@@ -8,12 +8,16 @@
 
 import { Context, Effect, Layer, Ref } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
+import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 
 export interface DaemonRuntimeConfig {
 	readonly port: number;
 	readonly host: string;
 	readonly pinHash: string | null;
 	readonly tlsEnabled: boolean;
+	readonly tailscaleServeEnabled?: boolean;
+	readonly tailscaleServeCleanupPending?: boolean;
+	readonly tailscaleServe?: DaemonStatus["tailscaleServe"];
 	readonly keepAwake: boolean;
 	readonly autoSettleAfterDays?: number | null;
 	readonly keepAwakeCommand: string | undefined;
@@ -66,6 +70,8 @@ export const makeDaemonConfigFromOptions = (options: {
 	hostExplicit?: boolean;
 	pinHash?: string;
 	tlsEnabled?: boolean;
+	tailscaleServeEnabled?: boolean;
+	tailscaleServeCleanupPending?: boolean;
 	keepAwake?: boolean;
 	autoSettleAfterDays?: number | null;
 	keepAwakeCommand?: string;
@@ -77,7 +83,11 @@ export const makeDaemonConfigFromOptions = (options: {
 	port: options.port ?? 2633,
 	host: options.host ?? "127.0.0.1",
 	pinHash: options.pinHash ?? null,
-	tlsEnabled: options.tlsEnabled ?? false,
+	tlsEnabled: options.tailscaleServeEnabled
+		? false
+		: (options.tlsEnabled ?? false),
+	tailscaleServeEnabled: options.tailscaleServeEnabled ?? false,
+	tailscaleServeCleanupPending: options.tailscaleServeCleanupPending ?? false,
 	keepAwake: options.keepAwake ?? false,
 	autoSettleAfterDays:
 		options.autoSettleAfterDays === undefined

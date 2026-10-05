@@ -68,6 +68,10 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		port: runtime.port,
 		pinHash: runtime.pinHash,
 		tls: runtime.tlsEnabled,
+		tailscaleServe: runtime.tailscaleServeEnabled ?? false,
+		...(runtime.tailscaleServeCleanupPending && {
+			tailscaleServeCleanupPending: true,
+		}),
 		debug: false,
 		keepAwake: runtime.keepAwake,
 		autoSettleAfterDays:

@@ -538,6 +538,12 @@ export const GetStatusResponseSchema = Schema.Struct({
 	clientCount: Schema.Number,
 	pinEnabled: Schema.Boolean,
 	tlsEnabled: Schema.Boolean,
+	tailscaleServe: Schema.optional(
+		Schema.Union(
+			Schema.Struct({ url: Schema.String }),
+			Schema.Struct({ error: Schema.String }),
+		),
+	),
 	keepAwake: Schema.Boolean,
 	projects: Schema.Array(
 		Schema.Struct({

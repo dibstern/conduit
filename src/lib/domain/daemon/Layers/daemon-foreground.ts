@@ -122,12 +122,20 @@ const buildInitialRuntimeConfig = (
 	const claudeConfigDir =
 		options.claudeConfigDir ?? persisted?.claudeConfigDir ?? undefined;
 
+	const tailscaleServeEnabled =
+		options.tailscaleServe ?? persisted?.tailscaleServe ?? false;
 	return makeDaemonConfigFromOptions({
 		port: options.port ?? persisted?.port ?? DEFAULT_PORT,
 		host: options.host ?? "127.0.0.1",
 		hostExplicit: options.host !== undefined,
 		...(pinHash != null && { pinHash }),
 		tlsEnabled: options.tlsEnabled ?? persisted?.tls ?? false,
+		tailscaleServeEnabled,
+		tailscaleServeCleanupPending:
+			!tailscaleServeEnabled &&
+			(persisted?.tailscaleServeCleanupPending === true ||
+				(options.tailscaleServe === false &&
+					persisted?.tailscaleServe === true)),
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
 		autoSettleAfterDays:
 			persisted?.autoSettleAfterDays === undefined

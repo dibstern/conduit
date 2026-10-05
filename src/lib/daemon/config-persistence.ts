@@ -43,6 +43,9 @@ export interface DaemonConfig {
 	port: number;
 	pinHash: string | null;
 	tls: boolean;
+	tailscaleServe?: boolean;
+	/** Retry an owned root-handler removal after a transient Tailscale failure. */
+	tailscaleServeCleanupPending?: boolean;
 	debug: boolean;
 	keepAwake: boolean;
 	/** Days of inactivity before automatic settlement; null disables it. */
@@ -150,6 +153,8 @@ export const DaemonConfigSchema = Schema.Struct({
 	port: Schema.Number,
 	pinHash: Schema.NullOr(Schema.String),
 	tls: Schema.Boolean,
+	tailscaleServe: Schema.optional(Schema.Boolean),
+	tailscaleServeCleanupPending: Schema.optional(Schema.Boolean),
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
 	autoSettleAfterDays: Schema.optional(

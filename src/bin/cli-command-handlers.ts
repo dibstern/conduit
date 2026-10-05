@@ -53,17 +53,33 @@ export async function handleServe(
 				: {}),
 			opencodeUrl,
 			tlsEnabled: !args.noHttps,
+			...(args.tailscaleServe !== undefined && {
+				tailscaleServe: args.tailscaleServe,
+			}),
 			logLevel: args.logLevel,
 			logFormat: args.logFormat ?? "pretty",
 		});
 
 		const status = daemon.getStatus();
 		const scheme = status.tlsEnabled ? "https" : "http";
+		const tailscale = status.tailscaleServe;
+		const url =
+			tailscale && "url" in tailscale
+				? tailscale.url
+				: `${scheme}://${status.host ?? "localhost"}:${daemon.port}`;
 		stdout.write("\nConduit (foreground)\n");
 		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
-		stdout.write(
-			`  Relay:    ${scheme}://${status.host ?? "localhost"}:${daemon.port}\n`,
-		);
+		stdout.write(`  Relay:    ${url}\n`);
+		if (tailscale && "url" in tailscale) {
+			const code = ctx.qr(tailscale.url);
+			if (code) stdout.write(`\n${code}\n`);
+		} else if (tailscale && "error" in tailscale) {
+			stderr.write(`  Tailscale Serve: ${tailscale.error}\n`);
+		} else if (ctx.getTsIP()) {
+			stdout.write(
+				"  Tip: Use conduit serve --tailscale-serve for trusted HTTPS on your tailnet.\n",
+			);
+		}
 		stdout.write("  Ready.\n\n");
 		await onReady?.();
 
