@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { RpcMockControl } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
@@ -38,6 +38,20 @@ export function requireRpcControl(page: Page): RpcMockControl {
 	const control = rpcControls.get(page);
 	if (!control) throw new Error("Mock RPC was not initialised");
 	return control;
+}
+
+/**
+ * Long-press like a person: press, wait for the menu, release. A fixed-length
+ * press races the hold timer, and a busy page runs the release first.
+ */
+export async function holdUntilVisible(
+	button: Locator,
+	menu: Locator,
+): Promise<void> {
+	await button.hover();
+	await button.page().mouse.down();
+	await expect(menu).toBeVisible();
+	await button.page().mouse.up();
 }
 
 export async function openModelPicker(page: Page): Promise<void> {

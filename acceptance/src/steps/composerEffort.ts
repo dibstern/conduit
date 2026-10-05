@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
+	holdUntilVisible,
 	rejectedEffortSwitches,
 	requireRelayControl,
 	requireRpcControl,
@@ -52,8 +53,10 @@ export const composerEffortHandlers: StepHandler[] = [
 				match[1] === "word" ? "composer-word-effort" : "variant-badge",
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await button.click({ delay: 1000 });
-			await expect(world.page.getByTestId("variant-dropdown")).toBeVisible();
+			await holdUntilVisible(
+				button,
+				world.page.getByTestId("variant-dropdown"),
+			);
 		},
 	},
 	{
@@ -85,11 +88,11 @@ export const composerEffortHandlers: StepHandler[] = [
 				) {
 					// Hold, as a phone user would. Shift+F10 leaves a keyboard focus
 					// ring on the chip, which then lands in the visual baselines.
-					await button.click({ delay: 1000 });
+					await holdUntilVisible(button, menu);
 				} else {
 					await button.click();
+					await expect(menu).toBeVisible();
 				}
-				await expect(menu).toBeVisible();
 			}
 			await world.page.getByTestId(`variant-option-${match[1]}`).click();
 			const trigger = world.page.getByTestId(
