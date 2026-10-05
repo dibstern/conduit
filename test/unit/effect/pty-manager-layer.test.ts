@@ -20,7 +20,6 @@ import {
 	TerminalServiceError,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -49,10 +48,9 @@ const makeApi = (): OpenCodeAPI =>
 
 describe("PtyManagerLive", () => {
 	it.effect(
-		"uses one scoped manager for terminal create, replay, input, and cleanup",
+		"uses one scoped manager for terminal create, snapshot, input, and cleanup",
 		() =>
 			Effect.gen(function* () {
-				const messages: Array<{ clientId: string; message: RelayMessage }> = [];
 				const dataHandlers: Array<(data: string) => void> = [];
 				const upstream = {
 					readyState: 1,
@@ -94,9 +92,6 @@ describe("PtyManagerLive", () => {
 				};
 				const wsHandler = makeMockWebSocketHandler({
 					getClientSession: vi.fn(() => "session-1"),
-					sendTo: vi.fn((clientId, message) => {
-						messages.push({ clientId, message });
-					}),
 				});
 				const connectPtyUpstream: ConnectPtyUpstreamShape = vi.fn(
 					() => Effect.void,
@@ -137,16 +132,12 @@ describe("PtyManagerLive", () => {
 				expect(ptyManager.hasSession("local-pty-1")).toBe(true);
 
 				dataHandlers[0]?.("hello\n");
-				yield* runWithContext(service.replay("client-2"));
-				expect(messages).toContainEqual({
-					clientId: "client-2",
-					message: {
-						type: "pty_output",
-						ptyId: "local-pty-1",
-						data: "hello\n",
-						replace: true,
-						restored: true,
-					},
+				expect(service.snapshot()).toContainEqual({
+					pty: expect.objectContaining({
+						id: "local-pty-1",
+						status: "running",
+					}),
+					scrollback: "hello\n",
 				});
 
 				yield* runWithContext(service.sendInput("local-pty-1", "ls\n"));

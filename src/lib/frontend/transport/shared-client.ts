@@ -1,7 +1,7 @@
 // One RPC client pair per project, carried over exactly two WebSockets:
 //
 //   control — unary calls plus low-rate subscriptions (the shell)
-//   stream  — hot per-session streams: session detail now, PTY in ni8.9
+//   stream  — hot streams: session detail and the project's PTYs (ni8.11)
 //
 // The split is about BLAST RADIUS. A socket drop fails every in-flight entry on
 // that socket, so the sockets are split along the axis where blast radius
@@ -14,7 +14,7 @@
 // join one of these two classes instead of opening a third socket.
 //
 // Stream buffering is left at the RpcClient default of 16. Do not wrap the
-// client to change it — the per-call override stays available to ni8.9's PTY
+// client to change it — the per-call override stays available to the PTY
 // consumer.
 
 import { Socket } from "@effect/platform";
@@ -111,6 +111,11 @@ const makeSubscriptions = (
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
 		),
+	/**
+	 * The project's terminals. Hot, so it rides the stream socket. PTYs carry no
+	 * sequence, so every re-issue is a cold snapshot with each scrollback ring.
+	 */
+	ptys: () => resumeStream(() => sockets.stream.SubscribePtys({ projectSlug })),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */
@@ -119,7 +124,7 @@ export type WsRpcSubscriptions = ReturnType<typeof makeSubscriptions>;
 export interface WsRpcSockets {
 	/** Unary calls and low-rate subscriptions. The 49 helpers move here in S-6. */
 	readonly control: WsRpcClient;
-	/** Hot per-session streams: session detail now, PTY in ni8.9. */
+	/** Hot streams: session detail and the project's PTYs. */
 	readonly stream: WsRpcClient;
 	/** Subscriptions over the pair, each resuming from its own high-water mark. */
 	readonly subscriptions: WsRpcSubscriptions;

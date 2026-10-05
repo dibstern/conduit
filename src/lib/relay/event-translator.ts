@@ -18,10 +18,6 @@ import {
 	isPartRemovedEvent,
 	isPartUpdatedEvent,
 	isPermissionAskedEvent,
-	isPtyCreatedEvent,
-	isPtyDeletedEvent,
-	isPtyEvent,
-	isPtyExitedEvent,
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
@@ -546,49 +542,6 @@ export function translateMessageRemoved(
 	return { type: "message_removed", messageId: props.messageID };
 }
 
-/** Translate pty.* events */
-export function translatePtyEvent(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	if (!isPtyEvent(event)) return null;
-
-	if (isPtyCreatedEvent(event)) {
-		const props = event.properties;
-		// OpenCode wraps pty info under an `info` key in the event properties
-		const info = props.info ?? props;
-		return {
-			type: "pty_created",
-			pty: {
-				id: String(info.id ?? ""),
-				title: String(info.title ?? ""),
-				command: String(info.command ?? ""),
-				cwd: String(info.cwd ?? ""),
-				status: info.status === "exited" ? "exited" : "running",
-				pid: Number(info.pid ?? 0),
-			},
-		};
-	}
-
-	if (isPtyExitedEvent(event)) {
-		const props = event.properties;
-		return {
-			type: "pty_exited",
-			ptyId: String(props.id ?? ""),
-			exitCode: Number(props.exitCode ?? 0),
-		};
-	}
-
-	if (isPtyDeletedEvent(event)) {
-		const props = event.properties;
-		return {
-			type: "pty_deleted",
-			ptyId: String(props.id ?? ""),
-		};
-	}
-
-	return null;
-}
-
 export type TranslateResult =
 	| { ok: true; messages: UntaggedRelayMessage[] }
 	| { ok: false; reason: string };
@@ -764,12 +717,13 @@ export function createTranslator(
 				);
 			}
 
-			// PTY events
+			// Terminals stream from the relay's PtyManager through the project's
+			// PTY subscription (conduit-test-ni8.11), not from OpenCode's SSE.
 			if (eventType.startsWith("pty.")) {
-				return wrapResult(
-					translatePtyEvent(event),
-					"pty event: unhandled pty event type",
-				);
+				return {
+					ok: false,
+					reason: `${eventType} served by SubscribePtys`,
+				};
 			}
 
 			// Session error (quota exhausted, model failure, etc.)

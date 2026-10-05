@@ -14,7 +14,6 @@ import type {
 	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
-	WsMessageEvent,
 } from "../../../src/lib/server/ws-handler-shape.js";
 
 let cleanup: Array<() => Promise<void> | void> = [];
@@ -68,10 +67,6 @@ function onceConnected(
 	handler: EffectWsHandler,
 ): Promise<WsClientConnectedEvent> {
 	return new Promise((resolve) => handler.once("client_connected", resolve));
-}
-
-function onceMessage(handler: EffectWsHandler): Promise<WsMessageEvent> {
-	return new Promise((resolve) => handler.once("message", resolve));
 }
 
 function onceDisconnected(
@@ -134,15 +129,20 @@ describe("Effect WS handler bridge", () => {
 			skipDefaultSession: true,
 		});
 
-		const delivered = vi.fn();
-		handler.on("message", delivered);
+		const unknownType = JSON.stringify({
+			type: "system_error",
+			code: "UNKNOWN_MESSAGE_TYPE",
+			message: "Unknown message type: pty_input",
+		});
 		socket.emit(
 			"message",
 			Buffer.from(
 				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "a" }),
 			),
 		);
-		expect(delivered).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() =>
+			expect(socket.send).toHaveBeenCalledWith(unknownType),
+		);
 
 		const disconnected = onceDisconnected(handler);
 		const sentAtDetach = socket.send.mock.calls.length;
@@ -171,14 +171,14 @@ describe("Effect WS handler bridge", () => {
 		expect(socket.send).toHaveBeenCalledTimes(sentBeforeBroadcast);
 		expect(socket.close).not.toHaveBeenCalled();
 
-		delivered.mockClear();
 		socket.emit(
 			"message",
 			Buffer.from(
 				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "b" }),
 			),
 		);
-		expect(delivered).not.toHaveBeenCalled();
+		await handler.drain();
+		expect(socket.send).toHaveBeenCalledTimes(sentBeforeBroadcast);
 	});
 
 	it("drain closes sockets attached without an upgrade", async () => {
@@ -236,7 +236,7 @@ describe("Effect WS handler bridge", () => {
 		expect(handler.getClientCount()).toBe(0);
 	});
 
-	it("emits routed messages for attached connections", async () => {
+	it("answers raw messages as unknown: pty_input is an RPC now", async () => {
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler, {
 			clientId: "test-client",
@@ -251,15 +251,20 @@ describe("Effect WS handler bridge", () => {
 		expect(connectedInfo.requestedSessionId).toBe("s1");
 		expect(connectedInfo.clientCount).toBe(1);
 
-		const message = onceMessage(handler);
+		const reply = waitForMessage(
+			client,
+			(msg) => msg["type"] === "system_error",
+		);
 		client.send(
 			JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "x" }),
 		);
-		const routed = await message;
 
-		expect(routed.clientId).toBe(connectedInfo.clientId);
-		expect(routed.handler).toBe("pty_input");
-		expect(routed.payload).toEqual({ ptyId: "pty-1", data: "x" });
+		expect(await reply).toEqual({
+			type: "system_error",
+			code: "UNKNOWN_MESSAGE_TYPE",
+			message: "Unknown message type: pty_input",
+		});
+		expect(handler.getClientCount()).toBe(1);
 	});
 
 	it("sends system_error for invalid JSON without disconnecting", async () => {

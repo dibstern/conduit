@@ -29,8 +29,6 @@ import {
 	setVariant,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import type { OpenCodeTerminalService } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import {
 	type ReadQueryEffect,
@@ -209,9 +207,6 @@ function makeClientInitEffectLayer(
 			}),
 		),
 	});
-	const terminal = partialFake<OpenCodeTerminalService>({
-		replay: vi.fn(() => Effect.void),
-	});
 	const discoverClaudeCapabilities = vi.fn(
 		(): Effect.Effect<ProviderCapabilities, unknown> =>
 			Effect.succeed(makeClaudeCapabilities()),
@@ -229,7 +224,6 @@ function makeClientInitEffectLayer(
 		modelService,
 		agentService,
 		pendingInteractions,
-		terminal,
 		discoverClaudeCapabilities,
 		orchestrationEngine,
 		log,
@@ -250,7 +244,6 @@ function makeClientInitEffectLayer(
 				Layer.succeed(OpenCodeModelServiceTag, modelService),
 				Layer.succeed(AgentServiceTag, agentService),
 				Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
-				Layer.succeed(OpenCodeTerminalServiceTag, terminal),
 				Layer.succeed(StatusPollerTag, statusPoller),
 			),
 		),
@@ -893,16 +886,6 @@ describe("handleClientConnectedEffect — defaultModel priority", () => {
 			providerID: "openai",
 			modelID: "gpt-4",
 		});
-	});
-});
-
-describe("handleClientConnectedEffect — PTY replay", () => {
-	it("replays terminal state through the terminal replay port", async () => {
-		const deps = makeClientInitEffectLayer();
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.terminal.replay).toHaveBeenCalledWith("client-1");
 	});
 });
 

@@ -1,27 +1,11 @@
-// Pure logic for routing incoming WebSocket messages to correct handlers,
-// client tracking, broadcast targeting, and state snapshot building.
-// Deliberately IO-free: no actual WebSocket I/O — just routing decisions.
+// Pure logic for parsing incoming WebSocket messages, client tracking and
+// broadcast targeting. Deliberately IO-free: no actual WebSocket I/O.
 
 import type { RelayMessage } from "../types.js";
-
-export type IncomingMessageType = "pty_input";
-
-const VALID_MESSAGE_TYPES = new Set<string>(["pty_input"]);
 
 export interface IncomingMessage {
 	type: string;
 	[key: string]: unknown;
-}
-
-export interface RouteResult {
-	handler: IncomingMessageType;
-	payload: Record<string, unknown>;
-}
-
-export interface ErrorResult {
-	type: "error";
-	code: string;
-	message: string;
 }
 
 /**
@@ -45,35 +29,6 @@ export function parseIncomingMessage(raw: string): IncomingMessage | null {
 	} catch {
 		return null;
 	}
-}
-
-/**
- * Route a parsed message to its handler.
- * Returns either a RouteResult or an ErrorResult for unknown types.
- */
-export function routeMessage(msg: IncomingMessage): RouteResult | ErrorResult {
-	if (!VALID_MESSAGE_TYPES.has(msg.type)) {
-		return {
-			type: "error",
-			code: "UNKNOWN_MESSAGE_TYPE",
-			message: `Unknown message type: ${msg.type}`,
-		};
-	}
-
-	const { type, ...payload } = msg;
-	return {
-		handler: type as IncomingMessageType,
-		payload,
-	};
-}
-
-/**
- * Check if a route result is an error.
- */
-export function isRouteError(
-	result: RouteResult | ErrorResult,
-): result is ErrorResult {
-	return "type" in result && (result as ErrorResult).type === "error";
 }
 
 export interface ClientTracker {

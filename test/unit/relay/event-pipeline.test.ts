@@ -103,8 +103,6 @@ describe("shouldCache", () => {
 			"permission_request",
 			"permission_resolved",
 			"session_list",
-			"pty_created",
-			"pty_output",
 			// status events are sent directly via wsHandler, never through the
 			// pipeline — so they should NOT be cacheable.
 			"status",

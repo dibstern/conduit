@@ -27,7 +27,6 @@ import {
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
@@ -428,21 +427,12 @@ const sendProvidersAndSettingsEffect = (
 		}
 	});
 
-const replayTerminalsAndInstancesEffect = (
+const replayInstancesEffect = (
 	clientId: string,
 	options: ClientInitEffectOptions,
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const terminal = yield* OpenCodeTerminalServiceTag;
-
-		yield* terminal
-			.replay(clientId)
-			.pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to replay terminals"),
-				),
-			);
 
 		if (options.getInstances) {
 			const instances = yield* Effect.tryPromise({
@@ -477,5 +467,5 @@ export const handleClientConnectedEffect = (
 		yield* replayPendingPermissionsEffect(clientId);
 		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
-		yield* replayTerminalsAndInstancesEffect(clientId, options);
+		yield* replayInstancesEffect(clientId, options);
 	});

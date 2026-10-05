@@ -248,8 +248,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"client_count",
 			"connection_status",
 			"notification_event",
-			"pty_list",
-			"pty_created",
 		];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;

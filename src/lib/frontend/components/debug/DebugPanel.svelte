@@ -158,8 +158,6 @@
 
 			case "instance_list":
 				return Array.isArray(properties["instances"]) ? `${properties["instances"].length} instances` : "";
-			case "pty_list":
-				return Array.isArray(properties["ptys"]) ? `${properties["ptys"].length} ptys` : "";
 			case "variant_info":
 				return properties["variant"] ? String(properties["variant"]) : "";
 			case "context_window_info":

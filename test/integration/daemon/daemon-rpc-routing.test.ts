@@ -103,7 +103,6 @@ describe("daemon shared RPC routing", () => {
 					string,
 					Effect.Effect.Success<ReturnType<typeof makeEffectWsHandler>>
 				>();
-				const ptyMessages = new Map<string, ReturnType<typeof vi.fn>>();
 				const factory = (slug: string) =>
 					Effect.gen(function* () {
 						const runtime = ManagedRuntime.make(
@@ -121,10 +120,7 @@ describe("daemon shared RPC routing", () => {
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
 						}).pipe(Effect.provide(runtime));
-						const ptyMessage = vi.fn();
-						ptyMessages.set(slug, ptyMessage);
 						handlers.set(slug, wsHandler);
-						wsHandler.on("message", ptyMessage);
 						wsHandler.on(
 							"client_connected",
 							({ clientId, requestedSessionId }) => {
@@ -359,15 +355,15 @@ describe("daemon shared RPC routing", () => {
 						data: "x",
 					}),
 				);
+				// Terminal input is an RPC now (conduit-test-ni8.11); the raw socket
+				// only answers that it no longer routes anything.
 				yield* waitFor(() => {
-					expect(ptyMessages.get("project-b")).toHaveBeenCalledWith(
-						expect.objectContaining({
-							clientId: "daemon-client",
-							handler: "pty_input",
-						}),
-					);
+					expect(eventMessages).toContainEqual({
+						type: "system_error",
+						code: "UNKNOWN_MESSAGE_TYPE",
+						message: "Unknown message type: pty_input",
+					});
 				});
-				expect(ptyMessages.get("project-a")).not.toHaveBeenCalled();
 			}),
 	);
 

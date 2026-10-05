@@ -1,6 +1,7 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
 import { type Context, Effect, type Layer, Stream } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
@@ -75,7 +76,9 @@ export {
 	type ModelInfo,
 	type ProjectMutationResponse,
 	type ProviderInfo,
+	type PtyEnvelope,
 	type PtyInfo,
+	PtyInput,
 	type PtyListResponse,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -116,6 +119,7 @@ export {
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
+	SubscribePtys,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
 	SubscribeShell,
@@ -195,6 +199,17 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					(error) =>
 						new WsRpcError({
 							message: `SubscribeSessionTodos failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribePtys: () =>
+		Rpc.fork(
+			subscribePtys().pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribePtys failed: ${String(error)}`,
 						}),
 				),
 			),
@@ -363,5 +378,6 @@ export const makeRoutedWsRpcServerLayer = (
 						: { resumeFromSequence: request.resumeFromSequence }),
 				}),
 			),
+		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 	});
 };

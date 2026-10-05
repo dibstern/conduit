@@ -19,7 +19,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 import WebSocket from "ws";
 import {
 	defaultInstanceIdForDriver,
@@ -29,6 +29,7 @@ import {
 import {
 	GetInstances,
 	GetStatus,
+	type PtyEnvelope,
 	Shutdown,
 	WsRpcGroup,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -100,6 +101,15 @@ interface Generation {
 export interface BrowserFrame {
 	message: Record<string, unknown>;
 	at: bigint;
+}
+
+/** The SubscribePtys envelope a `{ type: "pty" }` frame records, if any. */
+export function ptyEnvelope(
+	message: Record<string, unknown>,
+): PtyEnvelope | undefined {
+	return message["type"] === "pty"
+		? (message as unknown as PtyEnvelope)
+		: undefined;
 }
 
 export class ProcessHarness {
@@ -1022,7 +1032,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return browser;
 	}
 
-	/** Close before any /ws init replay or ListPtys can discover hosted terminals. */
+	/** Close before any SubscribePtys or ListPtys can discover hosted terminals. */
 	async closePtyWithoutBrowser(ptyId: string): Promise<void> {
 		const runtime = browserRpcRuntime(this.port);
 		try {
@@ -1545,6 +1555,7 @@ export class ProcessBrowser {
 	>();
 	private closed = false;
 	private failure: Error | undefined;
+	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private constructor(
 		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
@@ -1554,11 +1565,7 @@ export class ProcessBrowser {
 	) {
 		this.originId = originId;
 		ws.on("message", (data) => {
-			const at = process.hrtime.bigint();
-			const message = JSON.parse(data.toString()) as Record<string, unknown>;
-			this.frames.push({ message, at });
-			for (const notify of this.messageListeners) notify(message);
-			for (const notify of this.waiters) notify();
+			this.record(JSON.parse(data.toString()) as Record<string, unknown>);
 		});
 		ws.on("error", (error) => {
 			this.failure = error;
@@ -1606,11 +1613,40 @@ export class ProcessBrowser {
 			await browser.waitFor(
 				(message) => message["type"] === "protocol_version",
 			);
+			await browser.followPtys();
 			return browser;
 		} catch (error) {
 			await browser.close();
 			throw error;
 		}
+	}
+
+	private record(message: Record<string, unknown>): void {
+		this.frames.push({ message, at: process.hrtime.bigint() });
+		for (const notify of this.messageListeners) notify(message);
+		for (const notify of this.waiters) notify();
+	}
+
+	/**
+	 * Follow the project's terminals as the browser does. Each SubscribePtys
+	 * envelope is recorded as a `{ type: "pty", ...envelope }` frame.
+	 */
+	private async followPtys(): Promise<void> {
+		const cursor = this.frames.length;
+		this.ptys = this.runtime.runFork(
+			this.rpc
+				.SubscribePtys({ projectSlug: this.projectSlug })
+				.pipe(
+					Stream.runForEach((envelope) =>
+						Effect.sync(() => this.record({ type: "pty", ...envelope })),
+					),
+				),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "pty" && message["_tag"] === "synchronized",
+			cursor,
+		);
 	}
 
 	private run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -1700,10 +1736,10 @@ export class ProcessBrowser {
 			}),
 		);
 		const message = await this.waitFor(
-			(frame) => frame["type"] === "pty_created",
+			(frame) => frame["type"] === "pty" && frame["_tag"] === "upsert",
 			cursor,
 		);
-		return message["pty"] as PtyInfo;
+		return message["item"] as PtyInfo;
 	}
 
 	async listPtys(): Promise<readonly PtyInfo[]> {
@@ -1717,8 +1753,10 @@ export class ProcessBrowser {
 		).ptys;
 	}
 
-	inputPty(ptyId: string, data: string): void {
-		this.ws.send(JSON.stringify({ type: "pty_input", ptyId, data }));
+	async inputPty(ptyId: string, data: string): Promise<void> {
+		await this.run(
+			this.rpc.PtyInput({ projectSlug: this.projectSlug, ptyId, data }),
+		);
 	}
 
 	async resizePty(ptyId: string, cols: number, rows: number): Promise<void> {
@@ -1877,6 +1915,7 @@ export class ProcessBrowser {
 
 	async close(): Promise<void> {
 		if (!this.closed) this.ws.terminate();
+		if (this.ptys) await Effect.runPromise(Fiber.interrupt(this.ptys));
 		await this.runtime.dispose();
 		this.closed = true;
 	}

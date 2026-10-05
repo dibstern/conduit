@@ -287,10 +287,32 @@ const todoEnvelopes = [
 	},
 ] as const;
 
+const ptyRow = {
+	id: "pty-1",
+	title: "Shell",
+	command: "zsh",
+	cwd: "/repo",
+	status: "running",
+	pid: 42,
+} as const;
+const ptyEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [{ pty: ptyRow, scrollback: '\u001b[1m$ echo "雪"\r\n' }],
+	},
+	{ _tag: "synchronized" },
+	{ _tag: "output", ptyId: "pty-1", data: "\u0007\u001b]0;title\u0007ok\r\n" },
+	{ _tag: "output", ptyId: "pty-1", data: "fresh", replace: true },
+	{ _tag: "upsert", item: { ...ptyRow, status: "exited" } },
+	{ _tag: "remove", id: "pty-1" },
+] as const;
+
 const group = RpcGroup.make(
 	Contracts.SubscribeShell,
 	Contracts.SubscribeSessionDetail,
 	Contracts.SubscribeSessionTodos,
+	Contracts.SubscribePtys,
+	Rpc.fromTaggedRequest(Contracts.PtyInput),
 	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(Contracts.GetClaudeSettings),
 	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
@@ -360,6 +382,19 @@ const handlers = group.toLayer({
 			resumeFromSequence: 7,
 		});
 		return Rpc.fork(Stream.fromIterable(todoEnvelopes));
+	},
+	SubscribePtys: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project" });
+		return Rpc.fork(Stream.fromIterable(ptyEnvelopes));
+	},
+	PtyInput: (payload) => {
+		expect(payload).toEqual({
+			_tag: "PtyInput",
+			projectSlug: "project",
+			ptyId: "pty-1",
+			data: "\u0003ls -la 雪\r",
+		});
+		return Effect.succeed({ ok: true as const });
 	},
 	SubscribeShell: (payload) => {
 		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
@@ -584,6 +619,39 @@ it("SubscribeSessionTodos preserves the session id and todo items through JSON",
 							projectSlug: "project",
 							sessionId: "session-1",
 							resumeFromSequence: 7,
+						},
+					}),
+				);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribePtys and PtyInput carry terminal bytes through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribePtys({ projectSlug: "project" }),
+				);
+				expect(Array.from(result)).toEqual(ptyEnvelopes);
+				expect(
+					yield* client.PtyInput({
+						projectSlug: "project",
+						ptyId: "pty-1",
+						data: "\u0003ls -la 雪\r",
+					}),
+				).toEqual({ ok: true });
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "PtyInput",
+						payload: {
+							_tag: "PtyInput",
+							projectSlug: "project",
+							ptyId: "pty-1",
+							data: "\u0003ls -la 雪\r",
 						},
 					}),
 				);

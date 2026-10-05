@@ -105,6 +105,26 @@ describe("subscription RPC contracts", () => {
 		).toThrow();
 	});
 
+	it("exposes a project-scoped PTY stream through the frontend", () => {
+		const member = Contracts.SubscribePtys;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribePtys")).toBe(member);
+		expect(Frontend.SubscribePtys).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		expect(decodePayload({ projectSlug: "project" })).toEqual({
+			projectSlug: "project",
+		});
+		// Scope is an argument, never ambient: no project, no subscription.
+		expect(() => decodePayload({})).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		expect(decode({ _tag: "output", ptyId: "pty-1", data: "x" })).toEqual({
+			_tag: "output",
+			ptyId: "pty-1",
+			data: "x",
+		});
+		expect(() => decode({ _tag: "output", ptyId: "pty-1" })).toThrow();
+	});
+
 	it("exposes a resumable shell stream of session envelopes through the frontend", () => {
 		const member = Contracts.SubscribeShell;
 		expect(member).toBeDefined();

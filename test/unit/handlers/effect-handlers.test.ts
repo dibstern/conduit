@@ -79,10 +79,6 @@ import {
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	type OpenCodeTerminalService,
-	OpenCodeTerminalServiceTag,
-} from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
 } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
@@ -116,7 +112,6 @@ import {
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
-import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
@@ -1264,20 +1259,6 @@ function mockSessionManager(
 	});
 }
 
-function mockTerminalService(
-	overrides?: Partial<OpenCodeTerminalService>,
-): OpenCodeTerminalService {
-	return {
-		create: vi.fn(() => Effect.void),
-		list: vi.fn(() => Effect.succeed([])),
-		replay: vi.fn(() => Effect.void),
-		sendInput: vi.fn(() => Effect.void),
-		close: vi.fn(() => Effect.void),
-		resize: vi.fn(() => Effect.void),
-		...overrides,
-	};
-}
-
 function makeForkSessionLayer(options?: {
 	client?: OpenCodeAPI;
 	ws?: WebSocketHandlerShape;
@@ -1744,41 +1725,6 @@ describe("handleForkSession", () => {
 			);
 		},
 	);
-});
-
-describe("handlePtyInput", () => {
-	it.effect("forwards input and client origin through terminal service", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyInput("client-1", {
-			ptyId: "pty-1",
-			data: "ls\n",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.sendInput).toHaveBeenCalledExactlyOnceWith(
-					"pty-1",
-					"ls\n",
-					"client-1",
-				);
-			}),
-		);
-	});
-
-	it.effect("does nothing when ptyId is empty", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyInput("client-1", { ptyId: "", data: "ls\n" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.sendInput).not.toHaveBeenCalled();
-			}),
-		);
-	});
 });
 
 describe("setDefaultPermissionModeForRelay", () => {

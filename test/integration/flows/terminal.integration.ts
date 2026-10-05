@@ -1,21 +1,58 @@
 // Integration: Terminal (PTY)
 // Tests PTY operations against a mock OpenCode server.
-// Verifies shell I/O, multi-client broadcast, multi-terminal isolation,
-// resize, close/cleanup, and edge cases.
+// Terminals stream over SubscribePtys and take input over the PtyInput RPC.
+// Verifies shell I/O, multi-client broadcast, close/cleanup, and edge cases.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
 } from "../helpers/relay-harness.js";
-import type { ReceivedMessage } from "../helpers/test-ws-client.js";
+import type {
+	ReceivedMessage,
+	TestWsClient,
+} from "../helpers/test-ws-client.js";
 
-/** Collect all pty_output data for a given ptyId from received messages */
+/** All output a client's PTY subscription delivered for one terminal. */
 function collectOutput(messages: ReceivedMessage[], ptyId: string): string {
 	return messages
-		.filter((m) => m.type === "pty_output" && m["ptyId"] === ptyId)
+		.filter((m) => m["_tag"] === "output" && m["ptyId"] === ptyId)
 		.map((m) => String(m["data"]))
 		.join("");
+}
+
+/** Wait for the subscription to announce a PTY; returns its id. */
+async function waitForCreated(client: TestWsClient): Promise<string> {
+	const created = await client.waitFor("pty", {
+		timeout: 5_000,
+		predicate: (m) => m["_tag"] === "upsert",
+	});
+	return (created["item"] as { id: string }).id;
+}
+
+function waitForRemoved(client: TestWsClient, ptyId: string) {
+	return client.waitFor("pty", {
+		timeout: 5_000,
+		predicate: (m) => m["_tag"] === "remove" && m["id"] === ptyId,
+	});
+}
+
+function waitForOutput(client: TestWsClient, ptyId: string, text: string) {
+	return client.waitFor("pty", {
+		timeout: 5_000,
+		predicate: (m) =>
+			m["_tag"] === "output" &&
+			m["ptyId"] === ptyId &&
+			String(m["data"]).includes(text),
+	});
+}
+
+async function connect(harness: RelayHarness): Promise<TestWsClient> {
+	const client = await harness.connectWsClient();
+	await client.waitForInitialState();
+	await client.subscribePtys();
+	client.clearReceived();
+	return client;
 }
 
 describe("Integration: Terminal (PTY)", () => {
@@ -29,266 +66,149 @@ describe("Integration: Terminal (PTY)", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("CreatePty RPC returns pty_created with a valid id", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
+	it("CreatePty announces the PTY with a valid id", async () => {
+		const client = await connect(harness);
 
 		await client.createPty();
+		const ptyId = await waitForCreated(client);
+		expect(ptyId.length).toBeGreaterThan(0);
 
-		const created = await client.waitFor("pty_created", { timeout: 5_000 });
-		const pty = created["pty"] as { id: string };
-		expect(typeof pty.id).toBe("string");
-		expect(pty.id.length).toBeGreaterThan(0);
-
-		// Cleanup
-		await client.closePty(pty.id);
-		await client.waitFor("pty_deleted", { timeout: 5_000 });
+		await client.closePty(ptyId);
+		await waitForRemoved(client, ptyId);
 		await client.close();
 	}, 15_000);
 
-	it("two clients both receive pty_output from same PTY", async () => {
-		const client1 = await harness.connectWsClient();
-		const client2 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-		client1.clearReceived();
-		client2.clearReceived();
+	it("two clients both receive output from same PTY", async () => {
+		const client1 = await connect(harness);
+		const client2 = await connect(harness);
 
-		// Client 1 creates PTY
 		await client1.createPty();
-		const created1 = await client1.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created1["pty"] as { id: string }).id;
+		const ptyId = await waitForCreated(client1);
+		// Client 2 sees the same terminal on its own subscription.
+		expect(await waitForCreated(client2)).toBe(ptyId);
 
-		// Client 2 should also get pty_created (broadcast)
-		await client2.waitFor("pty_created", { timeout: 5_000 });
+		await client1.ptyInput(ptyId, "echo MULTI_CLIENT_TEST\n");
 
-		client1.clearReceived();
-		client2.clearReceived();
-
-		// Client 1 sends input
-		client1.send({
-			type: "pty_input",
-			ptyId,
-			data: "echo MULTI_CLIENT_TEST\n",
-		});
-
-		// Both clients should receive the output
-		await client1.waitFor("pty_output", {
-			timeout: 5_000,
-			predicate: (msg) =>
-				msg["ptyId"] === ptyId &&
-				String(msg["data"]).includes("MULTI_CLIENT_TEST"),
-		});
-		await client2.waitFor("pty_output", {
-			timeout: 5_000,
-			predicate: (msg) =>
-				msg["ptyId"] === ptyId &&
-				String(msg["data"]).includes("MULTI_CLIENT_TEST"),
-		});
+		await waitForOutput(client1, ptyId, "MULTI_CLIENT_TEST");
+		await waitForOutput(client2, ptyId, "MULTI_CLIENT_TEST");
 
 		await client1.closePty(ptyId);
-		await client1.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client1, ptyId);
 		await client1.close();
 		await client2.close();
 	}, 25_000);
 
 	it("client B can send input to PTY that client A created", async () => {
-		const clientA = await harness.connectWsClient();
-		const clientB = await harness.connectWsClient();
-		await clientA.waitForInitialState();
-		await clientB.waitForInitialState();
-		clientA.clearReceived();
-		clientB.clearReceived();
+		const clientA = await connect(harness);
+		const clientB = await connect(harness);
 
-		// Client A creates PTY
 		await clientA.createPty();
-		const created = await clientA.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
+		const ptyId = await waitForCreated(clientA);
 
-		clientA.clearReceived();
-		clientB.clearReceived();
+		await clientB.ptyInput(ptyId, "echo CROSS_CLIENT_INPUT\n");
 
-		// Client B sends input
-		clientB.send({
-			type: "pty_input",
-			ptyId,
-			data: "echo CROSS_CLIENT_INPUT\n",
-		});
-
-		// Client A should receive the output
-		await clientA.waitFor("pty_output", {
-			timeout: 5_000,
-			predicate: (msg) =>
-				msg["ptyId"] === ptyId &&
-				String(msg["data"]).includes("CROSS_CLIENT_INPUT"),
-		});
+		await waitForOutput(clientA, ptyId, "CROSS_CLIENT_INPUT");
 
 		await clientA.closePty(ptyId);
-		await clientA.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(clientA, ptyId);
 		await clientA.close();
 		await clientB.close();
 	}, 25_000);
 
 	it("client disconnect does NOT close the upstream PTY", async () => {
-		const client1 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		client1.clearReceived();
-
-		// Create PTY
+		const client1 = await connect(harness);
 		await client1.createPty();
-		const created = await client1.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
-
-		// Disconnect client 1
+		const ptyId = await waitForCreated(client1);
 		await client1.close();
 
-		// Connect a new client — the PTY should still be alive
+		// A new client's opening snapshot still lists the PTY.
 		const client2 = await harness.connectWsClient();
 		await client2.waitForInitialState();
-		client2.clearReceived();
-
-		// Send input to the existing PTY
-		client2.send({ type: "pty_input", ptyId, data: "echo STILL_ALIVE\n" });
-
-		// Should get output back
-		await client2.waitFor("pty_output", {
-			timeout: 5_000,
-			predicate: (msg) =>
-				msg["ptyId"] === ptyId && String(msg["data"]).includes("STILL_ALIVE"),
+		await client2.subscribePtys();
+		const snapshot = await client2.waitFor("pty", {
+			predicate: (m) => m["_tag"] === "snapshot",
 		});
+		expect(
+			(snapshot["rows"] as Array<{ pty: { id: string } }>).map(
+				({ pty }) => pty.id,
+			),
+		).toContain(ptyId);
+
+		await client2.ptyInput(ptyId, "echo STILL_ALIVE\n");
+		await waitForOutput(client2, ptyId, "STILL_ALIVE");
 
 		await client2.closePty(ptyId);
-		await client2.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client2, ptyId);
 		await client2.close();
 	}, 25_000);
 
-	it("ClosePty RPC returns pty_deleted with correct id", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
+	it("PtyInput to nonexistent PTY ID fails as a typed error", async () => {
+		const client = await connect(harness);
 
-		await client.createPty();
-		const created = await client.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
-
-		await client.closePty(ptyId);
-		const deleted = await client.waitFor("pty_deleted", { timeout: 5_000 });
-		expect(deleted["ptyId"]).toBe(ptyId);
-
-		await client.close();
-	}, 15_000);
-
-	it("pty_input to nonexistent PTY ID does not crash", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Send input to a fake PTY ID
-		client.send({
-			type: "pty_input",
-			ptyId: "nonexistent-pty-id",
-			data: "hello\n",
-		});
-
-		// Observe a full window because input to an unknown PTY must produce no error.
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-		const errors = client.getReceivedOfType("error");
-		expect(errors).toHaveLength(0);
+		await expect(
+			client.ptyInput("nonexistent-pty-id", "hello\n"),
+		).rejects.toThrow("Terminal is unavailable");
+		expect(client.getReceivedOfType("error")).toHaveLength(0);
 
 		await client.close();
 	}, 10_000);
 
-	it("pty_input after close does not crash", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
+	it("PtyInput after close fails and the relay stays responsive", async () => {
+		const client = await connect(harness);
 
-		// Create and close a PTY
 		await client.createPty();
-		const created = await client.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
-
+		const ptyId = await waitForCreated(client);
 		await client.closePty(ptyId);
-		await client.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client, ptyId);
 		client.clearReceived();
 
-		// Send input to the closed PTY
-		client.send({ type: "pty_input", ptyId, data: "should not crash\n" });
+		await expect(client.ptyInput(ptyId, "should not crash\n")).rejects.toThrow(
+			"Terminal is unavailable",
+		);
 
-		// Observe a full window because input to a closed PTY must not crash the relay.
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-
-		// The relay should still be responsive
 		await client.createPty();
-		const created2 = await client.waitFor("pty_created", { timeout: 5_000 });
-		expect(created2["pty"]).toBeDefined();
-
-		const ptyId2 = (created2["pty"] as { id: string }).id;
+		const ptyId2 = await waitForCreated(client);
 		await client.closePty(ptyId2);
-		await client.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client, ptyId2);
 		await client.close();
 	}, 20_000);
 
 	it("ListPtys RPC returns existing PTYs after creation", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
+		const client = await connect(harness);
 
-		// Create a PTY
 		await client.createPty();
-		const created = await client.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
+		const ptyId = await waitForCreated(client);
 
-		client.clearReceived();
+		const { ptys } = await client.listPtys();
+		expect(ptys.find((p) => p.id === ptyId)).toBeTruthy();
 
-		const list = await client.listPtys();
-		const ptys = list.ptys;
-		expect(Array.isArray(ptys)).toBe(true);
-		expect(ptys.length).toBeGreaterThanOrEqual(1);
-
-		const found = ptys.find((p) => p.id === ptyId);
-		expect(found).toBeTruthy();
-
-		// Cleanup
 		await client.closePty(ptyId);
-		await client.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client, ptyId);
 		await client.close();
 	}, 20_000);
 
 	it("new PTY output does not contain cursor metadata characters", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
+		const client = await connect(harness);
 
-		// Create a PTY
 		await client.createPty();
-		const created = await client.waitFor("pty_created", { timeout: 5_000 });
-		const ptyId = (created["pty"] as { id: string }).id;
+		const ptyId = await waitForCreated(client);
 
 		// Wait for the shell's first output before checking its framing.
-		await client.waitFor("pty_output", {
+		await client.waitFor("pty", {
 			timeout: 5_000,
-			predicate: (message) => message["ptyId"] === ptyId,
+			predicate: (m) => m["_tag"] === "output" && m["ptyId"] === ptyId,
 		});
 
-		// Collect all output received so far
 		const output = collectOutput(client.getReceived(), ptyId);
-
-		// Output should NOT contain null bytes (0x00) which are cursor metadata
+		// No null bytes (0x00), which are cursor metadata.
 		for (let i = 0; i < output.length; i++) {
 			expect(output.charCodeAt(i)).not.toBe(0);
 		}
+		// Not raw cursor metadata: {"cursor":N}
+		if (output.length > 0) expect(output).not.toMatch(/^\{"cursor":\d+\}/);
 
-		// Output should not start with JSON-like cursor metadata
-		if (output.length > 0) {
-			// Check that it doesn't look like raw cursor metadata: {"cursor":N}
-			expect(output).not.toMatch(/^\{"cursor":\d+\}/);
-		}
-
-		// Cleanup
 		await client.closePty(ptyId);
-		await client.waitFor("pty_deleted", { timeout: 5_000 });
+		await waitForRemoved(client, ptyId);
 		await client.close();
 	}, 15_000);
 });

@@ -6,10 +6,10 @@ import { PtyManager } from "../../../relay/pty-manager.js";
 import { connectPtyUpstream } from "../../../relay/pty-upstream.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
+	ConfigTag,
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
-	WebSocketHandlerTag,
 } from "../Services/services.js";
 
 const requireWs = createRequire(import.meta.url);
@@ -53,14 +53,14 @@ export const makeConnectPtyUpstreamLive = (
 ): Layer.Layer<
 	ConnectPtyUpstreamTag,
 	never,
-	PtyManagerTag | WebSocketHandlerTag | OpenCodeInstancesTag | LoggerTag
+	PtyManagerTag | OpenCodeInstancesTag | ConfigTag | LoggerTag
 > =>
 	Layer.effect(
 		ConnectPtyUpstreamTag,
 		Effect.gen(function* () {
 			const ptyManager = yield* PtyManagerTag;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const instances = yield* OpenCodeInstancesTag;
+			const config = yield* ConfigTag;
 			const log = yield* LoggerTag;
 			const ptyLog = log.child("pty");
 			// An attached OpenCode PTY holds a `use` scope until its upstream closes.
@@ -79,9 +79,9 @@ export const makeConnectPtyUpstreamLive = (
 							connectPtyUpstream(
 								{
 									ptyManager,
-									wsHandler,
 									client,
 									opencodeUrl: client.getBaseUrl(),
+									projectDir: config.projectDir,
 									log: ptyLog,
 									WebSocketClass,
 									onClose: () => Effect.runFork(release),
@@ -100,7 +100,7 @@ export const makePtyRuntimeLive = (
 ): Layer.Layer<
 	PtyManagerTag | ConnectPtyUpstreamTag,
 	never,
-	WebSocketHandlerTag | OpenCodeInstancesTag | LoggerTag
+	OpenCodeInstancesTag | ConfigTag | LoggerTag
 > =>
 	Layer.provideMerge(
 		makeConnectPtyUpstreamLive(WebSocketClass),

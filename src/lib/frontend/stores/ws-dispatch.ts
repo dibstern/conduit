@@ -86,14 +86,7 @@ import {
 	refreshSessionSkills,
 	sessionSkillsState,
 } from "./session-skills.svelte.js";
-import {
-	handlePtyCreated,
-	handlePtyDeleted,
-	handlePtyError,
-	handlePtyExited,
-	handlePtyList,
-	handlePtyOutput,
-} from "./terminal.svelte.js";
+import { handlePtyError } from "./terminal.svelte.js";
 import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
@@ -341,22 +334,6 @@ export function handleMessage(msg: RelayMessage): void {
 			}
 			break;
 		}
-
-		case "pty_list":
-			handlePtyList(msg);
-			break;
-		case "pty_created":
-			handlePtyCreated(msg);
-			break;
-		case "pty_output":
-			handlePtyOutput(msg);
-			break;
-		case "pty_exited":
-			handlePtyExited(msg);
-			break;
-		case "pty_deleted":
-			handlePtyDeleted(msg);
-			break;
 
 		case "visibility_info":
 			handleVisibilityInfo(msg);

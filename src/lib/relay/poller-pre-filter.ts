@@ -18,7 +18,6 @@ export const METADATA_TYPES: ReadonlySet<RelayMessage["type"]> = new Set<
 	"instance_update",
 	"notification_event",
 	"input_sync",
-	"pty_list",
 	"variant_info",
 	"context_window_info",
 	"permission_mode_info",

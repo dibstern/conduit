@@ -25,7 +25,7 @@
 //      → Source: AC7
 // P12: Part removal clears tracking state
 //      → Source: AC10
-// P13: translatePtyEvent handles pty.created, pty.exited, pty.deleted, unknown
+// P13: pty.* events are not translated (terminals stream through SubscribePtys)
 // P14: upstream file.* and installation.update-available events are dropped
 // P15: translateMessageRemoved handles valid messageID and missing messageID
 
@@ -38,7 +38,6 @@ import {
 	translateMessageUpdated,
 	translatePartDelta,
 	translatePermission,
-	translatePtyEvent,
 	translateQuestion,
 	translateReasoningPartUpdated,
 	translateSessionStatus,
@@ -761,163 +760,21 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	describe("P13: translatePtyEvent handles all pty event types", () => {
-		it("pty.created returns pty_created message with correct fields (info nested)", () => {
-			// OpenCode wraps PTY info under an `info` key in SSE events
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {
-					info: {
-						id: "pty-1",
-						title: "bash",
-						command: "/bin/bash",
-						cwd: "/home/user",
-						status: "running",
-						pid: 12345,
-					},
-				},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_created");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("pty-1");
-				expect(result.pty.title).toBe("bash");
-				expect(result.pty.command).toBe("/bin/bash");
-				expect(result.pty.cwd).toBe("/home/user");
-				expect(result.pty.status).toBe("running");
-				expect(result.pty.pid).toBe(12345);
+	describe("P13: pty.* events are left to the PTY subscription", () => {
+		it("translates none of them; terminals stream through SubscribePtys", () => {
+			const translator = createTranslator();
+			for (const type of [
+				"pty.created",
+				"pty.exited",
+				"pty.deleted",
+			] as const) {
+				expect(
+					translator.translate({
+						type,
+						properties: { id: "pty-1" },
+					} as OpenCodeEvent),
+				).toEqual({ ok: false, reason: `${type} served by SubscribePtys` });
 			}
-		});
-
-		it("pty.created falls back to top-level properties when info key absent", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {
-					id: "pty-1b",
-					title: "zsh",
-					command: "/bin/zsh",
-					cwd: "/tmp",
-					status: "running",
-					pid: 999,
-				},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("pty-1b");
-				expect(result.pty.title).toBe("zsh");
-				expect(result.pty.command).toBe("/bin/zsh");
-			}
-		});
-
-		it("pty.created defaults missing fields to empty/0", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("");
-				expect(result.pty.title).toBe("");
-				expect(result.pty.command).toBe("");
-				expect(result.pty.cwd).toBe("");
-				expect(result.pty.status).toBe("running");
-				expect(result.pty.pid).toBe(0);
-			}
-		});
-
-		it("pty.exited returns pty_exited message", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.exited",
-				properties: { id: "pty-2", exitCode: 1 },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_exited");
-			if (result.type === "pty_exited") {
-				expect(result.ptyId).toBe("pty-2");
-				expect(result.exitCode).toBe(1);
-			}
-		});
-
-		it("pty.exited defaults exitCode to 0", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.exited",
-				properties: { id: "pty-3" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_exited") {
-				expect(result.exitCode).toBe(0);
-			}
-		});
-
-		it("pty.deleted returns pty_deleted message", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.deleted",
-				properties: { id: "pty-4" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_deleted");
-			if (result.type === "pty_deleted") {
-				expect(result.ptyId).toBe("pty-4");
-			}
-		});
-
-		it("unknown pty event returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.resized",
-				properties: { id: "pty-5", cols: 80, rows: 24 },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("pty.data returns null (not a recognized subtype)", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.data",
-				properties: { id: "pty-6", data: "hello" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("property: pty events with arbitrary properties never throw", () => {
-			fc.assert(
-				fc.property(
-					fc.constantFrom(
-						"pty.created",
-						"pty.exited",
-						"pty.deleted",
-						"pty.unknown",
-						"pty.data",
-					),
-					fc.dictionary(
-						fc.string({ minLength: 1, maxLength: 10 }),
-						fc.jsonValue(),
-					),
-					(eventType, props) => {
-						const event: OpenCodeEvent = { type: eventType, properties: props };
-						const result = translatePtyEvent(event);
-						// Should never throw; result is either a message or null
-						if (result !== null) {
-							expect(["pty_created", "pty_exited", "pty_deleted"]).toContain(
-								result.type,
-							);
-						}
-					},
-				),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
 		});
 	});
 

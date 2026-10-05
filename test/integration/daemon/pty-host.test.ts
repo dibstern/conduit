@@ -21,6 +21,7 @@ import { isRecord } from "../../../src/lib/utils.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
+	ptyEnvelope,
 } from "../../helpers/process-harness.js";
 
 const DIST = fileURLToPath(new URL("../../../dist/", import.meta.url));
@@ -59,12 +60,28 @@ function terminalOutput(
 ): string {
 	return browser.frames
 		.slice(cursor)
-		.filter(
-			({ message }) =>
-				message["type"] === "pty_output" && message["ptyId"] === ptyId,
-		)
-		.map(({ message }) => String(message["data"]))
+		.map(({ message }) => {
+			const envelope = ptyEnvelope(message);
+			if (envelope?._tag === "output" && envelope.ptyId === ptyId)
+				return envelope.data;
+			if (envelope?._tag === "snapshot")
+				return (
+					envelope.rows.find(({ pty }) => pty.id === ptyId)?.scrollback ?? ""
+				);
+			return "";
+		})
 		.join("");
+}
+
+/** The subscription reported this PTY exited or gone. */
+function isExitOf(message: Record<string, unknown>, ptyId: string): boolean {
+	const envelope = ptyEnvelope(message);
+	return (
+		(envelope?._tag === "upsert" &&
+			envelope.item.id === ptyId &&
+			envelope.item.status === "exited") ||
+		(envelope?._tag === "remove" && envelope.id === ptyId)
+	);
 }
 
 async function waitForOutput(
@@ -75,8 +92,7 @@ async function waitForOutput(
 ): Promise<string> {
 	await browser.waitFor(
 		(message) =>
-			message["type"] === "pty_output" &&
-			message["ptyId"] === ptyId &&
+			ptyEnvelope(message) !== undefined &&
 			terminalOutput(browser, ptyId, cursor).includes(marker),
 		cursor,
 	);
@@ -297,7 +313,7 @@ describe("PTY host process survival", () => {
 		const host = await connect();
 		const hostPid = host.hello.pid;
 		const marker = `85kb-undiscovered-close-${randomUUID()}`;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
 		await waitForOutput(browser, pty.id, marker);
 		await harness.kill();
 		await harness.restart({ skipBrowserProbe: true });
@@ -580,9 +596,9 @@ describe("PTY host process survival", () => {
 		const continued = `85kb-live-${randomUUID()}`;
 		const trigger = join(harness.root, "emit-while-server-down");
 		const finished = join(harness.root, "disconnected-output-written");
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(original)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(original)}\n`);
 		await waitForOutput(browser, pty.id, original);
-		browser.inputPty(
+		await browser.inputPty(
 			pty.id,
 			`(while [ ! -f ${shellQuote(trigger)} ]; do sleep 0.02; done; ${printMarker(whileDown)}; printf done > ${shellQuote(finished)}) &\n${printMarker(armed)}\n`,
 		);
@@ -611,7 +627,7 @@ describe("PTY host process survival", () => {
 		expect((await connect()).hello.pid).toBe(hostPid);
 		const cursor = reconnected.frames.length;
 		await reconnected.resizePty(pty.id, 101, 37);
-		reconnected.inputPty(
+		await reconnected.inputPty(
 			pty.id,
 			`printf '%s%s:%s\\n' '85kb' '-shell-pid' "$$"; stty size; ${printMarker(continued)}\n`,
 		);
@@ -657,7 +673,7 @@ describe("PTY host process survival", () => {
 		const browser = await harness.connect();
 		expect(await browser.listPtys()).toContainEqual(session.pty);
 		const marker = `85kb-old-host-live-${randomUUID()}`;
-		browser.inputPty(session.pty.id, `${printMarker(marker)}\n`);
+		await browser.inputPty(session.pty.id, `${printMarker(marker)}\n`);
 		await waitForOutput(browser, session.pty.id, marker);
 		evidence = {
 			oldHost: old.hello,
@@ -672,7 +688,7 @@ describe("PTY host process survival", () => {
 		const original = await harness.connect();
 		const pty = await original.createPty();
 		const ready = `85kb-concurrent-ready-${randomUUID()}`;
-		original.inputPty(pty.id, `stty -echo; ${printMarker(ready)}\n`);
+		await original.inputPty(pty.id, `stty -echo; ${printMarker(ready)}\n`);
 		await waitForOutput(original, pty.id, ready);
 		await harness.kill();
 		await harness.restart({ skipBrowserProbe: true });
@@ -690,7 +706,7 @@ describe("PTY host process survival", () => {
 		const marker = `85kb-concurrent-live-${randomUUID()}`;
 		const firstCursor = first.frames.length;
 		const secondCursor = second.frames.length;
-		first.inputPty(pty.id, `${printMarker(marker)}\n`);
+		await first.inputPty(pty.id, `${printMarker(marker)}\n`);
 		await Promise.all([
 			waitForOutput(first, pty.id, marker, firstCursor),
 			waitForOutput(second, pty.id, marker, secondCursor),
@@ -715,9 +731,9 @@ describe("PTY host process survival", () => {
 		const start = join(harness.root, "start-stream-after-reconnect");
 		const finished = join(harness.root, "numbered-stream-finished");
 		const armed = `85kb-stream-armed-${randomUUID()}`;
-		original.inputPty(pty.id, `stty -echo; ${printMarker(historical)}\n`);
+		await original.inputPty(pty.id, `stty -echo; ${printMarker(historical)}\n`);
 		await waitForOutput(original, pty.id, historical);
-		original.inputPty(
+		await original.inputPty(
 			pty.id,
 			`(while [ ! -f ${shellQuote(start)} ]; do sleep 0.01; done; n=1; while [ "$n" -le 40 ]; do printf '%s%s:%03d\\n' ${shellQuote(prefix.slice(0, 4))} ${shellQuote(prefix.slice(4))} "$n"; n=$((n+1)); sleep 0.03; done; printf done > ${shellQuote(finished)}) &\n${printMarker(armed)}\n`,
 		);
@@ -747,21 +763,18 @@ describe("PTY host process survival", () => {
 				(match) => Number(match[1]),
 			);
 		const outputOrder = (browser: ProcessBrowser) => ({
-			metadata: browser.frames.findIndex(
-				({ message }) =>
-					(message["type"] === "pty_created" &&
-						isRecord(message["pty"]) &&
-						message["pty"]["id"] === pty.id) ||
-					(message["type"] === "pty_list" &&
-						Array.isArray(message["ptys"]) &&
-						message["ptys"].some(
-							(item: unknown) => isRecord(item) && item["id"] === pty.id,
-						)),
-			),
-			output: browser.frames.findIndex(
-				({ message }) =>
-					message["type"] === "pty_output" && message["ptyId"] === pty.id,
-			),
+			metadata: browser.frames.findIndex(({ message }) => {
+				const envelope = ptyEnvelope(message);
+				return (
+					(envelope?._tag === "upsert" && envelope.item.id === pty.id) ||
+					(envelope?._tag === "snapshot" &&
+						envelope.rows.some((row) => row.pty.id === pty.id))
+				);
+			}),
+			output: browser.frames.findIndex(({ message }) => {
+				const envelope = ptyEnvelope(message);
+				return envelope?._tag === "output" && envelope.ptyId === pty.id;
+			}),
 		});
 		evidence = {
 			assertionsCompleted: false,
@@ -788,9 +801,13 @@ describe("PTY host process survival", () => {
 		await sameClient.listPtys();
 		await waitForOutput(sameClient, pty.id, finalMarker);
 		expect(numbers(sameClient)).toEqual(expected);
-		expect(outputOrder(sameClient).output).toBeGreaterThan(
-			outputOrder(sameClient).metadata,
-		);
+		// The shell is quiet now, so its whole history rides in the snapshot row
+		// alongside the metadata; any later output must still follow it.
+		const reconnected = outputOrder(sameClient);
+		expect(reconnected.metadata).toBeGreaterThanOrEqual(0);
+		expect(
+			reconnected.output === -1 || reconnected.output > reconnected.metadata,
+		).toBe(true);
 		await sameClient.listPtys();
 		expect(numbers(sameClient)).toEqual(expected);
 		expect(alive(pty.pid)).toBe(true);
@@ -811,7 +828,7 @@ describe("PTY host process survival", () => {
 		const browser = await harness.connect();
 		const pty = await browser.createPty();
 		const ready = `85kb-explicit-${action}-ready-${randomUUID()}`;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(ready)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(ready)}\n`);
 		await waitForOutput(browser, pty.id, ready);
 		const cursor = browser.frames.length;
 		if (action === "restart") {
@@ -826,12 +843,7 @@ describe("PTY host process survival", () => {
 		const listed = await browser.listPtys();
 		const exits = browser.frames
 			.slice(cursor)
-			.filter(
-				({ message }) =>
-					(message["type"] === "pty_exited" ||
-						message["type"] === "pty_deleted") &&
-					message["ptyId"] === pty.id,
-			);
+			.filter(({ message }) => isExitOf(message, pty.id));
 		evidence = {
 			assertionsCompleted: false,
 			action,
@@ -844,7 +856,7 @@ describe("PTY host process survival", () => {
 		const replacement = await browser.createPty();
 		expect(replacement.pid).not.toBe(pty.pid);
 		const marker = `85kb-after-explicit-${action}-${randomUUID()}`;
-		browser.inputPty(replacement.id, `${printMarker(marker)}\n`);
+		await browser.inputPty(replacement.id, `${printMarker(marker)}\n`);
 		await waitForOutput(browser, replacement.id, marker);
 		expect(alive(replacement.pid)).toBe(true);
 		evidence = {
@@ -970,7 +982,7 @@ describe("PTY host process survival", () => {
 		const retained = `85kb-retained-tail-λ-${suffix}`;
 		const ready = `85kb-full-window-ready-${randomUUID()}`;
 		const live = `85kb-after-full-window-${randomUUID()}`;
-		original.inputPty(
+		await original.inputPty(
 			pty.id,
 			`stty -echo; /usr/bin/awk 'BEGIN { for (i=0;i<100000;i++) printf "x" }'; printf '%s\\316\\273%s\\n' '85kb-retained-tail-' '-${suffix}'; ${printMarker(ready)}\n`,
 		);
@@ -983,7 +995,7 @@ describe("PTY host process survival", () => {
 		expect(initialReplay).toContain(retained);
 		expect(Buffer.byteLength(initialReplay)).toBe(PTY_SCROLLBACK_BYTES);
 		const cursor = first.frames.length;
-		first.inputPty(pty.id, `${printMarker(live)}\n`);
+		await first.inputPty(pty.id, `${printMarker(live)}\n`);
 		await waitForOutput(first, pty.id, live, cursor);
 		const second = await harness.connect();
 		await second.listPtys();
@@ -1286,7 +1298,7 @@ describe("PTY host process survival", () => {
 		const pty = await browser.createPty();
 		const host = await connect();
 		const marker = `85kb-before-host-crash-${randomUUID()}`;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
 		await waitForOutput(browser, pty.id, marker);
 		const cursor = browser.frames.length;
 		evidence = {
@@ -1304,12 +1316,7 @@ describe("PTY host process survival", () => {
 					expect(
 						browser.frames
 							.slice(cursor)
-							.some(
-								({ message }) =>
-									message["ptyId"] === pty.id &&
-									(message["type"] === "pty_exited" ||
-										message["type"] === "pty_deleted"),
-							),
+							.some(({ message }) => isExitOf(message, pty.id)),
 					).toBe(true),
 				{ timeout: 2_000 },
 			)
@@ -1320,18 +1327,12 @@ describe("PTY host process survival", () => {
 		expect(browser.connected).toBe(true);
 		await vi.waitFor(() => expect(alive(pty.pid)).toBe(false));
 		evidence["phase"] = "waiting-for-rejected-input";
-		const inputCursor = browser.frames.length;
-		browser.inputPty(pty.id, "printf 'must-not-run\\n'\n");
+		// PtyInput is an RPC: a dead terminal fails the call itself.
 		const inputRejected = await browser
-			.waitFor(
-				(message) =>
-					message["type"] === "system_error" &&
-					message["code"] === "PTY_INPUT_FAILED",
-				inputCursor,
-			)
+			.inputPty(pty.id, "printf 'must-not-run\\n'\n")
 			.then(
-				() => true,
 				() => false,
+				(error: unknown) => String(error).includes("Terminal is unavailable"),
 			);
 		const listed = await browser.listPtys();
 		evidence = {
@@ -1346,7 +1347,10 @@ describe("PTY host process survival", () => {
 		expect(listed.some((entry) => entry.id === pty.id)).toBe(false);
 		const replacement = await browser.createPty();
 		const replacementMarker = `85kb-after-host-crash-${randomUUID()}`;
-		browser.inputPty(replacement.id, `${printMarker(replacementMarker)}\n`);
+		await browser.inputPty(
+			replacement.id,
+			`${printMarker(replacementMarker)}\n`,
+		);
 		await waitForOutput(browser, replacement.id, replacementMarker);
 		expect(replacement.id).not.toBe(pty.id);
 		expect(alive(replacement.pid)).toBe(true);
@@ -1368,7 +1372,7 @@ describe("PTY host process survival", () => {
 		const file = join(harness.root, "shell-created-file");
 		const mask = join(harness.root, "shell-umask");
 		const marker = `85kb-umask-${randomUUID()}`;
-		browser.inputPty(
+		await browser.inputPty(
 			pty.id,
 			`stty -echo; umask > ${shellQuote(mask)}; : > ${shellQuote(file)}; ${printMarker(marker)}\n`,
 		);

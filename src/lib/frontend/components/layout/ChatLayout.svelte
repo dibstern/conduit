@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -49,7 +49,7 @@
 	} from "../../stores/ws.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
-	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
+	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
@@ -409,14 +409,6 @@
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
 				});
-			void listPtysRpc({
-				projectSlug: slug,
-				originId: getBrowserClientId(),
-			})
-				.then((response) => {
-					if (generation === attachGeneration) applyPtyListResponse(response);
-				})
-				.catch(() => undefined);
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
@@ -448,6 +440,11 @@
 			viewTranscript(project, null);
 			viewTodos(project, null);
 		};
+	});
+	$effect(() => {
+		const project = attachedProjectState.slug;
+		untrack(() => viewPtys(project));
+		return () => viewPtys(null);
 	});
 	$effect(() => {
 		const route = getCurrentRoute();

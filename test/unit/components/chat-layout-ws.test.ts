@@ -174,7 +174,7 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 	terminalState: { panelOpen: false, unreadPtyIds: new Set() },
 	destroyAll: vi.fn(),
-	applyPtyListResponse: vi.fn(),
+	viewPtys: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
@@ -264,10 +264,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getFileTreeRpc: vi.fn(async () => ({
 		projectSlug: "test-project",
 		files: [],
-	})),
-	listPtysRpc: vi.fn(async () => ({
-		projectSlug: "test-project",
-		ptys: [],
 	})),
 }));
 

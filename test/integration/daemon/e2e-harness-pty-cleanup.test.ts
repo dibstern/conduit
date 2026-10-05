@@ -147,8 +147,9 @@ test('actual replay fixture worker',async({harness})=>{
   writeFileSync(${JSON.stringify(workerResult)},JSON.stringify({configDir,host:host.hello,forcedDuringLoserJoin:true}));
  } else if (${JSON.stringify(startupState)}==='ready') {
   await creation;
-  const created=await browser.waitFor('pty_created');
-  const pty=Schema.decodeUnknownSync(PtyInfoSchema)(created.pty);
+  await browser.subscribePtys('e2e-replay');
+  const snapshot=await browser.waitFor('pty',{predicate:m=>m._tag==='snapshot'});
+  const pty=Schema.decodeUnknownSync(PtyInfoSchema)(snapshot.rows[0].pty);
   host=await PtyHostClient.connect({configDir,start:false});
   writeFileSync(${JSON.stringify(workerResult)},JSON.stringify({configDir,host:host.hello,shellPid:pty.pid}));
  } else {
@@ -325,6 +326,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 				harness.stack.initialSessionId,
 			);
 			await browser.waitForOpen();
+			await browser.subscribePtys("e2e-replay");
 			const originId = browser.getClientId();
 			await Effect.runPromise(
 				Effect.scoped(
@@ -344,8 +346,10 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			const created = await browser.waitFor("pty_created");
-			const pty = Schema.decodeUnknownSync(PtyInfoSchema)(created["pty"]);
+			const created = await browser.waitFor("pty", {
+				predicate: (message) => message["_tag"] === "upsert",
+			});
+			const pty = Schema.decodeUnknownSync(PtyInfoSchema)(created["item"]);
 			shellPid = pty.pid;
 			primary = await hostApi.PtyHostClient.connect({
 				configDir,
@@ -359,7 +363,8 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 			});
 			await vi.waitFor(() => {
 				const output = browser
-					?.getReceivedOfType("pty_output")
+					?.getReceivedOfType("pty")
+					.filter((message) => message["_tag"] === "output")
 					.map((message) => message["data"])
 					.join("");
 				expect(output).toContain(`85kb-cleanup-pid:${shellPid}`);

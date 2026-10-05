@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import WebSocket from "ws";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -41,6 +41,7 @@ export class TestWsClient {
 		timer: ReturnType<typeof setTimeout>;
 	}> = [];
 	private openPromise: Promise<void>;
+	private ptySubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
 
 	constructor(url: string, initialSessionId?: string) {
 		const wsUrl = new URL(url);
@@ -57,23 +58,24 @@ export class TestWsClient {
 
 		this.ws.on("message", (data) => {
 			try {
-				const msg = JSON.parse(data.toString()) as ReceivedMessage;
-				this.received.push(msg);
-
-				// Check waiters
-				for (let i = this.waiters.length - 1; i >= 0; i--) {
-					const waiter = this.waiters[i];
-					if (waiter === undefined) continue;
-					if (waiter.predicate(msg)) {
-						clearTimeout(waiter.timer);
-						waiter.resolve(msg);
-						this.waiters.splice(i, 1);
-					}
-				}
+				this.receive(JSON.parse(data.toString()) as ReceivedMessage);
 			} catch {
 				// Ignore non-JSON messages
 			}
 		});
+	}
+
+	private receive(msg: ReceivedMessage): void {
+		this.received.push(msg);
+		for (let i = this.waiters.length - 1; i >= 0; i--) {
+			const waiter = this.waiters[i];
+			if (waiter === undefined) continue;
+			if (waiter.predicate(msg)) {
+				clearTimeout(waiter.timer);
+				waiter.resolve(msg);
+				this.waiters.splice(i, 1);
+			}
+		}
 	}
 
 	/** Wait for the WebSocket connection to open */
@@ -708,6 +710,69 @@ export class TestWsClient {
 		}
 	}
 
+	/**
+	 * Follow the project's terminals over SubscribePtys, as the browser does.
+	 * Each envelope lands in `received` as `{ type: "pty", ...envelope }`;
+	 * resolves once the opening snapshot is synchronized.
+	 */
+	async subscribePtys(projectSlug = "integration-test"): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		const receive = (msg: ReceivedMessage) => this.receive(msg);
+		try {
+			this.ptySubscription = Effect.runFork(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client
+							.SubscribePtys({ projectSlug })
+							.pipe(
+								Stream.runForEach((envelope) =>
+									Effect.sync(() => receive({ type: "pty", ...envelope })),
+								),
+							);
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+			await this.waitFor("pty", {
+				predicate: (msg) => msg["_tag"] === "synchronized",
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
+	async ptyInput(ptyId: string, data: string): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client.PtyInput({
+							projectSlug: "integration-test",
+							ptyId,
+							data,
+						});
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async listPtys(): Promise<PtyListResponse> {
 		const previousWebSocket = globalThis.WebSocket;
 		const clientId = this.clientId;
@@ -936,6 +1001,8 @@ export class TestWsClient {
 			waiter.reject(new Error("Client closed"));
 		}
 		this.waiters = [];
+		if (this.ptySubscription)
+			await Effect.runPromise(Fiber.interrupt(this.ptySubscription));
 
 		if (
 			this.ws.readyState === WebSocket.OPEN ||

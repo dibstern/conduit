@@ -4,27 +4,18 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	decodeMessage,
-	preloadDecoder,
-} from "../../../src/lib/frontend/effect-boundary.js";
-import {
-	applyPtyListResponse,
+	applyPtyEnvelope,
 	destroyAll,
 	getScrollback,
-	handlePtyCreated,
-	handlePtyDeleted,
-	handlePtyExited,
-	handlePtyList,
-	handlePtyOutput,
 	onOutput,
 	renameTab,
 	terminalState,
 } from "../../../src/lib/frontend/stores/terminal.svelte.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import type { PtyHostClient as HostClient } from "../../../src/lib/terminal/pty-host-client.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
+	ptyEnvelope,
 } from "../../helpers/process-harness.js";
 import { createPtySocketProxy } from "../../helpers/pty-host-fixture.js";
 
@@ -43,31 +34,10 @@ function printMarker(marker: string): string {
 	return `printf '%s%s\\n' '${marker.slice(0, 4)}' '${marker.slice(4)}'`;
 }
 
+/** Feed the store what the browser's PTY subscription delivered. */
 function feedStore(message: Record<string, unknown>): void {
-	if (!String(message["type"]).startsWith("pty_")) return;
-	const msg = decodeMessage(message) as RelayMessage;
-	switch (msg.type) {
-		case "pty_list":
-			handlePtyList(msg);
-			break;
-		case "pty_created":
-			handlePtyCreated(msg);
-			break;
-		case "pty_output":
-			handlePtyOutput(msg);
-			break;
-		case "pty_exited":
-			handlePtyExited(msg);
-			break;
-		case "pty_deleted":
-			handlePtyDeleted(msg);
-	}
-}
-
-async function list(browser: ProcessBrowser) {
-	const ptys = await browser.listPtys();
-	applyPtyListResponse({ projectSlug: "process-test", ptys });
-	return ptys;
+	const envelope = ptyEnvelope(message);
+	if (envelope) applyPtyEnvelope(envelope);
 }
 
 describe("built PTY reconnect with the same frontend terminal store", () => {
@@ -82,7 +52,6 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 	let evidence: Record<string, unknown> = {};
 
 	beforeEach(async () => {
-		await preloadDecoder();
 		destroyAll();
 		rendered = "";
 		resetCount = 0;
@@ -155,7 +124,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		const missed = `85kb-store-restart-gap-${randomUUID()}`;
 		const trigger = join(harness.root, "store-restart-trigger");
 		const finished = join(harness.root, "store-restart-finished");
-		first.inputPty(
+		await first.inputPty(
 			pty.id,
 			`stty -echo; (while [ ! -f '${trigger}' ]; do sleep 0.02; done; ${printMarker(missed)}; : > '${finished}') & ${printMarker(historical)}\n`,
 		);
@@ -167,7 +136,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		await harness.restart({ skipBrowserProbe: true });
 		const reconnected = await harness.connect(undefined, first.originId);
 		subscriptions.push(reconnected.onMessage(feedStore));
-		const listed = await list(reconnected);
+		const listed = await reconnected.listPtys();
 		await vi.waitFor(() => expect(rendered).toContain(missed));
 		const replay = getScrollback(pty.id).join("");
 		evidence = {
@@ -215,7 +184,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		const live = `85kb-store-after-drop-${randomUUID()}`;
 		const trigger = join(harness.root, "socket-drop-trigger");
 		const finished = join(harness.root, "socket-drop-finished");
-		browser.inputPty(
+		await browser.inputPty(
 			pty.id,
 			`stty -echo; (while [ ! -f '${trigger}' ]; do sleep 0.02; done; ${printMarker(missed)}; : > '${finished}') & ${printMarker(historical)}\n`,
 		);
@@ -241,13 +210,13 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 			missedWrittenWhileDropped: existsSync(finished),
 			phase: "waiting-for-missed-output-replay",
 		};
-		const listed = await list(browser);
+		const listed = await browser.listPtys();
 		await vi.waitFor(() => expect(rendered).toContain(missed), {
 			timeout: 15_000,
 		});
-		browser.inputPty(pty.id, `${printMarker(live)}\n`);
+		await browser.inputPty(pty.id, `${printMarker(live)}\n`);
 		await vi.waitFor(() => expect(rendered).toContain(live));
-		await list(browser);
+		await browser.listPtys();
 		const replay = getScrollback(pty.id).join("");
 		expect(listed.find((entry) => entry.id === pty.id)?.pid).toBe(pty.pid);
 		for (const marker of [historical, missed, live]) {
@@ -280,10 +249,10 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		mountTerminal(browser, pty.id);
 		const historical = `85kb-store-list-reset-${randomUUID()}`;
 		const live = `85kb-store-list-recovered-${randomUUID()}`;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(historical)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(historical)}\n`);
 		await vi.waitFor(() => expect(rendered).toContain(historical));
 		proxy.dropNextList();
-		const failedListRejected = await list(browser).then(
+		const failedListRejected = await browser.listPtys().then(
 			() => false,
 			() => true,
 		);
@@ -306,9 +275,9 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		expect(failedListRejected).toBe(true);
 		expect(tabAfterFailure?.title).toBe("Persistent shell");
 		expect(afterFailure.split(historical)).toHaveLength(2);
-		const listed = await list(browser);
+		const listed = await browser.listPtys();
 		expect(listed.find((entry) => entry.id === pty.id)?.pid).toBe(pty.pid);
-		browser.inputPty(pty.id, `${printMarker(live)}\n`);
+		await browser.inputPty(pty.id, `${printMarker(live)}\n`);
 		await vi.waitFor(() => expect(rendered).toContain(live));
 		const recovered = getScrollback(pty.id).join("");
 		expect(recovered.split(historical)).toHaveLength(2);
@@ -333,7 +302,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		const pty = await browser.createPty();
 		mountTerminal(browser, pty.id);
 		const marker = `85kb-store-before-close-${randomUUID()}`;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
+		await browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}\n`);
 		await vi.waitFor(() => expect(rendered).toContain(marker));
 		const observer = await PtyHostClient.connect({
 			configDir: harness.configDir,
@@ -364,7 +333,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 				() => true,
 				() => false,
 			);
-		const listed = await list(browser);
+		const listed = await browser.listPtys();
 		evidence = {
 			assertionsCompleted: false,
 			hostPid: host.hello.pid,
@@ -397,14 +366,18 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		mountTerminal(browser, pty.id);
 		const marker = `85kb-store-natural-exit-${randomUUID()}`;
 		const cursor = browser.frames.length;
-		browser.inputPty(pty.id, `stty -echo; ${printMarker(marker)}; exit 0\n`);
-		const exit = await browser.waitFor(
-			(message) =>
-				message["type"] === "pty_exited" &&
-				message["ptyId"] === pty.id &&
-				message["exitCode"] === 0,
-			cursor,
+		await browser.inputPty(
+			pty.id,
+			`stty -echo; ${printMarker(marker)}; exit 0\n`,
 		);
+		const exit = await browser.waitFor((message) => {
+			const envelope = ptyEnvelope(message);
+			return (
+				envelope?._tag === "upsert" &&
+				envelope.item.id === pty.id &&
+				envelope.item.status === "exited"
+			);
+		}, cursor);
 		expect(getScrollback(pty.id).join("")).toContain(marker);
 		expect(terminalState.tabs.get(pty.id)?.exited).toBe(true);
 		const observer = await PtyHostClient.connect({
@@ -416,7 +389,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 		await vi.waitFor(() => expect(observer.connected).toBe(false));
 		proxy.resume();
 		await browser.closePty(pty.id);
-		const listed = await list(browser);
+		const listed = await browser.listPtys();
 		evidence = {
 			assertionsCompleted: false,
 			hostPid: host.hello.pid,
@@ -424,7 +397,7 @@ describe("built PTY reconnect with the same frontend terminal store", () => {
 			shellPid: pty.pid,
 			ptyId: pty.id,
 			naturalExitObserved: true,
-			naturalExitCode: exit["exitCode"],
+			naturalExit: exit,
 			observerDisconnected: !observer.connected,
 			listedIds: listed.map((entry) => entry.id),
 			tabResurrected: terminalState.tabs.has(pty.id),

@@ -99,8 +99,6 @@ describe("shouldCache", () => {
 		const nonCacheable = [
 			"permission_request",
 			"permission_resolved",
-			"pty_created",
-			"pty_output",
 			"status",
 		] as const;
 		for (const type of nonCacheable) {

@@ -534,15 +534,6 @@ const ProjectInfoSchema = Schema.Struct({
 	instanceId: Schema.optional(Schema.String),
 });
 
-const PtyInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	command: Schema.String,
-	cwd: Schema.String,
-	status: Schema.Literal("running", "exited"),
-	pid: Schema.Number,
-});
-
 const InstanceStatusSchema = Schema.Literal(
 	"starting",
 	"healthy",
@@ -800,35 +791,6 @@ const MessageRemovedSchema = Schema.Struct({
 	messageId: Schema.String,
 });
 
-const PtyCreatedSchema = Schema.Struct({
-	type: Schema.Literal("pty_created"),
-	pty: PtyInfoSchema,
-});
-
-const PtyOutputSchema = Schema.Struct({
-	type: Schema.Literal("pty_output"),
-	ptyId: Schema.String,
-	data: Schema.String,
-	replace: Schema.optional(Schema.Boolean),
-	restored: Schema.optional(Schema.Boolean),
-});
-
-const PtyExitedSchema = Schema.Struct({
-	type: Schema.Literal("pty_exited"),
-	ptyId: Schema.String,
-	exitCode: Schema.Number,
-});
-
-const PtyDeletedSchema = Schema.Struct({
-	type: Schema.Literal("pty_deleted"),
-	ptyId: Schema.String,
-});
-
-const PtyListSchema = Schema.Struct({
-	type: Schema.Literal("pty_list"),
-	ptys: Schema.Array(PtyInfoSchema),
-});
-
 const ConnectionStatusSchema = Schema.Struct({
 	type: Schema.Literal("connection_status"),
 	status: Schema.Literal("disconnected", "reconnecting", "connected"),
@@ -985,12 +947,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
-	// PTY / Terminal
-	PtyCreatedSchema,
-	PtyOutputSchema,
-	PtyExitedSchema,
-	PtyDeletedSchema,
-	PtyListSchema,
 	// Connection status
 	ConnectionStatusSchema,
 	// Cache / Replay

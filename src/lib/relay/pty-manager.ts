@@ -2,6 +2,7 @@
 // input forwarding, and cleanup. Extracted from relay-stack.ts so PTY state
 // management is isolated and independently testable.
 
+import type { PtyEvent } from "../contracts/ws-rpc.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { PtyInfo, PtyStatus } from "../shared-types.js";
 import {
@@ -29,6 +30,22 @@ export interface PtySessionState {
 	info?: PtyInfo;
 }
 
+/** A tracked PTY as a row. OpenCode PTYs re-attached after a restart carry no
+ *  info, so they get the defaults the terminal list always showed for them. */
+export const trackedPtyInfo = (
+	pty: { readonly id: string; readonly status: PtyStatus },
+	projectDir: string,
+	info?: PtyInfo,
+): PtyInfo => ({
+	id: pty.id,
+	title: "Terminal",
+	command: "bash",
+	cwd: projectDir,
+	pid: 0,
+	...info,
+	status: pty.status,
+});
+
 export interface PtyManagerOptions {
 	log?: Logger;
 	scrollbackMax?: number;
@@ -36,6 +53,7 @@ export interface PtyManagerOptions {
 
 export class PtyManager {
 	private readonly sessions = new Map<string, PtySessionState>();
+	private readonly listeners = new Set<(event: PtyEvent) => void>();
 	private readonly log: Logger;
 	private readonly scrollbackMax: number;
 
@@ -46,6 +64,24 @@ export class PtyManager {
 
 	get sessionCount(): number {
 		return this.sessions.size;
+	}
+
+	get listenerCount(): number {
+		return this.listeners.size;
+	}
+
+	/** Hear every PTY change from now on. Read the snapshot in the same turn to
+	 *  miss nothing. Returns the unsubscribe. */
+	subscribe(listener: (event: PtyEvent) => void): () => void {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+
+	/** Tell every subscriber, i.e. every browser tab on this project. */
+	publish(event: PtyEvent): void {
+		for (const listener of this.listeners) listener(event);
 	}
 
 	hasSession(ptyId: string): boolean {

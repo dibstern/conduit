@@ -1055,6 +1055,18 @@ export class ClosePty extends Schema.TaggedRequest<ClosePty>()("ClosePty", {
 	},
 }) {}
 
+/** Keystrokes for one terminal. Unary and never coalesced: input latency is
+ *  the user's typing, so each call carries what was typed since the last ack. */
+export class PtyInput extends Schema.TaggedRequest<PtyInput>()("PtyInput", {
+	failure: WsRpcError,
+	success: OkResponseSchema,
+	payload: {
+		projectSlug: NonEmptyString,
+		ptyId: NonEmptyString,
+		data: Schema.String,
+	},
+}) {}
+
 export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 	"FindFolders",
 	{
@@ -1777,6 +1789,7 @@ export const WsRpcRequest = Schema.Union(
 	CreatePty,
 	ResizePty,
 	ClosePty,
+	PtyInput,
 	ListDaemonSessions,
 	CreateSession,
 	ViewSession,
@@ -1839,10 +1852,60 @@ export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
 	stream: true,
 });
 
+/**
+ * A project's terminals (conduit-test-ni8.11). Not the read-model `Envelope`:
+ * PTYs live in memory, not the event store, so nothing carries a sequence and
+ * every (re)subscribe is a cold snapshot — each row with its scrollback ring.
+ * `output` appends to a terminal's buffer, or replaces it when `replace` is set.
+ */
+const PtyUpsertSchema = Schema.Struct({
+	_tag: Schema.Literal("upsert"),
+	item: PtyInfoSchema,
+});
+const PtyOutputSchema = Schema.Struct({
+	_tag: Schema.Literal("output"),
+	ptyId: Schema.String,
+	data: Schema.String,
+	replace: Schema.optional(Schema.Boolean),
+});
+const PtyRemoveSchema = Schema.Struct({
+	_tag: Schema.Literal("remove"),
+	id: Schema.String,
+});
+/** What a live terminal says between snapshots. */
+export type PtyEvent =
+	| typeof PtyUpsertSchema.Type
+	| typeof PtyOutputSchema.Type
+	| typeof PtyRemoveSchema.Type;
+export const PtyRowSchema = Schema.Struct({
+	pty: PtyInfoSchema,
+	scrollback: Schema.String,
+});
+export type PtyRow = typeof PtyRowSchema.Type;
+const PtyEnvelopeSchema = Schema.Union(
+	Schema.Struct({
+		_tag: Schema.Literal("snapshot"),
+		rows: Schema.Array(PtyRowSchema),
+	}),
+	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+	PtyUpsertSchema,
+	PtyOutputSchema,
+	PtyRemoveSchema,
+);
+export type PtyEnvelope = typeof PtyEnvelopeSchema.Type;
+
+export const SubscribePtys = Rpc.make("SubscribePtys", {
+	payload: { projectSlug: NonEmptyString },
+	success: PtyEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
+	SubscribePtys,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
@@ -1905,6 +1968,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(CreatePty),
 	Rpc.fromTaggedRequest(ResizePty),
 	Rpc.fromTaggedRequest(ClosePty),
+	Rpc.fromTaggedRequest(PtyInput),
 	Rpc.fromTaggedRequest(ListDaemonSessions),
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),

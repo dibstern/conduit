@@ -68,14 +68,37 @@ async function openHeader(
 					: [],
 			}),
 		},
+		...(options.viewActivity
+			? {
+					streams: {
+						SubscribePtys: () => [
+							{
+								_tag: "snapshot",
+								rows: [
+									{
+										pty: {
+											id: "pty-1",
+											title: "Shell",
+											command: "zsh",
+											cwd: directory,
+											status: "running",
+											pid: 1,
+										},
+										scrollback: "",
+									},
+								],
+							},
+							{ _tag: "synchronized" },
+							{ _tag: "output", ptyId: "pty-1", data: "activity" },
+						],
+					},
+				}
+			: {}),
 	});
 	await mockRelayWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions },
-			...(options.viewActivity
-				? [{ type: "pty_output", ptyId: "pty-1", data: "activity" }]
-				: []),
 		],
 		responses: new Map(),
 	});
