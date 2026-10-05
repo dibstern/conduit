@@ -574,8 +574,8 @@
 <a
 	bind:this={rowEl}
 	href={href || undefined}
-	class="{itemClass} no-underline {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
-	style="touch-action: pan-y; -webkit-touch-callout: none; user-select: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgb(from var(--color-brand-a) r g b / 0.1);' : ''}"
+	class="{itemClass} no-underline select-none {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
+	style="touch-action: pan-y; -webkit-touch-callout: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgb(from var(--color-brand-a) r g b / 0.1);' : ''}"
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}
