@@ -78,12 +78,13 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					evidence["sessionId"] = sessionId;
 					const cursor = browser.frames.length;
 					await Effect.runPromise(
-						browser.rpc
-							.SendMessage({
+						browser.rpc.input
+							.submit({
 								projectSlug: "process-test",
 								sessionId,
 								originId: browser.originId,
-								commandId: randomUUID(),
+								inputId: randomUUID(),
+								delivery: "queue",
 								text: `Use the Read tool to read the file at the absolute path ${markerPath}, then reply with its contents.`,
 							})
 							.pipe(Effect.timeout(15_000)),

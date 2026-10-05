@@ -1,4 +1,5 @@
 import { Data, Effect } from "effect";
+import type { InputDelivery } from "../contracts/stored-event.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -6,14 +7,13 @@ import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getContextWindow,
 	getModel,
 	getVariant,
 	isModelUserSelected,
-	PROCESSING_TIMEOUT_DURATION,
-	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { RelayError } from "../errors.js";
 
@@ -48,6 +48,8 @@ export interface SendMessageToSessionInput {
 	readonly excludeClientId?: string;
 	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
+	/** Only `queue` is honoured for now; a steer is queued like any input. */
+	readonly delivery?: InputDelivery;
 }
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
@@ -119,65 +121,47 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
 
-		// Send user_message to OTHER clients viewing this session
-		const targets = wsHandler.getClientsForSession(activeId);
-		for (const targetId of targets) {
-			if (targetId !== excludeClientId) {
-				wsHandler.sendTo(targetId, {
-					type: "user_message",
-					sessionId: activeId,
-					text,
-					...(originId && originalActiveId === activeId ? { originId } : {}),
-				});
-			}
-		}
-
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
+		// The request is captured now: a queued input keeps what was selected
+		// when it was sent, whatever changes before it is handed off.
 		const agentService = yield* AgentServiceTag;
 		const sessionAgent = yield* agentService.getActiveAgent(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
-		wsHandler.sendToSession(activeId, {
-			type: "status",
-			sessionId: activeId,
-			status: "processing",
-		});
-		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.sync(() => {
-				log.warn(
-					`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
-				);
-				wsHandler.sendToSession(
-					activeId,
-					new RelayError(
-						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-						{ code: "PROCESSING_TIMEOUT" },
-					).toMessage(activeId),
-				);
-				wsHandler.sendToSession(activeId, {
-					type: "done",
-					sessionId: activeId,
-					code: 1,
-				});
-			}),
-		);
-
-		yield* providerTurnService.sendTurn({
+		const inbox = yield* SessionInboxTag;
+		const { handedOff } = yield* inbox.submit({
 			clientId,
 			sessionId: activeId,
-			text,
-			commandId: input.commandId,
-			...(imageList ? { images: imageList } : {}),
-			...(sessionModel ? { model: sessionModel } : {}),
-			modelUserSelected: sessionModelUserSelected,
-			...(sessionAgent ? { agent: sessionAgent } : {}),
-			...(variant ? { variant } : {}),
-			...(contextWindow ? { contextWindow } : {}),
+			inputId: input.commandId,
+			delivery: input.delivery ?? "queue",
+			request: {
+				text,
+				...(imageList ? { images: imageList } : {}),
+				...(sessionModel ? { model: sessionModel } : {}),
+				modelUserSelected: sessionModelUserSelected,
+				...(sessionAgent ? { agent: sessionAgent } : {}),
+				...(variant ? { variant } : {}),
+				...(contextWindow ? { contextWindow } : {}),
+			},
 			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 		});
+
+		// Send user_message to OTHER clients viewing this session
+		if (handedOff) {
+			for (const targetId of wsHandler.getClientsForSession(activeId)) {
+				if (targetId !== excludeClientId) {
+					wsHandler.sendTo(targetId, {
+						type: "user_message",
+						sessionId: activeId,
+						text,
+						...(originId && originalActiveId === activeId ? { originId } : {}),
+					});
+				}
+			}
+		}
 		return activeId;
 	});
 

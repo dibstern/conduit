@@ -1613,11 +1613,12 @@ export class ProcessBrowser {
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
 		const cursor = this.frames.length;
 		await this.run(
-			this.rpc.SendMessage({
+			this.rpc.input.submit({
 				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
-				commandId: randomUUID(),
+				inputId: randomUUID(),
+				delivery: "queue",
 				text: prompt,
 			}),
 		);

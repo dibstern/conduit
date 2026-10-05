@@ -2,6 +2,8 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
 import {
+	type InputRequest,
+	InputRequestSchema,
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
@@ -367,7 +369,40 @@ export interface ReadQueryEffect {
 		TurnModelExecutionRow | undefined,
 		ReadQueryEffectError | SqlError
 	>;
+
+	/**
+	 * The session's pending inputs that moved inside `range`, oldest first.
+	 * Without `after` it is a base read: every input still pending, and no
+	 * removals. With it, inputs that left the tray come back as `removed`.
+	 * Pass `through` so the answer never runs ahead of the version the caller
+	 * reports.
+	 */
+	readonly readPendingInputs: (
+		sessionId: string,
+		range: { readonly after?: number; readonly through: number },
+	) => Effect.Effect<
+		{
+			readonly rows: readonly PendingInputRow[];
+			readonly removed: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
+		},
+		ReadQueryEffectError | SqlError
+	>;
 }
+
+export interface PendingInputRow {
+	readonly inputId: string;
+	readonly state: "queued" | "steering";
+	readonly request: InputRequest;
+	readonly admittedAt: number;
+	readonly version: number;
+}
+
+const decodeInputRequest = Schema.decodeUnknown(
+	Schema.parseJson(InputRequestSchema),
+);
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 	ReadQueryEffectTag,
@@ -1062,6 +1097,48 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readPendingInputs = (
+		sessionId: string,
+		range: { readonly after?: number; readonly through: number },
+	) =>
+		Effect.gen(function* () {
+			const floor = range.after ?? BEFORE_FIRST_VERSION;
+			const rows = yield* sql<{
+				input_id: string;
+				state: "queued" | "steering" | "removed";
+				request: string;
+				admitted_at: number;
+				version: number;
+			}>`
+				SELECT input_id, state, request, admitted_at, version FROM pending_inputs
+				WHERE session_id = ${sessionId}
+					AND version > ${floor} AND version <= ${range.through}
+				ORDER BY admitted_at, rowid`;
+			const live: PendingInputRow[] = [];
+			const removed: { id: string; version: number }[] = [];
+			for (const row of rows) {
+				if (row.state === "removed") {
+					if (range.after !== undefined)
+						removed.push({ id: `input:${row.input_id}`, version: row.version });
+					continue;
+				}
+				live.push({
+					inputId: row.input_id,
+					state: row.state,
+					request: yield* decodeInputRequest(row.request),
+					admittedAt: row.admitted_at,
+					version: row.version,
+				});
+			}
+			return { rows: live, removed };
+		}).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ReadQueryEffectError
+					? cause
+					: new ReadQueryEffectError({ operation: "readPendingInputs", cause }),
+			),
+		);
+
 	const getLatestTurnModelExecution = (
 		sessionId: string,
 	): Effect.Effect<
@@ -1107,5 +1184,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readSessionList,
 		readSessionTranscript,
 		getLatestTurnModelExecution,
+		readPendingInputs,
 	} satisfies ReadQueryEffect;
 });

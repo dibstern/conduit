@@ -22,6 +22,8 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"turn.error",
 		"turn.interrupted",
 		"turn.model_resolved",
+		"input.admitted",
+		"input.sent",
 		"session.status",
 		"session.compaction",
 		"message.created",

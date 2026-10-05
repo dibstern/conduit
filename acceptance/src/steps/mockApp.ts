@@ -251,7 +251,7 @@ export const mockAppHandlers: StepHandler[] = [
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
 					},
-					SendMessage: async (payload) => ({
+					"input.submit": async (payload) => ({
 						ok: true,
 						sessionId: payload["sessionId"],
 					}),

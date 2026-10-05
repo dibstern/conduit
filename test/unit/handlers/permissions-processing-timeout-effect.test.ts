@@ -30,6 +30,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -89,7 +90,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				});
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 

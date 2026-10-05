@@ -149,6 +149,7 @@ function makeReadQuery(
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+		readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 		readSessionTranscriptPage: () =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	};

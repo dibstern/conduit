@@ -41,7 +41,10 @@ import { OpenCodeInstanceClientsLive } from "../../src/lib/domain/relay/Services
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
+import {
+	ProviderTurnServiceLive,
+	ProviderTurnServiceTag,
+} from "../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
@@ -63,6 +66,7 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../src/lib/domain/relay/Services/services.js";
+import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceLive,
@@ -72,7 +76,10 @@ import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
 } from "../../src/lib/domain/relay/Services/session-manager-state.js";
-import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	makeOverridesStateLive,
+	OverridesStateTag,
+} from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
@@ -1066,6 +1073,9 @@ export function makeTestHandlerLayer(
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
 		providerTurnServiceLayer,
+		PassThroughSessionInbox.pipe(
+			Layer.provide(Layer.merge(providerTurnServiceLayer, overridesStateLayer)),
+		),
 		sessionManagerServiceLayer,
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),
 		wsHandlerLayer,
@@ -1147,3 +1157,33 @@ export function makeTestFullLayer(
 		makeTestDaemonStateLayer(opts),
 	);
 }
+
+/**
+ * A Session Inbox that hands every submit straight to ProviderTurnService, as
+ * an idle session does. For handler tests that exercise the send path around
+ * the inbox; the inbox itself is proven by the Claude replay lane.
+ */
+export const PassThroughSessionInbox = Layer.effect(
+	SessionInboxTag,
+	Effect.gen(function* () {
+		const turns = yield* ProviderTurnServiceTag;
+		const overrides = yield* OverridesStateTag;
+		return {
+			submit: ({ inputId, request, ...input }) =>
+				turns
+					.sendTurn({
+						clientId: input.clientId,
+						commandId: inputId,
+						sessionId: input.sessionId,
+						...request,
+						...(input.errorDelivery
+							? { errorDelivery: input.errorDelivery }
+							: {}),
+					})
+					.pipe(
+						Effect.provideService(OverridesStateTag, overrides),
+						Effect.as({ handedOff: true }),
+					),
+		};
+	}),
+);

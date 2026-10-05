@@ -99,6 +99,7 @@ const makeReadQuery = (
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
 	),
+	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),

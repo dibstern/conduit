@@ -1,5 +1,13 @@
 import { existsSync } from "node:fs";
-import { Context, Effect, FiberMap, type Ref, Runtime } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Fiber,
+	FiberMap,
+	type Ref,
+	Runtime,
+} from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -13,6 +21,7 @@ import {
 	ReadQueryEffectTag,
 	sessionGoalState,
 } from "../../../persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../persistence/events.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
@@ -35,6 +44,7 @@ import {
 	resetProcessingTimeout,
 	setModelDefault,
 	setPermissionMode,
+	startProcessingTimeout,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 
@@ -152,10 +162,14 @@ const loadClaudeHistory = (sessionId: string) =>
 		return { history: [], loaded: false };
 	});
 
-/** A handoff that ended before its message was placed still shows the send. */
+/**
+ * A handoff that ended before its message was placed still shows the send, and
+ * its turn ends failed so a queue behind it pauses instead of draining.
+ */
 const placeUnplacedUserMessage = (
 	input: ProviderTurnServiceSendInput,
 	driver: ProviderDriverKind,
+	error: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -167,6 +181,20 @@ const placeUnplacedUserMessage = (
 				provider: driver,
 			})
 			.pipe(
+				Effect.zipRight(
+					persist.persistEvent(
+						canonicalEvent(
+							"turn.error",
+							input.sessionId,
+							{
+								messageId: input.commandId,
+								userMessageId: input.commandId,
+								error,
+							},
+							{ provider: driver },
+						),
+					),
+				),
 				Effect.catchAll((error) =>
 					Effect.sync(() =>
 						log.warn(
@@ -247,7 +275,12 @@ const handleDispatchFailure = (
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		if (driver !== undefined) yield* placeUnplacedUserMessage(input, driver);
+		if (driver !== undefined)
+			yield* placeUnplacedUserMessage(
+				input,
+				driver,
+				formatErrorDetail(sendErr),
+			);
 		log.warn(
 			`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 			formatErrorDetail(sendErr),
@@ -290,10 +323,10 @@ const handleDispatchResult = (
 		// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
 		// the reason.
 		if (result.status !== "completed") {
-			yield* placeUnplacedUserMessage(input, driver);
 			const msg =
 				result.error?.message ??
 				(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
+			yield* placeUnplacedUserMessage(input, driver, msg);
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} engine dispatch ${result.status}: ${msg}`,
 			);
@@ -527,6 +560,10 @@ const dispatchEngineTurn = (
 			orchestrationEngine.bindSession(resolvedInput.sessionId, providerId),
 		);
 
+		// Resolved once the engine commits the handoff, or once the dispatch ends
+		// without committing it. The caller waits on it so a submit behind this
+		// one reads the committed handoff, not the moment before it.
+		const accepted = yield* Deferred.make<void>();
 		const dispatchProgram = Effect.try({
 			try: () =>
 				orchestrationEngine.dispatchEffect({
@@ -534,6 +571,8 @@ const dispatchEngineTurn = (
 					commandId: resolvedInput.commandId,
 					providerId,
 					input: sendTurnInput,
+					...(resolvedInput.events ? { events: resolvedInput.events } : {}),
+					onAccepted: Deferred.succeed(accepted, undefined),
 				}),
 			catch: (cause) => cause,
 		}).pipe(
@@ -547,13 +586,18 @@ const dispatchEngineTurn = (
 				),
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),
+			Effect.ensuring(Deferred.succeed(accepted, undefined)),
 		);
-		yield* FiberMap.run(
+		const fiber = yield* FiberMap.run(
 			dispatchFibers,
 			`${resolvedInput.sessionId}:${sendTurnInput.inputId}`,
 			dispatchProgram,
 			{ onlyIfMissing: true },
-		).pipe(Effect.asVoid);
+		);
+		yield* Effect.raceFirst(
+			Deferred.await(accepted),
+			Fiber.await(fiber).pipe(Effect.asVoid),
+		);
 	});
 
 const sendViaEngine = (
@@ -580,8 +624,41 @@ const sendViaEngine = (
 		yield* dispatchEngineTurn(resolvedInput, providerId, driver, sendTurnInput);
 	});
 
+/** The handoff is where a turn starts working: status and its timeout. */
+const startProcessing = (input: ProviderTurnServiceSendInput) =>
+	Effect.gen(function* () {
+		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
+		const { sessionId } = input;
+		wsHandler.sendToSession(sessionId, {
+			type: "status",
+			sessionId,
+			status: "processing",
+		});
+		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
+			Effect.sync(() => {
+				log.warn(
+					`client=${input.clientId} session=${sessionId} Processing timeout (120s) — broadcasting done`,
+				);
+				wsHandler.sendToSession(
+					sessionId,
+					new RelayError(
+						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+						{ code: "PROCESSING_TIMEOUT" },
+					).toMessage(sessionId),
+				);
+				wsHandler.sendToSession(sessionId, {
+					type: "done",
+					sessionId,
+					code: 1,
+				});
+			}),
+		);
+	});
+
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
+		yield* startProcessing(input);
 		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;
 		const providerId =

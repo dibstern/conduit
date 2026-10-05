@@ -203,6 +203,7 @@ const makeReadQuery = (
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
+	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
@@ -1576,6 +1577,7 @@ describe("ProviderTurnService", () => {
 				const dispatchEffect = vi.fn((command) => {
 					if (command.type !== "send_turn") return Effect.void;
 					return Effect.gen(function* () {
+						yield* command.onAccepted ?? Effect.void;
 						yield* Deferred.succeed(sendStarted, undefined);
 						yield* Deferred.await(releaseSend);
 						return yield* Effect.fail(new Error("late send failure"));

@@ -107,7 +107,10 @@ async function setup(
 				serverModes.set(String(params["sessionId"]), String(params["mode"]));
 				return { projectSlug: "myapp", mode: params["mode"] };
 			},
-			SendMessage: (params) => ({ ok: true, sessionId: params["sessionId"] }),
+			"input.submit": (params) => ({
+				ok: true,
+				sessionId: params["sessionId"],
+			}),
 			ViewSession: () => ({ ok: true }),
 			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
 			GetCommands: () => ({ projectSlug: "myapp", commands: [] }),

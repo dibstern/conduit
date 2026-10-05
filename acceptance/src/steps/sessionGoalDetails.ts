@@ -289,7 +289,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "SendMessage",
+				(candidate) => candidate.tag === "input.submit",
 			);
 			expect(request.payload["text"]).toBe(match[1]);
 			expect(request.payload["sessionId"]).toBe(

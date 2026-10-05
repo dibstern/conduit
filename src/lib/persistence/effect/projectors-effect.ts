@@ -1250,6 +1250,74 @@ export const makeProviderProjector = (): EffectProjector => ({
 		),
 });
 
+// One row per input conduit is holding. Rows are never deleted: a row that
+// leaves the tray turns `removed` and takes the event's version, so catch-up
+// can report it gone. Its owning session moves with every write.
+export const makeInputProjector = (): EffectProjector => ({
+	name: "input",
+	handles: ["input.admitted", "input.sent", "message.created"],
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+
+			if (isEventType(event, "input.admitted")) {
+				const { request } = event.data;
+				const images = request.images ? encodeJson(request.images) : null;
+				return owners(
+					yield* sql<OwnedRow>`
+						INSERT INTO pending_inputs
+						(input_id, session_id, text, images, request, state, admitted_at, version)
+						VALUES (${event.data.inputId}, ${event.data.sessionId}, ${request.text}, ${images}, ${encodeJson(request)}, 'queued', ${event.createdAt}, ${ctx.version})
+						ON CONFLICT (input_id) DO NOTHING
+						RETURNING session_id`,
+				);
+			}
+
+			// Sent while another turn is open, the input steers that turn and stays
+			// in the tray until its message lands. Otherwise it leaves now.
+			if (isEventType(event, "input.sent")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs
+						SET state = CASE WHEN EXISTS (
+								SELECT 1 FROM turns
+								WHERE session_id = ${event.data.sessionId}
+									AND state IN ('pending', 'running')
+							) THEN 'steering' ELSE 'removed' END,
+							version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state = 'queued'
+						RETURNING session_id`,
+				);
+			}
+
+			if (
+				isEventType(event, "message.created") &&
+				event.data.role === "user" &&
+				event.data.inputId
+			) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs
+						SET state = 'removed', version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state != 'removed'
+						RETURNING session_id`,
+				);
+			}
+			return [];
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ProjectionError
+					? e
+					: new ProjectionError({
+							projector: "input",
+							operation: "project",
+							cause: e,
+						}),
+			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
+		),
+});
+
 /**
  * Canonical event types that deliberately reach no projector.
  *
@@ -1271,7 +1339,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * Creates all 6 Effect-based projectors in the correct order.
+ * Creates all 7 Effect-based projectors in the correct order.
  * Order matters for FK compliance: SessionProjector first.
  */
 export function createAllEffectProjectors(): EffectProjector[] {
@@ -1282,5 +1350,6 @@ export function createAllEffectProjectors(): EffectProjector[] {
 		makeProviderProjector(),
 		makeApprovalProjector(),
 		makeActivityProjector(),
+		makeInputProjector(),
 	];
 }

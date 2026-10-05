@@ -2,6 +2,7 @@ import { Context, Effect, FiberMap, Layer } from "effect";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { CanonicalEvent } from "../../../persistence/events.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type {
 	PendingInteractionServiceTag,
@@ -45,6 +46,8 @@ export interface ProviderTurnServiceSendInput {
 	readonly variant?: string;
 	readonly contextWindow?: string;
 	readonly errorDelivery?: "client" | "session";
+	/** Committed with the handoff's outbox row, in one transaction. */
+	readonly events?: readonly CanonicalEvent[];
 }
 
 export interface ProviderTurnServicePrepareInput {

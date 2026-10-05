@@ -29,6 +29,7 @@ describe("Schema Migration", () => {
 				"message_tombstones",
 				"messages",
 				"pending_approvals",
+				"pending_inputs",
 				"projection_failures",
 				"projector_cursors",
 				"provider_command_interactions",
@@ -125,6 +126,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_pending_approvals_session_status",
 					table: "pending_approvals",
+					unique: false,
+				},
+				{
+					name: "idx_pending_inputs_session_version",
+					table: "pending_inputs",
 					unique: false,
 				},
 				{

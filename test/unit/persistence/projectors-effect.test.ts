@@ -2587,7 +2587,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 3,
+			totalReplayed: 4,
 		});
 		expect(result.durableFailures).toHaveLength(1);
 		const durableFailure = result.durableFailures[0];
@@ -2630,6 +2630,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.cursors).toEqual([
 			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
@@ -2803,7 +2804,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.retryRecovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 2,
+			totalReplayed: 3,
 		});
 		expect(result.durableFailuresAfterRetry).toEqual([
 			{ projector_name: "message", event_sequence: 1 },
@@ -2811,6 +2812,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.cursorsAfterRetry).toEqual([
 			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
@@ -2869,7 +2871,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 3,
-			totalReplayed: 6,
+			totalReplayed: 7,
 		});
 		expect(cold.failures).toEqual([]);
 		expect(cold.durableFailures).toEqual([{ count: 0 }]);
@@ -2889,6 +2891,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.cursors).toEqual([
 			{ projector_name: "activity", last_applied_seq: 3 },
 			{ projector_name: "approval", last_applied_seq: 3 },
+			{ projector_name: "input", last_applied_seq: 3 },
 			{ projector_name: "message", last_applied_seq: 3 },
 			{ projector_name: "provider", last_applied_seq: 3 },
 			{ projector_name: "session", last_applied_seq: 3 },
@@ -3039,6 +3042,7 @@ describe("ProjectionRunnerEffect", () => {
 				expect(cursors).toEqual([
 					{ projector_name: "activity", last_applied_seq: 4 },
 					{ projector_name: "approval", last_applied_seq: 4 },
+					{ projector_name: "input", last_applied_seq: 4 },
 					{ projector_name: "message", last_applied_seq: 4 },
 					{ projector_name: "provider", last_applied_seq: 4 },
 					{ projector_name: "session", last_applied_seq: 4 },
@@ -3147,6 +3151,7 @@ describe("ProjectionRunnerEffect", () => {
 				expect(firstCursors).toEqual([
 					{ projector_name: "activity", last_applied_seq: 501 },
 					{ projector_name: "approval", last_applied_seq: 501 },
+					{ projector_name: "input", last_applied_seq: 501 },
 					{ projector_name: "message", last_applied_seq: 501 },
 					{ projector_name: "provider", last_applied_seq: 501 },
 					{ projector_name: "session", last_applied_seq: 501 },

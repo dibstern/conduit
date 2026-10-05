@@ -1148,11 +1148,12 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		const rejected = "invalidated-resume-rejected-send";
 		await Effect.runPromise(
-			browser.rpc.SendMessage({
+			browser.rpc.input.submit({
 				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
-				commandId: randomUUID(),
+				inputId: randomUUID(),
+				delivery: "queue",
 				text: rejected,
 			}),
 		);

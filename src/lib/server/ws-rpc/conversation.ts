@@ -118,7 +118,7 @@ export const conversationHandlers = {
 				),
 			),
 		),
-	SendMessage: (request) =>
+	"input.submit": (request) =>
 		Effect.gen(function* () {
 			const limiter = yield* RateLimiterTag;
 			const result = yield* limiter.checkLimit(
@@ -135,7 +135,8 @@ export const conversationHandlers = {
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
-				commandId: request.commandId,
+				commandId: request.inputId,
+				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
 				...(request.originId ? { originId: request.originId } : {}),
 				errorDelivery: "session",
@@ -145,7 +146,7 @@ export const conversationHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SendMessage failed: ${String(error)}`,
+						message: `input.submit failed: ${String(error)}`,
 					}),
 				),
 			),
@@ -175,7 +176,7 @@ export const conversationHandlers = {
 	| "RespondPermission"
 	| "AnswerQuestion"
 	| "RejectQuestion"
-	| "SendMessage"
+	| "input.submit"
 	| "SyncInputDraft"
 	| "CancelSession"
 >;

@@ -88,7 +88,8 @@ export const composerHandlers: StepHandler[] = [
 			if (!rpcControl) throw new Error("Mock RPC was not initialised");
 			await rpcControl.waitForRequest(
 				(request) =>
-					request.tag === "SendMessage" && request.payload["text"] === match[1],
+					request.tag === "input.submit" &&
+					request.payload["text"] === match[1],
 			);
 		},
 	},
@@ -105,7 +106,7 @@ export const composerHandlers: StepHandler[] = [
 
 			const sendRequest = await rpcControl.waitForRequest(
 				(request) =>
-					request.tag === "SendMessage" && request.payload["text"] === message,
+					request.tag === "input.submit" && request.payload["text"] === message,
 			);
 			// Echo the sender's originId like the real relay: the sending tab
 			// ignores its own broadcast and keeps its local echo (no duplicate).

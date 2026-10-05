@@ -75,12 +75,13 @@ async function capture(options: {
 		const commandIds = options.prompts.map(() => randomUUID());
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc
-					.SendMessage({
+				browser.rpc.input
+					.submit({
 						projectSlug: "process-test",
 						sessionId,
 						originId: browser.originId,
-						commandId,
+						inputId: commandId,
+						delivery: "queue",
 						text,
 					})
 					.pipe(Effect.timeout(240_000)),

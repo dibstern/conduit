@@ -19,8 +19,8 @@ const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
 });
 
-describe("WsRpcServerLayer SendMessage", () => {
-	it.effect("passes commandId through to provider orchestration", () => {
+describe("WsRpcServerLayer input.submit", () => {
+	it.effect("passes the input id through to provider orchestration", () => {
 		const dispatch = vi.fn(() =>
 			Effect.succeed({
 				status: "completed" as const,
@@ -42,12 +42,13 @@ describe("WsRpcServerLayer SendMessage", () => {
 				modelID: "sonnet",
 			});
 
-			yield* client.SendMessage({
+			yield* client.input.submit({
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "hello",
 				originId: "browser-tab-a",
-				commandId: "cmd-send-1",
+				inputId: "cmd-send-1",
+				delivery: "queue",
 			});
 
 			expect(dispatch).toHaveBeenCalledWith(
@@ -79,7 +80,11 @@ describe("WsRpcServerLayer SendMessage", () => {
 	});
 
 	it.effect("sends prompts through the shared prompt path", () => {
-		const dispatchEffect = vi.fn(() => Effect.never);
+		const dispatchEffect = vi.fn(
+			(command: { onAccepted?: Effect.Effect<void> }) =>
+				// The engine commits the handoff, then the turn runs on.
+				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
+		);
 		const engine = withDispatchEffect({ dispatchEffect });
 		const recordMessageActivity = vi.fn(() => Effect.void);
 		const { wsHandler, calls } = makeRecordingWebSocketHandler({
@@ -89,13 +94,14 @@ describe("WsRpcServerLayer SendMessage", () => {
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 
-			const result = yield* client.SendMessage({
+			const result = yield* client.input.submit({
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "hello",
 				images: ["data:image/png;base64,abc"],
 				originId: "browser-tab-a",
-				commandId: "cmd-send-legacy-test",
+				inputId: "cmd-send-legacy-test",
+				delivery: "queue",
 			});
 
 			expect(result).toEqual({ ok: true, sessionId: "session-1" });
@@ -159,26 +165,32 @@ describe("WsRpcServerLayer SendMessage", () => {
 	});
 
 	it.effect("applies the relay rate limit when a limiter is available", () => {
-		const dispatchEffect = vi.fn(() => Effect.never);
+		const dispatchEffect = vi.fn(
+			(command: { onAccepted?: Effect.Effect<void> }) =>
+				// The engine commits the handoff, then the turn runs on.
+				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
+		);
 		const engine = withDispatchEffect({ dispatchEffect });
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
-			yield* client.SendMessage({
+			yield* client.input.submit({
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "first",
 				originId: "browser-tab-a",
-				commandId: "cmd-rate-1",
+				inputId: "cmd-rate-1",
+				delivery: "queue",
 			});
 
 			const second = yield* Effect.either(
-				client.SendMessage({
+				client.input.submit({
 					projectSlug: "project-a",
 					sessionId: "session-1",
 					text: "second",
 					originId: "browser-tab-a",
-					commandId: "cmd-rate-2",
+					inputId: "cmd-rate-2",
+					delivery: "queue",
 				}),
 			);
 

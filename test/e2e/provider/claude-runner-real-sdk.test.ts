@@ -74,12 +74,13 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				const cursor = browser.frames.length;
 				const sendAt = process.hrtime.bigint();
 				await Effect.runPromise(
-					browser.rpc
-						.SendMessage({
+					browser.rpc.input
+						.submit({
 							projectSlug: "process-test",
 							sessionId,
 							originId: browser.originId,
-							commandId: randomUUID(),
+							inputId: randomUUID(),
+							delivery: "queue",
 							text: evidence.prompt,
 						})
 						.pipe(Effect.timeout(15_000)),

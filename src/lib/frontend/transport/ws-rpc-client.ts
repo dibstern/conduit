@@ -45,10 +45,10 @@ import type {
 	RpcLogLevel,
 	SaveProjectResponse,
 	ScanNowResponse,
-	SendMessageResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
 	SetHiddenEntriesResponse,
+	SubmitInputResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
@@ -814,11 +814,12 @@ const callRewindSession = (input: RewindSessionRpcInput) =>
 
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client.SendMessage({
+		client.input.submit({
 			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
+			inputId: input.commandId,
 			text: input.text,
-			commandId: input.commandId,
+			delivery: "queue",
 			...(input.images ? { images: [...input.images] } : {}),
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
@@ -1255,7 +1256,7 @@ export async function rewindSessionRpc(
 
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
-): Promise<SendMessageResponse> {
+): Promise<SubmitInputResponse> {
 	return await runTransportEffect(callSendMessage(input));
 }
 

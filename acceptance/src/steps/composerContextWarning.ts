@@ -112,7 +112,7 @@ export const composerContextWarningHandlers: StepHandler[] = [
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Compact requires an open session");
 			const request = await requireRpcControl(world.page).waitForRequest(
-				(candidate) => candidate.tag === "SendMessage",
+				(candidate) => candidate.tag === "input.submit",
 			);
 			await expect(request.payload["text"]).toBe("/compact");
 			await expect(request.payload["sessionId"]).toBe(sessionId);

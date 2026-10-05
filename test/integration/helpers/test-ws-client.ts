@@ -118,11 +118,12 @@ export class TestWsClient {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
-						const result = yield* client.SendMessage({
+						const result = yield* client.input.submit({
 							projectSlug: "integration-test",
 							sessionId,
 							text,
-							commandId: opts.commandId ?? crypto.randomUUID(),
+							inputId: opts.commandId ?? crypto.randomUUID(),
+							delivery: "queue",
 							...(opts.images ? { images: [...opts.images] } : {}),
 							...(opts.originId ? { originId: opts.originId } : {}),
 						});

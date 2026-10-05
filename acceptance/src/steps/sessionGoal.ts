@@ -376,7 +376,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const request = await requireRpcControl(world.page).waitForRequest(
 				(request) =>
-					request.tag === "SendMessage" && request.payload["text"] === match[1],
+					request.tag === "input.submit" &&
+					request.payload["text"] === match[1],
 			);
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],

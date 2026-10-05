@@ -436,11 +436,12 @@ function recordTurn(
 		}
 
 		void runRecordingRpc(ws, (client) =>
-			client.SendMessage({
+			client.input.submit({
 				projectSlug: ws.projectSlug,
 				sessionId,
 				text: prompt,
-				commandId: crypto.randomUUID(),
+				inputId: crypto.randomUUID(),
+				delivery: "queue",
 				originId: ws.clientId,
 			}),
 		).catch((error) => {

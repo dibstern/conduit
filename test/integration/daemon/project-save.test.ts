@@ -427,13 +427,14 @@ describe("SaveProject through the built daemon", () => {
 			projectSlug: "process-test",
 			sessionId,
 			originId: before.originId,
-			commandId: randomUUID(),
+			inputId: randomUUID(),
+			delivery: "queue" as const,
 			text: prompt,
 		};
 		evidence["sendInput"] = input;
 		const release = join(fixture.root, "release-upgrade-turn");
 		try {
-			await Effect.runPromise(before.rpc.SendMessage(input));
+			await Effect.runPromise(before.rpc.input.submit(input));
 			await before.waitFor(
 				(message) =>
 					message["type"] === "delta" && message["sessionId"] === sessionId,

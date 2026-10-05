@@ -258,7 +258,7 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 					if (
 						isRecord(frame) &&
 						frame["_tag"] === "Request" &&
-						frame["tag"] === "SendMessage" &&
+						frame["tag"] === "input.submit" &&
 						isRecord(frame["payload"]) &&
 						typeof frame["payload"]["text"] === "string"
 					) {

@@ -23,7 +23,7 @@ function countEvents(dbPath: string | undefined, type: string): number {
 
 type Send = { commandId: string; sessionId: string; text: string };
 
-/** Records the browser's SendMessage requests. Register before navigation so
+/** Records the browser's input.submit requests. Register before navigation so
  *  even the first RPC socket is observed. */
 function recordSends(page: Page): Send[] {
 	const sends: Send[] = [];
@@ -34,20 +34,20 @@ function recordSends(page: Page): Send[] {
 				_tag?: string;
 				tag?: string;
 				payload?: {
-					commandId?: unknown;
+					inputId?: unknown;
 					sessionId?: unknown;
 					text?: unknown;
 				};
 			} = JSON.parse(payload);
-			if (frame?._tag !== "Request" || frame.tag !== "SendMessage") return;
+			if (frame?._tag !== "Request" || frame.tag !== "input.submit") return;
 			const input = frame.payload;
 			if (
-				typeof input?.commandId === "string" &&
+				typeof input?.inputId === "string" &&
 				typeof input.sessionId === "string" &&
 				typeof input.text === "string"
 			) {
 				sends.push({
-					commandId: input.commandId,
+					commandId: input.inputId,
 					sessionId: input.sessionId,
 					text: input.text,
 				});
@@ -298,6 +298,162 @@ test.describe("Claude replay lane", () => {
 			} finally {
 				db.close();
 			}
+		});
+	});
+
+	test.describe("inputs sent mid-turn queue behind it", () => {
+		// The delay keeps A's turn running while B and C are sent into it.
+		test.use({
+			claudeReplay: {
+				turns: [
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+				],
+				delayMs: 100,
+			},
+		});
+
+		test("each queued input is handed off only after the turn before it ends", async ({
+			page,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			const sessionId = decodeURIComponent(
+				harness.projectUrl.slice("/s/".length),
+			);
+			const dbPath = harness.eventsDbPath;
+			if (!dbPath) throw new Error("Claude replay harness has no event store");
+			const query = <T>(sql: string, ...params: string[]): T[] => {
+				const db = new DatabaseSync(dbPath, { readOnly: true });
+				try {
+					return db.prepare(sql).all(...params) as T[];
+				} finally {
+					db.close();
+				}
+			};
+			const sends = recordSends(page);
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+
+			await app.sendMessage("Alpha");
+			await expect(chat.stopBtn).toBeVisible();
+			await app.sendMessage("Bravo");
+			await app.sendMessage("Charlie");
+			await expect.poll(() => sends.length).toBe(3);
+			await expect.poll(() => countEvents(dbPath, "input.admitted")).toBe(3);
+			const [a, b, c] = sends.map((send) => send.commandId);
+
+			// While A runs, B and C are admitted but have no outbox row.
+			expect(countEvents(dbPath, "turn.completed")).toBe(0);
+			expect(
+				query(
+					"SELECT command_id FROM provider_command_outbox WHERE command_id IN (?, ?)",
+					b ?? "",
+					c ?? "",
+				),
+			).toEqual([]);
+
+			await expect.poll(() => countEvents(dbPath, "turn.completed")).toBe(3);
+			await chat.waitForStreamingComplete();
+			await expect(chat.userMessages).toHaveText([
+				/\bAlpha\b/,
+				/\bBravo\b/,
+				/\bCharlie\b/,
+			]);
+			await expect(chat.assistantMessages).toHaveText([
+				/pong/i,
+				/pong/i,
+				/pong/i,
+			]);
+
+			const events = query<{ type: string; input_id: string | null }>(
+				`SELECT type, json_extract(data, '$.inputId') AS input_id FROM events
+				WHERE session_id = ?
+					AND type IN ('input.admitted', 'input.sent', 'turn.completed')
+				ORDER BY sequence`,
+				sessionId,
+			);
+			const outbox = query<{ command_id: string; payload_json: string }>(
+				`SELECT command_id, payload_json FROM provider_command_outbox
+				WHERE session_id = ? AND effect_type = 'send_turn'
+				ORDER BY request_sequence`,
+				sessionId,
+			);
+			const turns = query<{ id: string; state: string }>(
+				`SELECT id, state FROM turns WHERE session_id = ?
+				ORDER BY requested_at, rowid`,
+				sessionId,
+			);
+			const [admittedB] = query<{ data: string }>(
+				`SELECT data FROM events
+				WHERE type = 'input.admitted' AND json_extract(data, '$.inputId') = ?`,
+				b ?? "",
+			);
+			await testInfo.attach("queue-proof.json", {
+				body: JSON.stringify(
+					{ inputs: { a, b, c }, events, outbox, turns, admittedB },
+					null,
+					2,
+				),
+				contentType: "application/json",
+			});
+
+			const inputIdsOf = (type: string) =>
+				events
+					.filter((event) => event.type === type)
+					.map((event) => event.input_id);
+			expect(inputIdsOf("input.admitted")).toEqual([a, b, c]);
+			expect(inputIdsOf("input.sent")).toEqual([a, b, c]);
+			// Each handoff (and its outbox row, committed with it) follows the end
+			// of the turn before it.
+			expect(
+				events
+					.filter((event) => event.type !== "input.admitted")
+					.map((event) => event.type),
+			).toEqual([
+				"input.sent",
+				"turn.completed",
+				"input.sent",
+				"turn.completed",
+				"input.sent",
+				"turn.completed",
+			]);
+			expect(outbox.map((row) => row.command_id)).toEqual([a, b, c]);
+			expect(turns).toEqual([
+				{ id: a, state: "completed" },
+				{ id: b, state: "completed" },
+				{ id: c, state: "completed" },
+			]);
+
+			// B is handed off with the selection it was queued with. The admitted
+			// request carries the browser's model shape; the outbox, the provider's.
+			const queued: {
+				request: {
+					model?: { providerID: string; modelID: string };
+					agent?: string;
+					variant?: string;
+				};
+			} = JSON.parse(admittedB?.data ?? "{}");
+			const handed: {
+				model?: { providerId: string; modelId: string };
+				agent?: string;
+				variant?: string;
+			} = JSON.parse(outbox[1]?.payload_json ?? "{}");
+			expect(queued.request.model).toBeDefined();
+			expect({
+				model: handed.model && {
+					providerID: handed.model.providerId,
+					modelID: handed.model.modelId,
+				},
+				agent: handed.agent,
+				variant: handed.variant,
+			}).toEqual({
+				model: queued.request.model,
+				agent: queued.request.agent,
+				variant: queued.request.variant,
+			});
 		});
 	});
 

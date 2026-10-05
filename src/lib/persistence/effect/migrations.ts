@@ -15,6 +15,7 @@ import {
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	MESSAGES_INPUT_ID_MIGRATION,
+	PENDING_INPUTS_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -361,6 +362,7 @@ const postBaselineTableNames = new Set<string>([
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
+	"pending_inputs", // 0032
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -1002,6 +1004,9 @@ export const effectMigrationEntries = {
 		if (columns.some((column) => column.name === "input_id")) return;
 		yield* executeSqlStatements(readMigrationSql(MESSAGES_INPUT_ID_MIGRATION));
 	}),
+	"0032_pending_inputs": executeSqlStatements(
+		readMigrationSql(PENDING_INPUTS_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

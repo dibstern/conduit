@@ -233,6 +233,7 @@ describe("session handlers with Effect-native model service", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 			readSessionTranscriptPage: vi.fn(
 				(
 					_sessionId: string,

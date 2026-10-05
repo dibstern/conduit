@@ -29,7 +29,7 @@ async function setup(page: import("@playwright/test").Page) {
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
 			ForkSession: () => ({ projectSlug, sessionId: forked }),
-			SendMessage: () => ({ ok: true, sessionId: materialized }),
+			"input.submit": () => ({ ok: true, sessionId: materialized }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
@@ -82,7 +82,7 @@ test("a draft's first send creates the session in its project and sends into it"
 	);
 	expect(create.payload["projectSlug"]).toBe(projectSlug);
 	const send = await rpc.waitForRequest(
-		(request) => request.tag === "SendMessage",
+		(request) => request.tag === "input.submit",
 	);
 	expect(send.payload).toMatchObject({
 		projectSlug,
@@ -121,7 +121,7 @@ test("deleting the viewed session selects the next sidebar row and replaces hist
 	await expect(page).not.toHaveURL(new RegExp(`/s/${seed}$`));
 });
 
-test("SendMessage response selects a materialized OpenCode session", async ({
+test("input.submit response selects a materialized OpenCode session", async ({
 	page,
 	harness,
 }) => {
@@ -130,7 +130,7 @@ test("SendMessage response selects a materialized OpenCode session", async ({
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("Dispatch to OpenCode");
 	await page.locator("#send").click();
-	await rpc.waitForRequest((request) => request.tag === "SendMessage");
+	await rpc.waitForRequest((request) => request.tag === "input.submit");
 	await expect(page).toHaveURL(new RegExp(`/s/${materialized}$`));
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${materialized}`);
 	await page.goBack();

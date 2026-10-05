@@ -32,6 +32,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -88,7 +89,16 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(
 					OrchestrationEngineTag,
-					withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.never) }),
+					withDispatchEffect({
+						dispatchEffect: vi.fn(
+							(command: { onAccepted?: Effect.Effect<void> }) =>
+								// The engine commits the handoff, then the turn runs on.
+								Effect.zipRight(
+									command.onAccepted ?? Effect.void,
+									Effect.never,
+								),
+						),
+					}),
 				),
 			),
 		);
@@ -102,7 +112,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 			yield* TestClock.adjust("120 seconds");
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(

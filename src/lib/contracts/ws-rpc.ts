@@ -21,7 +21,11 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
-import { StoredEventSchema } from "./stored-event.js";
+import {
+	INPUT_DELIVERIES,
+	InputRequestSchema,
+	StoredEventSchema,
+} from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -248,6 +252,18 @@ export const SessionDetailItemSchema = Schema.Union(
 		_tag: Schema.Literal("event"),
 		event: StoredEventSchema,
 	}),
+	// One input conduit is holding for the session: queued behind a running
+	// turn, or sent as a steer and not yet placed. Its row id is
+	// `input:<inputId>`, so a `remove` never collides with a message id.
+	Schema.Struct({
+		_tag: Schema.Literal("pendingInput"),
+		input: Schema.Struct({
+			inputId: Schema.String,
+			state: Schema.Literal("queued", "steering"),
+			request: InputRequestSchema,
+			admittedAt: Schema.Number,
+		}),
+	}),
 );
 
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
@@ -398,7 +414,7 @@ export const ViewSessionResponseSchema = Schema.Struct({
 	draft: Schema.optional(Schema.String),
 });
 
-export const SendMessageResponseSchema = Schema.Struct({
+export const SubmitInputResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
 	sessionId: Schema.String,
 });
@@ -703,7 +719,7 @@ export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
-export type SendMessageResponse = typeof SendMessageResponseSchema.Type;
+export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
@@ -1604,18 +1620,21 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 	},
 ) {}
 
-export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
-	"SendMessage",
+/** The composer's only send. The inbox hands it off when the session is idle
+ *  and queues it otherwise; a retry with the same input id is a no-op. */
+export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
+	"input.submit",
 	{
 		failure: WsRpcError,
-		success: SendMessageResponseSchema,
+		success: SubmitInputResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
 			text: Schema.String,
 			images: Schema.optional(Schema.Array(Schema.String)),
+			delivery: Schema.Literal(...INPUT_DELIVERIES),
 			originId: Schema.optional(NonEmptyString),
-			commandId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1769,7 +1788,7 @@ export const WsRpcRequest = Schema.Union(
 	RejectQuestion,
 	LoadMoreHistory,
 	RewindSession,
-	SendMessage,
+	SubmitInput,
 	SyncInputDraft,
 	CancelSession,
 	SetLogLevel,
@@ -1876,7 +1895,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RejectQuestion),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
-	Rpc.fromTaggedRequest(SendMessage),
+	Rpc.fromTaggedRequest(SubmitInput),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
 	Rpc.fromTaggedRequest(SetLogLevel),

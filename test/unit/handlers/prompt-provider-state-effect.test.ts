@@ -40,6 +40,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
@@ -205,6 +206,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				);
 				expect(updated).toEqual({ resumeSessionId: "sdk-session-next" });
 			}).pipe(
+				Effect.provide(PassThroughSessionInbox),
 				Effect.provide(layer),
 				Effect.ensuring(
 					Effect.sync(() => {
@@ -314,6 +316,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			);
 		}).pipe(
+			Effect.provide(PassThroughSessionInbox),
 			Effect.provide(layer),
 			Effect.ensuring(
 				Effect.sync(() => {
@@ -408,6 +411,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
+				Effect.provide(PassThroughSessionInbox),
 				Effect.provide(layer),
 				Effect.ensuring(
 					Effect.sync(() => {
@@ -537,6 +541,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				]);
 			}).pipe(
+				Effect.provide(PassThroughSessionInbox),
 				Effect.provide(layer),
 				Effect.ensuring(
 					Effect.sync(() => {
@@ -667,6 +672,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			);
 		}).pipe(
+			Effect.provide(PassThroughSessionInbox),
 			Effect.provide(layer),
 			Effect.ensuring(
 				Effect.sync(() => {

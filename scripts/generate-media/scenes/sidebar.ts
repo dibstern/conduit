@@ -30,7 +30,7 @@ export const sidebarScene: SceneDefinition = {
 						hasMore: false,
 						nextCursor: null,
 					}),
-					SendMessage: async () => {
+					"input.submit": async () => {
 						await relay.sendMessages(mainUiTurn1);
 						return { ok: true };
 					},

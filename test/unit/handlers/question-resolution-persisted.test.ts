@@ -31,6 +31,7 @@ import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import type { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
@@ -59,6 +60,7 @@ import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
@@ -99,7 +101,8 @@ type HandlerStack =
 	| SessionManagerServiceTag
 	| AgentServiceTag
 	| ProviderTurnServiceTag
-	| OverridesStateTag;
+	| OverridesStateTag
+	| SessionInboxTag;
 
 const withHandlerStack = async (
 	client: OpenCodeAPI,
@@ -171,7 +174,11 @@ const withHandlerStack = async (
 				advances.length = 0;
 
 				yield* body({ advances, pendingQuestions });
-			}).pipe(Effect.provide(layer), Effect.orDie),
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox),
+				Effect.provide(layer),
+				Effect.orDie,
+			),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

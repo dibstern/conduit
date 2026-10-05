@@ -34,6 +34,7 @@ import { SessionEventBusTag } from "./session-event-bus.js";
  * A single detail row shared by the base and the deltas, as the seam requires.
  * - `transcriptMessage`: a projected transcript message — what this source
  *   streams, base and delta alike.
+ * - `pendingInput`: an input conduit holds for the session, queued or steering.
  * - `event`: a raw committed event. Still on the wire for the browser's legacy
  *   delta arm, which conduit-test-ni8.5.20 retires; nothing produces it here.
  */
@@ -109,25 +110,47 @@ export const subscribeSessionDetail = (options: {
 									options.sessionId,
 									range,
 								));
+							// Pending inputs ride the same window, bounded by the version
+							// this read reports. A base read carries every one still
+							// pending, whatever transcript page it returns.
+							const pending = yield* readQuery.readPendingInputs(
+								options.sessionId,
+								{
+									...(range?.after === undefined ? {} : { after: range.after }),
+									through: range?.through ?? result.version,
+								},
+							);
+							const inputs = pending.rows.map(({ version, ...input }) => ({
+								item: {
+									_tag: "pendingInput" as const,
+									input,
+								} satisfies SessionDetailItem,
+								version,
+							}));
 							return {
 								// The adapter gets exactly these rows, so index `i` is still row `i`.
 								// That is what lets each item keep the version its row
 								// carries instead of borrowing the read's counter.
-								rows: messageRowsToHistory(result.messages, {
-									pageSize: result.messages.length,
-								}).messages.map((message, index) => ({
-									item: {
-										_tag: "transcriptMessage" as const,
-										message,
-									} satisfies SessionDetailItem,
-									version: result.messages[index]?.version ?? result.version,
-								})),
+								rows: [
+									...messageRowsToHistory(result.messages, {
+										pageSize: result.messages.length,
+									}).messages.map((message, index) => ({
+										item: {
+											_tag: "transcriptMessage" as const,
+											message,
+										} satisfies SessionDetailItem,
+										version: result.messages[index]?.version ?? result.version,
+									})),
+									...inputs,
+								],
 								version: result.version,
 								...(range === undefined
 									? {}
 									: {
-											removed:
-												"removed" in result ? (result.removed ?? []) : [],
+											removed: [
+												...("removed" in result ? (result.removed ?? []) : []),
+												...pending.removed,
+											],
 										}),
 								...(page === undefined
 									? {}

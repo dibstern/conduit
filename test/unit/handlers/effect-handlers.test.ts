@@ -160,6 +160,7 @@ import {
 	makeMockSessionTitleService,
 	makeMockStatusPoller,
 	makeTestHandlerLayer,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -1019,6 +1020,7 @@ describe("switchModelForSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -1531,6 +1533,7 @@ describe("handleGetToolContent", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2475,7 +2478,7 @@ describe("handleAskUserResponse", () => {
 					}),
 				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 	it.effect("answers question via REST API and broadcasts resolution", () => {
@@ -2505,7 +2508,7 @@ describe("handleAskUserResponse", () => {
 			toolId: "que-1",
 			answers: { "1": "Approve", "0": "Yes" },
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.question.reply).toHaveBeenCalledWith("que-1", [
 					["Yes"],
@@ -2569,7 +2572,7 @@ describe("handleAskUserResponse", () => {
 					answers: { "0": "Yes" },
 				});
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
@@ -2786,6 +2789,7 @@ describe("handleNewSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2883,6 +2887,7 @@ describe("handleNewSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -3274,6 +3279,7 @@ describe("loadMoreHistoryForSession", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
 					messages: [
@@ -3450,7 +3456,10 @@ describe("sendMessageToSession", () => {
 						sessionId: "s1",
 						text: "Continue",
 						commandId: "cmd1",
-					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
+					}).pipe(
+						Effect.provide(PassThroughSessionInbox),
+						Effect.provideService(ProviderTurnServiceTag, provider),
+					);
 					expect(ws.broadcast).not.toHaveBeenCalled();
 				}).pipe(
 					Effect.provide(
@@ -3521,7 +3530,7 @@ describe("sendMessageToSession", () => {
 			text: "Continue",
 			commandId: "cmd1",
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
 		);
 	});
@@ -3544,7 +3553,7 @@ describe("sendMessageToSession", () => {
 				originId: "origin-1",
 				commandId: "command-1",
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "user_message",
@@ -3574,7 +3583,7 @@ describe("sendMessageToSession", () => {
 				originId: "origin-1",
 				commandId: "command-2",
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 				Effect.tap(() => {
 					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "user_message",
@@ -3724,7 +3733,7 @@ describe("handleMessage", () => {
 			text: "hello",
 			commandId: "cmd-no-session",
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).toHaveBeenCalledWith(
 					"client-1",
@@ -3760,7 +3769,7 @@ describe("handleMessage", () => {
 		);
 
 		return handleMessage("client-1", { text: "" }).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
 				expect(ws.sendTo).not.toHaveBeenCalled();
 				expect(ws.sendToSession).not.toHaveBeenCalled();
@@ -3823,7 +3832,7 @@ describe("handleMessage", () => {
 					}),
 				}),
 			);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(
@@ -3918,7 +3927,7 @@ describe("handleMessage", () => {
 					"0": "Yes",
 				});
 				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -3955,6 +3964,7 @@ describe("handleMessage", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -4052,7 +4062,7 @@ describe("handleMessage", () => {
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -4132,7 +4142,7 @@ describe("handleMessage", () => {
 				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -4198,7 +4208,7 @@ describe("handleMessage", () => {
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
 			expect(pushViewerFamilies).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(
@@ -4261,6 +4271,7 @@ describe("handleMessage", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -4346,7 +4357,7 @@ describe("handleMessage", () => {
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -4414,7 +4425,7 @@ describe("handleMessage", () => {
 						code: "SEND_FAILED",
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
