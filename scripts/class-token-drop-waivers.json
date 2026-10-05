@@ -332,5 +332,21 @@
 	"src/lib/frontend/components/input/AttachMenu.svelte :: bg-bg-alt,h-7,rounded-md,w-7": "conduit-test-3oqa: the final composer design makes attach a borderless 32px ghost square with radius 10, so the 28px filled rounded-md chip is gone.",
 	"src/lib/frontend/components/input/InputArea.svelte :: h-8,min-h-6,w-8": "conduit-test-3oqa: send and stop become literal 32px squares (root font is 12px, so h-8/w-8 rendered 24px) and the field floor is 32px to centre the placeholder on the controls row.",
 	"src/lib/frontend/components/model/AgentSelector.svelte :: agent-dropdown-panel,flex-1,font-bold,font-brand,font-medium,font-semibold,gap-[2px],h-9,max-w-[160px],max-w-[calc(100vw-16px)],min-w-0,ml-auto,opacity-50,pb-1.5,pt-1,px-2,px-3.5,py-1.5,py-4,rounded-panel,text-accent,text-center,text-ellipsis,text-sm,text-text-dimmer,text-xs,tracking-[0.5px],uppercase,w-[12px],whitespace-nowrap": "conduit-test-3oqa: the final composer design moves agent choice into the model picker's Agent row, so the standalone AgentSelector component is deleted.",
-	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label."
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
+		"requires": "size=\"segment\""
+	},
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\"."
 }

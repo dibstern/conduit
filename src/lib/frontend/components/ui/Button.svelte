@@ -213,7 +213,7 @@
 		}),
 	);
 
-	const iconSize = $derived(iconSizeProp ?? (size === "sm" ? 14 : 16));
+	const iconSize = $derived(iconSizeProp ?? (size === "segment" ? 12 : size === "sm" ? 14 : 16));
 
 	// `loading` is a soft-disable: the button stays focusable (so keyboard/SR
 	// context is not lost mid-action), so the handler must guard it explicitly.

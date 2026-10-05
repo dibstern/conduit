@@ -23,7 +23,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { presentation, segmented = false }: { presentation: "sheet" | "popover"; segmented?: boolean } = $props();
+	let { presentation }: { presentation: "sheet" | "popover" } = $props();
 	const menuId = $props.id();
 	let open = $state(false);
 	let detailName = $state<string | null>(null);
@@ -186,12 +186,11 @@
 			<Button
 				{...props}
 				id="session-skills-chip"
-				variant={segmented ? "ghost" : "secondary"}
-				size={segmented ? "content" : "sm"}
+				variant="ghost"
+				size="segment"
 				icon="sparkles"
-				iconSize={segmented ? 12 : 14}
 				touchTarget
-				class="shrink-0 tabular-nums {segmented ? 'h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium' : ''}"
+				class="shrink-0 tabular-nums"
 				ariaLabel={label}
 				title={label}
 				data-testid="session-skills-chip"
