@@ -43,7 +43,7 @@ import {
 } from "../relay/relay-settings.js";
 import {
 	type ContextWindowOption,
-	findContextWindowOptions,
+	findCatalogModel,
 	type ProviderInfo,
 } from "../shared-types.js";
 
@@ -470,37 +470,21 @@ export const getModelsResponse = (
 		const selectedModel = selectedModelMatchesInstance
 			? (sessionModel ?? fallbackModel)
 			: undefined;
-		const catalogModels = providers.flatMap((p) => p.models);
-		const exactModel =
-			selectedModel &&
-			catalogModels.find(
-				(mod) =>
-					mod.id === selectedModel.modelID ||
-					mod.routingOptions?.some(
-						(option) => option.value === selectedModel.modelID,
-					),
-			);
-		// Stored ids outlive catalog ids: Opus was advertised as `opus[1m]`, now
-		// `opus`. Answer with the catalog's id for the same model, or the picker
-		// can't find it and loses the model's name, effort and context options.
-		const renamedModel =
-			selectedModel && !exactModel
-				? providers
-						.find((p) => p.id === selectedModel.providerID)
-						?.models.find((mod) =>
-							isSameModelIdentity(mod.id, selectedModel.modelID),
-						)
-				: undefined;
+		const catalogModel = findCatalogModel(providers, selectedModel);
+		// A stored `opus[1m]` answers as the catalog's `opus`, so the client
+		// carries the id the catalog advertises today. Routing options keep theirs.
 		const activeModel =
-			selectedModel && renamedModel
-				? { ...selectedModel, modelID: renamedModel.id }
+			selectedModel &&
+			catalogModel &&
+			isSameModelIdentity(catalogModel.id, selectedModel.modelID)
+				? { ...selectedModel, modelID: catalogModel.id }
 				: selectedModel;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
 			? yield* getVariant(activeId)
 			: yield* getDefaultVariant();
-		const variantList = [...((exactModel ?? renamedModel)?.variants ?? [])];
+		const variantList = [...(catalogModel?.variants ?? [])];
 		const currentContextWindow = activeId
 			? yield* getContextWindow(activeId)
 			: yield* getDefaultContextWindow();
@@ -552,7 +536,7 @@ export const getModelsResponse = (
 			},
 			contextWindow: {
 				contextWindow: currentContextWindow,
-				options: findContextWindowOptions(providers, activeModel?.modelID),
+				options: catalogModel?.contextWindowOptions ?? [],
 			},
 			permissionMode: activeId
 				? yield* getPermissionMode(activeId)

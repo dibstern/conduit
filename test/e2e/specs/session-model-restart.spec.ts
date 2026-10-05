@@ -183,4 +183,35 @@ test.describe("Claude session model with a renamed catalog id", () => {
 		await expect(trigger).toHaveAttribute("aria-label", /Fable 5/);
 		await expect(page.getByTestId("variant-badge")).toBeVisible();
 	});
+
+	// A tab left open across the restart only reconnects: it gets the
+	// connect-time snapshot and never re-asks for the model list.
+	test("an open tab keeps the effort control when it reconnects", async ({
+		page,
+		relayUrl,
+		harness,
+	}) => {
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+		await app.sendMessage("One");
+		await new ChatPage(page).waitForStreamingComplete();
+		await expect(page.getByTestId("variant-badge")).toBeVisible();
+
+		await harness.restart(() => {
+			const db = new DatabaseSync(harness.eventsDbPath);
+			try {
+				db.exec("UPDATE turns SET requested_model = requested_model || '[1m]'");
+			} finally {
+				db.close();
+			}
+		});
+		await expect(page.locator("#connect-overlay")).toBeHidden({
+			timeout: 30_000,
+		});
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"aria-label",
+			/Fable 5/,
+		);
+		await expect(page.getByTestId("variant-badge")).toBeVisible();
+	});
 });

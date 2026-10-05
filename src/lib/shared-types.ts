@@ -159,21 +159,34 @@ export interface ContextWindowOption {
 	isDefault?: boolean | undefined;
 }
 
-export function findContextWindowOptions(
-	providers: ReadonlyArray<{
-		models: ReadonlyArray<{
-			id: string;
-			contextWindowOptions?: readonly ContextWindowOption[];
-		}>;
-	}>,
-	modelId: string | undefined,
-): readonly ContextWindowOption[] {
-	if (!modelId) return [];
-	for (const provider of providers) {
-		const model = provider.models.find((m) => m.id === modelId);
-		if (model?.contextWindowOptions) return model.contextWindowOptions;
-	}
-	return [];
+/** The catalog entry a model id names. Turns and settings keep whatever id the
+ *  catalog advertised when they were written, and Claude's catalog moves its
+ *  `[1m]` context-window marker on and off (`opus[1m]` became `opus`), so an
+ *  exact miss falls back to the same model with or without it. The model's own
+ *  provider is searched first: OpenCode and Claude can list the same id with
+ *  different options. Mirrors the frontend's `modelMatchesId`. */
+export function findCatalogModel<
+	M extends {
+		id: string;
+		routingOptions?: readonly ContextWindowOption[] | undefined;
+	},
+>(
+	providers: ReadonlyArray<{ id: string; models: ReadonlyArray<M> }>,
+	model: { providerID: string; modelID: string } | undefined,
+): M | undefined {
+	if (!model) return undefined;
+	const identity = (id: string) => id.replace(/\[1m\]$/i, "");
+	const exact = (entry: M) =>
+		entry.id === model.modelID ||
+		entry.routingOptions?.some((option) => option.value === model.modelID);
+	const own =
+		providers.find((provider) => provider.id === model.providerID)?.models ??
+		[];
+	return (
+		own.find(exact) ??
+		providers.flatMap((provider) => provider.models).find(exact) ??
+		own.find((entry) => identity(entry.id) === identity(model.modelID))
+	);
 }
 
 export interface ModelInfo {
