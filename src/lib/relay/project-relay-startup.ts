@@ -32,6 +32,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { latestTurnSettingsQuery } from "../persistence/startup-restore-queries.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
@@ -194,45 +195,36 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Effort and context window are in-memory too; the latest sent turn's
 		// command payload is their durable record. A choice changed after that
 		// turn was never sent, so it is not restored.
-		// The outbox keeps every prompt ever sent and the driver is synchronous,
-		// so scanning it froze startup for seconds on large stores. Find each
-		// session's latest send_turn through its small receipt row instead, then
-		// read just that one payload by primary key.
-		yield* sql<{
-			session_id: string;
-			variant: string | null;
-			context_window: string | null;
-		}>`
-			SELECT latest.session_id,
-				json_extract(outbox.payload_json, '$.variant') AS variant,
-				json_extract(outbox.payload_json, '$.contextWindow') AS context_window
-			FROM (
-				SELECT session_id, MAX(side_effect_sequence) AS request_sequence
-				FROM command_receipts
-				WHERE command_type = 'send_turn' AND side_effect_sequence IS NOT NULL
-				GROUP BY session_id
-			) latest
-			JOIN provider_command_outbox outbox
-				ON outbox.request_sequence = latest.request_sequence
-			WHERE outbox.effect_type = 'send_turn'`.pipe(
-			Effect.flatMap((rows) =>
-				Effect.forEach(rows, (row) =>
-					Effect.all([
-						row.variant ? setVariant(row.session_id, row.variant) : Effect.void,
-						row.context_window
-							? setContextWindow(row.session_id, row.context_window)
-							: Effect.void,
-					]),
-				),
-			),
-			Effect.catchAll((error) =>
-				Effect.sync(() =>
-					log.warn(
-						`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
+		// The driver is synchronous and payloads run to megabytes, so the query
+		// reads the latest turn per session from receipts and both settings from
+		// an index, never the payloads themselves.
+		yield* sql
+			.unsafe<{
+				session_id: string;
+				variant: string | null;
+				context_window: string | null;
+			}>(latestTurnSettingsQuery)
+			.pipe(
+				Effect.flatMap((rows) =>
+					Effect.forEach(rows, (row) =>
+						Effect.all([
+							row.variant
+								? setVariant(row.session_id, row.variant)
+								: Effect.void,
+							row.context_window
+								? setContextWindow(row.session_id, row.context_window)
+								: Effect.void,
+						]),
 					),
 				),
-			),
-		);
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
+			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {

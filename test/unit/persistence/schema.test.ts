@@ -105,6 +105,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_message_parts_open_questions",
+					table: "message_parts",
+					unique: false,
+				},
+				{
 					name: "idx_message_tombstones_session_version",
 					table: "message_tombstones",
 					unique: false,
@@ -128,6 +133,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_provider_command_outbox_status",
+					table: "provider_command_outbox",
+					unique: false,
+				},
+				{
+					name: "idx_provider_command_outbox_turn_settings",
 					table: "provider_command_outbox",
 					unique: false,
 				},

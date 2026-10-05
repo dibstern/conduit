@@ -21,6 +21,10 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
+import {
+	latestTurnSettingsQuery,
+	pendingClaudeQuestionToolsQuery,
+} from "../../../src/lib/persistence/startup-restore-queries.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -747,6 +751,39 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 					row.detail.includes("idx_pending_approvals_pending"),
 				),
 			).toBe(true);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
+// Relay startup runs both reads synchronously before the first session can
+// open. Driven from sessions or the outbox table, they read the store's largest
+// rows (tool output, prompt payloads with images): over a second on an 8 GB store.
+describe("startup restore reads", () => {
+	const planOf = (query: string) =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			return (yield* sql.unsafe<{ detail: string }>(
+				`EXPLAIN QUERY PLAN ${query}`,
+			)).map((row) => row.detail);
+		});
+
+	it.effect("finds open questions from their index, not every part", () =>
+		Effect.gen(function* () {
+			const plan = yield* planOf(pendingClaudeQuestionToolsQuery);
+			expect(plan[0]).toBe(
+				"SCAN mp USING INDEX idx_message_parts_open_questions",
+			);
+			expect(plan.join("\n")).not.toContain("idx_message_parts_message");
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("reads turn settings from the index, not the payloads", () =>
+		Effect.gen(function* () {
+			const plan = yield* planOf(latestTurnSettingsQuery);
+			expect(plan).toContain(
+				"SEARCH outbox USING INDEX idx_provider_command_outbox_turn_settings (request_sequence=?)",
+			);
 		}).pipe(Effect.provide(testLayer)),
 	);
 });

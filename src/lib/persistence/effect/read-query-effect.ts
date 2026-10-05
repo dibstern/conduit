@@ -19,6 +19,7 @@ import type {
 } from "../read-model-types.js";
 import { sessionFamilyQuery } from "../session-family-query.js";
 import { messageRowsToHistory } from "../session-history-adapter.js";
+import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
@@ -736,31 +737,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		});
 
 	const listPendingClaudeQuestionTools = () =>
-		sql<PendingClaudeQuestionToolRow>`
-			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
-			FROM message_parts mp
-			JOIN messages m ON m.id = mp.message_id
-			JOIN sessions s ON s.id = m.session_id
-			WHERE s.provider = 'claude'
-				AND mp.type = 'tool'
-				AND mp.tool_name = 'AskUserQuestion'
-				AND mp.status IN ('started', 'running', 'pending')
-				-- A later user message means the conversation moved on (e.g. after a
-				-- crash), so the question is abandoned rather than still pending.
-				AND NOT EXISTS (
-					SELECT 1 FROM messages later
-					WHERE later.session_id = m.session_id
-						AND later.role = 'user'
-						AND later.created_at > m.created_at
-				)`.pipe(
-			Effect.mapError(
-				(cause) =>
-					new ReadQueryEffectError({
-						operation: "listPendingClaudeQuestionTools",
-						cause,
-					}),
-			),
-		);
+		sql
+			.unsafe<PendingClaudeQuestionToolRow>(pendingClaudeQuestionToolsQuery)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "listPendingClaudeQuestionTools",
+							cause,
+						}),
+				),
+			);
 
 	const getPendingClaudeQuestionTool = (sessionId: string, callId: string) =>
 		sql<PendingClaudeQuestionToolRow>`
