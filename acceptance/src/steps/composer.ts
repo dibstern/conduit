@@ -4,6 +4,7 @@ import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	exampleValue,
+	holdUntilVisible,
 	openSessionRoute,
 	relayControls,
 	requireRelayControl,
@@ -253,10 +254,10 @@ export const composerHandlers: StepHandler[] = [
 					: "permission-mode-badge",
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await button.click({ delay: 1000 });
-			await expect(
+			await holdUntilVisible(
+				button,
 				world.page.getByTestId("permission-mode-dropdown"),
-			).toBeVisible();
+			);
 		},
 	},
 	{

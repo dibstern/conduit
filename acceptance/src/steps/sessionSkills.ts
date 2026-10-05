@@ -154,9 +154,14 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		name: "focus a skill row",
 		match: /^I focus the skill row "([\w:-]+)"$/,
 		run: async ({ world, match }) => {
-			await world.page
-				.locator(`[data-testid="session-skills-row"][data-skill="${match[1]}"]`)
-				.focus();
+			// The opening menu focuses itself. Wait for that, or it can land after
+			// the row's focus and swallow the next key.
+			await expect(world.page.getByTestId("session-skills-menu")).toBeFocused();
+			const row = world.page.locator(
+				`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
+			);
+			await row.focus();
+			await expect(row).toBeFocused();
 		},
 	},
 	{
