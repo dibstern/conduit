@@ -401,6 +401,7 @@ export interface ListDaemonSessionsRpcInput {
 		readonly id: string;
 	};
 	readonly scope?: string;
+	readonly exclude?: string;
 }
 
 export interface LoadMoreHistoryRpcInput {

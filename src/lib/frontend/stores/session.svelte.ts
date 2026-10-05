@@ -508,10 +508,11 @@ export async function loadDaemonSessions(): Promise<void> {
 		const response = await listDaemonSessionsRpc({
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
-			// The sidebar shows roots only. Subagent children can outnumber roots
-			// 60 to 1, and pages of rows that never render keep the scroll sentinel
-			// in view, so the pager would walk the whole store.
+			// The sidebar shows other projects' roots only; this project's roots
+			// come from the shell feed. Pages of rows that never render keep the
+			// scroll sentinel in view, so the pager would walk the whole store.
 			roots: true,
+			exclude: projectSlug,
 			...(scope === null ? {} : { scope }),
 		});
 		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
@@ -557,6 +558,7 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor,
 			roots: true,
+			exclude: projectSlug,
 			...(scope === null ? {} : { scope }),
 		});
 		if (token !== daemonBrowseToken) return;

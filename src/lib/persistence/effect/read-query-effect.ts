@@ -683,28 +683,47 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (opts) =>
 		Effect.gen(function* () {
-			const [rows, lineage, approvals, projectedStatuses] = yield* Effect.all([
-				listSessions(opts),
-				getSessionLineage(),
+			const rows = yield* listSessions(opts);
+			// Roll-ups (busy, unread, pending counts) only need the listed rows and
+			// their descendants. Reading lineage and status for every session made
+			// each page cost a full scan of the store, twice.
+			const [family, approvals] = yield* Effect.all([
+				sql<{
+					id: string;
+					parent_id: string | null;
+					status: string;
+					unread: number;
+				}>`
+					WITH RECURSIVE family(id) AS (
+						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
+						UNION
+						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
+					)
+					SELECT id, parent_id, status, unread FROM sessions JOIN family USING (id)`,
 				countPendingApprovalsBySession(),
-				getAllSessionStatuses(),
-			]);
+			]).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ReadQueryEffectError
+						? cause
+						: new ReadQueryEffectError({
+								operation: "listSessionInfos",
+								cause,
+							}),
+				),
+			);
 			const pending = pendingApprovalCountsByType(approvals);
 			return sessionRowsToSessionInfoList(rows, {
 				parentMap: new Map(
-					lineage.rows.flatMap((row) =>
+					family.flatMap((row) =>
 						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
 					),
 				),
 				unreadSessionIds: new Set(
-					lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+					family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
 				statuses: {
 					...Object.fromEntries(
-						Object.entries(projectedStatuses).map(([id, type]) => [
-							id,
-							{ type },
-						]),
+						family.map((row) => [row.id, { type: row.status }]),
 					),
 					...opts?.statuses,
 				},

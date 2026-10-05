@@ -32,6 +32,7 @@ const makeProjectStore = (
 		readonly title: string;
 		readonly updatedAt: number;
 		readonly parentId?: string;
+		readonly status?: "idle" | "busy";
 		readonly lastMessageAt?: number | null;
 		readonly lastTurnEndVersion?: number | null;
 		readonly seenVersion?: number | null;
@@ -66,7 +67,7 @@ const makeProjectStore = (
 					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
 					created_at, updated_at
 				) VALUES (
-					${session.id}, 'opencode', ${session.title}, 'idle',
+					${session.id}, 'opencode', ${session.title}, ${session.status ?? "idle"},
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
 					${session.lastTurnEndVersion ?? null},
 					${session.seenVersion ?? null}, ${session.settledAt ?? null},
@@ -309,6 +310,60 @@ describe("listDaemonSessions", () => {
 				]),
 			),
 		);
+	});
+
+	// A page reads only its own rows' families, so a root must still roll up
+	// work and questions from descendants that are not on the page.
+	it.effect("rolls each paged root's descendants up into it", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(
+			project,
+			[
+				{ id: "root-a", title: "A", updatedAt: 300 },
+				{ id: "child-a", title: "A1", updatedAt: 50, parentId: "root-a" },
+				{
+					id: "grandchild-a",
+					title: "A2",
+					updatedAt: 40,
+					parentId: "child-a",
+					status: "busy",
+				},
+				{ id: "root-b", title: "B", updatedAt: 200 },
+				{ id: "root-c", title: "C", updatedAt: 100 },
+				{
+					id: "child-c",
+					title: "C1",
+					updatedAt: 30,
+					parentId: "root-c",
+					status: "busy",
+				},
+			],
+			[{ id: "q1", sessionId: "child-a", type: "question", status: "pending" }],
+		);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project", title: "Project", folders: [project] },
+		]);
+
+		return Effect.gen(function* () {
+			const first = yield* listDaemonSessions(root, { roots: true, limit: 1 });
+			expect(first.sessions).toEqual([
+				expect.objectContaining({
+					id: "root-a",
+					processing: true,
+					pendingQuestionCount: 1,
+				}),
+			]);
+			const rest = yield* listDaemonSessions(root, {
+				roots: true,
+				...(first.nextCursor ? { cursor: first.nextCursor } : {}),
+			});
+			const [rootB, rootC] = rest.sessions;
+			expect(rootB?.id).toBe("root-b");
+			expect(rootB).not.toHaveProperty("processing");
+			expect(rootC).toMatchObject({ id: "root-c", processing: true });
+		}).pipe(Effect.provide(registry));
 	});
 
 	it.effect("reads pending attention counts from a cold project store", () => {

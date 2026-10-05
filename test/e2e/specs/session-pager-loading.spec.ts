@@ -15,18 +15,20 @@ type Page = import("@playwright/test").Page;
 
 const LOCAL = "e2e-replay";
 
-/** Half the root rows are local (shell feed), half foreign (daemon pager).
- *  Subagent children (parentOf) belong to the local project. */
+/** By default half the root rows are local (shell feed), half foreign (daemon
+ *  pager). Subagent children (parentOf) belong to the local project. */
 async function mockSessions(
 	page: Page,
 	{
 		total,
 		settled,
 		parentOf = () => undefined,
+		foreign = (index) => index % 2 === 1,
 	}: {
 		total: number;
 		settled: (index: number) => boolean;
 		parentOf?: (index: number) => string | undefined;
+		foreign?: (index: number) => boolean;
 	},
 ): Promise<{ requested: string[]; exhausted: () => boolean }> {
 	const now = Date.now();
@@ -37,7 +39,7 @@ async function mockSessions(
 			title: `Session ${index}`,
 			status: "idle",
 			projectSlug:
-				parentID !== undefined || index % 2 === 0 ? LOCAL : "other-proj",
+				parentID === undefined && foreign(index) ? "other-proj" : LOCAL,
 			updatedAt: now - 1000 - index,
 			messageCount: 1,
 			...(settled(index) ? { settledAt: now - 500 } : {}),
@@ -54,10 +56,11 @@ async function mockSessions(
 				const cursor = params["cursor"] as { id: string } | undefined;
 				requested.push(cursor?.id ?? "first");
 				// The server's roots filter is `parent_id IS NULL`.
-				const pool =
-					params["roots"] === true
-						? sessions.filter((session) => session.parentID === undefined)
-						: sessions;
+				const pool = sessions.filter(
+					(session) =>
+						(params["roots"] !== true || session.parentID === undefined) &&
+						session.projectSlug !== params["exclude"],
+				);
 				const start = cursor
 					? pool.findIndex((session) => session.id === cursor.id) + 1
 					: 0;
@@ -137,7 +140,7 @@ test("a list too short to scroll pages in without flashing the loading row", asy
 	await page.goto(relayUrl);
 
 	// Every page still arrives; only the indicator stays quiet.
-	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(5);
+	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(3);
 	await expect(
 		page.locator("#session-list .session-item").first(),
 	).toBeVisible();
@@ -205,7 +208,7 @@ test("pages landing in the collapsed shelf do not resize the list under the user
 		}
 		return { mounts, heights };
 	});
-	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(5);
+	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(3);
 	const { mounts, heights } = await run;
 	expect(mounts).toBe(1);
 	expect(new Set(heights).size).toBe(1);
@@ -229,4 +232,24 @@ test("a store of mostly subagent sessions loads the sidebar from one page", asyn
 	await expect.poll(exhausted, { timeout: 10_000 }).toBe(true);
 	expect(requested).toEqual(["first"]);
 	await expect(page.locator("#session-list .session-item")).toHaveCount(10);
+});
+
+test("a store dominated by this project loads other projects from one page", async ({
+	page,
+	relayUrl,
+}) => {
+	// This project's roots arrive on the shell feed, so browse pages that also
+	// carried them added nothing visible and the pager walked every root.
+	const { requested, exhausted } = await mockSessions(page, {
+		total: 300,
+		settled: () => false,
+		foreign: (index) => index < 10,
+	});
+	await page.goto(relayUrl);
+
+	await expect.poll(exhausted, { timeout: 10_000 }).toBe(true);
+	expect(requested).toEqual(["first"]);
+	await expect(
+		page.locator('#session-list .session-item[data-session-id="sess-009"]'),
+	).toBeAttached();
 });
