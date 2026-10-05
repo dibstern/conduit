@@ -27,6 +27,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -371,6 +372,14 @@ async function createTestHarness(
 		},
 	});
 
+	// Relay startup makes no OpenCode requests; the first use opens the stream.
+	await relay.effectRuntime.runtime.runPromise(
+		Effect.scoped(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.use("opencode"),
+			),
+		),
+	);
 	await vi.waitFor(
 		() => {
 			expect(mock.sseClients.size).toBeGreaterThan(0);
@@ -444,6 +453,8 @@ describe("Group 1: SSE coverage and grace period", () => {
 		if (harness) await harness.stop();
 	}, 5_000);
 
+	// Longer timeout: the file's first attach pays the one-time Claude capability
+	// probe (model_list waits on it while no OpenCode catalog is cached).
 	it("Scenario 1: Busy + continuous SSE → no poller starts", async () => {
 		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
@@ -475,7 +486,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
 		await client.close();
-	}, 5_000);
+	}, 10_000);
 
 	it("Scenario 2: SSE events for wrong session don't count as coverage", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
