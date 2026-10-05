@@ -41,10 +41,9 @@ import {
 	persistConfig,
 	removeInstance,
 	requestManagedOpenCodeShutdown,
-	startInstance,
-	stopInstance,
 	updateInstance,
 } from "../Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -89,6 +88,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
+		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) =>
@@ -377,8 +377,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			StartInstance: (request) =>
 				run(
 					Effect.gen(function* () {
-						yield* getInstance(request.instanceId);
-						yield* startInstance(request.instanceId);
+						const instance = yield* getInstance(request.instanceId);
+						// Claude instances have no process to start.
+						if (instance.driver !== "claude")
+							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -389,7 +391,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						yield* getInstance(request.instanceId);
-						yield* stopInstance(request.instanceId);
+						yield* openCodeInstances.stop(request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,

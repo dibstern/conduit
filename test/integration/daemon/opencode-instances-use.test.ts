@@ -100,7 +100,7 @@ describe("OpenCode Instances use", () => {
 			b: pidOf(instanceB.id),
 		};
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Default A", undefined, "opencode");
+		const sessionA = await a.createSession("Default A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		mkdirSync(directoryB, { recursive: true });
 		const { savedSlug: slugB } = await sendRpcRequest(
@@ -112,7 +112,7 @@ describe("OpenCode Instances use", () => {
 			new SetProjectInstance({ slug: slugB, instanceId: instanceB.id }),
 		);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Named B", undefined, "opencode");
+		const sessionB = await b.createSession("Named B", "opencode", "opencode");
 		evidence["instances"] = {
 			a: { id: instanceA.id, pid: pids.a },
 			b: { id: instanceB.id, pid: pids.b },
@@ -232,6 +232,6 @@ describe("OpenCode Instances use", () => {
 		expect(message).not.toContain("Timeout");
 		expect(elapsedMs).toBeLessThan(15_000);
 		// The browser socket is still usable after the failure.
-		await a.createSession("Still works", undefined, "opencode");
+		await a.createSession("Still works", "opencode", "opencode");
 	}, 90_000);
 });

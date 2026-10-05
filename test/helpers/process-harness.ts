@@ -871,6 +871,26 @@ Object.assign(ClaudeDriver, { create: deps => {
 		);
 	}
 
+	opencodeRequests() {
+		const file = join(this.configDir, "fake-opencode-requests.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								pid: number;
+								at: number;
+								method: string;
+								url: string;
+								directory?: string;
+							},
+					)
+			: [];
+	}
+
 	opencodeStreamConnections() {
 		const file = join(this.configDir, "fake-opencode-stream-connections.jsonl");
 		return existsSync(file)
@@ -1619,6 +1639,15 @@ export class ProcessBrowser {
 
 	async stopInstance(instanceId: string) {
 		return this.run(this.rpc.StopInstance({ instanceId }));
+	}
+
+	async getModels(instanceId?: string) {
+		return this.run(
+			this.rpc.GetModels({
+				projectSlug: this.projectSlug,
+				...(instanceId ? { instanceId } : {}),
+			}),
+		);
 	}
 
 	async updateInstance(

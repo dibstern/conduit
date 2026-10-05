@@ -14,8 +14,10 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -290,6 +292,14 @@ async function createTestHarness(): Promise<TestHarness> {
 		socket.destroy();
 	});
 
+	// Relay startup makes no OpenCode requests; the first use opens the stream.
+	await relay.effectRuntime.runtime.runPromise(
+		Effect.scoped(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.use("opencode"),
+			),
+		),
+	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {

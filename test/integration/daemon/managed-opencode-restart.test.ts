@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	realpathSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -728,8 +729,11 @@ describe("managed OpenCode survives server replacement", () => {
 			JSON.stringify([
 				{
 					id: "existing-prefetch-session",
+					slug: "existing-session",
+					version: "1.18.34",
+					projectID: "global",
 					title: "Existing session",
-					directory: projectDir,
+					directory: realpathSync(projectDir),
 					time: { created: Date.now(), updated: Date.now() },
 				},
 			]),
@@ -753,7 +757,9 @@ describe("managed OpenCode survives server replacement", () => {
 			);
 		expect(
 			requests.some(
-				(request) => request.directory === projectDir && request.authenticated,
+				(request) =>
+					request.directory === realpathSync(projectDir) &&
+					request.authenticated,
 			),
 		).toBe(true);
 		results.push({

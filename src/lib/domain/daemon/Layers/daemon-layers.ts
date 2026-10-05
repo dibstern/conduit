@@ -77,8 +77,6 @@ import {
 	type InstanceHealthCheckTag,
 } from "../Services/instance-health-service.js";
 import {
-	getInstances as getEffectInstances,
-	getInstanceUrl,
 	InstanceManagerStateTag,
 	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
@@ -115,7 +113,10 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
-import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
+import {
+	OpenCodeInstancesLive,
+	resolveProjectOpencodeUrl,
+} from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import {
@@ -345,28 +346,6 @@ export const makeDaemonStateFromDisk = (configPath: string) =>
  */
 export const makeDaemonStateFromDiskNode = (configPath: string) =>
 	makeDaemonStateFromDisk(configPath).pipe(Layer.provide(NodeFileSystem.layer));
-
-const resolveProjectOpencodeUrl = (project: {
-	readonly slug: string;
-	readonly instanceId?: string;
-}) =>
-	Effect.gen(function* () {
-		const instances = Array.from(yield* getEffectInstances);
-		if (project.instanceId != null) {
-			const selected = instances.find(
-				(instance) => instance.id === project.instanceId,
-			);
-			if ((selected?.driver ?? "opencode") === "opencode") {
-				return yield* getInstanceUrl(project.instanceId);
-			}
-		}
-
-		const first = instances.find(
-			(instance) => (instance.driver ?? "opencode") === "opencode",
-		);
-		if (first == null) return null;
-		return yield* getInstanceUrl(first.id);
-	});
 
 export const makeRelayCacheLayer = (): Layer.Layer<
 	RelayCacheTag,

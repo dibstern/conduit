@@ -99,11 +99,11 @@ describe("daemon shared OpenCode global stream", () => {
 	it("shares one global connection and routes only by normalized directory", async () => {
 		const fixture = await start("routing");
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Project A", undefined, "opencode");
+		const sessionA = await a.createSession("Project A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Project B", undefined, "opencode");
+		const sessionB = await b.createSession("Project B", "opencode", "opencode");
 		evidence["sessions"] = { sessionA, sessionB };
 		evidence["directories"] = [fixture.projectDir, directoryB];
 		await vi.waitFor(() => {
@@ -189,7 +189,7 @@ describe("daemon shared OpenCode global stream", () => {
 		const defaultId = defaultInstance.id;
 		const namedId = namedInstance.id;
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Default A", undefined, "opencode");
+		const sessionA = await a.createSession("Default A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		await sendRpcRequest(
@@ -197,7 +197,11 @@ describe("daemon shared OpenCode global stream", () => {
 			new SetProjectInstance({ slug: slugB, instanceId: namedId }),
 		);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Selected B", undefined, "opencode");
+		const sessionB = await b.createSession(
+			"Selected B",
+			"opencode",
+			"opencode",
+		);
 		await vi.waitFor(() => {
 			expect(
 				fixture
@@ -259,7 +263,7 @@ describe("daemon shared OpenCode global stream", () => {
 		expect(replacement?.port).toBeGreaterThan(0);
 		if (!replacement) throw new Error("Replacement OpenCode instance missing");
 		const a = await fixture.connect();
-		await a.createSession("Existing A", undefined, "opencode");
+		await a.createSession("Existing A", "opencode", "opencode");
 		await sendRpcRequest(
 			socket,
 			new UpdateInstance({
@@ -271,7 +275,7 @@ describe("daemon shared OpenCode global stream", () => {
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Fresh B", undefined, "opencode");
+		const sessionB = await b.createSession("Fresh B", "opencode", "opencode");
 		// Session creation uses REST; wait separately for the replacement SSE
 		// connection before asking the fake to emit a non-replayed event.
 		await vi.waitFor(() => {
@@ -315,11 +319,11 @@ describe("daemon shared OpenCode global stream", () => {
 	it("keeps the stream until the last relay closes and reopens for a new scope", async () => {
 		const fixture = await start("scopes");
 		const a = await fixture.connect();
-		await a.createSession("Scoped A", undefined, "opencode");
+		await a.createSession("Scoped A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		await b.createSession("Scoped B", undefined, "opencode");
+		await b.createSession("Scoped B", "opencode", "opencode");
 		await a.close();
 		await removeProject(fixture, "process-test");
 		expect(
@@ -360,7 +364,7 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 		const reopenedSlug = await addProject(fixture, directoryB);
 		const reopened = await fixture.connect(undefined, undefined, reopenedSlug);
-		await reopened.createSession("Reopened", undefined, "opencode");
+		await reopened.createSession("Reopened", "opencode", "opencode");
 		await vi.waitFor(() => {
 			expect(
 				fixture

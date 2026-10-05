@@ -21,6 +21,8 @@ export interface PtyUpstreamDeps {
 	opencodeUrl: string;
 	log: Logger;
 	WebSocketClass: typeof import("ws").WebSocket;
+	/** Runs once the upstream socket has closed, however it closed. */
+	onClose?: () => void;
 }
 
 type RawData = import("ws").RawData;
@@ -39,8 +41,15 @@ export async function connectPtyUpstream(
 	ptyId: string,
 	cursor: number = 0,
 ): Promise<void> {
-	const { ptyManager, wsHandler, client, opencodeUrl, log, WebSocketClass } =
-		deps;
+	const {
+		ptyManager,
+		wsHandler,
+		client,
+		opencodeUrl,
+		log,
+		WebSocketClass,
+		onClose,
+	} = deps;
 
 	const httpUrl = new URL(
 		`/pty/${ptyId}/connect?cursor=${cursor}`,
@@ -115,6 +124,7 @@ export async function connectPtyUpstream(
 				});
 			}
 			log.info(`Upstream closed: ${ptyId}`);
+			onClose?.();
 		});
 
 		upstream.on("error", (err: Error) => {

@@ -1,11 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, ManagedRuntime, Option, Stream } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveOpenCodeInstanceUrl,
-} from "../daemon/config-persistence.js";
-import { makeOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
 import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
@@ -65,7 +61,6 @@ import {
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
-import { openCodeAuth } from "../instance/managed-opencode-process.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -120,8 +115,9 @@ const relayOpenCodeInstances = (
 					),
 				),
 		use,
-		ifRunning: (instanceId, directory) =>
-			Effect.option(use(instanceId, directory)),
+		ifRunning: (instanceId, directory = scope) =>
+			instances.ifRunning(target(instanceId), directory),
+		stop: (instanceId) => instances.stop(target(instanceId)),
 	};
 };
 
@@ -244,27 +240,7 @@ export function createProjectRelayLayers({
 	const openCodeInstancesLayer = Layer.map(
 		sharedInstances
 			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-			: // Standalone relay (no daemon): resolve instances from relay config.
-				makeOpenCodeInstancesLive(
-					(instanceId) =>
-						Effect.sync(() => {
-							if (instanceId === defaultInstanceIdForDriver("opencode"))
-								return {
-									url: config.opencodeUrl,
-									...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
-								};
-							const daemonConfig = loadDaemonConfig(config.configDir);
-							const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
-							const auth = openCodeAuth(
-								daemonConfig?.instances?.find(({ id }) => id === instanceId)
-									?.env,
-							);
-							return url === undefined
-								? undefined
-								: { url, ...(auth ? { auth } : {}) };
-						}),
-					config.log?.child("opencode"),
-				),
+			: makeStandaloneOpenCodeInstancesLive(config),
 		(context) =>
 			Context.make(
 				OpenCodeInstancesTag,
@@ -293,7 +269,14 @@ export function createProjectRelayLayers({
 		Layer.provide(openCodeApiLayer),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				openCodeInstancesLayer,
+				configLayer,
+				loggerLayer,
+			),
+		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
@@ -326,17 +309,16 @@ export function createProjectRelayLayers({
 	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				openCodeInstancesLayer,
 				webSocketHandlerLayer,
 				loggerLayer,
-				configLayer,
 			),
 		),
 	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				openCodeInstancesLayer,
 				webSocketHandlerLayer,
 				loggerLayer,
 				configLayer,

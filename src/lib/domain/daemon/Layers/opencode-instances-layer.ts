@@ -11,16 +11,23 @@ import {
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveOpenCodeInstanceUrl,
+} from "../../../daemon/config-persistence.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
 import { SSEStream } from "../../../relay/sse-stream.js";
+import type { InstanceStatus, ProjectRelayConfig } from "../../../types.js";
 import {
 	getInstances,
 	getInstanceUrl,
 	getManagedOpenCodeProcessEnv,
+	startInstance,
+	stopInstance,
 } from "../Services/instance-manager-service.js";
 import {
 	type OpenCodeInstanceEvent,
@@ -53,7 +60,22 @@ const decodeEnvelope = Schema.decodeUnknownEither(
 export type OpenCodeEndpoint = {
 	readonly url: string;
 	readonly auth?: { readonly username: string; readonly password: string };
+	/** Unknown (treated as running) when the resolver has no process state. */
+	readonly status?: InstanceStatus;
 };
+
+/** Process control for the instances behind the endpoints. */
+type OpenCodeProcessControl<Start, Stop> = {
+	readonly start: (instanceId: string) => Effect.Effect<void, unknown, Start>;
+	readonly stop: (instanceId: string) => Effect.Effect<void, never, Stop>;
+};
+
+const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
+	JSON.stringify([
+		endpoint?.url,
+		endpoint?.auth?.username,
+		endpoint?.auth?.password,
+	]);
 
 type Connection = Extract<OpenCodeInstanceEvent, { _tag: "connection" }>;
 
@@ -68,16 +90,21 @@ type InstanceStream = {
 
 const CONNECT_TIMEOUT = "4 seconds";
 
-export const makeOpenCodeInstancesLive = <R>(
+export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 	resolveEndpoint: (
 		instanceId: string,
 	) => Effect.Effect<OpenCodeEndpoint | undefined, never, R>,
-	log: Logger = createLogger("daemon").child("opencode"),
+	options: {
+		readonly log?: Logger;
+		readonly control?: OpenCodeProcessControl<Start, Stop>;
+	} = {},
 ) =>
 	Layer.scoped(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
-			const context = yield* Effect.context<R>();
+			const { log = createLogger("daemon").child("opencode"), control } =
+				options;
+			const context = yield* Effect.context<R | Start | Stop>();
 			const gate = yield* Effect.makeSemaphore(1);
 			const subscribers = new Set<{
 				directories: ReadonlySet<string>;
@@ -273,11 +300,7 @@ export const makeOpenCodeInstancesLive = <R>(
 				endpoint: OpenCodeEndpoint | undefined,
 			) =>
 				Effect.gen(function* () {
-					const key = JSON.stringify([
-						endpoint?.url,
-						endpoint?.auth?.username,
-						endpoint?.auth?.password,
-					]);
+					const key = endpointKey(endpoint);
 					if (streams.get(instanceId)?.key === key) return false;
 					yield* closeStream(instanceId);
 					yield* openStream(instanceId, endpoint, key);
@@ -308,20 +331,40 @@ export const makeOpenCodeInstancesLive = <R>(
 					}`,
 				});
 
+			const clientFor = (endpoint: OpenCodeEndpoint, directory?: string) => {
+				const { client: sdk, authHeaders } = createSdkClient({
+					baseUrl: endpoint.url,
+					...(endpoint.auth ? { auth: endpoint.auth } : {}),
+					...(directory !== undefined ? { directory } : {}),
+				});
+				return new OpenCodeAPI({ sdk, baseUrl: endpoint.url, authHeaders });
+			};
+
 			const use = (instanceId: string, directory?: string) =>
 				Effect.gen(function* () {
-					const endpoint = yield* resolveIn(instanceId);
+					let endpoint = yield* resolveIn(instanceId);
+					// Start Instance after Stop Instance: a stopped instance comes
+					// back on its next use. Boot still spawns every instance.
+					if (endpoint?.status === "stopped" && control) {
+						const url = endpoint.url;
+						yield* control.start(instanceId).pipe(
+							Effect.provide(context),
+							Effect.mapError((cause) => unreachable(instanceId, url, cause)),
+						);
+						endpoint = yield* resolveIn(instanceId);
+					}
 					if (!endpoint)
 						return yield* new OpenCodeUnavailable({
 							instanceId,
 							reason: "not-configured",
 							message: `OpenCode instance "${instanceId}" is not configured with a server URL`,
 						});
+					const resolved = endpoint;
 					const opened = yield* Effect.acquireRelease(
 						gate.withPermits(1)(
 							Effect.suspend(() => {
 								uses++;
-								return ensureStream(instanceId, endpoint);
+								return ensureStream(instanceId, resolved);
 							}),
 						),
 						() =>
@@ -329,16 +372,7 @@ export const makeOpenCodeInstancesLive = <R>(
 								uses--;
 							}),
 					);
-					const { client: sdk, authHeaders } = createSdkClient({
-						baseUrl: endpoint.url,
-						...(endpoint.auth ? { auth: endpoint.auth } : {}),
-						...(directory !== undefined ? { directory } : {}),
-					});
-					const client = new OpenCodeAPI({
-						sdk,
-						baseUrl: endpoint.url,
-						authHeaders,
-					});
+					const client = clientFor(endpoint, directory);
 					const stream = streams.get(instanceId);
 					if (stream?.connection.state === "connected") return client;
 					yield* Effect.tryPromise({
@@ -377,8 +411,8 @@ export const makeOpenCodeInstancesLive = <R>(
 				});
 
 			return {
-				// Subscribe path: registers a directory subscriber and holds the
-				// given instance's stream open.
+				// Subscribe path: registers a directory subscriber. Passive: only
+				// `use` opens a stream; subscribers keep open streams alive.
 				events: (
 					directories: readonly string[],
 					instanceId: string = defaultInstanceIdForDriver("opencode"),
@@ -388,7 +422,6 @@ export const makeOpenCodeInstancesLive = <R>(
 							gate
 								.withPermits(1)(
 									Effect.gen(function* () {
-										const endpoint = yield* resolveIn(instanceId);
 										const subscriber = yield* Effect.acquireRelease(
 											Effect.sync(() => {
 												const member = {
@@ -405,9 +438,8 @@ export const makeOpenCodeInstancesLive = <R>(
 													subscribers.delete(member);
 												}),
 										);
-										const opened = yield* ensureStream(instanceId, endpoint);
 										const stream = streams.get(instanceId);
-										if (!opened && stream) {
+										if (stream) {
 											subscriber.send({
 												...stream.connection,
 												health: stream.source.getHealth(),
@@ -436,36 +468,113 @@ export const makeOpenCodeInstancesLive = <R>(
 						"unbounded",
 					),
 				use,
+				// Reads process state only: no request, no stream, never a start.
 				ifRunning: (instanceId: string, directory?: string) =>
-					use(instanceId, directory).pipe(
-						Effect.map(Option.some),
-						Effect.catchTag("OpenCodeUnavailable", () =>
-							Effect.succeed(Option.none()),
-						),
+					Effect.map(resolveIn(instanceId), (endpoint) =>
+						endpoint && endpoint.status !== "stopped"
+							? Option.some(clientFor(endpoint, directory))
+							: Option.none(),
 					),
+				stop: (instanceId: string) =>
+					Effect.gen(function* () {
+						const key = endpointKey(yield* resolveIn(instanceId));
+						if (control)
+							yield* control.stop(instanceId).pipe(Effect.provide(context));
+						yield* gate.withPermits(1)(
+							Effect.forEach(
+								[...streams].filter(
+									([id, stream]) => id === instanceId || stream.key === key,
+								),
+								([id]) => closeStream(id),
+								{ discard: true },
+							),
+						);
+					}),
 			};
 		}),
 	);
 
-export const OpenCodeInstancesLive = makeOpenCodeInstancesLive((instanceId) =>
-	Effect.gen(function* () {
-		const instances = Array.from(yield* getInstances).filter(
-			({ driver }) => (driver ?? "opencode") === "opencode",
-		);
-		// The default id names the daemon's first OpenCode instance when no
-		// instance carries that id.
-		const instance =
-			instances.find(({ id }) => id === instanceId) ??
-			(instanceId === defaultInstanceIdForDriver("opencode")
-				? instances[0]
-				: undefined);
-		const url = instance ? yield* getInstanceUrl(instance.id) : null;
-		if (!instance || !url) return undefined;
-		const auth = openCodeAuth(
-			instance.managed
-				? yield* getManagedOpenCodeProcessEnv(instance.id)
-				: instance.env,
-		);
-		return { url, ...(auth ? { auth } : {}) };
-	}),
+export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
+	(instanceId) =>
+		Effect.gen(function* () {
+			const instances = Array.from(yield* getInstances).filter(
+				({ driver }) => (driver ?? "opencode") === "opencode",
+			);
+			// The default id names the daemon's first OpenCode instance when no
+			// instance carries that id.
+			const instance =
+				instances.find(({ id }) => id === instanceId) ??
+				(instanceId === defaultInstanceIdForDriver("opencode")
+					? instances[0]
+					: undefined);
+			const url = instance ? yield* getInstanceUrl(instance.id) : null;
+			if (!instance || !url) return undefined;
+			const auth = openCodeAuth(
+				instance.managed
+					? yield* getManagedOpenCodeProcessEnv(instance.id)
+					: instance.env,
+			);
+			return { url, status: instance.status, ...(auth ? { auth } : {}) };
+		}),
+	{
+		control: {
+			start: startInstance,
+			stop: (instanceId) =>
+				stopInstance(instanceId).pipe(
+					Effect.catchAllCause((cause) =>
+						Effect.logWarning("OpenCode instance stop failed", cause),
+					),
+				),
+		},
+	},
 );
+
+/** Relay without a daemon: endpoints come from relay config and the daemon config file. */
+export const makeStandaloneOpenCodeInstancesLive = (
+	config: Pick<
+		ProjectRelayConfig,
+		"opencodeUrl" | "opencodeAuth" | "configDir" | "log"
+	>,
+) =>
+	makeOpenCodeInstancesLive(
+		(instanceId) =>
+			Effect.sync(() => {
+				if (instanceId === defaultInstanceIdForDriver("opencode"))
+					return {
+						url: config.opencodeUrl,
+						...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
+					};
+				const daemonConfig = loadDaemonConfig(config.configDir);
+				const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
+				const auth = openCodeAuth(
+					daemonConfig?.instances?.find(({ id }) => id === instanceId)?.env,
+				);
+				return url === undefined
+					? undefined
+					: { url, ...(auth ? { auth } : {}) };
+			}),
+		config.log ? { log: config.log.child("opencode") } : {},
+	);
+
+/** Base URL of the OpenCode instance a project's relay targets, or null. */
+export const resolveProjectOpencodeUrl = (project: {
+	readonly slug: string;
+	readonly instanceId?: string;
+}) =>
+	Effect.gen(function* () {
+		const instances = Array.from(yield* getInstances);
+		if (project.instanceId != null) {
+			const selected = instances.find(
+				(instance) => instance.id === project.instanceId,
+			);
+			if ((selected?.driver ?? "opencode") === "opencode") {
+				return yield* getInstanceUrl(project.instanceId);
+			}
+		}
+
+		const first = instances.find(
+			(instance) => (instance.driver ?? "opencode") === "opencode",
+		);
+		if (first == null) return null;
+		return yield* getInstanceUrl(first.id);
+	});

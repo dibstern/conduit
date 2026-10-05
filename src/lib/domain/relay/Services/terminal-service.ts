@@ -1,4 +1,5 @@
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Option } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import type { PtyUpstream } from "../../../relay/pty-manager.js";
@@ -9,7 +10,10 @@ import {
 } from "../../../terminal/pty-host-client.js";
 import { PtyHostError } from "../../../terminal/pty-host-protocol.js";
 import { isRecord } from "../../../utils.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import {
+	type OpenCodeClient,
+	OpenCodeInstancesTag,
+} from "../../daemon/Services/opencode-instances-service.js";
 import {
 	ConfigTag,
 	ConnectPtyUpstreamTag,
@@ -216,7 +220,7 @@ const toTrackedPtyInfo = (
 export const OpenCodeTerminalServiceLive: Layer.Layer<
 	OpenCodeTerminalServiceTag,
 	never,
-	| OpenCodeAPITag
+	| OpenCodeInstancesTag
 	| WebSocketHandlerTag
 	| LoggerTag
 	| ConfigTag
@@ -226,7 +230,25 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 > = Layer.effect(
 	OpenCodeTerminalServiceTag,
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
+		const openCodeId = defaultInstanceIdForDriver("opencode");
+		const callOpenCodePty = (
+			operation: TerminalOperation,
+			ptyId: string,
+			call: (pty: OpenCodeClient["pty"]) => Promise<unknown>,
+		) =>
+			instances.use(openCodeId).pipe(
+				Effect.flatMap((client) =>
+					Effect.tryPromise({
+						try: () => call(client.pty),
+						catch: (cause) => cause,
+					}),
+				),
+				Effect.mapError(
+					(cause) => new TerminalServiceError({ operation, ptyId, cause }),
+				),
+				Effect.scoped,
+			);
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
@@ -398,12 +420,22 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					const ready = clientTerminals(clientId);
 					const session = wsHandler.getClientSession(clientId) ?? "?";
 					yield* restoreLocalSessions;
+					// Discovery never forces OpenCode: no running instance, no PTYs.
 					const rawPtysResult = yield* Effect.either(
-						Effect.tryPromise({
-							try: () => client.pty.list(),
-							catch: (cause) =>
-								new TerminalServiceError({ operation: "list", cause }),
-						}),
+						instances.ifRunning(openCodeId).pipe(
+							Effect.flatMap(
+								Option.match({
+									onNone: () => Effect.succeed([]),
+									onSome: (client) =>
+										Effect.tryPromise({
+											try: () => client.pty.list(),
+											catch: (cause) =>
+												new TerminalServiceError({ operation: "list", cause }),
+										}),
+								}),
+							),
+							Effect.scoped,
+						),
 					);
 					const ptys: PtyInfo[] = trackedPtys();
 					if (rawPtysResult._tag === "Left") {
@@ -440,15 +472,16 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						const ptyId = pty.id;
 						if (!ptyManager.hasSession(ptyId) && pty.status === "running") {
 							const reconnectResult = yield* Effect.either(
-								Effect.tryPromise({
-									try: () => connectPtyUpstream(ptyId, -1),
-									catch: (cause) =>
-										new TerminalServiceError({
-											operation: "connect",
-											ptyId,
-											cause,
-										}),
-								}),
+								connectPtyUpstream(ptyId, -1).pipe(
+									Effect.mapError(
+										(cause) =>
+											new TerminalServiceError({
+												operation: "connect",
+												ptyId,
+												cause,
+											}),
+									),
+								),
 							);
 							if (reconnectResult._tag === "Right") {
 								log.info(
@@ -524,15 +557,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					ptyManager.closeSession(ptyId);
 					for (const ready of readyTerminals.values()) ready.delete(ptyId);
 					if (!local) {
-						yield* Effect.tryPromise({
-							try: () => client.pty.delete(ptyId),
-							catch: (cause) =>
-								new TerminalServiceError({
-									operation: "delete",
-									ptyId,
-									cause,
-								}),
-						});
+						yield* callOpenCodePty("delete", ptyId, (pty) => pty.delete(ptyId));
 					}
 					wsHandler.broadcast({ type: "pty_deleted", ptyId });
 				}).pipe(terminalLock.withPermits(1)),
@@ -544,15 +569,9 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						return;
 					}
 					const resizeResult = yield* Effect.either(
-						Effect.tryPromise({
-							try: () => client.pty.resize(ptyId, rows, cols),
-							catch: (cause) =>
-								new TerminalServiceError({
-									operation: "resize",
-									ptyId,
-									cause,
-								}),
-						}),
+						callOpenCodePty("resize", ptyId, (pty) =>
+							pty.resize(ptyId, rows, cols),
+						),
 					);
 					if (resizeResult._tag === "Left") {
 						log.warn(

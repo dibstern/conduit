@@ -46,14 +46,13 @@ import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daem
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
+	getInstance as getEffectInstance,
 	getInstances as getEffectInstances,
 	getManagedOpenCodeProcessEnv,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
 	removeInstance as removeEffectInstance,
-	startInstance as startEffectInstance,
-	stopInstance as stopEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
@@ -253,11 +252,20 @@ export const RelayFactoryLive = (
 			const removeInstance = (id: string) =>
 				runCallback(provideInstanceDeps(removeEffectInstance(id)));
 
+			// Claude instances have no process to start.
 			const startInstance = (id: string) =>
-				runCallback(provideInstanceDeps(startEffectInstance(id)));
+				runCallback(
+					provideInstanceDeps(getEffectInstance(id)).pipe(
+						Effect.flatMap((instance) =>
+							instance.driver === "claude"
+								? Effect.void
+								: Effect.asVoid(Effect.scoped(openCodeInstances.use(id))),
+						),
+					),
+				);
 
 			const stopInstance = (id: string) =>
-				runCallback(provideInstanceDeps(stopEffectInstance(id)));
+				runCallback(openCodeInstances.stop(id));
 
 			const updateInstance = (
 				id: string,

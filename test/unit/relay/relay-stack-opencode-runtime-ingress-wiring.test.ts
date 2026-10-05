@@ -300,6 +300,14 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				statusPollerInterval: 60_000,
 				messagePollerInterval: 60_000,
 			});
+			// Relay startup makes no OpenCode requests; the first use opens the stream.
+			await relay.effectRuntime.runtime.runPromise(
+				Effect.scoped(
+					Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+						instances.use("opencode"),
+					),
+				),
+			);
 			await eventually(
 				() =>
 					Promise.race([

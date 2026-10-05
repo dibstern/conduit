@@ -6,16 +6,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	FiberMap,
-	HashMap,
-	Layer,
-	Ref,
-	Scope,
-} from "effect";
+import { Deferred, Effect, Exit, HashMap, Layer, Ref, Scope } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -29,13 +20,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import {
-	type InstanceManagerState,
-	InstanceManagerStateTag,
-	makeInstanceManagerStateFromDaemonStateLive,
-	makeInstanceManagerStateLive,
-	PollerFibersTag,
-} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
@@ -48,9 +33,13 @@ import {
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
-import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
+import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+import {
+	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 
 const configRefLayer = DaemonConfigRefLive(
 	makeDaemonConfigFromOptions({ port: 2633 }),
@@ -80,42 +69,30 @@ const httpServerRefWithServerLayer = Layer.effect(
 );
 
 const registryLayer = makeProjectRegistryLive();
-const instanceLayer = makeInstanceManagerStateLive();
+const sessions = (count: number) =>
+	Array.from({ length: count }, (_, i) => ({ id: `s${i}` })) as SessionDetail[];
 
-const makeInstance = (
-	id: string,
-	port: number,
-	status: OpenCodeInstance["status"] = "healthy",
-): OpenCodeInstance => ({
-	id,
-	name: id,
-	port,
-	managed: false,
-	status,
-	restartCount: 0,
-	createdAt: Date.now(),
-});
-
-const makeSeededInstanceLayer = (
-	instances: Array<{ id: string; port: number }>,
+/** OpenCode Instances whose running instances list the given sessions. */
+const makeInstancesLayer = (
+	lists: Readonly<Record<string, () => Promise<SessionDetail[]>>>,
+	calls: Array<[string, string | undefined]> = [],
 ) => {
-	const instanceMap = HashMap.fromIterable(
-		instances.map((i) => [i.id, makeInstance(i.id, i.port)] as const),
+	const stub = makeOpenCodeInstancesStub(
+		Object.fromEntries(
+			Object.entries(lists).map(([id, list]) => {
+				const client = makeMockOpenCodeAPI();
+				vi.mocked(client.session.list).mockImplementation(list);
+				return [id, client];
+			}),
+		),
 	);
-	return Layer.scoped(
-		InstanceManagerStateTag,
-		Ref.make<InstanceManagerState>({
-			instances: instanceMap,
-			externalUrls: HashMap.empty(),
-			restartTimestamps: HashMap.empty(),
-			config: {
-				maxInstances: 5,
-				healthPollIntervalMs: 5000,
-				maxRestartsPerWindow: 5,
-				restartWindowMs: 60_000,
-			},
-		}),
-	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+	return Layer.succeed(OpenCodeInstancesTag, {
+		...stub,
+		ifRunning: (instanceId: string, directory?: string) => {
+			calls.push([instanceId, directory]);
+			return stub.ifRunning(instanceId, directory);
+		},
+	});
 };
 
 const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
@@ -164,41 +141,49 @@ describe("prefetchSessionCounts", () => {
 		directory = mkdtempSync(join(tmpdir(), "conduit-prefetch-"));
 	});
 	afterEach(() => {
-		vi.unstubAllGlobals();
 		rmSync(directory, { recursive: true, force: true });
 	});
 
-	it.scoped("does not fetch sessions for a missing project directory", () =>
-		Effect.gen(function* () {
-			const fetchMock = vi.fn();
-			vi.stubGlobal("fetch", fetchMock);
-			const count = yield* prefetchSessionCounts;
-			expect(count).toBe(0);
-			expect(fetchMock.mock.calls.length).toBe(0);
-		}).pipe(
-			Effect.provide(
-				Layer.fresh(
-					Layer.mergeAll(
-						configRefLayer,
-						makeSeededInstanceLayer([{ id: "i1", port: 3456 }]),
-						makeSeededRegistryLayer([
-							[
-								"missing",
-								{
-									_tag: "Registering",
-									project: {
-										slug: "missing",
-										title: "Missing",
-										folders: [join(directory, "missing")],
-										instanceId: "i1",
-									},
-								},
-							],
-						]),
+	const readyProject = (
+		slug: string,
+		instanceId: string,
+		folder = directory,
+	): [string, ProjectState] => [
+		slug,
+		{
+			_tag: "Ready",
+			project: {
+				slug,
+				folders: [folder],
+				title: slug,
+				lastUsed: Date.now(),
+				instanceId,
+			},
+		},
+	];
+
+	it.scoped(
+		"does not ask for an instance for a missing project directory",
+		() => {
+			const calls: Array<[string, string | undefined]> = [];
+			return Effect.gen(function* () {
+				const count = yield* prefetchSessionCounts;
+				expect(count).toBe(0);
+				expect(calls).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					Layer.fresh(
+						Layer.mergeAll(
+							configRefLayer,
+							makeInstancesLayer({ i1: async () => sessions(1) }, calls),
+							makeSeededRegistryLayer([
+								readyProject("missing", "i1", join(directory, "missing")),
+							]),
+						),
 					),
 				),
-			),
-		),
+			);
+		},
 	);
 
 	it.scoped("returns 0 when no projects registered", () =>
@@ -208,16 +193,18 @@ describe("prefetchSessionCounts", () => {
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
-					Layer.mergeAll(configRefLayer, instanceLayer, registryLayer),
+					Layer.mergeAll(configRefLayer, makeInstancesLayer({}), registryLayer),
 				),
 			),
 		),
 	);
 
-	it.scoped("skips projects with existing persisted session counts", () =>
-		Effect.gen(function* () {
+	it.scoped("skips projects with existing persisted session counts", () => {
+		const calls: Array<[string, string | undefined]> = [];
+		return Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
+			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(
@@ -228,29 +215,15 @@ describe("prefetchSessionCounts", () => {
 								persistedSessionCounts: new Map([["my-project", 5]]),
 							}),
 						),
-						makeSeededInstanceLayer([{ id: "i1", port: 3456 }]),
-						makeSeededRegistryLayer([
-							[
-								"my-project",
-								{
-									_tag: "Ready" as const,
-									project: {
-										slug: "my-project",
-										folders: [directory],
-										title: "My Project",
-										lastUsed: Date.now(),
-										instanceId: "i1",
-									},
-								},
-							],
-						]),
+						makeInstancesLayer({ i1: async () => sessions(3) }, calls),
+						makeSeededRegistryLayer([readyProject("my-project", "i1")]),
 					),
 				),
 			),
-		),
-	);
+		);
+	});
 
-	it.scoped("returns 0 when project has no matching instance", () =>
+	it.scoped("returns 0 when the project's instance is not running", () =>
 		Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
@@ -259,38 +232,16 @@ describe("prefetchSessionCounts", () => {
 				Layer.fresh(
 					Layer.mergeAll(
 						configRefLayer,
-						instanceLayer, // empty
-						makeSeededRegistryLayer([
-							[
-								"orphan",
-								{
-									_tag: "Ready" as const,
-									project: {
-										slug: "orphan",
-										folders: [directory],
-										title: "Orphan",
-										lastUsed: Date.now(),
-										instanceId: "nonexistent",
-									},
-								},
-							],
-						]),
+						makeInstancesLayer({}),
+						makeSeededRegistryLayer([readyProject("orphan", "nonexistent")]),
 					),
 				),
 			),
 		),
 	);
 
-	it.scoped("fetches and persists session counts via mocked fetch", () =>
+	it.scoped("counts and persists sessions from a running instance", () =>
 		Effect.gen(function* () {
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockResolvedValue({
-					json: () =>
-						Promise.resolve([{ id: "s1" }, { id: "s2" }, { id: "s3" }]),
-				}),
-			);
-
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(1);
 
@@ -302,22 +253,8 @@ describe("prefetchSessionCounts", () => {
 				Layer.fresh(
 					Layer.provideMerge(
 						Layer.mergeAll(
-							makeSeededInstanceLayer([{ id: "i1", port: 3456 }]),
-							makeSeededRegistryLayer([
-								[
-									"my-project",
-									{
-										_tag: "Ready" as const,
-										project: {
-											slug: "my-project",
-											folders: [directory],
-											title: "My Project",
-											lastUsed: Date.now(),
-											instanceId: "i1",
-										},
-									},
-								],
-							]),
+							makeInstancesLayer({ i1: async () => sessions(3) }),
+							makeSeededRegistryLayer([readyProject("my-project", "i1")]),
 						),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
 					),
@@ -326,23 +263,12 @@ describe("prefetchSessionCounts", () => {
 		),
 	);
 
-	it.scoped("uses daemon-state seeded projects and instances", () =>
-		Effect.gen(function* () {
-			const fetchMock = vi.fn().mockResolvedValue({
-				json: () => Promise.resolve([{ id: "s1" }, { id: "s2" }]),
-			});
-			vi.stubGlobal("fetch", fetchMock);
-
+	it.scoped("uses daemon-state seeded projects", () => {
+		const calls: Array<[string, string | undefined]> = [];
+		return Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(1);
-			expect(fetchMock).toHaveBeenCalledWith(
-				"http://localhost:4567/session?limit=10000",
-				expect.objectContaining({
-					headers: expect.objectContaining({
-						"x-opencode-directory": directory,
-					}),
-				}),
-			);
+			expect(calls).toEqual([["default", directory]]);
 
 			const configRef = yield* DaemonConfigRefTag;
 			const config = yield* Ref.get(configRef);
@@ -352,54 +278,33 @@ describe("prefetchSessionCounts", () => {
 				Layer.fresh(
 					Layer.mergeAll(
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
-						makeProjectRegistryFromDaemonStateLive,
-						makeInstanceManagerStateFromDaemonStateLive(),
-					).pipe(
-						Layer.provideMerge(
-							makeDaemonStateLive({
-								projects: [
-									{
-										slug: "seeded-project",
-										path: directory,
-										folders: [directory],
-										title: "Seeded Project",
-										addedAt: 1,
-										instanceId: "default",
-									},
-								],
-								instances: [
-									{
-										id: "default",
-										name: "Default",
-										port: 4567,
-										managed: true,
-									},
-								],
-							}),
+						makeInstancesLayer({ default: async () => sessions(2) }, calls),
+						makeProjectRegistryFromDaemonStateLive.pipe(
+							Layer.provide(
+								makeDaemonStateLive({
+									projects: [
+										{
+											slug: "seeded-project",
+											path: directory,
+											folders: [directory],
+											title: "Seeded Project",
+											addedAt: 1,
+											instanceId: "default",
+										},
+									],
+								}),
+							),
 						),
 					),
 				),
 			),
-		),
-	);
+		);
+	});
 
 	it.scoped(
-		"fetch failure for one project does not prevent others from prefetching",
+		"a failed session list for one project does not prevent others from prefetching",
 		() =>
 			Effect.gen(function* () {
-				// Port-based routing: 3456 succeeds, 3457 rejects
-				vi.stubGlobal(
-					"fetch",
-					vi.fn((url: string) => {
-						if (url.includes("3456")) {
-							return Promise.resolve({
-								json: () => Promise.resolve([{ id: "s1" }]),
-							});
-						}
-						return Promise.reject(new Error("network error"));
-					}),
-				);
-
 				const count = yield* prefetchSessionCounts;
 				// One project succeeds, one fails — total fetched should be 1
 				expect(count).toBe(1);
@@ -408,37 +313,13 @@ describe("prefetchSessionCounts", () => {
 					Layer.fresh(
 						Layer.provideMerge(
 							Layer.mergeAll(
-								makeSeededInstanceLayer([
-									{ id: "i1", port: 3456 },
-									{ id: "i2", port: 3457 },
-								]),
+								makeInstancesLayer({
+									i1: async () => sessions(1),
+									i2: () => Promise.reject(new Error("network error")),
+								}),
 								makeSeededRegistryLayer([
-									[
-										"proj-a",
-										{
-											_tag: "Ready" as const,
-											project: {
-												slug: "proj-a",
-												folders: [directory],
-												title: "Project A",
-												lastUsed: Date.now(),
-												instanceId: "i1",
-											},
-										},
-									],
-									[
-										"proj-b",
-										{
-											_tag: "Ready" as const,
-											project: {
-												slug: "proj-b",
-												folders: [directory],
-												title: "Project B",
-												lastUsed: Date.now(),
-												instanceId: "i2",
-											},
-										},
-									],
+									readyProject("proj-a", "i1"),
+									readyProject("proj-b", "i2"),
 								]),
 							),
 							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
@@ -447,52 +328,12 @@ describe("prefetchSessionCounts", () => {
 				),
 			),
 	);
-
-	it.scoped("returns 0 when fetch returns non-array data", () =>
-		Effect.gen(function* () {
-			vi.stubGlobal(
-				"fetch",
-				vi.fn().mockResolvedValue({
-					json: () => Promise.resolve({ error: "not authorized" }),
-				}),
-			);
-
-			const count = yield* prefetchSessionCounts;
-			expect(count).toBe(0);
-		}).pipe(
-			Effect.provide(
-				Layer.fresh(
-					Layer.provideMerge(
-						Layer.mergeAll(
-							makeSeededInstanceLayer([{ id: "i1", port: 3456 }]),
-							makeSeededRegistryLayer([
-								[
-									"proj",
-									{
-										_tag: "Ready" as const,
-										project: {
-											slug: "proj",
-											folders: [directory],
-											title: "Proj",
-											lastUsed: Date.now(),
-											instanceId: "i1",
-										},
-									},
-								],
-							]),
-						),
-						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
-					),
-				),
-			),
-		),
-	);
 });
 
 describe("SessionPrefetchLive", () => {
 	const prefetchLayer = SessionPrefetchLive.pipe(
 		Layer.provide(configRefLayer),
-		Layer.provide(instanceLayer),
+		Layer.provide(makeInstancesLayer({})),
 		Layer.provide(registryLayer),
 	);
 
@@ -537,7 +378,7 @@ describe("Scoped fiber lifecycle", () => {
 			const layer = Layer.fresh(
 				SessionPrefetchLive.pipe(
 					Layer.provide(configRefLayer),
-					Layer.provide(instanceLayer),
+					Layer.provide(makeInstancesLayer({})),
 					Layer.provide(registryLayer),
 				),
 			);

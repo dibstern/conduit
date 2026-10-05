@@ -5,7 +5,8 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { type Cause, Context, Effect, Layer } from "effect";
+import { Cause, Context, Effect, Layer, Option } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 
 import type {
 	HandlerDeps,
@@ -31,6 +32,7 @@ import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../types.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
@@ -67,7 +69,7 @@ export interface PollerManagerShape {
 export type ConnectPtyUpstreamShape = (
 	ptyId: string,
 	cursor?: number,
-) => Promise<void>;
+) => Effect.Effect<void, unknown>;
 
 /**
  * Shape for the sessionMgr field — all SessionManager capabilities used
@@ -161,7 +163,10 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 );
 
 export interface OpenCodeModelService {
+	/** Refreshes the catalog from a running instance; reaches OpenCode only when nothing is cached. */
 	listProviders(): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
+	/** The last catalog listProviders returned. Never contacts OpenCode. */
+	cachedProviders(): Effect.Effect<Option.Option<OpenCodeProviderList>>;
 	persistDefaultModel(
 		providerID: string,
 		modelID: string,
@@ -175,15 +180,42 @@ export class OpenCodeModelServiceTag extends Context.Tag(
 export const OpenCodeModelServiceLive: Layer.Layer<
 	OpenCodeModelServiceTag,
 	never,
-	OpenCodeAPITag | ConfigTag | LoggerTag
+	OpenCodeAPITag | OpenCodeInstancesTag | ConfigTag | LoggerTag
 > = Layer.effect(
 	OpenCodeModelServiceTag,
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
+		const instanceId = defaultInstanceIdForDriver("opencode");
+		let catalog: OpenCodeProviderList | undefined;
+		const refresh = (opencode: OpenCodeAPI) =>
+			Effect.tryPromise(() => opencode.provider.list()).pipe(
+				Effect.tap((list) =>
+					Effect.sync(() => {
+						catalog = list;
+					}),
+				),
+				Effect.catchAll((error) =>
+					catalog ? Effect.succeed(catalog) : Effect.fail(error),
+				),
+			);
 		return {
-			listProviders: () => Effect.tryPromise(() => client.provider.list()),
+			listProviders: () =>
+				Effect.gen(function* () {
+					const running = yield* instances.ifRunning(instanceId);
+					if (Option.isSome(running)) return yield* refresh(running.value);
+					if (catalog) return catalog;
+					return yield* refresh(
+						yield* instances
+							.use(instanceId)
+							.pipe(
+								Effect.mapError((error) => new Cause.UnknownException(error)),
+							),
+					);
+				}).pipe(Effect.scoped),
+			cachedProviders: () => Effect.sync(() => Option.fromNullable(catalog)),
 			persistDefaultModel: (providerID: string, modelID: string) =>
 				Effect.tryPromise(async () => {
 					await client.config.update({ model: `${providerID}/${modelID}` });

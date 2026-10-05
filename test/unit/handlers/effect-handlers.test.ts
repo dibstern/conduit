@@ -256,6 +256,10 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(ConfigTag, mockConfig()),
 					Layer.succeed(LoggerTag, mockLogger()),
 				),
@@ -295,6 +299,10 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(ConfigTag, mockConfig()),
 					Layer.succeed(LoggerTag, mockLogger()),
 				),

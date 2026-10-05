@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { viewSessionForClient } from "../../../src/lib/handlers/session.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -228,6 +229,14 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			});
 		});
 
+		// Relay startup makes no OpenCode requests; the first use opens the stream.
+		await relay.effectRuntime.runtime.runPromise(
+			Effect.scoped(
+				Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+					instances.use("opencode"),
+				),
+			),
+		);
 		await vi.waitFor(async () => {
 			const pending = await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {

@@ -5,9 +5,7 @@
 // Extracted from relay-stack.ts's `client_connected` handler so the logic is
 // independently testable and relay-stack stays slim.
 
-import { Effect } from "effect";
-import { mapQuestionFields } from "../bridges/question-bridge.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { Effect, Option } from "effect";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
@@ -239,64 +237,13 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 const replayPendingPermissionsEffect = (clientId: string) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const client = yield* OpenCodeAPITag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const log = yield* LoggerTag;
 
 		const servicePending = yield* pendingInteractions.listPendingPermissions();
-		const sentPermissionIds = new Set<string>();
 		for (const { timestamp: _, ...perm } of servicePending) {
 			// Spread, not a field list: a reload must rebuild the same card the
 			// live prompt showed (title, description, reason).
 			wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
-			sentPermissionIds.add(perm.requestId);
-		}
-
-		const apiPermissionsResult = yield* Effect.either(
-			Effect.gen(function* () {
-				const apiPermissions = yield* Effect.tryPromise(() =>
-					client.permission.list(),
-				);
-				const newPerms = apiPermissions.filter(
-					(p) => !sentPermissionIds.has(p.id),
-				);
-				if (newPerms.length === 0) return;
-
-				const recoveryInput = newPerms.map((p) => {
-					const raw = p as {
-						id: string;
-						permission: string;
-						sessionID?: string;
-						patterns?: string[];
-						metadata?: Record<string, unknown>;
-						always?: string[];
-					};
-					return {
-						id: raw.id,
-						permission: raw.permission,
-						...(raw.sessionID != null && { sessionId: raw.sessionID }),
-						...(raw.patterns != null && { patterns: raw.patterns }),
-						...(raw.metadata != null && { metadata: raw.metadata }),
-						...(raw.always != null && { always: raw.always }),
-					};
-				});
-				const recovered =
-					yield* pendingInteractions.recoverPendingPermissions(recoveryInput);
-				for (const perm of recovered) {
-					wsHandler.sendTo(clientId, {
-						type: "permission_request",
-						sessionId: perm.sessionId,
-						requestId: perm.requestId,
-						toolName: perm.toolName,
-						toolInput: perm.toolInput,
-					});
-				}
-			}),
-		);
-		if (apiPermissionsResult._tag === "Left") {
-			log.warn(
-				`Failed to fetch pending permissions from API: ${formatErrorDetail(apiPermissionsResult.left)}`,
-			);
 		}
 	});
 
@@ -307,13 +254,11 @@ const replayPendingQuestionsEffect = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const client = yield* OpenCodeAPITag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const log = yield* LoggerTag;
 
 		const questionReplayResult = yield* Effect.either(
 			Effect.gen(function* () {
-				const sentQuestionIds = new Set<string>();
 				const servicePendingQuestions =
 					yield* pendingInteractions.listPendingQuestions();
 				for (const pq of servicePendingQuestions) {
@@ -334,48 +279,6 @@ const replayPendingQuestionsEffect = (
 						})),
 						...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
 						...(pq.providerId ? { providerId: pq.providerId } : {}),
-					});
-					sentQuestionIds.add(pq.requestId);
-				}
-				const pendingQuestions = yield* Effect.tryPromise(() =>
-					client.question.list(),
-				);
-				log.debug(
-					`client=${clientId} listPendingQuestions returned ${pendingQuestions.length} question(s)${pendingQuestions.length > 0 ? `: ${JSON.stringify(pendingQuestions.map((q) => ({ id: q.id, hasQuestions: !!q["questions"], hasTool: !!q["tool"] })))}` : ""}`,
-				);
-				for (const pq of pendingQuestions) {
-					if (sentQuestionIds.has(pq.id)) continue;
-					const qSessionId = pq["sessionID"] as string | undefined;
-					if (qSessionId && activeId && !familyIds.has(qSessionId)) continue;
-
-					const rawQuestions = pq["questions"] as
-						| Array<{
-								question?: string;
-								header?: string;
-								options?: Array<{ label?: string; description?: string }>;
-								multiple?: boolean;
-								custom?: boolean;
-						  }>
-						| undefined;
-					if (!Array.isArray(rawQuestions)) {
-						log.debug(
-							`client=${clientId} skipping question ${pq.id}: questions field is not an array (${typeof pq["questions"]})`,
-						);
-						continue;
-					}
-					const questions = mapQuestionFields(rawQuestions);
-					const tool = pq["tool"] as { callID?: string } | undefined;
-					const toolCallId = tool?.callID;
-					log.debug(
-						`client=${clientId} sending ask_user: toolId=${pq.id} toolUseId=${toolCallId ?? "none"} questionCount=${questions.length}`,
-					);
-					wsHandler.sendTo(clientId, {
-						type: "ask_user",
-						sessionId: qSessionId ?? activeId ?? "",
-						toolId: pq.id,
-						questions,
-						providerId: "opencode",
-						...(toolCallId ? { toolUseId: toolCallId } : {}),
 					});
 				}
 			}),
@@ -423,19 +326,15 @@ const sendProvidersAndSettingsEffect = (
 
 		const providerResult = yield* Effect.either(
 			Effect.gen(function* () {
-				const openCodeProviderResult = yield* Effect.either(
-					modelService.listProviders(),
-				);
-				const providers =
-					openCodeProviderResult._tag === "Right"
-						? toConfiguredOpenCodeProviders(openCodeProviderResult.right)
-						: [];
-				if (openCodeProviderResult._tag === "Right") {
+				// Attach never contacts OpenCode: send the cached catalog, if any.
+				// The model picker refreshes it through GetModels.
+				const openCodeCatalog = yield* modelService.cachedProviders();
+				const providers = Option.match(openCodeCatalog, {
+					onNone: () => [],
+					onSome: toConfiguredOpenCodeProviders,
+				});
+				if (Option.isSome(openCodeCatalog)) {
 					wsHandler.sendTo(clientId, { type: "model_list", providers });
-				} else {
-					log.warn(
-						`OpenCode provider discovery failed during client init: ${formatErrorDetail(openCodeProviderResult.left)}`,
-					);
 				}
 
 				const claudeCapsResult = yield* Effect.either(
@@ -450,11 +349,8 @@ const sendProvidersAndSettingsEffect = (
 				) {
 					wsHandler.sendTo(clientId, { type: "model_list", providers });
 				}
-				if (
-					openCodeProviderResult._tag === "Left" &&
-					(claudeCapsResult._tag === "Left" || providers.length === 0)
-				) {
-					return yield* Effect.fail(openCodeProviderResult.left);
+				if (claudeCapsResult._tag === "Left" && providers.length === 0) {
+					return yield* Effect.fail(claudeCapsResult.left);
 				}
 
 				const currentVariant = activeId
@@ -501,10 +397,9 @@ const sendProvidersAndSettingsEffect = (
 					mode: yield* getDefaultPermissionMode(),
 				});
 
-				if (!defaultModel && openCodeProviderResult._tag === "Right") {
-					for (const providerId of openCodeProviderResult.right.connected) {
-						const defaultModelId =
-							openCodeProviderResult.right.defaults[providerId];
+				if (!defaultModel && Option.isSome(openCodeCatalog)) {
+					for (const providerId of openCodeCatalog.value.connected) {
+						const defaultModelId = openCodeCatalog.value.defaults[providerId];
 						if (defaultModelId) {
 							yield* setDefaultModel({
 								providerID: providerId,
@@ -630,7 +525,9 @@ export const handleClientConnectedEffect = (
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* replayPendingPermissionsEffect(clientId);
 		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
-		yield* sendAgentListEffect(clientId, activeId);
+		// Providers first: with no default yet, this picks one, which scopes the
+		// agent list to its provider.
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
+		yield* sendAgentListEffect(clientId, activeId);
 		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
 	});

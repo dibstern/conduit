@@ -168,10 +168,13 @@ function makeClientInitEffectLayer(
 		sessionExists: vi.fn(() => Effect.succeed(true)),
 		...sessionManagerOverrides,
 	});
+	const listProviders = vi.fn<OpenCodeModelService["listProviders"]>(() =>
+		Effect.succeed({ providers: [], defaults: {}, connected: [] }),
+	);
 	const modelService: OpenCodeModelService = {
-		listProviders: vi.fn(() =>
-			Effect.succeed({ providers: [], defaults: {}, connected: [] }),
-		),
+		listProviders,
+		// The cached catalog is whatever the last listProviders returned.
+		cachedProviders: vi.fn(() => Effect.option(listProviders())),
 		persistDefaultModel: vi.fn(() => Effect.void),
 	};
 	const agentService: AgentService = {
@@ -208,8 +211,9 @@ function makeClientInitEffectLayer(
 	const terminal = partialFake<OpenCodeTerminalService>({
 		replay: vi.fn(() => Effect.void),
 	});
-	const discoverClaudeCapabilities = vi.fn(() =>
-		Effect.succeed(makeClaudeCapabilities()),
+	const discoverClaudeCapabilities = vi.fn(
+		(): Effect.Effect<ProviderCapabilities, unknown> =>
+			Effect.succeed(makeClaudeCapabilities()),
 	);
 	const orchestrationEngine = withDispatchEffect({
 		getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
@@ -1014,10 +1018,13 @@ describe("handleClientConnectedEffect — model list", () => {
 		});
 	});
 
-	it("sends INIT_FAILED when listProviders throws", async () => {
+	it("sends INIT_FAILED when no catalog is cached and Claude discovery fails", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.modelService.listProviders).mockReturnValue(
-			Effect.fail(new Cause.UnknownException(new Error("providers fail"))),
+		vi.mocked(deps.modelService.cachedProviders).mockReturnValue(
+			Effect.succeedNone,
+		);
+		deps.discoverClaudeCapabilities.mockReturnValue(
+			Effect.fail(new Cause.UnknownException(new Error("claude fail"))),
 		);
 
 		await runClientInit(deps, "client-1");
@@ -1257,34 +1264,26 @@ describe("handleClientConnectedEffect — pending questions", () => {
 						},
 					],
 				},
+				{
+					requestId: "unrelated-question",
+					timestamp: 0,
+					sessionId: "unrelated",
+					questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
+				},
 			]),
 		);
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "api-question",
-				sessionID: "grandchild",
-				questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
-			},
-			{
-				id: "unrelated-question",
-				sessionID: "unrelated",
-				questions: [{ question: "Proceed?", header: "Confirm", options: [] }],
-			},
-		]);
 		await runClientInit(deps, "client-1");
 		expect(
 			deps.pendingInteractions.listPendingQuestions,
 		).toHaveBeenCalledWith();
-		for (const toolId of ["service-question", "api-question"]) {
-			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-				"client-1",
-				expect.objectContaining({
-					type: "ask_user",
-					sessionId: "grandchild",
-					toolId,
-				}),
-			);
-		}
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+			"client-1",
+			expect.objectContaining({
+				type: "ask_user",
+				sessionId: "grandchild",
+				toolId: "service-question",
+			}),
+		);
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
 			expect.objectContaining({ toolId: "unrelated-question" }),
@@ -1303,24 +1302,28 @@ describe("handleClientConnectedEffect — pending questions", () => {
 
 	it("sends pending questions to reconnecting client", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "que_tool1",
-				questions: [
-					{
-						question: "Which option?",
-						header: "Select",
-						options: [
-							{ label: "A", description: "Option A" },
-							{ label: "B", description: "Option B" },
-						],
-						multiple: false,
-						custom: true,
-					},
-				],
-				tool: { callID: "toolu_abc123" },
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: "que_tool1",
+					timestamp: 0,
+					sessionId: "session-1",
+					questions: [
+						{
+							question: "Which option?",
+							header: "Select",
+							options: [
+								{ label: "A", description: "Option A" },
+								{ label: "B", description: "Option B" },
+							],
+							multiSelect: false,
+						},
+					],
+					toolCallId: "toolu_abc123",
+					providerId: "opencode",
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1337,7 +1340,6 @@ describe("handleClientConnectedEffect — pending questions", () => {
 						{ label: "B", description: "Option B" },
 					],
 					multiSelect: false,
-					custom: true,
 				},
 			],
 			providerId: "opencode",
@@ -1372,20 +1374,16 @@ describe("handleClientConnectedEffect — pending questions", () => {
 				},
 			]),
 		);
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "que_tool1",
-				questions: [
-					{
-						question: "Continue?",
-						header: "",
-						options: [],
-						multiple: false,
-						custom: true,
-					},
-				],
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: "que_tool1",
+					timestamp: 0,
+					sessionId: "session-1",
+					questions: [{ question: "Continue?", header: "", options: [] }],
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1402,34 +1400,22 @@ describe("handleClientConnectedEffect — pending questions", () => {
 
 	it("filters out questions from other sessions", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "que_this",
-				questions: [
-					{
-						question: "Q1?",
-						header: "H",
-						options: [],
-						multiple: false,
-						custom: true,
-					},
-				],
-				sessionID: "session-1", // matches default activeId
-			},
-			{
-				id: "que_other",
-				questions: [
-					{
-						question: "Q2?",
-						header: "H",
-						options: [],
-						multiple: false,
-						custom: true,
-					},
-				],
-				sessionID: "session-OTHER",
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: "que_this",
+					timestamp: 0,
+					sessionId: "session-1", // matches default activeId
+					questions: [{ question: "Q1?", header: "H", options: [] }],
+				},
+				{
+					requestId: "que_other",
+					timestamp: 0,
+					sessionId: "session-OTHER",
+					questions: [{ question: "Q2?", header: "H", options: [] }],
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1497,9 +1483,9 @@ describe("handleClientConnectedEffect — error resilience", () => {
 	});
 });
 
-// Permissions are replayed from the Effect-owned pending interaction port.
-// Questions are replayed first from the same port, then from the OpenCode REST
-// API with field mapping (`multiple` → `multiSelect`).
+// Permissions and questions are replayed from the Effect-owned pending
+// interaction port. Attach never asks OpenCode: reconcile on stream connect
+// recovers OpenCode's pending interactions into that port.
 
 describe("handleClientConnectedEffect — pending interaction integration", () => {
 	it("replays permission from the pending interaction port", async () => {
@@ -1530,54 +1516,7 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 		});
 	});
 
-	it("replays question from API with field mapping (multiple → multiSelect)", async () => {
-		const deps = makeClientInitEffectLayer();
-
-		// Mock the REST API to return a pending question in OpenCode's format
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "q-real-1",
-				questions: [
-					{
-						question: "Which option?",
-						header: "Choose",
-						options: [
-							{ label: "A", description: "opt A" },
-							{ label: "B", description: "opt B" },
-						],
-						multiple: false,
-						custom: true,
-					},
-				],
-				tool: { callID: "toolu_xyz" },
-			},
-		]);
-
-		await runClientInit(deps, "client-1");
-
-		// Verify the question was mapped correctly (multiple → multiSelect)
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "ask_user",
-			sessionId: "session-1",
-			toolId: "q-real-1",
-			questions: [
-				{
-					question: "Which option?",
-					header: "Choose",
-					options: [
-						{ label: "A", description: "opt A" },
-						{ label: "B", description: "opt B" },
-					],
-					multiSelect: false,
-					custom: true,
-				},
-			],
-			providerId: "opencode",
-			toolUseId: "toolu_xyz",
-		});
-	});
-
-	it("replays multiple pending permissions and API questions simultaneously", async () => {
+	it("replays multiple pending permissions and questions simultaneously", async () => {
 		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
 			Effect.succeed([
@@ -1600,13 +1539,16 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 			]),
 		);
 
-		// Mock the REST API to return 1 pending question
-		vi.mocked(deps.client.question.list).mockResolvedValue([
-			{
-				id: "q-r1",
-				questions: [{ question: "Continue?", header: "Confirm" }],
-			},
-		]);
+		vi.mocked(deps.pendingInteractions.listPendingQuestions).mockReturnValue(
+			Effect.succeed([
+				{
+					requestId: "q-r1",
+					timestamp: 0,
+					sessionId: "",
+					questions: [{ question: "Continue?", header: "Confirm" }],
+				},
+			]),
+		);
 
 		await runClientInit(deps, "client-1");
 
@@ -1631,243 +1573,14 @@ describe("handleClientConnectedEffect — pending interaction integration", () =
 	});
 });
 
-describe("handleClientConnectedEffect — API permission rehydration", () => {
-	it("fetches permissions from API and sends them to connecting client", async () => {
+describe("handleClientConnectedEffect — no OpenCode requests", () => {
+	it("does not ask OpenCode for pending permissions or questions", async () => {
 		const deps = makeClientInitEffectLayer();
-		// Pending interaction service has nothing — simulates relay restart where service state is lost
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([]),
-		);
-		// But API has a pending permission
-		vi.mocked(deps.client.permission.list).mockResolvedValue([
-			{
-				id: "per_api1",
-				sessionID: "ses-abc",
-				permission: "file_write",
-				patterns: ["/src/*"],
-				metadata: { path: "/src/foo.ts" },
-				always: [],
-			},
-		]);
-		// recoverPendingPermissions returns the recovered entries
-		vi.mocked(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_api1"),
-					sessionId: "ses-abc",
-					toolName: "file_write",
-					toolInput: {
-						patterns: ["/src/*"],
-						metadata: { path: "/src/foo.ts" },
-					},
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
 
 		await runClientInit(deps, "client-1");
 
-		// Should call the API
-		expect(deps.client.permission.list).toHaveBeenCalled();
-		// Should recover into pending interaction service (sessionID mapped to sessionId)
-		expect(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).toHaveBeenCalledWith([
-			{
-				id: "per_api1",
-				sessionId: "ses-abc",
-				permission: "file_write",
-				patterns: ["/src/*"],
-				metadata: { path: "/src/foo.ts" },
-				always: [],
-			},
-		]);
-		// Should send permission_request to client
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses-abc",
-			requestId: pid("per_api1"),
-			toolName: "file_write",
-			toolInput: { patterns: ["/src/*"], metadata: { path: "/src/foo.ts" } },
-		});
-	});
-
-	it("sends both service-cached and API-fetched permissions without duplicates", async () => {
-		const deps = makeClientInitEffectLayer();
-		// Pending interaction service already has one permission
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_service1"),
-					sessionId: "ses-1",
-					toolName: "shell_exec",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-		// API returns a different permission (not in service)
-		vi.mocked(deps.client.permission.list).mockResolvedValue([
-			{
-				id: "per_api2",
-				sessionID: "ses-2",
-				permission: "file_write",
-				patterns: [],
-				metadata: {},
-				always: [],
-			},
-		]);
-		vi.mocked(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_api2"),
-					sessionId: "ses-2",
-					toolName: "file_write",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 2000,
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const permCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "permission_request",
-		);
-		// Should have both: one from service, one from API
-		expect(permCalls).toHaveLength(2);
-		const requestIds = permCalls.map(
-			(c) => (c[1] as { requestId: string }).requestId,
-		);
-		expect(requestIds).toContain("per_service1");
-		expect(requestIds).toContain("per_api2");
-	});
-
-	it("deduplicates permissions that exist in both service and API", async () => {
-		const deps = makeClientInitEffectLayer();
-		// Pending interaction service has permission per_dup
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_dup"),
-					sessionId: "ses-1",
-					toolName: "shell_exec",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-		// API also returns per_dup (same permission)
-		vi.mocked(deps.client.permission.list).mockResolvedValue([
-			{
-				id: "per_dup",
-				sessionID: "ses-1",
-				permission: "shell_exec",
-				patterns: [],
-				metadata: {},
-				always: [],
-			},
-		]);
-		// recoverPendingPermissions won't return anything new since service already has it
-		vi.mocked(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).mockReturnValue(Effect.succeed([]));
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const permCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "permission_request",
-		);
-		// Should only send once (from service replay), not duplicated from API
-		expect(permCalls).toHaveLength(1);
-		const permissionCall = permCalls[0];
-		assert.exists(permissionCall, "expected permission call");
-		expect((permissionCall[1] as { requestId: string }).requestId).toBe(
-			"per_dup",
-		);
-	});
-
-	it("gracefully handles API failure for permissions", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.client.permission.list).mockRejectedValue(
-			new Error("API down"),
-		);
-		// Pending interaction service still has a permission
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_service"),
-					sessionId: "ses-1",
-					toolName: "Bash",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-
-		// Should NOT throw
-		await expect(runClientInit(deps, "client-1")).resolves.toBeUndefined();
-
-		// Pending interaction service permission should still be sent
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("per_service"),
-			toolName: "Bash",
-			toolInput: { patterns: [], metadata: {} },
-			always: [],
-		});
-	});
-
-	it("maps API sessionID field to sessionId in recovered permissions", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.pendingInteractions.listPendingPermissions).mockReturnValue(
-			Effect.succeed([]),
-		);
-		vi.mocked(deps.client.permission.list).mockResolvedValue([
-			{
-				id: "per_sess",
-				sessionID: "ses_325b9c3caffeFlhLvFRycK1ruF",
-				permission: "file_write",
-				patterns: [],
-				metadata: {},
-			},
-		]);
-		vi.mocked(
-			deps.pendingInteractions.recoverPendingPermissions,
-		).mockReturnValue(
-			Effect.succeed([
-				{
-					requestId: pid("per_sess"),
-					sessionId: "ses_325b9c3caffeFlhLvFRycK1ruF",
-					toolName: "file_write",
-					toolInput: { patterns: [], metadata: {} },
-					always: [],
-					timestamp: 1000,
-				},
-			]),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_request",
-			sessionId: "ses_325b9c3caffeFlhLvFRycK1ruF",
-			requestId: pid("per_sess"),
-			toolName: "file_write",
-			toolInput: { patterns: [], metadata: {} },
-		});
+		expect(deps.client.permission.list).not.toHaveBeenCalled();
+		expect(deps.client.question.list).not.toHaveBeenCalled();
 	});
 });
 

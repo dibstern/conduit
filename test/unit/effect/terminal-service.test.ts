@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
@@ -28,6 +28,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -77,7 +78,7 @@ const makeLayer = (options?: {
 	const ptyManager =
 		options?.ptyManager ?? new PtyManager({ log: makeMockLogger() });
 	const connectPtyUpstream =
-		options?.connectPtyUpstream ?? vi.fn(async () => undefined);
+		options?.connectPtyUpstream ?? vi.fn(() => Effect.void);
 	const localPty =
 		options?.localPty ??
 		({
@@ -113,7 +114,10 @@ const makeLayer = (options?: {
 	return OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, api),
+				Layer.succeed(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
 				Layer.succeed(PtyManagerTag, ptyManager),
 				Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
 				Layer.succeed(LocalPtyServiceTag, localPty),
@@ -215,9 +219,11 @@ describe("OpenCodeTerminalServiceLive", () => {
 			const wsHandler = makeMockWebSocketHandler({
 				broadcast: vi.fn((message) => events.push(`broadcast:${message.type}`)),
 			});
-			const connectPtyUpstream = vi.fn(async () => {
-				events.push("connect");
-			});
+			const connectPtyUpstream = vi.fn(() =>
+				Effect.sync(() => {
+					events.push("connect");
+				}),
+			);
 			const api = makeApi();
 			const layer = makeLayer({ api, wsHandler, connectPtyUpstream });
 
@@ -276,7 +282,7 @@ describe("OpenCodeTerminalServiceLive", () => {
 		"lists PTYs and reconnects missing running upstreams with cursor -1",
 		() => {
 			const wsHandler = makeMockWebSocketHandler();
-			const connectPtyUpstream = vi.fn(async () => undefined);
+			const connectPtyUpstream = vi.fn(() => Effect.void);
 			const api = makeApi({
 				list: vi.fn(async () => [
 					{ id: "pty-1", status: "running" },

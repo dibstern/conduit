@@ -85,68 +85,11 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		const opencodePathCheck = yield* Effect.either(
-			Effect.tryPromise({
-				try: () => api.app.path(),
-				catch: (cause) => cause,
-			}),
-		);
-		const opencodeAvailable = opencodePathCheck._tag === "Right";
-		if (opencodeAvailable) {
-			yield* Effect.sync(() =>
-				log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
-			);
-		} else {
-			yield* Effect.sync(() =>
-				log.warn(
-					`OpenCode is unavailable at ${config.opencodeUrl}: ${
-						opencodePathCheck.left instanceof Error
-							? opencodePathCheck.left.message
-							: String(opencodePathCheck.left)
-					}; continuing so other providers can load`,
-				),
-			);
-		}
-
-		let defaultModel = initialDefaultModel;
-		// Each call to an absent server spends the SDK's ~3s retry window, and
-		// Claude projects wait on this startup too.
-		if (!defaultModel && opencodeAvailable) {
-			const configResult = yield* Effect.either(
-				Effect.tryPromise(() => api.config.get()),
-			);
-			if (configResult._tag === "Right") {
-				const configModel =
-					typeof configResult.right?.["model"] === "string"
-						? configResult.right["model"]
-						: "";
-				if (configModel) {
-					const slashIdx = configModel.indexOf("/");
-					const provider = slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
-					const modelId =
-						slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
-					if (provider && modelId) {
-						defaultModel = {
-							providerID: provider,
-							modelID: modelId,
-						};
-						yield* Effect.sync(() =>
-							log.info(`✓ Default model from project config: ${configModel}`),
-						);
-					}
-				}
-			} else {
-				yield* Effect.sync(() =>
-					log.warn(
-						`Config API unavailable: ${formatErrorDetail(configResult.left)}`,
-					),
-				);
-			}
-		}
-
-		// Before initialize: the default model picks the first session's provider.
-		if (defaultModel) {
-			yield* setDefaultModel(defaultModel);
+		// Relay startup never contacts OpenCode, so the default model comes from
+		// relay settings only. Before initialize: it picks the first session's
+		// provider.
+		if (initialDefaultModel) {
+			yield* setDefaultModel(initialDefaultModel);
 		}
 		if (initialDefaultVariant) {
 			yield* setDefaultVariant(initialDefaultVariant);
@@ -249,32 +192,22 @@ function acquireStartupServices(inputs: StartupInputs) {
 				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
 			>(),
 		);
-		const sessionId = opencodeAvailable
-			? yield* sessionManagerService.initialize(config.sessionTitle)
-			: yield* Effect.gen(function* () {
-					const readQueryEffect = yield* ReadQueryEffectTag;
-					const sessionsResult = yield* Effect.either(
-						readQueryEffect.listSessions(),
-					);
-					if (
-						sessionsResult._tag === "Right" &&
-						sessionsResult.right.length > 0
-					) {
-						yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
-						const topLevel = sessionsResult.right.find(
-							(session) => !session.parent_id,
-						);
-						return (topLevel ?? sessionsResult.right[0])?.id ?? "";
-					}
-					if (sessionsResult._tag === "Left") {
-						yield* Effect.sync(() =>
-							log.warn(
-								`Session list unavailable while OpenCode is down: ${formatErrorDetail(sessionsResult.left)}`,
-							),
-						);
-					}
-					return "";
-				});
+		// Read-model only: creating a first session could call OpenCode, so attach
+		// creates it instead (getDefaultSessionId).
+		const readQueryEffect = yield* ReadQueryEffectTag;
+		const sessionsResult = yield* Effect.either(readQueryEffect.listSessions());
+		if (sessionsResult._tag === "Right" && sessionsResult.right.length > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
+		if (sessionsResult._tag === "Left")
+			yield* Effect.sync(() =>
+				log.warn(
+					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
+				),
+			);
+		const sessions =
+			sessionsResult._tag === "Right" ? sessionsResult.right : [];
+		const sessionId =
+			(sessions.find((session) => !session.parent_id) ?? sessions[0])?.id ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
@@ -311,7 +244,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			statusPoller,
 			pollerManager,
 			opencodeRuntimeIngress,
-			opencodeAvailable,
 		};
 	});
 }
@@ -351,7 +283,6 @@ function startMonitoringAndPollers(
 	inputs: StartupInputs,
 	services: AcquiredStartupServices,
 ) {
-	if (!services.opencodeAvailable) return Effect.succeed(undefined);
 	const { config, statusLog, sseLog, pipelineLog, pollerLog, layers } = inputs;
 	const { monitoringStateAccess } = layers;
 	const { api, wsHandler, pollerManager, sseStream } = services;
@@ -401,9 +332,8 @@ function startMonitoringAndPollers(
 	});
 }
 
-type StartupMonitoring = Exclude<
-	Effect.Effect.Success<ReturnType<typeof startMonitoringAndPollers>>,
-	undefined
+type StartupMonitoring = Effect.Effect.Success<
+	ReturnType<typeof startMonitoringAndPollers>
 >;
 
 function startSseConsumers(
@@ -482,10 +412,9 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const services = yield* acquireStartupServices(inputs);
 				yield* wireStartupCallbacks(inputs, services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
-				const stopMonitoring = monitoring?.stopMonitoring ?? (() => {});
+				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
-					if (monitoring)
-						yield* startSseConsumers(inputs, services, monitoring);
+					yield* startSseConsumers(inputs, services, monitoring);
 					const gate = yield* RelayCommandGateTag;
 					yield* gate.markReady();
 				}).pipe(

@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { expect, vi } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makePtyRuntimeLive } from "../../../src/lib/domain/relay/Layers/pty-manager-layer.js";
 import {
 	ConfigTag,
@@ -25,6 +25,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -98,10 +99,13 @@ describe("PtyManagerLive", () => {
 					}),
 				});
 				const connectPtyUpstream: ConnectPtyUpstreamShape = vi.fn(
-					async () => undefined,
+					() => Effect.void,
 				);
 				const dependencyLayer = Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag, makeApi()),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: makeApi() }),
+					),
 					Layer.succeed(WebSocketHandlerTag, wsHandler),
 					Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/project" })),
 					Layer.succeed(LoggerTag, makeMockLogger()),

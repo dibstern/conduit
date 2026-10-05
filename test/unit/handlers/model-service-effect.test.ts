@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
@@ -37,6 +38,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -70,6 +72,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -131,6 +134,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const engine = withDispatchEffect({
@@ -224,6 +228,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -288,6 +293,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -352,6 +358,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -438,6 +445,10 @@ describe("model handlers with Effect-native model service", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(
+							OpenCodeInstancesTag,
+							makeOpenCodeInstancesStub({ opencode: api }),
+						),
 						Layer.succeed(ConfigTag, makeMockConfig({ configDir, projectDir })),
 						Layer.succeed(LoggerTag, logger),
 					),

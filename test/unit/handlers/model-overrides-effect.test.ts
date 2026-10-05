@@ -99,6 +99,7 @@ describe("model handlers with Effect override state", () => {
 						],
 					}),
 				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const layer = Layer.mergeAll(

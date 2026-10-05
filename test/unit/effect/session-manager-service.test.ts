@@ -1097,6 +1097,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = new OrchestrationEngine({
 				registry: new ProviderRegistry(),
@@ -1288,6 +1289,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
 				[];
@@ -1619,6 +1621,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatch = vi.fn(async () => undefined);
 			const engine = withDispatchEffect({ dispatch });
@@ -1717,6 +1720,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
 				ifRunning: () => Effect.succeedNone,
+				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => undefined),
@@ -1787,6 +1791,7 @@ describe("SessionManagerService", () => {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
 			ifRunning: () => Effect.succeedNone,
+			stop: () => Effect.void,
 		} satisfies OpenCodeInstances;
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => undefined),
@@ -1977,6 +1982,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
@@ -2051,6 +2057,7 @@ describe("SessionManagerService", () => {
 					events: () => Stream.empty,
 					use,
 					ifRunning: () => Effect.succeedNone,
+					stop: () => Effect.void,
 				} satisfies OpenCodeInstances;
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,

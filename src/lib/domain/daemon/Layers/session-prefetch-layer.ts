@@ -8,7 +8,7 @@
 //
 // Dependencies:
 //   - DaemonConfigRefTag — for persistedSessionCounts
-//   - InstanceManagerStateTag — for resolving instance URLs and credentials
+//   - OpenCodeInstancesTag — for a client when the instance is already running
 //   - ProjectRegistryTag — for iterating registered projects
 //
 // Error handling: all errors are caught per-project. Session count
@@ -18,17 +18,12 @@
 // (AP-33)
 
 import { existsSync } from "node:fs";
-import { Effect, HashMap, Layer, Ref } from "effect";
+import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
-import {
-	getInstance,
-	getInstanceUrl,
-	getManagedOpenCodeProcessEnv,
-	type InstanceManagerStateTag,
-} from "../Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 
 /**
@@ -36,8 +31,8 @@ import { ProjectRegistryTag } from "../Services/project-registry-service.js";
  * that don't already have persisted counts.
  *
  * For each project:
- * 1. Resolve the OpenCode URL from the project's instanceId
- * 2. Fetch the /session endpoint with credentials
+ * 1. Take a client for the project's instance only if it is already running
+ * 2. List the project's sessions
  * 3. Update the persistedSessionCounts map in DaemonConfigRefTag
  *
  * Returns the number of projects for which counts were fetched.
@@ -45,17 +40,14 @@ import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 export const prefetchSessionCounts: Effect.Effect<
 	number,
 	never,
-	DaemonConfigRefTag | InstanceManagerStateTag | ProjectRegistryTag
+	DaemonConfigRefTag | OpenCodeInstancesTag | ProjectRegistryTag
 > = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
 	const registryRef = yield* ProjectRegistryTag;
+	const instances = yield* OpenCodeInstancesTag;
 
 	const config = yield* Ref.get(configRef);
 	const registryState = yield* Ref.get(registryRef);
-
-	// Global credentials from environment
-	const globalPassword = process.env["OPENCODE_SERVER_PASSWORD"] ?? "";
-	const globalUsername = process.env["OPENCODE_SERVER_USERNAME"] ?? "opencode";
 
 	let fetched = 0;
 
@@ -64,47 +56,25 @@ export const prefetchSessionCounts: Effect.Effect<
 		// Skip if we already have persisted counts
 		if (config.persistedSessionCounts.has(slug)) continue;
 
-		// Resolve instance for this project
-		const instanceId = entry.project.instanceId ?? "default";
-
-		// Get the instance (may not exist — skip if not found)
-		const instance = yield* getInstance(instanceId).pipe(
-			Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
-		);
-		if (instance === null) continue;
-
-		// Resolve OpenCode URL via the instance manager
-		const opencodeUrl = yield* getInstanceUrl(instanceId);
-		if (opencodeUrl === null) continue;
-
-		// Build auth headers
-		const env = instance.managed
-			? ((yield* getManagedOpenCodeProcessEnv(instanceId)) ?? instance.env)
-			: instance.env;
-		const password = env?.["OPENCODE_SERVER_PASSWORD"] ?? globalPassword;
-		const username = env?.["OPENCODE_SERVER_USERNAME"] ?? globalUsername;
-		const headers: Record<string, string> = {
-			"x-opencode-directory": entry.project.folders[0],
-		};
-		if (password) {
-			headers["Authorization"] =
-				`Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-		}
-
-		// Fetch session count (best-effort)
-		const count = yield* Effect.tryPromise({
-			try: async () => {
-				const res = await fetch(`${opencodeUrl}/session?limit=10000`, {
-					headers,
-				});
-				const data: unknown = await res.json();
-				if (Array.isArray(data)) {
-					return data.length;
-				}
-				return null;
-			},
-			catch: () => null,
-		}).pipe(Effect.catchAll(() => Effect.succeed(null)));
+		// Best-effort count, only from an instance that is already running.
+		const count = yield* instances
+			.ifRunning(
+				entry.project.instanceId ?? "default",
+				entry.project.folders[0],
+			)
+			.pipe(
+				Effect.flatMap(
+					Option.match({
+						onNone: () => Effect.succeed(null),
+						onSome: (client) =>
+							Effect.tryPromise(() =>
+								client.session.list({ limit: 10000 }),
+							).pipe(Effect.map((sessions) => sessions.length)),
+					}),
+				),
+				Effect.scoped,
+				Effect.catchAll(() => Effect.succeed(null)),
+			);
 
 		if (count !== null && count > 0) {
 			yield* commitDaemonRuntimeConfig((c) => ({
@@ -149,7 +119,7 @@ export const prefetchSessionCounts: Effect.Effect<
 export const SessionPrefetchLive: Layer.Layer<
 	never,
 	never,
-	DaemonConfigRefTag | InstanceManagerStateTag | ProjectRegistryTag
+	DaemonConfigRefTag | OpenCodeInstancesTag | ProjectRegistryTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		yield* Effect.logInfo("Session prefetch layer initialized");

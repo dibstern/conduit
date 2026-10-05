@@ -97,6 +97,10 @@ const streamLog = (action, stream) =>
 		`${JSON.stringify({ pid: process.pid, at: Date.now(), action, ...stream })}\n`,
 	);
 const server = createServer(async (request, response) => {
+	appendFileSync(
+		join(configDir, "fake-opencode-requests.jsonl"),
+		`${JSON.stringify({ pid: process.pid, at: Date.now(), method: request.method, url: request.url, directory: request.headers["x-opencode-directory"] })}\n`,
+	);
 	if (password && request.headers.authorization !== authorization) {
 		if (request.url?.split("?")[0] === "/session") {
 			appendFileSync(
@@ -193,7 +197,7 @@ const server = createServer(async (request, response) => {
 	if (request.url?.split("?")[0] === "/session") {
 		appendFileSync(
 			join(configDir, "fake-opencode-session-requests.jsonl"),
-			`${JSON.stringify({ authenticated: true, directory: request.headers["x-opencode-directory"] })}\n`,
+			`${JSON.stringify({ authenticated: true, directory })}\n`,
 		);
 		if (request.method === "POST") {
 			const input = JSON.parse(body || "{}");
@@ -283,6 +287,26 @@ const server = createServer(async (request, response) => {
 		);
 	} else if (path === "/config") {
 		response.end("{}");
+	} else if (path === "/provider" && request.method === "GET") {
+		response.end(
+			JSON.stringify({
+				all: [
+					{
+						id: "fake",
+						name: "Fake Provider",
+						models: {
+							"fake-model": {
+								id: "fake-model",
+								name: "Fake Model",
+								limit: { context: 128000, output: 4096 },
+							},
+						},
+					},
+				],
+				default: { fake: "fake-model" },
+				connected: ["fake"],
+			}),
+		);
 	} else {
 		response.end("[]");
 	}

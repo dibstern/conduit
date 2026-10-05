@@ -508,6 +508,7 @@ export function makeOpenCodeInstancesStub(
 		events: () => Stream.empty,
 		use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		stop: () => Effect.void,
 	};
 }
 
@@ -913,7 +914,7 @@ export function makeTestHandlerLayer(
 		notifySSEEvent: vi.fn(),
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
-		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+		opts?.connectPtyUpstream ?? vi.fn(() => Effect.void);
 	const sessionTitleService =
 		opts?.sessionTitleService ?? makeMockSessionTitleService();
 	const localPty: LocalPtyService = opts?.localPty ?? {
@@ -1001,7 +1002,14 @@ export function makeTestHandlerLayer(
 		Layer.provide(openCodeApiLayer),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				openCodeInstancesLayer,
+				configLayer,
+				loggerLayer,
+			),
+		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
@@ -1028,7 +1036,7 @@ export function makeTestHandlerLayer(
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				openCodeInstancesLayer,
 				wsHandlerLayer,
 				loggerLayer,
 				configLayer,

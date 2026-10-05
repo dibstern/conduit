@@ -40,7 +40,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
 			const wsHandler = makeMockWebSocketHandler();
-			const connectPtyUpstream = vi.fn(async () => undefined);
+			const connectPtyUpstream = vi.fn(() => Effect.void);
 
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
@@ -124,7 +124,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 					return Effect.succeed(session);
 				}),
 			};
-			const connectPtyUpstream = vi.fn(async () => undefined);
+			const connectPtyUpstream = vi.fn(() => Effect.void);
 
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;

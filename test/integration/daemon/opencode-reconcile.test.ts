@@ -101,11 +101,11 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 	it("re-delivers each project's pending prompt once after a reconnect, never across projects", async () => {
 		const fixture = await start("reconnect");
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Project A", undefined, "opencode");
+		const sessionA = await a.createSession("Project A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Project B", undefined, "opencode");
+		const sessionB = await b.createSession("Project B", "opencode", "opencode");
 		await fixture.addOpenCodePrompt(
 			"permission",
 			fixture.projectDir,
@@ -179,6 +179,8 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 	it("reconciles a relay that subscribes after the stream is connected", async () => {
 		const fixture = await start("late-subscriber");
 		const a = await fixture.connect();
+		// Events are passive: the first OpenCode use opens the shared stream.
+		await a.createSession("Project A", "opencode", "opencode");
 		await vi.waitFor(() => {
 			expect(
 				fixture
@@ -238,7 +240,7 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 	it("settles a session to idle from the status poll when its idle event is dropped", async () => {
 		const fixture = await start("dropped-idle");
 		const a = await fixture.connect();
-		const sessionA = await a.createSession("Busy A", undefined, "opencode");
+		const sessionA = await a.createSession("Busy A", "opencode", "opencode");
 		await vi.waitFor(() => {
 			expect(
 				fixture
