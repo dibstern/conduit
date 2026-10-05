@@ -28,8 +28,8 @@
 
 	/**
 	 * Fetch daemon health to discover the best external address.
-	 * Prefers LAN IP > Tailscale IP — LAN is more useful for same-network
-	 * device scanning. Only needed when user is on localhost.
+	 * Prefers the Tailscale Serve URL, then LAN IP, then Tailscale IP.
+	 * Only needed when user is on localhost.
 	 */
 	async function fetchNetworkHost(): Promise<void> {
 		fetchingHost = true;
@@ -37,6 +37,13 @@
 			const res = await fetch("/health");
 			if (!res.ok) return;
 			const data = await res.json();
+			// Serve mode binds conduit to loopback, so its Tailscale URL is the only
+			// address another device can reach. If Serve failed there is no URL,
+			// and an IP-based one would not work either.
+			if (data.tailscaleServe) {
+				networkHost = data.tailscaleServe.url ?? null;
+				return;
+			}
 			const tls = data.tlsEnabled === true;
 			const scheme = tls ? "https" : "http";
 			// Prefer LAN IP for same-network access, fall back to Tailscale

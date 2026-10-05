@@ -293,6 +293,7 @@ describe("Effect HTTP Router", () => {
 					Layer.succeed(SetupInfoProvider, {
 						getPort: () => Effect.succeed(2633),
 						getIsTls: () => Effect.succeed(false),
+						getPublicUrl: () => Effect.succeed(null),
 					}),
 				),
 			);

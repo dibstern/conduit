@@ -17,6 +17,7 @@ export interface SetupInfo {
 	httpUrl: string;
 	hasCert: boolean;
 	lanMode: boolean;
+	publicUrl: string | null;
 }
 
 export type StatusVariant = "ok" | "warn" | "pending";
@@ -51,7 +52,8 @@ export function detectPlatform(): PlatformInfo {
 		window.matchMedia("(display-mode:standalone)").matches ||
 		!!(navigator as Navigator & { standalone?: boolean }).standalone;
 	const isHttps = location.protocol === "https:";
-	const isTailscale = /^100\./.test(location.hostname);
+	const isTailscale =
+		/^100\./.test(location.hostname) || location.hostname.endsWith(".ts.net");
 	const isIPad =
 		/iPad/.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 	const isSafari =
