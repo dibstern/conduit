@@ -457,6 +457,8 @@ if (stories.length > 0) {
 		["overlays-connectoverlay--connected", "all"],
 		// Settles to the cleared viewer; the back-to-tree contract is its play().
 		["file-fileviewer--back-to-file-tree", "all"],
+		// Behavior-only: clicks through to Done; its contract is the play().
+		["pages-setuppage--done-on-localhost", "all"],
 
 		// Renders no pixels at either width, so both captures were blank. Note it
 		// is deliberately NOT added to build-health's EXPECTED_EMPTY_ROOT: it does

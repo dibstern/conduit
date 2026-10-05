@@ -75,7 +75,9 @@
 	});
 
 	let doneLinkHref = $derived.by(() => {
-		if (platform.isStandalone || platform.isHttps) return "/";
+		// localhost is already a secure context; moving origin would mean re-entering the PIN.
+		if (platform.isStandalone || platform.isHttps || window.isSecureContext)
+			return "/";
 		return httpsUrl || "/";
 	});
 
@@ -170,7 +172,12 @@
 			localStorage.removeItem("setup-pending");
 			localStorage.setItem("setup-done", "1");
 		}
-		navigate(doneLinkHref);
+		// pushState throws on a cross-origin URL, so leave the page instead.
+		if (new URL(doneLinkHref, location.href).origin === location.origin) {
+			navigate(doneLinkHref);
+		} else {
+			location.assign(doneLinkHref);
+		}
 	}
 
 	async function checkHttps(): Promise<void> {
