@@ -23,6 +23,7 @@ import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import WebSocket from "ws";
 import {
 	defaultInstanceIdForDriver,
+	type ProviderDriverKind,
 	ProviderInstanceIdSchema,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
@@ -847,6 +848,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return `http://127.0.0.1:${this.port}`;
 	}
 
+	opencodeRequestBodies() {
+		return this.recordedOpenCode?.requestBodies ?? [];
+	}
+
 	claudeOptions(): readonly {
 		pid: number;
 		options: Record<string, unknown>;
@@ -1520,11 +1525,15 @@ export class ProcessBrowser {
 		return !this.closed && !this.failure;
 	}
 
-	async createSession(title?: string, instanceId?: string): Promise<string> {
+	async createSession(
+		title?: string,
+		instanceId?: string,
+		providerId: ProviderDriverKind = "claude",
+	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
 				projectSlug: this.projectSlug,
-				providerId: "claude",
+				providerId,
 				...(instanceId
 					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
 					: {}),

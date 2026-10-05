@@ -423,6 +423,7 @@ export interface RelayStackConfig {
 	opencodeUrl: string;
 	pin?: string;
 	projectDir: string;
+	extraFolders?: readonly string[];
 	slug: string;
 	staticDir?: string;
 	/** TLS certificate and key for HTTPS mode */
@@ -819,6 +820,7 @@ export async function createRelayStack(
 		httpServer,
 		opencodeUrl: config.opencodeUrl,
 		projectDir: config.projectDir,
+		...(config.extraFolders != null && { extraFolders: config.extraFolders }),
 		slug: config.slug,
 		...(config.sessionTitle != null && { sessionTitle: config.sessionTitle }),
 		log,

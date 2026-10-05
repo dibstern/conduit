@@ -2,10 +2,15 @@
 // Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
+import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { Deferred, Effect } from "effect";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { PromptOptions } from "../instance/sdk-types.js";
+import type {
+	PermissionRuleset,
+	PromptOptions,
+} from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
 import { ProviderInstanceFailure } from "./errors.js";
 import type {
@@ -168,11 +173,24 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private sendTurnLocalEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, Error> {
-		const { sessionId, prompt, model, images, agent, variant, abortSignal } =
-			input;
+		const {
+			sessionId,
+			prompt,
+			model,
+			images,
+			agent,
+			variant,
+			abortSignal,
+			extraFolders,
+		} = input;
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
+			...(extraFolders.length > 0
+				? {
+						system: `Additional project folders available for reading and editing:\n${extraFolders.map((folder) => `- ${folder}`).join("\n")}`,
+					}
+				: {}),
 			...(model?.providerId && model?.modelId
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
@@ -232,7 +250,60 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 				const promptResult = yield* Effect.either(
 					Effect.tryPromise({
-						try: () => client.session.prompt(sessionId, promptOptions),
+						try: async () => {
+							const session = await client.session.get(sessionId);
+							const current = new Map<
+								string,
+								PermissionRuleset[number]["action"]
+							>();
+							for (const rule of session.permission ?? []) {
+								// Leave catch-alls untouched when reconciling folder rules.
+								if (
+									rule.permission === "external_directory" &&
+									rule.pattern !== "*"
+								) {
+									current.set(rule.pattern, rule.action);
+								}
+							}
+							const desired = new Set<string>();
+							for (const folder of extraFolders) {
+								let directory: string;
+								try {
+									directory = realpathSync(folder).replaceAll("\\", "/");
+								} catch {
+									// A folder can disappear after launch-folder resolution.
+									continue;
+								}
+								// Permission wildcards cannot escape a literal * or ?.
+								if (/[?*]/.test(directory)) continue;
+								desired.add(join(directory, "*").replaceAll("\\", "/"));
+							}
+							// Updates append rules, so unchanged patterns need no patch.
+							const permission: PermissionRuleset = [];
+							for (const [pattern, action] of current) {
+								if (action === "allow" && !desired.has(pattern)) {
+									permission.push({
+										permission: "external_directory",
+										pattern,
+										action: "ask",
+									});
+								}
+							}
+							for (const pattern of desired) {
+								if (current.get(pattern) !== "allow") {
+									permission.push({
+										permission: "external_directory",
+										pattern,
+										action: "allow",
+									});
+								}
+							}
+							if (permission.length > 0) {
+								await client.session.update(sessionId, { permission });
+							}
+							if (!abortSignal.aborted)
+								await client.session.prompt(sessionId, promptOptions);
+						},
 						catch: (cause) => cause,
 					}),
 				);
@@ -255,6 +326,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					return sendFailedTurnResult(message);
 				}
 
+				if (abortSignal.aborted) return interruptedTurnResult();
 				return yield* Deferred.await(pendingTurn.deferred);
 			}).pipe(Effect.ensuring(cleanup));
 		});

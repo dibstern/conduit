@@ -1,8 +1,12 @@
 // test/unit/provider/opencode-provider-instance-send-turn.test.ts
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import type { PermissionRuleset } from "../../../src/lib/instance/sdk-types.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type {
 	EventSink,
@@ -11,11 +15,6 @@ import type {
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
-		session: {
-			prompt: vi.fn(async () => {}),
-			abort: vi.fn(async () => {}),
-			...(overrides?.["session"] as Record<string, unknown>),
-		},
 		permission: { reply: vi.fn(async () => {}), list: vi.fn(async () => []) },
 		question: {
 			reply: vi.fn(async () => {}),
@@ -35,6 +34,13 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 			skills: vi.fn(async () => []),
 		},
 		...overrides,
+		session: {
+			get: vi.fn(async () => ({ permission: [] })),
+			update: vi.fn(async () => {}),
+			prompt: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			...(overrides?.["session"] as Record<string, unknown>),
+		},
 	} as unknown as OpenCodeAPI;
 }
 
@@ -105,6 +111,99 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 		});
 		expect(result).toBe(completion);
+		expect(client.session.update).not.toHaveBeenCalled();
+	});
+
+	// Cover duplicate history, last-rule precedence, global catch-alls, and
+	// folders that disappear or contain literal permission wildcards.
+	it.each([
+		{ action: "allow", desired: true },
+		{ action: "deny", desired: true },
+		{ action: "ask", desired: true },
+		{ action: "allow", desired: false },
+		{ action: "deny", desired: false },
+		{ action: "ask", desired: false },
+	] as const)("reconciles the last $action rule with desired=$desired without touching catch-alls", async ({
+		action,
+		desired,
+	}) => {
+		const extra = mkdtempSync(
+			join(realpathSync(tmpdir()), "usg5-7-permission-"),
+		);
+		try {
+			const pattern = `${extra}/*`;
+			const permission: PermissionRuleset = [
+				{ permission: "read", pattern, action: "allow" },
+				{ permission: "external_directory", pattern: "*", action: "allow" },
+				{ permission: "external_directory", pattern, action: "allow" },
+				{ permission: "external_directory", pattern, action },
+			];
+			client = makeStubClient({
+				session: { get: vi.fn(async () => ({ permission })) },
+			});
+			instance = new OpenCodeProviderInstance({ client });
+			const resultPromise = Effect.runPromise(
+				instance.sendTurnEffect(
+					makeSendTurnInput({ extraFolders: desired ? [extra, extra] : [] }),
+				),
+			);
+			instance.notifyTurnCompleted("s1", {
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			});
+			expect((await resultPromise).status).toBe("completed");
+			expect(client.session.get).toHaveBeenCalledWith("s1");
+			if (desired !== (action === "allow")) {
+				expect(client.session.update).toHaveBeenCalledExactlyOnceWith("s1", {
+					permission: [
+						{
+							permission: "external_directory",
+							pattern,
+							action: desired ? "allow" : "ask",
+						},
+					],
+				});
+			} else {
+				expect(client.session.update).not.toHaveBeenCalled();
+			}
+		} finally {
+			rmSync(extra, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		"disappeared-folder",
+		"literal*folder",
+		"literal?folder",
+	])("prompts without granting access to a %s", async (name) => {
+		const root = mkdtempSync(
+			join(realpathSync(tmpdir()), "usg5-7-permission-"),
+		);
+		const extra = join(root, name);
+		if (name !== "disappeared-folder") mkdirSync(extra);
+		try {
+			const resultPromise = Effect.runPromise(
+				instance.sendTurnEffect(makeSendTurnInput({ extraFolders: [extra] })),
+			);
+			instance.notifyTurnCompleted("s1", {
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			});
+			expect((await resultPromise).status).toBe("completed");
+			expect(client.session.update).not.toHaveBeenCalled();
+			expect(client.session.prompt).toHaveBeenCalledWith(
+				"s1",
+				expect.objectContaining({ system: expect.stringContaining(extra) }),
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("resolves concurrent prompts on one session from one completion", async () => {

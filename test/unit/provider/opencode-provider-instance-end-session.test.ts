@@ -8,6 +8,8 @@ import type { SendTurnInput } from "../../../src/lib/provider/types.js";
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
 		session: {
+			get: vi.fn(async () => ({ permission: [] })),
+			update: vi.fn(async () => {}),
 			abort: vi.fn(async () => {}),
 			prompt: vi.fn(async () => {}),
 			...(overrides?.["session"] as Record<string, unknown>),

@@ -3,7 +3,9 @@
 //
 // SessionDetail keeps compatibility with older server session fields and slugs.
 
-import type { Session } from "@opencode-ai/sdk/v2/types";
+import type { PermissionRuleset, Session } from "@opencode-ai/sdk/v2/types";
+
+export type { PermissionRuleset };
 
 /**
  * Extended session type that includes fields present in OpenCode API responses
@@ -25,6 +27,8 @@ export type SessionDetail = Omit<Session, "slug"> & {
 	slug?: string;
 	/** Whether the session is archived (from API, not in SDK types) */
 	archived?: boolean;
+	/** Session permission rules, appended by OpenCode on each update. */
+	permission?: PermissionRuleset;
 };
 
 export type {
@@ -121,6 +125,7 @@ export type ToolStatus = _ToolState["status"];
 
 export interface PromptOptions {
 	text: string;
+	system?: string;
 	images?: string[];
 	agent?: string;
 	model?: { providerID: string; modelID: string };

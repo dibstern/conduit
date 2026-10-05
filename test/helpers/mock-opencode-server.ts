@@ -73,6 +73,11 @@ export class MockOpenCodeServer {
 
 	/** Diagnostic log for debugging E2E SSE delivery issues. */
 	readonly diagnostics: MockDiagnosticEntry[] = [];
+	private readonly receivedBodies: {
+		method: string;
+		path: string;
+		body: string;
+	}[] = [];
 
 	// Replay state (rebuilt on reset)
 	private exactQueues = new Map<string, QueuedRestResponse[]>();
@@ -155,6 +160,10 @@ export class MockOpenCodeServer {
 		return this._url;
 	}
 
+	get requestBodies() {
+		return this.receivedBodies.slice();
+	}
+
 	/** Start the mock HTTP + WS server on a random port. */
 	async start(): Promise<void> {
 		const server = createServer((req, res) => {
@@ -204,6 +213,7 @@ export class MockOpenCodeServer {
 	/** Re-initialize all replay state from the original recording. */
 	reset(): void {
 		this.cleanupSseClients();
+		this.receivedBodies.length = 0;
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
@@ -472,6 +482,12 @@ export class MockOpenCodeServer {
 
 		// Read request body (used by stateful session handlers)
 		const rawBody = await this.readBody(req);
+		if (rawBody)
+			this.receivedBodies.push({
+				method,
+				path: path.split("?")[0] ?? path,
+				body: rawBody,
+			});
 
 		const exact = exactKey(method, path);
 		const normalized = normalizedKey(method, path);
@@ -677,10 +693,13 @@ export class MockOpenCodeServer {
 		if (method === "PATCH" && /^\/session\/[^/]+$/.test(basePath)) {
 			const id = basePath.split("/").pop() ?? "";
 			let title: string | undefined;
+			let permission: unknown[] | undefined;
 			if (rawBody) {
 				try {
 					const parsed = JSON.parse(rawBody) as Record<string, unknown>;
 					if (typeof parsed["title"] === "string") title = parsed["title"];
+					if (Array.isArray(parsed["permission"]))
+						permission = parsed["permission"];
 				} catch {
 					/* ignore */
 				}
@@ -693,10 +712,32 @@ export class MockOpenCodeServer {
 			}
 			const fallbackList = this.getSessionListFallback();
 			const found = fallbackList.find((s) => s["id"] === id);
-			const session = found ?? { id, title: title ?? "mock-title" };
+			const session = this.injectedSessions.get(id) ??
+				found ?? { id, title: title ?? "mock-title" };
+			if (permission) {
+				// Match Permission.merge: append rather than replace session rules.
+				session["permission"] = [
+					...(Array.isArray(session["permission"])
+						? session["permission"]
+						: []),
+					...permission,
+				];
+				this.injectedSessions.set(id, { ...session });
+			}
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(session));
 			return;
+		}
+
+		if (method === "GET" && /^\/session\/[^/]+$/.test(basePath)) {
+			const session = this.injectedSessions.get(
+				basePath.split("/").pop() ?? "",
+			);
+			if (session) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(session));
+				return;
+			}
 		}
 
 		if (method === "GET" && basePath === "/session/search") {

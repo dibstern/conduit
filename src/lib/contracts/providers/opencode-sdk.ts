@@ -105,6 +105,15 @@ export const OpenCodeSessionDetailSchema = Schema.Struct({
 	agentID: Schema.optional(Schema.String),
 	slug: Schema.optional(Schema.String),
 	archived: Schema.optional(Schema.Boolean),
+	permission: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				permission: Schema.String,
+				pattern: Schema.String,
+				action: Schema.Literal("allow", "deny", "ask"),
+			}),
+		),
+	),
 });
 
 export type OpenCodeSessionDetail = Schema.Schema.Type<

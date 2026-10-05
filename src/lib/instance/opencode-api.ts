@@ -53,6 +53,7 @@ import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type {
 	Agent,
 	Message,
+	PermissionRuleset,
 	Provider,
 	ProviderListResult,
 	SessionDetail,
@@ -270,7 +271,10 @@ class SessionNamespace {
 		);
 	}
 
-	async update(id: string, options: { title?: string }): Promise<void> {
+	async update(
+		id: string,
+		options: { title?: string; permission?: PermissionRuleset },
+	): Promise<void> {
 		await this.api.sdk("session.update", decodeOpenCodeSessionResponse, () =>
 			this.api._sdk.session.update({ sessionID: id, ...options }),
 		);
@@ -345,6 +349,7 @@ class SessionNamespace {
 		sessionId: string,
 		options: {
 			text: string;
+			system?: string;
 			model?: { providerID: string; modelID: string };
 			agent?: string;
 		},
@@ -353,6 +358,7 @@ class SessionNamespace {
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
 				parts: [{ type: "text", text: options.text }],
+				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),
 				...(options.agent != null ? { agent: options.agent } : {}),
 			}),
