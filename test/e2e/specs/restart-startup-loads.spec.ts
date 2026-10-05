@@ -1,5 +1,7 @@
 // An open tab must reload all startup data without error toasts after a restart.
 // Holding /rpc on a dead address lets /ws attach first, making the race deterministic.
+// Once released, /rpc must be back within the budget: the socket retries at
+// most a second apart (shared-client.ts), not on the library's 5 s default.
 
 import { writeFile } from "node:fs/promises";
 import { expect, test } from "../helpers/replay-fixture.js";
@@ -21,6 +23,10 @@ const startupLoads = [
 	"ListPtys",
 	"ListDaemonSessions",
 ];
+
+// Socket retry cap (1 s) + resume re-issue cap (1 s) + the reads, with headroom
+// for a loaded machine. Measured 1.6-3.0 s; the old 5 s retry cap measured 5.1 s.
+const reloadBudgetMs = 4_000;
 
 test.use({ claudeReplay: { turns: [] } });
 
@@ -77,6 +83,10 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 	let restarting = false;
 	const initialAnswered = new Set<string>();
 	const restartAnswered = new Set<string>();
+	let allAnsweredAt: number | undefined;
+	let releasedAt = 0;
+	const reloadMs = () =>
+		allAnsweredAt === undefined ? null : allAnsweredAt - releasedAt;
 	page.on("websocket", (socket) => {
 		if (!socket.url().includes("/rpc")) return;
 		const answered = restarting ? restartAnswered : initialAnswered;
@@ -106,6 +116,8 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				if (response._tag !== "Exit") continue;
 				const tag = requests.get(response.requestId);
 				if (tag) answered.add(tag);
+				if (restarting && restartAnswered.size === startupLoads.length)
+					allAnsweredAt ??= Date.now();
 			}
 		});
 	});
@@ -133,6 +145,7 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				}, 2_000);
 			}),
 	);
+	releasedAt = Date.now();
 	const hold = await page.evaluate(() => ({
 		heldRpcDials: (window as ProbeWindow).__heldRpcDials,
 		wsAttachedWhileHeld: (window as ProbeWindow).__wsAttachedWhileHeld,
@@ -152,12 +165,14 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				{ timeout: 20_000 },
 			)
 			.toEqual({ answeredExits: startupLoads, loadErrors: [] });
+		expect(reloadMs()).toBeLessThan(reloadBudgetMs);
 	} finally {
 		const artifact = testInfo.outputPath("restart-startup-loads.json");
 		await writeFile(
 			artifact,
 			JSON.stringify({
 				...hold,
+				reloadMs: reloadMs(),
 				answeredExits: startupLoads.filter((tag) => restartAnswered.has(tag)),
 				loadErrors: await page.evaluate(
 					() => (window as ProbeWindow).__startupLoadErrors,

@@ -26,6 +26,7 @@ import {
 	Exit,
 	Layer,
 	Ref,
+	Schedule,
 	Scope,
 } from "effect";
 import { resumeStream } from "./resume.js";
@@ -134,9 +135,18 @@ export type WsRpcConnect = (options: {
 // `Effect.provide` would give that layer a scope of its own that closes the
 // moment the client is constructed, leaving a client whose socket is already
 // gone. Building into the ambient scope ties the socket to the pair instead.
+//
+// Redials are capped at one second, not the library's five. Every unary read
+// waits for the control socket to be back (session-list.svelte.ts re-runs them
+// on `synchronized`), so after a restart the five-second cap meant up to five
+// seconds of stale panels. One local daemon can absorb the extra dials.
+const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
+	Schedule.union(Schedule.spaced("1 second")),
+);
+
 const connectWebSocket: WsRpcConnect = ({ url }) =>
 	Layer.build(
-		RpcClient.layerProtocolSocket().pipe(
+		RpcClient.layerProtocolSocket({ retrySchedule: reconnectSchedule }).pipe(
 			Layer.provide(Socket.layerWebSocket(url)),
 			Layer.provide(Socket.layerWebSocketConstructorGlobal),
 			Layer.provide(RpcSerialization.layerJson),
