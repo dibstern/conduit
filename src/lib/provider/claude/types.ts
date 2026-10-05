@@ -182,7 +182,7 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
-	/** True from prompt submit until a terminal turn message. The SDK's
+	/** True from prompt submit or an autonomous SDK turn until its result. The SDK's
 	 *  system/init reports idle to clear a busy status stranded by a crash
 	 *  mid-turn, but it arrives ~1s AFTER the prompt starts — so it needs to
 	 *  know whether a turn is actually running. currentTurnId cannot answer
@@ -210,6 +210,8 @@ export interface ClaudeSessionContext {
 	settingsOutOfSync?: boolean;
 	resumeSessionId: string | undefined;
 	lastAssistantUuid: string | undefined;
+	/** Message identity linked to the active turn, available before its SDK snapshot. */
+	activeAssistantMessageId?: string;
 	turnCount: number;
 	stopped: boolean;
 	/** Set when a user prompt is enqueued while the SDK's streaming turn is

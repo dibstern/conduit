@@ -40,6 +40,12 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 	});
 	try {
 		return {
+			session: db
+				.prepare("SELECT status FROM sessions WHERE id = ?")
+				.get(sessionId) as { status: string },
+			turns: db
+				.prepare("SELECT state FROM turns WHERE session_id = ?")
+				.all(sessionId) as Array<{ state: string }>,
 			events: (
 				db
 					.prepare(
@@ -721,6 +727,143 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 		details["foregroundFinishedBeforeMismatch"] = true;
 	}, 30_000);
+
+	it.each([
+		"before-restart",
+		"during-warm",
+	] as const)("keeps a notification-driven parent turn on the old runner %s until its result", async (timing) => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start(`nzjt-notification-${timing}`);
+		const sessionId = await initial.createSession("Notification turn upgrade");
+		details["sessionId"] = sessionId;
+		const prompt =
+			timing === "during-warm"
+				? "notification-parent-turn-during-warm"
+				: "notification-parent-turn";
+		expect((await initial.send(sessionId, prompt)).chunks).toEqual(
+			responseChunks(prompt),
+		);
+		await completed(harness, sessionId, [prompt]);
+		const old = runnerFor(harness, sessionId);
+		let candidate: Extract<ProcessMark, { kind: "query" }> | undefined;
+		if (timing === "during-warm") {
+			await harness.kill();
+			writeFileSync(join(harness.root, "hold-next-initialization"), "hold");
+			await harness.restart({ buildId: NEW_BUILD });
+			await harness.connect(sessionId);
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some(
+							(mark) => mark.kind === "initialization-held",
+						),
+					).toBe(true),
+				{ timeout: 10_000 },
+			);
+			candidate = sdkProof(harness).find(
+				(mark): mark is Extract<ProcessMark, { kind: "query" }> =>
+					mark.kind === "query" && mark.pid !== old.pid,
+			);
+			expect(candidate).toBeDefined();
+		}
+
+		writeFileSync(join(harness.root, "release-notification-parent"), "release");
+		await vi.waitFor(
+			() => {
+				const state = persisted(harness, sessionId);
+				expect(state.session.status).toBe("busy");
+				expect(state.turns).toEqual([{ state: "running" }]);
+				expect(
+					state.events.some(
+						(event) =>
+							event.type === "text.delta" &&
+							event.data["text"] === "Notification parent message.",
+					),
+				).toBe(true);
+				expect(
+					sdkProof(harness).some(
+						(mark) =>
+							mark.kind === "notification-turn" && mark.phase === "held",
+					),
+				).toBe(true);
+			},
+			{ timeout: 10_000 },
+		);
+		details["held"] = persisted(harness, sessionId);
+		if (timing === "before-restart") {
+			await harness.kill();
+			await harness.restart({ buildId: NEW_BUILD });
+			await harness.connect(sessionId);
+		} else {
+			writeFileSync(
+				join(harness.root, "release-held-initialization"),
+				"release",
+			);
+			await vi.waitFor(
+				() => {
+					expect(
+						sdkProof(harness).some(
+							(mark) =>
+								mark.kind === "runner-upgrade" &&
+								mark.phase === "cancelled" &&
+								mark.oldPid === old.pid,
+						),
+					).toBe(true);
+					if (candidate) expect(() => process.kill(candidate.pid, 0)).toThrow();
+				},
+				{ timeout: 10_000 },
+			);
+		}
+		// The fake is between parent messages, with no conduit send waiter and
+		// no live background task. Only the unfinished SDK turn protects it.
+		await new Promise<void>((done) => setTimeout(done, 250));
+		expect(() => process.kill(old.pid, 0)).not.toThrow();
+		expect(persisted(harness, sessionId)).toMatchObject({
+			session: { status: "busy" },
+			turns: [{ state: "running" }],
+			commands: [{ status: "completed" }],
+		});
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "runner-upgrade" && mark.phase === "switched",
+			),
+		).toEqual([]);
+		if (timing === "before-restart")
+			expect(
+				sdkProof(harness).filter(
+					(mark) => mark.kind === "runner-upgrade" && mark.phase === "warming",
+				),
+			).toEqual([]);
+
+		writeFileSync(join(harness.root, "release-notification-result"), "release");
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		await vi.waitFor(() => {
+			const state = persisted(harness, sessionId);
+			expect(state.session.status).toBe("idle");
+			expect(state.turns).toEqual([{ state: "completed" }]);
+			expect(state.commands).toHaveLength(1);
+			expect(state.commands[0]?.status).toBe("completed");
+			expect(
+				state.events.filter((event) => event.type === "turn.completed"),
+			).toHaveLength(2);
+			expect(
+				state.events.filter(
+					(event) =>
+						event.type === "turn.interrupted" || event.type === "turn.error",
+				),
+			).toEqual([]);
+		});
+		expect(
+			sdkProof(harness).filter((mark) => mark.kind === "enqueue"),
+		).toHaveLength(1);
+		details["oldRunner"] = old;
+		details["cancelledCandidate"] = candidate;
+		details["replacement"] = replacement;
+		details["notificationHadNoSendCommand"] = true;
+	}, 40_000);
 
 	it("re-adopts the old runner and cleans an abandoned replacement after a crash while warming", async () => {
 		const { harness, details, browser: initial } = await start("warming-crash");

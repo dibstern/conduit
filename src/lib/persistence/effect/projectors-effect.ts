@@ -967,7 +967,9 @@ export const makeTurnProjector = (): EffectProjector => ({
 					yield* sql<OwnedRow>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE session_id = ${event.sessionId}
+						AND (assistant_message_id = ${event.data.messageId}
+							OR (${event.data.messageId} = '' AND state = 'running'))
 						RETURNING session_id`,
 				);
 			}
