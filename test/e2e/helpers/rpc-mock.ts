@@ -1,5 +1,8 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	type ProjectSetting,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -64,6 +67,8 @@ export class RpcMockControl {
 	shellRows: readonly unknown[] | null = null;
 	catalog: MockCatalog = {};
 	private shellSequence = 0;
+	private readonly projectSettings = new Map<string, ProjectSetting>();
+	private projectSettingsSequence = 0;
 	private readonly detailRows = new Map<string, readonly unknown[]>();
 	private readonly detailSequences = new Map<string, number>();
 
@@ -135,6 +140,52 @@ export class RpcMockControl {
 				{ _tag: "synchronized" },
 			]);
 		}
+	}
+
+	/** Change one session row the way a live write does: an upsert with no
+	 *  re-snapshot, so nothing that follows `synchronized` refetches. */
+	upsertShellRow(row: {
+		readonly id: string;
+		readonly [field: string]: unknown;
+	}): void {
+		const rows = this.shellRows ?? [];
+		this.shellRows = [
+			...rows.filter(
+				(candidate) => (candidate as { id?: string }).id !== row.id,
+			),
+			row,
+		];
+		this.shellSequence++;
+		if (this.streams.has("SubscribeShell"))
+			this.sendChunk("SubscribeShell", [
+				{ _tag: "upsert", item: row, sequence: this.shellSequence },
+			]);
+	}
+
+	/** Publish one project-setting fact, the way another tab's or the CLI's
+	 *  write reaches every open SubscribeProjectSettings stream. */
+	setProjectSetting(setting: ProjectSetting): void {
+		this.projectSettings.set(setting._tag, setting);
+		this.projectSettingsSequence++;
+		if (this.streams.has("SubscribeProjectSettings"))
+			this.sendChunk("SubscribeProjectSettings", [
+				{
+					_tag: "upsert",
+					item: setting,
+					sequence: this.projectSettingsSequence,
+				},
+			]);
+	}
+
+	initialProjectSettingsFrames(): readonly unknown[] {
+		return [
+			{
+				_tag: "snapshot",
+				sequence: this.projectSettingsSequence,
+				rows: [...this.projectSettings.values()],
+			},
+			{ _tag: "synchronized" },
+		];
 	}
 
 	initialShellFrames(): readonly unknown[] {
@@ -308,7 +359,9 @@ async function handleMessage(
 				: raw.tag === "SubscribeSessionDetail"
 					? (payload: Record<string, unknown>) =>
 							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
-					: undefined);
+					: raw.tag === "SubscribeProjectSettings"
+						? () => control.initialProjectSettingsFrames()
+						: undefined);
 		if (stream) {
 			const sessionId =
 				raw.tag === "SubscribeSessionDetail"

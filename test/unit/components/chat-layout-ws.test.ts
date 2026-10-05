@@ -142,6 +142,10 @@ vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
 	viewTranscript: vi.fn(),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({
+	viewProjectSettings: vi.fn(),
+}));
+
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	sessionState: {
 		currentId: null,

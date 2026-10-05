@@ -1,11 +1,8 @@
 // Global hide-lists for the agent/model dropdowns. Persisted in relay settings.
 
 import { Data, Effect } from "effect";
-import {
-	ConfigTag,
-	LoggerTag,
-	WebSocketHandlerTag,
-} from "../domain/relay/Services/services.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -39,11 +36,10 @@ export interface SetHiddenEntriesInput {
 
 /**
  * Persist the provided hide-lists (replace semantics; an omitted list is left
- * untouched), broadcast the merged view as `visibility_info`, and return it.
+ * untouched), publish the merged view as a project setting, and return it.
  */
 export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
@@ -66,7 +62,7 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 		});
 
 		const entries = getHiddenEntries(config.configDir);
-		wsHandler.broadcast({ type: "visibility_info", ...entries });
+		yield* publishProjectSetting({ _tag: "visibility", ...entries });
 		log.info(
 			`client=${input.clientId} Hidden entries updated: ${entries.hiddenModels.length} models, ${entries.hiddenAgents.length} agents`,
 		);

@@ -30,6 +30,7 @@ const session = {
 	parentID: "parent-1",
 	forkMessageId: "message-0",
 	forkPointTimestamp: 90,
+	permissionMode: "plan",
 } as const;
 const shellEnvelopes = [
 	{ _tag: "snapshot", rows: [session], sequence: 40 },
@@ -364,11 +365,43 @@ const approvalEnvelopes = [
 	{ _tag: "remove", sequence: 42, id: "perm-1" },
 ] as const;
 
+const projectSettingsEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [
+			{
+				_tag: "defaultModel",
+				model: "claude-sonnet-4",
+				provider: "anthropic",
+				variant: "high",
+			},
+			{
+				_tag: "visibility",
+				hiddenModels: ["anthropic/claude-haiku"],
+				hiddenAgents: [],
+			},
+			{ _tag: "defaultPermissionMode", mode: "acceptEdits" },
+			{
+				_tag: "claudeSettings",
+				overrides: { model: "opus", env: { FOO: 'b"ar' } },
+			},
+		],
+		sequence: 1,
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		item: { _tag: "defaultModel", variant: "" },
+		sequence: 2,
+	},
+] as const;
+
 const group = RpcGroup.make(
 	Contracts.SubscribeShell,
 	Contracts.SubscribeApprovals,
 	Contracts.SubscribeSessionDetail,
 	Contracts.SubscribeSessionTodos,
+	Contracts.SubscribeProjectSettings,
 	Contracts.SubscribePtys,
 	Rpc.fromTaggedRequest(Contracts.PtyInput),
 	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
@@ -459,6 +492,10 @@ const handlers = group.toLayer({
 			data: "\u0003ls -la 雪\r",
 		});
 		return Effect.succeed({ ok: true as const });
+	},
+	SubscribeProjectSettings: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project" });
+		return Rpc.fork(Stream.fromIterable(projectSettingsEnvelopes));
 	},
 	SubscribeShell: (payload) => {
 		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
@@ -739,6 +776,27 @@ it("SubscribePtys and PtyInput carry terminal bytes through JSON", async () => {
 							ptyId: "pty-1",
 							data: "\u0003ls -la 雪\r",
 						},
+					}),
+				);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribeProjectSettings preserves every project-setting fact through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeProjectSettings({ projectSlug: "project" }),
+				);
+				expect(Array.from(result)).toEqual(projectSettingsEnvelopes);
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "SubscribeProjectSettings",
+						payload: { projectSlug: "project" },
 					}),
 				);
 			}),

@@ -14,17 +14,17 @@ import {
 	handlePermissionModeInfo,
 	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
+import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
 
 beforeEach(() => {
 	clearClaudeSettingsState();
 	clearDiscoveryState();
 });
 
-describe("Claude settings broadcast dispatch", () => {
-	it("applies claude_settings_info to the reactive settings state", () => {
-		handleMessage({
-			type: "claude_settings_info",
+describe("project-settings dispatch", () => {
+	it("applies a claudeSettings fact to the reactive settings state", () => {
+		applyProjectSetting({
+			_tag: "claudeSettings",
 			overrides: {
 				autoCompactEnabled: false,
 				autoCompactWindow: 16_000,
@@ -37,14 +37,11 @@ describe("Claude settings broadcast dispatch", () => {
 		});
 	});
 
-	it("applies default_permission_mode_info without changing the session mode", () => {
-		handlePermissionModeInfo({
-			type: "permission_mode_info",
-			mode: "acceptEdits",
-		});
+	it("applies a defaultPermissionMode fact without changing the session mode", () => {
+		handlePermissionModeInfo({ mode: "acceptEdits" });
 
-		handleMessage({
-			type: "default_permission_mode_info",
+		applyProjectSetting({
+			_tag: "defaultPermissionMode",
 			mode: "full",
 		});
 
@@ -52,15 +49,15 @@ describe("Claude settings broadcast dispatch", () => {
 		expect(discoveryState.permissionMode).toBe("acceptEdits");
 	});
 
-	it("applies default_model_info without changing the session variant", () => {
+	it("applies a defaultModel fact without changing the session variant", () => {
 		handleVariantInfo({
 			type: "variant_info",
 			variant: "low",
 			variants: ["low", "high"],
 		});
 
-		handleMessage({
-			type: "default_model_info",
+		applyProjectSetting({
+			_tag: "defaultModel",
 			model: "claude-sonnet-4",
 			provider: "anthropic",
 			variant: "high",

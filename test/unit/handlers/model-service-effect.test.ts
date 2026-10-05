@@ -7,6 +7,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -244,6 +245,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -375,6 +377,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -393,12 +396,6 @@ describe("model handlers with Effect-native model service", () => {
 					"gpt-4",
 				);
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "default_model_info",
-					model: "gpt-4",
-					provider: "openai",
-					variant: "",
-				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "variant_info",
 					variant: "",

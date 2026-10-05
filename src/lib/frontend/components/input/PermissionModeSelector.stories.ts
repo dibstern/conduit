@@ -27,7 +27,7 @@ function viewport(width: number): () => void {
 }
 
 function setMode(mode: SessionPermissionMode): void {
-	handlePermissionModeInfo({ type: "permission_mode_info", mode });
+	handlePermissionModeInfo({ mode });
 }
 
 function pendingApprovals(): () => void {

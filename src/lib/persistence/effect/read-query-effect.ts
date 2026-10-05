@@ -11,7 +11,11 @@ import type {
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
-import type { SessionAttention, SessionInfo } from "../../shared-types.js";
+import {
+	type SessionAttention,
+	type SessionInfo,
+	SessionPermissionModeSchema,
+} from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
@@ -29,6 +33,7 @@ import {
 } from "../session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
+const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
 );
@@ -184,6 +189,9 @@ export const sessionRowsToSessionInfoList = (
 			updatedAt: row.updated_at,
 			messageCount: 0,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
+			...(isSessionPermissionMode(row.permission_mode)
+				? { permissionMode: row.permission_mode }
+				: {}),
 			...(parentID ? { parentID } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null

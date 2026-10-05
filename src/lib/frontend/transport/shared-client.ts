@@ -126,6 +126,12 @@ const makeSubscriptions = (
 	 * sequence, so every re-issue is a cold snapshot with each scrollback ring.
 	 */
 	ptys: () => resumeStream(() => sockets.stream.SubscribePtys({ projectSlug })),
+	/** Default model, visibility, default approval mode, Claude overrides.
+	 *  Not in the read model, so a re-issue re-snapshots instead of resuming. */
+	projectSettings: () =>
+		resumeStream(() =>
+			sockets.control.SubscribeProjectSettings({ projectSlug }),
+		),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */

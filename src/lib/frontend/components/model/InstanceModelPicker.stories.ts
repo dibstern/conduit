@@ -75,7 +75,6 @@ function seedClaude(): void {
 		provider: "claude",
 	});
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: "claude-sonnet-4-5",
 		provider: "claude",
 		variant: "",
@@ -269,7 +268,6 @@ export const SingleContextWindow: Story = {
 			provider: "opencode",
 		});
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "gpt-5",
 			provider: "opencode",
 			variant: "",
@@ -438,7 +436,6 @@ export const RoutingOptions: Story = {
 			model: "claude-sonnet-4-5-eu",
 		});
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			provider: "claude",
 			model: "claude-sonnet-4-5",
 			variant: "",

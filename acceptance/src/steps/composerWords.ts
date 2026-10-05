@@ -58,10 +58,9 @@ export const composerWordsHandlers: StepHandler[] = [
 				})
 				.toBe(true);
 			// Reapply relay fixtures after navigation; leave the persisted preference alone.
-			await requireRelayControl(world.page).sendMessages([
-				...claudeBoundSessionMessages,
-				{ type: "permission_mode_info", mode: "ask" },
-			]);
+			await requireRelayControl(world.page).sendMessages(
+				claudeBoundSessionMessages,
+			);
 			await seedComposerPickerCatalog(world.page, "Claude");
 		},
 	},

@@ -17,10 +17,8 @@ import {
 	type OverridesStateTag,
 	setContextWindow,
 	setDefaultModel,
-	setDefaultPermissionMode,
 	setDefaultVariant,
 	setModel,
-	setPermissionMode,
 	setVariant,
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -359,71 +357,10 @@ describe("handleClientConnectedEffect — session selection", () => {
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
-		for (const type of ["variant_info", "permission_mode_info"]) {
-			expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-				"client-1",
-				expect.objectContaining({ type }),
-			);
-		}
-	});
-
-	it("keeps session and default permission modes distinct on connect", async () => {
-		const deps = makeClientInitEffectLayer();
-		await runClientInit(
-			deps,
+		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
 			"client-1",
-			"requested-session",
-			undefined,
-			Effect.gen(function* () {
-				yield* setDefaultPermissionMode("auto");
-				yield* setPermissionMode("requested-session", "full");
-			}),
+			expect.objectContaining({ type: "variant_info" }),
 		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_mode_info",
-			mode: "full",
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "default_permission_mode_info",
-			mode: "auto",
-		});
-	});
-
-	it("reports the configured default when no session is bound", async () => {
-		const deps = makeClientInitEffectLayer(makeReadQuery("claude-sdk"), {
-			getDefaultSessionId: vi.fn(() =>
-				Effect.fail(
-					new SessionManagerError({
-						operation: "getDefaultSessionId",
-						cause: "no sessions",
-					}),
-				),
-			),
-		});
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			Effect.gen(function* () {
-				yield* setDefaultModel({
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				});
-				yield* setDefaultVariant("high");
-				yield* setDefaultPermissionMode("full");
-			}),
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "permission_mode_info",
-			mode: "full",
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "default_model_info",
-			model: "claude-sonnet-4-7",
-			provider: "claude",
-			variant: "high",
-		});
 	});
 });
 
@@ -814,13 +751,6 @@ describe("handleClientConnectedEffect — defaultModel priority", () => {
 		expect(deps.state.defaultModel).toEqual({
 			providerID: "openai",
 			modelID: "gpt-4-turbo",
-		});
-		// Should send model_info to the client (not broadcast)
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "default_model_info",
-			model: "gpt-4-turbo",
-			provider: "openai",
-			variant: "high",
 		});
 	});
 

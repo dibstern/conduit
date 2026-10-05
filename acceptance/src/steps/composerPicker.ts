@@ -4,6 +4,7 @@ import {
 	effortOptions,
 	openModelPicker,
 	requireRelayControl,
+	requireRpcControl,
 	serveModelCatalog,
 } from "./shared.js";
 
@@ -63,8 +64,13 @@ export async function seedComposerPickerCatalog(
 	const provider = claude ? "claude" : "anthropic";
 	const sessionId = new URL(page.url()).pathname.split("/")[2];
 	await serveModelCatalog(page, { providers, active: { model, provider } });
+	requireRpcControl(page).setProjectSetting({
+		_tag: "defaultModel",
+		model,
+		provider,
+		variant: "",
+	});
 	await requireRelayControl(page).sendMessages([
-		{ type: "default_model_info", model, provider },
 		// An open session shows its own model, not the default.
 		...(sessionId ? [{ type: "model_info", sessionId, model, provider }] : []),
 		{ type: "context_window_info", contextWindow: "200k", options },

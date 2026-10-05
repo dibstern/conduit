@@ -108,7 +108,6 @@ describe("InstanceModelPicker", () => {
 			provider: "claude",
 		});
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "claude-sonnet-4-7",
 			provider: "claude",
 			variant: "",
@@ -132,7 +131,6 @@ describe("InstanceModelPicker", () => {
 		const { getByTitle } = render(InstanceModelPicker);
 		expect(getByTitle("Switch model").textContent).toContain("Sonnet 4.7");
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "claude-opus-4-7",
 			provider: "claude",
 			variant: "",

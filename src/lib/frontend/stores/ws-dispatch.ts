@@ -43,16 +43,11 @@ import {
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
-import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
-	applyDefaultPermissionMode,
 	handleContextWindowInfo,
-	handleDefaultModelInfo,
 	handleModelInfo,
-	handlePermissionModeInfo,
 	handleVariantInfo,
-	handleVisibilityInfo,
 } from "./discovery.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
 import { clearScanInFlight, handleInstanceList } from "./instance.svelte.js";
@@ -304,12 +299,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 
-		case "visibility_info":
-			handleVisibilityInfo(msg);
-			break;
-		case "claude_settings_info":
-			handleClaudeSettingsInfo(msg);
-			break;
 		case "model_info":
 			// Unkeyed legacy/default metadata cannot identify the active session.
 			if (
@@ -318,15 +307,6 @@ export function handleMessage(msg: RelayMessage): void {
 			)
 				return;
 			handleModelInfo(msg);
-			break;
-		case "default_model_info":
-			handleDefaultModelInfo(msg);
-			break;
-		case "default_permission_mode_info":
-			applyDefaultPermissionMode(msg.mode);
-			break;
-		case "permission_mode_info":
-			handlePermissionModeInfo(msg);
 			break;
 		case "variant_info":
 			handleVariantInfo(msg);

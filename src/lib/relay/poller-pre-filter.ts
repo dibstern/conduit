@@ -10,7 +10,6 @@ export const METADATA_TYPES: ReadonlySet<RelayMessage["type"]> = new Set<
 	"session_list",
 	"session_forked",
 	"model_info",
-	"default_model_info",
 	"project_list",
 	"connection_status",
 	"client_count",
@@ -20,7 +19,6 @@ export const METADATA_TYPES: ReadonlySet<RelayMessage["type"]> = new Set<
 	"input_sync",
 	"variant_info",
 	"context_window_info",
-	"permission_mode_info",
 ]);
 
 /**

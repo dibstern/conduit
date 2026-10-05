@@ -9,6 +9,7 @@ import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -49,7 +50,6 @@ export const setDefaultPermissionModeForRelay = (input: {
 }) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
 		yield* Effect.try({
@@ -61,8 +61,8 @@ export const setDefaultPermissionModeForRelay = (input: {
 			catch: (cause) => new RelaySettingsSaveError({ cause }),
 		});
 		yield* setDefaultPermissionMode(input.mode);
-		wsHandler.broadcast({
-			type: "default_permission_mode_info",
+		yield* publishProjectSetting({
+			_tag: "defaultPermissionMode",
 			mode: input.mode,
 		});
 		log.info(

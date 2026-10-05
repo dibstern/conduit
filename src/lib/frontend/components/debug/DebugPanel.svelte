@@ -154,8 +154,6 @@
 				return properties["contextWindow"] ? String(properties["contextWindow"]) : "";
 			case "model_info":
 				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
-			case "default_model_info":
-				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
 			case "project_list":
 				return Array.isArray(properties["projects"]) ? `${properties["projects"].length} projects${properties["current"] ? ` current=${properties["current"]}` : ""}` : "";
 			default:

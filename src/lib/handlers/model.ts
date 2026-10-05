@@ -11,6 +11,7 @@ import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
 } from "../daemon/config-persistence.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -22,6 +23,7 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
 	getPermissionMode,
@@ -465,9 +467,10 @@ export const getModelsResponse = (
 				contextWindow: currentContextWindow,
 				options: catalogModel?.contextWindowOptions ?? [],
 			},
+			// No session yet: the mode a new session would start in.
 			permissionMode: activeId
 				? yield* getPermissionMode(activeId)
-				: ("ask" as const),
+				: yield* getDefaultPermissionMode(),
 			...(modelExecution === undefined ? {} : { modelExecution }),
 		};
 	});
@@ -687,14 +690,13 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		yield* setDefaultVariant(validVariant);
 
 		const modelMessage = { type: "model_info" as const, model, provider };
-		const defaultModelMessage = {
-			type: "default_model_info" as const,
+		wsHandler.broadcast(modelMessage);
+		yield* publishProjectSetting({
+			_tag: "defaultModel",
 			model,
 			provider,
 			variant: validVariant,
-		};
-		wsHandler.broadcast(modelMessage);
-		wsHandler.broadcast(defaultModelMessage);
+		});
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
 		const variantMessage = {
@@ -704,11 +706,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		} as const;
 		wsHandler.broadcast(variantMessage);
 
-		return {
-			model: modelMessage,
-			defaultModel: defaultModelMessage,
-			variant: variantMessage,
-		};
+		return { model: modelMessage, variant: variantMessage };
 	});
 
 export interface SwitchVariantInput {
@@ -756,6 +754,13 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 			wsHandler.sendToSession(sessionId, message);
 		} else {
 			wsHandler.sendTo(input.clientId, message);
+			yield* publishProjectSetting({
+				_tag: "defaultModel",
+				...(activeModel
+					? { model: activeModel.modelID, provider: activeModel.providerID }
+					: {}),
+				variant,
+			});
 		}
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,

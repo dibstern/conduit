@@ -45,6 +45,7 @@ import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipLive } from "../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
 import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -1114,6 +1115,7 @@ export function makeTestHandlerLayer(
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),
 		wsHandlerLayer,
 		overridesStateLayer,
+		ProjectSettingsLive,
 		ptyManagerLayer,
 		configLayer,
 		loggerLayer,

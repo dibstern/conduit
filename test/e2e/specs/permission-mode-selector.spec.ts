@@ -19,19 +19,23 @@ type Page = import("@playwright/test").Page;
 const PROJECT_URL = "/s/sess-pm-001";
 const BASE = "http://localhost:4173";
 
+const existingSession = {
+	id: "sess-pm-001",
+	title: "Existing session",
+	status: "idle",
+	updatedAt: Date.now(),
+	messageCount: 4,
+};
+
 const sessionList: MockMessage = {
 	type: "shell_snapshot",
 	roots: true,
-	sessions: [
-		{
-			id: "sess-pm-001",
-			title: "Existing session",
-			status: "idle",
-			updatedAt: Date.now(),
-			messageCount: 4,
-		},
-	],
+	sessions: [existingSession],
 };
+
+/** The server reports the session's mode on its shell row. */
+const reportMode = (rpc: RpcMockControl, mode: string): void =>
+	rpc.setShellRows([{ ...existingSession, permissionMode: mode }]);
 
 const modelList: MockMessage = {
 	type: "mock_model_catalog",
@@ -187,19 +191,19 @@ test.describe("Permission mode with a bound session", () => {
 	});
 
 	test("an approved plan drops the pill back off Plan", async ({ page }) => {
-		const { relay } = await setup(page, claudeBoundInit);
+		const { rpc } = await setup(page, claudeBoundInit);
 		await page
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
-		relay.sendMessage({ type: "permission_mode_info", mode: "plan" });
+		reportMode(rpc, "plan");
 		await expect(pill(page)).toContainText("Plan");
 
 		// Approving ExitPlanMode makes the SDK leave plan mode, which conduit
 		// learns from the SDK's own report rather than from its stored request.
 		// A pill still reading "Plan" after that is the difference between "read
 		// only" on screen and a session that is now editing files.
-		relay.sendMessage({ type: "permission_mode_info", mode: "ask" });
+		reportMode(rpc, "ask");
 		await expect(pill(page)).toContainText("Ask");
 	});
 
@@ -211,7 +215,7 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
-		relay.sendMessage({ type: "permission_mode_info", mode: "auto" });
+		reportMode(rpc, "auto");
 		await expect(pill(page)).toContainText("Auto");
 
 		relay.sendMessage({
@@ -287,7 +291,7 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 	test("selection made while no session is bound is flushed on selection", async ({
 		page,
 	}) => {
-		const { relay, rpc, serverModes } = await setup(page, unboundInit);
+		const { rpc, serverModes } = await setup(page, unboundInit);
 
 		// Cold-start window: no session bound yet. Select "Full access".
 		await selectFullAccess(page);
@@ -305,7 +309,7 @@ test.describe("Permission mode selected before session bind (regression)", () =>
 
 		// A later hydration push reflecting the (now stored) server mode must
 		// not flip the pill.
-		relay.sendMessage({ type: "permission_mode_info", mode: "full" });
+		reportMode(rpc, "full");
 		await expect(pill(page)).toContainText("Full access");
 	});
 

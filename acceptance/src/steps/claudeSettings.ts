@@ -3,7 +3,6 @@ import type { StepHandler } from "../runtime.js";
 import {
 	inheritedClaudeCommitAttribution,
 	openSessionRoute,
-	requireRelayControl,
 	requireRpcControl,
 	serveModelCatalog,
 } from "./shared.js";
@@ -31,8 +30,8 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		name: "set default approval mode to ask",
 		match: /^the default approval mode is Ask$/,
 		run: async ({ world }) => {
-			requireRelayControl(world.page).sendMessage({
-				type: "default_permission_mode_info",
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "defaultPermissionMode",
 				mode: "ask",
 			});
 		},
@@ -53,14 +52,12 @@ export const claudeSettingsHandlers: StepHandler[] = [
 				})),
 				active: { model: "claude-sonnet-4", provider: "anthropic" },
 			});
-			await requireRelayControl(world.page).sendMessages([
-				{
-					type: "default_model_info",
-					model: "claude-sonnet-4",
-					provider: "anthropic",
-					variant: "high",
-				},
-			]);
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-4",
+				provider: "anthropic",
+				variant: "high",
+			});
 		},
 	},
 	{

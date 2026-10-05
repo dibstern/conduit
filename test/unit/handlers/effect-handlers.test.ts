@@ -31,6 +31,7 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -1045,6 +1046,7 @@ describe("switchVariantForSession", () => {
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
+			ProjectSettingsLive,
 		);
 
 		return Effect.gen(function* () {
@@ -1104,6 +1106,7 @@ describe("switchVariantForSession", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1732,7 +1735,7 @@ describe("handleForkSession", () => {
 
 describe("setDefaultPermissionModeForRelay", () => {
 	it.effect(
-		"persists, updates the default, and broadcasts without changing a session",
+		"persists and updates the default without changing a session",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-default-permission-mode-"),
@@ -1744,6 +1747,7 @@ describe("setDefaultPermissionModeForRelay", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, mockConfig({ configDir })),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1758,10 +1762,8 @@ describe("setDefaultPermissionModeForRelay", () => {
 				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
 				expect(yield* getDefaultPermissionMode()).toBe("auto");
 				expect(yield* getPermissionMode("session-1")).toBe("full");
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "default_permission_mode_info",
-					mode: "auto",
-				});
+				// Peers hear it through SubscribeProjectSettings, not a broadcast.
+				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalledWith(
 					"client=client-1 Set default permission mode to: auto",
 				);

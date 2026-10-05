@@ -1918,12 +1918,47 @@ export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
 	stream: true,
 });
 
+/**
+ * One project-global setting, whole. Each member owns one slot, keyed by its
+ * `_tag`, so a duplicate or late delivery is idempotent and a new fact is a new
+ * member rather than a reshape.
+ */
+export const ProjectSettingSchema = Schema.Union(
+	Schema.TaggedStruct("defaultModel", {
+		model: Schema.optional(Schema.String),
+		provider: Schema.optional(Schema.String),
+		variant: Schema.String,
+	}),
+	Schema.TaggedStruct("visibility", {
+		hiddenModels: Schema.Array(Schema.String),
+		hiddenAgents: Schema.Array(Schema.String),
+	}),
+	Schema.TaggedStruct("defaultPermissionMode", {
+		mode: SessionPermissionModeSchema,
+	}),
+	Schema.TaggedStruct("claudeSettings", {
+		overrides: ClaudeSettingsOverridesSchema,
+	}),
+);
+export type ProjectSetting = typeof ProjectSettingSchema.Type;
+const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
+export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
+
+/** Settings are not in the read model: every subscribe opens with a snapshot. */
+export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
+	payload: { projectSlug: NonEmptyString },
+	success: ProjectSettingsEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
 	SubscribePtys,
 	SubscribeApprovals,
+	SubscribeProjectSettings,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),

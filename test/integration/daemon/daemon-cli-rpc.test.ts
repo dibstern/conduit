@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {
@@ -28,6 +28,7 @@ import {
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { subscribeProjectSettings } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { getDefaultModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
@@ -59,6 +60,12 @@ describe("CLI and browser daemon RPC parity", () => {
 								makeRoutedWsRpcServerLayer(() => Effect.succeed(context)),
 							),
 						);
+						// An open browser tab on the project (ni8.12 acceptance 4).
+						const tab = yield* Queue.unbounded<unknown>();
+						yield* Stream.runForEach(subscribeProjectSettings(), (envelope) =>
+							Queue.offer(tab, envelope),
+						).pipe(Effect.forkScoped);
+						yield* Queue.takeBetween(tab, 2, 2); // snapshot + synchronized
 						const result = yield* Effect.promise(() =>
 							sendRpcRequest(
 								socketPath,
@@ -79,6 +86,14 @@ describe("CLI and browser daemon RPC parity", () => {
 							modelID: "gpt-4",
 						});
 						expect(loadRelaySettings(root).defaultModel).toBe("openai/gpt-4");
+						expect(yield* Queue.take(tab)).toMatchObject({
+							_tag: "upsert",
+							item: {
+								_tag: "defaultModel",
+								model: "gpt-4",
+								provider: "openai",
+							},
+						});
 						expect(api.config.update).toHaveBeenCalledWith({
 							model: "openai/gpt-4",
 						});

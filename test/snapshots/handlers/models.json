@@ -11,15 +11,6 @@
 		{
 			"channel": "broadcast",
 			"message": {
-				"type": "default_model_info",
-				"model": "gpt-4",
-				"provider": "openai",
-				"variant": ""
-			}
-		},
-		{
-			"channel": "broadcast",
-			"message": {
 				"type": "variant_info",
 				"variant": "",
 				"variants": ["standard", "fast"]

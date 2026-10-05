@@ -2,6 +2,7 @@ import { Rpc, type RpcGroup } from "@effect/rpc";
 import { type Context, Effect, type Layer, Stream } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
+import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
@@ -230,6 +231,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
 	...unaryHandlers,
 });
 
@@ -403,5 +405,7 @@ export const makeRoutedWsRpcServerLayer = (
 				}),
 			),
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
+		SubscribeProjectSettings: (request) =>
+			routeStream(request.projectSlug, () => subscribeProjectSettings()),
 	});
 };

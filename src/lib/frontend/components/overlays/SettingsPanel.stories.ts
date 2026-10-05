@@ -181,7 +181,6 @@ export const VisibilityPopulated: Story = {
 			],
 		});
 		handleVisibilityInfo({
-			type: "visibility_info",
 			hiddenModels: ["anthropic/claude-haiku-3-5"],
 			hiddenAgents: ["anthropic/review"],
 		});

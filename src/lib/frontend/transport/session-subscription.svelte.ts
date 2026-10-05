@@ -7,8 +7,9 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
+import { handlePermissionModeInfo } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
-import { forgetSession } from "../stores/session.svelte.js";
+import { forgetSession, sessionState } from "../stores/session.svelte.js";
 import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
@@ -78,12 +79,23 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
+	// The viewed session's approval mode follows its row, so a switch made in
+	// another tab, or reported by the provider, lands in this tab's picker.
+	const followPermissionMode = (row: SessionInfo) => {
+		if (
+			row.id === sessionState.currentId &&
+			row.permissionMode !== undefined &&
+			row.permissionMode !== applied.rows.get(row.id)?.permissionMode
+		)
+			handlePermissionModeInfo({ mode: row.permissionMode });
+	};
 	const receivedSequence = sessionActivityBridge.observe();
 	// Only accepted shell changes retire activity. A duplicate or stale
 	// envelope must not affect client state independently of the row applier.
 	if (change._tag === "upsert") {
 		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
 		hydrateSessionGoal(change.item);
+		followPermissionMode(change.item);
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
@@ -102,6 +114,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		for (const row of next.rows.values()) {
 			sessionActivityBridge.retire(row.id, receivedSequence, "row");
 			hydrateSessionGoal(row);
+			followPermissionMode(row);
 		}
 	}
 	applied = next;

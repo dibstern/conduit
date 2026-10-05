@@ -158,4 +158,38 @@ describe("subscription RPC contracts", () => {
 			decode({ _tag: "snapshot", rows: [{ id: "session-1" }], sequence: 42 }),
 		).toThrow();
 	});
+	it("exposes a project-scoped settings stream through the frontend", () => {
+		const member = Contracts.SubscribeProjectSettings;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribeProjectSettings")).toBe(
+			member,
+		);
+		expect(Frontend.SubscribeProjectSettings).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		expect(decodePayload({ projectSlug: "project" })).toEqual({
+			projectSlug: "project",
+		});
+		// Scope is an argument, never ambient: no project, no subscription.
+		expect(() => decodePayload({})).toThrow();
+		expect(() => decodePayload({ projectSlug: "" })).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		const visibility = {
+			_tag: "visibility",
+			hiddenModels: ["anthropic/claude-haiku"],
+			hiddenAgents: [],
+		};
+		expect(decode({ _tag: "upsert", item: visibility, sequence: 2 })).toEqual({
+			_tag: "upsert",
+			item: visibility,
+			sequence: 2,
+		});
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { _tag: "defaultPermissionMode", mode: "sometimes" },
+				sequence: 2,
+			}),
+		).toThrow();
+	});
 });

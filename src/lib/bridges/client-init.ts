@@ -6,6 +6,7 @@
 // independently testable and relay-stack stays slim.
 
 import { Effect, Option } from "effect";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
 import {
 	LoggerTag,
@@ -18,10 +19,8 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
-	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
-	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	setDefaultModel,
@@ -277,29 +276,9 @@ const sendProvidersAndSettingsEffect = (
 						: yield* getDefaultContextWindow(),
 					options: catalogModel?.contextWindowOptions ?? [],
 				});
-				wsHandler.sendTo(clientId, {
-					type: "permission_mode_info",
-					// No session yet: report the mode one would start in, not "ask".
-					// getPermissionMode already falls back to the default itself.
-					mode: activeId
-						? yield* getPermissionMode(activeId)
-						: yield* getDefaultPermissionMode(),
-				});
-
+				// The approval mode reaches the tab on the session's shell row and
+				// the GetModels response; defaults ride SubscribeProjectSettings.
 				const defaultModel = yield* getDefaultModel();
-				if (defaultModel) {
-					wsHandler.sendTo(clientId, {
-						type: "default_model_info",
-						model: defaultModel.modelID,
-						provider: defaultModel.providerID,
-						variant: yield* getDefaultVariant(),
-					});
-				}
-				wsHandler.sendTo(clientId, {
-					type: "default_permission_mode_info",
-					mode: yield* getDefaultPermissionMode(),
-				});
-
 				if (!defaultModel && Option.isSome(openCodeCatalog)) {
 					for (const providerId of openCodeCatalog.value.connected) {
 						const defaultModelId = openCodeCatalog.value.defaults[providerId];
@@ -307,6 +286,12 @@ const sendProvidersAndSettingsEffect = (
 							yield* setDefaultModel({
 								providerID: providerId,
 								modelID: defaultModelId,
+							});
+							yield* publishProjectSetting({
+								_tag: "defaultModel",
+								model: defaultModelId,
+								provider: providerId,
+								variant: yield* getDefaultVariant(),
 							});
 							wsHandler.broadcast({
 								type: "model_info",
@@ -330,6 +315,12 @@ const sendProvidersAndSettingsEffect = (
 						yield* setDefaultModel({
 							providerID: "claude",
 							modelID: defaultClaudeModel.id,
+						});
+						yield* publishProjectSetting({
+							_tag: "defaultModel",
+							model: defaultClaudeModel.id,
+							provider: "claude",
+							variant: yield* getDefaultVariant(),
 						});
 						wsHandler.broadcast({
 							type: "model_info",

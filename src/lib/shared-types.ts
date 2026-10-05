@@ -1,7 +1,6 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
-import { ClaudeSettingsOverridesSchema } from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
@@ -290,6 +289,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** The approval mode this session was last switched to; absent until one is. */
+	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
@@ -727,29 +728,6 @@ const ModelInfoMsgSchema = Schema.Struct({
 	provider: Schema.String,
 });
 
-const DefaultModelInfoSchema = Schema.Struct({
-	type: Schema.Literal("default_model_info"),
-	model: Schema.String,
-	provider: Schema.String,
-	variant: Schema.String,
-});
-
-const DefaultPermissionModeInfoSchema = Schema.Struct({
-	type: Schema.Literal("default_permission_mode_info"),
-	mode: SessionPermissionModeSchema,
-});
-
-const VisibilityInfoSchema = Schema.Struct({
-	type: Schema.Literal("visibility_info"),
-	hiddenModels: Schema.Array(Schema.String),
-	hiddenAgents: Schema.Array(Schema.String),
-});
-
-const ClaudeSettingsInfoSchema = Schema.Struct({
-	type: Schema.Literal("claude_settings_info"),
-	overrides: ClaudeSettingsOverridesSchema,
-});
-
 const ProjectListSchema = Schema.Struct({
 	type: Schema.Literal("project_list"),
 	projects: Schema.Array(ProjectInfoSchema),
@@ -876,11 +854,6 @@ const ContextWindowInfoSchema = Schema.Struct({
 	options: Schema.Array(ContextWindowOptionSchema),
 });
 
-const PermissionModeInfoSchema = Schema.Struct({
-	type: Schema.Literal("permission_mode_info"),
-	mode: SessionPermissionModeSchema,
-});
-
 const SessionGoalChangedSchema = Schema.Struct({
 	type: Schema.Literal("session.goal_changed"),
 	...SessionGoalChangedPayloadSchema.fields,
@@ -918,10 +891,6 @@ export const RelayMessageSchema = Schema.Union(
 	SessionForkedSchema,
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
-	DefaultModelInfoSchema,
-	DefaultPermissionModeInfoSchema,
-	VisibilityInfoSchema,
-	ClaudeSettingsInfoSchema,
 	// Projects
 	ProjectListSchema,
 	DaemonSessionsChangedSchema,
@@ -950,7 +919,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Variant / thinking level
 	VariantInfoSchema,
 	ContextWindowInfoSchema,
-	PermissionModeInfoSchema,
 	SessionGoalChangedSchema,
 	// Cross-session notifications
 	NotificationEventSchema,

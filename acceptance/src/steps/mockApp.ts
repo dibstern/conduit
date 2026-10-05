@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
@@ -26,7 +27,7 @@ import {
 	rpcControls,
 } from "./shared.js";
 
-const mockClaudeSettings = new WeakMap<Page, Record<string, unknown>>();
+const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
 
 // The detail mock sends the last 50 messages first. Turn 3 needs two older pages.
 const skillNavigationMessages = Array.from(
@@ -153,13 +154,10 @@ export const mockAppHandlers: StepHandler[] = [
 						const overrides =
 							typeof payload["overrides"] === "object" &&
 							payload["overrides"] !== null
-								? (payload["overrides"] as Record<string, unknown>)
+								? (payload["overrides"] as ClaudeSettingsOverrides)
 								: {};
 						mockClaudeSettings.set(page, overrides);
-						relayControl.sendMessage({
-							type: "claude_settings_info",
-							overrides,
-						});
+						rpcControl.setProjectSetting({ _tag: "claudeSettings", overrides });
 						return { projectSlug: "myapp", overrides };
 					},
 					SetDefaultPermissionMode: async (payload) => ({

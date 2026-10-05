@@ -619,10 +619,7 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		? { ...response.modelExecution }
 		: null;
 	if (response.permissionMode) {
-		handlePermissionModeInfo({
-			type: "permission_mode_info",
-			mode: response.permissionMode,
-		});
+		handlePermissionModeInfo({ mode: response.permissionMode });
 	}
 	if (response.hiddenModels) {
 		serverDiscovery.hiddenModels = [...response.hiddenModels];
@@ -661,9 +658,11 @@ export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 	});
 }
 
-export function handleDefaultModelInfo(
-	msg: Extract<RelayMessage, { type: "default_model_info" }>,
-): void {
+export function handleDefaultModelInfo(msg: {
+	readonly model?: string | undefined;
+	readonly provider?: string | undefined;
+	readonly variant?: string | undefined;
+}): void {
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
@@ -702,16 +701,17 @@ export function handleContextWindowInfo(
 	choice.contextWindow = null;
 }
 
-export function handlePermissionModeInfo(
-	msg: Extract<RelayMessage, { type: "permission_mode_info" }>,
-): void {
+export function handlePermissionModeInfo(msg: {
+	readonly mode: SessionPermissionMode;
+}): void {
 	serverDiscovery.permissionMode = msg.mode;
 	choice.permissionMode = null;
 }
 
-export function handleVisibilityInfo(
-	msg: Extract<RelayMessage, { type: "visibility_info" }>,
-): void {
+export function handleVisibilityInfo(msg: {
+	readonly hiddenModels: readonly string[];
+	readonly hiddenAgents: readonly string[];
+}): void {
 	serverDiscovery.hiddenModels = [...msg.hiddenModels];
 	serverDiscovery.hiddenAgents = [...msg.hiddenAgents];
 	choice.hiddenModels = null;
@@ -861,7 +861,6 @@ export function applyModelSwitched(response: SwitchModelResponse): void {
 
 export function applyDefaultModelSet(response: SetDefaultModelResponse): void {
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: response.model,
 		provider: response.provider,
 		variant: response.variant,
@@ -895,7 +894,6 @@ export function applyHiddenEntriesSet(
 	response: SetHiddenEntriesResponse,
 ): void {
 	handleVisibilityInfo({
-		type: "visibility_info",
 		hiddenModels: [...response.hiddenModels],
 		hiddenAgents: [...response.hiddenAgents],
 	});

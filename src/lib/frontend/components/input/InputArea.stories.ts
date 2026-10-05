@@ -232,7 +232,6 @@ function setupWords(phone: boolean) {
 		provider: "claude",
 	});
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: "claude-sonnet-5",
 		provider: "claude",
 		variant: "",
