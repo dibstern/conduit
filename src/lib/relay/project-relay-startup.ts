@@ -4,7 +4,6 @@ import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
-import { RelayCommandGateTag } from "../domain/relay/Services/relay-command-gate.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
@@ -405,11 +404,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				yield* wireStartupCallbacks(inputs, services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
 				const { stopMonitoring } = monitoring;
-				yield* Effect.gen(function* () {
-					yield* startSseConsumers(inputs, services, monitoring);
-					const gate = yield* RelayCommandGateTag;
-					yield* gate.markReady();
-				}).pipe(
+				yield* startSseConsumers(inputs, services, monitoring).pipe(
 					Effect.onExit((exit) =>
 						Exit.isFailure(exit) ? Effect.sync(stopMonitoring) : Effect.void,
 					),

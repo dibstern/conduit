@@ -38,7 +38,6 @@ import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-o
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
-import { makeRelayCommandGateLive } from "../domain/relay/Services/relay-command-gate.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	BackgroundLivenessTag,
@@ -438,7 +437,6 @@ export function createProjectRelayLayers({
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
 		defaultCommandQueueLayer,
-		makeRelayCommandGateLive(config.slug),
 	).pipe(Layer.provide(baseLayers));
 	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
