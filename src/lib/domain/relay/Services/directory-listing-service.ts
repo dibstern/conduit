@@ -5,7 +5,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { Context, Data, Effect, Layer, Option } from "effect";
 import type { FindFoldersResponse } from "../../../contracts/ws-rpc.js";
 
-const MAX_DIR_ENTRIES = 50;
+/** Path autocomplete lists every child folder; this only bounds huge folders like node_modules. The list scrolls. */
+const MAX_PATH_MATCHES = 500;
 const MAX_FOLDER_ENTRIES = 20;
 
 type DirectoryListOperation = "read" | "stat";
@@ -61,7 +62,8 @@ const readDirectoryEntries = (
 			: `${parentDir}/`;
 		const entries = directoryEntries
 			.filter((entry) => {
-				if (!entry.isDirectory()) return false;
+				// Symlinks are kept here; findFolders drops those that are not folders.
+				if (!entry.isDirectory() && !entry.isSymbolicLink()) return false;
 				if (!showHidden && entry.name.startsWith(".")) return false;
 				if (
 					prefix &&
@@ -72,7 +74,7 @@ const readDirectoryEntries = (
 				return true;
 			})
 			.sort((a, b) => a.name.localeCompare(b.name))
-			.slice(0, MAX_DIR_ENTRIES)
+			.slice(0, MAX_PATH_MATCHES)
 			.map((entry) => `${normalizedParent}${entry.name}/`);
 
 		return { path: rawPath, entries };
@@ -223,35 +225,41 @@ export const findFolders = (
 					: Effect.fail(error),
 			),
 		);
-		const exists = Option.isSome(requested);
-		const matches = listing.entries
-			.map((entry) => resolve(entry))
-			.filter((entry) => entry !== path)
-			.slice(0, MAX_FOLDER_ENTRIES - 1);
-		const candidates = exists ? [path, ...matches] : [...matches, path];
-		const entries: FolderEntry[] = [];
-		for (const candidate of candidates) {
-			const directory =
-				candidate === path ? requested : yield* statPath(candidate);
-			if (Option.isNone(directory)) {
-				if (candidate === path)
-					entries.push({
-						path,
-						isGitRepo: false,
-						reason: "match",
-						exists: false,
-					});
-				continue;
-			}
-			if (!directory.value.isDirectory()) continue;
-			entries.push({
-				path: candidate,
-				isGitRepo: yield* isGitRepo(candidate),
-				reason: "match",
-				exists: true,
-			});
-		}
-		return { entries };
+		const children = yield* Effect.forEach(
+			listing.entries
+				.map((entry) => resolve(entry))
+				.filter((entry) => entry !== path),
+			(candidate) =>
+				Effect.gen(function* () {
+					const directory = yield* statPath(candidate);
+					if (Option.isNone(directory) || !directory.value.isDirectory())
+						return [];
+					const git = yield* isGitRepo(candidate);
+					return [
+						{
+							path: candidate,
+							isGitRepo: git,
+							reason: "match",
+							exists: true,
+						} as const,
+					];
+				}).pipe(Effect.orElseSucceed(() => [])),
+			{ concurrency: 16 },
+		);
+		if (Option.isNone(requested))
+			return {
+				entries: [
+					...children.flat(),
+					{ path, isGitRepo: false, reason: "match", exists: false } as const,
+				],
+			};
+		const typed = {
+			path,
+			isGitRepo: yield* isGitRepo(path),
+			reason: "match",
+			exists: true,
+		} as const;
+		return { entries: [typed, ...children.flat()] };
 	}).pipe(Effect.map((result) => ({ home: homedir(), ...result })));
 
 export const DirectoryListingServiceLive: Layer.Layer<DirectoryListingServiceTag> =

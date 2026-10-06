@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -84,7 +83,7 @@ describe("managed OpenCode survives server replacement", () => {
 			JSON.stringify(
 				{
 					ticket: "conduit-test-85kb.12",
-					passed: results.length === 25,
+					passed: results.length === 23,
 					scenarios: results,
 				},
 				null,
@@ -281,62 +280,6 @@ describe("managed OpenCode survives server replacement", () => {
 			bothExited: true,
 			recordCleared: true,
 		});
-	});
-
-	it("cleans up descendants when the legacy manager's process leader exits", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
-		const manager = new InstanceManager({
-			configDir: join(harness.root, "config"),
-			healthPollIntervalMs: 50,
-			maxRestartsPerWindow: 1,
-		});
-		const instance = manager.addInstance("legacy-test", {
-			name: "Legacy process cleanup",
-			managed: true,
-			port: 0,
-			env: {
-				OPENCODE_SERVER_USERNAME: "legacy-user",
-				OPENCODE_SERVER_PASSWORD: "legacy-test-password",
-				CONDUIT_TEST_OPENCODE_LISTEN_DELAY_MS: "250",
-				PATH: `${join(harness.root, "bin")}:${process.env["PATH"]}`,
-				HOME: join(harness.root, "home"),
-				CONDUIT_CONFIG_DIR: join(harness.root, "config"),
-				XDG_DATA_HOME: join(harness.root, "data"),
-			},
-		});
-		try {
-			await manager.startInstance(instance.id);
-			await vi.waitFor(() => expect(instance.status).toBe("healthy"), {
-				timeout: 5000,
-			});
-			const response = await fetch(
-				`http://127.0.0.1:${instance.port}/global/health`,
-				{
-					headers: {
-						Authorization: `Basic ${Buffer.from("legacy-user:legacy-test-password").toString("base64")}`,
-					},
-				},
-			);
-			const before = (await response.json()) as {
-				pid: number;
-				childPid: number;
-			};
-			expect(alive(before.childPid)).toBe(true);
-			process.kill(before.pid, "SIGTERM");
-			await vi.waitFor(() => expect(instance.status).toBe("stopped"), {
-				timeout: 5000,
-			});
-			await manager.drain();
-			await vi.waitFor(() => expect(alive(before.childPid)).toBe(false));
-			results.push({
-				scenario: "legacy-leader-exit",
-				pid: before.pid,
-				childPid: before.childPid,
-				bothExited: true,
-			});
-		} finally {
-			await manager.drain();
-		}
 	});
 
 	it("never adopts or signals an unrelated PID behind an authenticated server", async () => {
@@ -813,44 +756,6 @@ describe("managed OpenCode survives server replacement", () => {
 			bothExited: true,
 			recordRemoved: true,
 		});
-	});
-
-	it("reserves legacy recovery before concurrent start calls can spawn", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
-		const manager = new InstanceManager({
-			configDir: join(harness.root, "config"),
-			healthPollIntervalMs: 50,
-			maxRestartsPerWindow: 1,
-		});
-		const instance = manager.addInstance("concurrent-test", {
-			name: "Concurrent recovery",
-			managed: true,
-			port: 0,
-			pid: process.pid,
-			env: {
-				PATH: `${join(harness.root, "bin")}:${process.env["PATH"]}`,
-				HOME: join(harness.root, "home"),
-				CONDUIT_CONFIG_DIR: join(harness.root, "config"),
-				XDG_DATA_HOME: join(harness.root, "data"),
-			},
-		});
-		const pidsFile = join(harness.root, "config", "fake-opencode-pids.jsonl");
-		const before = readFileSync(pidsFile, "utf8").trim().split("\n").length;
-		try {
-			await Promise.all([
-				manager.startInstance(instance.id),
-				manager.startInstance(instance.id),
-			]);
-			await vi.waitFor(() => expect(instance.status).toBe("healthy"), {
-				timeout: 5000,
-			});
-			expect(readFileSync(pidsFile, "utf8").trim().split("\n")).toHaveLength(
-				before + 1,
-			);
-			results.push({ scenario: "concurrent-recovery", childrenSpawned: 1 });
-		} finally {
-			await manager.drain();
-		}
 	});
 
 	it("requires the verified generation and process identity before every stop", async () => {

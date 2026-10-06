@@ -219,6 +219,7 @@ export const sessionsHandlers = {
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
+			...(request.model != null ? { model: request.model } : {}),
 		}).pipe(
 			Effect.map((session) => ({
 				projectSlug: request.projectSlug,

@@ -1556,6 +1556,13 @@ export class ClaudeEventTranslator {
 		result: SDKResultMessage,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
+			if (
+				result.subtype === "success" &&
+				!result.is_error &&
+				!isInterruptedResult(result)
+			) {
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
+			}
 			yield* this.settleGoal(ctx);
 			if (isInterruptedResult(result)) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));

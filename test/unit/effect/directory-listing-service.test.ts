@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -55,6 +55,40 @@ describe("DirectoryListingService", () => {
 						match(`${root}/work`),
 						match(`${root}/workspace`),
 						match(`${root}/wo`, false),
+					],
+				});
+			}).pipe(Effect.scoped, Effect.provide(DirectoryListingServiceLive)),
+	);
+
+	it.effect(
+		"lists every child directory, following symlinks to directories",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* tempDirectory;
+				const names = Array.from(
+					{ length: 60 },
+					(_, index) => `dir-${String(index).padStart(2, "0")}`,
+				);
+				yield* Effect.forEach(names, (name) =>
+					tryFs(() => mkdir(join(root, name))),
+				);
+				yield* tryFs(() => writeFile(join(root, "notes.txt"), "file"));
+				yield* tryFs(() => symlink(join(root, "dir-00"), join(root, "linked")));
+				yield* tryFs(() =>
+					symlink(join(root, "notes.txt"), join(root, "linked-file")),
+				);
+				yield* tryFs(() =>
+					symlink(join(root, "missing"), join(root, "linked-missing")),
+				);
+
+				const service = yield* DirectoryListingServiceTag;
+
+				expect(yield* service.find(`${root}/`)).toEqual({
+					home: homedir(),
+					entries: [
+						match(root),
+						...names.map((name) => match(`${root}/${name}`)),
+						match(`${root}/linked`),
 					],
 				});
 			}).pipe(Effect.scoped, Effect.provide(DirectoryListingServiceLive)),
