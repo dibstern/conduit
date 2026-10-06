@@ -187,7 +187,8 @@ export interface PreWarmSessionRpcInput {
 }
 
 export interface AttachProjectRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
+	readonly sessionId?: string;
 	readonly originId: string;
 }
 
@@ -556,9 +557,7 @@ const callPreWarmSession = (input: PreWarmSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.PreWarmSession(input));
 
 const callAttachProject = (input: AttachProjectRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client.AttachProject(input).pipe(Effect.asVoid),
-	);
+	callControl(input.projectSlug, (client) => client.AttachProject(input));
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -996,10 +995,10 @@ export async function preWarmSessionRpc(
 	await runTransportEffect(callPreWarmSession(input));
 }
 
-export async function attachProjectRpc(
+export function attachProjectRpc(
 	input: AttachProjectRpcInput,
-): Promise<void> {
-	await runTransportEffect(callAttachProject(input));
+): Promise<{ readonly projectSlug: string | null }> {
+	return runTransportEffect(callAttachProject(input));
 }
 
 export async function deleteSessionRpc(

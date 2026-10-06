@@ -52,6 +52,7 @@ import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { updateContextPercent } from "./ui.svelte.js";
+import { setAttachedProject } from "./ws-dispatch.js";
 
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
@@ -923,6 +924,9 @@ export function switchToSession(
 		};
 		void (view ?? viewSessionRpc)(input)
 			.then(({ draft }) => {
+				// Viewing another project's session attaches this tab to it.
+				if (generation === selectionGeneration && getCurrentSlug() !== slug)
+					setAttachedProject(slug);
 				if (
 					draft !== undefined &&
 					generation === selectionGeneration &&

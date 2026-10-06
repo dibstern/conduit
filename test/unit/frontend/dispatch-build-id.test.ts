@@ -74,6 +74,7 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 describe("build ID dispatch", () => {
 	let handleMessage: typeof import("../../../src/lib/frontend/stores/ws-dispatch.js")["handleMessage"];
+	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/ws-dispatch.js")["setAttachedProject"];
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -113,7 +114,7 @@ describe("build ID dispatch", () => {
 			history: { pushState: () => {}, replaceState: () => {} },
 			addEventListener: () => {},
 		});
-		({ handleMessage } = await import(
+		({ handleMessage, setAttachedProject } = await import(
 			"../../../src/lib/frontend/stores/ws-dispatch.js"
 		));
 	});
@@ -152,7 +153,7 @@ describe("build ID dispatch", () => {
 			"../../../src/lib/frontend/stores/ws-listeners.js"
 		);
 		const unsubscribe = onProjectAttached(() => mocks.showBanner.mockClear());
-		handleMessage({ type: "project_attached", slug: "test-project" });
+		setAttachedProject("test-project");
 		unsubscribe();
 		expect(mocks.showBanner).toHaveBeenCalledWith({
 			id: "server-update",
@@ -204,7 +205,7 @@ describe("build ID dispatch", () => {
 		serverUpdate(false);
 		finishRestart();
 		await Promise.all([first, second, third]);
-		handleMessage({ type: "project_attached", slug: "test-project" });
+		setAttachedProject("test-project");
 		serverUpdate(true);
 		await run();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);
@@ -344,7 +345,7 @@ describe("build ID dispatch", () => {
 		await vi.runAllTimersAsync();
 		expect(mocks.reload).toHaveBeenCalledTimes(1);
 		vi.resetModules();
-		({ handleMessage } = await import(
+		({ handleMessage, setAttachedProject } = await import(
 			"../../../src/lib/frontend/stores/ws-dispatch.js"
 		));
 		handshake();

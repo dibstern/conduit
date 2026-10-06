@@ -10,6 +10,7 @@ const emptyComponent = vi.hoisted(
 );
 const wsLifecycleHarness = vi.hoisted(() => ({
 	onAttachCallbacks: [] as Array<(slug: string) => void>,
+	attachedSlugs: [] as string[],
 	onSynchronizedCallbacks: [] as Array<(slug: string) => void>,
 }));
 
@@ -118,6 +119,9 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		onProjectAttached: vi.fn((callback: (slug: string) => void) => {
 			wsLifecycleHarness.onAttachCallbacks.push(callback);
 			return () => {};
+		}),
+		setAttachedProject: vi.fn((slug: string) => {
+			wsLifecycleHarness.attachedSlugs.push(slug);
 		}),
 		onNavigateToSession: vi.fn(),
 		clearNavigateToSession: vi.fn(),
@@ -246,7 +250,9 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	resolveSessionRpc: vi.fn(async () => ({
 		projectSlug: "test-project" as string | null,
 	})),
-	attachProjectRpc: vi.fn(async () => {}),
+	attachProjectRpc: vi.fn(async () => ({
+		projectSlug: null as string | null,
+	})),
 	listDaemonSessionsRpc: vi.fn(async () => ({
 		sessions: [],
 		availability: [],
@@ -320,6 +326,7 @@ describe("ChatLayout WS lifecycle", () => {
 			},
 		);
 		wsLifecycleHarness.onAttachCallbacks = [];
+		wsLifecycleHarness.attachedSlugs = [];
 		wsLifecycleHarness.onSynchronizedCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
@@ -584,6 +591,28 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(routerState.sessionNotFound).toBe(false);
 	});
 
+	it("keeps the /ws bootstrap that lands before the first attach reply", () => {
+		render(ChatLayout);
+		attach("test-project");
+		expect(clearMessages).not.toHaveBeenCalled();
+		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
+	});
+
+	it("attaches again after a remount, which keeps the previous slug", async () => {
+		render(ChatLayout).unmount();
+		attachedProjectState.slug = "test-project";
+		vi.clearAllMocks();
+		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+			projectSlug: "test-project",
+		});
+		render(ChatLayout);
+		await tick();
+		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+			originId: "browser-client-1",
+		});
+		expect(wsLifecycleHarness.attachedSlugs.at(-1)).toBe("test-project");
+	});
+
 	it("rehydrates once on a reconnect attach to the same project without resetting", () => {
 		render(ChatLayout);
 		attach("test-project");
@@ -596,6 +625,7 @@ describe("ChatLayout WS lifecycle", () => {
 	it("uses AttachProject for project-only navigation without reconnecting", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		vi.mocked(attachProjectRpc).mockClear();
 		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();
@@ -608,13 +638,24 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(disconnect).not.toHaveBeenCalled();
 	});
 
+	it("attaches the cold-load project from the AttachProject reply", async () => {
+		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+			projectSlug: "daemon-default",
+		});
+		render(ChatLayout);
+		await tick();
+		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+			originId: "browser-client-1",
+		});
+		expect(wsLifecycleHarness.attachedSlugs).toEqual(["daemon-default"]);
+	});
+
 	it("can select a project before the socket has attached to one", async () => {
 		render(ChatLayout);
-		expect(attachProjectRpc).not.toHaveBeenCalled();
 		replaceRoute("/?p=first-project");
 		flushSync();
 		await tick();
-		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProjectRpc).toHaveBeenLastCalledWith({
 			projectSlug: "first-project",
 			originId: "browser-client-1",
 		});
@@ -624,6 +665,8 @@ describe("ChatLayout WS lifecycle", () => {
 	it("cancels a pending project switch when navigating back to the attached project", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		vi.mocked(attachProjectRpc).mockClear();
+		vi.mocked(attachProjectRpc).mockReturnValueOnce(new Promise(() => {}));
 		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();

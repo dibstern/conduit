@@ -61,10 +61,9 @@ describe("Integration: Error Handling", () => {
 					messages.some((message) => message["type"] === "session_family"),
 				).toBe(true);
 			});
-			expect(messages[0]).toEqual({
-				type: "project_attached",
-				slug: "integration-test",
-			});
+			expect(messages.map((message) => message["type"])).not.toContain(
+				"project_attached",
+			);
 			expect(attach).toHaveBeenCalledOnce();
 			expect(attach).toHaveBeenCalledWith(expect.any(WebSocket), {
 				clientId:

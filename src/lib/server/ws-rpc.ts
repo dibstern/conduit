@@ -261,6 +261,12 @@ export type ReattachDaemonViewSession = (payload: {
 	readonly sessionId?: string;
 }) => Effect.Effect<boolean, WsRpcError>;
 
+export type AttachDaemonProject = (payload: {
+	readonly originId: string;
+	readonly projectSlug?: string | undefined;
+	readonly sessionId?: string | undefined;
+}) => Effect.Effect<{ readonly projectSlug: string | null }, WsRpcError>;
+
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers
 	| "GetProjects"
@@ -307,6 +313,7 @@ export const makeRoutedWsRpcServerLayer = (
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
 	reattachViewSession?: ReattachDaemonViewSession,
+	attachProject?: AttachDaemonProject,
 ) => {
 	const routeHandler =
 		<P extends { readonly projectSlug?: string }, A, E, R>(
@@ -346,10 +353,7 @@ export const makeRoutedWsRpcServerLayer = (
 			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError
 		>;
 	};
-	handlers.AttachProject = (payload) =>
-		reattachViewSession
-			? reattachViewSession(payload).pipe(Effect.as({ ok: true as const }))
-			: unaryHandlers.AttachProject(payload);
+	if (attachProject) handlers.AttachProject = attachProject;
 	if (reattachViewSession) {
 		const routeViewSession = routeHandler(unaryHandlers.ViewSession);
 		handlers.ViewSession = (

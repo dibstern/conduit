@@ -83,7 +83,8 @@ export const routerState = $state({
 	sessionNotFound: false,
 });
 
-/** The daemon sets the attached project through project_attached messages. */
+/** The project this tab is attached to, from the AttachProject reply or a
+ *  ViewSession that crossed projects. Tab state: each tab attaches its own. */
 export const attachedProjectState = $state({
 	slug: null as string | null,
 });

@@ -74,6 +74,7 @@ export const splitScene: SceneDefinition = {
 			sendMockShellSnapshot(page, shellSnapshot.sessions);
 			await mockWsRpc(page, {
 				handlers: {
+					AttachProject: () => ({ projectSlug: "saas-landing" }),
 					ListDaemonSessions: () => ({
 						sessions: [],
 						availability: [],
@@ -83,9 +84,6 @@ export const splitScene: SceneDefinition = {
 				},
 			});
 			await context.routeWebSocket(/\/ws/, (ws: WebSocketRoute) => {
-				ws.send(
-					JSON.stringify({ type: "project_attached", slug: "saas-landing" }),
-				);
 				// Send all init messages on connect
 				for (const msg of splitInit) {
 					if (msg.type !== "shell_snapshot") ws.send(JSON.stringify(msg));

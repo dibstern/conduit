@@ -48,7 +48,7 @@ async function readServerBuildId(baseUrl: string): Promise<string> {
 	);
 	try {
 		return await new Promise<string>((resolve, reject) => {
-			// Daemon-level project_attached can precede the relay handshake.
+			// Other relay bootstrap messages can precede the handshake.
 			socket.on("message", (data) => {
 				const message = JSON.parse(String(data)) as {
 					type: string;

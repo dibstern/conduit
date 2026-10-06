@@ -310,12 +310,6 @@ async function createTestHarness(
 					? requestedClientId
 					: randomBytes(8).toString("hex");
 				const requestedSessionId = params.get("session") || undefined;
-				ws.send(
-					JSON.stringify({
-						type: "project_attached",
-						slug: `test-sse-gating-${relayPort}`,
-					}),
-				);
 				relay.wsHandler.attach(ws, {
 					clientId,
 					...(requestedSessionId != null && { requestedSessionId }),

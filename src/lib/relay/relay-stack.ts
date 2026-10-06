@@ -916,9 +916,6 @@ export async function createRelayStack(
 					? requestedClientId
 					: randomBytes(8).toString("hex");
 				const requestedSessionId = params.get("session") || undefined;
-				ws.send(
-					JSON.stringify({ type: "project_attached", slug: config.slug }),
-				);
 				relay.wsHandler.attach(ws, {
 					clientId,
 					...(requestedSessionId != null && { requestedSessionId }),

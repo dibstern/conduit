@@ -41,6 +41,7 @@
 		connect,
 		disconnect,
 		onProjectAttached,
+		setAttachedProject,
 		wsState,
 		onNavigateToSession,
 		clearNavigateToSession,
@@ -339,13 +340,17 @@
 	}
 
 	let requestedProject: string | null = null;
+	// Each mount attaches once: a remount keeps the previous mount's slug.
+	let attachedThisMount = false;
 	onMount(() => {
-		let previousSlug: string | null = null;
+		// A page load starts clean, and the /ws bootstrap can land before the
+		// AttachProject reply, so only a change of project clears state.
+		let previousSlug = attachedProjectState.slug;
 		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
 			if (requestedProject === slug) requestedProject = null;
 			attachGeneration++;
-			if (slug !== previousSlug) {
+			if (previousSlug !== null && slug !== previousSlug) {
 				clearMessages();
 				clearSessionState();
 				destroyAll();
@@ -353,10 +358,8 @@
 				clearTodoState();
 				clearFileTreeState();
 				resetProjectUI();
-				previousSlug = slug;
 			}
-			// Fetch current version for sidebar footer
-			fetchCurrentVersion();
+			previousSlug = slug;
 			// Request initial state from server
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
@@ -461,6 +464,11 @@
 		untrack(() => followDaemonLists(connection));
 		return () => followDaemonLists(null);
 	});
+	// The version is daemon-wide, so it follows the connection, not the project:
+	// a reconnect after a restart can be a new build.
+	$effect(() => {
+		if (connected) void fetchCurrentVersion();
+	});
 	$effect(() => {
 		const route = getCurrentRoute();
 		// A draft attaches the project it will be created in, so models and
@@ -470,15 +478,28 @@
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
+			// The server picks the project on a cold load (the session's, the hint,
+			// else its default); afterwards only a project-only route switches it.
+			if (!attachedThisMount || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
+				requestedProject = projectHint ?? null;
+				void attachProjectRpc({
+					originId: getBrowserClientId(),
+					...(projectHint ? { projectSlug: projectHint } : {}),
+					...(route.sessionId ? { sessionId: route.sessionId } : {}),
+				})
+					.then(({ projectSlug }) => {
+						if (cancelled) return;
+						requestedProject = null;
+						if (projectSlug === null) return;
+						attachedThisMount = true;
+						setAttachedProject(projectSlug);
+					})
+					.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+			}
 			if (!route.sessionId) {
 				if (sessionState.currentId !== null) {
 					sessionState.currentId = null;
 					clearTodoState();
-				}
-				if (projectHint && (projectHint !== attachedProjectState.slug || requestedProject !== null)) {
-					requestedProject = projectHint;
-					void attachProjectRpc({ projectSlug: projectHint, originId: getBrowserClientId() })
-						.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
 				}
 				return;
 			}

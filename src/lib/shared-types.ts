@@ -693,11 +693,6 @@ const DaemonSessionsChangedSchema = Schema.Struct({
 	type: Schema.Literal("daemon_sessions_changed"),
 });
 
-const ProjectAttachedSchema = Schema.Struct({
-	type: Schema.Literal("project_attached"),
-	slug: Schema.String,
-});
-
 const PartRemovedSchema = Schema.Struct({
 	type: Schema.Literal("part_removed"),
 	sessionId: Schema.String,
@@ -809,7 +804,6 @@ export const RelayMessageSchema = Schema.Union(
 	SessionForkedSchema,
 	// Projects
 	DaemonSessionsChangedSchema,
-	ProjectAttachedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,

@@ -215,15 +215,6 @@ function routePerSession(event: PerSessionEvent): void {
  */
 export function handleMessage(msg: RelayMessage): void {
 	observeSessionActivity(msg);
-	if (msg.type === "project_attached") {
-		if (attachedProjectState.slug !== msg.slug)
-			for (const activity of sessionActivity.values())
-				activity.replayGeneration++;
-		attachedProjectState.slug = msg.slug;
-		for (const listener of projectAttachedListeners) listener(msg.slug);
-		handleServerUpdate(serverUpdateAvailable);
-		return;
-	}
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot. notification_event is excluded by construction
 	// (PerSessionEventType union does not include it).
@@ -514,6 +505,18 @@ function showServerUpdateBanner(): void {
 			},
 		},
 	});
+}
+
+/** Attach this tab to a project: the reply to AttachProject, or a ViewSession
+ *  that crossed projects. Listeners reset per-project state, which clears
+ *  banners, so the server-update banner is restored afterwards. */
+export function setAttachedProject(slug: string): void {
+	if (attachedProjectState.slug !== slug)
+		for (const activity of sessionActivity.values())
+			activity.replayGeneration++;
+	attachedProjectState.slug = slug;
+	for (const listener of projectAttachedListeners) listener(slug);
+	handleServerUpdate(serverUpdateAvailable);
 }
 
 function handleServerUpdate(restartAvailable: boolean): void {

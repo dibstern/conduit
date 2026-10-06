@@ -1516,9 +1516,13 @@ export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
 	"AttachProject",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		// The project this tab is now attached to; null when none is registered.
+		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
 		payload: {
-			projectSlug: NonEmptyString,
+			// Hints, in priority order: the session's project, then projectSlug.
+			// The server falls back to its default project when neither resolves.
+			sessionId: Schema.optional(NonEmptyString),
+			projectSlug: Schema.optional(NonEmptyString),
 			originId: NonEmptyString,
 		},
 	},

@@ -228,18 +228,12 @@ describe("daemon shared RPC routing", () => {
 						),
 					).toBe(true);
 				});
-				const attachedA = eventMessages.findIndex(
-					(message) =>
-						message["type"] === "project_attached" &&
-						message["slug"] === "project-a",
-				);
 				const bootstrapA = eventMessages.findIndex(
 					(message) =>
 						message["type"] === "session_family" &&
 						JSON.stringify(message).includes("project-a bootstrap"),
 				);
-				expect(attachedA).toBeGreaterThanOrEqual(0);
-				expect(bootstrapA).toBeGreaterThan(attachedA);
+				expect(bootstrapA).toBeGreaterThanOrEqual(0);
 
 				const rpcContext = yield* Layer.build(
 					RpcClient.layerProtocolSocket().pipe(
@@ -264,7 +258,11 @@ describe("daemon shared RPC routing", () => {
 								projectSlug: "project-b",
 								originId: "daemon-client",
 							}),
-				).toMatchObject({ ok: true });
+				).toMatchObject(
+					operation === "ViewSession"
+						? { ok: true }
+						: { projectSlug: "project-b" },
+				);
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(
@@ -274,18 +272,12 @@ describe("daemon shared RPC routing", () => {
 						),
 					).toBe(true);
 				});
-				const attachedB = eventMessages.findIndex(
-					(message) =>
-						message["type"] === "project_attached" &&
-						message["slug"] === "project-b",
-				);
 				const bootstrapB = eventMessages.findIndex(
 					(message) =>
 						message["type"] === "session_family" &&
 						JSON.stringify(message).includes("project-b bootstrap"),
 				);
-				expect(bootstrapB).toBeGreaterThan(attachedB);
-				expect(attachedB).toBeGreaterThan(bootstrapA);
+				expect(bootstrapB).toBeGreaterThan(bootstrapA);
 				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
 				expect(
 					eventMessages.filter(

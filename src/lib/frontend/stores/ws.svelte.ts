@@ -31,7 +31,7 @@ import {
 // These were extracted for modularity but consumers still import from here.
 
 // Re-export dispatch module — consumers import handleMessage from here.
-export { handleMessage } from "./ws-dispatch.js";
+export { handleMessage, setAttachedProject } from "./ws-dispatch.js";
 
 export {
 	type FileBrowserReply,
@@ -60,6 +60,7 @@ import {
 	disarmProtocolVersionCheck,
 	handleMessage,
 } from "./ws-dispatch.js";
+import { onProjectAttached } from "./ws-listeners.js";
 import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
@@ -155,6 +156,8 @@ function fetchRelayStatus(slug: string, generation: number): void {
 			// Ignore — this is just for UI enrichment
 		});
 }
+
+onProjectAttached((slug) => fetchRelayStatus(slug, _connectionGeneration));
 
 /**
  * Establish WebSocket connection.
@@ -331,8 +334,6 @@ function doConnect(
 
 						try {
 							handleMessage(msg);
-							if (msg.type === "project_attached")
-								fetchRelayStatus(msg.slug, generation);
 						} catch (err) {
 							log.warn("Handler error for", msg.type, err);
 						}

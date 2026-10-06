@@ -64,11 +64,13 @@ async function setupWithProjectManagement(
 			messageCount: 0,
 		},
 	];
-	// The daemon answers AttachProject by announcing the new project on the socket.
-	let relay: WsMockControl | undefined;
+	// The daemon answers AttachProject with the project it attached.
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			AttachProject: async (params) => {
+				// A cold load without ?p attaches the daemon's default project.
+				if (typeof params["projectSlug"] !== "string")
+					return { projectSlug: "myapp" };
 				// A real attach takes a round trip or two; an instant answer would
 				// hide anything that races it.
 				await new Promise((resolve) => setTimeout(resolve, 300));
@@ -77,13 +79,7 @@ async function setupWithProjectManagement(
 						(session) => session.projectSlug === params["projectSlug"],
 					),
 				);
-				setTimeout(() =>
-					relay?.sendMessage({
-						type: "project_attached",
-						slug: String(params["projectSlug"]),
-					}),
-				);
-				return { ok: true };
+				return { projectSlug: String(params["projectSlug"]) };
 			},
 			ListSessions: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
@@ -181,7 +177,6 @@ async function setupWithProjectManagement(
 		initDelay: 0,
 		messageDelay: 0,
 	});
-	relay = control;
 	await page.goto(`${baseURL ?? "http://localhost:4173"}${path}`);
 	await waitForChatReady(page);
 	return Object.assign(control, { rpc });

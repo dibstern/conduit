@@ -508,9 +508,16 @@ async function handleMessage(
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 			(raw.tag === "ResolveSession"
 				? () => ({ projectSlug: control.projectSlug })
-				: raw.tag === "ViewSession"
-					? () => ({ ok: true })
-					: undefined);
+				: raw.tag === "AttachProject"
+					? ({ projectSlug }) => ({
+							projectSlug:
+								typeof projectSlug === "string"
+									? projectSlug
+									: control.projectSlug,
+						})
+					: raw.tag === "ViewSession"
+						? () => ({ ok: true })
+						: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
