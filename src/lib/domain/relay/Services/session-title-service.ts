@@ -18,7 +18,6 @@ import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effec
 import { canonicalEvent } from "../../../persistence/events.js";
 import { makeClaudeSdkEnv } from "../../../provider/claude/claude-sdk-env.js";
 import { ConfigTag, LoggerTag } from "./services.js";
-import { SessionManagerServiceTag } from "./session-manager-service.js";
 
 const TITLE_GENERATION_TIMEOUT = Duration.seconds(30);
 const AUTO_TITLE_SOURCE = "auto-title";
@@ -212,7 +211,6 @@ export const makeSessionTitleServiceLive = (
 	never,
 	| LoggerTag
 	| ConfigTag
-	| SessionManagerServiceTag
 	| ReadQueryEffectTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
@@ -223,7 +221,6 @@ export const makeSessionTitleServiceLive = (
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
-			const sessionManagerService = yield* SessionManagerServiceTag;
 			const config = yield* ConfigTag;
 			const readQuery = yield* ReadQueryEffectTag;
 			const eventStore = yield* EventStoreEffectTag;
@@ -352,13 +349,10 @@ export const makeSessionTitleServiceLive = (
 					const rows = yield* sql<{ title: string; provider: string }>`
 						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;
 					const appliedRow = rows[0];
-					const applied =
+					return (
 						appliedRow?.title === title &&
-						isClaudeSessionProvider(appliedRow.provider);
-					if (!applied) return false;
-
-					yield* sessionManagerService.pushViewerFamilies();
-					return true;
+						isClaudeSessionProvider(appliedRow.provider)
+					);
 				});
 
 			const runTitleJob = (input: {

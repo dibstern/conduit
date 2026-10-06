@@ -170,19 +170,6 @@ const materializeOpenCodeSession = (
 		}
 		orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
 		wsHandler.setClientSession(input.clientId, session.id);
-		yield* Effect.forkDaemon(
-			sessionManagerService
-				.pushViewerFamilies()
-				.pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to push viewed families after OpenCode materialization: ${err}`,
-							),
-						),
-					),
-				),
-		);
 		log.info(
 			`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
 		);

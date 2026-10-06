@@ -2,7 +2,10 @@
 import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import type {
+	RelayMessage,
+	SessionInfo,
+} from "../../../src/lib/shared-types.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -25,15 +28,60 @@ function sessionId(page: Page): string {
 	return id;
 }
 
-function watchPushes(page: Page): RelayMessage[] {
-	const messages: RelayMessage[] = [];
+/** Relay pushes from /ws, and every family row SubscribeSessionFamily delivers. */
+function watchPushes(page: Page) {
+	const relay: RelayMessage[] = [];
+	const family: SessionInfo[] = [];
 	page.on("websocket", (socket) => {
-		if (new URL(socket.url()).pathname !== "/ws") return;
+		const path = new URL(socket.url()).pathname;
+		if (path === "/ws") {
+			socket.on("framereceived", ({ payload }) => {
+				relay.push(JSON.parse(String(payload)) as RelayMessage);
+			});
+			return;
+		}
+		if (!path.endsWith("/rpc")) return;
+		const familyRequests = new Set<string>();
+		socket.on("framesent", ({ payload }) => {
+			for (const line of String(payload).split("\n").filter(Boolean)) {
+				const request = JSON.parse(line) as {
+					_tag?: string;
+					id?: string;
+					tag?: string;
+				};
+				if (
+					request._tag === "Request" &&
+					request.tag === "SubscribeSessionFamily" &&
+					request.id
+				)
+					familyRequests.add(request.id);
+			}
+		});
 		socket.on("framereceived", ({ payload }) => {
-			messages.push(JSON.parse(String(payload)) as RelayMessage);
+			for (const line of String(payload).split("\n").filter(Boolean)) {
+				const chunk = JSON.parse(line) as {
+					_tag?: string;
+					requestId?: string;
+					values?: ReadonlyArray<{
+						_tag: string;
+						rows?: SessionInfo[];
+						item?: SessionInfo;
+					}>;
+				};
+				if (
+					chunk._tag !== "Chunk" ||
+					!familyRequests.has(chunk.requestId ?? "")
+				)
+					continue;
+				for (const envelope of chunk.values ?? [])
+					family.push(
+						...(envelope.rows ?? []),
+						...(envelope.item ? [envelope.item] : []),
+					);
+			}
 		});
 	});
-	return messages;
+	return { relay, family };
 }
 
 function storedFacts(dbPath: string) {
@@ -92,7 +140,7 @@ async function attachEvidence(
 	testInfo: TestInfo,
 	page: Page,
 	harness: ReplayHarness,
-	pushes: RelayMessage[],
+	pushes: ReturnType<typeof watchPushes>,
 	name: string,
 ) {
 	const screenshot = testInfo.outputPath(`${name}.png`);
@@ -105,14 +153,11 @@ async function attachEvidence(
 			{
 				url: page.url(),
 				store: storedFacts(harness.eventsDbPath),
-				pushes: pushes.filter((message) =>
-					[
-						"status",
-						"session_family",
-						"session_list",
-						"permission_request",
-						"ask_user",
-					].includes(message.type),
+				family: pushes.family,
+				pushes: pushes.relay.filter((message) =>
+					["status", "session_list", "permission_request", "ask_user"].includes(
+						message.type,
+					),
 				),
 				mockDiagnostics: harness.mock.diagnostics,
 			},
@@ -252,16 +297,9 @@ test.describe("OpenCode Side Thread status", () => {
 			await expect(chat.stopBtn).toBeHidden();
 			await expect
 				.poll(() =>
-					pushes.some(
-						(message) =>
-							message.type === "session_family" &&
-							message.sessions.some(
-								(session) =>
-									session.id === parentId && session.processing === true,
-							),
-					),
+					pushes.family.filter((session) => session.id === parentId).at(-1),
 				)
-				.toBe(true);
+				.toMatchObject({ processing: true });
 			await attachEvidence(
 				testInfo,
 				page,
@@ -282,18 +320,12 @@ test.describe("OpenCode Side Thread status", () => {
 				)
 				.toBe("idle");
 			await expect
-				.poll(() =>
-					pushes.some(
-						(message) =>
-							message.type === "session_family" &&
-							message.sessions.some(
-								(session) =>
-									session.id === parentId &&
-									session.status === "idle" &&
-									!session.processing,
-							),
-					),
-				)
+				.poll(() => {
+					const parent = pushes.family
+						.filter((session) => session.id === parentId)
+						.at(-1);
+					return parent?.status === "idle" && !parent.processing;
+				})
 				.toBe(true);
 			await expect(page).toHaveURL(new RegExp(`/s/${sideId}(?:\\?|$)`));
 			await expect(
@@ -363,18 +395,12 @@ for (const attention of ["permission", "question"] as const) {
 						? "pendingPermissionCount"
 						: "pendingQuestionCount";
 				await expect
-					.poll(() =>
-						pushes.some(
-							(message) =>
-								message.type === "session_family" &&
-								message.sessions.some(
-									(session) =>
-										session.id === parentId &&
-										(session[counter] ?? 0) > 0 &&
-										!session.processing,
-								),
-						),
-					)
+					.poll(() => {
+						const parent = pushes.family
+							.filter((session) => session.id === parentId)
+							.at(-1);
+						return (parent?.[counter] ?? 0) > 0 && !parent?.processing;
+					})
 					.toBe(true);
 				await attachEvidence(
 					testInfo,

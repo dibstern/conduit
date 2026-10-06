@@ -514,16 +514,16 @@ function questionAskedPush(
 	};
 }
 
-const refreshSessionListAfterUpdateEffect = (deps: SSEWiringDeps) =>
+const refreshLineageAfterUpdateEffect = (deps: SSEWiringDeps) =>
 	Effect.gen(function* () {
 		const sessionService = yield* SessionManagerServiceTag;
 		yield* sessionService
-			.pushViewerFamilies()
+			.refreshSessionLineage()
 			.pipe(
 				Effect.catchAll((err) =>
 					Effect.sync(() =>
 						deps.log.warn(
-							`Failed to refresh sessions after session.updated: ${err}`,
+							`Failed to refresh session lineage after session.updated: ${err}`,
 						),
 					),
 				),
@@ -552,7 +552,7 @@ const handleSSEEventAfterPendingEffect = (
 				}
 			}
 
-			yield* refreshSessionListAfterUpdateEffect(deps);
+			yield* refreshLineageAfterUpdateEffect(deps);
 		}
 
 		if (isSessionErrorEvent(event)) {

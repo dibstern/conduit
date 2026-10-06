@@ -6,10 +6,8 @@ import type {
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
 import {
-	pendingApprovalCountsByType,
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
-	sessionRowsToSessionInfoList,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
@@ -18,7 +16,7 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "./relay-status-snapshot.js";
-import type { StatusPollerShape, WebSocketHandlerShape } from "./services.js";
+import type { StatusPollerShape } from "./services.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import type {
 	ListSessionsOptions,
@@ -142,7 +140,6 @@ export const makeSessionListOperations = ({
 	statusPollerOption,
 	backgroundOf,
 	snapshot,
-	wsHandler,
 	projectDir,
 }: {
 	api: OpenCodeAPI;
@@ -153,7 +150,6 @@ export const makeSessionListOperations = ({
 		| ((sessionId: string) => SessionBackground | undefined)
 		| undefined;
 	snapshot: RelayStatusSnapshotService;
-	wsHandler: WebSocketHandlerShape;
 	projectDir: string;
 }) => {
 	const currentStatuses = (
@@ -186,102 +182,29 @@ export const makeSessionListOperations = ({
 				? sessions.map((session) => ({ ...session, git }))
 				: [...sessions];
 		});
-	const getSessionFamily: SessionManagerService["getSessionFamily"] = (
-		sessionId,
-	) =>
-		Effect.gen(function* () {
-			const [rows, approvals] = yield* Effect.all([
-				readQuery.getSessionFamily(sessionId),
-				readQuery.countPendingApprovalsBySession(),
-			]).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({ operation: "getSessionFamily", cause }),
-				),
-			);
-			// Keep source statuses; attention follows the same lineage rule as the sidebar.
-			const familyStatuses: Record<string, SessionStatus> = {};
-			for (const row of rows) {
-				familyStatuses[row.id] =
-					row.status === "busy" || row.status === "retry"
-						? { type: "busy" }
-						: { type: "idle" };
-			}
-			const ids = new Set(rows.map((row) => row.id));
-			const root = rows.find(
-				(row) => !row.parent_id || !ids.has(row.parent_id),
-			);
-			return {
-				type: "session_family" as const,
-				rootId: root?.id ?? sessionId,
-				sessions: sessionRowsToSessionInfoList(rows, {
-					parentMap: new Map(
-						rows.flatMap((row) =>
-							row.parent_id ? [[row.id, row.parent_id] as const] : [],
+	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =
+		() =>
+			Effect.gen(function* () {
+				const lineage = yield* readQuery.getSessionLineage().pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({
+								operation: "refreshSessionLineage",
+								cause,
+							}),
+					),
+				);
+				yield* Ref.update(stateRef, (current) => ({
+					...current,
+					cachedParentMap: sessionRowsParentMap(lineage.rows),
+					cachedSideThreadIds: new Set(
+						lineage.rows.flatMap((row) =>
+							row.side_thread === 1 ? [row.id] : [],
 						),
 					),
-					unreadSessionIds: new Set(
-						rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
-					),
-					statuses: familyStatuses,
-					...(backgroundOf && { backgroundOf }),
-					pendingQuestionCounts:
-						pendingApprovalCountsByType(approvals).questions,
-					pendingPermissionCounts:
-						pendingApprovalCountsByType(approvals).permissions,
-				}),
-			};
-		});
-	const pushViewerFamilies: SessionManagerService["pushViewerFamilies"] = () =>
-		Effect.gen(function* () {
-			const lineage = yield* readQuery.getSessionLineage().pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionManagerError({
-							operation: "pushViewerFamilies",
-							cause,
-						}),
-				),
-			);
-			yield* Ref.update(stateRef, (current) => ({
-				...current,
-				cachedParentMap: sessionRowsParentMap(lineage.rows),
-				cachedSideThreadIds: new Set(
-					lineage.rows.flatMap((row) =>
-						row.side_thread === 1 ? [row.id] : [],
-					),
-				),
-				lastKnownSessionCount: lineage.count,
-			}));
-			yield* snapshot.setSessionCount(lineage.count);
-			const ws = wsHandler;
-			const parentMap = (yield* Ref.get(stateRef)).cachedParentMap;
-			const families = new Map<string, string[]>();
-			for (const clientId of ws.getClientIds()) {
-				const viewed = ws.getClientSession(clientId);
-				if (!viewed) continue;
-				let root = viewed;
-				const seen = new Set<string>();
-				while (!seen.has(root)) {
-					seen.add(root);
-					const parent = HashMap.get(parentMap, root);
-					if (parent._tag === "None") break;
-					root = parent.value;
-				}
-				const viewers = families.get(root) ?? [];
-				viewers.push(clientId);
-				families.set(root, viewers);
-			}
-			for (const [root, viewers] of families) {
-				const family = yield* getSessionFamily(root);
-				const familyIds = new Set(family.sessions.map((session) => session.id));
-				for (const clientId of viewers) {
-					const viewed = ws.getClientSession(clientId);
-					if (viewed && (familyIds.has(viewed) || viewed === family.rootId)) {
-						ws.sendTo(clientId, family);
-					}
-				}
-			}
-		});
-	return { serviceListSessions, getSessionFamily, pushViewerFamilies };
+					lastKnownSessionCount: lineage.count,
+				}));
+				yield* snapshot.setSessionCount(lineage.count);
+			});
+	return { serviceListSessions, refreshSessionLineage };
 };

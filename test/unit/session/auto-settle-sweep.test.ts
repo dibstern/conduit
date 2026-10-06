@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -129,13 +129,11 @@ describe("relay automatic settlement sweep", () => {
 					kind: "snapshot",
 					tasks: [{ id: "task1", type: "local_agent", description: "Audit" }],
 				});
-				const broadcast = vi.fn(() => service.pushViewerFamilies());
 				const ports = {
 					hasViewer: (id: string) => viewers.has(id),
 					hasLiveBackgroundWork: background.hasLiveWork,
 					setSettled: (id: string) =>
 						service.setSessionSettled(id, { settled: true, automatic: true }),
-					broadcastSessionList: broadcast,
 				};
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(2);
 				expect(
@@ -160,7 +158,6 @@ describe("relay automatic settlement sweep", () => {
 					"session.settled",
 				]);
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(0);
-				expect(broadcast).toHaveBeenCalled();
 				yield* service.setSessionSettled("eligible", { settled: false });
 				expect(
 					(yield* read.getSession("eligible"))?.settled_automatically,

@@ -41,33 +41,19 @@ interface ForkSessionPayload {
 }
 
 /**
- * Send metadata (goal, viewed family) to a client. These are supplementary
- * data to the transcript and selection RPCs; pending permissions and questions
- * come from the approvals subscription (ni8.9).
+ * Send the session goal to a client. It is supplementary to the transcript and
+ * selection RPCs; pending permissions and questions come from the approvals
+ * subscription (ni8.9), the family from SubscribeSessionFamily (ni8.28).
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const log = yield* LoggerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const row = yield* readQuery.getSession(id);
 		wsHandler.sendTo(clientId, {
 			type: "session.goal_changed",
 			...(row ? sessionGoalState(row) : { sessionId: id, goal: null }),
 		});
-
-		yield* sessionManagerService
-			.pushViewerFamilies()
-			.pipe(
-				Effect.catchAll((err) =>
-					Effect.sync(() =>
-						log.warn(
-							`Failed to push viewed family to ${clientId}: ${err instanceof Error ? err.message : err}`,
-						),
-					),
-				),
-			);
 	});
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
@@ -93,10 +79,6 @@ const switchClientToSession = (
 		const pollerManager = yield* PollerManagerTag;
 
 		wsHandler.setClientSession(clientId, sessionId);
-
-		const sessionService = yield* SessionManagerServiceTag;
-		const family = yield* sessionService.getSessionFamily(sessionId);
-		wsHandler.sendTo(clientId, family);
 
 		const canUseOpenCodePoller = yield* shouldStartOpenCodePoller(sessionId);
 		if (
@@ -191,20 +173,6 @@ export const createSessionForClient = ({
 			skipPollerSeed: true,
 		});
 
-		yield* Effect.forkDaemon(
-			sessionManagerService
-				.pushViewerFamilies()
-				.pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to push viewed families after CreateSession: ${err}`,
-							),
-						),
-					),
-				),
-		);
-
 		log.info(`client=${clientId} Created: ${session.id}`);
 		return session;
 	});
@@ -246,7 +214,6 @@ export const deleteSessionForClient = ({
 		// Id only, no row: tabs prune the daemon-wide list and search results,
 		// which the per-project shell feed does not cover.
 		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
-		yield* sessionManagerService.pushViewerFamilies();
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});
 
@@ -275,7 +242,6 @@ export const renameSessionForClient = ({
 		const id = sessionId;
 		if (id && title) {
 			yield* sessionManagerService.renameSession(id, title);
-			yield* sessionManagerService.pushViewerFamilies();
 			log.info(`client=${clientId} Renamed: ${id} → ${title}`);
 		}
 	});
@@ -293,7 +259,6 @@ export const setSessionSettledForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, { settled })) {
-			yield* service.pushViewerFamilies();
 			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
 				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
@@ -317,7 +282,6 @@ export const setSessionPinnedForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionPinned(sessionId, pinned)) {
-			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Set pinned=${pinned}: ${sessionId}`);
 		}
 	});
@@ -335,7 +299,6 @@ export const setSessionAutoSettleForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
-			yield* service.pushViewerFamilies();
 			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "Some" && config.value.broadcastSessionListChanged) {
 				yield* Effect.tryPromise(config.value.broadcastSessionListChanged).pipe(
@@ -361,7 +324,6 @@ export const snoozeSessionForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.snoozeSession(sessionId, until)) {
-			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Snoozed: ${sessionId}`);
 		}
 	});
@@ -377,7 +339,6 @@ export const unsnoozeSessionForClient = ({
 		const service = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 		if (yield* service.unsnoozeSession(sessionId)) {
-			yield* service.pushViewerFamilies();
 			log.info(`client=${clientId} Unsnoozed: ${sessionId}`);
 		}
 	});
@@ -390,17 +351,11 @@ export const markSessionUnreadForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		if (sessionId) {
 			yield* sessionManagerService.markSessionUnread(sessionId);
-			yield* sessionManagerService.pushViewerFamilies();
-			wsHandler.sendToSession(
-				sessionId,
-				yield* sessionManagerService.getSessionFamily(sessionId),
-			);
 			log.info(`client=${clientId} Marked unread: ${sessionId}`);
 		}
 	});
@@ -433,7 +388,6 @@ export const markSessionSeenForClient = ({
 				),
 			);
 		if (changed) {
-			yield* sessionManagerService.pushViewerFamilies();
 			log.info(`client=${clientId} Marked seen: ${sessionId} up to ${upTo}`);
 		}
 	});
@@ -446,17 +400,11 @@ export const markSessionReadForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
 		if (sessionId) {
 			yield* sessionManagerService.markSessionRead(sessionId);
-			yield* sessionManagerService.pushViewerFamilies();
-			wsHandler.sendToSession(
-				sessionId,
-				yield* sessionManagerService.getSessionFamily(sessionId),
-			);
 			log.info(`client=${clientId} Marked read: ${sessionId}`);
 		}
 	});
@@ -532,9 +480,6 @@ export const forkSessionForClient = ({
 			parentId: sessionId,
 			parentTitle: parent?.title ?? "Unknown",
 		});
-
-		// Refresh the viewed family after the fork.
-		yield* sessionManagerService.pushViewerFamilies();
 
 		log.info(
 			`client=${clientId} Forked: ${sessionId} → ${forked.id}${messageId ? ` at ${messageId}` : ""}`,

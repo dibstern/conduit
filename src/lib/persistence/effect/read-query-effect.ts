@@ -26,10 +26,7 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
-import {
-	sessionFamilyQuery,
-	sessionFamilyWindowQuery,
-} from "../session-family-query.js";
+import { sessionFamilyWindowQuery } from "../session-family-query.js";
 import {
 	messageRowsToHistory,
 	toolOutputText,
@@ -336,10 +333,6 @@ export interface ReadQueryEffect {
 		},
 		ReadQueryEffectError | SqlError
 	>;
-
-	readonly getSessionFamily: (
-		sessionId: string,
-	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
 	readonly countPendingApprovalsBySession: () => Effect.Effect<
 		readonly PendingApprovalCountRow[],
@@ -815,16 +808,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					new ReadQueryEffectError({ operation: "getSessionLineage", cause }),
 			),
 		);
-
-	const getSessionFamily = (sessionId: string) =>
-		sql
-			.unsafe<SessionRow>(sessionFamilyQuery, [sessionId])
-			.pipe(
-				Effect.mapError(
-					(cause) =>
-						new ReadQueryEffectError({ operation: "getSessionFamily", cause }),
-				),
-			);
 
 	const countPendingApprovalsBySession = (): Effect.Effect<
 		readonly PendingApprovalCountRow[],
@@ -1510,7 +1493,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listSessions,
 		listSessionInfos,
 		getSessionLineage,
-		getSessionFamily,
 		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
 		readPendingApprovals,

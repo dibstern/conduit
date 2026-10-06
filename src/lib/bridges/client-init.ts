@@ -96,23 +96,6 @@ const logInitErrorEffect = (err: unknown, prefix: string) =>
 		log.warn(`${prefix}: ${formatErrorDetail(err)}`);
 	});
 
-const switchClientToSessionForInitEffect = (
-	clientId: string,
-	sessionId: string,
-) =>
-	Effect.gen(function* () {
-		if (!sessionId) return;
-
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		wsHandler.setClientSession(clientId, sessionId);
-
-		const sessionService = yield* SessionManagerServiceTag;
-		const family = yield* sessionService.getSessionFamily(sessionId);
-		wsHandler.sendTo(clientId, family);
-		return family;
-	});
-
 const resolveAndReplaySessionEffect = (
 	clientId: string,
 	requestedSessionId: string | undefined,
@@ -161,27 +144,14 @@ const resolveAndReplaySessionEffect = (
 		}
 
 		if (activeId) {
-			yield* switchClientToSessionForInitEffect(clientId, activeId);
+			const wsHandler = yield* WebSocketHandlerTag;
+			wsHandler.setClientSession(clientId, activeId);
 		}
 
 		return {
 			activeId,
 			validatedRequestedSessionId,
 		};
-	});
-
-const pushViewedFamiliesForInitEffect = (clientId: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionService = yield* SessionManagerServiceTag;
-		yield* sessionService.pushViewerFamilies().pipe(
-			Effect.catchAll((err) =>
-				logInitErrorEffect(err, "Failed to push viewed families"),
-			),
-			Effect.ensuring(
-				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
-			),
-		);
 	});
 
 const sendProvidersAndSettingsEffect = (clientId: string) =>
@@ -287,6 +257,7 @@ export const handleClientConnectedEffect = (
 ) =>
 	Effect.gen(function* () {
 		yield* resolveAndReplaySessionEffect(clientId, requestedSessionId, options);
-		yield* pushViewedFamiliesForInitEffect(clientId);
+		const wsHandler = yield* WebSocketHandlerTag;
+		wsHandler.markClientBootstrapped(clientId);
 		yield* sendProvidersAndSettingsEffect(clientId);
 	});

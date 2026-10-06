@@ -661,12 +661,6 @@ const SessionListSchema = Schema.Struct({
 	// columns on the session row itself, derived server-side.
 });
 
-const SessionFamilySchema = Schema.Struct({
-	type: Schema.Literal("session_family"),
-	rootId: Schema.String,
-	sessions: Schema.Array(SessionInfoSchema),
-});
-
 const SessionForkedSchema = Schema.Struct({
 	type: Schema.Literal("session_forked"),
 	sessionId: Schema.String,
@@ -771,7 +765,6 @@ export const RelayMessageSchema = Schema.Union(
 	ResultSchema,
 	DoneSchema,
 	SessionListSchema,
-	SessionFamilySchema,
 	SessionForkedSchema,
 	// Projects
 	DaemonSessionsChangedSchema,

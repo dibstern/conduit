@@ -20,7 +20,7 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
+import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import {
 	latestTurnSettingsQuery,
 	pendingClaudeQuestionToolsQuery,
@@ -768,15 +768,13 @@ describe("ReadQueryEffect session families", () => {
 				yield* seedSession("unrelated");
 				const readQuery = yield* makeReadQueryEffect;
 				const expected = ["root", "child", "grandchild", "sibling"];
-				expect(
-					(yield* readQuery.getSessionFamily("grandchild")).map(
-						(row) => row.id,
-					),
-				).toEqual(expected);
-				expect(
-					(yield* readQuery.getSessionFamily("root")).map((row) => row.id),
-				).toEqual(expected);
-				expect(yield* readQuery.getSessionFamily("missing")).toEqual([]);
+				const familyIds = (familyOf: string) =>
+					readQuery
+						.readSessionList({ familyOf })
+						.pipe(Effect.map(({ rows }) => rows.map((row) => row.item.id)));
+				expect(yield* familyIds("grandchild")).toEqual(expected);
+				expect(yield* familyIds("root")).toEqual(expected);
+				expect(yield* familyIds("missing")).toEqual([]);
 				const lineage = yield* readQuery.getSessionLineage();
 				expect(lineage.count).toBe(5);
 				expect(lineage.rows).toHaveLength(5);
@@ -800,8 +798,8 @@ describe("ReadQueryEffect session families", () => {
 				for (let i = 0; i < 100; i++) yield* seedSession(`unrelated-${i}`);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = (yield* sql.unsafe<{ detail: string }>(
-					`EXPLAIN QUERY PLAN ${sessionFamilyQuery}`,
-					["grandchild"],
+					`EXPLAIN QUERY PLAN ${sessionFamilyWindowQuery}`,
+					["grandchild", 0, Number.MAX_SAFE_INTEGER],
 				)).map((row) => row.detail);
 
 				expect(plan.some((step) => /\bSCAN (?:s|sessions)\b/i.test(step))).toBe(

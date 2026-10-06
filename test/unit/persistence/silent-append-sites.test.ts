@@ -14,8 +14,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Chunk, Deferred, Effect, Layer, Stream } from "effect";
-import { expect, it, vi } from "vitest";
+import { Chunk, Effect, Layer, Stream } from "effect";
+import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
@@ -25,7 +25,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	makeSessionEventBusLive,
@@ -52,8 +51,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -312,10 +309,6 @@ it("the status poller's staleness write advances the version", async () => {
 
 it("the auto-title rename advances the version of the session it renames", async () => {
 	await withTempDb(async (dbPath) => {
-		const renamed = await Effect.runPromise(Deferred.make<void>());
-		const sessionManager = makeMockSessionManagerService({
-			pushViewerFamilies: vi.fn(() => Deferred.succeed(renamed, undefined)),
-		});
 		const bus = makeSessionEventBusLive();
 		const layer = Layer.provideMerge(
 			makeSessionTitleServiceLive({
@@ -326,10 +319,6 @@ it("the auto-title rename advances the version of the session it renames", async
 				makePersistenceEffectLayer(dbPath, createAllEffectProjectors(), bus),
 				Layer.succeed(ConfigTag, makeMockConfig()),
 				Layer.succeed(LoggerTag, makeMockLogger()),
-				Layer.succeed(SessionManagerServiceTag, sessionManager),
-				// The service only reports a finished rename through the ws
-				// handler, so the test needs one to know when to look.
-				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 			),
 		);
 		await Effect.runPromise(
@@ -344,12 +333,9 @@ it("the auto-title rename advances the version of the session it renames", async
 
 					const titles = yield* SessionTitleServiceTag;
 					const announced = yield* announcedDuring(
-						Effect.gen(function* () {
-							yield* titles.startForFirstClaudeMessage({
-								sessionId: "titled",
-								firstMessage: "OAuth keeps redirecting after callback.",
-							});
-							yield* Deferred.await(renamed);
+						titles.startForFirstClaudeMessage({
+							sessionId: "titled",
+							firstMessage: "OAuth keeps redirecting after callback.",
 						}),
 					);
 

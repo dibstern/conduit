@@ -734,13 +734,6 @@ export function makeMockSessionManagerService(
 ): SessionManagerService {
 	return {
 		initialize: vi.fn(() => Effect.succeed("s1")),
-		getSessionFamily: vi.fn((sessionId: string) =>
-			Effect.succeed({
-				type: "session_family" as const,
-				rootId: sessionId,
-				sessions: [],
-			}),
-		),
 		getDefaultSessionId: vi.fn(() => Effect.succeed("s1")),
 		getLastKnownSessionCount: vi.fn(() => Effect.succeed(1)),
 		sessionExists: vi.fn(() => Effect.succeed(false)),
@@ -770,7 +763,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
-		pushViewerFamilies: vi.fn(() => Effect.void),
+		refreshSessionLineage: vi.fn(() => Effect.void),
 		...overrides,
 	} as unknown as SessionManagerService;
 }

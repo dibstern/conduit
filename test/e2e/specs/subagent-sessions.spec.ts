@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { projectLegacyRelayMessage } from "../helpers/detail-projection-mock.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
 import {
 	createMockRelayProtocolContext,
 	mockRelayWebSocket,
@@ -71,11 +71,7 @@ const rootSessionListMsg: MockMessage = {
 };
 
 /** The viewed family includes child metadata without sidebar rows. */
-const familyMsg: MockMessage = {
-	type: "session_family",
-	rootId: snapshot.parentSession.id,
-	sessions: [snapshot.parentSession, snapshot.childSession],
-};
+const familyRows = [snapshot.parentSession, snapshot.childSession];
 
 const modelListMsg: MockMessage = {
 	type: "mock_model_catalog",
@@ -105,7 +101,6 @@ const agentListMsg: MockMessage = {
 
 /** Init messages: parent session active, idle, with full history */
 const initMessages: MockMessage[] = [
-	familyMsg,
 	{
 		type: "mock_transcript_snapshot",
 		id: snapshot.parentSession.id,
@@ -115,14 +110,12 @@ const initMessages: MockMessage[] = [
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	{ type: "client_count", count: 1 },
 	rootSessionListMsg,
-	familyMsg,
 	modelListMsg,
 	agentListMsg,
 ];
 
 /** Messages to send when switching to child session */
 const childSwitchMessages: MockMessage[] = [
-	familyMsg,
 	{
 		type: "mock_transcript_snapshot",
 		id: snapshot.childSession.id,
@@ -131,7 +124,6 @@ const childSwitchMessages: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	rootSessionListMsg, // re-send so client has parentID metadata
-	familyMsg,
 ];
 
 /** Messages to send when switching back to parent session */
@@ -144,7 +136,6 @@ const parentSwitchMessages: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
 	rootSessionListMsg,
-	familyMsg,
 ];
 
 async function waitForChatReady(page: import("@playwright/test").Page) {
@@ -163,6 +154,7 @@ test.describe("Roots-only sidebar", () => {
 			initMessages,
 			responses: new Map(),
 		});
+		sendMockFamily(page, familyRows);
 		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
@@ -189,7 +181,6 @@ test.describe("Subagent navigation", () => {
 	}) => {
 		// Use a session-aware handler for bootstrap and ViewSession replies.
 		const childInitMessages: MockMessage[] = [
-			familyMsg,
 			{
 				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
@@ -203,7 +194,6 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg,
-			familyMsg,
 			modelListMsg,
 			agentListMsg,
 		];
@@ -257,6 +247,7 @@ test.describe("Subagent navigation", () => {
 			}
 		});
 
+		sendMockFamily(page, familyRows);
 		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);
 		await waitForChatReady(page);
 
@@ -291,7 +282,6 @@ test.describe("Subagent navigation", () => {
 	test("SubagentBackBar shows parent title", async ({ page, baseURL }) => {
 		// Start directly in child session
 		const childInitMessages: MockMessage[] = [
-			familyMsg,
 			{
 				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
@@ -305,7 +295,6 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg, // roots (parent + other, no child)
-			familyMsg, // family metadata includes the child parentID
 			modelListMsg,
 			agentListMsg,
 		];
@@ -314,6 +303,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
+		sendMockFamily(page, familyRows);
 		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 
@@ -331,7 +321,6 @@ test.describe("Subagent navigation", () => {
 	}) => {
 		// Start in child session
 		const childInitMessages: MockMessage[] = [
-			familyMsg,
 			{
 				type: "mock_transcript_snapshot",
 				id: snapshot.childSession.id,
@@ -345,7 +334,6 @@ test.describe("Subagent navigation", () => {
 			},
 			{ type: "client_count", count: 1 },
 			rootSessionListMsg,
-			familyMsg,
 			modelListMsg,
 			agentListMsg,
 		];
@@ -365,6 +353,7 @@ test.describe("Subagent navigation", () => {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
+		sendMockFamily(page, familyRows);
 		await page.goto(`${baseURL}/s/${snapshot.childSession.id}`);
 		await waitForChatReady(page);
 

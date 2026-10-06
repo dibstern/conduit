@@ -72,7 +72,7 @@ function createHarness(
 			broadcastPerSessionEvent,
 		},
 		sessionService: {
-			pushViewerFamilies: vi.fn(async () => {}),
+			refreshSessionLineage: vi.fn(async () => {}),
 			getSessionParentMap: () => parentMap,
 		},
 		processingTimeouts: {
@@ -708,7 +708,7 @@ describe("wireMonitoring shutdown", () => {
 });
 
 async function createEffectHarness(
-	pushViewerFamilies = () => Effect.void,
+	refreshSessionLineage = () => Effect.void,
 	pushManager?: PushNotificationSender,
 	dbPath = ":memory:",
 	seedTurn = true,
@@ -740,7 +740,6 @@ async function createEffectHarness(
 		Layer.succeed(SessionManagerServiceTag, {
 			initialize: unused,
 			getDefaultSessionId: unused,
-			getSessionFamily: unused,
 			getLastKnownSessionCount: unused,
 			sessionExists: unused,
 			listSessions: unused,
@@ -760,7 +759,7 @@ async function createEffectHarness(
 			recordMessageActivity: unused,
 			addToParentMap: unused,
 			setForkEntry: unused,
-			pushViewerFamilies,
+			refreshSessionLineage,
 			getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
 		}),
 		Layer.succeed(StatusPollerTag, {

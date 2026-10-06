@@ -327,11 +327,11 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		stack = await startStack(mock, dbPath);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/ws?session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.getPort()}/ws?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
-			await client.waitFor("session_family");
+			await client.subscribeFamily(SESSION_ID);
 			await client.viewSession(SESSION_ID, "iea-backfill");
 			await client.loadTranscriptSnapshot(SESSION_ID, "iea-backfill");
 			await waitFor(() => historyComplete(dbPath), "reconciliation after open");
@@ -419,11 +419,11 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		stack = await startStack(mock, dbPath, configDir);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/ws?session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.getPort()}/ws?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
-			await client.waitFor("session_family");
+			await client.subscribeFamily(SESSION_ID);
 			await client.viewSession(SESSION_ID, "iea-backfill");
 			await client.loadTranscriptSnapshot(SESSION_ID, "iea-backfill");
 			await waitFor(

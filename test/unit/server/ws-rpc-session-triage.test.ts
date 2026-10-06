@@ -13,7 +13,7 @@ import {
 
 describe("session triage RPCs", () => {
 	it.scoped(
-		"routes both setters by projectSlug and refreshes viewed families",
+		"routes the triage setters by projectSlug without sending to any client",
 		() =>
 			Effect.gen(function* () {
 				const { wsHandler, calls } = makeRecordingWebSocketHandler();
@@ -22,7 +22,6 @@ describe("session triage RPCs", () => {
 					setSessionPinned: vi.fn(() => Effect.succeed(true)),
 					snoozeSession: vi.fn(() => Effect.succeed(true)),
 					unsnoozeSession: vi.fn(() => Effect.succeed(true)),
-					pushViewerFamilies: vi.fn(() => Effect.void),
 				});
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({ wsHandler, sessionManagerService: service }),
@@ -71,7 +70,7 @@ describe("session triage RPCs", () => {
 				expect(resolve.mock.calls.every(([slug]) => slug === "project-b")).toBe(
 					true,
 				);
-				expect(service.pushViewerFamilies).toHaveBeenCalledTimes(6);
+				expect(service.setSessionSettled).toHaveBeenCalledTimes(2);
 				expect(calls).toEqual([]);
 			}),
 	);
@@ -114,7 +113,6 @@ describe("session triage RPCs", () => {
 						message: expect.stringMatching(/pinned.*unpinned first/),
 					});
 				expect(calls).toEqual([]);
-				expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 	);
 
@@ -153,7 +151,6 @@ describe("session triage RPCs", () => {
 			expect(
 				yield* client.UnsnoozeSession({ projectSlug: "a", sessionId: "s" }),
 			).toEqual({ ok: true });
-			expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 		}),
 	);
 
@@ -196,7 +193,6 @@ describe("session triage RPCs", () => {
 						_tag: "WsRpcError",
 						message: expect.stringContaining(message),
 					});
-				expect(service.pushViewerFamilies).not.toHaveBeenCalled();
 			}),
 		);
 	}
