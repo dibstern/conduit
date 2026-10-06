@@ -388,19 +388,22 @@ describe("handleMessage with Effect provider state persistence", () => {
 					"session-claude-user-effect",
 				);
 
-				// The user message, then the failed turn's projected error.
+				// The user message and the failed turn's projected error, whose
+				// order depends on which lands first in the same millisecond.
+				const user = messages.find((message) => message.role === "user");
+				const errors = messages.filter((message) => message !== user);
 				expect(messages).toHaveLength(2);
-				expect(messages[1]?.parts).toEqual([
+				expect(errors[0]?.parts).toEqual([
 					expect.objectContaining({ type: "error" }),
 				]);
-				expect(messages[0]).toMatchObject({
+				expect(user).toMatchObject({
 					id: "cmd-provider-state-persist-effect",
 					input_id: "cmd-provider-state-persist-effect",
 					session_id: "session-claude-user-effect",
 					role: "user",
 					text: "persist this through effect",
 				});
-				expect(messages[0]?.parts).toEqual([
+				expect(user?.parts).toEqual([
 					expect.objectContaining({
 						type: "text",
 						text: "persist this through effect",
