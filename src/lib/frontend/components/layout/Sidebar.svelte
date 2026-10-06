@@ -11,7 +11,7 @@
 		collapseSidebar,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
+	import { DRAFT_PROJECT_PARAM, SCOPE_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
 	import { applyProjectList, projectState } from "../../stores/project.svelte.js";
 	import { setSessionScope } from "../../stores/session-scope.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
@@ -49,10 +49,13 @@
 		),
 	);
 
-	// Opens a draft; the session is created by its first send.
+	// Opens a draft; the session is created by its first send. The scoped
+	// project wins over the attached one: an open session keeps the tab attached
+	// to its own project after the list is scoped to another.
 	function handleNewSession() {
 		const params = getCurrentSearchParams();
-		const project = getCurrentSlug() ?? projectState.projects.find((p) => !p.missing)?.slug;
+		const project =
+			params.get(SCOPE_PARAM) ?? getCurrentSlug() ?? projectState.projects.find((p) => !p.missing)?.slug;
 		if (project) params.set(DRAFT_PROJECT_PARAM, project);
 		navigate(`/new?${params}`);
 	}
