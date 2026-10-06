@@ -7,7 +7,10 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
-import { handlePermissionModeInfo } from "../stores/discovery.svelte.js";
+import {
+	followSessionModelSettings,
+	handlePermissionModeInfo,
+} from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { forgetSession, sessionState } from "../stores/session.svelte.js";
 import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
@@ -79,15 +82,17 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	if (change._tag === "synchronized") transportFailureSince = null;
 	const next = reduce(applied, change, identify);
 	if (next === applied) return;
-	// The viewed session's approval mode follows its row, so a switch made in
-	// another tab, or reported by the provider, lands in this tab's picker.
-	const followPermissionMode = (row: SessionInfo) => {
+	// The viewed session's approval mode and model settings follow its row, so
+	// a switch made in another tab, or by the provider, lands in this tab's pickers.
+	const followViewedSession = (row: SessionInfo) => {
+		if (row.id !== sessionState.currentId) return;
+		const previous = applied.rows.get(row.id);
 		if (
-			row.id === sessionState.currentId &&
 			row.permissionMode !== undefined &&
-			row.permissionMode !== applied.rows.get(row.id)?.permissionMode
+			row.permissionMode !== previous?.permissionMode
 		)
 			handlePermissionModeInfo({ mode: row.permissionMode });
+		followSessionModelSettings(row, previous);
 	};
 	const receivedSequence = sessionActivityBridge.observe();
 	// Only accepted shell changes retire activity. A duplicate or stale
@@ -95,7 +100,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	if (change._tag === "upsert") {
 		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
 		hydrateSessionGoal(change.item);
-		followPermissionMode(change.item);
+		followViewedSession(change.item);
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
@@ -114,7 +119,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		for (const row of next.rows.values()) {
 			sessionActivityBridge.retire(row.id, receivedSequence, "row");
 			hydrateSessionGoal(row);
-			followPermissionMode(row);
+			followViewedSession(row);
 		}
 	}
 	applied = next;

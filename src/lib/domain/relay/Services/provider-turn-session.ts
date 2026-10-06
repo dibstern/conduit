@@ -29,7 +29,8 @@ import {
 	WebSocketHandlerTag,
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
-import { clearProcessingTimeout, setModel } from "./session-overrides-state.js";
+import { selectSessionModel } from "./session-model-settings.js";
+import { clearProcessingTimeout } from "./session-overrides-state.js";
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -164,7 +165,7 @@ const materializeOpenCodeSession = (
 			providerId: targetProvider,
 		});
 		if (input.model && input.modelUserSelected) {
-			yield* setModel(session.id, input.model);
+			yield* selectSessionModel(session.id, input.model);
 		}
 		orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
 		wsHandler.setClientSession(input.clientId, session.id);

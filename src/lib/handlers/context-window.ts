@@ -2,14 +2,13 @@ import { Effect } from "effect";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { selectSessionContextWindow } from "../domain/relay/Services/session-model-settings.js";
 import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
 	getModel,
-	setContextWindow,
 	setDefaultContextWindow,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { ContextWindowOption } from "../shared-types.js";
@@ -49,7 +48,6 @@ export const switchContextWindowForSession = (
 	input: SwitchContextWindowInput,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
 		const sessionId = input.sessionId;
@@ -72,7 +70,7 @@ export const switchContextWindowForSession = (
 
 		if (supported) {
 			if (sessionId) {
-				yield* setContextWindow(sessionId, requested);
+				yield* selectSessionContextWindow(sessionId, requested);
 				yield* applyLiveSessionSettings(sessionId);
 			} else {
 				yield* setDefaultContextWindow(requested);
@@ -83,19 +81,8 @@ export const switchContextWindowForSession = (
 			);
 		}
 
-		const message = {
-			type: "context_window_info" as const,
-			contextWindow: nextContextWindow,
-			options,
-		};
-		if (sessionId) {
-			wsHandler.sendToSession(sessionId, message);
-		} else {
-			wsHandler.sendTo(input.clientId, message);
-		}
-
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched context window to: ${nextContextWindow || "default"}`,
 		);
-		return message;
+		return { contextWindow: nextContextWindow, options };
 	});

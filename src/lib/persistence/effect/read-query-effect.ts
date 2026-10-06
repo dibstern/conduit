@@ -194,6 +194,13 @@ export const sessionRowsToSessionInfoList = (
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }
 				: {}),
+			...(row.model_id != null && row.model_provider != null
+				? { model: { model: row.model_id, provider: row.model_provider } }
+				: {}),
+			...(row.variant != null ? { variant: row.variant } : {}),
+			...(row.context_window != null
+				? { contextWindow: row.context_window }
+				: {}),
 			...(parentID ? { parentID } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null

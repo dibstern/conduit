@@ -55,7 +55,16 @@ export interface MockCatalog {
 		agents: readonly unknown[];
 	}>;
 	commands?: readonly unknown[];
+	/** The viewed session's model settings, as GetModels reports them. */
+	active?: unknown;
+	variant?: unknown;
+	contextWindow?: unknown;
 }
+
+export type MockModelState = Pick<
+	MockCatalog,
+	"active" | "variant" | "contextWindow"
+>;
 
 export interface RecordedRpcRequest {
 	readonly tag: string;
@@ -90,10 +99,10 @@ export class RpcMockControl {
 	}
 
 	catalogHandler(tag: string): RpcHandler | undefined {
-		const { providers, agents, commands } = this.catalog;
+		const { providers, agents, commands, ...modelState } = this.catalog;
 		const projectSlug = this.projectSlug;
-		if (tag === "GetModels" && providers)
-			return () => ({ projectSlug, providers });
+		if (tag === "GetModels" && (providers || Object.keys(modelState).length))
+			return () => ({ projectSlug, providers: providers ?? [], ...modelState });
 		if (tag === "GetCommands" && commands)
 			return () => ({ projectSlug, commands });
 		if (tag === "GetAgents" && agents?.length)
@@ -149,6 +158,13 @@ export class RpcMockControl {
 				{ _tag: "synchronized" },
 			]);
 		}
+	}
+
+	/** Change the model settings GetModels reports, and make the app refetch
+	 *  them the way a reconnect does. */
+	setModelState(state: MockModelState): void {
+		this.catalog = { ...this.catalog, ...state };
+		this.setShellRows(this.shellRows ?? []);
 	}
 
 	/** Change one session row the way a live write does: an upsert with no
@@ -384,6 +400,12 @@ export function setMockRpcCatalog(page: Page, catalog: MockCatalog): void {
 	const control = controls.get(page);
 	if (control) control.catalog = catalog;
 	else pendingCatalogs.set(page, catalog);
+}
+
+export function sendMockModelState(page: Page, state: MockModelState): void {
+	const control = controls.get(page);
+	if (control) control.setModelState(state);
+	else pendingCatalogs.set(page, { ...pendingCatalogs.get(page), ...state });
 }
 
 /** Mock-only input: deliver a daemon list through its subscription, never /ws. */

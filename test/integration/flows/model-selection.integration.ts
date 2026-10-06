@@ -51,23 +51,19 @@ describe("Integration: Model Selection", () => {
 		await client.close();
 	}, 15_000);
 
-	it("receives model_info on connect", async () => {
+	it("GetModels reports an active model on connect", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		// Should have received model_info (auto-selected or from session)
-		await client.waitFor("model_info");
-		const modelInfos = client.getReceivedOfType("model_info");
-		expect(modelInfos.length).toBeGreaterThan(0);
-		const info = modelInfos[0];
-		assert.exists(info, "expected a model info message");
-		expect(typeof info["model"]).toBe("string");
-		expect((info["model"] as string).length).toBeGreaterThan(0);
+		// Auto-selected or from the session.
+		const { active } = await client.getModels();
+		assert.exists(active, "expected an active model");
+		expect(active.model.length).toBeGreaterThan(0);
 
 		await client.close();
 	}, 15_000);
 
-	it("SwitchModel RPC updates model_info broadcast", async () => {
+	it("SwitchModel RPC records the session's model", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -85,14 +81,10 @@ describe("Integration: Model Selection", () => {
 		const targetModel = target.id;
 		const targetProvider = provider.id;
 
-		client.clearReceived();
-
 		await client.switchModel(targetModel, targetProvider);
 
-		// Should receive model_info broadcast
-		const modelInfo = await client.waitFor("model_info");
-		expect(modelInfo["model"]).toBe(targetModel);
-		expect(modelInfo["provider"]).toBe(targetProvider);
+		const { active } = await client.getModels();
+		expect(active).toEqual({ model: targetModel, provider: targetProvider });
 
 		await client.close();
 	}, 15_000);
@@ -111,8 +103,6 @@ describe("Integration: Model Selection", () => {
 		const target = provider.models[0];
 		assert.exists(target, "expected the provider to have a model");
 		await client.switchModel(target.id, provider.id);
-
-		await client.waitFor("model_info");
 		client.clearReceived();
 
 		// Send a message — should work with the selected model
@@ -144,8 +134,6 @@ describe("Integration: Model Selection", () => {
 		const target = provider.models[0];
 		assert.exists(target, "expected the provider to have a model");
 		await client.switchModel(target.id, provider.id);
-
-		await client.waitFor("model_info");
 
 		// Create a new session — should reset model selection
 		client.clearReceived();

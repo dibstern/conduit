@@ -70,8 +70,6 @@ import {
 	makeOverridesStateLive,
 	setAgent,
 	setContextWindow,
-	setDefaultContextWindow,
-	setDefaultModel,
 	setModel,
 	setPermissionMode,
 	setVariant,
@@ -79,7 +77,6 @@ import {
 import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
 	getModelsResponse,
-	sendModelsStateToClient,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
@@ -134,6 +131,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
 	makeHandlerLogger,
 	makeHandlerOpenCodeAPI,
+	makeSessionSettingsLayer,
 } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
@@ -620,60 +618,6 @@ describe("sendModelsStateToClient", () => {
 		},
 	);
 	it.effect(
-		"sends context_window_info for active Claude model during model refresh",
-		() => {
-			const contextWindowOptions = [
-				{ value: "200k", label: "200K", isDefault: true },
-				{ value: "1m", label: "1M (beta)" },
-			];
-			const ws = mockWsHandler();
-			const engine = withDispatchEffect({
-				dispatch: vi.fn(async () => ({
-					models: [
-						{
-							id: "claude-opus-4-7",
-							name: "Claude Opus 4.7",
-							providerId: "claude",
-							contextWindowOptions,
-						},
-					],
-				})),
-			});
-			const client = makeHandlerOpenCodeAPI({
-				provider: {
-					list: vi.fn(async () => makeProviderListResult({
-						connected: [],
-						providers: [],
-					})),
-				},
-				session: { get: vi.fn() },
-			});
-			const log = mockLogger();
-
-			const layer = Layer.mergeAll(
-				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
-				makeOverridesStateLive(),
-			);
-
-			return Effect.gen(function* () {
-				yield* setDefaultModel({
-					providerID: "claude",
-					modelID: "claude-opus-4-7",
-				});
-				yield* setDefaultContextWindow("1m");
-				yield* sendModelsStateToClient("client-1");
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "context_window_info",
-					contextWindow: "1m",
-					options: contextWindowOptions,
-				});
-			}).pipe(Effect.provide(layer));
-		},
-	);
-	it.effect(
 		"keeps OpenCode discovery while skipping session lookup for a Claude-bound model refresh",
 		() => {
 			const ws = mockWsHandler();
@@ -786,6 +730,7 @@ describe("switchModelForSession", () => {
 		});
 
 		const layer = Layer.mergeAll(
+			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
@@ -898,6 +843,7 @@ describe("switchModelForSession", () => {
 			} satisfies ReadQueryEffect;
 
 			const layer = Layer.mergeAll(
+				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
@@ -908,7 +854,7 @@ describe("switchModelForSession", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* switchModelForSession({
+				const result = yield* switchModelForSession({
 					clientId: "client-1",
 					sessionId: "ses-local-placeholder",
 					modelId: "big-pickle",
@@ -928,8 +874,7 @@ describe("switchModelForSession", () => {
 					providerID: "opencode",
 					modelID: "big-pickle",
 				});
-				expect(ws.sendToSession).toHaveBeenCalledWith("ses-local-placeholder", {
-					type: "variant_info",
+				expect(result).toMatchObject({
 					variant: "",
 					variants: ["standard"],
 				});
@@ -968,6 +913,7 @@ describe("switchModelForSession", () => {
 		});
 
 		const layer = Layer.mergeAll(
+			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
@@ -977,7 +923,7 @@ describe("switchModelForSession", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* switchModelForSession({
+			const result = yield* switchModelForSession({
 				clientId: "client-1",
 				sessionId: "session-42",
 				modelId: "opus",
@@ -992,8 +938,7 @@ describe("switchModelForSession", () => {
 				providerId: "claude",
 			});
 			expect(client.provider.list).not.toHaveBeenCalled();
-			expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-				type: "variant_info",
+			expect(result).toMatchObject({
 				variant: "",
 				variants: ["low", "medium", "high", "max"],
 			});
@@ -1032,6 +977,7 @@ describe("switchVariantForSession", () => {
 		});
 
 		const layer = Layer.mergeAll(
+			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
@@ -1046,7 +992,7 @@ describe("switchVariantForSession", () => {
 				providerID: "claude",
 				modelID: "claude-opus-4-7",
 			});
-			yield* switchVariantForSession({
+			const result = yield* switchVariantForSession({
 				clientId: "client-1",
 				sessionId: "session-42",
 				variant: "high",
@@ -1057,8 +1003,7 @@ describe("switchVariantForSession", () => {
 				providerId: "claude",
 			});
 			expect(client.provider.list).not.toHaveBeenCalled();
-			expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-				type: "variant_info",
+			expect(result).toMatchObject({
 				variant: "high",
 				variants: ["low", "medium", "high", "max"],
 			});
@@ -1093,6 +1038,7 @@ describe("switchVariantForSession", () => {
 			});
 
 			const layer = Layer.mergeAll(
+				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
@@ -1106,14 +1052,13 @@ describe("switchVariantForSession", () => {
 					providerID: "openai",
 					modelID: "gpt-4",
 				});
-				yield* switchVariantForSession({
+				const result = yield* switchVariantForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					variant: "v2",
 				});
 				expect(yield* getVariant("session-42")).toBe("v2");
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "variant_info",
+				expect(result).toMatchObject({
 					variant: "v2",
 					variants: ["v2", "v3"],
 				});
@@ -1148,6 +1093,7 @@ describe("switchContextWindowForSession", () => {
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
+				makeSessionSettingsLayer(),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
@@ -1159,7 +1105,7 @@ describe("switchContextWindowForSession", () => {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-7",
 				});
-				yield* switchContextWindowForSession({
+				const result = yield* switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
@@ -1169,8 +1115,7 @@ describe("switchContextWindowForSession", () => {
 					type: "discover",
 					providerId: "claude",
 				});
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "context_window_info",
+				expect(result).toMatchObject({
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
@@ -1198,6 +1143,7 @@ describe("switchContextWindowForSession", () => {
 			const log = mockLogger();
 
 			const layer = Layer.mergeAll(
+				makeSessionSettingsLayer(),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
@@ -1210,14 +1156,13 @@ describe("switchContextWindowForSession", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				yield* switchContextWindowForSession({
+				const result = yield* switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("200k");
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "context_window_info",
+				expect(result).toMatchObject({
 					contextWindow: "200k",
 					options: [],
 				});

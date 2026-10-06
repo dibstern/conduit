@@ -1,7 +1,13 @@
+import { Layer } from "effect";
 import { vi } from "vitest";
+import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
-import { makeMockOpenCodeAPI } from "./mock-factories.js";
+import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
+import {
+	makeMockOpenCodeAPI,
+	makeMockSessionManagerService,
+} from "./mock-factories.js";
 
 type OpenCodeAPIOverrides = {
 	readonly [K in
@@ -44,4 +50,12 @@ export function makeHandlerLogger(): Logger {
 		child: vi.fn(() => logger),
 	};
 	return logger;
+}
+
+/** What a session model-settings write needs: a store to commit its event to. */
+export function makeSessionSettingsLayer() {
+	return Layer.merge(
+		makePersistenceEffectLayer(":memory:"),
+		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+	);
 }

@@ -85,11 +85,13 @@ const SHIPPED_MIGRATION_HASHES = {
 		"6aeb7378d45a6fd2f2efe26390fb45a7573cd3ba833c21d6a10ced32aa89de96",
 	"0032_pending_approvals_version.sql":
 		"6b8757c79ec3a05864d72d9a9f9f813ba6bff24d923f4c91ab5decca0f631018",
-	"0033_messages_input_id.sql":
+	"0033_sessions_model_settings.sql":
+		"b73ed248ed34d011e5127c6a240512dedd726a7fe7de89518ae4bd5aa1eefb27",
+	"0034_messages_input_id.sql":
 		"9810a56cd0d51fc664bf8eabbe757997bad9abcff00142052d4ddcc129ba130e",
-	"0034_pending_inputs.sql":
+	"0035_pending_inputs.sql":
 		"4454f92eb123bac242c514140668577a7c06874a119de4ea42d32b8cfc8716d6",
-	"0035_messages_steered.sql":
+	"0036_messages_steered.sql":
 		"bc7e3ec7b28fdd150dc76afbbc5a45f9fde2aa28c6c817c80fca72bd24410afc",
 } satisfies Record<string, string>;
 

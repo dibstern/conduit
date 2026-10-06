@@ -74,7 +74,6 @@ const meta = {
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
 		handleModelInfo({
-			type: "model_info",
 			model: "story-model",
 			provider: "claude",
 		});
@@ -205,7 +204,6 @@ export const PhoneClaudeCycle: Story = {
 export const PhoneOpenCodeCycle: Story = {
 	beforeEach: () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "story-model",
 			provider: "opencode",
 		});
@@ -357,7 +355,6 @@ export const Responsive: Story = {
 export const OpenCodeNormalizesAuto: Story = {
 	beforeEach: () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "story-model",
 			provider: "opencode",
 		});

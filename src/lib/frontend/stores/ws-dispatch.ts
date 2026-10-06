@@ -42,11 +42,6 @@ import {
 	setMessages,
 } from "./chat.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
-import {
-	handleContextWindowInfo,
-	handleModelInfo,
-	handleVariantInfo,
-} from "./discovery.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
 import { clearScanInFlight } from "./instance.svelte.js";
 import {
@@ -279,22 +274,6 @@ export function handleMessage(msg: RelayMessage): void {
 			}
 			break;
 		}
-
-		case "model_info":
-			// Unkeyed legacy/default metadata cannot identify the active session.
-			if (
-				msg.sessionId === undefined ||
-				msg.sessionId !== sessionState.currentId
-			)
-				return;
-			handleModelInfo(msg);
-			break;
-		case "variant_info":
-			handleVariantInfo(msg);
-			break;
-		case "context_window_info":
-			handleContextWindowInfo(msg);
-			break;
 
 		// Now routed through routePerSession (per-session events).
 

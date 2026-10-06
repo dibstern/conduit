@@ -3,7 +3,6 @@ import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
 	openModelPicker,
-	requireRelayControl,
 	requireRpcControl,
 	serveModelCatalog,
 } from "./shared.js";
@@ -62,20 +61,18 @@ export async function seedComposerPickerCatalog(
 	effortOptions.set(page, claude ? levels : []);
 	const model = claude ? "claude-sonnet-5" : "claude-sonnet-4";
 	const provider = claude ? "claude" : "anthropic";
-	const sessionId = new URL(page.url()).pathname.split("/")[2];
-	await serveModelCatalog(page, { providers, active: { model, provider } });
 	requireRpcControl(page).setProjectSetting({
 		_tag: "defaultModel",
 		model,
 		provider,
 		variant: "",
 	});
-	await requireRelayControl(page).sendMessages([
-		// An open session shows its own model, not the default.
-		...(sessionId ? [{ type: "model_info", sessionId, model, provider }] : []),
-		{ type: "context_window_info", contextWindow: "200k", options },
-		{ type: "variant_info", variant: "", variants: claude ? levels : [] },
-	]);
+	await serveModelCatalog(page, {
+		providers,
+		active: { model, provider },
+		contextWindow: { contextWindow: "200k", options },
+		variant: { variant: "", variants: claude ? levels : [] },
+	});
 	// The phone button shows only a short tag (S5); its accessible name has the full model.
 	await expect(
 		page.getByTestId(/^(model-picker-trigger|composer-word-model)$/),

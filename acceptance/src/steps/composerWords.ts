@@ -1,8 +1,7 @@
 import { expect } from "@playwright/test";
-import { claudeBoundSessionMessages } from "../../../test/e2e/fixtures/mockup-state.js";
 import type { StepHandler } from "../runtime.js";
 import { seedComposerPickerCatalog } from "./composerPicker.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import { requireRpcControl } from "./shared.js";
 
 export const composerWordsHandlers: StepHandler[] = [
 	{
@@ -57,10 +56,6 @@ export const composerWordsHandlers: StepHandler[] = [
 					);
 				})
 				.toBe(true);
-			// Reapply relay fixtures after navigation; leave the persisted preference alone.
-			await requireRelayControl(world.page).sendMessages(
-				claudeBoundSessionMessages,
-			);
 			await seedComposerPickerCatalog(world.page, "Claude");
 		},
 	},

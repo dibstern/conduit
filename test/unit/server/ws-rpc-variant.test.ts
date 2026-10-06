@@ -10,6 +10,7 @@ import {
 	getVariant,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
@@ -61,11 +62,12 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 					variants: ["standard", "fast"],
 				});
 				expect(yield* getVariant("session-1")).toBe("fast");
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "variant_info",
-					variant: "fast",
-					variants: ["standard", "fast"],
-				});
+				const committed = yield* (yield* EventStoreEffectTag).readAllBySession(
+					"session-1",
+				);
+				expect(committed.map((event) => event.type)).toEqual([
+					"session.variant_changed",
+				]);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

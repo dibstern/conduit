@@ -70,7 +70,7 @@ export const RelayRegistering: Story = {
  */
 export const InstanceActions: Story = {
 	beforeEach: () => {
-		handleModelInfo({ type: "model_info", provider: "opencode", model: "" });
+		handleModelInfo({ provider: "opencode", model: "" });
 		projectState.currentSlug = "demo";
 		projectState.projects = [
 			{

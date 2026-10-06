@@ -47,7 +47,10 @@ import {
 	sessionState,
 	switchToSession,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
+import {
+	applySessionChange,
+	resetSessionSubscription,
+} from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -80,6 +83,7 @@ beforeEach(() => {
 		.mockResolvedValue({ projectSlug: "project-a", providers: [] });
 	clearSessionState();
 	clearDiscoveryState();
+	resetSessionSubscription();
 	routerState.path = "/";
 	attachedProjectState.slug = "project-a";
 });
@@ -148,19 +152,31 @@ it("ignores a draft returned after the selection moves on", async () => {
 	expect(inputSyncState.text).toBe("B draft");
 });
 
-it("keeps B's model when A's model metadata arrives last", () => {
+it("keeps B's model when A's row changes model last", () => {
 	select("B");
-	handleMessage({
-		type: "model_info",
-		sessionId: "B",
-		model: "model-b",
-		provider: "provider-b",
+	const row = (id: string, model: string, provider: string) => ({
+		id,
+		title: id,
+		status: "idle" as const,
+		model: { model, provider },
 	});
-	handleMessage({
-		type: "model_info",
-		sessionId: "A",
-		model: "model-a",
-		provider: "provider-a",
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: 1,
+		rows: [
+			row("A", "model-a0", "provider-a"),
+			row("B", "model-b0", "provider-b"),
+		],
+	});
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 2,
+		item: row("B", "model-b", "provider-b"),
+	});
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 3,
+		item: row("A", "model-a", "provider-a"),
 	});
 	expect(discoveryState.currentModelId).toBe("model-b");
 	expect(discoveryState.currentProviderId).toBe("provider-b");

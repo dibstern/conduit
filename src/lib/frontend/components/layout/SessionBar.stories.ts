@@ -174,7 +174,7 @@ function setupGoal(
 	const previous = sessionGoals.get(mockSession.id);
 	const model = discoveryState.currentModelId;
 	const provider = discoveryState.currentProviderId;
-	handleModelInfo({ type: "model_info", model, provider: "claude" });
+	handleModelInfo({ model, provider: "claude" });
 	phaseToIdle(getOrCreateSessionActivity(mockSession.id));
 	goalStorySetAt = Math.max(
 		goalStorySetAt + 1,
@@ -212,7 +212,7 @@ function setupGoal(
 	return () => {
 		if (previous) handleGoalChanged(previous);
 		else sessionGoals.delete(mockSession.id);
-		handleModelInfo({ type: "model_info", model, provider });
+		handleModelInfo({ model, provider });
 	};
 }
 

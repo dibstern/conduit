@@ -13,14 +13,19 @@ import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
 	handleDefaultModelInfo,
+	handleModelInfo,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
+import { sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
 export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
+			// A draft has no session model of its own, so it shows the default.
+			if (!sessionState.currentId && setting.model && setting.provider)
+				handleModelInfo({ model: setting.model, provider: setting.provider });
 			break;
 		case "visibility":
 			handleVisibilityInfo(setting);

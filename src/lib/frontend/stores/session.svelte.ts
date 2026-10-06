@@ -37,6 +37,7 @@ import {
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
 	flushPendingPermissionMode,
+	followSessionModelSettings,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import {
@@ -483,6 +484,13 @@ function getSessionDate(session: SessionInfo): Date {
 export function handleSessionFamily(
 	msg: Extract<RelayMessage, { type: "session_family" }>,
 ): void {
+	// A child is not a shell row, so its settings follow the family push.
+	const viewed = msg.sessions.find((row) => row.id === sessionState.currentId);
+	if (viewed?.parentID)
+		followSessionModelSettings(
+			viewed,
+			familySessions.find((row) => row.id === viewed.id),
+		);
 	familySessions = msg.sessions;
 }
 

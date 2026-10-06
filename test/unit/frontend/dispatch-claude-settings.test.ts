@@ -51,7 +51,6 @@ describe("project-settings dispatch", () => {
 
 	it("applies a defaultModel fact without changing the session variant", () => {
 		handleVariantInfo({
-			type: "variant_info",
 			variant: "low",
 			variants: ["low", "high"],
 		});

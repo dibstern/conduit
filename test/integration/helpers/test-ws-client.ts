@@ -41,6 +41,7 @@ export class TestWsClient {
 	}> = [];
 	private openPromise: Promise<void>;
 	private ptySubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private shellSubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
 
 	constructor(url: string, initialSessionId?: string) {
 		const wsUrl = new URL(url);
@@ -728,6 +729,43 @@ export class TestWsClient {
 		}
 	}
 
+	/**
+	 * Follow the project's session shell over SubscribeShell, as the browser
+	 * does. Each envelope lands in `received` as `{ type: "shell", ...envelope }`;
+	 * resolves once the opening snapshot is synchronized.
+	 */
+	async subscribeShell(projectSlug = "integration-test"): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		const receive = (msg: ReceivedMessage) => this.receive(msg);
+		try {
+			this.shellSubscription = Effect.runFork(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* client
+							.SubscribeShell({ projectSlug })
+							.pipe(
+								Stream.runForEach((envelope) =>
+									Effect.sync(() => receive({ type: "shell", ...envelope })),
+								),
+							);
+					}),
+				).pipe(
+					Effect.provide(RpcClient.layerProtocolSocket()),
+					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+					Effect.provide(Socket.layerWebSocketConstructorGlobal),
+					Effect.provide(RpcSerialization.layerJson),
+				),
+			);
+			await this.waitFor("shell", {
+				predicate: (msg) => msg["_tag"] === "synchronized",
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async ptyInput(ptyId: string, data: string): Promise<void> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -984,6 +1022,8 @@ export class TestWsClient {
 		this.waiters = [];
 		if (this.ptySubscription)
 			await Effect.runPromise(Fiber.interrupt(this.ptySubscription));
+		if (this.shellSubscription)
+			await Effect.runPromise(Fiber.interrupt(this.shellSubscription));
 
 		if (
 			this.ws.readyState === WebSocket.OPEN ||

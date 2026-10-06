@@ -1,5 +1,8 @@
+import type { SqlClient } from "@effect/sql";
 import { Context, Deferred, Effect, FiberMap, Layer } from "effect";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
@@ -115,6 +118,9 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ProviderStateEffectTag
 		| SessionTitleServiceTag
 		| ProviderTurnDispatchFibersTag
+		| SqlClient.SqlClient
+		| EventStoreEffectTag
+		| ProjectionRunnerEffectTag
 	>();
 	const runtime = yield* Effect.runtime<OverridesStateTag>();
 	const overridesRef = yield* OverridesStateTag;
@@ -182,6 +188,9 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ProviderRuntimeIngestionTag
 	| ProviderStateEffectTag
 	| SessionTitleServiceTag
+	| SqlClient.SqlClient
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
 );

@@ -9,7 +9,6 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { formatErrorDetail } from "../errors.js";
-import { sendModelsStateToClient } from "./model.js";
 
 export interface ReloadProviderSessionInput {
 	readonly clientId: string;
@@ -41,8 +40,6 @@ export const reloadProviderSessionForClient = (
 		if (engineResult._tag === "Left") {
 			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
 		}
-
-		yield* sendModelsStateToClient(input.clientId, input.sessionId);
 
 		wsHandler.sendTo(input.clientId, {
 			type: "provider_session_reloaded",

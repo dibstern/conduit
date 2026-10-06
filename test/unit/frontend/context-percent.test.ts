@@ -43,7 +43,7 @@ function setClaudeProvider(
 }
 
 function selectModel(model: string): void {
-	handleModelInfo({ type: "model_info", model, provider: "claude" });
+	handleModelInfo({ model, provider: "claude" });
 }
 
 describe("context percent computation", () => {

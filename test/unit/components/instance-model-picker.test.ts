@@ -103,7 +103,6 @@ describe("InstanceModelPicker", () => {
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		handleModelInfo({
-			type: "model_info",
 			model: "claude-sonnet-4-7",
 			provider: "claude",
 		});
@@ -161,7 +160,6 @@ describe("InstanceModelPicker", () => {
 			],
 		});
 		handleModelInfo({
-			type: "model_info",
 			model: "opus[1m]",
 			provider: "claude",
 		});

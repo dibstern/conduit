@@ -10,6 +10,7 @@ import {
 	getModel,
 	getVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -79,17 +80,13 @@ describe("WsRpcServerLayer SwitchModel", () => {
 					"session-1",
 					"opencode",
 				);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "model_info",
-					sessionId: "session-1",
-					model: "gpt-4",
-					provider: "openai",
-				});
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "variant_info",
-					variant: "fast",
-					variants: ["standard", "fast"],
-				});
+				const committed = yield* (yield* EventStoreEffectTag).readAllBySession(
+					"session-1",
+				);
+				expect(committed.map((event) => event.type)).toEqual([
+					"session.model_changed",
+					"session.variant_changed",
+				]);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

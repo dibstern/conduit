@@ -28,17 +28,8 @@ import type {
 	CommandInfo,
 	ModelInfo,
 	ProviderInfo,
-	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
 import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
-
-// Tests deliberately pass incomplete objects to verify defensive handling.
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
 
 beforeEach(() => {
 	clearDiscoveryState();
@@ -351,7 +342,6 @@ describe("an undo only undoes its own choice", () => {
 
 	it("keeps a newer model choice when an older model request fails", () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "server-model",
 			provider: "server-provider",
 		});
@@ -380,7 +370,6 @@ describe("an undo only undoes its own choice", () => {
 
 	it("keeps a re-chosen model when the first request for it fails", () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "server-model",
 			provider: "server-provider",
 		});
@@ -398,7 +387,6 @@ describe("an undo only undoes its own choice", () => {
 describe("handleModelInfo", () => {
 	it("sets current model and provider IDs (server sends 'model' and 'provider')", () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "claude-4",
 			provider: "anthropic",
 		});
@@ -408,11 +396,10 @@ describe("handleModelInfo", () => {
 
 	it("does not overwrite if fields are empty", () => {
 		handleModelInfo({
-			type: "model_info",
 			model: "existing",
 			provider: "existing",
 		});
-		handleModelInfo({ type: "model_info", model: "", provider: "" });
+		handleModelInfo({ model: "", provider: "" });
 		expect(discoveryState.currentModelId).toBe("existing");
 	});
 });
@@ -455,7 +442,6 @@ describe("getActiveModel", () => {
 			],
 		});
 		handleModelInfo({
-			type: "model_info",
 			model: "us.anthropic.claude-fable-5",
 			provider: "amazon-bedrock",
 		});
@@ -511,7 +497,6 @@ describe("handleDefaultModelInfo", () => {
 describe("handleContextWindowInfo", () => {
 	it("sets the current context window and options from the server", () => {
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "1m",
 			options: [
 				{ value: "200k", label: "200K" },
@@ -528,18 +513,15 @@ describe("handleContextWindowInfo", () => {
 
 	it("falls back to empty state when the server sends no options", () => {
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "1m",
 			options: [{ value: "200k", label: "200K" }],
 		});
 
-		handleContextWindowInfo(
-			msg({
-				type: "context_window_info",
-				contextWindow: "",
-				options: undefined,
-			}),
-		);
+		// Deliberately incomplete, to verify defensive handling.
+		handleContextWindowInfo({
+			contextWindow: "",
+			options: undefined,
+		} as unknown as Parameters<typeof handleContextWindowInfo>[0]);
 
 		expect(discoveryState.currentContextWindow).toBe("");
 		expect(discoveryState.availableContextWindowOptions).toEqual([]);
@@ -549,7 +531,6 @@ describe("handleContextWindowInfo", () => {
 describe("getActiveContextWindowOptions", () => {
 	it("returns the server-provided context window options", () => {
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "",
 			options: [
 				{ value: "200k", label: "200K", isDefault: true },
@@ -586,13 +567,11 @@ describe("getActiveContextWindowOptions", () => {
 			],
 		});
 		handleModelInfo({
-			type: "model_info",
 			model: "claude-opus-5",
 			provider: "claude",
 		});
 		// Stale server list from a previously-selected model must not win.
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "",
 			options: [{ value: "200k", label: "200K", isDefault: true }],
 		});
@@ -614,12 +593,10 @@ describe("getActiveContextWindowOptions", () => {
 			],
 		});
 		handleModelInfo({
-			type: "model_info",
 			model: "claude-haiku-4-5",
 			provider: "claude",
 		});
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "",
 			options: [{ value: "200k", label: "200K", isDefault: true }],
 		});

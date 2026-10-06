@@ -8,7 +8,9 @@ import { projectLegacyRelayMessage } from "./detail-projection-mock.js";
 import {
 	ensureMockTranscriptRpc,
 	type MockCatalog,
+	type MockModelState,
 	sendMockDaemonList,
+	sendMockModelState,
 	sendMockProjectSetting,
 	sendMockShellSnapshot,
 	setMockRpcCatalog,
@@ -51,6 +53,19 @@ function sendDaemonList(page: Page, message: MockMessage): boolean {
 	return tag !== undefined;
 }
 
+/**
+ * Recorded fixtures still carry the retired model_info / variant_info /
+ * context_window_info frames. The server now reports those settings through
+ * GetModels (and the session's shell row), so the mock serves them there.
+ */
+function legacyModelState(message: MockMessage): MockModelState | null {
+	const { type, sessionId: _sessionId, ...fields } = message;
+	if (type === "model_info") return { active: fields };
+	if (type === "variant_info") return { variant: fields };
+	if (type === "context_window_info") return { contextWindow: fields };
+	return null;
+}
+
 function mockCatalog(messages: readonly MockMessage[]): MockCatalog | null {
 	const last = (type: string) => messages.filter((m) => m.type === type).at(-1);
 	const models = last("mock_model_catalog");
@@ -67,8 +82,19 @@ function mockCatalog(messages: readonly MockMessage[]): MockCatalog | null {
 				]
 			: [],
 	);
-	if (!models && !commands && agents.length === 0) return null;
+	const modelState: MockModelState = Object.assign(
+		{},
+		...messages.map(legacyModelState),
+	);
+	if (
+		!models &&
+		!commands &&
+		agents.length === 0 &&
+		Object.keys(modelState).length === 0
+	)
+		return null;
 	return {
+		...modelState,
 		...(models ? { providers: models["providers"] as unknown[] } : {}),
 		...(commands ? { commands: commands["commands"] as unknown[] } : {}),
 		...(agents.length > 0 ? { agents } : {}),
@@ -145,11 +171,7 @@ export function normalizeMockRelayMessage(
 			: null;
 	const sessionId = explicitSessionId ?? context.activeSessionId;
 
-	if (
-		(SESSION_SCOPED_MESSAGE_TYPES.has(normalized.type) ||
-			normalized.type === "model_info") &&
-		sessionId
-	) {
+	if (SESSION_SCOPED_MESSAGE_TYPES.has(normalized.type) && sessionId) {
 		normalized["sessionId"] = sessionId;
 	}
 
@@ -245,6 +267,7 @@ export async function mockRelayWebSocket(
 			(message) =>
 				message.type !== "shell_snapshot" &&
 				!CATALOG_MESSAGE_TYPES.has(message.type) &&
+				!legacyModelState(message) &&
 				!DAEMON_LIST_TAGS.has(message.type),
 		);
 		void sendSequence(control, initMessages, initDelay);
@@ -367,6 +390,11 @@ export class WsMockControl {
 					_tag: "opencodeConnection",
 					status,
 				});
+			return;
+		}
+		const modelState = legacyModelState(msg);
+		if (modelState) {
+			sendMockModelState(this.page, modelState);
 			return;
 		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");

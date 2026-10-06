@@ -261,10 +261,6 @@ async function bindOpenCodeSession(
 	if (!localId) throw new Error("createSession returned no id");
 	client.clearReceived();
 	await client.switchModel(model.id, provider.id, localId);
-	await client.waitFor("model_info", {
-		predicate: (message) =>
-			message["model"] === model.id && message["provider"] === provider.id,
-	});
 	client.clearReceived();
 	return localId;
 }
@@ -480,10 +476,6 @@ describe("Integration: Session Visibility Repros", () => {
 		const providerId = provider.id;
 		client1.clearReceived();
 		await client1.switchModel(model.id, providerId, localId);
-		await client1.waitFor("model_info", {
-			predicate: (message) =>
-				message["model"] === model.id && message["provider"] === providerId,
-		});
 		client1.clearReceived();
 
 		// 3. First message → prepareTurnSession materializes an OpenCode session.

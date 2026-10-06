@@ -308,6 +308,14 @@ export const mockAppHandlers: StepHandler[] = [
 						...(modelExecutionMockup
 							? { modelExecution: modelExecutionMockup.modelExecution }
 							: {}),
+						...(effortOptions.has(page)
+							? {
+									variant: {
+										variant: "",
+										variants: effortOptions.get(page) ?? [],
+									},
+								}
+							: {}),
 					}),
 					GetAgents: async (payload) => {
 						const instanceId =
