@@ -135,11 +135,6 @@ describe("wsSend client-side rate limiting", () => {
 			expect(sentMessages).toHaveLength(10);
 			expect(showToastMock).not.toHaveBeenCalled();
 		});
-
-		it("sends terminal input controls immediately", () => {
-			wsSend({ type: "pty_input", ptyId: "pty-1", data: "x" });
-			expect(sentMessages).toHaveLength(1);
-		});
 	});
 
 	describe("under rate limit", () => {

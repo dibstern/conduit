@@ -1,6 +1,6 @@
 import { type Rpc, RpcClient, type RpcGroup, RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Schema, type Scope, Stream } from "effect";
+import { Array as Arr, Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
@@ -27,12 +27,12 @@ import {
 	GetToolContent,
 	InstanceListResponseSchema,
 	ListDaemonSessions,
-	ListDirectories,
 	ListPtys,
 	LoadMoreHistory,
 	LoadMoreHistoryResponseSchema,
 	MarkSessionUnread,
 	ModelExecutionSchema,
+	PtyInput,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -85,6 +85,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				...daemonOnlyHandlers,
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
+				SubscribeSessionTodos: () => Stream.empty,
+				SubscribePtys: () => Stream.empty,
+				SubscribeApprovals: () => Stream.empty,
+				SubscribeProjectSettings: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ ok: true as const }),
 				ResolveSession: () => Effect.succeed({ projectSlug: null }),
 				GetGoalDetails: () =>
@@ -138,7 +142,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							{
 								slug: "demo",
 								title: "Demo",
-								directory: "/tmp/demo",
 								folders: ["/tmp/demo"],
 							},
 						],
@@ -159,26 +162,26 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						hasMore: false,
 						nextCursor: null,
 					}),
-				SaveProject: (request) =>
-					Effect.succeed({
+				SaveProject: (request) => {
+					const folders = request.folders.map((folder) =>
+						typeof folder === "string" ? folder : folder.path,
+					);
+					if (!Arr.isNonEmptyReadonlyArray(folders))
+						return Effect.die("SaveProject needs a folder");
+					return Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [
 							{
 								slug: request.slug ?? "new-project",
 								title: request.title ?? "New Project",
-								directory:
-									typeof request.folders[0] === "string"
-										? request.folders[0]
-										: (request.folders[0]?.path ?? ""),
-								folders: request.folders.map((folder) =>
-									typeof folder === "string" ? folder : folder.path,
-								),
+								folders,
 							},
 						],
 						current: "demo",
 						savedSlug: request.slug ?? "new-project",
 						warnings: [],
-					}),
+					});
+				},
 				RemoveProject: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -192,7 +195,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							{
 								slug: request.slug,
 								title: "Demo",
-								directory: "/tmp/demo",
 								folders: ["/tmp/demo"],
 								instanceId: request.instanceId,
 							},
@@ -315,6 +317,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				CreatePty: () => Effect.succeed({ ok: true as const }),
 				ResizePty: () => Effect.succeed({ ok: true as const }),
 				ClosePty: () => Effect.succeed({ ok: true as const }),
+				PtyInput: (request) =>
+					request.ptyId === "pty-gone"
+						? Effect.fail(
+								new WsRpcError({
+									message:
+										"Terminal is unavailable; reconnect or create a new terminal",
+								}),
+							)
+						: Effect.succeed({ ok: true as const }),
 				PreWarmSession: () => Effect.void,
 				CreateSession: (request) =>
 					Effect.succeed({
@@ -333,12 +344,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				RespondPermission: () => Effect.succeed({ ok: true as const }),
 				AnswerQuestion: () => Effect.succeed({ ok: true as const }),
 				RejectQuestion: () => Effect.succeed({ ok: true as const }),
-				ListDirectories: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						path: request.path,
-						entries: ["/tmp/demo/"],
-					}),
+				FindFolders: () => Effect.succeed({ home: "/home/test", entries: [] }),
 				SwitchAgent: () => Effect.succeed({ ok: true as const }),
 				SwitchContextWindow: (request) =>
 					Effect.succeed({
@@ -781,6 +787,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("CreatePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResizePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("ClosePty")).toBe(true);
+		expect(WsRpcGroup.requests.has("PtyInput")).toBe(true);
+		expect(WsRpcGroup.requests.has("SubscribePtys")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
@@ -788,7 +796,6 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("RespondPermission")).toBe(true);
 		expect(WsRpcGroup.requests.has("AnswerQuestion")).toBe(true);
 		expect(WsRpcGroup.requests.has("RejectQuestion")).toBe(true);
-		expect(WsRpcGroup.requests.has("ListDirectories")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchContextWindow")).toBe(true);
@@ -880,7 +887,6 @@ describe("browser WebSocket RPC contract", () => {
 						{
 							slug: "demo",
 							title: "Demo",
-							directory: "/tmp/demo",
 							folders: ["/tmp/demo"],
 						},
 					],
@@ -914,7 +920,7 @@ describe("browser WebSocket RPC contract", () => {
 					instanceId: "inst-1",
 				});
 				expect(addedProject.savedSlug).toBe("new-project");
-				expect(addedProject.projects[0]?.directory).toBe("/tmp/new-project");
+				expect(addedProject.projects[0]?.folders[0]).toBe("/tmp/new-project");
 
 				expect(
 					yield* client.RemoveProject({
@@ -1024,15 +1030,27 @@ describe("browser WebSocket RPC contract", () => {
 					}),
 				).toEqual({ ok: true });
 
-				const directories = yield* client.ListDirectories({
-					projectSlug: "demo",
-					path: "/tmp/",
-				});
-				expect(directories).toEqual({
-					projectSlug: "demo",
-					path: "/tmp/",
-					entries: ["/tmp/demo/"],
-				});
+				expect(
+					yield* client.PtyInput({
+						projectSlug: "demo",
+						ptyId: "pty-1",
+						data: "ls\r",
+					}),
+				).toEqual({ ok: true });
+				expect(
+					yield* Effect.flip(
+						client.PtyInput({
+							projectSlug: "demo",
+							ptyId: "pty-gone",
+							data: "ls\r",
+						}),
+					),
+				).toEqual(
+					new WsRpcError({
+						message:
+							"Terminal is unavailable; reconnect or create a new terminal",
+					}),
+				);
 
 				const todo = yield* client.GetTodo({ projectSlug: "demo" });
 				expect(todo).toEqual({
@@ -1415,6 +1433,17 @@ describe("browser WebSocket RPC contract", () => {
 			})._tag,
 		).toBe("ClosePty");
 		expect(
+			new PtyInput({ projectSlug: "demo", ptyId: "pty-1", data: "x" })._tag,
+		).toBe("PtyInput");
+		expect(
+			Schema.decodeUnknownEither(PtyInput)({
+				_tag: "PtyInput",
+				projectSlug: "demo",
+				ptyId: "",
+				data: "x",
+			})._tag,
+		).toBe("Left");
+		expect(
 			new CreateSession({
 				projectSlug: "demo",
 				originId: "browser-tab-a",
@@ -1467,9 +1496,6 @@ describe("browser WebSocket RPC contract", () => {
 				toolId: "que-1",
 			})._tag,
 		).toBe("RejectQuestion");
-		expect(
-			new ListDirectories({ projectSlug: "demo", path: "/tmp/" })._tag,
-		).toBe("ListDirectories");
 		expect(new GetTodo({ projectSlug: "demo" })._tag).toBe("GetTodo");
 		expect(
 			new SwitchAgent({

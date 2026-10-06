@@ -40,7 +40,7 @@ test("shell feed adds and removes sidebar roots", async ({
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -65,7 +65,10 @@ test("shell feed adds and removes sidebar roots", async ({
 	await expect(
 		page.locator('#session-list [data-session-id="feed-root"]'),
 	).toBeVisible();
-	await page.locator('#session-list [data-session-id="feed-root"]').click();
+	// Open the row by its title: on desktop hover the row's verbs sit at its centre.
+	await page
+		.locator('#session-list [data-session-id="feed-root"] .session-item-title')
+		.click();
 	relay.sendMessage({
 		type: "mock_transcript_snapshot",
 		id: "feed-root",
@@ -116,7 +119,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -173,7 +176,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -222,7 +225,7 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 					{
 						slug: "e2e-replay",
 						title: "e2e-replay",
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: "e2e-replay",
@@ -1038,32 +1041,19 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure("#sidebar");
 		await page.getByTestId("session-filter-clear").click();
 		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-projects")).toBeVisible();
+		await expect(page.getByTestId("list-overflow-select")).toBeVisible();
 		await measure("[role=menu]");
-		await page.getByTestId("list-overflow-projects").click();
-		await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
-		await measure("#sidebar-projects-panel");
-		await page.getByRole("button", { name: "Add project" }).click();
-		await expect(
-			page.getByRole("combobox", { name: "Project directory" }),
-		).toBeVisible();
-		await measure("#sidebar-projects-panel");
-		await page.getByRole("button", { name: "Cancel" }).click();
-		await page
-			.getByRole("button", { name: "More options for e2e-replay" })
-			.click();
-		await expect(page.getByTestId("project-ctx-menu")).toBeVisible();
-		await measure("[role=menu]");
-		await page.getByTestId("project-ctx-rename").click();
-		await expect(
-			page.getByRole("textbox", { name: "Rename project" }),
-		).toBeVisible();
-		await measure("#sidebar-projects-panel");
-		// The first Escape ends the rename, the second closes the panel, which
-		// overlays the list header now that no action rows push it down.
 		await page.keyboard.press("Escape");
+		await page.getByTestId("session-scope-chip").click();
+		await page.getByRole("menuitem", { name: "Add a project…" }).click();
+		const addProject = page.getByRole("dialog", {
+			name: "Add project",
+			exact: true,
+		});
+		await expect(addProject).toBeVisible();
+		await measure('role=dialog[name="Add project"]');
 		await page.keyboard.press("Escape");
-		await expect(page.getByTestId("sidebar-projects-panel")).toHaveCount(0);
+		await expect(addProject).toHaveCount(0);
 		await page.getByTestId("list-bar-overflow").click();
 		await page.getByTestId("list-overflow-select").click();
 		await expect(
@@ -1182,21 +1172,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(app.sidebar).toBeVisible();
 		await expect(app.sessionsPanel).toBeVisible();
 		await expect(app.app).toBeHidden();
-	});
-
-	test("mobile: list bar menu opens the projects panel", async ({
-		page,
-		relayUrl,
-	}) => {
-		const app = new AppPage(page);
-		await app.goto(new URL("/", relayUrl).toString());
-
-		await page.getByTestId("list-bar-overflow").click();
-		await page.getByTestId("list-overflow-projects").click();
-
-		// The menu is portaled outside the header, so the header's click-outside
-		// dismissal must not close the panel the menu item just opened.
-		await expect(page.getByTestId("sidebar-projects-panel")).toBeVisible();
 	});
 
 	test("mobile: selecting a session shows the session route", async ({

@@ -74,6 +74,57 @@ describe("subscription RPC contracts", () => {
 		}
 	});
 
+	it("exposes a session-scoped todo stream through the frontend", () => {
+		const member = Contracts.SubscribeSessionTodos;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribeSessionTodos")).toBe(
+			member,
+		);
+		expect(Frontend.SubscribeSessionTodos).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		const payload = { projectSlug: "project", sessionId: "session-1" };
+		expect(decodePayload(payload)).toEqual(payload);
+		// Scope is an argument, never ambient: no session, no subscription.
+		expect(() => decodePayload({ projectSlug: "project" })).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		const item = {
+			sessionId: "session-1",
+			items: [{ id: "t1", subject: "Plan", status: "pending" }],
+		};
+		expect(decode({ _tag: "upsert", item, sequence: 3 })).toEqual({
+			_tag: "upsert",
+			item,
+			sequence: 3,
+		});
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { ...item, items: [{ id: "t1", subject: "x", status: "nope" }] },
+				sequence: 3,
+			}),
+		).toThrow();
+	});
+
+	it("exposes a project-scoped PTY stream through the frontend", () => {
+		const member = Contracts.SubscribePtys;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribePtys")).toBe(member);
+		expect(Frontend.SubscribePtys).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		expect(decodePayload({ projectSlug: "project" })).toEqual({
+			projectSlug: "project",
+		});
+		// Scope is an argument, never ambient: no project, no subscription.
+		expect(() => decodePayload({})).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		expect(decode({ _tag: "output", ptyId: "pty-1", data: "x" })).toEqual({
+			_tag: "output",
+			ptyId: "pty-1",
+			data: "x",
+		});
+		expect(() => decode({ _tag: "output", ptyId: "pty-1" })).toThrow();
+	});
+
 	it("exposes a resumable shell stream of session envelopes through the frontend", () => {
 		const member = Contracts.SubscribeShell;
 		expect(member).toBeDefined();
@@ -105,6 +156,40 @@ describe("subscription RPC contracts", () => {
 		expect(() => decode({ _tag: "upsert", item: session })).toThrow();
 		expect(() =>
 			decode({ _tag: "snapshot", rows: [{ id: "session-1" }], sequence: 42 }),
+		).toThrow();
+	});
+	it("exposes a project-scoped settings stream through the frontend", () => {
+		const member = Contracts.SubscribeProjectSettings;
+		expect(Contracts.WsRpcGroup.requests.get("SubscribeProjectSettings")).toBe(
+			member,
+		);
+		expect(Frontend.SubscribeProjectSettings).toBe(member);
+		const decodePayload = Schema.decodeUnknownSync(member.payloadSchema);
+		expect(decodePayload({ projectSlug: "project" })).toEqual({
+			projectSlug: "project",
+		});
+		// Scope is an argument, never ambient: no project, no subscription.
+		expect(() => decodePayload({})).toThrow();
+		expect(() => decodePayload({ projectSlug: "" })).toThrow();
+		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
+		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
+		const decode = Schema.decodeUnknownSync(member.successSchema.success);
+		const visibility = {
+			_tag: "visibility",
+			hiddenModels: ["anthropic/claude-haiku"],
+			hiddenAgents: [],
+		};
+		expect(decode({ _tag: "upsert", item: visibility, sequence: 2 })).toEqual({
+			_tag: "upsert",
+			item: visibility,
+			sequence: 2,
+		});
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { _tag: "defaultPermissionMode", mode: "sometimes" },
+				sequence: 2,
+			}),
 		).toThrow();
 	});
 });

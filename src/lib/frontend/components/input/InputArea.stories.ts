@@ -94,7 +94,6 @@ function setHighVariant() {
 
 function setupDiscovery() {
 	handleModelList({
-		type: "model_list",
 		providers: [
 			{
 				id: "anthropic",
@@ -118,13 +117,11 @@ function setupDiscovery() {
 	});
 	setHighVariant();
 	handleAgentList({
-		type: "agent_list",
 		providerScope: { id: "anthropic", name: "Anthropic" },
 		agents: [{ id: "code", name: "code", description: "Write and edit code" }],
 		activeAgentId: "code",
 	});
 	handleCommandList({
-		type: "command_list",
 		commands: [
 			{ name: "review", description: "Review a pull request" },
 			{ name: "compact", description: "Compact conversation history" },
@@ -213,7 +210,6 @@ function setupWords(phone: boolean) {
 		{ value: "1m", label: "1M" },
 	];
 	handleModelList({
-		type: "model_list",
 		providers: [
 			{
 				id: "claude",
@@ -236,7 +232,6 @@ function setupWords(phone: boolean) {
 		provider: "claude",
 	});
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: "claude-sonnet-5",
 		provider: "claude",
 		variant: "",
@@ -337,11 +332,30 @@ export const WordsPhoneLight: Story = {
 	globals: { theme: "light" },
 };
 
+// The composer clock times the prompt that started the turn.
+function startTurn() {
+	const chat = getOrCreateSessionMessages(testId);
+	chat.messages = [
+		{
+			type: "user",
+			uuid: "story-prompt",
+			messageId: "story-prompt",
+			text: "Run the suite",
+			turnTiming: { startedAt: Date.now(), waits: [] },
+		},
+	];
+	phaseToProcessing(getOrCreateSessionActivity(testId));
+	return () => {
+		chat.messages = [];
+	};
+}
+
 export const Processing: Story = {
 	beforeEach: () => {
-		phaseToProcessing(getOrCreateSessionActivity(testId));
+		const cleanup = startTurn();
 		// Ensure discovery state persists through processing state change
 		setHighVariant();
+		return cleanup;
 	},
 };
 
@@ -388,10 +402,10 @@ function setupGoal(
 						: {}),
 				};
 	handleGoalChanged(facts);
-	if (state === "not_yet")
-		phaseToProcessing(getOrCreateSessionActivity(testId));
-	else phaseToIdle(getOrCreateSessionActivity(testId));
+	const endTurn = state === "not_yet" ? startTurn() : undefined;
+	if (!endTurn) phaseToIdle(getOrCreateSessionActivity(testId));
 	return () => {
+		endTurn?.();
 		if (previous) handleGoalChanged(previous);
 		else sessionGoals.delete(testId);
 		handleModelInfo({ type: "model_info", model, provider });

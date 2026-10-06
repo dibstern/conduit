@@ -76,7 +76,7 @@ export const InstanceActions: Story = {
 			{
 				slug: "demo",
 				title: "Demo",
-				directory: "/tmp/demo",
+				folders: ["/tmp/demo"],
 				instanceId: "instance-stopped",
 			},
 		];

@@ -174,7 +174,7 @@ describe("PendingInteractionService", () => {
 			yield* TestClock.adjust("1 seconds");
 
 			expect(yield* service.takeTimedOutPermissions()).toEqual([
-				{ id: "perm-1", sessionId: "session-1" },
+				{ id: "perm-1", sessionId: "session-1", awaited: false },
 			]);
 			expect(yield* service.listPendingPermissions()).toHaveLength(0);
 		}).pipe(
@@ -200,7 +200,7 @@ describe("PendingInteractionService", () => {
 			yield* TestClock.adjust("1 seconds");
 
 			expect(yield* service.takeTimedOutPermissions()).toEqual([
-				{ id: "perm-1", sessionId: "session-1" },
+				{ id: "perm-1", sessionId: "session-1", awaited: true },
 			]);
 			yield* Effect.yieldNow();
 			const waiterExit = yield* Fiber.poll(waiter);

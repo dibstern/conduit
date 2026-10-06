@@ -54,26 +54,16 @@ export function beginProxyDetection(): void {
 	}, 5_000);
 }
 
-export function handleProxyDetected(
-	msg: Extract<RelayMessage, { type: "proxy_detected" }>,
-): void {
-	if (proxyDetectTimer) {
-		clearTimeout(proxyDetectTimer);
-		proxyDetectTimer = null;
-	}
-	proxyDetection = { found: msg.found, port: msg.port };
-}
-
 export function getProxyDetection(): { found: boolean; port: number } | null {
 	return proxyDetection;
 }
 
 export function applyDetectProxyResponse(response: DetectProxyResponse): void {
-	handleProxyDetected({
-		type: "proxy_detected",
-		found: response.found,
-		port: response.port,
-	});
+	if (proxyDetectTimer) {
+		clearTimeout(proxyDetectTimer);
+		proxyDetectTimer = null;
+	}
+	proxyDetection = { found: response.found, port: response.port };
 }
 
 interface ScanResult {
@@ -102,24 +92,13 @@ export function clearScanInFlight(): void {
 	scanInFlight = false;
 }
 
-export function handleScanResult(
-	msg: Extract<RelayMessage, { type: "scan_result" }>,
-): void {
-	lastScanResult = {
-		discovered: [...msg.discovered],
-		lost: [...msg.lost],
-		active: [...msg.active],
-	};
-	scanInFlight = false;
-}
-
 export function applyScanNowResponse(response: ScanNowResponse): void {
-	handleScanResult({
-		type: "scan_result",
+	lastScanResult = {
 		discovered: [...response.discovered],
 		lost: [...response.lost],
 		active: [...response.active],
-	});
+	};
+	scanInFlight = false;
 }
 
 export function handleInstanceList(
@@ -159,26 +138,6 @@ export function applyInstanceListResponse(
 				: {}),
 		})),
 	});
-}
-
-export function handleInstanceStatus(
-	msg: Extract<RelayMessage, { type: "instance_status" }>,
-): void {
-	const idx = instanceState.instances.findIndex((i) => i.id === msg.instanceId);
-	if (idx !== -1) {
-		const instance = instanceState.instances[idx];
-		if (instance !== undefined) {
-			instanceState.instances[idx] = { ...instance, status: msg.status };
-		}
-	}
-	// Also update the cache
-	const cacheIdx = cachedInstances.findIndex((i) => i.id === msg.instanceId);
-	if (cacheIdx !== -1) {
-		const instance = cachedInstances[cacheIdx];
-		if (instance !== undefined) {
-			cachedInstances[cacheIdx] = { ...instance, status: msg.status };
-		}
-	}
 }
 
 export function getInstanceById(id: string): OpenCodeInstance | undefined {

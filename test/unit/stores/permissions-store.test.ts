@@ -1,5 +1,6 @@
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
+	applyApprovalEnvelope,
 	buildAnswerPayload,
 	clearAll,
 	clearAllPermissions,
@@ -7,11 +8,6 @@ import {
 	getDescendantSessionIds,
 	getLocalPermissions,
 	getRemotePermissions,
-	handleAskUser,
-	handleAskUserError,
-	handleAskUserResolved,
-	handlePermissionRequest,
-	handlePermissionResolved,
 	isValidSubmission,
 	permissionsState,
 	removePermission,
@@ -26,26 +22,135 @@ import {
 import type {
 	AskUserQuestion,
 	PermissionId,
-	RelayMessage,
 } from "../../../src/lib/frontend/types.js";
+import type { Approval } from "../../../src/lib/shared-types.js";
 import { seedSessionsWithFamily } from "./session-fixtures.js";
 
 /** Cast a plain string to PermissionId for test data. */
 const pid = (s: string) => s as PermissionId;
 
-// Tests deliberately pass incomplete objects to verify defensive handling.
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
+// The approvals subscription is the store's only writer: seed it the same way.
+let sequence = 0;
+const upsert = (item: Approval) =>
+	applyApprovalEnvelope({ _tag: "upsert", item, sequence: ++sequence });
+const permissionAsked = (
+	fields: Omit<Extract<Approval, { _tag: "permission" }>, "_tag">,
+) => upsert({ _tag: "permission", ...fields });
+const questionAsked = (
+	fields: Omit<Extract<Approval, { _tag: "question" }>, "_tag">,
+) => upsert({ _tag: "question", ...fields });
 
 beforeEach(() => {
-	permissionsState.pendingPermissions = [];
-	permissionsState.pendingQuestions = [];
-	permissionsState.questionErrors = new Map();
+	clearAll();
 	clearSessionState();
+});
+
+describe("applyApprovalEnvelope", () => {
+	const question = {
+		_tag: "question",
+		sessionId: "s1",
+		toolId: "que-1",
+		toolUseId: "call-1",
+		providerId: "opencode",
+		questions: [
+			{
+				question: "Which?",
+				header: "Pick",
+				options: [{ label: "A" }],
+				multiSelect: false,
+			},
+		],
+	} as const;
+	const permission = {
+		_tag: "permission",
+		sessionId: "child-1",
+		requestId: pid("perm-1"),
+		toolName: "Bash",
+		toolInput: { command: "ls" },
+		always: ["ls *"],
+		permissionTitle: "Run ls",
+	} as const;
+
+	it("drives both lists from snapshot, upsert and remove, and reports what entered", () => {
+		expect(
+			applyApprovalEnvelope({
+				_tag: "snapshot",
+				rows: [question],
+				sequence: 5,
+			}),
+		).toEqual([question]);
+		expect(applyApprovalEnvelope({ _tag: "synchronized" })).toEqual([]);
+		expect(permissionsState.pendingQuestions).toEqual([
+			{
+				toolId: "que-1",
+				sessionId: "s1",
+				toolUseId: "call-1",
+				providerId: "opencode",
+				questions: question.questions,
+			},
+		]);
+
+		expect(
+			applyApprovalEnvelope({ _tag: "upsert", item: permission, sequence: 6 }),
+		).toEqual([permission]);
+		expect(permissionsState.pendingPermissions).toEqual([
+			{
+				id: "perm-1",
+				requestId: "perm-1",
+				sessionId: "child-1",
+				toolName: "Bash",
+				toolInput: { command: "ls" },
+				always: ["ls *"],
+				permissionTitle: "Run ls",
+			},
+		]);
+
+		// A replayed upsert at or below what we hold is not news.
+		expect(
+			applyApprovalEnvelope({ _tag: "upsert", item: permission, sequence: 6 }),
+		).toEqual([]);
+
+		applyApprovalEnvelope({ _tag: "remove", id: "perm-1", sequence: 7 });
+		applyApprovalEnvelope({ _tag: "remove", id: "que-1", sequence: 8 });
+		expect(permissionsState.pendingPermissions).toEqual([]);
+		expect(permissionsState.pendingQuestions).toEqual([]);
+	});
+
+	it("a reconnect snapshot reports only approvals it did not already hold", () => {
+		applyApprovalEnvelope({ _tag: "snapshot", rows: [question], sequence: 5 });
+		applyApprovalEnvelope({ _tag: "synchronized" });
+		expect(
+			applyApprovalEnvelope({
+				_tag: "snapshot",
+				rows: [question, permission],
+				sequence: 9,
+			}),
+		).toEqual([permission]);
+		// And one that leaves an approval out has resolved it while we were away.
+		applyApprovalEnvelope({
+			_tag: "snapshot",
+			rows: [permission],
+			sequence: 10,
+		});
+		expect(permissionsState.pendingQuestions).toEqual([]);
+		expect(permissionsState.pendingPermissions.map((p) => p.id)).toEqual([
+			"perm-1",
+		]);
+	});
+
+	it("a project switch forgets everything, so the next snapshot starts clean", () => {
+		applyApprovalEnvelope({ _tag: "snapshot", rows: [question], sequence: 50 });
+		clearAllPermissions();
+		expect(permissionsState.pendingQuestions).toEqual([]);
+		// Another project's store is at a lower sequence; it must still apply.
+		expect(
+			applyApprovalEnvelope({
+				_tag: "snapshot",
+				rows: [permission],
+				sequence: 3,
+			}),
+		).toEqual([permission]);
+	});
 });
 
 describe("buildAnswerPayload", () => {
@@ -211,238 +316,15 @@ describe("formatQuestionHeader", () => {
 	});
 });
 
-describe("handlePermissionRequest", () => {
-	it("adds a permission request with toolInput", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("r1"),
-			toolName: "Write",
-			toolInput: { path: "/foo/bar.ts" },
-		});
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		const permission = permissionsState.pendingPermissions[0];
-		assert.exists(permission, "expected pending permission");
-		expect(permission.toolName).toBe("Write");
-		expect(permission.toolInput).toEqual({
-			path: "/foo/bar.ts",
-		});
-	});
-
-	it("ignores missing requestId", () => {
-		handlePermissionRequest(
-			msg({ type: "permission_request", toolName: "Write" }),
-		);
-		expect(permissionsState.pendingPermissions).toHaveLength(0);
-	});
-
-	it("ignores missing toolName", () => {
-		handlePermissionRequest(
-			msg({
-				type: "permission_request",
-				requestId: pid("r1"),
-			}),
-		);
-		expect(permissionsState.pendingPermissions).toHaveLength(0);
-	});
-
-	it("preserves the always field from the message", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("r1"),
-			toolName: "bash",
-			toolInput: { command: "git status" },
-			always: ["git *"],
-		});
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-		const permission = permissionsState.pendingPermissions[0];
-		assert.exists(permission, "expected pending permission");
-		expect(permission.always).toEqual(["git *"]);
-	});
-
-	it("always adds to pending (no in-memory auto-approve)", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("r1"),
-			toolName: "Write",
-			toolInput: {},
-		});
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-	});
-});
-
-describe("handlePermissionResolved", () => {
-	it("removes the resolved permission", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("r1"),
-			toolName: "Write",
-			toolInput: {},
-		});
-		handlePermissionResolved({
-			type: "permission_resolved",
-			sessionId: "s1",
-			requestId: pid("r1"),
-			decision: "allow",
-		});
-		expect(permissionsState.pendingPermissions).toHaveLength(0);
-	});
-
-	it("ignores missing requestId", () => {
-		handlePermissionRequest({
-			type: "permission_request",
-			sessionId: "ses-1",
-			requestId: pid("r1"),
-			toolName: "Write",
-			toolInput: {},
-		});
-		handlePermissionResolved(msg({ type: "permission_resolved" }));
-		expect(permissionsState.pendingPermissions).toHaveLength(1);
-	});
-});
-
-describe("handleAskUser", () => {
-	it("adds a question request", () => {
-		const questions: AskUserQuestion[] = [
-			{
-				question: "Which?",
-				header: "H",
-				options: [{ label: "A" }],
-				multiSelect: false,
-			},
-		];
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "t1",
-			questions,
-		});
-		expect(permissionsState.pendingQuestions).toHaveLength(1);
-		const question = permissionsState.pendingQuestions[0];
-		assert.exists(question, "expected pending question");
-		expect(question.toolId).toBe("t1");
-	});
-
-	it("ignores missing toolId", () => {
-		handleAskUser(
-			msg({
-				type: "ask_user",
-				questions: [
-					{
-						question: "Q",
-						header: "H",
-						options: [],
-						multiSelect: false,
-					},
-				],
-			}),
-		);
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-	});
-
-	it("ignores non-array questions", () => {
-		handleAskUser(
-			msg({
-				type: "ask_user",
-				sessionId: "s1",
-				toolId: "t1",
-				questions: "bad",
-			}),
-		);
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-	});
-
-	it("deduplicates ask_user with same toolId (prevents duplicate question cards)", () => {
-		const questions: AskUserQuestion[] = [
-			{
-				question: "Which?",
-				header: "H",
-				options: [{ label: "A" }],
-				multiSelect: false,
-			},
-		];
-		// First ask_user adds to pending
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "que_abc",
-			questions,
-		});
-		expect(permissionsState.pendingQuestions).toHaveLength(1);
-
-		// Second ask_user with same toolId (e.g., from API replay after SSE) is ignored
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "que_abc",
-			questions,
-		});
-		expect(permissionsState.pendingQuestions).toHaveLength(1);
-	});
-
-	it("allows different toolIds to be added", () => {
-		const questions: AskUserQuestion[] = [
-			{
-				question: "Q",
-				header: "H",
-				options: [{ label: "A" }],
-				multiSelect: false,
-			},
-		];
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "que_1",
-			questions,
-		});
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "que_2",
-			questions,
-		});
-		expect(permissionsState.pendingQuestions).toHaveLength(2);
-	});
-});
-
-describe("handleAskUserResolved", () => {
-	it("removes the resolved question", () => {
-		handleAskUser({
-			type: "ask_user",
-			sessionId: "s1",
-			toolId: "t1",
-			questions: [
-				{
-					question: "Q",
-					header: "H",
-					options: [{ label: "A" }],
-					multiSelect: false,
-				},
-			],
-		});
-		handleAskUserResolved({
-			type: "ask_user_resolved",
-			sessionId: "s1",
-			toolId: "t1",
-		});
-		expect(permissionsState.pendingQuestions).toHaveLength(0);
-	});
-});
-
 describe("removePermission", () => {
 	it("removes by requestId", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			sessionId: "ses-1",
 			requestId: pid("r1"),
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			sessionId: "ses-1",
 			requestId: pid("r2"),
 			toolName: "Read",
@@ -458,8 +340,7 @@ describe("removePermission", () => {
 
 describe("removeQuestion", () => {
 	it("removes by toolId", () => {
-		handleAskUser({
-			type: "ask_user",
+		questionAsked({
 			sessionId: "s1",
 			toolId: "t1",
 			questions: [
@@ -478,15 +359,13 @@ describe("removeQuestion", () => {
 
 describe("clearAll", () => {
 	it("clears all pending items", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			sessionId: "ses-1",
 			requestId: pid("r1"),
 			toolName: "Write",
 			toolInput: {},
 		});
-		handleAskUser({
-			type: "ask_user",
+		questionAsked({
 			sessionId: "s1",
 			toolId: "t1",
 			questions: [
@@ -501,26 +380,18 @@ describe("clearAll", () => {
 		clearAll();
 		expect(permissionsState.pendingPermissions).toHaveLength(0);
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
-	});
-
-	it("clears questionErrors", () => {
-		permissionsState.questionErrors.set("t1", "Some error");
-		clearAll();
-		expect(permissionsState.questionErrors.size).toBe(0);
 	});
 });
 
 describe("clearAllPermissions", () => {
 	it("clears all pending items", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			sessionId: "ses-1",
 			requestId: pid("r1"),
 			toolName: "Write",
 			toolInput: {},
 		});
-		handleAskUser({
-			type: "ask_user",
+		questionAsked({
 			sessionId: "s1",
 			toolId: "t1",
 			questions: [
@@ -532,69 +403,22 @@ describe("clearAllPermissions", () => {
 				},
 			],
 		});
-		permissionsState.questionErrors.set("t1", "Some error");
-
 		clearAllPermissions();
 
 		expect(permissionsState.pendingPermissions).toHaveLength(0);
 		expect(permissionsState.pendingQuestions).toHaveLength(0);
-		expect(permissionsState.questionErrors.size).toBe(0);
-	});
-});
-
-describe("handleAskUserError", () => {
-	it("stores error message keyed by toolId", () => {
-		handleAskUserError({
-			type: "ask_user_error",
-			sessionId: "s1",
-			toolId: "t1",
-			message: "This question was asked in a terminal session.",
-		});
-		expect(permissionsState.questionErrors.get("t1")).toBe(
-			"This question was asked in a terminal session.",
-		);
-	});
-
-	it("ignores missing toolId", () => {
-		handleAskUserError(
-			msg({
-				type: "ask_user_error",
-				sessionId: "s1",
-				toolId: "",
-				message: "err",
-			}),
-		);
-		expect(permissionsState.questionErrors.size).toBe(0);
-	});
-
-	it("overwrites previous error for the same toolId", () => {
-		handleAskUserError({
-			type: "ask_user_error",
-			sessionId: "s1",
-			toolId: "t1",
-			message: "first error",
-		});
-		handleAskUserError({
-			type: "ask_user_error",
-			sessionId: "s1",
-			toolId: "t1",
-			message: "second error",
-		});
-		expect(permissionsState.questionErrors.get("t1")).toBe("second error");
 	});
 });
 
 describe("getLocalPermissions", () => {
 	it("returns only permissions matching the current session", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r2"),
 			sessionId: "sess-2",
 			toolName: "Bash",
@@ -608,8 +432,7 @@ describe("getLocalPermissions", () => {
 	});
 
 	it("returns empty array when currentSessionId is null", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
@@ -619,8 +442,7 @@ describe("getLocalPermissions", () => {
 	});
 
 	it("returns empty array when no permissions match", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
@@ -632,15 +454,13 @@ describe("getLocalPermissions", () => {
 
 describe("getRemotePermissions", () => {
 	it("returns only permissions NOT matching the current session", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r2"),
 			sessionId: "sess-2",
 			toolName: "Bash",
@@ -654,8 +474,7 @@ describe("getRemotePermissions", () => {
 	});
 
 	it("returns all permissions when currentSessionId is null", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
@@ -665,8 +484,7 @@ describe("getRemotePermissions", () => {
 	});
 
 	it("returns empty array when all permissions are local", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
@@ -678,15 +496,13 @@ describe("getRemotePermissions", () => {
 
 describe("session switch re-derives", () => {
 	it("same permission list, different session → different local/remote split", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r2"),
 			sessionId: "sess-2",
 			toolName: "Bash",
@@ -712,15 +528,13 @@ describe("session switch re-derives", () => {
 // Pending prompts stay with their sessions when this tab changes routes.
 describe("pending prompts across a session switch", () => {
 	it("keeps permissions and questions until their resolution events arrive", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handleAskUser({
-			type: "ask_user",
+		questionAsked({
 			sessionId: "sess-1",
 			toolId: "t1",
 			questions: [
@@ -818,8 +632,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 				updatedAt: 0,
 			},
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "child",
 			toolName: "Bash",
@@ -851,8 +664,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 				updatedAt: 0,
 			},
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "grandchild",
 			toolName: "Write",
@@ -877,15 +689,13 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 				updatedAt: 0,
 			},
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "parent",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r2"),
 			sessionId: "child",
 			toolName: "Bash",
@@ -908,8 +718,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 			},
 			{ id: "other", title: "Other", status: "idle", updatedAt: 0 },
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "other",
 			toolName: "Write",
@@ -928,8 +737,7 @@ describe("getLocalPermissions with subagent hierarchy", () => {
 
 describe("getLocalPermissions with unknown session (sessionId='')", () => {
 	it("includes permissions with empty sessionId in the current session", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r-unknown"),
 			sessionId: "",
 			toolName: "Bash",
@@ -944,15 +752,13 @@ describe("getLocalPermissions with unknown session (sessionId='')", () => {
 	});
 
 	it("includes unknown-session permissions alongside session-matched ones", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "sess-1",
 			toolName: "Write",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r-unknown"),
 			sessionId: "",
 			toolName: "Bash",
@@ -966,8 +772,7 @@ describe("getLocalPermissions with unknown session (sessionId='')", () => {
 
 describe("getRemotePermissions with unknown session (sessionId='')", () => {
 	it("excludes permissions with empty sessionId (they show as local)", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r-unknown"),
 			sessionId: "",
 			toolName: "Bash",
@@ -979,15 +784,13 @@ describe("getRemotePermissions with unknown session (sessionId='')", () => {
 	});
 
 	it("keeps other-session permissions in remote while excluding empty-session ones", () => {
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r-unknown"),
 			sessionId: "",
 			toolName: "Bash",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r-other"),
 			sessionId: "sess-2",
 			toolName: "Write",
@@ -1014,8 +817,7 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 				updatedAt: 0,
 			},
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "child",
 			toolName: "Bash",
@@ -1038,8 +840,7 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 			},
 			{ id: "other", title: "Other", status: "idle", updatedAt: 0 },
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "other",
 			toolName: "Write",
@@ -1071,15 +872,13 @@ describe("getRemotePermissions with subagent hierarchy", () => {
 				updatedAt: 0,
 			},
 		]);
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r1"),
 			sessionId: "grandchild",
 			toolName: "Bash",
 			toolInput: {},
 		});
-		handlePermissionRequest({
-			type: "permission_request",
+		permissionAsked({
 			requestId: pid("r2"),
 			sessionId: "other-root",
 			toolName: "Write",

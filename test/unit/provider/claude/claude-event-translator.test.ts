@@ -2088,7 +2088,8 @@ describe("ClaudeEventTranslator", () => {
 		const interrupted = sink.events.find((e) => e.type === "turn.interrupted");
 		expect(interrupted).toBeDefined();
 		const data = dataOf(interrupted);
-		expect(data["messageId"]).toBe("assist-uuid-3");
+		// An SDK uuid names no turn row; empty tells the projector "the running turn".
+		expect(data["messageId"]).toBe("");
 	});
 
 	it("translates result with 'interrupted' keyword to turn.interrupted", async () => {

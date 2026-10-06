@@ -59,10 +59,6 @@ describe("daemon RPC handlers", () => {
 				expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
 					projectSlug: null,
 				});
-				expect(
-					(yield* client.ListDirectories({ path: "/nonexistent-directory/" }))
-						.entries,
-				).toEqual([]);
 				expect((yield* client.ScanNow({})).active).toEqual([]);
 				expect(
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
@@ -149,12 +145,12 @@ describe("daemon RPC handlers", () => {
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
 				yield* client.SaveProject({ folders: [directory] });
 				expect((yield* client.GetProjects({})).projects).toMatchObject([
-					{ directory },
+					{ folders: [directory] },
 				]);
 			}).pipe(
 				Effect.provide(
 					makeDaemonRpcTestLayer([
-						{ slug: "gone", title: "gone", directory, folders: [directory] },
+						{ slug: "gone", title: "gone", folders: [directory] },
 					]),
 				),
 			);
@@ -173,8 +169,7 @@ describe("daemon RPC handlers", () => {
 				return {
 					slug,
 					title: slug,
-					directory: projectDir,
-					folders: [projectDir],
+					folders: [projectDir] as const,
 				};
 			});
 			const factory = vi.fn((slug: string) =>

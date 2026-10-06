@@ -7,12 +7,13 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, type Scope } from "effect";
+import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsTag } from "../domain/relay/Services/opencode-instance-clients.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -127,7 +128,7 @@ const createOrchestrationComponentsEffect = (
 	never,
 	| Scope.Scope
 	| SqlClient.SqlClient
-	| OpenCodeInstanceClientsTag
+	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 > =>
@@ -142,20 +143,19 @@ const createOrchestrationComponentsEffect = (
 			sql,
 		);
 
-		// Sessions bound to a NAMED OpenCode instance route their
-		// provider calls to that instance's client. The binding is set before
-		// sendTurn dispatches (orchestration-engine binds session→providerId),
-		// so a session-keyed resolver over the binding read model is correct
-		// for sendTurn/interrupt/permission/question alike.
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		// Every session's provider calls run on its bound OpenCode instance.
+		// The binding is set before sendTurn dispatches (orchestration-engine
+		// binds session→providerId), so a session-keyed resolver over the
+		// binding read model is correct for sendTurn/interrupt/permission/question.
+		const instances = yield* OpenCodeInstancesTag;
 		const clientForSession = (sessionId: string) =>
 			sessionBindingReadModel
 				.getProviderForSession(sessionId)
 				.pipe(
 					Effect.flatMap((boundInstanceId) =>
-						boundInstanceId == null
-							? Effect.succeed(undefined)
-							: instanceClients.clientFor(boundInstanceId),
+						instances.use(
+							boundInstanceId ?? defaultInstanceIdForDriver("opencode"),
+						),
 					),
 				);
 
@@ -289,7 +289,7 @@ export const makeOrchestrationRuntimeLayer = (
 	never,
 	| OpenCodeAPITag
 	| SqlClient.SqlClient
-	| OpenCodeInstanceClientsTag
+	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 > => {

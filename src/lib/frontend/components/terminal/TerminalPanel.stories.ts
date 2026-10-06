@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import {
 	beginCreateTab,
 	destroyAll,
-	handlePtyList,
+	handlePtySnapshot,
 	openPanel,
 	renameTab,
 	switchTab,
@@ -20,17 +20,19 @@ function setTabs(
 	entries: Array<{ ptyId: string; title: string; exited?: boolean }>,
 	activeId?: string,
 ) {
-	handlePtyList({
-		type: "pty_list",
-		ptys: entries.map((e) => ({
-			id: e.ptyId,
-			title: e.title,
-			command: "bash",
-			cwd: "/repo",
-			status: e.exited ? ("exited" as const) : ("running" as const),
-			pid: 1000,
+	handlePtySnapshot(
+		entries.map((e) => ({
+			pty: {
+				id: e.ptyId,
+				title: e.title,
+				command: "bash",
+				cwd: "/repo",
+				status: e.exited ? ("exited" as const) : ("running" as const),
+				pid: 1000,
+			},
+			scrollback: "",
 		})),
-	});
+	);
 	for (const e of entries) renameTab(e.ptyId, e.title);
 	const active = activeId ?? entries[0]?.ptyId;
 	if (active) switchTab(active);

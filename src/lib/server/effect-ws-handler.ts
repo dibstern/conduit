@@ -24,19 +24,12 @@ import type {
 	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
-	WsMessageEvent,
 } from "./ws-handler-shape.js";
-import {
-	createClientCountMessage,
-	isRouteError,
-	parseIncomingMessage,
-	routeMessage,
-} from "./ws-router.js";
+import { createClientCountMessage, parseIncomingMessage } from "./ws-router.js";
 
 type WsEventMap = {
 	client_connected: WsClientConnectedEvent;
 	client_disconnected: WsClientDisconnectedEvent;
-	message: WsMessageEvent;
 	client_error: { clientId: string; error: Error };
 };
 
@@ -293,20 +286,12 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			return;
 		}
 
-		const routed = routeMessage(parsed);
-		if (isRouteError(routed)) {
-			this.sendTo(clientId, {
-				type: "system_error",
-				code: routed.code,
-				message: routed.message,
-			});
-			return;
-		}
-
-		this.events.emit("message", {
-			clientId,
-			handler: routed.handler,
-			payload: routed.payload,
+		// Every browser request is an @effect/rpc call now; nothing is routed
+		// over the raw socket any more (conduit-test-ni8.11 retired pty_input).
+		this.sendTo(clientId, {
+			type: "system_error",
+			code: "UNKNOWN_MESSAGE_TYPE",
+			message: `Unknown message type: ${parsed.type}`,
 		});
 	}
 

@@ -86,6 +86,7 @@ describe("daemon-config-persistence", () => {
 						projects: [
 							{
 								path: "/app",
+								folders: ["/app"],
 								slug: "app",
 								title: "My App",
 								addedAt: 1000,

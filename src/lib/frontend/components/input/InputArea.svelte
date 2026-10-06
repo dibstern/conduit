@@ -1,6 +1,11 @@
 <!-- Auto-expanding textarea with send/stop button, attach menu, agent/model pills. -->
 <!-- Command menu triggered by "/" prefix. -->
 
+<script module lang="ts">
+	// A composer remount must not repeat the same turn's diagnostic.
+	const reportedMissingPrompts = new Set<string>();
+</script>
+
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
@@ -23,12 +28,14 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		conduitCommands,
 		discoveryState,
 		extractCommandQuery,
 		filterCommands,
+		getChosenModel,
 		getEffectiveInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
@@ -50,6 +57,7 @@
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
+	import { isPaused, segmentTurns, startedTurn, workingTime } from "../../utils/turns.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -89,7 +97,38 @@
 		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
 		return () => clearTimeout(timer);
 	});
-	const working = $derived(isProcessing() || Boolean(currentSession && sessionAttention(currentSession) === "working"));
+	const turn = $derived.by(() => {
+		const chat = currentChat();
+		return startedTurn(segmentTurns(chat.messages, isProcessing(), chat.turnEpoch), chat.turnEpoch, isProcessing());
+	});
+	const paused = $derived(turn !== undefined && isPaused(turn));
+	const working = $derived(isProcessing() || paused || Boolean(currentSession && sessionAttention(currentSession) === "working"));
+	const elapsed = $derived.by(() => {
+		if (!turn) return undefined;
+		if (paused) return workingTime(turn, Date.now());
+		if (turn.live) return workingTime(turn, clock.now);
+		if (turn.user?.turnTiming?.endedAt !== undefined) return workingTime(turn, Date.now());
+		return undefined;
+	});
+	const missingPrompt = $derived(isProcessing() && currentChat().loadLifecycle === "ready" && !turn?.user);
+	$effect(() => {
+		if (!missingPrompt) return;
+		const sessionId = sessionState.currentId;
+		if (!sessionId) return;
+		const chat = currentChat();
+		const key = JSON.stringify([sessionId, chat.turnEpoch]);
+		if (reportedMissingPrompts.has(key)) return;
+		reportedMissingPrompts.add(key);
+		const lastRow = chat.transcript?.rows.at(-1);
+		const last = chat.messages.at(-1);
+		console.error("[turn-clock] Working session has no prompt to time from", {
+			sessionId,
+			turnEpoch: chat.turnEpoch,
+			messageCount: chat.messages.length,
+			lastMessageRole: lastRow?.role ?? last?.type ?? null,
+			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
+		});
+	});
 	const activity = $derived.by(() => {
 		const chat = currentChat();
 		for (let i = chat.messages.length - 1; i >= 0; i--) {
@@ -110,21 +149,6 @@
 			}
 		}
 		return "";
-	});
-	$effect(() => {
-		const sessionId = sessionState.currentId;
-		const active = working;
-		if (!sessionId) return;
-		untrack(() => {
-			// A shell row can announce a working session before a status event.
-			const { activity: status, messages } = getOrCreateSessionSlot(sessionId);
-			if (!active) {
-				if (status.phase === "idle") status.turnStartedAt = null;
-				return;
-			}
-			const user = [...messages.messages].reverse().find((part) => part.type === "user");
-			status.turnStartedAt ??= user?.createdAt ?? Date.now();
-		});
 	});
 	$effect(() => {
 		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
@@ -582,10 +606,14 @@
 			if (creatingSession) return false;
 			creatingSession = true;
 			try {
+				// The draft's model pick is client-local until the session exists.
+				const instanceId = getEffectiveInstanceId();
+				const model = getChosenModel(instanceId);
 				const created = await createSessionRpc({
 					projectSlug,
 					originId: getBrowserClientId(),
-					instanceId: getEffectiveInstanceId(),
+					instanceId,
+					...(model ? { model } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");
@@ -917,7 +945,8 @@
 		>
 			{#if working || goal.phase === "checking"}
 				<ComposerStatusHeader
-					startedAt={currentChat().turnStartedAt}
+					{elapsed}
+					{missingPrompt}
 					{activity}
 					{goal}
 					following={sessionViewState.atBottom}

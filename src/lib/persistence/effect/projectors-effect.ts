@@ -102,9 +102,10 @@ function isEventType<K extends CanonicalEventType>(
 }
 
 // A child-table row naming the session row it belongs to. `turns`, `activities`,
-// `pending_approvals` and `session_providers` carry no version of their own, so
-// the session row that owns them is what moves — and the owner is whatever the
-// write itself put in `session_id`, not what the event header says.
+// `pending_approvals` and `session_providers` move the session row that owns
+// them (pending_approvals also has a version, for its own subscription), and
+// the owner is whatever the write itself put in `session_id`, not what the
+// event header says.
 interface OwnedRow {
 	readonly session_id: string;
 }
@@ -763,7 +764,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
 				if (rows[0]?.rest_digest != null) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
-					return [];
+					return { sessions: [], messages: [] };
 				}
 			}
 
@@ -781,6 +782,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 						(owner): owner is string => owner != null,
 					),
 				);
+				const messageIds: string[] = [];
 				const displayOwners = yield* sql<{ id: string }>`
 					SELECT id FROM turns WHERE assistant_message_id = ${message.id}
 					AND session_id = ${event.sessionId}`;
@@ -834,31 +836,44 @@ export const makeTurnProjector = (): EffectProjector => ({
 						AND role = 'assistant'
 						ORDER BY created_at DESC, id DESC LIMIT 1`;
 					if (latest) {
-						yield* sql`UPDATE turns SET assistant_message_id = ${latest.id},
+						const rows = yield* sql<{
+							id: string;
+						}>`UPDATE turns SET assistant_message_id = ${latest.id},
 							state = ${latest.is_streaming ? "running" : "completed"},
 							started_at = ${totals?.started_at ?? null},
 							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
 							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
-							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}`;
+							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}
+							RETURNING id`;
+						messageIds.push(...ids(rows));
 					} else {
-						yield* sql`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
+						const rows = yield* sql<{
+							id: string;
+						}>`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
 							started_at = NULL, completed_at = NULL, cost = NULL,
 							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
-						AND assistant_message_id IS NOT NULL`;
+							AND assistant_message_id IS NOT NULL RETURNING id`;
+						messageIds.push(...ids(rows));
 					}
 				}
-				return affected.size > 0 ? [event.sessionId] : [];
+				return {
+					sessions: affected.size > 0 ? [event.sessionId] : [],
+					messages: messageIds,
+				};
 			}
 
 			if (isEventType(event, "message.created")) {
 				if (event.data.role === "user") {
-					return owners(
-						yield* sql<OwnedRow>`
-							INSERT OR REPLACE INTO turns
-							(id, session_id, state, user_message_id, requested_at)
-							VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
-							RETURNING session_id`,
-					);
+					return {
+						sessions: owners(
+							yield* sql<OwnedRow>`
+								INSERT OR REPLACE INTO turns
+								(id, session_id, state, user_message_id, requested_at)
+								VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
+								RETURNING session_id`,
+						),
+						messages: [],
+					};
 				}
 			}
 
@@ -888,6 +903,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 								WHERE messages.id = ${event.data.messageId}
 								AND turns.session_id = ${event.sessionId}`
 							: [];
+				// Without a key, a signal belongs to the newest turn, except that
+				// a prompt queued behind a running turn must not take over that
+				// turn's busy and tool signals. A new reply is what starts the
+				// queued turn. A turn still running from before a later one
+				// settled is a crash leftover, so it never wins.
 				const [turn] = parentTurn.length
 					? parentTurn
 					: yield* sql<{
@@ -898,8 +918,23 @@ export const makeTurnProjector = (): EffectProjector => ({
 					SELECT id, state, assistant_message_id FROM turns
 					WHERE session_id = ${event.sessionId}
 					AND requested_at <= ${event.createdAt}
-					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
-				if (!turn) return [];
+					ORDER BY (${isEventType(event, "message.created") ? 0 : 1}
+						AND state = 'running'
+						AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
+							WHERE session_id = ${event.sessionId}
+							AND state NOT IN ('pending', 'running'))) DESC,
+						requested_at DESC, rowid DESC LIMIT 1`;
+				if (!turn) return { sessions: [], messages: [] };
+				// Turns run one at a time, so a reply starting ends every earlier
+				// turn. Claude never closes a turn whose queued successor took
+				// over its streaming SDK turn.
+				const superseded = isEventType(event, "message.created")
+					? yield* sql<OwnedRow & { id: string }>`
+						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
+						WHERE session_id = ${event.sessionId} AND state = 'running'
+						AND requested_at < (SELECT requested_at FROM turns WHERE id = ${turn.id})
+						RETURNING id, session_id`
+					: [];
 				if (isEventType(event, "message.created")) {
 					yield* sql`UPDATE messages SET turn_id = ${turn.id},
 						parent_id = COALESCE(parent_id, ${turn.id})
@@ -907,16 +942,18 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 				const reopening = turn.state !== "pending" && turn.state !== "running";
 				const assistantMessageId = reopening ? null : turn.assistant_message_id;
-				return owners(
-					yield* sql<OwnedRow>`
+				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
 							started_at = COALESCE(started_at, ${event.createdAt}),
 							completed_at = NULL,
 							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
 						WHERE id = ${turn.id}
-						RETURNING session_id`,
-				);
+						RETURNING id, session_id`;
+				return {
+					sessions: owners([...written, ...superseded]),
+					messages: ids([...written, ...superseded]),
+				};
 			}
 
 			// These three find their turn by assistant message id, so the owning
@@ -929,8 +966,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 				// so the latest value wins. Tokens are per-execution, so a turn
 				// that ran twice sums them.
 				const tokens = event.data.tokens;
-				return owners(
-					yield* sql<OwnedRow>`
+				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'completed',
 							cost = COALESCE(${event.data.cost ?? null}, cost),
@@ -938,38 +974,41 @@ export const makeTurnProjector = (): EffectProjector => ({
 							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
 						WHERE assistant_message_id = ${event.data.messageId}
-						RETURNING session_id`,
-				);
+						RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
 			}
 
 			if (isEventType(event, "turn.error")) {
 				// Runner startup and queued sends can fail before an assistant
 				// message identifies the owning turn. Prefer the persisted user ID.
-				if (event.data.userMessageId)
-					return owners(
-						yield* sql<OwnedRow>`UPDATE turns
+				if (event.data.userMessageId) {
+					const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
 							SET state = 'error', completed_at = ${event.createdAt}
 							WHERE id = ${event.data.userMessageId}
 							AND session_id = ${event.sessionId}
-							RETURNING session_id`,
-					);
-				return owners(
-					yield* sql<OwnedRow>`
+							RETURNING id, session_id`;
+					return { sessions: owners(written), messages: ids(written) };
+				}
+				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'error', completed_at = ${event.createdAt}
 						WHERE assistant_message_id = ${event.data.messageId}
-						RETURNING session_id`,
-				);
+						RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				return owners(
-					yield* sql<OwnedRow>`
+				// Stop ends the session's work, so whatever is still running stops
+				// with the named turn. That also covers an empty id (stopped before
+				// naming its reply) and an id no turn owns.
+				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
-						RETURNING session_id`,
-				);
+						WHERE session_id = ${event.sessionId}
+						AND (assistant_message_id = ${event.data.messageId}
+							OR state = 'running')
+						RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
 			}
 
 			// Attributed to the newest open turn rather than by id, because the
@@ -981,23 +1020,26 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// next turn's row exists. A second emitter, or concurrent turns,
 			// needs a real key first (tracked in conduit-test-7i3).
 			if (isEventType(event, "turn.model_resolved")) {
-				return owners(
-					yield* sql<OwnedRow>`
-						UPDATE turns
-						SET requested_model = ${event.data.requestedModel ?? null},
-							expected_model = ${event.data.expectedModel ?? null},
-							actual_model = ${event.data.actualModel}
-						WHERE id = (
-							SELECT id FROM turns
-							WHERE session_id = ${event.sessionId}
-								AND state IN ('pending', 'running')
-							ORDER BY requested_at DESC
-							LIMIT 1
-						)
-						RETURNING session_id`,
-				);
+				return {
+					sessions: owners(
+						yield* sql<OwnedRow>`
+							UPDATE turns
+							SET requested_model = ${event.data.requestedModel ?? null},
+								expected_model = ${event.data.expectedModel ?? null},
+								actual_model = ${event.data.actualModel}
+							WHERE id = (
+								SELECT id FROM turns
+								WHERE session_id = ${event.sessionId}
+									AND state IN ('pending', 'running')
+								ORDER BY requested_at DESC
+								LIMIT 1
+							)
+							RETURNING session_id`,
+					),
+					messages: [],
+				};
 			}
-			return [];
+			return { sessions: [], messages: [] };
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -1008,7 +1050,14 @@ export const makeTurnProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
+			Effect.flatMap((written) =>
+				Effect.gen(function* () {
+					return mergeTouches([
+						yield* stampMessage(written.messages, ctx.version),
+						yield* stampSessions(written.sessions, ctx.version),
+					]);
+				}),
+			),
 		),
 });
 
@@ -1135,49 +1184,43 @@ export const makeApprovalProjector = (): EffectProjector => ({
 
 			// The resolve statements find their approval by id and never name a
 			// session, so only the row can say whose it was.
+			// `version` is what the approvals subscription windows on (ni8.9);
+			// `details` keeps the rest of the asked payload for the card.
 			if (isEventType(event, "permission.asked")) {
-				const inputJson = encodeJson(event.data.input);
-				return owners(
-					yield* sql<OwnedRow>`
+				const { id, sessionId, toolName, input, ...details } = event.data;
+				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, tool_name, input, created_at)
-						VALUES (${event.data.id}, ${event.data.sessionId}, 'permission', 'pending', ${event.data.toolName}, ${inputJson}, ${event.createdAt})
+						(id, session_id, type, status, tool_name, input, details, version, created_at)
+						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
 						ON CONFLICT (id) DO NOTHING
-						RETURNING session_id`,
-				);
+						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "permission.resolved")) {
-				return owners(
-					yield* sql<OwnedRow>`
+				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
-						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}
+						SET status = 'resolved', decision = ${event.data.decision}, resolved_at = ${event.createdAt}, version = ${ctx.version}
 						WHERE id = ${event.data.id}
-						RETURNING session_id`,
-				);
+						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "question.asked")) {
-				const questionsJson = encodeJson(event.data.questions);
-				return owners(
-					yield* sql<OwnedRow>`
+				const { id, sessionId, questions, ...details } = event.data;
+				return yield* sql<OwnedRow & { created_at: number }>`
 						INSERT INTO pending_approvals
-						(id, session_id, type, status, input, created_at)
-						VALUES (${event.data.id}, ${event.data.sessionId}, 'question', 'pending', ${questionsJson}, ${event.createdAt})
+						(id, session_id, type, status, input, details, version, created_at)
+						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt})
 						ON CONFLICT (id) DO NOTHING
-						RETURNING session_id`,
-				);
+						RETURNING session_id, created_at`;
 			}
 
 			if (isEventType(event, "question.resolved")) {
 				const answersJson = encodeJson(event.data.answers);
-				return owners(
-					yield* sql<OwnedRow>`
+				return yield* sql<OwnedRow & { created_at: number }>`
 						UPDATE pending_approvals
-						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}
+						SET status = 'resolved', decision = ${answersJson}, resolved_at = ${event.createdAt}, version = ${ctx.version}
 						WHERE id = ${event.data.id}
-						RETURNING session_id`,
-				);
+						RETURNING session_id, created_at`;
 			}
 			return [];
 		}).pipe(
@@ -1190,7 +1233,26 @@ export const makeApprovalProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
+			Effect.flatMap((written) =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const messageIds: string[] = [];
+					for (const approval of written) {
+						// Every turn open across the wait reads it (see turnTimingColumns),
+						// so a prompt queued behind a running one needs both re-sent.
+						const turns = yield* sql<{ id: string }>`
+							SELECT id FROM turns
+							WHERE session_id = ${approval.session_id}
+							AND requested_at <= ${approval.created_at}
+							AND (completed_at IS NULL OR completed_at >= ${approval.created_at})`;
+						messageIds.push(...ids(turns));
+					}
+					return mergeTouches([
+						yield* stampMessage(messageIds, ctx.version),
+						yield* stampSessions(owners(written), ctx.version),
+					]);
+				}),
+			),
 		),
 });
 

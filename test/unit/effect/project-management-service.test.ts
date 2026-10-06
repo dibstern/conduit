@@ -60,11 +60,11 @@ describe("ProjectManagementServiceLive", () => {
 			});
 			const config = makeMockConfig({
 				getProjects: () => [
-					{ slug: "cached", title: "Cached", directory },
+					{ slug: "cached", title: "Cached", folders: [directory] as const },
 					{
 						slug: "uncached",
 						title: "Uncached",
-						directory: join(directory, "other"),
+						folders: [join(directory, "other")] as const,
 					},
 				],
 			});
@@ -99,7 +99,7 @@ describe("ProjectManagementServiceLive", () => {
 				{
 					slug: "proj-1",
 					title: "Project 1",
-					directory: "/work/proj-1",
+					folders: ["/work/proj-1"] as const,
 					instanceId: "inst-1",
 				},
 			],
@@ -114,7 +114,6 @@ describe("ProjectManagementServiceLive", () => {
 				{
 					slug: "proj-1",
 					title: "Project 1",
-					directory: "/work/proj-1",
 					instanceId: "inst-1",
 					missing: true,
 					folders: ["/work/proj-1"],
@@ -195,8 +194,7 @@ describe("ProjectManagementServiceLive", () => {
 			{
 				slug: "proj-1",
 				title: "Old Title",
-				directory: "/work/proj-1",
-				folders: ["/work/proj-1"],
+				folders: ["/work/proj-1"] as const,
 			},
 		];
 		const saveProject = vi.fn(async (input: SaveProjectInput) => {
@@ -228,7 +226,6 @@ describe("ProjectManagementServiceLive", () => {
 				{
 					slug: "proj-1",
 					title: "New Title",
-					directory: "/work/proj-1",
 					folders: ["/work/proj-1"],
 					missing: true,
 				},
@@ -266,7 +263,7 @@ describe("ProjectManagementServiceLive", () => {
 				{
 					slug: "proj-1",
 					title: "Project 1",
-					directory: "/work/proj-1",
+					folders: ["/work/proj-1"] as const,
 					instanceId: "old",
 				},
 			];
@@ -290,7 +287,6 @@ describe("ProjectManagementServiceLive", () => {
 					{
 						slug: "proj-1",
 						title: "Project 1",
-						directory: "/work/proj-1",
 						instanceId: "inst-2",
 						missing: true,
 						folders: ["/work/proj-1"],

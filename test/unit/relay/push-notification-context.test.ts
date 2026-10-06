@@ -31,8 +31,8 @@ describe("sendPushForEvent with context", () => {
 
 		expect(push.sendToAll).toHaveBeenCalledWith({
 			type: "done",
-			title: "Task Complete",
-			body: "Agent has finished processing.",
+			title: "Response complete",
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 			slug: "my-project",
 			sessionId: "sess-123",
@@ -88,8 +88,8 @@ describe("sendPushForEvent with context", () => {
 		const payload = call[0];
 		expect(payload).toEqual({
 			type: "done",
-			title: "Task Complete",
-			body: "Agent has finished processing.",
+			title: "Response complete",
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 		});
 		expect(payload).not.toHaveProperty("slug");

@@ -20,6 +20,7 @@ import type {
 	ClaudeSettingsResponse,
 	CreateSessionResponse,
 	DetectProxyResponse,
+	FindFoldersResponse,
 	ForkSessionResponse,
 	GetAgentsResponse,
 	GetCommandsResponse,
@@ -32,13 +33,11 @@ import type {
 	GetToolContentResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
-	ListDirectoriesResponse,
 	LoadMoreHistoryResponse,
 	PermissionDecision,
 	PermissionPersistScope,
 	PermissionUpdateDestination,
 	ProjectMutationResponse,
-	PtyListResponse,
 	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
 	RewindSessionResponse,
@@ -137,9 +136,10 @@ export interface DetectProxyRpcInput {
 	readonly projectSlug: string;
 }
 
-export interface ListPtysRpcInput {
+export interface PtyInputRpcInput {
 	readonly projectSlug: string;
-	readonly originId: string;
+	readonly ptyId: string;
+	readonly data: string;
 }
 
 export interface CreatePtyRpcInput {
@@ -167,6 +167,13 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	/** The draft composer's model and effort, so the first turn runs what the
+	 *  user picked. */
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string;
+	};
 }
 
 export interface ViewSessionRpcInput {
@@ -263,9 +270,9 @@ export interface GetSessionSkillsRpcInput {
 	readonly sessionId: string;
 }
 
-export interface ListDirectoriesRpcInput {
-	readonly projectSlug: string;
-	readonly path: string;
+export interface FindFoldersRpcInput {
+	readonly projectSlug?: string;
+	readonly query: string;
 }
 
 export interface SwitchAgentRpcInput {
@@ -407,6 +414,7 @@ export interface ListDaemonSessionsRpcInput {
 		readonly id: string;
 	};
 	readonly scope?: string;
+	readonly exclude?: string;
 }
 
 export interface LoadMoreHistoryRpcInput {
@@ -504,8 +512,10 @@ const callScanNow = (input: ScanNowRpcInput) =>
 const callDetectProxy = (input: DetectProxyRpcInput) =>
 	callControl(input.projectSlug, (client) => client.DetectProxy(input));
 
-const callListPtys = (input: ListPtysRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ListPtys(input));
+const callPtyInput = (input: PtyInputRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.PtyInput(input).pipe(Effect.asVoid),
+	);
 
 const callCreatePty = (input: CreatePtyRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -540,6 +550,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
+			...(input.model != null ? { model: input.model } : {}),
 		}),
 	);
 
@@ -646,8 +657,8 @@ const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSessionSkills(input));
 
-const callListDirectories = (input: ListDirectoriesRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ListDirectories(input));
+const callFindFolders = (input: FindFoldersRpcInput) =>
+	callControl(input.projectSlug, (client) => client.FindFolders(input));
 
 const callSwitchAgent = (input: SwitchAgentRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -892,7 +903,11 @@ export async function getProjectsRpc(
 export async function saveProjectRpc(
 	input: SaveProjectRpcInput,
 ): Promise<SaveProjectResponse> {
-	return await runTransportEffect(callSaveProject(input));
+	const result = await runTransportEffect(
+		Effect.either(callSaveProject(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function removeProjectRpc(
@@ -955,10 +970,8 @@ export async function detectProxyRpc(
 	return await runTransportEffect(callDetectProxy(input));
 }
 
-export async function listPtysRpc(
-	input: ListPtysRpcInput,
-): Promise<PtyListResponse> {
-	return await runTransportEffect(callListPtys(input));
+export async function ptyInputRpc(input: PtyInputRpcInput): Promise<void> {
+	await runTransportEffect(callPtyInput(input));
 }
 
 export async function createPtyRpc(input: CreatePtyRpcInput): Promise<void> {
@@ -1079,10 +1092,10 @@ export async function getSessionSkillsRpc(
 	return await runTransportEffect(callGetSessionSkills(input));
 }
 
-export async function listDirectoriesRpc(
-	input: ListDirectoriesRpcInput,
-): Promise<ListDirectoriesResponse> {
-	return await runTransportEffect(callListDirectories(input));
+export async function findFoldersRpc(
+	input: FindFoldersRpcInput,
+): Promise<FindFoldersResponse> {
+	return await runTransportEffect(callFindFolders(input));
 }
 
 export async function switchAgentRpc(

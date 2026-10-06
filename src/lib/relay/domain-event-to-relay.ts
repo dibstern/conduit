@@ -217,17 +217,13 @@ export function translateDomainEventToRelay(
 		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
 
-		// The SDK owns the live mode, so a change reported mid-session has to
-		// reach the picker; a stale picker is the difference between "Full
-		// access" on screen and an ask the user did not expect.
 		case "session.goal_changed":
 			return emit({ type: "session.goal_changed", ...event.data });
 
+		// The SDK owns the live mode, so a change reported mid-session has to
+		// reach the picker; it does, as the session's shell row (ni8.12).
 		case "session.permission_mode_changed":
-			return emit({
-				type: "permission_mode_info",
-				mode: event.data.mode,
-			});
+			return silent("delivered as the shell row's permissionMode");
 
 		case "permission.asked":
 		case "permission.resolved":

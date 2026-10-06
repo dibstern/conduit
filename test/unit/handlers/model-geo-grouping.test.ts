@@ -5,7 +5,7 @@
 // commercial source region.
 
 import { layer } from "@effect/vitest";
-import { Cause, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	ConfigTag,
@@ -101,9 +101,7 @@ layer(
 						],
 					}),
 				),
-				getSession: vi.fn(() =>
-					Effect.fail(new Cause.UnknownException("no session")),
-				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const layer = Layer.mergeAll(
@@ -162,9 +160,7 @@ layer(
 					],
 				}),
 			),
-			getSession: vi.fn(() =>
-				Effect.fail(new Cause.UnknownException("no session")),
-			),
+			cachedProviders: vi.fn(() => Effect.succeedNone),
 			persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 		};
 		const layer = Layer.mergeAll(

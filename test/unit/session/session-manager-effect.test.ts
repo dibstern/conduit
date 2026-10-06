@@ -6,8 +6,8 @@ import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -66,6 +66,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -104,8 +105,9 @@ describe("SessionManager Effect", () => {
 			Layer.succeed(BackgroundLivenessTag, () => undefined),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),
-			OpenCodeInstanceClientsLive.pipe(
-				Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+			Layer.succeed(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({ opencode: mockApi }),
 			),
 		);
 	};
@@ -560,16 +562,21 @@ describe("SessionManager Effect", () => {
 				getGoalDetails: () =>
 					Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() =>
+					Effect.succeed({ rows: [], version: 0 }),
+				),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptPage: vi.fn(() =>

@@ -1,6 +1,6 @@
 <!--
   DetachedListbox — the shared surface for a combobox whose input lives outside
-  the list: FileMenu, CommandMenu and DirectoryAutocomplete.
+  the list: FileMenu, CommandMenu and ProjectDialog's folder picker.
 
   It owns exactly the invariants those three surfaces must not each re-derive:
   the listbox role, a required id and accessible name, non-focusability, the

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { within } from "storybook/test";
+import { expect, within } from "storybook/test";
 import SetupPage from "./SetupPage.svelte";
 
 const meta = {
@@ -47,6 +47,7 @@ export const CertificateStep: Story = {
 			httpUrl: "http://100.64.0.1:7080",
 			hasCert: true,
 			lanMode: false,
+			publicUrl: null,
 		},
 	},
 	// Assert the probe has settled before the screenshot: the stub above makes
@@ -66,7 +67,53 @@ export const PWAStep: Story = {
 			httpUrl: "http://100.64.0.1:7080",
 			hasCert: false,
 			lanMode: true,
+			publicUrl: null,
 		},
+	},
+};
+
+const serveSetupInfo = {
+	httpsUrl: "https://conduit-mac.tail1234.ts.net:2633",
+	httpUrl: "http://conduit-mac.tail1234.ts.net:2633",
+	hasCert: false,
+	lanMode: false,
+	publicUrl: "https://conduit-mac.tail1234.ts.net:2633",
+};
+
+/**
+ * Tailscale Serve mode. Tailscale holds the certificate, so conduit reports no
+ * cert of its own and there is no Certificate step. The PWA step warns that an
+ * app added from an older address has to be added again.
+ */
+export const TailscaleServe: Story = {
+	args: { initialSetupInfo: serveSetupInfo },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByText(/Already added Conduit from another address\?/);
+		expect(canvas.queryByText(/certificate/i)).toBeNull();
+	},
+};
+
+/** Done on http://localhost must stay on this origin: pushState to the
+ * cross-origin ts.net URL threw a SecurityError (conduit-test-6qyv). */
+export const DoneOnLocalhost: Story = {
+	args: { initialSetupInfo: serveSetupInfo },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const startUrl = location.href;
+		history.replaceState(null, "", "/setup");
+		try {
+			(await canvas.findByRole("button", { name: "Skip for now" })).click();
+			(
+				await canvas.findByRole("button", { name: /Enable Push Notifications/ })
+			).click();
+			(await canvas.findByRole("button", { name: "Finish anyway" })).click();
+			(await canvas.findByRole("button", { name: "Open Conduit" })).click();
+			expect(location.origin).toBe(new URL(startUrl).origin);
+			expect(location.pathname).toBe("/");
+		} finally {
+			history.replaceState(null, "", startUrl);
+		}
 	},
 };
 

@@ -8,6 +8,12 @@ Conduit is a browser-facing orchestrator for AI coding assistants. It keeps dura
 A saved fork owned by its parent session that starts with the parent's context, keeps its own transcript, and stays hidden from the sidebar.
 _Avoid_: side chat, btw session, ephemeral fork
 
+**OpenCode Instance**:
+A configured OpenCode server, managed by Conduit or external.
+
+**Instance Demand**:
+Open `use` scopes, plus busy or retrying sessions and pending permission or question requests reported by OpenCode.
+
 **Provider Runtime**:
 An execution engine that runs assistant turns and streams events back into Conduit.
 _Avoid_: backend, model server

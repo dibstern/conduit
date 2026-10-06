@@ -1,22 +1,15 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import {
-	ConfigTag,
-	LoggerTag,
-	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
-import {
-	makeMockConfig,
-	makeMockLogger,
-} from "../../helpers/mock-factories.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -49,16 +42,16 @@ describe("orchestration scoped layer", () => {
 			.spyOn(ClaudeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
 		const persistence = makePersistenceEffectLayer(":memory:");
-		const config = Layer.succeed(ConfigTag, makeMockConfig());
-		const logger = Layer.succeed(LoggerTag, makeMockLogger());
+		const openCodeApi = makeStubClient();
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, makeStubClient()),
+						Layer.succeed(OpenCodeAPITag, openCodeApi),
 						persistence,
-						OpenCodeInstanceClientsLive.pipe(
-							Layer.provide(Layer.merge(config, logger)),
+						Layer.succeed(
+							OpenCodeInstancesTag,
+							makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 						),
 						makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 					),

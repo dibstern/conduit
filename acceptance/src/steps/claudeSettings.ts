@@ -3,8 +3,8 @@ import type { StepHandler } from "../runtime.js";
 import {
 	inheritedClaudeCommitAttribution,
 	openSessionRoute,
-	requireRelayControl,
 	requireRpcControl,
+	serveModelCatalog,
 } from "./shared.js";
 
 const claudeSettingsSessionId = "sess-claude-settings";
@@ -30,8 +30,8 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		name: "set default approval mode to ask",
 		match: /^the default approval mode is Ask$/,
 		run: async ({ world }) => {
-			requireRelayControl(world.page).sendMessage({
-				type: "default_permission_mode_info",
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "defaultPermissionMode",
 				mode: "ask",
 			});
 		},
@@ -41,25 +41,23 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		match:
 			/^the default model is Claude Sonnet 4 with a thinking level of high$/,
 		run: async ({ world }) => {
-			await requireRelayControl(world.page).sendMessages([
-				{
-					type: "model_list",
-					providers: dualDriverProviders.map((provider) => ({
-						...provider,
-						models: provider.models.map((model) =>
-							model.id === "claude-sonnet-4"
-								? { ...model, name: "Claude Sonnet 4" }
-								: model,
-						),
-					})),
-				},
-				{
-					type: "default_model_info",
-					model: "claude-sonnet-4",
-					provider: "anthropic",
-					variant: "high",
-				},
-			]);
+			await serveModelCatalog(world.page, {
+				providers: dualDriverProviders.map((provider) => ({
+					...provider,
+					models: provider.models.map((model) =>
+						model.id === "claude-sonnet-4"
+							? { ...model, name: "Claude Sonnet 4" }
+							: model,
+					),
+				})),
+				active: { model: "claude-sonnet-4", provider: "anthropic" },
+			});
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-4",
+				provider: "anthropic",
+				variant: "high",
+			});
 		},
 	},
 	{

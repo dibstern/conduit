@@ -34,9 +34,22 @@ it("keeps a background session's queued row in its own slot", () => {
 		status: { _tag: "live" as const },
 		carriedUsers: new Map(),
 	};
-	const next = applyTranscriptEnvelope(entry, {
+	const running = applyTranscriptEnvelope(entry, {
 		_tag: "upsert",
 		sequence: 1,
+		item: {
+			_tag: "transcriptMessage",
+			message: {
+				id: "r",
+				role: "user",
+				parts: [{ id: "rp", type: "text", text: "running" }],
+				turnTiming: { startedAt: 1, waits: [] },
+			},
+		},
+	});
+	const next = applyTranscriptEnvelope(running, {
+		_tag: "upsert",
+		sequence: 2,
 		item: {
 			_tag: "transcriptMessage",
 			message: {
@@ -53,7 +66,7 @@ it("keeps a background session's queued row in its own slot", () => {
 		newUserIds: new Set(["u"]),
 	});
 	background.messages.messages = derived.messages;
-	expect(background.messages.messages[0]).toMatchObject({
+	expect(background.messages.messages[1]).toMatchObject({
 		type: "user",
 		sentDuringEpoch: 0,
 	});

@@ -37,12 +37,11 @@
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getAgentsRpc,
 		getModelsRpc,
-		reloadProviderSessionRpc,
 		setDefaultModelRpc,
 		switchAgentRpc,
 	} from "../../transport/ws-rpc-client.js";
@@ -367,11 +366,7 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void reloadProviderSessionRpc({
-				projectSlug,
-				sessionId,
-				commandId: crypto.randomUUID(),
-			});
+			void reloadProviderSession(projectSlug, sessionId).catch(() => undefined);
 		}
 		showToast("Reloading skills…", { duration: 1500 });
 		closePicker();

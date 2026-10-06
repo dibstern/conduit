@@ -32,6 +32,7 @@ const makeProjectStore = (
 		readonly title: string;
 		readonly updatedAt: number;
 		readonly parentId?: string;
+		readonly status?: "idle" | "busy";
 		readonly lastMessageAt?: number | null;
 		readonly lastTurnEndVersion?: number | null;
 		readonly seenVersion?: number | null;
@@ -66,7 +67,7 @@ const makeProjectStore = (
 					pinned_at, snoozed_at, snoozed_until, woken_at, woken_reason,
 					created_at, updated_at
 				) VALUES (
-					${session.id}, 'opencode', ${session.title}, 'idle',
+					${session.id}, 'opencode', ${session.title}, ${session.status ?? "idle"},
 					${session.parentId ?? null}, ${session.lastMessageAt ?? null},
 					${session.lastTurnEndVersion ?? null},
 					${session.seenVersion ?? null}, ${session.settledAt ?? null},
@@ -127,13 +128,11 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "git-project",
 						title: "Git",
-						directory: gitProject,
 						folders: [gitProject],
 					},
 					{
 						slug: "plain-project",
 						title: "Plain",
-						directory: plainProject,
 						folders: [plainProject],
 					},
 				]),
@@ -187,7 +186,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -253,7 +251,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -308,12 +305,65 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
 			),
 		);
+	});
+
+	// A page reads only its own rows' families, so a root must still roll up
+	// work and questions from descendants that are not on the page.
+	it.effect("rolls each paged root's descendants up into it", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		mkdirSync(project);
+		makeProjectStore(
+			project,
+			[
+				{ id: "root-a", title: "A", updatedAt: 300 },
+				{ id: "child-a", title: "A1", updatedAt: 50, parentId: "root-a" },
+				{
+					id: "grandchild-a",
+					title: "A2",
+					updatedAt: 40,
+					parentId: "child-a",
+					status: "busy",
+				},
+				{ id: "root-b", title: "B", updatedAt: 200 },
+				{ id: "root-c", title: "C", updatedAt: 100 },
+				{
+					id: "child-c",
+					title: "C1",
+					updatedAt: 30,
+					parentId: "root-c",
+					status: "busy",
+				},
+			],
+			[{ id: "q1", sessionId: "child-a", type: "question", status: "pending" }],
+		);
+		const registry = makeProjectRegistryLive([
+			{ slug: "project", title: "Project", folders: [project] },
+		]);
+
+		return Effect.gen(function* () {
+			const first = yield* listDaemonSessions(root, { roots: true, limit: 1 });
+			expect(first.sessions).toEqual([
+				expect.objectContaining({
+					id: "root-a",
+					processing: true,
+					pendingQuestionCount: 1,
+				}),
+			]);
+			const rest = yield* listDaemonSessions(root, {
+				roots: true,
+				...(first.nextCursor ? { cursor: first.nextCursor } : {}),
+			});
+			const [rootB, rootC] = rest.sessions;
+			expect(rootB?.id).toBe("root-b");
+			expect(rootB).not.toHaveProperty("processing");
+			expect(rootC).toMatchObject({ id: "root-c", processing: true });
+		}).pipe(Effect.provide(registry));
 	});
 
 	it.effect("reads pending attention counts from a cold project store", () => {
@@ -392,7 +442,6 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project",
 						title: "Project",
-						directory: project,
 						folders: [project],
 					},
 				]),
@@ -488,31 +537,26 @@ describe("listDaemonSessions", () => {
 						{
 							slug: "project-a",
 							title: "Project A",
-							directory: projectA,
 							folders: [projectA],
 						},
 						{
 							slug: "project-b",
 							title: "Project B",
-							directory: projectB,
 							folders: [projectB],
 						},
 						{
 							slug: "no-store",
 							title: "No store",
-							directory: noStore,
 							folders: [noStore],
 						},
 						{
 							slug: "unreadable-store",
 							title: "Unreadable store",
-							directory: unreadableStore,
 							folders: [unreadableStore],
 						},
 						{
 							slug: "missing",
 							title: "Missing",
-							directory: missing,
 							folders: [missing],
 						},
 					]),
@@ -546,19 +590,16 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 			{
 				slug: "project-c",
 				title: "project-c",
-				directory: projectC,
 				folders: [projectC],
 			},
 		]);
@@ -641,7 +682,6 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project",
 				title: "Project",
-				directory: project,
 				folders: [project],
 			},
 		]);
@@ -704,19 +744,16 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 			{
 				slug: "project-c",
 				title: "project-c",
-				directory: projectC,
 				folders: [projectC],
 			},
 		]);
@@ -772,13 +809,11 @@ describe("listDaemonSessions", () => {
 			{
 				slug: "project-a",
 				title: "project-a",
-				directory: projectA,
 				folders: [projectA],
 			},
 			{
 				slug: "project-b",
 				title: "project-b",
-				directory: projectB,
 				folders: [projectB],
 			},
 		]);
@@ -849,19 +884,16 @@ describe("listDaemonSessions", () => {
 					{
 						slug: "project-a",
 						title: "A",
-						directory: projectA,
 						folders: [projectA],
 					},
 					{
 						slug: "project-b",
 						title: "B",
-						directory: projectB,
 						folders: [projectB],
 					},
 					{
 						slug: "project-c",
 						title: "C",
-						directory: projectC,
 						folders: [projectC],
 					},
 				]),
@@ -912,19 +944,16 @@ describe("listDaemonSessions", () => {
 						{
 							slug: "project-a",
 							title: "A",
-							directory: projectA,
 							folders: [projectA],
 						},
 						{
 							slug: "project-b",
 							title: "B",
-							directory: projectB,
 							folders: [projectB],
 						},
 						{
 							slug: "unavailable",
 							title: "Unavailable",
-							directory: unavailable,
 							folders: [unavailable],
 						},
 					]),
@@ -942,11 +971,10 @@ describe("ResolveSession", () => {
 			const projects = ["project-a", "project-b"].map((slug) => ({
 				slug,
 				title: slug,
-				directory: join(root, slug),
-				folders: [join(root, slug)],
+				folders: [join(root, slug)] as const,
 			}));
 			for (const project of projects) {
-				makeProjectStore(project.directory, [
+				makeProjectStore(project.folders[0], [
 					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
 				]);
 			}

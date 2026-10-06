@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { flushSync } from "svelte";
 import {
+	applyApprovalEnvelope,
 	clearAllPermissions,
-	handlePermissionRequest,
 } from "../../stores/permissions.svelte.js";
 import {
 	clearSessionState,
@@ -52,15 +52,17 @@ function setupState(opts: {
 			})),
 		);
 
-		for (const p of opts.permissions ?? []) {
-			handlePermissionRequest({
-				type: "permission_request",
+		applyApprovalEnvelope({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: (opts.permissions ?? []).map((p) => ({
+				_tag: "permission" as const,
 				requestId: p.id as PermissionId,
 				sessionId: p.sessionId,
 				toolName: p.toolName,
 				toolInput: {},
-			});
-		}
+			})),
+		});
 	});
 }
 

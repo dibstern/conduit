@@ -139,13 +139,13 @@ test.describe("New session draft", () => {
 				{
 					slug: "e2e-replay",
 					title: "e2e-replay",
-					directory: "/tmp/e2e-replay",
+					folders: ["/tmp/e2e-replay"],
 					git: { branch: "main" },
 				},
 				{
 					slug: "other",
 					title: "other",
-					directory: "/tmp/other",
+					folders: ["/tmp/other"],
 					git: { branch: "dev" },
 				},
 			];

@@ -1,8 +1,8 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Exit, Runtime } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsTag } from "../domain/relay/Services/opencode-instance-clients.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { RelayCommandGateTag } from "../domain/relay/Services/relay-command-gate.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
@@ -32,6 +32,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { latestTurnSettingsQuery } from "../persistence/startup-restore-queries.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
@@ -84,68 +85,11 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		const opencodePathCheck = yield* Effect.either(
-			Effect.tryPromise({
-				try: () => api.app.path(),
-				catch: (cause) => cause,
-			}),
-		);
-		const opencodeAvailable = opencodePathCheck._tag === "Right";
-		if (opencodeAvailable) {
-			yield* Effect.sync(() =>
-				log.info(`✓ OpenCode is reachable at ${config.opencodeUrl}`),
-			);
-		} else {
-			yield* Effect.sync(() =>
-				log.warn(
-					`OpenCode is unavailable at ${config.opencodeUrl}: ${
-						opencodePathCheck.left instanceof Error
-							? opencodePathCheck.left.message
-							: String(opencodePathCheck.left)
-					}; continuing so other providers can load`,
-				),
-			);
-		}
-
-		let defaultModel = initialDefaultModel;
-		// Each call to an absent server spends the SDK's ~3s retry window, and
-		// Claude projects wait on this startup too.
-		if (!defaultModel && opencodeAvailable) {
-			const configResult = yield* Effect.either(
-				Effect.tryPromise(() => api.config.get()),
-			);
-			if (configResult._tag === "Right") {
-				const configModel =
-					typeof configResult.right?.["model"] === "string"
-						? configResult.right["model"]
-						: "";
-				if (configModel) {
-					const slashIdx = configModel.indexOf("/");
-					const provider = slashIdx > 0 ? configModel.slice(0, slashIdx) : "";
-					const modelId =
-						slashIdx > 0 ? configModel.slice(slashIdx + 1) : configModel;
-					if (provider && modelId) {
-						defaultModel = {
-							providerID: provider,
-							modelID: modelId,
-						};
-						yield* Effect.sync(() =>
-							log.info(`✓ Default model from project config: ${configModel}`),
-						);
-					}
-				}
-			} else {
-				yield* Effect.sync(() =>
-					log.warn(
-						`Config API unavailable: ${formatErrorDetail(configResult.left)}`,
-					),
-				);
-			}
-		}
-
-		// Before initialize: the default model picks the first session's provider.
-		if (defaultModel) {
-			yield* setDefaultModel(defaultModel);
+		// Relay startup never contacts OpenCode, so the default model comes from
+		// relay settings only. Before initialize: it picks the first session's
+		// provider.
+		if (initialDefaultModel) {
+			yield* setDefaultModel(initialDefaultModel);
 		}
 		if (initialDefaultVariant) {
 			yield* setDefaultVariant(initialDefaultVariant);
@@ -194,45 +138,36 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Effort and context window are in-memory too; the latest sent turn's
 		// command payload is their durable record. A choice changed after that
 		// turn was never sent, so it is not restored.
-		// The outbox keeps every prompt ever sent and the driver is synchronous,
-		// so scanning it froze startup for seconds on large stores. Find each
-		// session's latest send_turn through its small receipt row instead, then
-		// read just that one payload by primary key.
-		yield* sql<{
-			session_id: string;
-			variant: string | null;
-			context_window: string | null;
-		}>`
-			SELECT latest.session_id,
-				json_extract(outbox.payload_json, '$.variant') AS variant,
-				json_extract(outbox.payload_json, '$.contextWindow') AS context_window
-			FROM (
-				SELECT session_id, MAX(side_effect_sequence) AS request_sequence
-				FROM command_receipts
-				WHERE command_type = 'send_turn' AND side_effect_sequence IS NOT NULL
-				GROUP BY session_id
-			) latest
-			JOIN provider_command_outbox outbox
-				ON outbox.request_sequence = latest.request_sequence
-			WHERE outbox.effect_type = 'send_turn'`.pipe(
-			Effect.flatMap((rows) =>
-				Effect.forEach(rows, (row) =>
-					Effect.all([
-						row.variant ? setVariant(row.session_id, row.variant) : Effect.void,
-						row.context_window
-							? setContextWindow(row.session_id, row.context_window)
-							: Effect.void,
-					]),
-				),
-			),
-			Effect.catchAll((error) =>
-				Effect.sync(() =>
-					log.warn(
-						`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
+		// The driver is synchronous and payloads run to megabytes, so the query
+		// reads the latest turn per session from receipts and both settings from
+		// an index, never the payloads themselves.
+		yield* sql
+			.unsafe<{
+				session_id: string;
+				variant: string | null;
+				context_window: string | null;
+			}>(latestTurnSettingsQuery)
+			.pipe(
+				Effect.flatMap((rows) =>
+					Effect.forEach(rows, (row) =>
+						Effect.all([
+							row.variant
+								? setVariant(row.session_id, row.variant)
+								: Effect.void,
+							row.context_window
+								? setContextWindow(row.session_id, row.context_window)
+								: Effect.void,
+						]),
 					),
 				),
-			),
-		);
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
+			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {
@@ -257,46 +192,36 @@ function acquireStartupServices(inputs: StartupInputs) {
 				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
 			>(),
 		);
-		const sessionId = opencodeAvailable
-			? yield* sessionManagerService.initialize(config.sessionTitle)
-			: yield* Effect.gen(function* () {
-					const readQueryEffect = yield* ReadQueryEffectTag;
-					const sessionsResult = yield* Effect.either(
-						readQueryEffect.listSessions(),
-					);
-					if (
-						sessionsResult._tag === "Right" &&
-						sessionsResult.right.length > 0
-					) {
-						yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
-						const topLevel = sessionsResult.right.find(
-							(session) => !session.parent_id,
-						);
-						return (topLevel ?? sessionsResult.right[0])?.id ?? "";
-					}
-					if (sessionsResult._tag === "Left") {
-						yield* Effect.sync(() =>
-							log.warn(
-								`Session list unavailable while OpenCode is down: ${formatErrorDetail(sessionsResult.left)}`,
-							),
-						);
-					}
-					return "";
-				});
+		// Read-model only: creating a first session could call OpenCode, so attach
+		// creates it instead (getDefaultSessionId).
+		const readQueryEffect = yield* ReadQueryEffectTag;
+		const sessionsResult = yield* Effect.either(readQueryEffect.listSessions());
+		if (sessionsResult._tag === "Right" && sessionsResult.right.length > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
+		if (sessionsResult._tag === "Left")
+			yield* Effect.sync(() =>
+				log.warn(
+					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
+				),
+			);
+		const sessions =
+			sessionsResult._tag === "Right" ? sessionsResult.right : [];
+		const sessionId =
+			(sessions.find((session) => !session.parent_id) ?? sessions[0])?.id ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		const instances = yield* OpenCodeInstancesTag;
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			(sessionId, instanceId, signal) =>
 				Effect.gen(function* () {
-					const client = (yield* instanceClients.clientFor(instanceId)) ?? api;
+					const client = yield* instances.use(instanceId);
 					return yield* Effect.tryPromise(() =>
 						client.session.messages(sessionId, { signal }),
 					);
-				}),
+				}).pipe(Effect.scoped),
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
@@ -319,7 +244,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			statusPoller,
 			pollerManager,
 			opencodeRuntimeIngress,
-			opencodeAvailable,
 		};
 	});
 }
@@ -347,9 +271,6 @@ function wireStartupCallbacks(
 				...(config.getInstances != null && {
 					getInstances: config.getInstances,
 				}),
-				...(config.getCachedUpdate != null && {
-					getCachedUpdate: config.getCachedUpdate,
-				}),
 			},
 		});
 	});
@@ -359,7 +280,6 @@ function startMonitoringAndPollers(
 	inputs: StartupInputs,
 	services: AcquiredStartupServices,
 ) {
-	if (!services.opencodeAvailable) return Effect.succeed(undefined);
 	const { config, statusLog, sseLog, pipelineLog, pollerLog, layers } = inputs;
 	const { monitoringStateAccess } = layers;
 	const { api, wsHandler, pollerManager, sseStream } = services;
@@ -370,6 +290,7 @@ function startMonitoringAndPollers(
 			pollerManager,
 			sseStream,
 			config: {
+				...(config.configDir != null && { configDir: config.configDir }),
 				...(config.pollerGatingConfig != null && {
 					pollerGatingConfig: config.pollerGatingConfig,
 				}),
@@ -408,9 +329,8 @@ function startMonitoringAndPollers(
 	});
 }
 
-type StartupMonitoring = Exclude<
-	Effect.Effect.Success<ReturnType<typeof startMonitoringAndPollers>>,
-	undefined
+type StartupMonitoring = Effect.Effect.Success<
+	ReturnType<typeof startMonitoringAndPollers>
 >;
 
 function startSseConsumers(
@@ -437,8 +357,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			listPendingQuestions: () => api.question.list(),
-			listPendingPermissions: () => api.permission.list(),
 			replyPermission: (
 				sessionId: string,
 				permissionId: string,
@@ -451,17 +369,14 @@ function startSseConsumers(
 			opencodeRuntimeIngress,
 		};
 		yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
-		yield* sseStream.connectEffect();
-		// Named OpenCode instances: lazily created
-		// per-instance SSE streams join the SAME pipeline — turn
-		// completion via wireSSEToInstance, streaming/persistence via
-		// wireSSEConsumerEffect. Pending permission/question recovery
-		// lists stay on the default api (accepted degradation), and the
-		// ingress translator reset stays owned by the default stream's
-		// reconnects so a named stream's (re)connect cannot reset
-		// in-flight default-session ingestion state.
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
-		yield* instanceClients.registerStreamWirer((stream, instanceId) =>
+		// Other OpenCode instances delivering events for this project join the
+		// SAME pipeline — turn completion via wireSSEToInstance,
+		// streaming/persistence via wireSSEConsumerEffect. Pending prompt and
+		// status recovery runs per instance stream in OpenCode Instances, and
+		// the ingress translator reset stays owned by the selected instance's
+		// reconnects so another instance's (re)connect cannot reset in-flight
+		// default-session ingestion state.
+		yield* sseStream.wireInstanceStreams((stream, instanceId) =>
 			Effect.gen(function* () {
 				yield* Effect.sync(() =>
 					orchestration.wireSSEToInstance((event, handler) => {
@@ -477,6 +392,7 @@ function startSseConsumers(
 				);
 			}),
 		);
+		yield* sseStream.connectEffect();
 	});
 }
 
@@ -493,10 +409,9 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const services = yield* acquireStartupServices(inputs);
 				yield* wireStartupCallbacks(inputs, services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
-				const stopMonitoring = monitoring?.stopMonitoring ?? (() => {});
+				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
-					if (monitoring)
-						yield* startSseConsumers(inputs, services, monitoring);
+					yield* startSseConsumers(inputs, services, monitoring);
 					const gate = yield* RelayCommandGateTag;
 					yield* gate.markReady();
 				}).pipe(

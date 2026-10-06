@@ -1,8 +1,8 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
 import { expect, vi } from "vitest";
-import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type {
 	LocalPtyService,
 	LocalPtySession,
@@ -40,7 +40,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
 			const wsHandler = makeMockWebSocketHandler();
-			const connectPtyUpstream = vi.fn(async () => undefined);
+			const connectPtyUpstream = vi.fn(() => Effect.void);
 
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
@@ -62,10 +62,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 						},
 					],
 				});
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("browser-tab-a", {
-					type: "pty_list",
-					ptys: response.ptys,
-				});
+				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 				expect(connectPtyUpstream).toHaveBeenCalledWith("pty-1", -1);
 			}).pipe(
 				Effect.scoped,
@@ -80,8 +77,8 @@ describe("WsRpcServerLayer terminal controls", () => {
 		},
 	);
 
-	it.effect(
-		"creates, resizes, and closes PTYs through RPC control calls",
+	it.live(
+		"creates, resizes, and closes PTYs through RPC control calls, announced on the PTY stream",
 		() => {
 			const api = makeMockOpenCodeAPI();
 			api.pty.list = vi.fn(async () => []);
@@ -124,10 +121,14 @@ describe("WsRpcServerLayer terminal controls", () => {
 					return Effect.succeed(session);
 				}),
 			};
-			const connectPtyUpstream = vi.fn(async () => undefined);
+			const connectPtyUpstream = vi.fn(() => Effect.void);
 
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
+				const announced = yield* client
+					.SubscribePtys({ projectSlug: "proj-1" })
+					.pipe(Stream.take(4), Stream.runCollect, Effect.fork);
+				yield* Effect.sleep("10 millis");
 
 				expect(
 					yield* client.CreatePty({
@@ -138,17 +139,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 				expect(api.pty.create).not.toHaveBeenCalled();
 				expect(localPty.create).toHaveBeenCalledWith({
 					cwd: MOCK_PROJECT_DIR,
-				});
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "pty_created",
-					pty: {
-						id: "pty-1",
-						title: "Shell",
-						command: "zsh",
-						cwd: "/repo",
-						status: "running",
-						pid: 123,
-					},
 				});
 				expect(connectPtyUpstream).not.toHaveBeenCalled();
 
@@ -172,10 +162,23 @@ describe("WsRpcServerLayer terminal controls", () => {
 				).toEqual({ ok: true });
 				expect(upstream.close).toHaveBeenCalledWith(1000, "Proxy closed");
 				expect(api.pty.delete).not.toHaveBeenCalled();
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "pty_deleted",
-					ptyId: "pty-1",
-				});
+				expect(Chunk.toReadonlyArray(yield* Fiber.join(announced))).toEqual([
+					{ _tag: "snapshot", rows: [] },
+					{ _tag: "synchronized" },
+					{
+						_tag: "upsert",
+						item: {
+							id: "pty-1",
+							title: "Shell",
+							command: "zsh",
+							cwd: "/repo",
+							status: "running",
+							pid: 123,
+						},
+					},
+					{ _tag: "remove", id: "pty-1" },
+				]);
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
@@ -189,6 +192,53 @@ describe("WsRpcServerLayer terminal controls", () => {
 								connectPtyUpstream,
 							}),
 						),
+					),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"PtyInput forwards keystrokes to a live terminal and fails typed for a gone one",
+		() => {
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const upstream = {
+				readyState: 1,
+				send: vi.fn(),
+				close: vi.fn(),
+				terminate: vi.fn(),
+			};
+			ptyManager.registerSession("pty-1", upstream, "local");
+
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				expect(
+					yield* client.PtyInput({
+						projectSlug: "proj-1",
+						ptyId: "pty-1",
+						data: "ls\r",
+					}),
+				).toEqual({ ok: true });
+				expect(upstream.send).toHaveBeenCalledWith("ls\r");
+				expect(
+					yield* Effect.flip(
+						client.PtyInput({
+							projectSlug: "proj-1",
+							ptyId: "pty-gone",
+							data: "ls\r",
+						}),
+					),
+				).toEqual(
+					new WsRpcError({
+						message:
+							"Terminal is unavailable; reconnect or create a new terminal",
+					}),
+				);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					WsRpcServerLayer.pipe(
+						Layer.provideMerge(makeTestHandlerLayer({ ptyManager })),
 					),
 				),
 			);

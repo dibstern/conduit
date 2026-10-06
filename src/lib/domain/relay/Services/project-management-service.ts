@@ -86,16 +86,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 			return Effect.tryPromise({
 				try: () => Promise.resolve(getProjects()),
 				catch: toError("list"),
-			}).pipe(
-				Effect.map((projects) =>
-					withCachedProjectGit(
-						projects.map((project) => ({
-							...project,
-							folders: project.folders ?? [project.directory],
-						})),
-					),
-				),
-			);
+			}).pipe(Effect.map((projects) => withCachedProjectGit(projects)));
 		};
 
 		return {
@@ -118,10 +109,7 @@ export const ProjectManagementServiceLive: Layer.Layer<
 								? cause
 								: toError("save")(cause),
 					});
-					const project = {
-						...result.project,
-						folders: result.project.folders ?? [result.project.directory],
-					};
+					const { project } = result;
 					const projects =
 						(yield* listConfigProjects()) ?? withCachedProjectGit([project]);
 					return { project, projects, warnings: result.warnings };

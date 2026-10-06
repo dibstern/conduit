@@ -39,20 +39,6 @@ const loadContextWindowOptions = (modelId: string) =>
 		);
 	});
 
-export const handleSwitchContextWindow = (
-	clientId: string,
-	payload: { contextWindow: string },
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionId = wsHandler.getClientSession(clientId);
-		yield* switchContextWindowForSession({
-			clientId,
-			sessionId,
-			contextWindow: payload.contextWindow,
-		});
-	});
-
 export interface SwitchContextWindowInput {
 	readonly clientId: string;
 	readonly sessionId?: string | undefined;

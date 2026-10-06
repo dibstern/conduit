@@ -7,6 +7,7 @@ import { Context, Effect, Ref } from "effect";
 import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
 import {
 	migrateProjectFolders,
+	type PersistedProject,
 	sanitizeRestartMetadata,
 } from "../../../daemon/config-persistence.js";
 import { isRecord } from "../../../utils.js";
@@ -101,7 +102,9 @@ function deserializeConfig(value: Record<string, unknown>): DaemonState {
 			dangerouslySkipPermissions: raw["dangerouslySkipPermissions"],
 		}),
 		...(Array.isArray(raw["projects"]) && {
-			projects: (raw["projects"] as DaemonProject[]).map(migrateProjectFolders),
+			projects: (raw["projects"] as PersistedProject[]).map(
+				migrateProjectFolders,
+			),
 		}),
 		...(Array.isArray(raw["instances"]) && {
 			instances: raw["instances"] as DaemonInstanceConfig[],

@@ -36,13 +36,13 @@ export const ProjectShellEnvWiringLive: Layer.Layer<
 			Effect.flatMap((projects) =>
 				Effect.sync(() => {
 					const directories = new Set(
-						projects.map((project) => project.directory),
+						projects.map((project) => project.folders[0]),
 					);
 					for (const directory of resolver.directories()) {
 						if (!directories.has(directory)) resolver.remove(directory);
 					}
 					for (const project of projects)
-						resolver.register(project.directory, project.shellEnv);
+						resolver.register(project.folders[0], project.shellEnv);
 				}),
 			),
 		);

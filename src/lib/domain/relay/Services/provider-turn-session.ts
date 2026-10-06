@@ -110,9 +110,9 @@ const resolvePendingClaudeQuestions = (
 ) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		// A Claude turn blocked on a question never reaches the next message, so
 		// replying instead of answering interrupts it and resolves the question.
+		// Each path records question.resolved, which takes the card down.
 		const pendingQuestions =
 			yield* pendingInteractionService.listPendingQuestions(input.sessionId);
 		for (const question of pendingQuestions) {
@@ -125,13 +125,6 @@ const resolvePendingClaudeQuestions = (
 				clientId: input.clientId,
 				sessionId: input.sessionId,
 				commandId: `${input.commandId}:interrupt-for-question`,
-			});
-		}
-		for (const question of pendingQuestions) {
-			wsHandler.broadcast({
-				type: "ask_user_resolved",
-				sessionId: input.sessionId,
-				toolId: question.requestId,
 			});
 		}
 	});

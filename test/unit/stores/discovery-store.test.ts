@@ -80,7 +80,6 @@ describe("formatModelName", () => {
 describe("getModelDisplayName", () => {
 	it("resolves catalog names and falls back to the raw id", () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "claude",
@@ -170,7 +169,6 @@ describe("handleAgentList", () => {
 			{ id: "a2", name: "Agent 2" },
 		];
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents,
 			activeAgentId: "a1",
@@ -200,24 +198,17 @@ describe("handleAgentList", () => {
 
 	it("clears stale active agent when a scoped list has no active override", () => {
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [],
 			activeAgentId: "missing",
 		});
 
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 		});
 
 		expect(discoveryState.activeAgentId).toBeNull();
-	});
-
-	it("ignores non-array agents", () => {
-		handleAgentList(msg({ type: "agent_list", agents: "bad" }));
-		expect(discoveryState.agents).toHaveLength(0);
 	});
 });
 
@@ -231,16 +222,11 @@ describe("handleModelList", () => {
 				models: [{ id: "m1", name: "Claude", provider: "anthropic" }],
 			},
 		];
-		handleModelList({ type: "model_list", providers });
+		handleModelList({ providers });
 		expect(discoveryState.providers).toHaveLength(1);
 		const firstProvider = discoveryState.providers[0];
 		assert.exists(firstProvider, "expected discovered provider");
 		expect(firstProvider.models).toHaveLength(1);
-	});
-
-	it("ignores non-array providers", () => {
-		handleModelList(msg({ type: "model_list", providers: null }));
-		expect(discoveryState.providers).toHaveLength(0);
 	});
 });
 
@@ -298,9 +284,7 @@ describe("applyGetModelsResponse", () => {
 
 describe("handlePermissionModeInfo", () => {
 	it("sets the session permission mode", () => {
-		handlePermissionModeInfo(
-			msg({ type: "permission_mode_info", mode: "auto" }),
-		);
+		handlePermissionModeInfo({ mode: "auto" });
 		expect(discoveryState.permissionMode).toBe("auto");
 	});
 });
@@ -325,7 +309,7 @@ describe("flushPendingPermissionMode", () => {
 	// pill read "Ask". Restricting a session must never be the silent case.
 	it("sends a pre-bind selection of ask rather than assuming the server default", () => {
 		const sent: SessionPermissionMode[] = [];
-		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+		handlePermissionModeInfo({ mode: "full" });
 		discoveryState.pendingPermissionMode = "ask";
 
 		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
@@ -338,7 +322,7 @@ describe("flushPendingPermissionMode", () => {
 
 describe("an undo only undoes its own choice", () => {
 	it("leaves a newer choice alone when an older request fails", () => {
-		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+		handlePermissionModeInfo({ mode: "full" });
 
 		const undoA = choosePermissionMode("acceptEdits");
 		choosePermissionMode("ask"); // the user clicks again while A is in flight
@@ -348,7 +332,7 @@ describe("an undo only undoes its own choice", () => {
 	});
 
 	it("drops its own choice, falling back to the server's value", () => {
-		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+		handlePermissionModeInfo({ mode: "full" });
 
 		const undo = choosePermissionMode("acceptEdits");
 		expect(discoveryState.permissionMode).toBe("acceptEdits");
@@ -359,7 +343,7 @@ describe("an undo only undoes its own choice", () => {
 
 	it("leaves a server update that landed meanwhile alone", () => {
 		const undo = choosePermissionMode("acceptEdits");
-		handlePermissionModeInfo({ type: "permission_mode_info", mode: "plan" });
+		handlePermissionModeInfo({ mode: "plan" });
 		undo();
 
 		expect(discoveryState.permissionMode).toBe("plan");
@@ -384,7 +368,7 @@ describe("an undo only undoes its own choice", () => {
 	// on a value an earlier failing request also asked for is a normal way to
 	// use a dropdown, and it must not hand that earlier request the field.
 	it("keeps a re-chosen mode when the first request for it fails", () => {
-		handlePermissionModeInfo({ type: "permission_mode_info", mode: "full" });
+		handlePermissionModeInfo({ mode: "full" });
 
 		const undoA = choosePermissionMode("acceptEdits");
 		choosePermissionMode("ask");
@@ -438,22 +422,15 @@ describe("handleCommandList", () => {
 		const commands: CommandInfo[] = [
 			{ name: "help", description: "Show help" },
 		];
-		handleCommandList({ type: "command_list", commands });
+		handleCommandList({ commands });
 		expect(discoveryState.commands).toHaveLength(1);
 		expect(discoveryState.commandsFetched).toBe(true);
-	});
-
-	it("ignores non-array commands", () => {
-		handleCommandList(msg({ type: "command_list", commands: 42 }));
-		expect(discoveryState.commands).toHaveLength(0);
-		expect(discoveryState.commandsFetched).toBe(false);
 	});
 });
 
 describe("getActiveModel", () => {
 	it("resolves a grouped model when the active id is a routing option", () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "amazon-bedrock",
@@ -489,7 +466,6 @@ describe("getActiveModel", () => {
 describe("handleDefaultModelInfo", () => {
 	it("sets default model and provider IDs", () => {
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "claude-4",
 			provider: "anthropic",
 			variant: "high",
@@ -501,19 +477,15 @@ describe("handleDefaultModelInfo", () => {
 
 	it("clears to empty string when fields are missing", () => {
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "existing",
 			provider: "existing-provider",
 			variant: "existing-variant",
 		});
-		handleDefaultModelInfo(
-			msg({
-				type: "default_model_info",
-				model: undefined,
-				provider: undefined,
-				variant: undefined,
-			}),
-		);
+		handleDefaultModelInfo({
+			model: undefined,
+			provider: undefined,
+			variant: undefined,
+		});
 		expect(discoveryState.defaultModelId).toBe("");
 		expect(discoveryState.defaultProviderId).toBe("");
 		expect(discoveryState.defaultVariant).toBe("");
@@ -521,13 +493,11 @@ describe("handleDefaultModelInfo", () => {
 
 	it("updates when called with new values", () => {
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "model-a",
 			provider: "provider-a",
 			variant: "low",
 		});
 		handleDefaultModelInfo({
-			type: "default_model_info",
 			model: "model-b",
 			provider: "provider-b",
 			variant: "high",
@@ -598,26 +568,23 @@ describe("getActiveContextWindowOptions", () => {
 			{ value: "200k", label: "200k" },
 			{ value: "1m", label: "1M", isDefault: true },
 		];
-		handleModelList(
-			msg({
-				type: "model_list",
-				providers: [
-					{
-						id: "claude",
-						name: "Claude",
-						configured: true,
-						models: [
-							{
-								id: "claude-opus-5",
-								name: "Opus 5",
-								provider: "claude",
-								contextWindowOptions: modelOptions,
-							},
-						],
-					},
-				],
-			}),
-		);
+		handleModelList({
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{
+							id: "claude-opus-5",
+							name: "Opus 5",
+							provider: "claude",
+							contextWindowOptions: modelOptions,
+						},
+					],
+				},
+			],
+		});
 		handleModelInfo({
 			type: "model_info",
 			model: "claude-opus-5",
@@ -634,21 +601,18 @@ describe("getActiveContextWindowOptions", () => {
 	});
 
 	it("falls back to the server list when the active model has no options", () => {
-		handleModelList(
-			msg({
-				type: "model_list",
-				providers: [
-					{
-						id: "claude",
-						name: "Claude",
-						configured: true,
-						models: [
-							{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
-						],
-					},
-				],
-			}),
-		);
+		handleModelList({
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{ id: "claude-haiku-4-5", name: "Haiku", provider: "claude" },
+					],
+				},
+			],
+		});
 		handleModelInfo({
 			type: "model_info",
 			model: "claude-haiku-4-5",
@@ -669,7 +633,6 @@ describe("getActiveContextWindowOptions", () => {
 describe("clearDiscoveryState", () => {
 	it("resets provider-scoped agent state on project switch", () => {
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "claude", name: "Claude" },
 			agents: [{ id: "Explore", name: "Explore" }],
 			activeAgentId: "Explore",

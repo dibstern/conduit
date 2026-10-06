@@ -102,6 +102,10 @@
 		preventScroll: FLOATING_POSITIONING_DEFAULTS.preventScroll,
 		strategy: FLOATING_POSITIONING_DEFAULTS.strategy,
 		collisionPadding: FLOATING_POSITIONING_DEFAULTS.collisionPadding,
+		// bits-ui 2.18.1 makes <body> unselectable during a press in the popover
+		// and leaks that when the press turns into a scroll, leaving the page
+		// unselectable until reload (conduit-test-l1sh).
+		preventOverflowTextSelection: false,
 		role: "dialog",
 		...(resolvedTitle
 			? { "aria-labelledby": titleId }

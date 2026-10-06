@@ -33,7 +33,6 @@ export const LongText: Story = {
 export const WithSkills: Story = {
 	beforeEach: () => {
 		handleCommandList({
-			type: "command_list",
 			commands: [
 				{ name: "commit", description: "Create a git commit" },
 				{ name: "code-review", description: "Review the current diff" },

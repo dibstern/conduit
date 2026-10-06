@@ -14,7 +14,7 @@ import {
 	setDefaultModel,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
+import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -47,7 +47,7 @@ function mockWsHandler(
 
 const mockLogger = makeHandlerLogger;
 
-describe("handleSwitchContextWindow with Effect override state", () => {
+describe("switchContextWindowForSession with Effect override state", () => {
 	it.effect(
 		"stores a supported session context window without legacy SessionOverrides",
 		() => {
@@ -55,9 +55,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 				{ value: "200k", label: "200k", isDefault: true },
 				{ value: "1m", label: "1M" },
 			];
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-42"),
-			});
+			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -84,7 +82,9 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 					modelID: "claude-sonnet-4-7",
 				});
 
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
+					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 
@@ -105,9 +105,7 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 				{ value: "200k", label: "200k", isDefault: true },
 				{ value: "1m", label: "1M" },
 			];
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => undefined),
-			});
+			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -134,7 +132,8 @@ describe("handleSwitchContextWindow with Effect override state", () => {
 					modelID: "claude-sonnet-4-7",
 				});
 
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
 					contextWindow: "1m",
 				});
 

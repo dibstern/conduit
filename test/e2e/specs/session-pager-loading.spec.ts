@@ -15,22 +15,39 @@ type Page = import("@playwright/test").Page;
 
 const LOCAL = "e2e-replay";
 
-/** Half the rows are local (shell feed), half foreign (daemon pager). */
+/** By default half the root rows are local (shell feed), half foreign (daemon
+ *  pager). Subagent children (parentOf) belong to the local project. */
 async function mockSessions(
 	page: Page,
-	{ total, settled }: { total: number; settled: (index: number) => boolean },
-): Promise<string[]> {
+	{
+		total,
+		settled,
+		parentOf = () => undefined,
+		foreign = (index) => index % 2 === 1,
+	}: {
+		total: number;
+		settled: (index: number) => boolean;
+		parentOf?: (index: number) => string | undefined;
+		foreign?: (index: number) => boolean;
+	},
+): Promise<{ requested: string[]; exhausted: () => boolean }> {
 	const now = Date.now();
-	const sessions = Array.from({ length: total }, (_, index) => ({
-		id: `sess-${String(index).padStart(3, "0")}`,
-		title: `Session ${index}`,
-		status: "idle",
-		projectSlug: index % 2 === 0 ? LOCAL : "other-proj",
-		updatedAt: now - 1000 - index,
-		messageCount: 1,
-		...(settled(index) ? { settledAt: now - 500 } : {}),
-	}));
+	const sessions = Array.from({ length: total }, (_, index) => {
+		const parentID = parentOf(index);
+		return {
+			id: `sess-${String(index).padStart(3, "0")}`,
+			title: `Session ${index}`,
+			status: "idle",
+			projectSlug:
+				parentID === undefined && foreign(index) ? "other-proj" : LOCAL,
+			updatedAt: now - 1000 - index,
+			messageCount: 1,
+			...(settled(index) ? { settledAt: now - 500 } : {}),
+			...(parentID !== undefined ? { parentID } : {}),
+		};
+	});
 	const requested: string[] = [];
+	let exhausted = false;
 	await mockWsRpc(page, {
 		handlers: {
 			ListDaemonSessions: async (params) => {
@@ -38,12 +55,19 @@ async function mockSessions(
 				const limit = Number(params["limit"]);
 				const cursor = params["cursor"] as { id: string } | undefined;
 				requested.push(cursor?.id ?? "first");
+				// The server's roots filter is `parent_id IS NULL`.
+				const pool = sessions.filter(
+					(session) =>
+						(params["roots"] !== true || session.parentID === undefined) &&
+						session.projectSlug !== params["exclude"],
+				);
 				const start = cursor
-					? sessions.findIndex((session) => session.id === cursor.id) + 1
+					? pool.findIndex((session) => session.id === cursor.id) + 1
 					: 0;
-				const rows = sessions.slice(start, start + limit);
+				const rows = pool.slice(start, start + limit);
 				const last = rows.at(-1);
-				const hasMore = start + limit < sessions.length;
+				const hasMore = start + limit < pool.length;
+				exhausted = !hasMore;
 				return {
 					sessions: rows,
 					availability: [],
@@ -60,7 +84,10 @@ async function mockSessions(
 					_tag: "snapshot",
 					sequence: 1,
 					rows: sessions
-						.filter((session) => session.projectSlug === LOCAL)
+						.filter(
+							(session) =>
+								session.projectSlug === LOCAL && session.parentID === undefined,
+						)
 						.map(({ id, title, status, updatedAt, settledAt }) => ({
 							id,
 							title,
@@ -78,11 +105,11 @@ async function mockSessions(
 			{
 				type: "project_list",
 				projects: [
-					{ slug: LOCAL, title: LOCAL, directory: `/tmp/${LOCAL}` },
+					{ slug: LOCAL, title: LOCAL, folders: [`/tmp/${LOCAL}`] },
 					{
 						slug: "other-proj",
 						title: "other-proj",
-						directory: "/tmp/other-proj",
+						folders: ["/tmp/other-proj"],
 					},
 				],
 				current: LOCAL,
@@ -90,14 +117,14 @@ async function mockSessions(
 		],
 		responses: new Map(),
 	});
-	return requested;
+	return { requested, exhausted: () => exhausted };
 }
 
 test("a list too short to scroll pages in without flashing the loading row", async ({
 	page,
 	relayUrl,
 }) => {
-	const requested = await mockSessions(page, {
+	const { requested } = await mockSessions(page, {
 		total: 150,
 		settled: (index) => index >= 15,
 	});
@@ -113,7 +140,7 @@ test("a list too short to scroll pages in without flashing the loading row", asy
 	await page.goto(relayUrl);
 
 	// Every page still arrives; only the indicator stays quiet.
-	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(5);
+	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(3);
 	await expect(
 		page.locator("#session-list .session-item").first(),
 	).toBeVisible();
@@ -128,7 +155,7 @@ test("scrolling to the bottom of a long list shows the loading row", async ({
 	page,
 	relayUrl,
 }) => {
-	const requested = await mockSessions(page, {
+	const { requested } = await mockSessions(page, {
 		total: 150,
 		settled: () => false,
 	});
@@ -151,7 +178,7 @@ test("pages landing in the collapsed shelf do not resize the list under the user
 }) => {
 	// Scrollable after the first page, and every later page is settled, so it
 	// adds nothing visible: only the loading row could change the list's height.
-	const requested = await mockSessions(page, {
+	const { requested } = await mockSessions(page, {
 		total: 150,
 		settled: (index) => index >= 30,
 	});
@@ -181,8 +208,48 @@ test("pages landing in the collapsed shelf do not resize the list under the user
 		}
 		return { mounts, heights };
 	});
-	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(5);
+	await expect.poll(() => requested.length, { timeout: 10_000 }).toBe(3);
 	const { mounts, heights } = await run;
 	expect(mounts).toBe(1);
 	expect(new Set(heights).size).toBe(1);
+});
+
+test("a store of mostly subagent sessions loads the sidebar from one page", async ({
+	page,
+	relayUrl,
+}) => {
+	// The sidebar shows root sessions only. A real store held 8,641 subagent
+	// children beside 142 roots; asking for every session made each page add
+	// nothing visible, so the pager walked all 293 pages on every load and
+	// session opens queued behind it.
+	const { requested, exhausted } = await mockSessions(page, {
+		total: 300,
+		settled: () => false,
+		parentOf: (index) => (index < 10 ? undefined : "sess-000"),
+	});
+	await page.goto(relayUrl);
+
+	await expect.poll(exhausted, { timeout: 10_000 }).toBe(true);
+	expect(requested).toEqual(["first"]);
+	await expect(page.locator("#session-list .session-item")).toHaveCount(10);
+});
+
+test("a store dominated by this project loads other projects from one page", async ({
+	page,
+	relayUrl,
+}) => {
+	// This project's roots arrive on the shell feed, so browse pages that also
+	// carried them added nothing visible and the pager walked every root.
+	const { requested, exhausted } = await mockSessions(page, {
+		total: 300,
+		settled: () => false,
+		foreign: (index) => index < 10,
+	});
+	await page.goto(relayUrl);
+
+	await expect.poll(exhausted, { timeout: 10_000 }).toBe(true);
+	expect(requested).toEqual(["first"]);
+	await expect(
+		page.locator('#session-list .session-item[data-session-id="sess-009"]'),
+	).toBeAttached();
 });

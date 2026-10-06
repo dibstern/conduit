@@ -12,7 +12,7 @@
 		getCanCreateTab,
 		beginCreateTab,
 		failCreateTab,
-		handlePtyDeleted,
+		handlePtyRemove,
 		switchTab,
 		renameTab,
 		closePanel,
@@ -104,7 +104,7 @@
 		if (projectSlug) {
 			void closePtyRpc({ projectSlug, ptyId }).catch(() => undefined);
 		}
-		handlePtyDeleted({ type: "pty_deleted", ptyId });
+		handlePtyRemove({ id: ptyId });
 	}
 
 	/**

@@ -1,6 +1,10 @@
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import {
+	AgentServiceTag,
+	filterAgents,
+} from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	PendingSendOwnershipLive,
 	PendingSendOwnershipTag,
@@ -20,12 +24,14 @@ import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -43,7 +49,6 @@ import {
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
-	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
@@ -76,23 +81,12 @@ import {
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
-	type OpenCodeTerminalService,
-	OpenCodeTerminalServiceTag,
-} from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
 } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
+import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
-	filterAgents,
-	handleGetAgents,
-} from "../../../src/lib/handlers/agent.js";
-import { handleSwitchContextWindow } from "../../../src/lib/handlers/context-window.js";
-import {
-	handleGetFileContent,
-	handleGetFileList,
-} from "../../../src/lib/handlers/files.js";
-import {
+	getModelsResponse,
 	sendModelsStateToClient,
 	switchModelForSession,
 	switchVariantForSession,
@@ -120,11 +114,6 @@ import {
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
-import {
-	handleGetCommands,
-	handleGetProjects,
-} from "../../../src/lib/handlers/settings.js";
-import { handlePtyInput } from "../../../src/lib/handlers/terminal.js";
 import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
@@ -150,6 +139,8 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
 import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
+import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -165,6 +156,7 @@ import {
 	makeMockSessionManagerShape,
 	makeMockSessionTitleService,
 	makeMockStatusPoller,
+	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
@@ -239,14 +231,6 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 	};
 }
 
-function openCodeFileLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
-	return Layer.merge(
-		apiLayer,
-		OpenCodeFileServiceLive.pipe(Layer.provide(apiLayer)),
-	);
-}
-
 function openCodeModelLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
@@ -255,6 +239,10 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(ConfigTag, mockConfig()),
 					Layer.succeed(LoggerTag, mockLogger()),
 				),
@@ -294,6 +282,10 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: client }),
+					),
 					Layer.succeed(ConfigTag, mockConfig()),
 					Layer.succeed(LoggerTag, mockLogger()),
 				),
@@ -328,9 +320,9 @@ const persistentHandlerPersistence = Layer.merge(
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 layer(Layer.mergeAll(persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, PendingSendOwnershipLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
-describe("handleGetAgents", () => {
+describe("GetAgents", () => {
 	it.effect(
-		"fetches agents via OpenCodeAPI and sends filtered list to client",
+		"fetches agents via OpenCodeAPI and returns the filtered list",
 		() => {
 			const ws = mockWsHandler();
 			const mockAgents = [
@@ -342,52 +334,27 @@ describe("handleGetAgents", () => {
 				app: { agents: vi.fn(async () => mockAgents) },
 			});
 
-			return handleGetAgents("client-1", {}).pipe(
-				Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
-				Effect.tap(() => {
-					expect(client.app.agents).toHaveBeenCalledOnce();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
-						providerScope: { id: "opencode", name: "OpenCode" },
-						agents: filterAgents(mockAgents),
-					});
-				}),
-			);
+			return modelsHandlers
+				.GetAgents(new GetAgents({ projectSlug: "test-project" }))
+				.pipe(
+					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws })),
+					Effect.tap((reply) => {
+						expect(client.app.agents).toHaveBeenCalledOnce();
+						expect(reply).toMatchObject({
+							providerScope: { id: "opencode", name: "OpenCode" },
+							agents: filterAgents(mockAgents),
+						});
+					}),
+				);
 		},
 	);
 });
 
-describe("handleGetCommands", () => {
-	it.effect("fetches commands and sends to client", () => {
-		const ws = mockWsHandler();
-		const mockCommands = [{ name: "test" }];
-		const client = makeHandlerOpenCodeAPI({
-			app: { commands: vi.fn(async () => mockCommands) },
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeSettingsLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetCommands("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.app.commands).toHaveBeenCalledOnce();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "command_list",
-					commands: mockCommands,
-				});
-			}),
-		);
-	});
-});
-
-describe("handleGetProjects", () => {
+describe("GetProjects", () => {
 	it.effect("uses config.getProjects when available", () => {
 		const ws = mockWsHandler();
 		const projects = [
-			{ slug: "proj-1", title: "Project 1", directory: "/path" },
+			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
 		const config = mockConfig({
 			getProjects: () => projects,
@@ -399,11 +366,11 @@ describe("handleGetProjects", () => {
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
-		return handleGetProjects("client-1", {}).pipe(
+		return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
 			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "project_list",
+			Effect.tap((reply) => {
+				expect(reply).toEqual({
+					projectSlug: "test-project",
 					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
 					current: "test-project",
 				});
@@ -429,12 +396,12 @@ describe("handleGetProjects", () => {
 				Layer.succeed(WebSocketHandlerTag, ws),
 			);
 
-			return handleGetProjects("client-1", {}).pipe(
+			return projectsHandlers.GetProjects(new GetProjects({ projectSlug: "test-project" })).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.tap((reply) => {
 					expect(client.app.projects).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "project_list",
+					expect(reply).toEqual({
+						projectSlug: "test-project",
 						projects: [],
 						current: "test-project",
 					});
@@ -442,89 +409,6 @@ describe("handleGetProjects", () => {
 			);
 		},
 	);
-});
-
-describe("handleGetFileContent", () => {
-	it.effect("reads file content and sends to client", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: {
-				read: vi.fn(async () => ({ content: "hello world" })),
-			},
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileContent("client-1", { path: "README.md" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.file.read).toHaveBeenCalledWith("README.md", expect.anything());
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "file_content",
-					path: "README.md",
-					content: "hello world",
-				});
-			}),
-		);
-	});
-
-	it.effect("does nothing when path is empty", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: { read: vi.fn() },
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileContent("client-1", { path: "" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(client.file.read).not.toHaveBeenCalled();
-				expect(ws.sendTo).not.toHaveBeenCalled();
-			}),
-		);
-	});
-});
-
-describe("handleGetFileList", () => {
-	it.effect("lists files and filters with gitignore rules", () => {
-		const ws = mockWsHandler();
-		const client = makeHandlerOpenCodeAPI({
-			file: {
-				list: vi.fn(async () => [
-					{ name: "src", type: "directory" },
-					{ name: ".git", type: "directory" },
-					{ name: "README.md", type: "file" },
-				]),
-				read: vi.fn(async () => ({ content: "" })),
-			},
-		});
-
-		const layer = Layer.mergeAll(
-			openCodeFileLayer(client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-		);
-
-		return handleGetFileList("client-1", {}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "file_list",
-					path: ".",
-					entries: [
-						{ name: "src", type: "directory" },
-						{ name: "README.md", type: "file" },
-					],
-				});
-			}),
-		);
-	});
 });
 
 describe("reloadProviderSessionForClient", () => {
@@ -586,7 +470,7 @@ describe("reloadProviderSessionForClient", () => {
 });
 
 describe("sendModelsStateToClient", () => {
-	it.effect("fetches providers and sends model_list to client", () => {
+	it.effect("fetches providers into the model catalog", () => {
 		const ws = mockWsHandler();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
@@ -616,26 +500,19 @@ describe("sendModelsStateToClient", () => {
 			makeOverridesStateLive(),
 		);
 
-		return sendModelsStateToClient("client-1").pipe(
+		return getModelsResponse({ clientId: "client-1" }).pipe(
 			Effect.provide(layer),
-			Effect.tap(() => {
+			Effect.tap((response) => {
 				expect(client.provider.list).toHaveBeenCalledOnce();
-				// Verify model_list was sent with correct providers
-				expect(ws.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "model_list",
-						providers: expect.arrayContaining([
+				expect(response.providers).toEqual(expect.arrayContaining([
 							expect.objectContaining({ id: "openai" }),
-						]),
-					}),
-				);
+						]));
 			}),
 		);
 	});
 
 	it.effect(
-		"includes variants and contextWindowOptions in claude provider entries in model_list",
+		"includes variants and contextWindowOptions in claude provider entries",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -673,14 +550,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return getModelsResponse({ clientId: "client-1" }).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({
-							type: "model_list",
-							providers: [
+				Effect.tap((response) => {
+					expect(response.providers).toEqual([
 								{
 									id: "claude",
 									name: "Anthropic - claude",
@@ -698,15 +571,13 @@ describe("sendModelsStateToClient", () => {
 										},
 									],
 								},
-							],
-						}),
-					);
+							]);
 				}),
 			);
 		},
 	);
 	it.effect(
-		"sends Claude models when OpenCode provider discovery fails",
+		"returns Claude models when OpenCode provider discovery fails",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -738,12 +609,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return getModelsResponse({ clientId: "client-1" }).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "model_list",
-						providers: [
+				Effect.tap((response) => {
+					expect(response.providers).toEqual([
 							{
 								id: "claude",
 								name: "Anthropic - claude",
@@ -756,8 +625,7 @@ describe("sendModelsStateToClient", () => {
 									},
 								],
 							},
-						],
-					});
+						]);
 				}),
 			);
 		},
@@ -867,13 +735,14 @@ describe("sendModelsStateToClient", () => {
 					providerID: "claude",
 					modelID: "claude-opus-4-7",
 				});
-				yield* sendModelsStateToClient("client-1", "session-1");
+				const response = yield* getModelsResponse({
+					clientId: "client-1",
+					sessionId: "session-1",
+				});
 
 				expect(client.provider.list).toHaveBeenCalledOnce();
 				expect(client.session.get).not.toHaveBeenCalled();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_list",
-					providers: [
+				expect(response.providers).toEqual([
 						{
 							id: "openai",
 							name: "OpenAI",
@@ -898,11 +767,8 @@ describe("sendModelsStateToClient", () => {
 								},
 							],
 						},
-					],
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_info",
-					sessionId: "session-1",
+					]);
+				expect(response.active).toEqual({
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
@@ -1019,12 +885,14 @@ describe("switchModelForSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -1032,6 +900,7 @@ describe("switchModelForSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1177,6 +1046,7 @@ describe("switchVariantForSession", () => {
 			Layer.succeed(ConfigTag, config),
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			makeOverridesStateLive(),
+			ProjectSettingsLive,
 		);
 
 		return Effect.gen(function* () {
@@ -1236,6 +1106,7 @@ describe("switchVariantForSession", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1259,7 +1130,7 @@ describe("switchVariantForSession", () => {
 	);
 });
 
-describe("handleSwitchContextWindow", () => {
+describe("switchContextWindowForSession", () => {
 	it.effect(
 		"persists supported Claude context window and echoes available options",
 		() => {
@@ -1296,7 +1167,9 @@ describe("handleSwitchContextWindow", () => {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-7",
 				});
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
+					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("1m");
@@ -1345,7 +1218,9 @@ describe("handleSwitchContextWindow", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				yield* handleSwitchContextWindow("client-1", {
+				yield* switchContextWindowForSession({
+					clientId: "client-1",
+					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("200k");
@@ -1387,20 +1262,6 @@ function mockSessionManager(
 		recordMessageActivity: vi.fn(),
 		...overrides,
 	});
-}
-
-function mockTerminalService(
-	overrides?: Partial<OpenCodeTerminalService>,
-): OpenCodeTerminalService {
-	return {
-		create: vi.fn(() => Effect.void),
-		list: vi.fn(() => Effect.succeed([])),
-		replay: vi.fn(() => Effect.void),
-		sendInput: vi.fn(() => Effect.void),
-		close: vi.fn(() => Effect.void),
-		resize: vi.fn(() => Effect.void),
-		...overrides,
-	};
 }
 
 function makeForkSessionLayer(options?: {
@@ -1533,12 +1394,14 @@ describe("handleGetToolContent", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -1546,6 +1409,7 @@ describe("handleGetToolContent", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -1869,44 +1733,9 @@ describe("handleForkSession", () => {
 	);
 });
 
-describe("handlePtyInput", () => {
-	it.effect("forwards input and client origin through terminal service", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyInput("client-1", {
-			ptyId: "pty-1",
-			data: "ls\n",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.sendInput).toHaveBeenCalledExactlyOnceWith(
-					"pty-1",
-					"ls\n",
-					"client-1",
-				);
-			}),
-		);
-	});
-
-	it.effect("does nothing when ptyId is empty", () => {
-		const terminal = mockTerminalService();
-
-		const layer = Layer.succeed(OpenCodeTerminalServiceTag, terminal);
-
-		return handlePtyInput("client-1", { ptyId: "", data: "ls\n" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(terminal.sendInput).not.toHaveBeenCalled();
-			}),
-		);
-	});
-});
-
 describe("setDefaultPermissionModeForRelay", () => {
 	it.effect(
-		"persists, updates the default, and broadcasts without changing a session",
+		"persists and updates the default without changing a session",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-default-permission-mode-"),
@@ -1918,6 +1747,7 @@ describe("setDefaultPermissionModeForRelay", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, mockConfig({ configDir })),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1932,10 +1762,8 @@ describe("setDefaultPermissionModeForRelay", () => {
 				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
 				expect(yield* getDefaultPermissionMode()).toBe("auto");
 				expect(yield* getPermissionMode("session-1")).toBe("full");
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "default_permission_mode_info",
-					mode: "auto",
-				});
+				// Peers hear it through SubscribeProjectSettings, not a broadcast.
+				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalledWith(
 					"client=client-1 Set default permission mode to: auto",
 				);
@@ -1996,13 +1824,6 @@ describe("handlePermissionResponse", () => {
 						"perm-1",
 						"once",
 					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "permission_resolved",
-							requestId: "perm-1",
-							decision: "once",
-						}),
-					);
 				}),
 			);
 		},
@@ -2051,14 +1872,6 @@ describe("handlePermissionResponse", () => {
 						"permission-session",
 						"perm-cross-session",
 						"once",
-					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "permission_resolved",
-							sessionId: "permission-session",
-							requestId: "perm-cross-session",
-							decision: "once",
-						}),
 					);
 				}),
 			);
@@ -2223,7 +2036,7 @@ describe("handlePermissionResponse", () => {
 			}),
 	);
 
-	it.effect("processes permission response and broadcasts resolution", () => {
+	it.effect("processes permission response", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2259,12 +2072,6 @@ describe("handlePermissionResponse", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "permission_resolved",
-						requestId: "perm-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2323,7 +2130,7 @@ describe("handleQuestionReject", () => {
 		);
 	});
 
-	it.effect("rejects question via REST API and broadcasts resolution", () => {
+	it.effect("rejects question via REST API", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2345,12 +2152,6 @@ describe("handleQuestionReject", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.question.reject).toHaveBeenCalledWith("que-1");
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "que-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2395,29 +2196,22 @@ describe("handleQuestionReject", () => {
 					sessionId: "question-session",
 					questions: [{ question: "Continue?" }],
 				});
-				yield* handleQuestionReject("client-1", { toolId: "que-claude" });
+				const refusal = yield* Effect.flip(
+					handleQuestionReject("client-1", { toolId: "que-claude" }),
+				);
 				const pending = yield* pendingInteractions.listPendingQuestions();
-				return pending;
+				return { refusal, pending };
 			}).pipe(
 				Effect.provide(layer),
-				Effect.tap((pending) => {
+				Effect.tap(({ refusal, pending }) => {
 					expect(client.question.reject).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
 					);
-					expect(ws.sendTo).toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({
-							type: "ask_user_error",
-							toolId: "que-claude",
-							sessionId: "question-session",
-						}),
-					);
-					expect(ws.broadcast).not.toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-claude",
-						}),
+					// The refusal travels the RejectQuestion RPC's error channel.
+					expect(refusal).toBeInstanceOf(WsRpcError);
+					expect(refusal.message).toContain(
+						"Claude questions require an answer",
 					);
 					expect(pending).toHaveLength(1);
 					expect(pending[0]?.requestId).toBe("que-claude");
@@ -2484,17 +2278,11 @@ describe("handleAskUserResponse", () => {
 						text: 'Answer to your question "Which colour?": red',
 					}),
 				);
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "toolu-1",
-					}),
-				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
 			}).pipe(Effect.provide(layer));
 		},
 	);
-	it.effect("answers question via REST API and broadcasts resolution", () => {
+	it.effect("answers question via REST API", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2528,12 +2316,6 @@ describe("handleAskUserResponse", () => {
 					["Yes"],
 					["Approve"],
 				]);
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "ask_user_resolved",
-						toolId: "que-1",
-					}),
-				);
 			}),
 		);
 	});
@@ -2592,13 +2374,6 @@ describe("handleAskUserResponse", () => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
 						"question-session",
-					);
-					expect(ws.broadcast).toHaveBeenCalledWith(
-						expect.objectContaining({
-							type: "ask_user_resolved",
-							toolId: "que-claude",
-							sessionId: "question-session",
-						}),
 					);
 				}),
 			);
@@ -2798,12 +2573,14 @@ describe("handleNewSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2811,6 +2588,7 @@ describe("handleNewSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
@@ -2896,12 +2674,14 @@ describe("handleNewSession", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2909,10 +2689,26 @@ describe("handleNewSession", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
+				getSessionFamily: vi.fn(() =>
+					Effect.succeed({
+						type: "session_family" as const,
+						rootId: "session-in-flight",
+						sessions: [
+							{
+								id: "session-in-flight",
+								title: "In flight",
+								status: "busy" as const,
+								updatedAt: 0,
+								messageCount: 0,
+							},
+						],
+					}),
+				),
 				loadPreRenderedHistory: vi.fn(() =>
 					Effect.succeed({
 						messages: [],
@@ -2935,12 +2731,7 @@ describe("handleNewSession", () => {
 						dispatchEffect,
 					}),
 				),
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
-						isProcessing: vi.fn(() => Effect.succeed(true)),
-					}),
-				),
+				Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
 				Layer.succeed(PollerManagerTag, {
 					on: vi.fn(),
 					isPolling: vi.fn(() => false),
@@ -3288,12 +3079,14 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+			getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 			getSessionsForReconciliation: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
 					messages: [
@@ -3330,6 +3123,7 @@ describe("loadMoreHistoryForSession", () => {
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+			readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
@@ -3401,17 +3195,21 @@ describe("sendMessageToSession", () => {
 				const ws = mockWsHandler();
 				const configLayer = Layer.succeed(ConfigTag, mockConfig());
 				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+				const openCodeApi = makeMockOpenCodeAPI();
 				const serviceLayer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(OpenCodeAPITag, openCodeApi),
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						OpenCodeInstanceClientsLive.pipe(Layer.provide(Layer.merge(configLayer, loggerLayer))),
+						Layer.succeed(
+	OpenCodeInstancesTag,
+	makeOpenCodeInstancesStub({ opencode: openCodeApi }),
+),
 						makeSessionManagerStateLive(),
 						PendingSendOwnershipLive,
 						DaemonEventBusLive,
@@ -4229,12 +4027,14 @@ describe("handleMessage", () => {
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -4242,6 +4042,7 @@ describe("handleMessage", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() =>
 					Effect.succeed([
@@ -4537,12 +4338,14 @@ describe("handleMessage", () => {
 				),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 				getSessionsForReconciliation: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -4550,6 +4353,7 @@ describe("handleMessage", () => {
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;

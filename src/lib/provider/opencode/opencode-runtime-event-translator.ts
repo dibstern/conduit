@@ -668,6 +668,8 @@ export class OpenCodeRuntimeEventTranslator {
 					patterns: props.patterns ?? [],
 					metadata: props.metadata ?? {},
 				},
+				always: props.always ?? [],
+				...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
 			}),
 		];
 	}
@@ -698,6 +700,10 @@ export class OpenCodeRuntimeEventTranslator {
 				id: event.properties.id,
 				sessionId,
 				questions: event.properties.questions,
+				providerId: "opencode",
+				...(event.properties.tool?.callID
+					? { toolUseId: event.properties.tool.callID }
+					: {}),
 			}),
 		];
 	}

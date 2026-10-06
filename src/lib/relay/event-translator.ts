@@ -1,35 +1,18 @@
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
-import type { PermissionId, UntaggedRelayMessage } from "../shared-types.js";
-import type {
-	AskUserQuestion,
-	PartType,
-	RelayMessage,
-	TodoItem,
-	TodoStatus,
-	ToolName,
-	ToolStatus,
-} from "../types.js";
+import type { UntaggedRelayMessage } from "../shared-types.js";
+import type { PartType, RelayMessage, ToolName, ToolStatus } from "../types.js";
 import type { KnownOpenCodeEventType, SSEEvent } from "./opencode-events.js";
 import {
-	isFileEvent,
-	isInstallationUpdateEvent,
 	isMessageCreatedEvent,
 	isMessageRemovedEvent,
 	isMessageUpdatedEvent,
 	isPartDeltaEvent,
 	isPartRemovedEvent,
 	isPartUpdatedEvent,
-	isPermissionAskedEvent,
-	isPtyCreatedEvent,
-	isPtyDeletedEvent,
-	isPtyEvent,
-	isPtyExitedEvent,
-	isQuestionAskedEvent,
 	isSessionErrorEvent,
 	isSessionStatusEvent,
-	isTodoUpdatedEvent,
 	sessionErrorText,
 } from "./opencode-events.js";
 
@@ -45,21 +28,27 @@ type _HandledByTranslator =
 	| "message.removed"
 	| "session.status"
 	| "session.error"
-	| "permission.asked"
-	| "question.asked"
 	| "pty.created"
 	| "pty.exited"
 	| "pty.deleted"
-	| "file.edited"
-	| "file.watcher.updated"
-	| "installation.update-available"
 	| "todo.updated";
 
-type _HandledByBridge = "permission.replied";
+// Approvals reach the browser through the approvals subscription (ni8.9).
+type _HandledByBridge =
+	| "permission.asked"
+	| "permission.replied"
+	| "question.asked";
+
+// Known upstream events conduit deliberately drops: nothing in the UI consumes
+// file-change or OpenCode-installation-update notices.
+type _DeliberatelyIgnored =
+	| "file.edited"
+	| "file.watcher.updated"
+	| "installation.update-available";
 
 type _MissingTypes = Exclude<
 	KnownOpenCodeEventType,
-	_HandledByTranslator | _HandledByBridge
+	_HandledByTranslator | _HandledByBridge | _DeliberatelyIgnored
 >;
 type _AssertAllHandled = _MissingTypes extends never
 	? true
@@ -240,56 +229,6 @@ export function translateReasoningPartUpdated(
 	}
 
 	return null;
-}
-
-/** Translate permission.asked event */
-export function translatePermission(
-	event: SSEEvent,
-	sessionId?: string,
-): Extract<RelayMessage, { type: "permission_request" }> | null {
-	if (!isPermissionAskedEvent(event)) return null;
-	if (!sessionId) return null;
-	const { properties: props } = event;
-
-	return {
-		type: "permission_request",
-		sessionId,
-		requestId: props.id as PermissionId,
-		toolName: props.permission,
-		toolInput: {
-			patterns: props.patterns ?? [],
-			metadata: props.metadata ?? {},
-		},
-		always: props.always ?? [],
-		...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
-	};
-}
-
-/** Translate question.asked event */
-export function translateQuestion(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	if (!isQuestionAskedEvent(event)) return null;
-	const { properties: props } = event;
-
-	const questions: AskUserQuestion[] = props.questions.map((q) => ({
-		question: q.question ?? "",
-		header: q.header ?? "",
-		options: (q.options ?? []).map((o) => ({
-			label: o.label ?? "",
-			description: o.description ?? "",
-		})),
-		multiSelect: q.multiple ?? false,
-		custom: q.custom ?? true,
-	}));
-
-	return {
-		type: "ask_user",
-		toolId: props.id,
-		questions,
-		providerId: "opencode",
-		...(props.tool?.callID ? { toolUseId: props.tool.callID } : {}),
-	};
 }
 
 /** Format a human-readable retry message with proper delay display */
@@ -547,68 +486,6 @@ export function translateMessageRemoved(
 	return { type: "message_removed", messageId: props.messageID };
 }
 
-/** Translate pty.* events */
-export function translatePtyEvent(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	if (!isPtyEvent(event)) return null;
-
-	if (isPtyCreatedEvent(event)) {
-		const props = event.properties;
-		// OpenCode wraps pty info under an `info` key in the event properties
-		const info = props.info ?? props;
-		return {
-			type: "pty_created",
-			pty: {
-				id: String(info.id ?? ""),
-				title: String(info.title ?? ""),
-				command: String(info.command ?? ""),
-				cwd: String(info.cwd ?? ""),
-				status: info.status === "exited" ? "exited" : "running",
-				pid: Number(info.pid ?? 0),
-			},
-		};
-	}
-
-	if (isPtyExitedEvent(event)) {
-		const props = event.properties;
-		return {
-			type: "pty_exited",
-			ptyId: String(props.id ?? ""),
-			exitCode: Number(props.exitCode ?? 0),
-		};
-	}
-
-	if (isPtyDeletedEvent(event)) {
-		const props = event.properties;
-		return {
-			type: "pty_deleted",
-			ptyId: String(props.id ?? ""),
-		};
-	}
-
-	return null;
-}
-
-/** Translate file.* events */
-export function translateFileEvent(
-	event: SSEEvent,
-): UntaggedRelayMessage | null {
-	// OpenCode uses `file` (not `path`) as the property name for file events
-	if (!isFileEvent(event)) return null;
-	const { properties: props } = event;
-
-	if (event.type === "file.edited") {
-		return { type: "file_changed", path: props.file, changeType: "edited" };
-	}
-
-	if (event.type === "file.watcher.updated") {
-		return { type: "file_changed", path: props.file, changeType: "external" };
-	}
-
-	return null;
-}
-
 export type TranslateResult =
 	| { ok: true; messages: UntaggedRelayMessage[] }
 	| { ok: false; reason: string };
@@ -766,38 +643,13 @@ export function createTranslator(
 				);
 			}
 
-			// Permission
-			if (eventType === "permission.asked") {
-				return wrapResult(
-					translatePermission(event, context?.sessionId),
-					context?.sessionId
-						? "permission asked: invalid event"
-						: "permission asked: no sessionId in context",
-				);
-			}
-
-			// Question
-			if (eventType === "question.asked") {
-				return wrapResult(
-					translateQuestion(event),
-					"question asked: invalid event",
-				);
-			}
-
-			// PTY events
+			// Terminals stream from the relay's PtyManager through the project's
+			// PTY subscription (conduit-test-ni8.11), not from OpenCode's SSE.
 			if (eventType.startsWith("pty.")) {
-				return wrapResult(
-					translatePtyEvent(event),
-					"pty event: unhandled pty event type",
-				);
-			}
-
-			// File events
-			if (eventType.startsWith("file.")) {
-				return wrapResult(
-					translateFileEvent(event),
-					"file event: unhandled file event type",
-				);
+				return {
+					ok: false,
+					reason: `${eventType} served by SubscribePtys`,
+				};
 			}
 
 			// Session error (quota exhausted, model failure, etc.)
@@ -820,50 +672,34 @@ export function createTranslator(
 				};
 			}
 
-			// Installation update available
-			if (eventType === "installation.update-available") {
-				if (!isInstallationUpdateEvent(event)) {
-					return {
-						ok: false,
-						reason: "installation update: invalid event",
-					};
-				}
-				const version = event.properties.version;
-				return {
-					ok: true,
-					messages: [
-						{
-							type: "update_available",
-							...(version != null && { version }),
-						},
-					],
-				};
-			}
-
-			// Todo updated
+			// The todo list is projected from the TodoWrite tool part and served
+			// by the session's todo subscription (conduit-test-ni8.10).
 			if (eventType === "todo.updated") {
-				if (!isTodoUpdatedEvent(event)) {
-					return { ok: false, reason: "todo updated: invalid event" };
-				}
-				const items: TodoItem[] = (event.properties.todos ?? []).map(
-					(t, i) => ({
-						id: `todo-${i}`,
-						subject: t.content,
-						status: (t.status as TodoStatus) ?? "pending",
-					}),
-				);
-				return { ok: true, messages: [{ type: "todo_state", items }] };
+				return {
+					ok: false,
+					reason: "todo.updated served by SubscribeSessionTodos",
+				};
 			}
 
 			// Known event types handled by bridge/SSE wiring, not translator
 			if (
+				eventType === "permission.asked" ||
 				eventType === "permission.replied" ||
+				eventType === "question.asked" ||
 				eventType === "session.updated"
 			) {
 				return {
 					ok: false,
 					reason: `${eventType} handled by bridge`,
 				};
+			}
+
+			if (
+				eventType === "file.edited" ||
+				eventType === "file.watcher.updated" ||
+				eventType === "installation.update-available"
+			) {
+				return { ok: false, reason: `${eventType} deliberately ignored` };
 			}
 
 			// Unknown event type

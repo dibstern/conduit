@@ -35,9 +35,8 @@ async function projectFolders(harness: ProcessHarness) {
 		socket(harness),
 		new GetProjects({}),
 	);
-	return projects.map(({ slug, directory, folders, title }) => ({
+	return projects.map(({ slug, folders, title }) => ({
 		slug,
-		directory,
 		folders,
 		title,
 	}));
@@ -193,7 +192,7 @@ describe("SaveProject through the built daemon", () => {
 		const legacy = readConfig(fixture);
 		const project = legacy.projects.find(({ slug }) => slug === "process-test");
 		if (!project) throw new Error("Missing initial project in daemon.json");
-		delete project.folders;
+		delete (project as { folders?: unknown }).folders;
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify(legacy),
@@ -207,7 +206,6 @@ describe("SaveProject through the built daemon", () => {
 		expect(projects).toMatchObject([
 			{
 				slug: "process-test",
-				directory: fixture.projectDir,
 				folders: [fixture.projectDir],
 			},
 		]);
@@ -218,7 +216,7 @@ describe("SaveProject through the built daemon", () => {
 				({ slug }) => slug === project.slug,
 			);
 			expect(migrated?.folders).toEqual([fixture.projectDir]);
-			expect(migrated?.directory).toBe(migrated?.folders?.[0]);
+			expect(migrated).not.toHaveProperty("directory");
 		});
 	}, 60_000);
 
@@ -302,7 +300,6 @@ describe("SaveProject through the built daemon", () => {
 		expect(
 			saved.projects.find(({ slug }) => slug === saved.savedSlug),
 		).toMatchObject({
-			directory: valid,
 			folders: [valid, nested],
 		});
 		evidence["projectsAfter"] = await projectFolders(fixture);
@@ -353,7 +350,6 @@ describe("SaveProject through the built daemon", () => {
 		evidence["projectsAfter"] = projects;
 		expect(projects.find(({ slug }) => slug === saved.savedSlug)).toMatchObject(
 			{
-				directory: git,
 				folders: [git, plain],
 			},
 		);
@@ -384,7 +380,6 @@ describe("SaveProject through the built daemon", () => {
 		expect(added["projects"]).toContainEqual(
 			expect.objectContaining({
 				slug: saved.savedSlug,
-				directory,
 				folders: [directory],
 			}),
 		);
@@ -492,7 +487,6 @@ describe("SaveProject through the built daemon", () => {
 			expect(projects).toMatchObject([
 				{
 					slug: "process-test",
-					directory: fixture.projectDir,
 					folders: [fixture.projectDir, extra],
 				},
 			]);
@@ -605,7 +599,7 @@ describe("SaveProject through the built daemon", () => {
 		const projects = await projectFolders(fixture);
 		evidence["projectsAfter"] = projects;
 		expect(projects).toMatchObject([
-			{ slug: "process-test", directory: newMain, folders: [newMain] },
+			{ slug: "process-test", folders: [newMain] },
 		]);
 		const after = await fixture.connect(sessionId);
 		const retained = await after.history(sessionId);
@@ -647,7 +641,9 @@ describe("SaveProject through the built daemon", () => {
 		evidence["cliResult"] = { exitCode: 0, ...result };
 		const projects = await projectFolders(fixture);
 		evidence["projectsAfter"] = projects;
-		const added = projects.filter((project) => project.directory === directory);
+		const added = projects.filter(
+			(project) => project.folders[0] === directory,
+		);
 		expect(added).toHaveLength(1);
 		expect(added[0]?.folders).toEqual([directory]);
 		expect(result.stdout).toContain(`Project added: ${added[0]?.slug}`);

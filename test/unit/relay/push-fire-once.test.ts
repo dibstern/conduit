@@ -5,8 +5,8 @@
 // left the process is never recorded as delivered.
 //
 // The replay cases are the ones that matter. Three pipelines observe a
-// completed turn (SSE, message poller, status-poller safety net) and SSE
-// reconnect recovery re-emits every pending question — so "arrived twice" is
+// completed turn (SSE, message poller, status-poller safety net) and OpenCode
+// reconnect recovery re-emits every pending prompt — so "arrived twice" is
 // the normal case here, not the pathological one.
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,18 +14,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import {
 	AlertLedgerLive,
 	AlertLedgerTag,
 } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
@@ -34,14 +31,7 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import type {
-	SSEStreamCallbacks,
-	SSEStreamEvents,
-} from "../../../src/lib/relay/sse-stream.js";
-import {
-	sendPushForEventEffect,
-	wireSSEConsumerEffect,
-} from "../../../src/lib/relay/sse-wiring.js";
+import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
 import type {
 	PushDeliveryReport,
 	PushSubscriptionData,
@@ -49,13 +39,10 @@ import type {
 } from "../../../src/lib/server/push.js";
 import { PushNotificationManager } from "../../../src/lib/server/push.js";
 import {
+	type Approval,
 	PermissionId,
 	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
-import {
-	createMockSSEWiringDeps,
-	makeMockSessionManagerService,
-} from "../../helpers/mock-factories.js";
 
 const silentBus = Layer.succeed(SessionEventBusTag, {
 	publish: () => Effect.void,
@@ -136,268 +123,18 @@ const done: RelayMessage = {
 	code: 0,
 	alertId: "turn-1",
 };
-const askUser = (toolId: string): RelayMessage => ({
-	type: "ask_user",
+const askUser = (toolId: string): Approval => ({
+	_tag: "question",
 	sessionId: "s1",
 	toolId,
 	questions: [],
 });
-const permission = (requestId: string): RelayMessage => ({
-	type: "permission_request",
+const permission = (requestId: string): Approval => ({
+	_tag: "permission",
 	sessionId: "s1",
 	requestId: PermissionId.make(requestId),
 	toolName: "bash",
 	toolInput: {},
-});
-
-it.each([
-	"question",
-	"permission",
-] as const)("recovery pushes an abandoned pending %s and suppresses delivered replay", async (kind) => {
-	const payloads: Array<Record<string, unknown>> = [];
-	const deps = createMockSSEWiringDeps({
-		pushManager: {
-			getPublicKey: () => "pub",
-			addSubscription: () => {},
-			removeSubscription: () => {},
-			sendToAll: async (payload) => {
-				payloads.push(payload);
-				return reachedOneDevice;
-			},
-		},
-		listPendingQuestions: async () =>
-			kind === "question"
-				? [
-						{
-							id: "q1",
-							sessionID: "s1",
-							questions: [{ question: "Continue?", header: "Approval" }],
-						},
-					]
-				: [],
-		listPendingPermissions: async () =>
-			kind === "permission"
-				? [{ id: "p1", sessionID: "s1", permission: "bash" }]
-				: [],
-	});
-	const { statusPoller: _poller, ...base } = deps;
-	const callbacks: {
-		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
-	} = {
-		connected: [],
-		disconnected: [],
-		reconnecting: [],
-		error: [],
-		event: [],
-		heartbeat: [],
-	};
-	const consumer: SSEStreamEvents = {
-		on: (event, callback) => {
-			callbacks[event].push(callback);
-		},
-	};
-	await withStore(
-		Effect.gen(function* () {
-			yield* seed("s1", "turn-1");
-			const sql = yield* SqlClient.SqlClient;
-			const alertKey = kind === "question" ? "ask_user" : "permission_request";
-			const ledgerKey =
-				kind === "question" ? "ask_user:q1" : "permission_request:p1";
-			const anchor =
-				kind === "question" ? "s1:question:q1" : "s1:permission:p1";
-			yield* sql`INSERT INTO sent_alerts (session_id, alert_key, anchor, sent_at, state, claim_id)
-			VALUES ('s1', ${ledgerKey}, ${anchor}, 1, 'pending', 'dead-process')`;
-			yield* wireSSEConsumerEffect(
-				{ ...base, providerInstanceId: "opencode" },
-				consumer,
-			);
-			for (const callback of callbacks.connected) callback();
-			yield* Effect.tryPromise({
-				try: () => vi.waitFor(() => expect(payloads).toHaveLength(1)),
-				catch: (cause) => cause,
-			});
-			expect(payloads[0]).toMatchObject({
-				type: alertKey,
-				alertId: anchor,
-				sessionId: "s1",
-				slug: "test-project",
-			});
-			// Wait for the receipt, then simulate another connection returning stale pending data.
-			yield* sql`SELECT state FROM sent_alerts WHERE anchor = ${anchor} AND alert_key = ${ledgerKey}`.pipe(
-				Effect.repeat({ until: (rows) => rows[0]?.["state"] === "delivered" }),
-				Effect.timeout("1 second"),
-			);
-			for (const callback of callbacks.connected) callback();
-			yield* Effect.sleep("50 millis");
-			expect(payloads).toHaveLength(1);
-		}).pipe(
-			Effect.provide(
-				Layer.mergeAll(
-					AlertLedgerLive,
-					PendingInteractionServiceLive,
-					makeOverridesStateLive(),
-					Layer.succeed(
-						SessionManagerServiceTag,
-						makeMockSessionManagerService(),
-					),
-				),
-			),
-		),
-	);
-});
-
-it.each([
-	"HTTP 500",
-	"ECONNRESET",
-])("recovery pushes the whole batch after a recheck fails with %s", async (reason) => {
-	const cause = new Error(reason);
-	const questions = ["q1", "q2"].map((id) => ({
-		id,
-		sessionID: "s1",
-		questions: [{ question: "Continue?" }],
-	}));
-	const listPendingQuestions = vi
-		.fn()
-		.mockResolvedValueOnce(questions)
-		.mockRejectedValueOnce(cause)
-		.mockResolvedValue(questions);
-	const pushed: string[] = [];
-	const deps = createMockSSEWiringDeps({
-		listPendingQuestions,
-		pushManager: {
-			getPublicKey: () => "pub",
-			addSubscription: () => {},
-			removeSubscription: () => {},
-			sendToAll: async (payload) => {
-				pushed.push(String(payload["alertId"]));
-				return reachedOneDevice;
-			},
-		},
-	});
-	const warn = vi.spyOn(deps.log, "warn");
-	const { statusPoller: _poller, ...base } = deps;
-	const callbacks: {
-		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
-	} = {
-		connected: [],
-		disconnected: [],
-		reconnecting: [],
-		error: [],
-		event: [],
-		heartbeat: [],
-	};
-	await withStore(
-		Effect.gen(function* () {
-			yield* seed("s1", "turn-1");
-			yield* wireSSEConsumerEffect(
-				{ ...base, providerInstanceId: "opencode" },
-				{
-					on: (event, callback) => {
-						callbacks[event].push(callback);
-					},
-				},
-			);
-			for (const callback of callbacks.connected) callback();
-			yield* Effect.tryPromise({
-				try: () =>
-					vi.waitFor(() =>
-						expect(pushed).toEqual(["s1:question:q1", "s1:question:q2"]),
-					),
-				catch: (error) => error,
-			});
-			expect(listPendingQuestions).toHaveBeenCalledTimes(3);
-			expect(warn).toHaveBeenCalledOnce();
-			expect(warn).toHaveBeenCalledWith(expect.stringContaining("q1"), cause);
-		}).pipe(
-			Effect.provide(
-				Layer.mergeAll(
-					AlertLedgerLive,
-					PendingInteractionServiceLive,
-					makeOverridesStateLive(),
-					Layer.succeed(
-						SessionManagerServiceTag,
-						makeMockSessionManagerService(),
-					),
-				),
-			),
-		),
-	);
-});
-
-it("recovery skips a question answered while the preceding push is in flight", async () => {
-	let pending = ["q1", "q2"];
-	let finishFirst = () => {};
-	const firstPush = new Promise<void>((resolve) => {
-		finishFirst = resolve;
-	});
-	const pushed: string[] = [];
-	const deps = createMockSSEWiringDeps({
-		listPendingQuestions: async () =>
-			pending.map((id) => ({
-				id,
-				sessionID: "s1",
-				questions: [{ question: "Continue?" }],
-			})),
-		pushManager: {
-			getPublicKey: () => "pub",
-			addSubscription: () => {},
-			removeSubscription: () => {},
-			sendToAll: async (payload) => {
-				pushed.push(String(payload["alertId"]));
-				if (pushed.length === 1) await firstPush;
-				return reachedOneDevice;
-			},
-		},
-	});
-	const { statusPoller: _poller, ...base } = deps;
-	const callbacks: {
-		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
-	} = {
-		connected: [],
-		disconnected: [],
-		reconnecting: [],
-		error: [],
-		event: [],
-		heartbeat: [],
-	};
-	await withStore(
-		Effect.gen(function* () {
-			yield* seed("s1", "turn-1");
-			yield* wireSSEConsumerEffect(
-				{ ...base, providerInstanceId: "opencode" },
-				{
-					on: (event, callback) => {
-						callbacks[event].push(callback);
-					},
-				},
-			);
-			for (const callback of callbacks.connected) callback();
-			yield* Effect.tryPromise(() =>
-				vi.waitFor(() => expect(pushed).toHaveLength(1)),
-			);
-			expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
-				"s1",
-				expect.objectContaining({ toolId: "q2" }),
-			);
-			// The provider has accepted the other device's answer before Q1 finishes.
-			pending = ["q1"];
-			finishFirst();
-			yield* Effect.sleep("100 millis");
-			expect(pushed).toEqual(["s1:question:q1"]);
-		}).pipe(
-			Effect.provide(
-				Layer.mergeAll(
-					AlertLedgerLive,
-					PendingInteractionServiceLive,
-					makeOverridesStateLive(),
-					Layer.succeed(
-						SessionManagerServiceTag,
-						makeMockSessionManagerService(),
-					),
-				),
-			),
-		),
-	);
 });
 
 it("pushes one ding however many pipelines notice the same completed turn", async () => {
@@ -460,7 +197,7 @@ it("does not re-ask a question that reconnect recovery re-emits", async () => {
 			yield* sendPushForEventEffect(r.pushManager, askUser("tool-a"), r.log, {
 				sessionId: "s1",
 			});
-			// The SSE stream drops and recoverPendingQuestions replays it.
+			// The stream drops and OpenCode Instances replays it on reconnect.
 			yield* sendPushForEventEffect(r.pushManager, askUser("tool-a"), r.log, {
 				sessionId: "s1",
 			});

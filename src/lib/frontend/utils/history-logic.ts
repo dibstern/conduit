@@ -241,6 +241,12 @@ function convertAssistantParts(
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
 						...(toolResult != null && { result: toolResult }),
+						...(state?.isTruncated === true && {
+							isTruncated: true,
+							...(state.fullContentLength != null && {
+								fullContentLength: state.fullContentLength,
+							}),
+						}),
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),
 						...(toolMetadata !== undefined && { metadata: toolMetadata }),
@@ -317,6 +323,7 @@ export function historyToChatMessages(
 				...(msg.modelExecution != null
 					? { modelExecution: msg.modelExecution }
 					: {}),
+				...(msg.turnTiming != null ? { turnTiming: msg.turnTiming } : {}),
 			} satisfies UserMessage);
 		} else if (msg.role === "assistant") {
 			// Assistant messages: convert each part to the appropriate ChatMessage
@@ -374,9 +381,7 @@ export function historyToChatMessages(
 					}),
 					// The bill lands when the turn finishes. Stamping it with the
 					// message's start would put it before the turn's own last step.
-					...((msg.time?.completed ?? msg.time?.created) != null && {
-						createdAt: (msg.time?.completed ?? msg.time?.created) as number,
-					}),
+					createdAt: msg.time.completed,
 				} satisfies ResultMessage);
 			}
 		}

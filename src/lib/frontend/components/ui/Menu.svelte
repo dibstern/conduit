@@ -203,6 +203,11 @@
 		strategy: FLOATING_POSITIONING_DEFAULTS.strategy,
 		collisionPadding: FLOATING_POSITIONING_DEFAULTS.collisionPadding,
 		loop: true,
+		// bits-ui 2.18.1 makes <body> unselectable while a finger is down in the
+		// menu. A press that turns into a scroll never undoes it, and the next
+		// press saves the locked state as the one to restore, so the whole page,
+		// chat included, stays unselectable until reload (conduit-test-l1sh).
+		preventOverflowTextSelection: false,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: contentClass,
 	});
@@ -212,6 +217,7 @@
 		onOpenAutoFocus: focusContentOnce,
 		preventScroll: false,
 		loop: true,
+		preventOverflowTextSelection: false,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: [
 			"fixed inset-x-0 bottom-0 z-[var(--z-sheet)] max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal focus-visible:outline-hidden",

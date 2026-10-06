@@ -127,16 +127,6 @@
 			case "tool_content":
 				return `id=${id(properties["toolId"])}`;
 
-			case "permission_request":
-				return `${properties["toolName"] ?? "?"} sess=${id(properties["sessionId"])} req=${id(properties["requestId"])}`;
-			case "permission_resolved":
-				return `${properties["decision"]} req=${id(properties["requestId"])}`;
-			case "ask_user":
-				return `tool=${id(properties["toolId"])}`;
-			case "ask_user_resolved":
-			case "ask_user_error":
-				return `tool=${id(properties["toolId"])}`;
-
 			case "result":
 				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;
 			case "done":
@@ -158,29 +148,14 @@
 
 			case "instance_list":
 				return Array.isArray(properties["instances"]) ? `${properties["instances"].length} instances` : "";
-			case "pty_list":
-				return Array.isArray(properties["ptys"]) ? `${properties["ptys"].length} ptys` : "";
 			case "variant_info":
 				return properties["variant"] ? String(properties["variant"]) : "";
 			case "context_window_info":
 				return properties["contextWindow"] ? String(properties["contextWindow"]) : "";
 			case "model_info":
 				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
-			case "default_model_info":
-				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
-			case "model_list": {
-				if (!Array.isArray(properties["providers"])) return "";
-				const counts = (properties["providers"] as Array<{ name?: string; models?: unknown[] }>)
-					.map((prov) => `${prov.name ?? "?"}: ${Array.isArray(prov.models) ? prov.models.length : 0}`)
-					.join(", ");
-				return counts;
-			}
 			case "project_list":
 				return Array.isArray(properties["projects"]) ? `${properties["projects"].length} projects${properties["current"] ? ` current=${properties["current"]}` : ""}` : "";
-			case "command_list":
-				return Array.isArray(properties["commands"]) ? `${properties["commands"].length} commands` : "";
-			case "agent_list":
-				return Array.isArray(properties["agents"]) ? `${properties["agents"].length} agents${properties["activeAgentId"] ? ` active=${properties["activeAgentId"]}` : ""}` : "";
 			default:
 				return "";
 		}

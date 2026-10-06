@@ -114,7 +114,7 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 			projects: [
 				{
 					slug: "alpha",
-					directory: "/work/alpha",
+					folders: ["/work/alpha"],
 					title: "Alpha",
 					status: "ready",
 					sse: {
@@ -291,7 +291,6 @@ describe("makeDaemonHttpRouterLive", () => {
 								_tag: "Ready",
 								project: {
 									slug: "alpha",
-									directory: "/work/alpha",
 									folders: ["/work/alpha"],
 									title: "Alpha",
 									lastUsed: 200,
@@ -304,7 +303,6 @@ describe("makeDaemonHttpRouterLive", () => {
 								_tag: "Error",
 								project: {
 									slug: "broken",
-									directory: "/work/broken",
 									folders: ["/work/broken"],
 									title: "Broken",
 									lastUsed: 100,
@@ -388,7 +386,6 @@ describe("makeDaemonHttpRouterLive", () => {
 							_tag: "Ready",
 							project: {
 								slug: "solo",
-								directory: "/work/solo",
 								folders: ["/work/solo"],
 								title: "Solo",
 								lastUsed: 1,

@@ -102,12 +102,14 @@ const makeLayer = (options: {
 					getGoalDetails: () =>
 						Effect.succeed({ checks: [], tokensSinceStart: null }),
 					getAllSessionStatuses: () => Effect.succeed({}),
+					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 					getSessionFamily: () => Effect.succeed([]),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
+					readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					readSessionTranscriptPage: () =>
 						options.failRead
@@ -135,6 +137,7 @@ const makeLayer = (options: {
 												version: range.after + 1,
 											},
 								),
+					readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 					readSessionList: () =>
 						options.failRead
 							? Effect.fail(readFailure)

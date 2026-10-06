@@ -51,11 +51,11 @@ import {
 	publishSessionCreated,
 	publishSessionDeleted,
 } from "../../daemon/Services/daemon-pubsub.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
-	type OpenCodeInstanceClients,
-	OpenCodeInstanceClientsTag,
-} from "./opencode-instance-clients.js";
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../../daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -299,9 +299,8 @@ export const deleteSession = (sessionId: string) =>
 		const stateRef = yield* SessionManagerStateTag;
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
-		const instanceClientsOption = yield* Effect.serviceOption(
-			OpenCodeInstanceClientsTag,
-		);
+		const instanceClientsOption =
+			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const configOption = yield* Effect.serviceOption(ConfigTag);
@@ -457,22 +456,12 @@ export const deleteSession = (sessionId: string) =>
 										),
 									);
 								}
-								const resolved =
-									yield* instanceClientsOption.value.clientFor(
-										capturedInstanceId,
-									);
-								if (resolved === undefined) {
-									return yield* Effect.fail(
-										new Error(
-											`OpenCode instance client "${capturedInstanceId}" was not resolved`,
-										),
-									);
-								}
-								deleteApi = resolved;
+								deleteApi =
+									yield* instanceClientsOption.value.use(capturedInstanceId);
 							}
 
 							yield* openCodeUpstreamAdapter(deleteApi).sync(command);
-						}),
+						}).pipe(Effect.scoped),
 					);
 					if (Exit.isFailure(providerDeleteExit)) {
 						if (Exit.isInterrupted(providerDeleteExit)) {
@@ -703,7 +692,7 @@ const makeServiceCreateSession = ({
 	api: OpenCodeAPI;
 	engine: OrchestrationEngine;
 	configDir: string | undefined;
-	instanceClients: OpenCodeInstanceClients;
+	instanceClients: OpenCodeInstances;
 	readQuery: ReadQueryEffect;
 	eventStore: EventStoreEffect;
 	projectionRunner: ProjectionRunnerEffect;
@@ -741,15 +730,14 @@ const makeServiceCreateSession = ({
 			const createViaOpenCode = (instanceId?: ProviderInstanceId) =>
 				Effect.either(
 					Effect.gen(function* () {
-						// A session bound to a NAMED OpenCode instance is
-						// created on THAT instance's server; the default id (and
-						// wirings without the instance-clients service, e.g. legacy
-						// or unit harnesses) use the project-default client. A named
-						// instance that cannot be resolved fails the create cleanly
-						// instead of silently landing on the default server.
+						// A session bound to an OpenCode instance is created on
+						// THAT instance's server; no explicit instance uses the
+						// project-default client. An instance that is unknown or
+						// unreachable fails the create cleanly instead of silently
+						// landing on the default server.
 						const instanceApi =
 							instanceId !== undefined
-								? yield* instanceClients.clientFor(instanceId).pipe(
+								? yield* instanceClients.use(instanceId).pipe(
 										Effect.mapError(
 											(cause) =>
 												new SessionManagerError({
@@ -779,7 +767,7 @@ const makeServiceCreateSession = ({
 									}),
 							),
 						);
-					}),
+					}).pipe(Effect.scoped),
 				);
 			const createViaLocal = (instanceId?: ProviderInstanceId) =>
 				Effect.either(
@@ -907,7 +895,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| ConfigTag
 	| WebSocketHandlerTag
 	| RelayStatusSnapshotTag
-	| OpenCodeInstanceClientsTag
+	| OpenCodeInstancesTag
 	| BackgroundLivenessTag
 	| OverridesStateTag
 	| DaemonEventBusTag
@@ -936,7 +924,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const backgroundOf = yield* BackgroundLivenessTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
-		const instanceClients = yield* OpenCodeInstanceClientsTag;
+		const instanceClients = yield* OpenCodeInstancesTag;
 		const overrides = yield* OverridesStateTag;
 		const ownership = yield* PendingSendOwnershipTag;
 		const inFlightDeletes = new Map<
@@ -1193,10 +1181,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(PendingSendOwnershipTag, ownership),
 								Effect.provideService(OrchestrationEngineTag, engine),
-								Effect.provideService(
-									OpenCodeInstanceClientsTag,
-									instanceClients,
-								),
+								Effect.provideService(OpenCodeInstancesTag, instanceClients),
 								Effect.provideService(SessionManagerStateTag, stateRef),
 								Effect.provideService(ReadQueryEffectTag, readQuery),
 								Effect.provideService(EventStoreEffectTag, eventStore),
@@ -1269,7 +1254,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 							loadDaemonConfig(configDir),
 							instanceId,
 						) === "opencode"
-							? yield* instanceClients.clientFor(instanceId).pipe(
+							? yield* instanceClients.use(instanceId).pipe(
 									Effect.mapError(
 										(cause) =>
 											new SessionManagerError({
@@ -1282,7 +1267,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					return yield* loadPreRenderedHistory(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 					);
-				}),
+				}).pipe(Effect.scoped),
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),

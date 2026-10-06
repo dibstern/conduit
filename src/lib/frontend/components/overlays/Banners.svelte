@@ -9,6 +9,7 @@
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
 
 	const INSTANCE_WARNING: BannerConfig = {
@@ -45,7 +46,21 @@
 
 	/** The app-wide banners, health warning first. Reactive inside $derived. */
 	export function appBanners(): BannerConfig[] {
-		return instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : uiState.banners;
+		const banners = instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : [...uiState.banners];
+		const sessionId = sessionState.currentId;
+		const providerId = sessionId ? discoveryState.sessionProviderIds[sessionId] : undefined;
+		const status = uiState.opencodeConnectionStatus;
+		if (providerId === "opencode" && (status === "reconnecting" || status === "disconnected")) {
+			banners.push({
+				id: "opencode-connection-status",
+				variant: "warning",
+				icon: "alert-triangle",
+				text: status === "reconnecting" ? "Reconnecting to OpenCode\u2026" : "OpenCode server disconnected",
+				summary: status === "reconnecting" ? "OpenCode reconnecting\u2026" : "OpenCode disconnected",
+				dismissible: false,
+			});
+		}
+		return banners;
 	}
 
 	export function bannerTone(variant: BannerConfig["variant"]): string {

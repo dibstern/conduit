@@ -6,6 +6,11 @@
 
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Runtime } from "effect";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../daemon/config-persistence.js";
+import { OPENCODE_PROVIDER_ID } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -90,11 +95,11 @@ interface LegacyStatusPollerPort {
 		string,
 		import("../instance/sdk-types.js").SessionStatus
 	>;
+	getSessionProviders?(): ReadonlyMap<string, string>;
 	isProcessing?(sessionId: string): boolean;
 	markMessageActivity?(sessionId: string): void;
 	clearMessageActivity(sessionId: string): void;
 	notifySSEIdle?(sessionId: string): void;
-	reconcileNow?(): Promise<void>;
 }
 
 export interface MonitoringWiringDeps {
@@ -106,6 +111,7 @@ export interface MonitoringWiringDeps {
 	pollerManager: PollerManagerLike;
 	sseStream: SSEConnectionHealthLike;
 	config: {
+		configDir?: string;
 		pollerGatingConfig?: Partial<PollerGatingConfig>;
 		pushManager?: PushNotificationSender;
 		slug: string;
@@ -160,6 +166,17 @@ export function createMonitoringWiringState(): MonitoringWiringStateAccess {
 			monitoringState = state;
 		},
 	};
+}
+
+function providerStreamsLifecycle(
+	daemonConfig: ReturnType<typeof loadDaemonConfig>,
+	provider: string | undefined,
+): boolean {
+	const driver =
+		provider === undefined
+			? undefined
+			: resolveProviderRoutingDriver(daemonConfig, provider);
+	return driver !== undefined && driver !== OPENCODE_PROVIDER_ID;
 }
 
 const processAndApplyDoneEffect = (
@@ -311,13 +328,14 @@ const executeMonitoringEffectsEffect = (
 	// False once a newer reduction replaced this session's phase: the newer
 	// tick owns the session and this batch's effects for it are obsolete.
 	isCurrent: (sessionId: string) => boolean,
+	canStartPoller: (sessionId: string) => boolean,
 ) =>
 	Effect.gen(function* () {
 		for (const effect of effects) {
 			if (!isCurrent(effect.sessionId)) continue;
 			switch (effect.effect) {
 				case "start-poller": {
-					if (!monitoringActive()) break;
+					if (!monitoringActive() || !canStartPoller(effect.sessionId)) break;
 					const sessionId = effect.sessionId;
 					// Seed off the tick: a hung messages() call must not delay
 					// the effects that follow it (other sessions' stops and dones).
@@ -364,15 +382,18 @@ const executeMonitoringEffectsEffect = (
 					);
 					break;
 
+				case "clear-processing":
 				case "notify-idle":
-					yield* processAndApplyDoneEffect(
-						effect.sessionId,
-						effect.isSubagent,
-						effect.busySince,
-						doneDeliveredByPrimary,
-						deps,
-						pipelineDeps,
-					);
+					if (effect.effect === "notify-idle") {
+						yield* processAndApplyDoneEffect(
+							effect.sessionId,
+							effect.isSubagent,
+							effect.busySince,
+							doneDeliveredByPrimary,
+							deps,
+							pipelineDeps,
+						);
+					}
 					yield* clearProcessingTimeout(effect.sessionId);
 					break;
 
@@ -408,6 +429,7 @@ export function wireMonitoring(
 
 	const { sseTracker, getMonitoringState, setMonitoringState } = state;
 	let monitoringActive = true;
+	let providerCoveredSessions: ReadonlySet<string> = new Set();
 	const pollerGatingCfg: PollerGatingConfig = {
 		...DEFAULT_POLLER_GATING_CONFIG,
 		...config.pollerGatingConfig,
@@ -428,7 +450,7 @@ export function wireMonitoring(
 	// Effect executor deps (used by monitoring reducer effects)
 	const effectDeps: EffectDeps = {
 		startPoller: (sessionId) => {
-			if (!monitoringActive) return;
+			if (!monitoringActive || providerCoveredSessions.has(sessionId)) return;
 			client.session
 				.messages(sessionId)
 				.then((msgs) => {
@@ -513,6 +535,8 @@ export function wireMonitoring(
 		const parentMap = sessionService.getSessionParentMap({
 			activityOnly: true,
 		});
+		const providers = statusPoller.getSessionProviders?.();
+		const daemonConfig = loadDaemonConfig(config.configDir);
 		const now = Date.now();
 		const prevState = getMonitoringState();
 		const contexts = new Map<string, SessionEvalContext>();
@@ -533,11 +557,17 @@ export function wireMonitoring(
 					parentMap,
 					(sid) => wsHandler.getClientsForSession(sid).length > 0,
 					now,
+					providerStreamsLifecycle(daemonConfig, providers?.get(sessionId)),
 				),
 			);
 		}
 
 		const result = evaluateAll(prevState, contexts, pollerGatingCfg, parentMap);
+		providerCoveredSessions = new Set(
+			Array.from(contexts)
+				.filter(([, context]) => context.providerStreamsLifecycle)
+				.map(([sessionId]) => sessionId),
+		);
 		setMonitoringState(result.state);
 
 		if (result.effects.length > 0) {
@@ -619,6 +649,8 @@ export const wireMonitoringEffect = (
 				Effect.gen(function* () {
 					if (!monitoringActive) return;
 					const sessionService = yield* SessionManagerServiceTag;
+					const providers = yield* statusPoller.getSessionProviders();
+					const daemonConfig = loadDaemonConfig(config.configDir);
 
 					if (statusesChanged) {
 						yield* sessionService
@@ -663,6 +695,10 @@ export const wireMonitoringEffect = (
 										parentMap,
 										(sid) => wsHandler.getClientsForSession(sid).length > 0,
 										now,
+										providerStreamsLifecycle(
+											daemonConfig,
+											providers.get(sessionId),
+										),
 									),
 								);
 							}
@@ -674,11 +710,11 @@ export const wireMonitoringEffect = (
 								parentMap,
 							);
 							setMonitoringState(result.state);
-							return { prevState, result };
+							return { prevState, result, contexts };
 						}),
 					);
 					if (reduced === undefined) return;
-					const { prevState, result } = reduced;
+					const { prevState, result, contexts } = reduced;
 
 					if (result.effects.length > 0) {
 						yield* executeMonitoringEffectsEffect(
@@ -691,6 +727,7 @@ export const wireMonitoringEffect = (
 							(sessionId) =>
 								getMonitoringState().sessions.get(sessionId) ===
 								result.state.sessions.get(sessionId),
+							(sessionId) => !contexts.get(sessionId)?.providerStreamsLifecycle,
 						);
 					}
 

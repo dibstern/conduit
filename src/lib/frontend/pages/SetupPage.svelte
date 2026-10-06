@@ -33,6 +33,7 @@
 	let httpUrl = $state("");
 	let hasCert = $state(false);
 	let lanMode = $state(false);
+	let publicUrl = $state<string | null>(null);
 	let loading = $state(true);
 
 	let platform: PlatformInfo = $state({
@@ -74,7 +75,9 @@
 	});
 
 	let doneLinkHref = $derived.by(() => {
-		if (platform.isStandalone || platform.isHttps) return "/";
+		// localhost is already a secure context; moving origin would mean re-entering the PIN.
+		if (platform.isStandalone || platform.isHttps || window.isSecureContext)
+			return "/";
 		return httpsUrl || "/";
 	});
 
@@ -169,7 +172,12 @@
 			localStorage.removeItem("setup-pending");
 			localStorage.setItem("setup-done", "1");
 		}
-		navigate(doneLinkHref);
+		// pushState throws on a cross-origin URL, so leave the page instead.
+		if (new URL(doneLinkHref, location.href).origin === location.origin) {
+			navigate(doneLinkHref);
+		} else {
+			location.assign(doneLinkHref);
+		}
 	}
 
 	async function checkHttps(): Promise<void> {
@@ -244,6 +252,7 @@
 			httpUrl = initialSetupInfo.httpUrl;
 			hasCert = initialSetupInfo.hasCert;
 			lanMode = initialSetupInfo.lanMode;
+			publicUrl = initialSetupInfo.publicUrl;
 		} else {
 			try {
 				const resp = await fetch("/api/setup-info");
@@ -252,6 +261,7 @@
 				httpUrl = info.httpUrl ?? "";
 				hasCert = !!info.hasCert;
 				lanMode = !!info.lanMode;
+				publicUrl = info.publicUrl ?? null;
 			} catch {
 				// Fallback: use current location
 				httpsUrl = location.origin;
@@ -332,6 +342,7 @@
 					isDesktop={platform.isDesktop}
 					isSafari={platform.isSafari}
 					isIPad={platform.isIPad}
+					showReinstallNote={publicUrl !== null}
 					onnextstep={nextStep}
 				/>
 			{/if}

@@ -5,7 +5,6 @@ import {
 	getHealthyInstances,
 	getInstanceById,
 	handleInstanceList,
-	handleInstanceStatus,
 	instanceState,
 	instanceStatusColor,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
@@ -112,48 +111,6 @@ describe("Instance Store", () => {
 			driver: "opencode",
 			url: "https://opencode.example.test",
 		});
-	});
-
-	it("handleInstanceStatus updates a single instance status", () => {
-		handleInstanceList({
-			type: "instance_list",
-			instances: [
-				makeInstance({ id: "default", status: "healthy" }),
-				makeInstance({ id: "work", status: "healthy" }),
-			],
-		});
-
-		handleInstanceStatus({
-			type: "instance_status",
-			instanceId: "work",
-			status: "unhealthy",
-		});
-
-		const firstInstance = instanceState.instances[0];
-		const secondInstance = instanceState.instances[1];
-		assert.exists(firstInstance, "expected healthy instance");
-		assert.exists(secondInstance, "expected unhealthy instance");
-		expect(firstInstance.status).toBe("healthy");
-		expect(secondInstance.status).toBe("unhealthy");
-	});
-
-	it("handleInstanceStatus is a no-op for unknown instanceId", () => {
-		handleInstanceList({
-			type: "instance_list",
-			instances: [makeInstance({ id: "default", status: "healthy" })],
-		});
-
-		handleInstanceStatus({
-			type: "instance_status",
-			instanceId: "nonexistent",
-			status: "stopped",
-		});
-
-		// Should remain unchanged
-		expect(instanceState.instances).toHaveLength(1);
-		const firstInstance = instanceState.instances[0];
-		assert.exists(firstInstance, "expected healthy instance");
-		expect(firstInstance.status).toBe("healthy");
 	});
 
 	it("getInstanceById returns matching instance", () => {

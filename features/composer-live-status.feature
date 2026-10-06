@@ -10,7 +10,7 @@ Background:
 
 Scenario Outline: header follows the turn lifecycle and restarts its clock
   Then the composer status header is not visible
-  When the mock relay sets composer status to processing
+  When the mock relay starts a composer turn
   Then the composer status header is visible
   And the composer elapsed label reads Working 0:00
   When the composer status clock advances by 65 seconds
@@ -18,7 +18,7 @@ Scenario Outline: header follows the turn lifecycle and restarts its clock
   And the composer region visually matches <baseline> at <threshold> percent
   When the mock relay sets composer status to idle
   Then the composer status header is not visible
-  When the mock relay sets composer status to processing
+  When the mock relay starts a composer turn
   Then the composer elapsed label reads Working 0:00
   When the mock relay sets composer status to idle
   Then the composer status header is not visible

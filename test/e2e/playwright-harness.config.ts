@@ -29,6 +29,14 @@ export default defineConfig({
 				isMobile: false,
 			},
 		},
+		{
+			name: "mobile",
+			use: {
+				viewport: { width: 393, height: 852 },
+				isMobile: true,
+				hasTouch: true,
+			},
+		},
 	],
 	// Each test's process harness serves the built frontend on its own port.
 });

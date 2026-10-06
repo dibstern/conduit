@@ -10,8 +10,16 @@ import {
 
 const pushState = vi.fn();
 const replaceState = vi.fn();
-const projectA = { slug: "project-a", title: "A", directory: "/projects/a" };
-const projectB = { slug: "project-b", title: "B", directory: "/projects/b" };
+const projectA = {
+	slug: "project-a",
+	title: "A",
+	folders: ["/projects/a"] as const,
+};
+const projectB = {
+	slug: "project-b",
+	title: "B",
+	folders: ["/projects/b"] as const,
+};
 
 beforeEach(() => {
 	vi.stubGlobal("window", { history: { pushState, replaceState } });

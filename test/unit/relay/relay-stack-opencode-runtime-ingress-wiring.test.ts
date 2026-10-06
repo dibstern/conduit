@@ -17,7 +17,7 @@ import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { OpenCodeInstanceClientsTag } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -44,8 +44,10 @@ const listenOnRandomPort = (server: ReturnType<typeof createServer>) =>
 const closeServer = (server: ReturnType<typeof createServer>) =>
 	new Promise<void>((resolve) => server.close(() => resolve()));
 
-async function createMockOpenCode(): Promise<MockOpenCode> {
+async function createMockOpenCode(directory: string): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	const globalClients = new Set<ServerResponse>();
+	let eventId = 0;
 	let sseConnections = 0;
 	let historyRequests = 0;
 	let resolveSseClient: (() => void) | undefined;
@@ -56,19 +58,29 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 	function handler(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
-		if (url.pathname === "/event") {
+		if (url.pathname === "/event" || url.pathname === "/global/event") {
+			const global = url.pathname === "/global/event";
 			sseConnections++;
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
 				Connection: "keep-alive",
 			});
+			const connected = {
+				id: "evt_connected",
+				type: "server.connected",
+				properties: {},
+			};
 			res.write(
-				`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+				`data: ${JSON.stringify(global ? { payload: connected } : connected)}\n\n`,
 			);
 			sseClients.add(res);
+			if (global) globalClients.add(res);
 			resolveSseClient?.();
-			req.on("close", () => sseClients.delete(res));
+			req.on("close", () => {
+				sseClients.delete(res);
+				globalClients.delete(res);
+			});
 			return;
 		}
 
@@ -167,9 +179,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		waitForSseClient: () => sseClientConnected,
 		injectSSE(events) {
 			for (const event of events) {
-				const data = JSON.stringify(event);
+				const payload = { id: `evt_${++eventId}`, ...event };
 				for (const client of sseClients) {
-					client.write(`data: ${data}\n\n`);
+					client.write(
+						`data: ${JSON.stringify(globalClients.has(client) ? { directory, payload } : payload)}\n\n`,
+					);
 				}
 			}
 		},
@@ -269,7 +283,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			projectStorageDir(dir, "runtime-ingress-smoke"),
 			"events.db",
 		);
-		const mock = await createMockOpenCode();
+		const mock = await createMockOpenCode(projectDir);
 		const relayServer = createServer();
 		await listenOnRandomPort(relayServer);
 
@@ -286,6 +300,14 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				statusPollerInterval: 60_000,
 				messagePollerInterval: 60_000,
 			});
+			// Relay startup makes no OpenCode requests; the first use opens the stream.
+			await relay.effectRuntime.runtime.runPromise(
+				Effect.scoped(
+					Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+						instances.use("opencode"),
+					),
+				),
+			);
 			await eventually(
 				() =>
 					Promise.race([
@@ -367,9 +389,9 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 			projectStorageDir(dir, "named-runtime-ingress"),
 			"events.db",
 		);
-		const defaultMock = await createMockOpenCode();
-		const workMock = await createMockOpenCode();
-		const personalMock = await createMockOpenCode();
+		const defaultMock = await createMockOpenCode(projectDir);
+		const workMock = await createMockOpenCode(projectDir);
+		const personalMock = await createMockOpenCode(projectDir);
 		writeFileSync(
 			join(dir, "daemon.json"),
 			JSON.stringify({
@@ -420,9 +442,9 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 
 			await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {
-					const instanceClients = yield* OpenCodeInstanceClientsTag;
-					yield* instanceClients.clientFor("work-oc");
-					yield* instanceClients.clientFor("personal-oc");
+					const instances = yield* OpenCodeInstancesTag;
+					yield* Effect.scoped(instances.use("work-oc"));
+					yield* Effect.scoped(instances.use("personal-oc"));
 				}),
 			);
 

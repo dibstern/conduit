@@ -1,4 +1,4 @@
-import { Either, Schema } from "effect";
+import { Either, Option, Schema } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
@@ -9,7 +9,9 @@ import {
 	type EventMetadata,
 	type MessageRole,
 	type MessageSnapshotPayload,
+	PermissionAskedDetailsSchema,
 	type PermissionDecision,
+	QuestionAskedDetailsSchema,
 	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
 	SessionGoalChangedPayloadSchema,
@@ -344,8 +346,12 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "turn.interrupted": {
+			// An empty ID targets a running turn that has no assistant message yet.
 			return singleEvent(event, state, "turn.interrupted", {
-				messageId: messageIdFromDataOrState(event, data, state),
+				messageId:
+					typeof data["messageId"] === "string"
+						? data["messageId"]
+						: messageIdFromDataOrState(event, data, state),
 			});
 		}
 
@@ -445,6 +451,7 @@ export function translateProviderRuntimeEventToDomain(
 				sessionId: event.sessionId,
 				toolName: stringField(data["toolName"]) ?? "Unknown",
 				input: data["input"],
+				...cardDetails(PermissionAskedDetailsSchema, data),
 			});
 		}
 
@@ -463,6 +470,7 @@ export function translateProviderRuntimeEventToDomain(
 				id: requestId(event, data),
 				sessionId: event.sessionId,
 				questions: data["questions"],
+				...cardDetails(QuestionAskedDetailsSchema, data),
 			});
 		}
 
@@ -525,6 +533,14 @@ function isSessionPermissionMode(
 	value: string | undefined,
 ): value is SessionPermissionModeValue {
 	return value != null && sessionPermissionModes.has(value);
+}
+
+/** What an approval card shows beyond the ask itself; none of it if malformed. */
+function cardDetails<A, I>(
+	schema: Schema.Schema<A, I>,
+	data: Record<string, unknown>,
+): A | Record<never, never> {
+	return Option.getOrElse(Schema.decodeUnknownOption(schema)(data), () => ({}));
 }
 
 function singleEvent<K extends CanonicalEventType>(

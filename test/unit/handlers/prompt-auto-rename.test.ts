@@ -95,6 +95,7 @@ const makeReadQuery = (
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -102,12 +103,14 @@ const makeReadQuery = (
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
 	),
+	readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
 });

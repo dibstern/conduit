@@ -7,7 +7,6 @@ import type {
 	ClaudeSettingsResponse,
 	ResolveClaudeSettingsResponse,
 } from "../transport/ws-rpc.js";
-import type { RelayMessage } from "../types.js";
 
 export type ClaudeSettingKey = keyof ResolvedClaudeSettings;
 export type ClaudeSettingsResolutionStatus =
@@ -86,9 +85,9 @@ export function applyClaudeSettingsResponse(
 	setServerOverrides(response.overrides);
 }
 
-export function handleClaudeSettingsInfo(
-	message: Extract<RelayMessage, { type: "claude_settings_info" }>,
-): void {
+export function handleClaudeSettingsInfo(message: {
+	readonly overrides: ClaudeSettingsOverrides;
+}): void {
 	setServerOverrides(message.overrides);
 }
 

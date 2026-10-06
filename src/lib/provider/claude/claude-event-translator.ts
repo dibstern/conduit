@@ -313,6 +313,7 @@ export class ClaudeEventTranslator {
 				return Effect.void;
 			}
 			this.announcedMessageIds.add(messageId);
+			ctx.activeAssistantMessageId = messageId;
 			return this.push(
 				ctx,
 				makeProviderRuntimeEvent("message.created", ctx.sessionId, {
@@ -404,6 +405,7 @@ export class ClaudeEventTranslator {
 				}),
 			);
 			ctx.turnInFlight = false;
+			ctx.activeAssistantMessageId = "";
 			this.resetInFlightState();
 		});
 	}
@@ -1554,14 +1556,21 @@ export class ClaudeEventTranslator {
 		result: SDKResultMessage,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
+			if (
+				result.subtype === "success" &&
+				!result.is_error &&
+				!isInterruptedResult(result)
+			) {
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
+			}
 			yield* this.settleGoal(ctx);
 			if (isInterruptedResult(result)) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty means "the running one".
+						messageId: this.currentAssistantMessageId || "",
 					}),
 				);
 				yield* this.endTurn(ctx);

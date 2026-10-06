@@ -10,6 +10,7 @@
 <!-- lists which ran and when, picks them out on the strip, and jumps to the call.  -->
 <script lang="ts">
 	import { tick, untrack } from "svelte";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { revealedPart } from "../../stores/reveal.svelte.js";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
@@ -18,15 +19,17 @@
 		countsPhrase,
 		currentStepLabel,
 		economics,
+		fmtClock,
 		fmtDuration,
+		latestStamp,
 		stepCaption,
-		segmentDuration,
 		type SkillChapter,
 		skillChapters,
 		stepDurations,
 		type Segment,
 		type Turn,
 		turnStats,
+		workingTime,
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
@@ -41,22 +44,16 @@
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
 
-	/** Only a live turn needs a clock; a settled one reads its stamps. */
-	let now = $state(Date.now());
-	$effect(() => {
-		if (!final || !turn.live) return;
-		now = Date.now();
-		const id = setInterval(() => {
-			now = Date.now();
-		}, 1000);
-		return () => clearInterval(id);
-	});
+	const settledNow = Date.now();
+	const now = $derived(final && turn.live ? clock.now : settledNow);
 
 	const stats = $derived(turnStats(segment));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	// Steps overlap when tools are dispatched in parallel, so the header reads
-	// the segment's wall clock rather than the sum of its steps.
-	const duration = $derived(segmentDuration(segment, turn, final, now));
+	const duration = $derived.by(() => {
+		const index = turn.segments.indexOf(segment);
+		const until = index === -1 || index === turn.segments.length - 1 ? undefined : latestStamp(segment);
+		return workingTime(turn, now, until);
+	});
 	const bill = $derived(economics(turn, now));
 	const phrase = $derived(countsPhrase(stats));
 	const chapters = $derived(skillChapters(segment, turn, final, now));
@@ -123,7 +120,7 @@
 						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 						<span class="shrink-0 font-medium text-text-secondary @max-[336px]:hidden">Working</span>
 						{#if duration !== undefined}
-							<span class="turn-duration shrink-0 font-mono text-text-dimmer">{fmtDuration(duration)}</span>
+							<span class="turn-duration shrink-0 font-mono text-text-dimmer">{fmtClock(duration)}</span>
 						{/if}
 						<span class="flex-1 truncate text-text-muted">— {currentStepLabel(segment)}</span>
 					{:else}

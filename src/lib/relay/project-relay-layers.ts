@@ -1,6 +1,12 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Option, Stream } from "effect";
+import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../domain/daemon/Services/opencode-instances-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
@@ -24,10 +30,6 @@ import {
 	hasInstanceManagementConfig,
 	InstanceManagementServiceFromConfigLive,
 } from "../domain/relay/Services/instance-management-service.js";
-import {
-	OpenCodeInstanceClientsLive,
-	type OpenCodeInstanceClientsTag,
-} from "../domain/relay/Services/opencode-instance-clients.js";
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
@@ -80,13 +82,55 @@ import { publishProviderRelayMessage } from "./project-relay-publisher.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 
+/**
+ * Relay view of OpenCode Instances. Sessions bound to the default id run on
+ * this relay's selected instance, so the default id maps to it both ways, and
+ * clients default to the relay's directory scope.
+ */
+const relayOpenCodeInstances = (
+	instances: OpenCodeInstances,
+	config: ProjectRelayConfig,
+): OpenCodeInstances => {
+	const defaultId = defaultInstanceIdForDriver("opencode");
+	const selectedId = config.openCodeInstanceId ?? defaultId;
+	const target = (instanceId: string) =>
+		instanceId === defaultId ? selectedId : instanceId;
+	const scope = config.noServer ? config.projectDir : undefined;
+	// Other instances' events reach this relay only once it has used them.
+	const used = new Set<string>();
+	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
+		instances.use(target(instanceId), directory).pipe(
+			Effect.tap(() => {
+				used.add(target(instanceId));
+			}),
+		);
+	return {
+		events: (directories, instanceId = defaultId) =>
+			instances
+				.events(directories, target(instanceId))
+				.pipe(
+					Stream.filterMap((message) =>
+						message.instanceId === selectedId
+							? Option.some({ ...message, instanceId: defaultId })
+							: used.has(message.instanceId)
+								? Option.some(message)
+								: Option.none(),
+					),
+				),
+		use,
+		ifRunning: (instanceId, directory = scope) =>
+			instances.ifRunning(target(instanceId), directory),
+		stop: (instanceId) => instances.stop(target(instanceId)),
+	};
+};
+
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
 	| OverridesStateTag
 	| Layer.Layer.Success<typeof PendingInteractionServiceLive>
 	| PollerStateTag
 	| ReadQueryEffectTag
-	| OpenCodeInstanceClientsTag
+	| OpenCodeInstancesTag
 	| SessionManagerServiceTag
 	| SqlClient.SqlClient
 	| ReturnType<typeof createTranslator>;
@@ -196,11 +240,21 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	// Named OpenCode instance clients: one shared layer reference
-	// (Effect memoizes it) so orchestration wiring, the session manager, and
-	// the startup SSE wiring all see the same lazy per-instance client cache.
-	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+	// One shared layer reference (Effect memoizes it), so orchestration wiring,
+	// the session manager, startup and the SSE adapter see one relay view.
+	const sharedInstances = config.openCodeInstances;
+	const openCodeInstancesLayer = Layer.map(
+		sharedInstances
+			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+			: makeStandaloneOpenCodeInstancesLive(config),
+		(context) =>
+			Context.make(
+				OpenCodeInstancesTag,
+				relayOpenCodeInstances(
+					Context.get(context, OpenCodeInstancesTag),
+					config,
+				),
+			),
 	);
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared
@@ -212,7 +266,7 @@ export function createProjectRelayLayers({
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		providerRuntimeIngestionLayer,
-		openCodeInstanceClientsLayer,
+		openCodeInstancesLayer,
 	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
@@ -221,13 +275,20 @@ export function createProjectRelayLayers({
 		Layer.provide(openCodeApiLayer),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				openCodeInstancesLayer,
+				configLayer,
+				loggerLayer,
+			),
+		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
 	);
 	const sseStreamLayer = SSEStreamLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, loggerLayer)),
+		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
@@ -253,18 +314,13 @@ export function createProjectRelayLayers({
 	);
 	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 		Layer.provide(
-			Layer.mergeAll(
-				openCodeApiLayer,
-				webSocketHandlerLayer,
-				loggerLayer,
-				configLayer,
-			),
+			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				openCodeInstancesLayer,
 				webSocketHandlerLayer,
 				loggerLayer,
 				configLayer,
@@ -307,7 +363,7 @@ export function createProjectRelayLayers({
 		configLayer,
 		loggerLayer,
 		providerOrchestrationLayer,
-		openCodeInstanceClientsLayer,
+		openCodeInstancesLayer,
 		persistenceEffectLayer,
 		alertLedgerLayer,
 		providerRuntimeIngestionLayer,

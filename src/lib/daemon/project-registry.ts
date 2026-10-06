@@ -217,7 +217,7 @@ export class ProjectRegistry {
 
 	findByDirectory(directory: string): ProjectEntry | undefined {
 		for (const entry of this.entries.values()) {
-			if (entry.project.directory === directory) {
+			if (entry.project.folders[0] === directory) {
 				return { ...entry, project: { ...entry.project } };
 			}
 		}

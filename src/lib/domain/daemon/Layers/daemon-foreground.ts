@@ -430,7 +430,7 @@ export async function startForegroundDaemon(
 						yield* Effect.validateAll(
 							registered,
 							({ project }) =>
-								stopRegisteredClaudeRunners(project.directory, configDir),
+								stopRegisteredClaudeRunners(project.folders[0], configDir),
 							{ concurrency: 4 },
 						).pipe(
 							Effect.orDie,
@@ -458,7 +458,7 @@ export async function startForegroundDaemon(
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
-							discoverClaudeRunners(project.directory, configDir),
+							discoverClaudeRunners(project.folders[0], configDir),
 						);
 						if (
 							runners.length > 0 ||
@@ -507,7 +507,7 @@ export async function startForegroundDaemon(
 					Effect.flatMap((projects) => {
 						const normalized = normalizeProjectDirectory(directory);
 						const existing = projects.find(
-							(project) => project.directory === normalized,
+							(project) => project.folders[0] === normalized,
 						);
 						return existing
 							? Effect.succeed(existing)

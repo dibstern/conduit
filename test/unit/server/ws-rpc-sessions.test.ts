@@ -813,12 +813,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"per-1",
 				"once",
 			);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "permission_resolved",
-				sessionId: "session-1",
-				requestId: "per-1",
-				decision: "once",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -848,11 +842,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(api.question.reply).toHaveBeenCalledWith("que-1", [
 				["PostgreSQL"],
 			]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "ask_user_resolved",
-				toolId: "que-1",
-				sessionId: "session-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -879,11 +868,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(api.question.reject).toHaveBeenCalledWith("que-1");
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "ask_user_resolved",
-				toolId: "que-1",
-				sessionId: "session-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

@@ -1,5 +1,8 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	type ProjectSetting,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -37,6 +40,16 @@ export interface RpcMockOptions {
 	>;
 }
 
+/** Mock-only catalog served by GetModels/GetAgents/GetCommands when a spec has no handler. */
+export interface MockCatalog {
+	providers?: readonly unknown[];
+	agents?: ReadonlyArray<{
+		providerScope: { id: string; name: string };
+		agents: readonly unknown[];
+	}>;
+	commands?: readonly unknown[];
+}
+
 export interface RecordedRpcRequest {
 	readonly tag: string;
 	readonly payload: Record<string, unknown>;
@@ -52,7 +65,10 @@ export class RpcMockControl {
 		{ ws: WebSocketRoute; id: string }
 	>();
 	shellRows: readonly unknown[] | null = null;
+	catalog: MockCatalog = {};
 	private shellSequence = 0;
+	private readonly projectSettings = new Map<string, ProjectSetting>();
+	private projectSettingsSequence = 0;
 	private readonly detailRows = new Map<string, readonly unknown[]>();
 	private readonly detailSequences = new Map<string, number>();
 
@@ -62,6 +78,22 @@ export class RpcMockControl {
 
 	getResponseHandler(tag: string): RpcHandler | undefined {
 		return this.responseHandlers.get(tag);
+	}
+
+	catalogHandler(tag: string): RpcHandler | undefined {
+		const { providers, agents, commands } = this.catalog;
+		const projectSlug = this.projectSlug;
+		if (tag === "GetModels" && providers)
+			return () => ({ projectSlug, providers });
+		if (tag === "GetCommands" && commands)
+			return () => ({ projectSlug, commands });
+		if (tag === "GetAgents" && agents?.length)
+			return ({ instanceId }) => ({
+				projectSlug,
+				...(agents.find((list) => list.providerScope.id === instanceId) ??
+					agents.at(-1)),
+			});
+		return undefined;
 	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
@@ -108,6 +140,52 @@ export class RpcMockControl {
 				{ _tag: "synchronized" },
 			]);
 		}
+	}
+
+	/** Change one session row the way a live write does: an upsert with no
+	 *  re-snapshot, so nothing that follows `synchronized` refetches. */
+	upsertShellRow(row: {
+		readonly id: string;
+		readonly [field: string]: unknown;
+	}): void {
+		const rows = this.shellRows ?? [];
+		this.shellRows = [
+			...rows.filter(
+				(candidate) => (candidate as { id?: string }).id !== row.id,
+			),
+			row,
+		];
+		this.shellSequence++;
+		if (this.streams.has("SubscribeShell"))
+			this.sendChunk("SubscribeShell", [
+				{ _tag: "upsert", item: row, sequence: this.shellSequence },
+			]);
+	}
+
+	/** Publish one project-setting fact, the way another tab's or the CLI's
+	 *  write reaches every open SubscribeProjectSettings stream. */
+	setProjectSetting(setting: ProjectSetting): void {
+		this.projectSettings.set(setting._tag, setting);
+		this.projectSettingsSequence++;
+		if (this.streams.has("SubscribeProjectSettings"))
+			this.sendChunk("SubscribeProjectSettings", [
+				{
+					_tag: "upsert",
+					item: setting,
+					sequence: this.projectSettingsSequence,
+				},
+			]);
+	}
+
+	initialProjectSettingsFrames(): readonly unknown[] {
+		return [
+			{
+				_tag: "snapshot",
+				sequence: this.projectSettingsSequence,
+				rows: [...this.projectSettings.values()],
+			},
+			{ _tag: "synchronized" },
+		];
 	}
 
 	initialShellFrames(): readonly unknown[] {
@@ -228,11 +306,18 @@ const sendJson = (ws: WebSocketRoute, message: unknown) => {
 const controls = new WeakMap<Page, RpcMockControl>();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
+const pendingCatalogs = new WeakMap<Page, MockCatalog>();
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
 	if (control) control.projectSlug = slug;
 	else pendingProjectSlugs.set(page, slug);
+}
+
+export function setMockRpcCatalog(page: Page, catalog: MockCatalog): void {
+	const control = controls.get(page);
+	if (control) control.catalog = catalog;
+	else pendingCatalogs.set(page, catalog);
 }
 
 export function sendMockShellSnapshot(
@@ -274,7 +359,9 @@ async function handleMessage(
 				: raw.tag === "SubscribeSessionDetail"
 					? (payload: Record<string, unknown>) =>
 							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
-					: undefined);
+					: raw.tag === "SubscribeProjectSettings"
+						? () => control.initialProjectSettingsFrames()
+						: undefined);
 		if (stream) {
 			const sessionId =
 				raw.tag === "SubscribeSessionDetail"
@@ -290,6 +377,7 @@ async function handleMessage(
 		const handler =
 			control.getResponseHandler(raw.tag) ??
 			handlers[raw.tag] ??
+			control.catalogHandler(raw.tag) ??
 			(raw.tag === "ResolveSession"
 				? () => ({ projectSlug: control.projectSlug })
 				: raw.tag === "ViewSession"
@@ -362,6 +450,7 @@ export async function mockWsRpc(
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
+	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);

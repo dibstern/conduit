@@ -1,5 +1,7 @@
 // SQLite projection row types returned by the Effect read services.
 
+import type { HistoryMessage } from "../shared-types.js";
+
 export interface SessionRow {
 	id: string;
 	version: number;
@@ -38,6 +40,20 @@ export interface PendingApprovalCountRow {
 	session_id: string;
 	type: "permission" | "question";
 	pending_count: number;
+}
+
+/** A pending_approvals row as the approvals subscription reads it (ni8.9). */
+export interface PendingApprovalRow {
+	id: string;
+	session_id: string;
+	type: "permission" | "question";
+	status: "pending" | "resolved";
+	tool_name: string | null;
+	/** JSON: the tool input, or a question's questions. */
+	input: string | null;
+	/** JSON: the rest of the asked payload; NULL on rows from before 0030. */
+	details: string | null;
+	version: number;
 }
 
 export interface PendingClaudeQuestionToolRow {
@@ -94,6 +110,7 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {
 		requestedModel?: string;
 		expectedModel?: string;

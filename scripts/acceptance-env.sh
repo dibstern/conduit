@@ -9,7 +9,10 @@ if [ ! -x "$ROOT_DIR/build/acceptance/bin/gherkin-parser" ]; then
 fi
 
 PATH="$ROOT_DIR/build/acceptance/bin:$PATH"
-CONDUIT_BASE_URL="${CONDUIT_BASE_URL:-http://localhost:4173}"
+# The runners start their own preview on this port, so worktrees running the
+# suite at the same time each need a different ACCEPTANCE_PORT.
+ACCEPTANCE_PORT="${ACCEPTANCE_PORT:-4173}"
+CONDUIT_BASE_URL="http://localhost:$ACCEPTANCE_PORT"
 VIEWPORT="${VIEWPORT:-desktop}"
 
-export CONDUIT_BASE_URL PATH VIEWPORT
+export ACCEPTANCE_PORT CONDUIT_BASE_URL PATH VIEWPORT

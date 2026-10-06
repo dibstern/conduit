@@ -1,17 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	applyPtyListResponse,
+	applyPtyEnvelope,
 	beginCreateTab,
 	closePanel,
 	destroyAll,
 	getScrollback,
 	getScrollbackSize,
-	handlePtyCreated,
-	handlePtyDeleted,
 	handlePtyError,
-	handlePtyExited,
-	handlePtyList,
 	handlePtyOutput,
+	handlePtyRemove,
+	handlePtySnapshot,
+	handlePtyUpsert,
 	onOutput,
 	openPanel,
 	renameTab,
@@ -19,31 +18,19 @@ import {
 	terminalState,
 	togglePanel,
 } from "../../../src/lib/frontend/stores/terminal.svelte.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
-// Tests deliberately pass incomplete objects to verify defensive handling.
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
+/** A PTY as SubscribePtys sends it. */
+function ptyRow(id: string, status: "running" | "exited" = "running") {
+	return { id, title: "bash", command: "bash", cwd: "/repo", status, pid: 1 };
 }
 
-function ptyCreatedMsg(
-	id: string,
-	_title?: string,
-): Extract<RelayMessage, { type: "pty_created" }> {
-	return msg({
-		type: "pty_created" as const,
-		pty: {
-			id,
-			title: _title ?? "",
-			command: "",
-			cwd: "",
-			status: "running",
-			pid: 0,
-		},
-	});
+function upsert(id: string, status: "running" | "exited" = "running") {
+	return { _tag: "upsert", item: ptyRow(id, status) } as const;
+}
+
+/** Snapshot rows for these PTYs, each with an empty scrollback ring. */
+function rows(...ptys: ReturnType<typeof ptyRow>[]) {
+	return ptys.map((pty) => ({ pty, scrollback: "" }));
 }
 
 beforeEach(() => {
@@ -55,9 +42,9 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("handlePtyCreated", () => {
+describe("handlePtyUpsert of a new PTY", () => {
 	it("adds a tab and sets it as active (server sends { pty: PtyInfo })", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1", "bash"));
+		handlePtyUpsert(upsert("pty1"));
 		expect(terminalState.tabs.size).toBe(1);
 		expect(terminalState.activeTabId).toBe("pty1");
 		// Sequential naming: ignores server title, generates "Terminal N"
@@ -66,66 +53,67 @@ describe("handlePtyCreated", () => {
 
 	it("leaves the panel closed when the user switched away before the tab arrived", () => {
 		closePanel();
-		handlePtyCreated(ptyCreatedMsg("pty1", "bash"));
+		handlePtyUpsert(upsert("pty1"));
 		expect(terminalState.panelOpen).toBe(false);
 	});
 
 	it("uses sequential title regardless of server title", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const tab = terminalState.tabs.get("pty1");
 		expect(tab?.title).toBe("Terminal 1");
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty2"));
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 2");
 	});
 
 	it("clears pending create state", () => {
 		beginCreateTab();
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBeNull();
 	});
 
 	it("initializes scrollback buffer", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		expect(getScrollback("pty1")).toEqual([]);
 	});
 
-	it("ignores message with missing pty object", () => {
-		handlePtyCreated(msg({ type: "pty_created" }));
-		expect(terminalState.tabs.size).toBe(0);
+	it("only updates status for a PTY it already knows", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
+		handlePtyUpsert(upsert("pty1", "exited"));
+		expect(terminalState.activeTabId).toBe("pty2");
+		expect(terminalState.tabs.get("pty1")?.exited).toBe(true);
 	});
 });
 
 describe("handlePtyOutput", () => {
 	it("appends data to scrollback buffer", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "line1\n" });
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "line2\n" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "line1\n" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "line2\n" });
 		expect(getScrollback("pty1")).toEqual(["line1\n", "line2\n"]);
 	});
 
 	it("calls output listeners", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const received: string[] = [];
 		onOutput("pty1", (data) => received.push(data));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "hello" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "hello" });
 		expect(received).toEqual(["hello"]);
 	});
 
 	it("replaces restored history and then appends live output", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const output = vi.fn();
 		onOutput("pty1", output);
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "marker\n" });
-		handlePtyOutput(
-			msg({
-				type: "pty_output",
-				ptyId: "pty1",
-				data: "marker\nwhile disconnected\n",
-				replace: true,
-			}),
-		);
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "live\n" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "marker\n" });
+		handlePtyOutput({
+			_tag: "output",
+			ptyId: "pty1",
+			data: "marker\nwhile disconnected\n",
+			replace: true,
+		});
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "live\n" });
 		expect(getScrollback("pty1")).toEqual([
 			"marker\nwhile disconnected\n",
 			"live\n",
@@ -138,53 +126,38 @@ describe("handlePtyOutput", () => {
 	});
 
 	it("clears old history and signals mounted listeners for an empty replay", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "stale\n" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "stale\n" });
 		const output = vi.fn();
 		onOutput("pty1", output);
-		handlePtyOutput(
-			msg({ type: "pty_output", ptyId: "pty1", data: "", replace: true }),
-		);
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "", replace: true });
 		expect(getScrollback("pty1")).toEqual([]);
 		expect(getScrollbackSize("pty1")).toBe(0);
 		expect(output).toHaveBeenCalledExactlyOnceWith("", true);
 	});
 
-	it("does not revive an exited terminal without confirmed restoration replay", () => {
+	it("does not revive an exited terminal: only an upsert changes status", () => {
 		const ptyId = "local-pty1";
-		handlePtyCreated(ptyCreatedMsg(ptyId));
-		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
+		handlePtyUpsert(upsert(ptyId));
+		handlePtyUpsert(upsert(ptyId, "exited"));
 		handlePtyOutput({
-			type: "pty_output",
+			_tag: "output",
 			ptyId,
 			data: "history",
 			replace: true,
 		});
 		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
-		handlePtyOutput(
-			msg({ type: "pty_output", ptyId, data: "live", restored: true }),
-		);
+		handlePtyOutput({ _tag: "output", ptyId, data: "live" });
 		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
 	});
 
-	it("ignores output with missing ptyId", () => {
-		handlePtyOutput(msg({ type: "pty_output", data: "orphan" }));
-		// Should not throw
-	});
-
-	it("ignores output with non-string data", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput(msg({ type: "pty_output", ptyId: "pty1", data: 123 }));
-		expect(getScrollback("pty1")).toEqual([]);
-	});
-
 	it("trims scrollback buffer when exceeding 50KB", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		// Write chunks that exceed 50KB total
 		const bigChunk = "x".repeat(20 * 1024); // 20KB each
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: bigChunk });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: bigChunk });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: bigChunk });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: bigChunk });
 		expect(getScrollback("pty1")).toEqual([
 			"x".repeat(10 * 1024),
 			bigChunk,
@@ -194,25 +167,23 @@ describe("handlePtyOutput", () => {
 	});
 
 	it("retains the tail of a full replay when the next live chunk arrives", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const snapshot = "a".repeat(50 * 1024);
-		handlePtyOutput(
-			msg({
-				type: "pty_output",
-				ptyId: "pty1",
-				data: snapshot,
-				replace: true,
-			}),
-		);
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "b" });
+		handlePtyOutput({
+			_tag: "output",
+			ptyId: "pty1",
+			data: snapshot,
+			replace: true,
+		});
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "b" });
 		expect(getScrollback("pty1")).toEqual([snapshot.slice(1), "b"]);
 		expect(getScrollbackSize("pty1")).toBe(50 * 1024);
 	});
 
 	it("bounds a single oversized UTF-8 chunk without splitting a character", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		handlePtyOutput({
-			type: "pty_output",
+			_tag: "output",
 			ptyId: "pty1",
 			data: "€".repeat(20_000),
 		});
@@ -221,89 +192,91 @@ describe("handlePtyOutput", () => {
 	});
 
 	it("trims UTF-8 at code point boundaries after a full emoji snapshot", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		handlePtyOutput({
-			type: "pty_output",
+			_tag: "output",
 			ptyId: "pty1",
 			data: "🚀".repeat(12_800),
 		});
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "a" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "a" });
 		expect(getScrollback("pty1")).toEqual(["🚀".repeat(12_799), "a"]);
 		expect(getScrollbackSize("pty1")).toBe(51_197);
 	});
 
 	it("reports UTF-8 bytes rather than UTF-16 code units", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "🚀é" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "🚀é" });
 		expect(getScrollbackSize("pty1")).toBe(6);
 	});
 });
 
 describe("onOutput", () => {
 	it("returns an unsubscribe function", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const received: string[] = [];
 		const unsub = onOutput("pty1", (data) => received.push(data));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "a" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "a" });
 		unsub();
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "b" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "b" });
 		expect(received).toEqual(["a"]);
 	});
 
 	it("supports multiple listeners for same pty", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		const r1: string[] = [];
 		const r2: string[] = [];
 		onOutput("pty1", (data) => r1.push(data));
 		onOutput("pty1", (data) => r2.push(data));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "x" });
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "x" });
 		expect(r1).toEqual(["x"]);
 		expect(r2).toEqual(["x"]);
 	});
 });
 
-describe("handlePtyExited", () => {
+describe("handlePtyUpsert of an exited PTY", () => {
 	it("marks the tab as exited", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyExited({ type: "pty_exited", ptyId: "pty1", exitCode: 0 });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty1", "exited"));
 		const tab = terminalState.tabs.get("pty1");
 		expect(tab?.exited).toBe(true);
 	});
 
-	it("ignores unknown ptyId", () => {
-		handlePtyExited({ type: "pty_exited", ptyId: "unknown", exitCode: 0 });
-		expect(terminalState.tabs.size).toBe(0);
+	it("revives it when the server reports it running again", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty1", "exited"));
+		handlePtyUpsert(upsert("pty1"));
+		expect(terminalState.tabs.get("pty1")?.exited).toBe(false);
 	});
 });
 
-describe("handlePtyDeleted", () => {
+describe("handlePtyRemove", () => {
 	it("removes the tab", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyRemove({ id: "pty1" });
 		expect(terminalState.tabs.size).toBe(0);
 	});
 
 	it("cleans up scrollback and listeners", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "data" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "data" });
 		const received: string[] = [];
 		onOutput("pty1", (data) => received.push(data));
 
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyRemove({ id: "pty1" });
 		expect(getScrollback("pty1")).toEqual([]);
 	});
 
 	it("switches to another tab when active tab is deleted", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 		// pty2 is now active
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty2" });
+		handlePtyRemove({ id: "pty2" });
 		expect(terminalState.activeTabId).toBe("pty1");
 	});
 
 	it("sets activeTabId to null when last tab is deleted", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyRemove({ id: "pty1" });
 		expect(terminalState.activeTabId).toBeNull();
 		expect(terminalState.panelOpen).toBe(false);
 	});
@@ -357,7 +330,7 @@ describe("beginCreateTab", () => {
 	it("returns false if max tabs reached", () => {
 		// Create max tabs
 		for (let i = 0; i < terminalState.maxTabs; i++) {
-			handlePtyCreated(ptyCreatedMsg(`pty${i}`));
+			handlePtyUpsert(upsert(`pty${i}`));
 		}
 		expect(beginCreateTab()).toBe(false);
 	});
@@ -376,14 +349,14 @@ describe("beginCreateTab", () => {
 
 describe("switchTab", () => {
 	it("switches to an existing tab", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 		switchTab("pty1");
 		expect(terminalState.activeTabId).toBe("pty1");
 	});
 
 	it("does not switch to non-existent tab", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		switchTab("nonexistent");
 		expect(terminalState.activeTabId).toBe("pty1");
 	});
@@ -391,7 +364,7 @@ describe("switchTab", () => {
 
 describe("renameTab", () => {
 	it("renames an existing tab", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1", "old"));
+		handlePtyUpsert(upsert("pty1"));
 		renameTab("pty1", "new name");
 		const tab = terminalState.tabs.get("pty1");
 		expect(tab?.title).toBe("new name");
@@ -413,16 +386,16 @@ describe("getScrollback and getScrollbackSize", () => {
 	});
 
 	it("returns correct size", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "12345" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "12345" });
 		expect(getScrollbackSize("pty1")).toBe(5);
 	});
 });
 
 describe("destroyAll", () => {
 	it("clears all terminal state", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyOutput({ type: "pty_output", ptyId: "pty1", data: "data" });
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "data" });
 		destroyAll();
 		expect(terminalState.tabs.size).toBe(0);
 		expect(terminalState.activeTabId).toBeNull();
@@ -433,194 +406,149 @@ describe("destroyAll", () => {
 
 describe("tab number reuse", () => {
 	it("reuses lowest available number when a tab is closed", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
-		handlePtyCreated(ptyCreatedMsg("pty3"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
+		handlePtyUpsert(upsert("pty3"));
 
 		expect(terminalState.tabs.get("pty1")?.title).toBe("Terminal 1");
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 2");
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 3");
 
 		// Close Terminal 2
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty2" });
+		handlePtyRemove({ id: "pty2" });
 		expect(terminalState.tabs.size).toBe(2);
 
 		// Next tab should reuse number 2
-		handlePtyCreated(ptyCreatedMsg("pty4"));
+		handlePtyUpsert(upsert("pty4"));
 		expect(terminalState.tabs.get("pty4")?.title).toBe("Terminal 2");
 	});
 
 	it("reuses number 1 when first tab is closed", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyRemove({ id: "pty1" });
 
-		handlePtyCreated(ptyCreatedMsg("pty3"));
+		handlePtyUpsert(upsert("pty3"));
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 1");
 	});
 
 	it("reuses multiple closed numbers in order", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
-		handlePtyCreated(ptyCreatedMsg("pty3"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
+		handlePtyUpsert(upsert("pty3"));
 
 		// Close 1 and 3
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty3" });
+		handlePtyRemove({ id: "pty1" });
+		handlePtyRemove({ id: "pty3" });
 
 		// Next tab gets lowest available: 1
-		handlePtyCreated(ptyCreatedMsg("pty4"));
+		handlePtyUpsert(upsert("pty4"));
 		expect(terminalState.tabs.get("pty4")?.title).toBe("Terminal 1");
 
 		// Next tab gets 3 (2 is still in use)
-		handlePtyCreated(ptyCreatedMsg("pty5"));
+		handlePtyUpsert(upsert("pty5"));
 		expect(terminalState.tabs.get("pty5")?.title).toBe("Terminal 3");
 	});
 
 	it("resets tab numbers when all tabs are closed", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty2" });
+		handlePtyRemove({ id: "pty1" });
+		handlePtyRemove({ id: "pty2" });
 
 		// Panel closes, tab numbers reset
-		handlePtyCreated(ptyCreatedMsg("pty3"));
+		handlePtyUpsert(upsert("pty3"));
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 1");
 	});
 
 	it("does not reuse numbers for tabs with custom titles", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		expect(terminalState.tabs.get("pty1")?.title).toBe("Terminal 1");
 
 		// Rename the tab (no longer matches "Terminal N" pattern)
 		renameTab("pty1", "My Custom Shell");
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyRemove({ id: "pty1" });
 
 		// Next tab should be Terminal 1 (custom name doesn't affect counter)
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty2"));
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 1");
 	});
 
-	it("handlePtyDeleted releases tab number", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+	it("handlePtyRemove releases tab number", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 
-		handlePtyDeleted({ type: "pty_deleted", ptyId: "pty1" });
+		handlePtyRemove({ id: "pty1" });
 
 		// Deleted tab number should be reusable
-		handlePtyCreated(ptyCreatedMsg("pty3"));
+		handlePtyUpsert(upsert("pty3"));
 		expect(terminalState.tabs.get("pty3")?.title).toBe("Terminal 1");
 	});
 });
 
-describe("handlePtyList", () => {
-	it("adds tabs from server PTY list", () => {
-		handlePtyList({
-			type: "pty_list",
-			ptys: [
-				{
-					id: "pty-a",
-					title: "bash",
-					command: "bash",
-					cwd: "/",
-					status: "running",
-					pid: 1,
-				},
-				{
-					id: "pty-b",
-					title: "zsh",
-					command: "zsh",
-					cwd: "/",
-					status: "running",
-					pid: 2,
-				},
-			],
-		});
+describe("handlePtySnapshot", () => {
+	it("adds tabs from the server's PTYs", () => {
+		handlePtySnapshot(rows(ptyRow("pty-a"), ptyRow("pty-b")));
 		expect(terminalState.tabs.size).toBe(2);
 		expect(terminalState.tabs.get("pty-a")?.title).toBe("Terminal 1");
 		expect(terminalState.tabs.get("pty-b")?.title).toBe("Terminal 2");
+		expect(terminalState.activeTabId).toBe("pty-a");
 	});
 
 	it("does not duplicate existing tabs", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyList({
-			type: "pty_list",
-			ptys: [
-				{
-					id: "pty1",
-					title: "bash",
-					command: "bash",
-					cwd: "/",
-					status: "running",
-					pid: 1,
-				},
-			],
-		});
+		handlePtyUpsert(upsert("pty1"));
+		handlePtySnapshot(rows(ptyRow("pty1")));
 		expect(terminalState.tabs.size).toBe(1);
 	});
 
 	it("removes tabs not on server", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
-		handlePtyList({
-			type: "pty_list",
-			ptys: [
-				{
-					id: "pty2",
-					title: "bash",
-					command: "bash",
-					cwd: "/",
-					status: "running",
-					pid: 1,
-				},
-			],
-		});
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
+		handlePtySnapshot(rows(ptyRow("pty2")));
 		expect(terminalState.tabs.has("pty1")).toBe(false);
 		expect(terminalState.tabs.has("pty2")).toBe(true);
 	});
 
-	it("clears server-owned tabs when the authoritative pty list is empty", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyList({ type: "pty_list", ptys: [] });
+	it("clears server-owned tabs when the authoritative snapshot is empty", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtySnapshot([]);
 		expect(terminalState.tabs.size).toBe(0);
 	});
 
 	it("marks exited PTYs", () => {
-		handlePtyList({
-			type: "pty_list",
-			ptys: [
-				{
-					id: "pty1",
-					title: "bash",
-					command: "bash",
-					cwd: "/",
-					status: "exited",
-					pid: 1,
-				},
-			],
-		});
+		handlePtySnapshot(rows(ptyRow("pty1", "exited")));
 		expect(terminalState.tabs.get("pty1")?.exited).toBe(true);
 	});
 
-	it("applies RPC list responses through the terminal list reducer", () => {
-		applyPtyListResponse({
-			projectSlug: "demo",
-			ptys: [
-				{
-					id: "pty-rpc",
-					title: "Shell",
-					command: "zsh",
-					cwd: "/repo",
-					status: "running",
-					pid: 123,
-				},
-			],
-		});
+	it("restores each scrollback ring without marking it unread", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyOutput({ _tag: "output", ptyId: "pty1", data: "stale\n" });
+		const output = vi.fn();
+		onOutput("pty1", output);
+		handlePtySnapshot([{ pty: ptyRow("pty1"), scrollback: "ring\n" }]);
+		expect(getScrollback("pty1")).toEqual(["ring\n"]);
+		expect(output).toHaveBeenCalledExactlyOnceWith("ring\n", true);
+		expect(terminalState.unreadPtyIds.has("pty1")).toBe(true);
+		destroyAll();
+		handlePtySnapshot([{ pty: ptyRow("pty2"), scrollback: "ring\n" }]);
+		expect(terminalState.unreadPtyIds.has("pty2")).toBe(false);
+	});
+});
 
-		expect(terminalState.tabs.size).toBe(1);
-		expect(terminalState.tabs.get("pty-rpc")?.title).toBe("Terminal 1");
+describe("applyPtyEnvelope", () => {
+	it("routes every envelope of a subscription to its reducer", () => {
+		const envelopes = [
+			{ _tag: "snapshot", rows: rows(ptyRow("pty1")) },
+			{ _tag: "synchronized" },
+			upsert("pty2"),
+			{ _tag: "output", ptyId: "pty2", data: "hi" },
+			{ _tag: "remove", id: "pty1" },
+		] as const;
+		for (const envelope of envelopes) applyPtyEnvelope(envelope);
+		expect([...terminalState.tabs.keys()]).toEqual(["pty2"]);
+		expect(getScrollback("pty2")).toEqual(["hi"]);
 	});
 });
 
@@ -638,7 +566,7 @@ describe("togglePanel", () => {
 	});
 
 	it("does not mutate tab create state when opening", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		closePanel(); // simulate closed panel with existing tab
 		togglePanel();
 		expect(terminalState.panelOpen).toBe(true);
@@ -659,22 +587,14 @@ describe("openPanel / closePanel", () => {
 	});
 });
 
-/** A pty_list row as the server sends it. */
-function ptyRow(id: string, status: "running" | "exited" = "running") {
-	return { id, title: "bash", command: "bash", cwd: "/repo", status, pid: 1 };
-}
-
 describe("applying server rows never touches the client half", () => {
-	it("keeps the renamed label and the selected tab across a pty_list", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+	it("keeps the renamed label and the selected tab across a snapshot", () => {
+		handlePtyUpsert(upsert("pty1"));
+		handlePtyUpsert(upsert("pty2"));
 		renameTab("pty1", "build");
 		switchTab("pty1");
 
-		handlePtyList({
-			type: "pty_list",
-			ptys: [ptyRow("pty1"), ptyRow("pty2"), ptyRow("pty3")],
-		});
+		handlePtySnapshot(rows(ptyRow("pty1"), ptyRow("pty2"), ptyRow("pty3")));
 
 		expect(terminalState.tabs.get("pty1")?.title).toBe("build");
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 2");
@@ -682,10 +602,10 @@ describe("applying server rows never touches the client half", () => {
 	});
 
 	it("takes exit status from the server without disturbing the label", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		renameTab("pty1", "build");
 
-		handlePtyExited(msg({ type: "pty_exited", ptyId: "pty1" }));
+		handlePtyUpsert(upsert("pty1", "exited"));
 
 		expect(terminalState.tabs.get("pty1")).toEqual({
 			ptyId: "pty1",
@@ -694,44 +614,27 @@ describe("applying server rows never touches the client half", () => {
 		});
 	});
 
-	it.each([
-		"local-pty1",
-		"pty-opencode",
-	])("keeps %s exited when an older ListPtys response arrives after its exit", (ptyId) => {
-		const olderResponse = { projectSlug: "demo", ptys: [ptyRow(ptyId)] };
-		applyPtyListResponse(olderResponse);
-		handlePtyExited({ type: "pty_exited", ptyId, exitCode: 0 });
-
-		applyPtyListResponse(olderResponse);
-
-		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
-	});
-
-	it("requires confirmed host replay to restore running status without replacing client state", () => {
+	it("a host restore (running upsert + replace output) revives the tab without replacing client state", () => {
 		const ptyId = "local-pty1";
-		handlePtyCreated(ptyCreatedMsg(ptyId));
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert(ptyId));
+		handlePtyUpsert(upsert("pty2"));
 		renameTab(ptyId, "build");
 		switchTab(ptyId);
 		openPanel();
-		handlePtyOutput({ type: "pty_output", ptyId, data: "retained\n" });
+		handlePtyOutput({ _tag: "output", ptyId, data: "retained\n" });
 		const scrollback = getScrollback(ptyId);
 		const output = vi.fn();
 		onOutput(ptyId, output);
-		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
+		handlePtyUpsert(upsert(ptyId, "exited"));
 		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
 
-		handlePtyList({ type: "pty_list", ptys: [ptyRow(ptyId), ptyRow("pty2")] });
-		expect(terminalState.tabs.get(ptyId)?.exited).toBe(true);
-		handlePtyOutput(
-			msg({
-				type: "pty_output",
-				ptyId,
-				data: "retained\n",
-				replace: true,
-				restored: true,
-			}),
-		);
+		handlePtyUpsert(upsert(ptyId));
+		handlePtyOutput({
+			_tag: "output",
+			ptyId,
+			data: "retained\n",
+			replace: true,
+		});
 
 		expect(terminalState.tabs.get(ptyId)).toEqual({
 			ptyId,
@@ -742,35 +645,28 @@ describe("applying server rows never touches the client half", () => {
 		expect(terminalState.panelOpen).toBe(true);
 		expect(getScrollback(ptyId)).toBe(scrollback);
 		expect(scrollback).toEqual(["retained\n"]);
-		handlePtyOutput({ type: "pty_output", ptyId, data: "live\n" });
+		handlePtyOutput({ _tag: "output", ptyId, data: "live\n" });
 		expect(output.mock.calls).toEqual([["retained\n", true], ["live\n"]]);
 		expect(scrollback).toEqual(["retained\n", "live\n"]);
 	});
 
-	it("restores a running host terminal when its confirmed snapshot is empty", () => {
+	it("restores a running host terminal when its restored ring is empty", () => {
 		const ptyId = "local-pty1";
-		handlePtyCreated(ptyCreatedMsg(ptyId));
-		handlePtyOutput({ type: "pty_output", ptyId, data: "stale" });
-		handlePtyExited({ type: "pty_exited", ptyId, exitCode: -1 });
-		handlePtyOutput(
-			msg({
-				type: "pty_output",
-				ptyId,
-				data: "",
-				replace: true,
-				restored: true,
-			}),
-		);
+		handlePtyUpsert(upsert(ptyId));
+		handlePtyOutput({ _tag: "output", ptyId, data: "stale" });
+		handlePtyUpsert(upsert(ptyId, "exited"));
+		handlePtyUpsert(upsert(ptyId));
+		handlePtyOutput({ _tag: "output", ptyId, data: "", replace: true });
 		expect(terminalState.tabs.get(ptyId)?.exited).toBe(false);
 		expect(getScrollback(ptyId)).toEqual([]);
 	});
 
 	it("drops the label when the server drops the pty, freeing its number", () => {
-		handlePtyCreated(ptyCreatedMsg("pty1"));
+		handlePtyUpsert(upsert("pty1"));
 		renameTab("pty1", "build");
-		handlePtyDeleted(msg({ type: "pty_deleted", ptyId: "pty1" }));
+		handlePtyRemove({ id: "pty1" });
 
-		handlePtyCreated(ptyCreatedMsg("pty2"));
+		handlePtyUpsert(upsert("pty2"));
 
 		expect(terminalState.tabs.get("pty2")?.title).toBe("Terminal 1");
 	});

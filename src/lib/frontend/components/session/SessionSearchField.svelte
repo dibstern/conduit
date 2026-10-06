@@ -3,12 +3,14 @@
 <!-- same chip. Both write ?p=<slug> in the URL (stores/session-scope.ts).      -->
 
 <script lang="ts">
-	import { confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
+	import { applyProjectMutationResponse, confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
 	import {
 		getSessionScope,
 		setSessionScope,
 		takeScopeToken,
 	} from "../../stores/session-scope.js";
+	import type { ProjectInfo } from "../../types.js";
+	import ProjectDialog from "../project/ProjectDialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -43,6 +45,7 @@
 	// projects at once. It lasts only while the menu stays open.
 	let selecting = $state(false);
 	let selected: readonly string[] = $state([]);
+	let editing: ProjectInfo | null = $state(null);
 	// Focusing or typing in the input raises the suggestions; they stay up while
 	// focus is anywhere in the field, and Escape hides them without leaving it.
 	let focused = $state(false);
@@ -246,7 +249,11 @@
 			>
 				<MenuRadioItem value={ALL_PROJECTS} class="min-h-[44px] md:min-h-0">All projects</MenuRadioItem>
 				{#each projectState.projects as project (project.slug)}
-					<ProjectScopeItem {project} onremove={(slug) => void removeProjects([slug])} />
+					<ProjectScopeItem
+						{project}
+						onremove={(slug) => void removeProjects([slug])}
+						onedit={(target) => { setPickerOpen(false); editing = target; }}
+					/>
 				{/each}
 			</MenuRadioGroup>
 			{#if projectState.projects.length > 0 || onaddproject}<MenuSeparator />{/if}
@@ -344,3 +351,14 @@
 		{#if scope === slug}<Icon name="check" size={13} class="shrink-0 text-accent" />{/if}
 	</Button>
 {/snippet}
+
+{#if editing}
+	<ProjectDialog
+		open
+		project={editing}
+		projects={projectState.projects}
+		onclose={() => { editing = null; }}
+		onsaved={applyProjectMutationResponse}
+		returnFocus={() => scopeChip ?? null}
+	/>
+{/if}

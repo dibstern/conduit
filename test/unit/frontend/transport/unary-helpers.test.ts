@@ -1,6 +1,7 @@
 import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { Effect, Exit } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ProjectSaveRejected } from "../../../../src/lib/contracts/ws-rpc.js";
 import { disposeRuntime } from "../../../../src/lib/frontend/transport/runtime.js";
 import type {
 	TrafficClass,
@@ -8,12 +9,14 @@ import type {
 } from "../../../../src/lib/frontend/transport/shared-client.js";
 import { WsRpcGroup } from "../../../../src/lib/frontend/transport/ws-rpc.js";
 import {
+	saveProjectRpc,
 	setLogLevelRpc,
 	syncInputDraftRpc,
 } from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 const harness = vi.hoisted(() => ({
 	connect: undefined as WsRpcConnect | undefined,
+	saveFailure: undefined as ProjectSaveRejected | undefined,
 }));
 
 // Replace only the transport factory; use the real shared service and runtime.
@@ -43,6 +46,7 @@ const transports: Array<{
 const legacySockets: string[] = [];
 
 beforeEach(() => {
+	harness.saveFailure = undefined;
 	transports.length = 0;
 	legacySockets.length = 0;
 	vi.stubGlobal("location", { protocol: "http:", host: "localhost:2633" });
@@ -96,10 +100,33 @@ beforeEach(() => {
 					_tag: "Exit",
 					clientId: 0,
 					requestId,
-					exit: Exit.succeed({ ok: true }),
+					exit: harness.saveFailure
+						? Exit.fail(harness.saveFailure)
+						: Exit.succeed({ ok: true }),
 				});
 			return built.client;
 		});
+});
+
+it("preserves typed folder issues at the SaveProject Promise boundary", async () => {
+	const failure = new ProjectSaveRejected({
+		issues: [
+			{
+				kind: "mkdir-failed",
+				path: "/missing/parent/notes",
+				message: "ENOENT",
+			},
+		],
+	});
+	harness.saveFailure = failure;
+
+	await expect(
+		saveProjectRpc({
+			projectSlug: "alpha",
+			title: "Notes",
+			folders: [{ path: "/missing/parent/notes", create: { gitInit: true } }],
+		}),
+	).rejects.toBe(failure);
 });
 
 afterEach(async () => {

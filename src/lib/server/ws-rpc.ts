@@ -1,9 +1,13 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
 import { type Context, Effect, type Layer, Stream } from "effect";
 import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
+import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
+import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
+import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
@@ -28,6 +32,8 @@ export {
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	FindFolders,
+	type FindFoldersResponse,
 	ForkSession,
 	type ForkSessionResponse,
 	GetAgents,
@@ -63,8 +69,6 @@ export {
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
-	ListDirectories,
-	type ListDirectoriesResponse,
 	ListPtys,
 	LoadMoreHistory,
 	type LoadMoreHistoryResponse,
@@ -74,7 +78,9 @@ export {
 	type ModelInfo,
 	type ProjectMutationResponse,
 	type ProviderInfo,
+	type PtyEnvelope,
 	type PtyInfo,
+	PtyInput,
 	type PtyListResponse,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -115,7 +121,9 @@ export {
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
+	SubscribePtys,
 	SubscribeSessionDetail,
+	SubscribeSessionTodos,
 	SubscribeShell,
 	SwitchAgent,
 	SwitchContextWindow,
@@ -163,6 +171,21 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	SubscribeApprovals: (request) =>
+		Rpc.fork(
+			subscribeApprovals(
+				request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence },
+			).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeApprovals failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
 	SubscribeSessionDetail: (request) =>
 		Rpc.fork(
 			subscribeSessionDetail({
@@ -181,6 +204,34 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	SubscribeSessionTodos: (request) =>
+		Rpc.fork(
+			subscribeSessionTodos({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionTodos failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribePtys: () =>
+		Rpc.fork(
+			subscribePtys().pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribePtys failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
 	...unaryHandlers,
 });
 
@@ -215,7 +266,7 @@ export type DaemonRpcName =
 	| "SetAutoSettleSetting"
 	| "ScanNow"
 	| "DetectProxy"
-	| "ListDirectories"
+	| "FindFolders"
 	| "ListDaemonSessions"
 	| "SetLogLevel"
 	| "ResolveSession";
@@ -324,6 +375,14 @@ export const makeRoutedWsRpcServerLayer = (
 						: { resumeFromSequence: request.resumeFromSequence },
 				),
 			),
+		SubscribeApprovals: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeApprovals(
+					request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence },
+				),
+			),
 		SubscribeSessionDetail: (request) =>
 			routeStream(request.projectSlug, () => {
 				const source = subscribeSessionDetail({
@@ -336,5 +395,17 @@ export const makeRoutedWsRpcServerLayer = (
 					? encodeSessionDetail(source)
 					: source;
 			}),
+		SubscribeSessionTodos: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeSessionTodos({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				}),
+			),
+		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
+		SubscribeProjectSettings: (request) =>
+			routeStream(request.projectSlug, () => subscribeProjectSettings()),
 	});
 };

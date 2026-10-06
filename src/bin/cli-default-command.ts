@@ -34,7 +34,7 @@ async function showProject(ctx: CommandContext): Promise<void> {
 		const directory = resolve(cwd);
 		const { projects } = await rpcSend(new GetProjects({}));
 		const existing = projects.find(
-			(project) => (project.folders?.[0] ?? project.directory) === directory,
+			(project) => project.folders[0] === directory,
 		);
 		const registerResponse = await rpcSend(
 			new SaveProject({

@@ -110,7 +110,7 @@ describe("foreground daemon process harness", () => {
 		const cursor = browser.frames.length;
 		const pending = browser.send(sessionId, "approval-proof");
 		const request = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
 		expect(request["toolName"]).toBe("Bash");
@@ -125,13 +125,12 @@ describe("foreground daemon process harness", () => {
 		await browser.answerApproval(request, decision);
 		const turn = await pending;
 		expect(turn.chunks).toEqual(responseChunks("approval-proof"));
-		const resolved = await browser.waitFor(
+		await browser.waitFor(
 			(message) =>
-				message["type"] === "permission_resolved" &&
-				message["requestId"] === request["requestId"],
+				message["type"] === "approval_removed" &&
+				message["id"] === request["requestId"],
 			cursor,
 		);
-		expect(resolved["decision"]).toBe(decision === "allow" ? "once" : "reject");
 		const result = await browser.waitFor(
 			(message) => message["type"] === "tool_result",
 			cursor,

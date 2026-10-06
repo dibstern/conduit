@@ -26,6 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
@@ -33,6 +34,7 @@ import {
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
@@ -111,6 +113,9 @@ describe("RelayFactoryTag", () => {
 	// It requires DaemonConfigRefTag from the caller.
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
 		Layer.provideMerge(configLayer),
+		Layer.provide(
+			Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+		),
 	);
 
 	it.effect("resolves from the Layer", () =>
@@ -135,8 +140,7 @@ describe("RelayFactoryTag", () => {
 			const factory = yield* RelayFactoryTag;
 			const project = {
 				slug: "test-project",
-				directory: "/tmp/test-project",
-				folders: ["/tmp/test-project"],
+				folders: ["/tmp/test-project"] as const,
 				title: "Test Project",
 			};
 
@@ -170,7 +174,6 @@ describe("RelayFactoryTag", () => {
 						{
 							slug: "missing",
 							title: "Missing",
-							directory: missingDirectory,
 							folders: [missingDirectory],
 						},
 						"http://localhost:4096",
@@ -206,8 +209,7 @@ describe("RelayFactoryTag", () => {
 			const project = {
 				slug: "git-project",
 				title: "Git Project",
-				directory,
-				folders: [directory],
+				folders: [directory] as const,
 			};
 			yield* addWithoutRelay(project);
 			const subscription = yield* subscribeToDaemonEvents;

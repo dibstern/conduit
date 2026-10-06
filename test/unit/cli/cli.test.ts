@@ -674,7 +674,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							projects: [
 								{
 									slug: "my-project",
-									directory: "/home/user/my-project",
+									folders: ["/home/user/my-project"],
 									title: "My Project",
 								},
 							],
@@ -739,7 +739,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							projects: [
 								{
 									slug: "my-project",
-									directory: "/home/user/my-project",
+									folders: ["/home/user/my-project"],
 									title: "",
 								},
 							],
@@ -770,10 +770,10 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							projects: [
 								{
 									slug: "proj-a",
-									directory: "/home/user/proj-a",
+									folders: ["/home/user/proj-a"],
 									title: "Project A",
 								},
-								{ slug: "proj-b", directory: "/home/user/proj-b", title: "" },
+								{ slug: "proj-b", folders: ["/home/user/proj-b"], title: "" },
 							],
 						};
 					}
@@ -812,7 +812,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							projects: [
 								{
 									slug: "my-project",
-									directory: "/home/user/my-project",
+									folders: ["/home/user/my-project"],
 									title: "",
 								},
 							],
@@ -888,7 +888,7 @@ describe("T6: --add/--remove/--list/--title (AC5)", () => {
 							projects: [
 								{
 									slug: "my-project",
-									directory: "/home/user/my-project",
+									folders: ["/home/user/my-project"],
 									title: "",
 								},
 							],

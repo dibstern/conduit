@@ -26,6 +26,7 @@
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { partStyle } from "./activity-style.js";
 	import SkillDoc from "./SkillDoc.svelte";
+	import ToolOutputMore from "./ToolOutputMore.svelte";
 
 	let {
 		part,
@@ -110,8 +111,9 @@
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
 		{:else if expanded && (part.result || command)}
 			<div
-				class="ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {part.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
+				class="tool-result ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {part.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
 			>{#if command}<span class="text-text-muted">$ {command}</span>{#if part.result}{"\n\n"}{/if}{/if}{part.result ?? ""}</div>
+			<ToolOutputMore message={part} class="ml-7 mr-1 mb-1" />
 		{/if}
 	</div>
 {:else if part.type === "thinking"}

@@ -73,6 +73,7 @@ export const sessionsHandlers = {
 				...(request.search !== undefined ? { search: request.search } : {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 				...(request.scope !== undefined ? { scope: request.scope } : {}),
+				...(request.exclude !== undefined ? { exclude: request.exclude } : {}),
 			});
 			return {
 				projectSlug: request.projectSlug,
@@ -219,6 +220,7 @@ export const sessionsHandlers = {
 			...(request.title != null ? { title: request.title } : {}),
 			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
 			...(request.providerId != null ? { providerId: request.providerId } : {}),
+			...(request.model != null ? { model: request.model } : {}),
 		}).pipe(
 			Effect.map((session) => ({
 				projectSlug: request.projectSlug,

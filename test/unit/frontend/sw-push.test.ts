@@ -134,16 +134,16 @@ describe("SW push handler", () => {
 	it("shows notification for 'done' event", async () => {
 		const event = createPushEvent({
 			type: "done",
-			title: "Task Complete",
-			body: "Agent has finished processing.",
+			title: "Response complete",
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 		});
 
 		await callPushListener(event);
 
 		const spy = getShowNotificationSpy();
-		expect(spy).toHaveBeenCalledWith("Task Complete", {
-			body: "Agent has finished processing.",
+		expect(spy).toHaveBeenCalledWith("Response complete", {
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 			data: expect.objectContaining({ type: "done" }),
 		});
@@ -206,8 +206,8 @@ describe("SW push handler", () => {
 		]);
 		const event = createPushEvent({
 			type: "done",
-			title: "Task Complete",
-			body: "Agent has finished processing.",
+			title: "Response complete",
+			body: "Agent finished its response.",
 			tag: "opencode-done",
 		});
 

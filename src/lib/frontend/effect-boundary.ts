@@ -8,8 +8,7 @@
 //   - Protocol correctness: Known message types that fail schema validation are
 //     rejected so bad server payloads do not enter application state.
 //
-// Uses RelayMessageSchema from shared-types.ts (daemon → client direction),
-// NOT IncomingWsMessage from ws-message-schemas.ts (client → daemon direction).
+// Uses RelayMessageSchema from shared-types.ts (daemon → client direction).
 
 import { Schema } from "effect";
 import {

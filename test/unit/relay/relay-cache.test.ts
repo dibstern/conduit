@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import {
+	Cause,
 	Context,
 	Deferred,
 	Duration,
@@ -54,7 +55,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const relay = yield* cache.get("my-project");
 
@@ -74,7 +75,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const relay1 = yield* cache.get("my-project");
 			const relay2 = yield* cache.get("my-project");
@@ -94,7 +95,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const missing = yield* cache.peek("my-project");
 			expect(Option.isNone(missing)).toBe(true);
@@ -123,7 +124,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const getFiber = yield* Effect.fork(cache.get("my-project"));
 			yield* Deferred.await(factoryStarted);
@@ -164,7 +165,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const getFiber = yield* Effect.fork(cache.get("my-project"));
 			yield* Effect.gen(function* () {
@@ -178,11 +179,55 @@ describe("RelayCache", () => {
 				);
 
 				yield* Deferred.succeed(releaseFactory, undefined);
-				yield* Fiber.await(getFiber);
+				const waiterExit = yield* Fiber.await(getFiber);
 
 				expect(invalidateResult).toBe("completed");
 				expect(interruptedResult).toBe("completed");
+				expect(Exit.isFailure(waiterExit)).toBe(true);
+				if (Exit.isFailure(waiterExit)) {
+					expect(Cause.failureOption(waiterExit.cause)).toMatchObject({
+						_tag: "Some",
+						value: {
+							_tag: "RelayCreationInvalidatedError",
+							slug: "my-project",
+						},
+					});
+				}
 			}).pipe(Effect.ensuring(Fiber.interrupt(getFiber)));
+		}),
+	);
+
+	it.scoped("keeps startup alive when its first caller disconnects", () =>
+		Effect.gen(function* () {
+			const factoryStarted = yield* Deferred.make<void>();
+			const releaseFactory = yield* Deferred.make<void>();
+			const relay = makeTestRelay("my-project");
+			let callCount = 0;
+			const factory: RelayFactory = () =>
+				Effect.gen(function* () {
+					callCount++;
+					yield* Deferred.succeed(factoryStarted, undefined);
+					yield* Deferred.await(releaseFactory);
+					return relay;
+				});
+			const cache = Context.get(
+				yield* Layer.build(makeRelayCacheLive(factory)),
+				RelayCacheTag,
+			);
+
+			const firstCaller = yield* Effect.fork(cache.get("my-project"));
+			yield* Deferred.await(factoryStarted);
+			yield* Fiber.interrupt(firstCaller);
+			const secondCaller = yield* Effect.fork(cache.get("my-project"));
+			yield* Deferred.succeed(releaseFactory, undefined);
+			const completion = yield* completeOrTimeout(
+				Fiber.join(secondCaller).pipe(
+					Effect.tap((ready) => Effect.sync(() => expect(ready).toBe(relay))),
+				),
+			);
+
+			expect(completion).toBe("completed");
+			expect(callCount).toBe(1);
 		}),
 	);
 
@@ -196,7 +241,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			// Fire two gets concurrently — semaphore serializes them,
 			// so the second finds the already-created relay from the first.
@@ -223,7 +268,7 @@ describe("RelayCache", () => {
 				});
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			// First get creates the relay
 			const relay1 = yield* cache.get("my-project");
@@ -261,7 +306,7 @@ describe("RelayCache", () => {
 			const factory: RelayFactory = () => Effect.succeed(relay);
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 			yield* cache.get("my-project");
 
 			const invalidateFiber = yield* Effect.fork(
@@ -316,6 +361,57 @@ describe("RelayCache", () => {
 		}),
 	);
 
+	it.effect("scope close interrupts startup and settles waiting callers", () =>
+		Effect.gen(function* () {
+			const factoryStarted = yield* Deferred.make<void>();
+			const releaseFactory = yield* Deferred.make<void>();
+			const factoryInterrupted = yield* Deferred.make<void>();
+			const factory: RelayFactory = () =>
+				Effect.gen(function* () {
+					yield* Deferred.succeed(factoryStarted, undefined);
+					yield* Deferred.await(releaseFactory).pipe(
+						Effect.onInterrupt(() =>
+							Deferred.succeed(factoryInterrupted, undefined).pipe(
+								Effect.asVoid,
+							),
+						),
+					);
+					return makeTestRelay("my-project");
+				});
+			const scope = yield* Scope.make();
+			const context = yield* Layer.buildWithScope(
+				makeRelayCacheLive(factory),
+				scope,
+			);
+			const cache = Context.get(context, RelayCacheTag);
+			const caller = yield* Effect.fork(cache.get("my-project"));
+			yield* Deferred.await(factoryStarted);
+
+			const closed = yield* completeOrTimeout(Scope.close(scope, Exit.void));
+			const interrupted = yield* completeOrTimeout(
+				Deferred.await(factoryInterrupted),
+			);
+			const callerCompleted = yield* completeOrTimeout(
+				Fiber.await(caller).pipe(
+					Effect.tap((waiterExit) =>
+						Effect.sync(() => {
+							expect(Exit.isFailure(waiterExit)).toBe(true);
+							if (Exit.isFailure(waiterExit)) {
+								expect(Cause.isInterrupted(waiterExit.cause)).toBe(true);
+							}
+						}),
+					),
+				),
+			);
+			yield* Deferred.succeed(releaseFactory, undefined);
+			yield* Fiber.interrupt(caller);
+
+			expect(closed).toBe("completed");
+			expect(interrupted).toBe("completed");
+			expect(callerCompleted).toBe("completed");
+		}),
+	);
+
 	it.scoped("invalidate logs and swallows relay stop rejection", () =>
 		Effect.gen(function* () {
 			const messages: unknown[] = [];
@@ -331,7 +427,7 @@ describe("RelayCache", () => {
 			const factory: RelayFactory = () => Effect.succeed(relay);
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 			const exit = yield* Effect.gen(function* () {
 				yield* cache.get("my-project");
 				return yield* Effect.exit(cache.invalidate("my-project"));
@@ -357,7 +453,7 @@ describe("RelayCache", () => {
 				Effect.sync(() => makeTestRelay(slug));
 
 			const layer = makeRelayCacheLive(factory);
-			const cache = yield* Effect.provide(RelayCacheTag, layer);
+			const cache = Context.get(yield* Layer.build(layer), RelayCacheTag);
 
 			const relayA = yield* cache.get("project-a");
 			const relayB = yield* cache.get("project-b");

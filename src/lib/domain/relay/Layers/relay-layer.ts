@@ -7,9 +7,9 @@
 import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../daemon/Services/instance-manager-service.js";
-import { ClientMessageSerializationLive } from "../Services/client-message-serialization.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { PendingSendOwnershipLive } from "../Services/pending-send-ownership.js";
+import { ProjectSettingsLive } from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
 import { RelayStatusSnapshotLive } from "../Services/relay-status-snapshot.js";
@@ -81,11 +81,12 @@ export const makeRelayStateLive = (
 		makePollerPubSubLive(),
 		// WebSocket handler state
 		makeWsHandlerStateLive(),
-		ClientMessageSerializationLive,
 		// Per-relay domain event fanout
 		RelayEventBusLive,
 		// Per-relay committed-event change signal (streaming subscriptions)
 		SessionEventBusLive,
+		// Per-relay project-settings change fanout
+		ProjectSettingsLive,
 		// PTY state
 		PtyManagerStateLive,
 		// Instance management state

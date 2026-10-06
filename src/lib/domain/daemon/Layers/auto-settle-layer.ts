@@ -32,14 +32,15 @@ export const AutoSettleLive = (configDir: string) =>
 				);
 				for (const project of projects) {
 					yield* Effect.gen(function* () {
-						if (!existsSync(project.directory)) {
-							if (!missingDirectories.has(project.directory)) {
-								missingDirectories.add(project.directory);
+						const mainFolder = project.folders[0];
+						if (!existsSync(mainFolder)) {
+							if (!missingDirectories.has(mainFolder)) {
+								missingDirectories.add(mainFolder);
 								yield* Effect.logDebug(
 									"Skipping background work for missing project directory",
 									{
 										projectSlug: project.slug,
-										directory: project.directory,
+										mainFolder,
 									},
 								);
 							}
@@ -47,7 +48,7 @@ export const AutoSettleLive = (configDir: string) =>
 							yield* cache.invalidate(project.slug);
 							return;
 						}
-						missingDirectories.delete(project.directory);
+						missingDirectories.delete(mainFolder);
 						if (days === null) return;
 						const running = yield* cache.peek(project.slug);
 						const relay = Option.isSome(running)

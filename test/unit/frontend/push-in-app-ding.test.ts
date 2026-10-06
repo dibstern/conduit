@@ -131,7 +131,7 @@ afterEach(() => {
 
 const doneAlert = {
 	type: "done",
-	title: "Task Complete",
+	title: "Response complete",
 	body: "Agent has finished",
 	tag: "opencode-done",
 	sessionId: "s1",
@@ -284,7 +284,7 @@ describe("SW push: in-app ding vs OS notification", () => {
 		expect(showNotification).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(100);
 		expect(showNotification).toHaveBeenCalledWith(
-			"Task Complete",
+			"Response complete",
 			expect.objectContaining({ tag: "opencode-done" }),
 		);
 		await delivery;
@@ -298,7 +298,7 @@ describe("SW push: in-app ding vs OS notification", () => {
 		await push(doneAlert);
 
 		expect(showNotification).toHaveBeenCalledWith(
-			"Task Complete",
+			"Response complete",
 			expect.objectContaining({ tag: "opencode-done" }),
 		);
 	});

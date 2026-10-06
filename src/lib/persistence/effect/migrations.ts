@@ -14,6 +14,7 @@ import {
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	PENDING_APPROVALS_VERSION_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -33,6 +34,8 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	STARTUP_RESTORE_INDEXES_MIGRATION,
+	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -997,14 +1000,22 @@ export const effectMigrationEntries = {
 		if (columns.some((column) => column.name === "goal_state")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
 	}),
-	"0031_sessions_side_thread": Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
-		if (columns.some((column) => column.name === "side_thread")) return;
-		yield* executeSqlStatements(
-			readMigrationSql(SESSIONS_SIDE_THREAD_MIGRATION),
-		);
-	}),
+	"0031_startup_restore_indexes": executeSqlStatements(
+		readMigrationSql(STARTUP_RESTORE_INDEXES_MIGRATION),
+	),
+	"0032_tool_call_index": executeSqlStatements(
+		readMigrationSql(TOOL_CALL_INDEX_MIGRATION),
+	),
+	"0033_pending_approvals_version": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"version",
+		readMigrationSql(PENDING_APPROVALS_VERSION_MIGRATION),
+	),
+	"0034_sessions_side_thread": runAddColumnMigrationIfMissing(
+		"sessions",
+		"side_thread",
+		readMigrationSql(SESSIONS_SIDE_THREAD_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

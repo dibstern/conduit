@@ -4,7 +4,7 @@
 
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, type Scope } from "effect";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -67,16 +67,16 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	/**
-	 * Resolve the API client for a session bound to a NAMED
-	 * OpenCode instance (a real second server). Resolves to undefined when the
-	 * session runs on the project-default instance, and fails when a named
-	 * instance cannot be resolved — the caller surfaces that as a send
-	 * failure instead of silently using the default server. Absent in wirings
+	 * Resolve the scoped API client for the OpenCode instance that owns a
+	 * session (OpenCode Instances `use`). Resolving to undefined means the
+	 * default client. Fails when the instance is unknown or unreachable — the
+	 * caller surfaces that as a send failure instead of silently using the
+	 * default server. Absent in wirings
 	 * without named-instance support.
 	 */
 	readonly clientForSession?: (
 		sessionId: string,
-	) => Effect.Effect<OpenCodeAPI | undefined, Error>;
+	) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>;
 }
 
 export class OpenCodeProviderInstance implements ProviderInstance {
@@ -85,7 +85,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
 	private readonly clientForSession:
-		| ((sessionId: string) => Effect.Effect<OpenCodeAPI | undefined, Error>)
+		| ((
+				sessionId: string,
+		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
 	private readonly pendingTurns = new Map<
 		string,
@@ -107,7 +109,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	 */
 	private resolveClientEffect(
 		sessionId: string,
-	): Effect.Effect<OpenCodeAPI, Error> {
+	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
 		const resolve = this.clientForSession;
 		if (resolve === undefined) return Effect.succeed(this.client);
 		return resolve(sessionId).pipe(
@@ -337,9 +339,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					// 404s the prompt. Surface that clearly instead of silently
 					// re-routing to the default server.
 					const message =
-						client !== this.client &&
 						cause instanceof OpenCodeApiError &&
-						cause.responseStatus === 404
+						cause.responseStatus === 404 &&
+						client.getBaseUrl() !== this.client.getBaseUrl()
 							? `${baseMessage} — this session does not exist on its bound OpenCode instance (it may predate named-instance routing); create a new session on that instance`
 							: baseMessage;
 					log.error(`sendTurn failed for session ${sessionId}: ${message}`);
@@ -349,7 +351,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				if (abortSignal.aborted) return interruptedTurnResult();
 				return yield* Deferred.await(pendingTurn.deferred);
 			}).pipe(Effect.ensuring(cleanup));
-		});
+			// The client stays valid for the whole turn, abort included.
+		}).pipe(Effect.scoped);
 	}
 
 	/**
@@ -386,6 +389,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			),
 			Effect.mapError((cause) => this.providerFailure("interruptTurn", cause)),
 			Effect.asVoid,
+			Effect.scoped,
 		);
 	}
 
@@ -408,6 +412,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				this.providerFailure("setPermissionMode", cause),
 			),
 			Effect.asVoid,
+			Effect.scoped,
 		);
 	}
 
@@ -427,6 +432,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				this.providerFailure("resolvePermission", cause),
 			),
 			Effect.asVoid,
+			Effect.scoped,
 		);
 	}
 
@@ -449,6 +455,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				this.providerFailure("resolveQuestion", cause),
 			),
 			Effect.asVoid,
+			Effect.scoped,
 		);
 	}
 

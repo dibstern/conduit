@@ -112,8 +112,7 @@ export interface ConnectionHealth {
 
 export interface StoredProject {
 	readonly slug: string;
-	readonly directory: string;
-	readonly folders: readonly string[];
+	readonly folders: readonly [string, ...string[]];
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
@@ -147,6 +146,10 @@ export interface ProjectRelayConfig {
 	opencodeUrl: string;
 	/** Credentials of the OpenCode instance selected for this relay. */
 	opencodeAuth?: { username: string; password: string };
+	/** Daemon-owned OpenCode Instances module shared by project relays. */
+	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
+	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
+	openCodeInstanceId?: string;
 	/** Project working directory */
 	projectDir: string;
 	/** Additional Claude workspace folders, fixed for this relay's lifetime. */
@@ -168,8 +171,7 @@ export interface ProjectRelayConfig {
 		ReadonlyArray<{
 			slug: string;
 			title: string;
-			directory: string;
-			folders?: readonly string[];
+			folders: readonly [string, ...string[]];
 			instanceId?: string;
 		}>
 	>;
@@ -229,8 +231,6 @@ export interface ProjectRelayConfig {
 		lost: number[];
 		active: number[];
 	}>;
-	/** Return cached update version if one is available (for replaying to new clients). */
-	getCachedUpdate?: () => MaybePromise<string | null>;
 	/** Optional push notification manager for server-side push delivery */
 	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */

@@ -121,7 +121,7 @@ class RelayTestSdkConfigurationError extends Data.TaggedError(
 
 interface StandaloneProjectEntry {
 	slug: string;
-	directory: string;
+	folders: readonly [string, ...string[]];
 	title: string;
 	getClientCount?: () => number;
 	getSessionCount?: () => number;
@@ -210,7 +210,7 @@ export class EffectRelayServer {
 		const getProjects = (): RouterProjectInfo[] =>
 			Array.from(this.projects.values()).map((p) => ({
 				slug: p.slug,
-				directory: p.directory,
+				folders: p.folders,
 				title: p.title,
 				clients: p.getClientCount?.() ?? 0,
 				sessions: p.getSessionCount?.() ?? 0,
@@ -686,7 +686,7 @@ export async function createRelayStack(
 
 	server.addProject({
 		slug: config.slug,
-		directory: config.projectDir,
+		folders: [config.projectDir],
 		title: config.slug,
 	});
 
@@ -709,8 +709,7 @@ export async function createRelayStack(
 		server.getProjects().map((p) => ({
 			slug: p.slug,
 			title: p.title,
-			directory: p.directory,
-			folders: [p.directory],
+			folders: p.folders,
 		}));
 
 	const saveProjectRelay: NonNullable<
@@ -722,17 +721,15 @@ export async function createRelayStack(
 				directory: "",
 				reason: "missing",
 			});
-		const project = await addProjectRelay(main);
-		return {
-			project: { ...project, folders: [project.directory] },
-			warnings: [],
-		};
+		return { project: await addProjectRelay(main), warnings: [] };
 	};
 
 	/** Create a new project relay and register it. */
-	async function addProjectRelay(
-		directory: string,
-	): Promise<{ slug: string; title: string; directory: string }> {
+	async function addProjectRelay(directory: string): Promise<{
+		slug: string;
+		title: string;
+		folders: readonly [string, ...string[]];
+	}> {
 		// Expand ~ and resolve to absolute path
 		if (directory.startsWith("~/") || directory === "~") {
 			directory = directory.replace("~", homedir());
@@ -741,8 +738,8 @@ export async function createRelayStack(
 
 		// Check if directory is already registered
 		for (const p of server.getProjects()) {
-			if (p.directory === directory) {
-				return { slug: p.slug, title: p.title, directory: p.directory };
+			if (p.folders[0] === directory) {
+				return { slug: p.slug, title: p.title, folders: p.folders };
 			}
 		}
 
@@ -763,7 +760,7 @@ export async function createRelayStack(
 		// Guard against concurrent creation for the same slug
 		if (relays.has(slug) || pendingSlugs.has(slug)) {
 			const existing = relays.get(slug);
-			if (existing) return { slug, title, directory };
+			if (existing) return { slug, title, folders: [directory] };
 			throw new RelayCreationInProgressError({ directory });
 		}
 
@@ -796,7 +793,7 @@ export async function createRelayStack(
 			relays.set(slug, newRelay);
 			server.addProject({
 				slug,
-				directory,
+				folders: [directory],
 				title,
 				getClientCount: () => newRelay.getStatusSnapshot().clients,
 				getSessionCount: () => newRelay.getStatusSnapshot().sessionCount,
@@ -815,7 +812,7 @@ export async function createRelayStack(
 			pendingSlugs.delete(slug);
 		}
 
-		return { slug, title, directory };
+		return { slug, title, folders: [directory] };
 	}
 
 	const relay = await createProjectRelay({
@@ -846,7 +843,7 @@ export async function createRelayStack(
 	relays.set(config.slug, relay);
 	server.addProject({
 		slug: config.slug,
-		directory: config.projectDir,
+		folders: [config.projectDir],
 		title: config.slug,
 		getClientCount: () => relay.getStatusSnapshot().clients,
 		getSessionCount: () => relay.getStatusSnapshot().sessionCount,

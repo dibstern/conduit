@@ -28,7 +28,7 @@ export const Default: Story = {};
 export const WithOutput: Story = {
 	beforeEach: () => {
 		handlePtyOutput({
-			type: "pty_output",
+			_tag: "output",
 			ptyId: PTY_ID,
 			data: mockTerminalOutput,
 		});
@@ -39,7 +39,7 @@ export const LargeFont: Story = {
 	args: { fontSize: 18 },
 	beforeEach: () => {
 		handlePtyOutput({
-			type: "pty_output",
+			_tag: "output",
 			ptyId: PTY_ID,
 			data: mockTerminalOutput,
 		});

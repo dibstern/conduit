@@ -3,6 +3,7 @@
 // Pure conversion with no I/O.
 
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
+import { truncateContent } from "../relay/truncate-content.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
@@ -49,6 +50,9 @@ function snapshotRowToHistory(
 		role: parsed.role,
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+		...(row.role === "user" && row.turnTiming
+			? { turnTiming: row.turnTiming }
+			: {}),
 	};
 }
 
@@ -77,7 +81,20 @@ function parseObjectJson(value: string): Record<string, unknown> | undefined {
 	return undefined;
 }
 
-function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+/** A stored tool result as shown: JSON strings decoded, anything else raw. */
+export function toolOutputText(result: string): string {
+	try {
+		const output: unknown = JSON.parse(result);
+		return typeof output === "string" ? output : result;
+	} catch {
+		return result;
+	}
+}
+
+function partRowToHistoryPart(
+	row: MessagePartRow,
+	previewToolOutput: boolean,
+): HistoryMessagePart {
 	if (row.type === "compaction") {
 		const metadata =
 			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
@@ -123,6 +140,8 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			status?: ToolStatus;
 			input?: unknown;
 			output?: string;
+			isTruncated?: boolean;
+			fullContentLength?: number;
 			metadata?: Record<string, unknown>;
 			[key: string]: unknown;
 		} = {};
@@ -137,11 +156,12 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			}
 		}
 		if (row.result != null) {
-			try {
-				const output: unknown = JSON.parse(row.result);
-				stateObj["output"] = typeof output === "string" ? output : row.result;
-			} catch {
-				stateObj["output"] = row.result;
+			const output = toolOutputText(row.result);
+			const preview = previewToolOutput ? truncateContent(output) : undefined;
+			stateObj["output"] = preview?.content ?? output;
+			if (preview?.fullContentLength !== undefined) {
+				stateObj["isTruncated"] = true;
+				stateObj["fullContentLength"] = preview.fullContentLength;
 			}
 		}
 		if (row.metadata != null) {
@@ -172,10 +192,14 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
  *
  * Uses all ascending rows from the read model to detect exact `hasMore`, then
  * keeps the newest `pageSize` rows while preserving ascending display order.
+ *
+ * `toolOutputPreview` cuts long tool output the way the live stream does, for
+ * readers that can fetch the rest through GetToolContent. A busy session
+ * otherwise ships megabytes of output it mostly never shows.
  */
 export function messageRowsToHistory(
 	rows: MessageWithParts[],
-	opts: { pageSize: number },
+	opts: { pageSize: number; toolOutputPreview?: boolean },
 ): HistoryResult {
 	// The read query returns oldest-to-newest; keep the tail for REST parity.
 	const hasMore = rows.length > opts.pageSize;
@@ -184,7 +208,9 @@ export function messageRowsToHistory(
 	const messages: HistoryMessage[] = pageRows.map((row) => {
 		const snapshot = snapshotRowToHistory(row);
 		if (snapshot) return snapshot;
-		const parts = row.parts.map(partRowToHistoryPart);
+		const parts = row.parts.map((part) =>
+			partRowToHistoryPart(part, opts.toolOutputPreview === true),
+		);
 
 		return {
 			id: row.id,
@@ -197,6 +223,9 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
+			...(row.role === "user" && row.turnTiming
+				? { turnTiming: row.turnTiming }
+				: {}),
 			...(row.role === "user" && row.modelExecution
 				? {
 						modelExecution: {

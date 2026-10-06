@@ -2,6 +2,7 @@ import { Deferred, Effect, Layer, Ref } from "effect";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
+import { OpenCodeInstancesLive } from "../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { PortScannerTag } from "../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	ConfigPersistenceNoopLive,
@@ -79,8 +80,12 @@ export const makeDaemonRpcTestLayer = (
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 		}),
 	);
-	const dependencies = (options.persistence ?? ConfigPersistenceNoopLive).pipe(
-		Layer.provideMerge(base),
+	const dependencies = OpenCodeInstancesLive.pipe(
+		Layer.provideMerge(
+			(options.persistence ?? ConfigPersistenceNoopLive).pipe(
+				Layer.provideMerge(base),
+			),
+		),
 	);
 	return DaemonWsRpcHandlersLive.pipe(
 		Layer.provideMerge(DaemonHandleLive.pipe(Layer.provideMerge(dependencies))),

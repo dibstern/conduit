@@ -1,10 +1,8 @@
-// Verifies that createProjectRelay wires listPendingPermissions into the SSE
-// consumer, so pending permissions are rehydrated from the OpenCode API on
-// SSE connect. Uses a mock OpenCode server — no real OpenCode required.
-//
-// This is the integration-level companion to the unit tests in sse-wiring.test.ts
-// that prove wireSSEConsumerEffect handles listPendingPermissions correctly. This test
-// proves relay-stack.ts actually passes the function through.
+// Verifies that a standalone createProjectRelay recovers pending permissions on
+// stream connect: OpenCode Instances lists them from the OpenCode API and
+// re-emits them as ordinary permission.asked events, which reach the Effect
+// service. Browsers see them through the approvals subscription (ni8.9). Uses a
+// mock OpenCode server — no real OpenCode required.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import {
@@ -15,19 +13,16 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber } from "effect";
+import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { viewSessionForClient } from "../../../src/lib/handlers/session.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
-import type { RelayRuntimeServices } from "../../../src/lib/relay/project-relay-layers.js";
 import {
 	createProjectRelay,
 	type ProjectRelay,
 } from "../../../src/lib/relay/relay-stack.js";
-import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
 // Returns one pending permission from GET /permission.
 
@@ -44,7 +39,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
 		// SSE event stream
-		if (url.pathname === "/event") {
+		if (url.pathname === "/global/event") {
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
@@ -54,7 +49,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			// Real OpenCode's first SSE frame is always server.connected; conduit
 			// treats the first yielded event as its connect signal.
 			res.write(
-				`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`,
+				`data: ${JSON.stringify({ payload: { id: "evt_connected", type: "server.connected", properties: {} } })}\n\n`,
 			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));
@@ -200,7 +195,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	let mock: MockOpenCode;
 	let relay: ProjectRelay;
 	let relayServer: Server;
-	let relayPort: number;
 	let wss: WebSocketServer;
 	let persistenceDir: string;
 
@@ -209,7 +203,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 
 		relayServer = createServer();
 		await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
-		relayPort = (relayServer.address() as { port: number }).port;
 		persistenceDir = mkdtempSync(join(tmpdir(), "conduit-permission-"));
 
 		relay = await createProjectRelay({
@@ -230,6 +223,14 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			});
 		});
 
+		// Relay startup makes no OpenCode requests; the first use opens the stream.
+		await relay.effectRuntime.runtime.runPromise(
+			Effect.scoped(
+				Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+					instances.use("opencode"),
+				),
+			),
+		);
 		await vi.waitFor(async () => {
 			const pending = await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {
@@ -263,95 +264,5 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			sessionId: "sess-1",
 			toolName: "Bash",
 		});
-	});
-
-	it("broadcasts rehydrated permission to connected WS clients", async () => {
-		const url = `ws://127.0.0.1:${relayPort}`;
-		const client = new TestWsClient(url);
-		await client.waitForOpen();
-
-		// The client-init path replays pending permissions from the shared service.
-		// If rehydration worked, the client should receive a permission_request.
-		const permMsg = await client.waitFor("permission_request", {
-			timeout: 3000,
-		});
-		expect(permMsg).toMatchObject({
-			type: "permission_request",
-			requestId: "perm-rehydrate-1",
-			toolName: "Bash",
-			sessionId: "sess-1",
-		});
-
-		await client.close();
-	});
-
-	// A page reload is a fresh socket; the card it rebuilds must say what the
-	// live prompt said, including why the provider asked under Full access.
-	it("replays a provider prompt's title, description and reason after a reload", async () => {
-		const pendingInteractions = await relay.effectRuntime.runtime.runPromise(
-			PendingInteractionServiceTag,
-		);
-		const sink = createRelayEventSink({
-			sessionId: "sess-1",
-			send: () => {},
-			pendingInteractions: {
-				beginPermissionRequest: (entry) =>
-					pendingInteractions.beginPermissionRequest(entry),
-				resolvePermissionRequest: (requestId, response) =>
-					pendingInteractions.resolvePermissionRequest(requestId, response),
-				beginQuestionRequest: (entry) =>
-					pendingInteractions.beginQuestionRequest(entry),
-				resolveQuestionRequest: (requestId, answers) =>
-					pendingInteractions.resolveQuestionRequest(requestId, answers),
-			},
-		});
-		const prompt = {
-			permissionTitle: "Claude wants to run rm",
-			permissionDisplayName: "Bash",
-			permissionDescription: "Clean up worktrees",
-			permissionReason:
-				"Dangerous rm operation on possibly-empty variable path",
-		};
-		const ask = Effect.runFork(
-			sink.requestPermission({
-				requestId: "perm-reload-1",
-				sessionId: "sess-1",
-				turnId: "turn-1",
-				providerItemId: "tool-1",
-				toolName: "Bash",
-				toolInput: { command: "rm $R/$w/node_modules" },
-				...prompt,
-			}),
-		);
-		const replayed = (client: TestWsClient) =>
-			client
-				.getReceivedOfType("permission_request")
-				.filter((msg) => msg["requestId"] === "perm-reload-1");
-
-		const client = new TestWsClient(`ws://127.0.0.1:${relayPort}`);
-		await client.waitForOpen();
-		await vi.waitFor(() => expect(replayed(client)).toHaveLength(1));
-		const onConnect = replayed(client)[0];
-		client.clearReceived();
-		// The ViewSession RPC body; this harness serves the socket, not /rpc.
-		// The relay runtime provides the handler services; its public type
-		// promises only a subset.
-		await relay.effectRuntime.runtime.runPromise(
-			viewSessionForClient({
-				clientId: "perm-rehydrate-client",
-				sessionId: "sess-1",
-			}) as unknown as Effect.Effect<unknown, unknown, RelayRuntimeServices>,
-		);
-		await vi.waitFor(() => expect(replayed(client)).toHaveLength(1));
-
-		expect(onConnect).toMatchObject(prompt);
-		expect(replayed(client)[0]).toMatchObject(prompt);
-		await client.close();
-		await Effect.runPromise(
-			pendingInteractions.resolvePermissionRequest("perm-reload-1", {
-				decision: "reject",
-			}),
-		);
-		await Effect.runPromise(Fiber.join(ask));
 	});
 });

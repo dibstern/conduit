@@ -26,7 +26,6 @@ export type {
 	ContextWindowOption,
 	DaemonSessionCursor,
 	FileEntry,
-	FileVersion,
 	HistoryMessage,
 	HistoryMessagePart,
 	InstanceStatus,
@@ -117,6 +116,7 @@ export interface UserMessage {
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;
+	turnTiming?: HistoryMessage["turnTiming"];
 }
 
 export interface AssistantMessage {
@@ -381,8 +381,6 @@ export interface SplitRow {
 	newLineNo: number | null;
 	newLine: string | null;
 }
-
-// FileVersion is re-exported from shared-types.ts above.
 
 // ProjectInfo is re-exported from shared-types.ts above.
 

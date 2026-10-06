@@ -19,7 +19,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 import WebSocket from "ws";
 import {
 	defaultInstanceIdForDriver,
@@ -29,6 +29,7 @@ import {
 import {
 	GetInstances,
 	GetStatus,
+	type PtyEnvelope,
 	Shutdown,
 	WsRpcGroup,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -100,6 +101,15 @@ interface Generation {
 export interface BrowserFrame {
 	message: Record<string, unknown>;
 	at: bigint;
+}
+
+/** The SubscribePtys envelope a `{ type: "pty" }` frame records, if any. */
+export function ptyEnvelope(
+	message: Record<string, unknown>,
+): PtyEnvelope | undefined {
+	return message["type"] === "pty"
+		? (message as unknown as PtyEnvelope)
+		: undefined;
 }
 
 export class ProcessHarness {
@@ -237,7 +247,6 @@ export class ProcessHarness {
 					? [
 							{
 								path: this.projectDir,
-								directory: this.projectDir,
 								folders: [this.projectDir],
 								slug: "process-test",
 								addedAt: Date.now(),
@@ -804,7 +813,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 								ready({
 									pid: child.pid,
 									port: status.port,
-									projects: status.projects.map((project) => project.directory),
+									projects: status.projects.map(
+										(project) => project.folders[0],
+									),
 									instances: instances.instances.map((instance) => ({
 										managed: instance.managed,
 										...(instance.url !== undefined
@@ -849,7 +860,143 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	opencodeRequestBodies() {
-		return this.recordedOpenCode?.requestBodies ?? [];
+		const file = join(this.configDir, "fake-opencode-request-bodies.jsonl");
+		return (
+			this.recordedOpenCode?.requestBodies ??
+			(existsSync(file)
+				? readFileSync(file, "utf8")
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) =>
+								JSON.parse(line) as {
+									pid?: number;
+									method: string;
+									path: string;
+									body: string;
+								},
+						)
+				: [])
+		);
+	}
+
+	opencodeRequests() {
+		const file = join(this.configDir, "fake-opencode-requests.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								pid: number;
+								at: number;
+								method: string;
+								url: string;
+								directory?: string;
+							},
+					)
+			: [];
+	}
+
+	opencodeStreamConnections() {
+		const file = join(this.configDir, "fake-opencode-stream-connections.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								pid: number;
+								at: number;
+								action: "open" | "close";
+								connectionId: number;
+								path: string;
+							},
+					)
+			: [];
+	}
+
+	async emitOpenCodeEvent(
+		envelope: unknown,
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
+	): Promise<void> {
+		await this.openCodeTestCommand("emit-event", envelope, instanceId);
+	}
+
+	async closeOpenCodeStreams(): Promise<void> {
+		await this.openCodeTestCommand("close-streams", {});
+	}
+
+	/** Serve a status from /session/status and emit it as session.status. */
+	async setOpenCodeStatus(
+		directory: string,
+		sessionID: string,
+		status: { type: "busy" | "idle" | "retry"; [key: string]: unknown },
+	): Promise<void> {
+		await this.openCodeTestCommand("set-status", {
+			directory,
+			sessionID,
+			status,
+		});
+	}
+
+	/** Serve a pending prompt from /permission or /question and emit it as asked. */
+	async addOpenCodePrompt(
+		kind: "permission" | "question",
+		directory: string,
+		item: { id: string; sessionID: string; [key: string]: unknown },
+	): Promise<void> {
+		await this.openCodeTestCommand(`add-${kind}`, { directory, item });
+	}
+
+	/** Record but do not emit matching events from then on. */
+	async dropOpenCodeEvents(
+		rules: readonly { type: string; status?: string }[],
+	): Promise<void> {
+		await this.openCodeTestCommand("drop-events", { rules });
+	}
+
+	opencodeDroppedEvents(): unknown[] {
+		const file = join(this.configDir, "fake-opencode-dropped-events.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map((line): unknown => JSON.parse(line))
+			: [];
+	}
+
+	private async openCodeTestCommand(
+		command: string,
+		body: unknown,
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
+	): Promise<void> {
+		const instance = loadDaemonConfig(this.configDir)?.instances?.find(
+			({ id }) => id === instanceId,
+		);
+		if (!instance?.port)
+			throw new Error(`No fake OpenCode instance ${instanceId}`);
+		const response = await fetch(
+			`http://127.0.0.1:${instance.port}/test/${command}`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Basic ${Buffer.from(`${instance.env?.["OPENCODE_SERVER_USERNAME"] ?? "opencode"}:${instance.env?.["OPENCODE_SERVER_PASSWORD"]}`).toString("base64")}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(body),
+				signal: AbortSignal.timeout(2000),
+			},
+		);
+		if (!response.ok)
+			throw new Error(`Fake OpenCode ${command}: ${response.status}`);
+		await response.arrayBuffer();
 	}
 
 	claudeOptions(): readonly {
@@ -885,7 +1032,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return browser;
 	}
 
-	/** Close before any /ws init replay or ListPtys can discover hosted terminals. */
+	/** Close before any SubscribePtys or ListPtys can discover hosted terminals. */
 	async closePtyWithoutBrowser(ptyId: string): Promise<void> {
 		const runtime = browserRpcRuntime(this.port);
 		try {
@@ -1408,6 +1555,8 @@ export class ProcessBrowser {
 	>();
 	private closed = false;
 	private failure: Error | undefined;
+	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private constructor(
 		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
@@ -1417,11 +1566,7 @@ export class ProcessBrowser {
 	) {
 		this.originId = originId;
 		ws.on("message", (data) => {
-			const at = process.hrtime.bigint();
-			const message = JSON.parse(data.toString()) as Record<string, unknown>;
-			this.frames.push({ message, at });
-			for (const notify of this.messageListeners) notify(message);
-			for (const notify of this.waiters) notify();
+			this.record(JSON.parse(data.toString()) as Record<string, unknown>);
 		});
 		ws.on("error", (error) => {
 			this.failure = error;
@@ -1451,6 +1596,7 @@ export class ProcessBrowser {
 			`ws://127.0.0.1:${port}/ws?p=${projectSlug}&client=${originId}${sessionId ? `&session=${sessionId}` : ""}`,
 		);
 		const browser = new ProcessBrowser(ws, runtime, rpc, originId, projectSlug);
+		browser.watchApprovals();
 		try {
 			await new Promise<void>((done, fail) => {
 				const timer = setTimeout(
@@ -1469,11 +1615,64 @@ export class ProcessBrowser {
 			await browser.waitFor(
 				(message) => message["type"] === "protocol_version",
 			);
+			await browser.followPtys();
 			return browser;
 		} catch (error) {
 			await browser.close();
 			throw error;
 		}
+	}
+
+	private record(message: Record<string, unknown>): void {
+		this.frames.push({ message, at: process.hrtime.bigint() });
+		for (const notify of this.messageListeners) notify(message);
+		for (const notify of this.waiters) notify();
+	}
+
+	/**
+	 * Follow the project's terminals as the browser does. Each SubscribePtys
+	 * envelope is recorded as a `{ type: "pty", ...envelope }` frame.
+	 */
+	private async followPtys(): Promise<void> {
+		const cursor = this.frames.length;
+		this.ptys = this.runtime.runFork(
+			this.rpc
+				.SubscribePtys({ projectSlug: this.projectSlug })
+				.pipe(
+					Stream.runForEach((envelope) =>
+						Effect.sync(() => this.record({ type: "pty", ...envelope })),
+					),
+				),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "pty" && message["_tag"] === "synchronized",
+			cursor,
+		);
+	}
+
+	// The approvals subscription, recorded as frames in the harness's own
+	// vocabulary: `permission_pending` / `question_pending` carry the card, and
+	// `approval_removed` its resolution.
+	private watchApprovals(): void {
+		this.approvals = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						const items =
+							envelope._tag === "snapshot"
+								? envelope.rows
+								: envelope._tag === "upsert"
+									? [envelope.item]
+									: [];
+						for (const item of items)
+							this.record({ ...item, type: `${item._tag}_pending` });
+						if (envelope._tag === "remove")
+							this.record({ type: "approval_removed", id: envelope.id });
+					}),
+			).pipe(Effect.ignore),
+		);
 	}
 
 	private run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -1502,6 +1701,15 @@ export class ProcessBrowser {
 
 	async stopInstance(instanceId: string) {
 		return this.run(this.rpc.StopInstance({ instanceId }));
+	}
+
+	async getModels(instanceId?: string) {
+		return this.run(
+			this.rpc.GetModels({
+				projectSlug: this.projectSlug,
+				...(instanceId ? { instanceId } : {}),
+			}),
+		);
 	}
 
 	async updateInstance(
@@ -1554,10 +1762,10 @@ export class ProcessBrowser {
 			}),
 		);
 		const message = await this.waitFor(
-			(frame) => frame["type"] === "pty_created",
+			(frame) => frame["type"] === "pty" && frame["_tag"] === "upsert",
 			cursor,
 		);
-		return message["pty"] as PtyInfo;
+		return message["item"] as PtyInfo;
 	}
 
 	async listPtys(): Promise<readonly PtyInfo[]> {
@@ -1571,8 +1779,10 @@ export class ProcessBrowser {
 		).ptys;
 	}
 
-	inputPty(ptyId: string, data: string): void {
-		this.ws.send(JSON.stringify({ type: "pty_input", ptyId, data }));
+	async inputPty(ptyId: string, data: string): Promise<void> {
+		await this.run(
+			this.rpc.PtyInput({ projectSlug: this.projectSlug, ptyId, data }),
+		);
 	}
 
 	async resizePty(ptyId: string, cols: number, rows: number): Promise<void> {
@@ -1731,6 +1941,9 @@ export class ProcessBrowser {
 
 	async close(): Promise<void> {
 		if (!this.closed) this.ws.terminate();
+		if (this.ptys) await Effect.runPromise(Fiber.interrupt(this.ptys));
+		if (this.approvals)
+			await Effect.runPromise(Fiber.interrupt(this.approvals));
 		await this.runtime.dispose();
 		this.closed = true;
 	}

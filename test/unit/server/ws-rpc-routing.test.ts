@@ -85,6 +85,111 @@ describe("routed RPC server", () => {
 		}),
 	);
 
+	it.scoped(
+		"serves a named project's approvals, a subagent's included, and no other project's",
+		() =>
+			Effect.gen(function* () {
+				const contexts = new Map<string, Context.Context<unknown>>();
+				for (const slug of ["project-a", "project-b"]) {
+					const bus = makeSessionEventBusLive();
+					const context = yield* Layer.build(
+						Layer.mergeAll(
+							bus,
+							makePersistenceEffectLayer(":memory:", undefined, bus),
+							Layer.succeed(BackgroundLivenessTag, () => undefined),
+						),
+					);
+					contexts.set(slug, context as Context.Context<unknown>);
+					const at = { provider: "claude", createdAt: 1 };
+					yield* Effect.gen(function* () {
+						const runner = yield* ProjectionRunnerEffectTag;
+						yield* runner.recover();
+						const commit = yield* makeCommitAndSignal;
+						yield* commit([
+							canonicalEvent(
+								"session.created",
+								`${slug}-parent`,
+								{ sessionId: `${slug}-parent`, title: "p", provider: "claude" },
+								at,
+							),
+							canonicalEvent(
+								"session.created",
+								`${slug}-child`,
+								{
+									sessionId: `${slug}-child`,
+									title: "c",
+									provider: "claude",
+									parentId: `${slug}-parent`,
+								},
+								at,
+							),
+							canonicalEvent(
+								"permission.asked",
+								`${slug}-child`,
+								{
+									id: `${slug}-perm`,
+									sessionId: `${slug}-child`,
+									toolName: "Bash",
+									input: { command: "ls" },
+								},
+								at,
+							),
+							canonicalEvent(
+								"question.asked",
+								`${slug}-parent`,
+								{
+									id: `${slug}-que`,
+									sessionId: `${slug}-parent`,
+									questions: [
+										{
+											question: "Q?",
+											header: "H",
+											options: [],
+											multiSelect: false,
+										},
+									],
+								},
+								at,
+							),
+						]);
+					}).pipe(Effect.provide(context));
+				}
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer((slug) => {
+							const context = contexts.get(slug);
+							return context
+								? Effect.succeed(context)
+								: Effect.fail(
+										new WsRpcError({ message: `Unknown project ${slug}` }),
+									);
+						}),
+					),
+				);
+				const envelopes = yield* client
+					.SubscribeApprovals({ projectSlug: "project-b" })
+					.pipe(Stream.take(2), Stream.runCollect);
+				const [snapshot, synchronized] = Array.from(envelopes);
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+				const rows = snapshot?._tag === "snapshot" ? snapshot.rows : [];
+				expect(rows).toHaveLength(2);
+				expect(rows).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							_tag: "permission",
+							requestId: "project-b-perm",
+							sessionId: "project-b-child",
+						}),
+						expect.objectContaining({
+							_tag: "question",
+							toolId: "project-b-que",
+							sessionId: "project-b-parent",
+						}),
+					]),
+				);
+			}),
+	);
+
 	it.scoped.each([true, false])(
 		"AttachProject returns ok without resolving a relay context when reattached=%s",
 		(reattached) =>
@@ -234,7 +339,7 @@ describe("routed RPC server", () => {
 								config: makeMockConfig({
 									slug,
 									getProjects: () => [
-										{ slug, title: slug, directory: `/tmp/${slug}` },
+										{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
 									],
 								}),
 							}),
