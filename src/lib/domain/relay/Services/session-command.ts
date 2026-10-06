@@ -321,8 +321,9 @@ export const createOpenCodeSession = (
  * only if the provider event stream happened to mention it — with no parent, so
  * it surfaced as a root session in the sidebar.
  *
- * Resolve tip forks before publishing creation so the first subscription row
- * already carries the fork point.
+ * The fork keeps the parent's messages up to and including `messageId`, or all
+ * of them when it is omitted. Resolve the fork point before publishing creation
+ * so the first subscription row already carries it.
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
@@ -334,11 +335,11 @@ export const forkOpenCodeSession = (
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		// An explicit fork must not succeed upstream before its ordering key is
 		// known. Otherwise a provider read failure creates a new legacy fallback.
-		const requestedBoundary =
+		const parentHistory =
 			messageId === undefined
 				? undefined
 				: yield* Effect.tryPromise(() =>
-						api.session.message(parentSessionId, messageId),
+						api.session.messages(parentSessionId),
 					).pipe(
 						Effect.mapError(
 							(cause) =>
@@ -348,20 +349,26 @@ export const forkOpenCodeSession = (
 								}),
 						),
 					);
+		const boundaryIndex =
+			parentHistory?.findIndex((message) => message.id === messageId) ?? -1;
+		const requestedBoundary = parentHistory?.[boundaryIndex];
 		if (
 			messageId !== undefined &&
 			requestedBoundary?.time?.created === undefined
 		) {
 			return yield* new SessionCommandError({
 				operation: "session.forked.boundary",
-				cause: "OpenCode fork boundary has no creation timestamp",
+				cause: "OpenCode fork boundary is missing or has no creation timestamp",
 			});
 		}
+		// The given message is kept, as Claude forks keep theirs. OpenCode copies
+		// the messages before its messageID, so name the one after the boundary.
+		const cutBefore = parentHistory?.[boundaryIndex + 1]?.id;
 
 		// No retry: fork is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
 			api.session.fork(parentSessionId, {
-				...(messageId != null && { messageID: messageId }),
+				...(cutBefore !== undefined && { messageID: cutBefore }),
 			}),
 		).pipe(
 			Effect.mapError(
@@ -404,34 +411,22 @@ export const forkOpenCodeSession = (
 						.getSession(parentSessionId)
 						.pipe(Effect.orElseSucceed(() => undefined))
 				: undefined;
-		const providerForkPointEvent =
-			messageId ??
-			(yield* Effect.tryPromise(() =>
-				api.session.messagesPage(session.id, { limit: 1 }),
-			).pipe(
-				Effect.map((messages) => messages.at(-1)?.id),
-				Effect.catchAll((error) =>
-					Effect.logWarning(
-						`Could not determine fork point for ${session.id}: ${String(error)}`,
-					).pipe(Effect.as(undefined)),
-				),
-			));
+		// The fork's newest message is its copy of the boundary. Its id, not the
+		// parent's, orders the fork's own transcript at that boundary.
+		const forkTip = yield* Effect.tryPromise(() =>
+			api.session.messagesPage(session.id, { limit: 1 }),
+		).pipe(
+			Effect.map((messages) => messages.at(-1)),
+			Effect.catchAll((error) =>
+				Effect.logWarning(
+					`Could not determine fork point for ${session.id}: ${String(error)}`,
+				).pipe(Effect.as(undefined)),
+			),
+		);
 		let forkPointTimestamp =
-			requestedBoundary?.time?.created ??
-			(providerForkPointEvent === undefined
-				? undefined
-				: yield* Effect.tryPromise(() =>
-						api.session.message(parentSessionId, providerForkPointEvent),
-					).pipe(
-						Effect.map((message) => message.time?.created),
-						Effect.catchAll((error) =>
-							Effect.logWarning(
-								`Could not read fork boundary ${providerForkPointEvent}: ${String(error)}`,
-							).pipe(Effect.as(undefined)),
-						),
-					));
+			forkTip?.time?.created ?? requestedBoundary?.time?.created;
 
-		let forkPointEvent = providerForkPointEvent;
+		let forkPointEvent = forkTip?.id ?? messageId;
 		if (
 			(forkPointEvent === undefined || forkPointTimestamp === undefined) &&
 			readQueryOption._tag === "Some"
@@ -521,6 +516,8 @@ export const forkSession = (
 					"This session has no completed turn yet. Wait for its first reply.",
 			});
 		}
+		// Both providers fork up to and including this message.
+		const messageId = options?.messageId ?? midTurn?.lastCompleted;
 		if (
 			!parent ||
 			!isClaudeSessionRow(
@@ -535,10 +532,9 @@ export const forkSession = (
 					cause: "OpenCode API is unavailable",
 				});
 			}
-			// OpenCode copies the messages before the given one.
 			const fork = forkOpenCodeSession(
 				parentSessionId,
-				options?.messageId ?? midTurn?.next,
+				messageId,
 				options?.side,
 			).pipe(Effect.provideService(OpenCodeAPITag, api.value));
 			const creationGate = yield* Effect.serviceOption(
@@ -559,7 +555,6 @@ export const forkSession = (
 			};
 		}
 		// Claude forks through the turn holding the given message.
-		const messageId = options?.messageId ?? midTurn?.lastCompleted;
 		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);

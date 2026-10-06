@@ -57,9 +57,10 @@ describe("applySessionCommand", () => {
 			fork: vi.fn(async () =>
 				partialFake<SessionDetail>({ id: "ses-fork", title: "Forked" }),
 			),
-			message: vi.fn(async () =>
+			messages: vi.fn(async () => [
 				partialFake<Message>({ id: "msg-7", time: { created: 123 } }),
-			),
+				partialFake<Message>({ id: "msg-8", time: { created: 456 } }),
+			]),
 			messagesPage: vi.fn(async () => [partialFake<Message>({ id: "msg-7" })]),
 		},
 	});
@@ -157,9 +158,6 @@ describe("applySessionCommand", () => {
 						api.session.messagesPage.mockResolvedValue([
 							partialFake<Message>({ id: "b" }),
 						]);
-						api.session.message.mockRejectedValue(
-							new Error("timestamp unavailable"),
-						);
 						const forked = yield* forkOpenCodeSession("ses-parent");
 						const reads = yield* makeReadQueryEffect;
 						expect(yield* reads.getSession(forked.id)).toMatchObject({
@@ -185,7 +183,6 @@ describe("applySessionCommand", () => {
 						       ('msg-a-tie', 'ses-parent', 'user', 200, 200),
 						       ('msg-other', 'ses-other', 'assistant', 300, 300)`;
 					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
-					api.session.message.mockRejectedValue(new Error("unavailable"));
 
 					const forked = yield* forkOpenCodeSession("ses-parent");
 					const reads = yield* makeReadQueryEffect;
@@ -357,8 +354,9 @@ describe("applySessionCommand", () => {
 					snapshot.rows.find(({ item }) => item.id === forked.id)?.item,
 				).toMatchObject({ forkMessageId: "msg-7", forkPointTimestamp: 123 });
 
+				// The fork keeps msg-7; OpenCode copies what precedes its messageID.
 				expect(api.session.fork).toHaveBeenCalledWith("ses-parent", {
-					messageID: "msg-7",
+					messageID: "msg-8",
 				});
 
 				// The row has to exist before lineage can land on it: session.forked
@@ -399,7 +397,7 @@ describe("applySessionCommand", () => {
 		() =>
 			withHarness(({ api }) =>
 				Effect.gen(function* () {
-					api.session.message.mockRejectedValueOnce(new Error("unavailable"));
+					api.session.messages.mockRejectedValueOnce(new Error("unavailable"));
 					const result = yield* Effect.either(
 						forkOpenCodeSession("ses-parent", "msg-7"),
 					);

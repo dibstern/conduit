@@ -1,5 +1,7 @@
 // Capture the Side Thread replay fixture from a real ephemeral OpenCode.
-// Run: pnpm exec tsx test/e2e/scripts/capture-side-thread.ts
+// Run: pnpm exec tsx test/e2e/scripts/capture-side-thread.ts [fork-reply]
+// "fork-reply" records two parent turns, a fork from the first reply and a
+// turn in the fork instead.
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,9 +21,15 @@ import type { MockMessage } from "../fixtures/mockup-state.js";
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
 import { spawnOpenCode } from "../helpers/opencode-spawner.js";
 
+const scenario =
+	process.argv[2] === "fork-reply" ? "fork-reply" : "side-thread";
 const projectSlug = "side-thread-recording";
 const parentPrompt =
 	"Remember the word 'alpha'. Reply with only: ok, remembered.";
+const secondPrompt =
+	"Now remember the word 'beta' too. Reply with only: ok, remembered.";
+const forkPrompt =
+	"Which words did I ask you to remember? Reply with only the words.";
 const question =
 	"What word did I ask you to remember? Reply with only the word.";
 const raisedPrompt = "Reply with only: ok, raised.";
@@ -46,20 +54,7 @@ try {
 	});
 	const relayPort = stack.getPort();
 	const originId = `record-${randomUUID()}`;
-	const socket = new WebSocket(
-		`ws://127.0.0.1:${relayPort}/ws?p=${projectSlug}&client=${originId}`,
-	);
-	ws = socket;
 	const captured: MockMessage[] = [];
-	socket.on("message", (data: WebSocket.RawData) => {
-		captured.push(JSON.parse(String(data)) as MockMessage);
-	});
-	await new Promise<void>((resolve, reject) => {
-		socket.once("open", resolve);
-		socket.once("error", reject);
-	});
-	await new Promise((resolve) => setTimeout(resolve, 2_000));
-	const initMessages = [...captured];
 	globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 
 	async function rpc<A>(
@@ -113,6 +108,8 @@ try {
 		return { prompt, events: captured.slice(firstMessage) };
 	}
 
+	// The parent is the first session OpenCode creates, as the replay harness
+	// creates its session first; attaching the socket to it skips the default.
 	const parent = await rpc((client) =>
 		client.CreateSession({
 			projectSlug,
@@ -121,6 +118,19 @@ try {
 			title: "Remember alpha",
 		}),
 	);
+	const socket = new WebSocket(
+		`ws://127.0.0.1:${relayPort}/ws?p=${projectSlug}&client=${originId}&session=${parent.sessionId}`,
+	);
+	ws = socket;
+	socket.on("message", (data: WebSocket.RawData) => {
+		captured.push(JSON.parse(String(data)) as MockMessage);
+	});
+	await new Promise<void>((resolve, reject) => {
+		socket.once("open", resolve);
+		socket.once("error", reject);
+	});
+	await new Promise((resolve) => setTimeout(resolve, 2_000));
+	const initMessages = [...captured];
 	await rpc((client) =>
 		client.SwitchModel({
 			projectSlug,
@@ -129,25 +139,52 @@ try {
 			modelId: "big-pickle",
 		}),
 	);
-	const turns = [await recordTurn(parent.sessionId, parentPrompt)];
-	const side = await rpc((client) =>
-		client.StartSideThread({
-			projectSlug,
-			parentSessionId: parent.sessionId,
-			title: question,
-		}),
-	);
-	turns.push(await recordTurn(side.sessionId, question));
-	// Raising the mode appends the raised rules; the next prompt drops "plan".
+	// Replays read the agent catalogue, which only GetAgents fetches.
 	await rpc((client) =>
-		client.SwitchPermissionMode({
-			projectSlug,
-			sessionId: side.sessionId,
-			mode: "ask",
-		}),
+		client.GetAgents({ projectSlug, sessionId: parent.sessionId }),
 	);
-	turns.push(await recordTurn(side.sessionId, raisedPrompt));
-	await fetch(`${proxy.url}/session/${side.sessionId}/message`);
+	const turns = [await recordTurn(parent.sessionId, parentPrompt)];
+	if (scenario === "fork-reply") {
+		turns.push(await recordTurn(parent.sessionId, secondPrompt));
+		// Read OpenCode directly so the lookup stays out of the recording.
+		const history = (await (
+			await fetch(`${opencode.url}/session/${parent.sessionId}/message`)
+		).json()) as { info: { id: string; role: string } }[];
+		const secondTurn = history
+			.map((message) => message.info.role)
+			.lastIndexOf("user");
+		const firstReply = history[secondTurn - 1]?.info.id;
+		if (!firstReply) throw new Error("First reply not found");
+		const fork = await rpc((client) =>
+			client.ForkSession({
+				projectSlug,
+				originId,
+				sessionId: parent.sessionId,
+				messageId: firstReply,
+			}),
+		);
+		turns.push(await recordTurn(fork.sessionId, forkPrompt));
+		await fetch(`${proxy.url}/session/${fork.sessionId}/message`);
+	} else {
+		const side = await rpc((client) =>
+			client.StartSideThread({
+				projectSlug,
+				parentSessionId: parent.sessionId,
+				title: question,
+			}),
+		);
+		turns.push(await recordTurn(side.sessionId, question));
+		// Raising the mode appends the raised rules; the next prompt drops "plan".
+		await rpc((client) =>
+			client.SwitchPermissionMode({
+				projectSlug,
+				sessionId: side.sessionId,
+				mode: "ask",
+			}),
+		);
+		turns.push(await recordTurn(side.sessionId, raisedPrompt));
+		await fetch(`${proxy.url}/session/${side.sessionId}/message`);
+	}
 	await fetch(`${proxy.url}/session`);
 
 	const interactions = proxy.getRecording();
@@ -168,7 +205,7 @@ try {
 		}
 	}
 	const recording: OpenCodeRecording = {
-		name: "side-thread",
+		name: scenario,
 		recordedAt: new Date().toISOString(),
 		opencodeVersion:
 			interactions.flatMap((interaction) => {
@@ -187,10 +224,10 @@ try {
 	};
 	const fixtureDir = path.resolve(import.meta.dirname, "../fixtures/recorded");
 	writeFileSync(
-		path.join(fixtureDir, "side-thread.json"),
+		path.join(fixtureDir, `${scenario}.json`),
 		`${JSON.stringify(
 			{
-				name: "side-thread",
+				name: scenario,
 				model: "opencode/big-pickle",
 				recordedAt: recording.recordedAt,
 				initMessages,
@@ -201,7 +238,7 @@ try {
 		)}\n`,
 	);
 	writeFileSync(
-		path.join(fixtureDir, "side-thread.opencode.json.gz"),
+		path.join(fixtureDir, `${scenario}.opencode.json.gz`),
 		gzipSync(JSON.stringify(recording, null, "\t")),
 	);
 	console.log(

@@ -157,8 +157,14 @@ export class RecordingProxy {
 
 		// Forward response headers
 		for (const [key, value] of upstreamRes.headers) {
-			// Skip transfer-encoding since we're sending the full buffer
-			if (key.toLowerCase() === "transfer-encoding") continue;
+			// The buffer is whole and already decompressed by fetch, so the
+			// upstream framing and encoding headers no longer describe it.
+			if (
+				["transfer-encoding", "content-encoding", "content-length"].includes(
+					key.toLowerCase(),
+				)
+			)
+				continue;
 			res.setHeader(key, value);
 		}
 
@@ -260,10 +266,13 @@ export class RecordingProxy {
 			if (!line.startsWith("data: ")) continue;
 			const jsonStr = line.slice(6);
 			try {
-				const parsed = JSON.parse(jsonStr) as {
+				const data = JSON.parse(jsonStr) as {
 					type?: string;
 					properties?: unknown;
+					payload?: { type?: string; properties?: unknown };
 				};
+				// /global/event wraps each event in a { directory, payload } envelope.
+				const parsed = data.payload ?? data;
 				if (parsed.type) {
 					const now = Date.now();
 					const delayMs =

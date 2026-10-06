@@ -101,13 +101,11 @@ export function copyForkHistory(
  * A turn ends at `session.status` idle on both providers; OpenCode also emits
  * turn.completed for each intermediate step, so that alone is not a turn end.
  * `lastCompleted` is the final message of the last turn that completed before
- * that idle (an inclusive cut, as Claude forks take). `next` is the first
- * message created after it (an exclusive cut, as OpenCode forks take), absent
- * while the running turn has created none.
+ * that idle: the fork keeps messages up to and including it.
  */
 export function midTurnForkBoundary(
 	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
-): { lastCompleted?: string; next?: string } | undefined {
+): { lastCompleted?: string } | undefined {
 	let busy = false;
 	let idle = -1;
 	parentEvents.forEach((event, index) => {
@@ -129,12 +127,5 @@ export function midTurnForkBoundary(
 		completed--;
 	const completedEvent = parentEvents[completed];
 	const lastCompleted = completedEvent && messageIdOf(completedEvent);
-	if (!lastCompleted) return {};
-	const next = parentEvents
-		.slice(completed + 1)
-		.map((event) =>
-			event.type === "message.created" ? event.data.messageId : undefined,
-		)
-		.find((id) => id !== undefined && id !== lastCompleted);
-	return next === undefined ? { lastCompleted } : { lastCompleted, next };
+	return lastCompleted ? { lastCompleted } : {};
 }

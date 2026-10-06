@@ -630,6 +630,14 @@ describe("subscribeShell", () => {
 			`a new OpenCode fork exposes its parent and fork point ${messageId ?? "at tip"} without a metadata cache`,
 			() => {
 				const api = makeMockOpenCodeAPI();
+				vi.mocked(api.session.messages).mockResolvedValue([
+					{
+						id: "fork-message",
+						role: "user",
+						sessionID: "parent",
+						time: { created: 1 },
+					},
+				]);
 				vi.mocked(api.session.messagesPage).mockResolvedValue([
 					{ id: "fork-message", role: "user", sessionID: "new-fork" },
 				]);
