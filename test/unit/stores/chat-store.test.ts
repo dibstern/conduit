@@ -21,7 +21,6 @@ import {
 	advanceTurnIfNewMessage,
 	chatState,
 	clearMessages,
-	handleCompaction,
 	handleError,
 	historyState,
 	isProcessing,
@@ -186,51 +185,6 @@ describe("addSystemMessage", () => {
 		if (m.type === "system") {
 			expect(m.variant).toBe("error");
 		}
-	});
-});
-
-describe("handleCompaction", () => {
-	const compaction = (
-		state: "started" | "completed" | "failed",
-		detail: string,
-		tokens: { preTokens?: number; postTokens?: number } = {},
-	) =>
-		handleCompaction(ta, tm, {
-			type: "compaction",
-			sessionId: "s1",
-			state,
-			detail,
-			...tokens,
-		});
-
-	it("shows a transient notice while compacting", () => {
-		compaction("started", "Compacting conversation…");
-		expect(chatState.messages).toEqual([
-			expect.objectContaining({
-				compaction: "started",
-				text: "Compacting conversation…",
-			}),
-		]);
-	});
-
-	it.each([
-		"completed",
-		"failed",
-	] as const)("a %s outcome retires the notice and leaves the outcome to the transcript", (state) => {
-		tm.messages = [
-			{
-				type: "system",
-				uuid: "compaction-1/compaction-part-1",
-				text: "Context compacted",
-				variant: "info",
-				compaction: "completed",
-			},
-		];
-		compaction("started", "Compacting conversation…");
-		compaction(state, "outcome");
-		expect(
-			chatState.messages.map((m) => (m.type === "system" ? m.uuid : m.type)),
-		).toEqual(["compaction-1/compaction-part-1"]);
 	});
 });
 

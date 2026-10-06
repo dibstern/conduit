@@ -880,31 +880,32 @@ export function handleError(
 	}
 }
 
-export function handleCompaction(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "compaction" }>,
+/** Follow the shell row's compaction in progress (ni8.33, C1): show it as a
+ *  transient notice. The transcript projects the outcome, which supersedes
+ *  the notice once the row clears it. */
+export function followSessionCompaction(
+	id: string,
+	compacting: string | undefined,
 ): void {
-	requestScrollOnNextContent();
-	// Only the start is transient; the transcript projects the outcome (and
-	// the context size it leaves), which supersedes the "Compacting…" notice.
-	if (msg.state !== "started") {
-		setMessages(
-			messages,
-			getMessages(messages).filter(
-				(m) => m.type !== "system" || m.compaction !== "started",
-			),
-		);
+	const messages = sessionMessages.get(id);
+	if (!messages) return;
+	const current = getMessages(messages);
+	const settled = current.filter(
+		(m) => m.type !== "system" || m.compaction !== "started",
+	);
+	if (compacting === undefined) {
+		if (settled.length !== current.length) setMessages(messages, settled);
 		return;
 	}
+	requestScrollOnNextContent();
 	setMessages(messages, [
-		...getMessages(messages),
+		...settled,
 		{
 			type: "system",
 			uuid: generateUuid(),
-			text: msg.detail,
+			text: compacting,
 			variant: "info",
-			compaction: msg.state,
+			compaction: "started",
 			createdAt: Date.now(),
 		},
 	]);

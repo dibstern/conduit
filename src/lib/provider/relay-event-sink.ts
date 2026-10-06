@@ -178,10 +178,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			// Attempt persistence before WS send; failures are logged and delivery continues.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
-			// A compaction's "started" notice is UI-only. Its outcome, completed or
-			// failed, persists so the divider or the failure notice survives a reload.
-			// All states still go on the wire below (the send loop iterates the
-			// unfiltered result.events).
+			// A compaction's "started" notice is transient status (C1) that rides the
+			// shell row. Its outcome, completed or failed, persists so the divider or
+			// the failure notice survives a reload.
 			const persistentEvents = result.events.filter(
 				(domainEvent) =>
 					domainEvent.type !== "session.compaction" ||
@@ -304,10 +303,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Attempt persistence before WS send; failures are logged and delivery continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				// A compaction's "started" notice is UI-only. Its outcome, completed or
-				// failed, persists so the divider or the failure notice survives a reload.
-				// All states still go on the wire below (the send loop iterates the
-				// unfiltered result.events).
+				// A compaction's "started" notice is transient status (C1) that rides the
+				// shell row. Its outcome, completed or failed, persists so the divider or
+				// the failure notice survives a reload.
 				const persistentEvents = result.events.filter(
 					(domainEvent) =>
 						domainEvent.type !== "session.compaction" ||

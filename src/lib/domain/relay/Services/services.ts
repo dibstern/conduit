@@ -278,6 +278,12 @@ export class BackgroundLivenessTag extends Context.Tag("BackgroundLiveness")<
 	(sessionId: string) => SessionBackground | undefined
 >() {}
 
+/** The compaction in progress per session; see makeSessionCompactions. */
+export class SessionCompactionsTag extends Context.Tag("SessionCompactions")<
+	SessionCompactionsTag,
+	(sessionId: string) => string | undefined
+>() {}
+
 export class PollerManagerTag extends Context.Tag("PollerManager")<
 	PollerManagerTag,
 	PollerManagerShape

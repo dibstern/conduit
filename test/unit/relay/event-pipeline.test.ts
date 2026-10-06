@@ -168,10 +168,9 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("does not cache non-cacheable types", () => {
 		const msg: RelayMessage = {
-			type: "compaction",
+			type: "message_removed",
 			sessionId: "ses_abc",
-			state: "started",
-			detail: "",
+			messageId: "m1",
 		};
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.cache).toBe(false);

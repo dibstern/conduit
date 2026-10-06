@@ -182,17 +182,10 @@ export function translateDomainEventToRelay(
 				"the shell row carries session status; terminal done/error covers completion",
 			);
 
-		case "session.compaction": {
-			const { state, detail, preTokens, postTokens } = event.data;
-			return emit({
-				type: "compaction",
-				sessionId: event.sessionId,
-				state,
-				detail,
-				...(preTokens != null ? { preTokens } : {}),
-				...(postTokens != null ? { postTokens } : {}),
-			});
-		}
+		case "session.compaction":
+			return silent(
+				"the shell row carries a compaction in progress; the transcript projects its outcome",
+			);
 
 		case "message.created":
 		case "message.removed":

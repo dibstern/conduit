@@ -28,7 +28,6 @@ import {
 	findMessage,
 	getMessages,
 	getOrCreateSessionSlot,
-	handleCompaction,
 	handleDone,
 	handleError,
 	inputSyncState,
@@ -95,7 +94,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"result",
 		"done",
 		"error",
-		"compaction",
 		"user_message",
 		"part_removed",
 		"message_removed",
@@ -176,9 +174,6 @@ function routePerSession(event: PerSessionEvent): void {
 			}
 			break;
 		}
-		case "compaction":
-			handleCompaction(activity, messages, event);
-			break;
 		case "error":
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);

@@ -7,7 +7,10 @@
 // notification reducer established.
 
 import type { Stream } from "effect";
-import { followSessionBusy } from "../stores/chat.svelte.js";
+import {
+	followSessionBusy,
+	followSessionCompaction,
+} from "../stores/chat.svelte.js";
 import {
 	followSessionModelSettings,
 	handlePermissionModeInfo,
@@ -111,6 +114,8 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		const busy = isBusy(change.item);
 		if (busy !== isBusy(applied.rows.get(change.item.id)))
 			followSessionBusy(change.item.id, busy);
+		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
+			followSessionCompaction(change.item.id, change.item.compacting);
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
@@ -132,6 +137,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followViewedSession(row);
 			// A snapshot (cold start, resume) is absolute.
 			followSessionBusy(row.id, isBusy(row));
+			followSessionCompaction(row.id, row.compacting);
 		}
 	}
 	applied = next;

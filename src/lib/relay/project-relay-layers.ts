@@ -53,6 +53,7 @@ import {
 	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	type OrchestrationEngineTag,
+	SessionCompactionsTag,
 	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
@@ -77,6 +78,7 @@ import {
 } from "../provider/orchestration-wiring.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
+import { makeSessionCompactions } from "../session/session-compactions.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
@@ -182,6 +184,7 @@ export function createProjectRelayLayers({
 		titleQuery: sdkQuery,
 		fork: defaultClaudeSessionForkSdk,
 	};
+	const compactions = makeSessionCompactions();
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.shellEnv && { shellEnv: config.shellEnv }),
@@ -251,6 +254,7 @@ export function createProjectRelayLayers({
 							Effect.provideService(AlertsTag, alerts),
 						),
 				},
+				compactions,
 			});
 		}),
 	).pipe(
@@ -378,6 +382,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
+		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

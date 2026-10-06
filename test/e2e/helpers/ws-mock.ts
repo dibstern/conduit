@@ -381,7 +381,8 @@ export class WsMockControl {
 		}
 		const normalized = normalizeMockRelayMessage(msg, this._context);
 		projectLegacyRelayMessage(this.page, normalized);
-		this._ws.send(JSON.stringify(normalized));
+		// The transcript projects a compaction's outcome; /ws has no arm for it.
+		if (msg.type !== "compaction") this._ws.send(JSON.stringify(normalized));
 	}
 
 	/** Send multiple messages with optional delay between them. */

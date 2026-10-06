@@ -131,16 +131,24 @@ export const composerContextWarningHandlers: StepHandler[] = [
 					: match[1] === "fails"
 						? "failed"
 						: "completed";
+			// A compaction in progress rides the shell row; its outcome is a
+			// projected transcript message (ni8.33).
+			const rpc = requireRpcControl(world.page);
+			const { compacting: _, ...row } = (rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			) ?? { title: sessionId, status: "idle" }) as Record<string, unknown>;
+			rpc.upsertShellRow({
+				...row,
+				id: sessionId,
+				...(state === "started" ? { compacting: "Compacting…" } : {}),
+			});
+			if (state === "started") return;
 			requireRelayControl(world.page).sendMessage({
 				type: "compaction",
 				sessionId,
 				state,
 				detail:
-					state === "started"
-						? "Compacting…"
-						: state === "failed"
-							? "Compaction failed."
-							: "Context compacted.",
+					state === "failed" ? "Compaction failed." : "Context compacted.",
 				...(state === "completed"
 					? { preTokens: 170_000, postTokens: 164_000 }
 					: {}),

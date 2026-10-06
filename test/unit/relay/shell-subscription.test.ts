@@ -19,6 +19,7 @@ import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import {
+	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -29,6 +30,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
+	SessionCompactionsTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	announceBackgroundWork,
@@ -64,6 +66,7 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
+import { makeSessionCompactions } from "../../../src/lib/session/session-compactions.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -1306,4 +1309,79 @@ describe("subscribeShell", () => {
 				),
 			),
 	);
+
+	// C1: a compaction's start is transient status. It rides the shell row from
+	// memory and is never appended; its outcome or the session going idle
+	// clears it.
+	it.scoped("a compaction in progress rides the shell row, not the log", () => {
+		const compactions = makeSessionCompactions();
+		return Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID)]);
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			const ingestion = yield* ProviderRuntimeIngestionTag;
+			const ingest = (
+				eventId: string,
+				type: "session.compaction" | "session.status",
+				data: Record<string, unknown>,
+			) =>
+				ingestion.ingest(
+					decodeProviderRuntimeEvent({
+						eventId,
+						type,
+						providerId: "claude",
+						sessionId: SID,
+						createdAt: "2026-10-06T00:00:00.000Z",
+						rawSource: {
+							kind: "claude.sdk.message",
+							providerMessageType: "system",
+						},
+						providerRefs: { providerSessionId: "provider-shell" },
+						data: { sessionId: SID, ...data },
+					}),
+				);
+			const compactingOnRow = (compacting: string | undefined) =>
+				Effect.gen(function* () {
+					for (;;) {
+						const delta = yield* Queue.take(q);
+						if (
+							delta._tag === "upsert" &&
+							delta.item.id === SID &&
+							delta.item.compacting === compacting
+						)
+							return;
+					}
+				}).pipe(Effect.timeout("2 seconds"));
+			const started = { state: "started", detail: "Compacting conversation…" };
+
+			yield* ingest("rt-compaction-1", "session.compaction", started);
+			yield* compactingOnRow("Compacting conversation…");
+			yield* ingest("rt-compaction-1-done", "session.compaction", {
+				state: "completed",
+				detail: "Context compacted",
+			});
+			yield* compactingOnRow(undefined);
+
+			yield* ingest("rt-compaction-2", "session.compaction", started);
+			yield* compactingOnRow("Compacting conversation…");
+			yield* ingest("rt-idle", "session.status", { status: "idle" });
+			yield* compactingOnRow(undefined);
+
+			const sql = yield* SqlClient.SqlClient;
+			const logged = yield* sql<{ state: string }>`
+				SELECT json_extract(data, '$.state') AS state FROM events
+				WHERE type = 'session.compaction'`;
+			expect(logged.map((event) => event.state)).toEqual(["completed"]);
+		}).pipe(
+			Effect.provideService(SessionCompactionsTag, compactions.compactingOf),
+			Effect.provide(
+				Layer.provideMerge(
+					makeProviderRuntimeIngestionLive({ compactions }),
+					makeShellTestLayer(),
+				),
+			),
+		);
+	});
 });

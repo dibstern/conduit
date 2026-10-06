@@ -339,10 +339,9 @@ describe("handleSSEEventEffect", () => {
 	it("does not record non-cacheable events to cache", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
-			type: "compaction",
+			type: "message_removed",
 			sessionId: "active-session",
-			state: "started",
-			detail: "",
+			messageId: "m1",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -350,8 +349,8 @@ describe("handleSSEEventEffect", () => {
 		});
 
 		const event: OpenCodeEvent = {
-			type: "session.compacted",
-			properties: { sessionID: "active-session" },
+			type: "message.removed",
+			properties: { sessionID: "active-session", messageID: "m1" },
 		};
 		await runSSEEvent(deps, event);
 
