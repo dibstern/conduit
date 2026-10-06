@@ -2993,7 +2993,7 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("does not connect SSE and mark the command gate ready through separate runtime calls", () => {
+	it("does not connect SSE through a standalone runtime call", () => {
 		const path = "src/lib/relay/project-relay-startup.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
@@ -3001,13 +3001,7 @@ describe("Effect runtime boundary grep", () => {
 				pattern:
 					/await relayManagedRuntime\.runPromise\(\s*sseStream\.connectEffect\(\)\s*\);/,
 				reason:
-					"SSE connection should be sequenced with command-gate readiness inside one Effect program",
-			},
-			{
-				pattern:
-					/await relayManagedRuntime\.runPromise\(\s*Effect\.gen\(function\* \(\) \{\s*const gate = yield\* RelayCommandGateTag;\s*yield\* gate\.markReady\(\);\s*\}\),\s*\);/,
-				reason:
-					"command-gate readiness should not be a standalone runtime bridge",
+					"SSE connection should be sequenced inside the startup Effect program",
 			},
 		] as const;
 
@@ -3156,12 +3150,6 @@ describe("Effect runtime boundary grep", () => {
 					/markPermissionReplied:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
 				reason:
 					"permission reply tracking should not use a sync runtime bridge in relay-stack",
-			},
-			{
-				pattern:
-					/recoverPendingPermissions:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
-				reason:
-					"permission recovery should not use a sync runtime bridge in relay-stack",
 			},
 		] as const;
 

@@ -172,6 +172,13 @@ import type {
 
 const log = createLogger("claude-provider-runtime");
 type EffortLevel = NonNullable<SDKOptions["effort"]>;
+const INTERRUPTED_TURN: TurnResult = {
+	status: "interrupted",
+	cost: 0,
+	tokens: { input: 0, output: 0 },
+	durationMs: 0,
+	providerStateUpdates: [],
+};
 
 export interface ClaudeProviderInstanceDeps {
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
@@ -2075,8 +2082,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					const joinsRunningTurn =
 						(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId)).size > 0;
 
+					// A Stop that landed while this turn waited dropped it with the
+					// rest of the queue and already sent done. Failing it instead
+					// would send a second done that ends the user's next prompt.
+					if (ctx.stopped) {
+						const dropped = yield* Deferred.make<TurnResult, Error>();
+						yield* Deferred.succeed(dropped, INTERRUPTED_TURN);
+						return dropped;
+					}
 					if (
-						ctx.stopped ||
 						!(yield* isCurrentSession(this.stateRef, ctx)) ||
 						(yield* isStreamEnded(this.stateRef, ctx.sessionId))
 					) {
@@ -2578,13 +2592,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
-			yield* settleQueuedTurnDeferredsEffect(this.stateRef, ctx.sessionId, {
-				status: "interrupted",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
+			yield* settleQueuedTurnDeferredsEffect(
+				this.stateRef,
+				ctx.sessionId,
+				INTERRUPTED_TURN,
+			);
 			if (
 				HashSet.has(
 					(yield* getState(this.stateRef)).shutdownAfterTurn,

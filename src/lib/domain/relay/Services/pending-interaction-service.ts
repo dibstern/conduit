@@ -48,15 +48,6 @@ export interface PendingPermissionRequestInput {
 	readonly permissionReason?: string;
 }
 
-export interface PendingPermissionRecoveryInput {
-	readonly id: string;
-	readonly permission: string;
-	readonly sessionId?: string;
-	readonly patterns?: readonly string[];
-	readonly metadata?: Record<string, unknown>;
-	readonly always?: readonly string[];
-}
-
 export interface PendingQuestionInput {
 	readonly requestId: string;
 	readonly sessionId: string;
@@ -145,9 +136,6 @@ export interface PendingInteractionService {
 		},
 	): Effect.Effect<Option.Option<ResolvedPermissionDecision>>;
 	markPermissionReplied(requestId: string): Effect.Effect<boolean>;
-	recoverPendingPermissions(
-		permissions: readonly PendingPermissionRecoveryInput[],
-	): Effect.Effect<PendingPermission[]>;
 	/**
 	 * Drop permissions pending past the timeout. `awaited` says a provider turn
 	 * was waiting on it: that turn now fails and records the resolution itself.
@@ -559,21 +547,6 @@ export const makePendingInteractionServiceLive = (
 						next.delete(requestId);
 						return [true, next] as const;
 					}),
-				recoverPendingPermissions: (
-					pending: readonly PendingPermissionRecoveryInput[],
-				) =>
-					Effect.forEach(pending, (permission) =>
-						recordPermissionRequest({
-							requestId: permission.id as PermissionId,
-							sessionId: permission.sessionId ?? "",
-							toolName: permission.permission,
-							toolInput: {
-								patterns: [...(permission.patterns ?? [])],
-								metadata: permission.metadata ?? {},
-							},
-							always: permission.always ?? [],
-						}),
-					),
 				takeTimedOutPermissions: () =>
 					Effect.gen(function* () {
 						const now = yield* Clock.currentTimeMillis;

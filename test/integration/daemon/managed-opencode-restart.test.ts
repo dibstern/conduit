@@ -12,7 +12,9 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -38,6 +40,21 @@ describe("managed OpenCode survives server replacement", () => {
 		expect(instance).toBeDefined();
 		if (!instance) throw new Error("Managed instance record missing");
 		return instance;
+	};
+	/** Managed OpenCode spawns on first use, not with the server. */
+	const firstUse = () => {
+		if (!harness) throw new Error("No process harness");
+		return sendRpcRequest(
+			join(harness.configDir, "relay.sock"),
+			new StartInstance({ instanceId: "managed-test" }),
+		);
+	};
+	const startManaged = async (
+		options: Parameters<typeof ProcessHarness.start>[0] = {},
+	) => {
+		harness = await ProcessHarness.start({ managedOpenCode: true, ...options });
+		await firstUse();
+		return harness;
 	};
 	const health = async () => {
 		const instance = recorded();
@@ -93,7 +110,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("reuses the authenticated PID and dynamic port after a server crash", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = recorded();
 		const processBefore = await health();
@@ -133,7 +150,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("keeps the instance through a graceful server restart", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = await health();
 		await harness.terminate();
@@ -148,14 +165,15 @@ describe("managed OpenCode survives server replacement", () => {
 		});
 	});
 
-	it("respawns an instance killed while the server is down", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+	it("respawns on first use an instance killed while the server is down", async () => {
+		harness = await startManaged();
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = await health();
 		await harness.kill();
 		process.kill(before.pid, "SIGKILL");
 		await vi.waitFor(() => expect(alive(before.pid)).toBe(false));
 		await harness.restart();
+		await firstUse();
 		const after = await health();
 		expect(after.pid).not.toBe(before.pid);
 		expect(recorded().pid).toBe(after.pid);
@@ -167,7 +185,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("rejects an unrelated live PID and wrong-auth health without killing it", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = await health();
 		await harness.kill();
@@ -198,6 +216,7 @@ describe("managed OpenCode survives server replacement", () => {
 			);
 			writeFileSync(configFile, JSON.stringify(config));
 			await harness.restart();
+			await firstUse();
 			const after = await health();
 			expect(after.pid).not.toBe(strangerPid);
 			expect(recorded().port).not.toBe(address.port);
@@ -218,10 +237,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("leaves no instance or descendant after explicit Shutdown RPC", async () => {
-		harness = await ProcessHarness.start({
-			managedOpenCode: true,
-			ignoreOpenCodeSigterm: true,
-		});
+		harness = await startManaged({ ignoreOpenCodeSigterm: true });
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = await health();
 		await harness.kill();
@@ -247,7 +263,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("terminates an adopted instance even when its health endpoint fails later", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		await harness.kill();
 		await harness.restart();
@@ -283,7 +299,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("never adopts or signals an unrelated PID behind an authenticated server", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		await harness.kill();
 		const stranger = spawn(
@@ -307,6 +323,7 @@ describe("managed OpenCode survives server replacement", () => {
 			);
 			writeFileSync(file, JSON.stringify(config));
 			await harness.restart();
+			await firstUse();
 			const recovered = recorded();
 			const after = await health();
 			await harness.shutdown();
@@ -329,7 +346,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("drops invalid recovery metadata without losing PIN or other settings", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await harness.kill();
 		const file = join(harness.root, "config", "daemon.json");
 		const config = loadDaemonConfig(join(harness.root, "config"));
@@ -369,6 +386,7 @@ describe("managed OpenCode survives server replacement", () => {
 		expect(saved?.debug).toBe(true);
 		expect(saved?.dangerouslySkipPermissions).toBe(true);
 		expect(saved?.autoSettleAfterDays).toBe(17);
+		await firstUse();
 		expect(recorded().pid).toBeGreaterThan(0);
 		const port = harness.generations.at(-1)?.port;
 		expect((await fetch(`http://127.0.0.1:${port}/api/projects`)).status).toBe(
@@ -382,7 +400,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("keeps managed credentials out of browser RPC and broadcasts", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const password = recorded().env?.["OPENCODE_SERVER_PASSWORD"];
 		const token = recorded().processIdentity?.token;
 		expect(password).toBeTruthy();
@@ -417,7 +435,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("drops managed credentials and stops ownership when converting to Claude", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		const password = recorded().env?.["OPENCODE_SERVER_PASSWORD"];
 		expect(password).toBeTruthy();
@@ -449,7 +467,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("spawns a second healthy managed process after browser StopInstance then StartInstance", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		const browser = await harness.connect();
 		await browser.stopInstance("managed-test");
@@ -494,7 +512,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("respawns after its supervisor exits even if the recorded worker PID belongs to a stranger", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		await harness.kill();
 		const instance = recorded();
@@ -517,6 +535,7 @@ describe("managed OpenCode survives server replacement", () => {
 			);
 			writeFileSync(join(configDir, "daemon.json"), JSON.stringify(config));
 			await harness.restart();
+			await firstUse();
 			const browser = await harness.connect();
 			expect(
 				(await browser.instanceStatus("managed-test")).instance?.status,
@@ -543,7 +562,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("cleans fixture ownership without signalling recycled IDs from its process ledger", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const instance = recorded();
 		const before = await health();
 		await harness.kill();
@@ -619,6 +638,7 @@ describe("managed OpenCode survives server replacement", () => {
 			managedOpenCode: true,
 			pauseOpenCodeSupervisor: true,
 		});
+		await expect(firstUse()).rejects.toThrow();
 		const instance = recorded();
 		const identity = instance.processIdentity;
 		if (!identity || !instance.pid) throw new Error("Missing paused ownership");
@@ -652,7 +672,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("prefetches existing sessions using backend credentials for a managed instance", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await harness.kill();
 		const projectDir = join(harness.root, "prefetch-project");
 		mkdirSync(projectDir);
@@ -713,7 +733,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("terminates a verified unhealthy instance before replacing its recovery record", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		const instance = recorded();
 		await fetch(`http://127.0.0.1:${instance.port}/test/fail-health`, {
@@ -724,6 +744,7 @@ describe("managed OpenCode survives server replacement", () => {
 		});
 		await harness.kill();
 		await harness.restart();
+		await firstUse();
 		const after = await health();
 		expect(after.pid).not.toBe(before.pid);
 		await vi.waitFor(() => {
@@ -737,7 +758,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("stops a removed managed group before server-only teardown", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		const browser = await harness.connect();
 		await browser.removeInstance("managed-test");
@@ -759,7 +780,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("requires the verified generation and process identity before every stop", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const instance = recorded();
 		const before = await health();
 		const identity = instance.processIdentity;
@@ -796,7 +817,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("retains a live recovery handle when control authentication cannot be verified", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		const identity = recorded().processIdentity;
 		if (!identity) throw new Error("Missing private process identity");
@@ -843,7 +864,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("identifies and reuses the listener behind an npm-style OpenCode launcher", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const before = await health();
 		await harness.kill();
 		process.kill(before.pid, "SIGKILL");
@@ -857,6 +878,7 @@ describe("managed OpenCode survives server replacement", () => {
 			`#!/usr/bin/env node\nimport { spawn } from "node:child_process";\nconst child = spawn(process.execPath, [${JSON.stringify(native)}, ...process.argv.slice(2)], { stdio: "inherit" });\nchild.once("exit", code => process.exit(code ?? 1));\n`,
 		);
 		await harness.restart();
+		await firstUse();
 		const listener = await health();
 		expect(recorded().pid).toBe(listener.pid);
 		await harness.kill();
@@ -896,7 +918,7 @@ describe("managed OpenCode survives server replacement", () => {
 	});
 
 	it("cleans an uncommitted spawn if the server crashes before saving its identity", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		const instance = recorded();
 		const helperUrl = new URL(
 			"../../../src/lib/instance/managed-opencode-process.ts",
@@ -976,6 +998,7 @@ process.kill(process.pid, "SIGKILL");`,
 			managedOpenCode: true,
 			pauseOpenCodeSupervisor: true,
 		});
+		await expect(firstUse()).rejects.toThrow();
 		const instance = recorded();
 		const identity = instance.processIdentity;
 		if (!identity || !instance.pid)
@@ -993,7 +1016,7 @@ process.kill(process.pid, "SIGKILL");`,
 	});
 
 	it("cleans up a failed spawn and permits a subsequent start", async () => {
-		harness = await ProcessHarness.start({ managedOpenCode: true });
+		harness = await startManaged();
 		await vi.waitFor(() => expect(recorded().pid).toBeGreaterThan(0));
 		const before = await health();
 		await harness.kill();
@@ -1002,6 +1025,7 @@ process.kill(process.pid, "SIGKILL");`,
 		const executable = join(harness.root, "bin", "opencode");
 		writeFileSync(executable, "#!/usr/bin/env node\nprocess.exit(1);\n");
 		await harness.restart();
+		await expect(firstUse()).rejects.toThrow();
 		await vi.waitFor(() => expect(recorded().pid).toBeUndefined());
 		await harness.kill();
 		writeFileSync(
@@ -1013,6 +1037,7 @@ process.kill(process.pid, "SIGKILL");`,
 			),
 		);
 		await harness.restart();
+		await firstUse();
 		const after = await health();
 		expect(after.pid).not.toBe(before.pid);
 		results.push({

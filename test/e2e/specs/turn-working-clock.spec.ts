@@ -339,8 +339,6 @@ test.describe("Turn working clock", () => {
 			await expect(page.locator(".turn-activity")).toHaveCount(1, {
 				timeout: 30_000,
 			});
-			// The Stop button can blink off as the stopped query restarts, so
-			// wait for the reply's last words before waiting for the turn to end.
 			await expect(page.getByText("notes ready").last()).toBeVisible({
 				timeout: 60_000,
 			});
@@ -358,6 +356,51 @@ test.describe("Turn working clock", () => {
 				testInfo.outputPath("stop-queued-readings.json"),
 				JSON.stringify({ reloadedAfterMs }, null, 2),
 			);
+		});
+		test("Stop stays on through the whole of the next prompt", async ({
+			page,
+			relayUrl,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			await app.sendMessage("Read the extra folder");
+			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+				timeout: 30_000,
+			});
+			await app.sendMessage("Queued prompt");
+			await chat.stopBtn.click();
+			await chat.waitForStreamingComplete();
+
+			// Sample every 50ms in the page, from the moment Stop first shows, so
+			// a blink of a few frames is caught.
+			await page.evaluate(() => {
+				const w = window as unknown as { stopGaps: number[] };
+				w.stopGaps = [];
+				let start: number | undefined;
+				const timer = setInterval(() => {
+					if (document.body.innerText.includes("notes ready"))
+						return clearInterval(timer);
+					const stopShown = Boolean(document.querySelector("#stop"));
+					if (start === undefined) {
+						if (stopShown) start = performance.now();
+					} else if (!stopShown) {
+						w.stopGaps.push(Math.round(performance.now() - start));
+					}
+				}, 50);
+			});
+			await app.sendMessage("Load the skill");
+			await expect(page.getByText("notes ready").last()).toBeVisible({
+				timeout: 60_000,
+			});
+			const stopGaps = await page.evaluate(
+				() => (window as unknown as { stopGaps: number[] }).stopGaps,
+			);
+			writeFileSync(
+				testInfo.outputPath("stop-gaps.json"),
+				JSON.stringify({ stopGaps }, null, 2),
+			);
+			expect(stopGaps).toEqual([]);
 		});
 	});
 

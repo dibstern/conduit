@@ -5,6 +5,7 @@ import {
 	Effect,
 	Either,
 	Exit,
+	FiberId,
 	Layer,
 	Option,
 	Schema,
@@ -62,12 +63,16 @@ export type OpenCodeEndpoint = {
 	readonly auth?: { readonly username: string; readonly password: string };
 	/** Unknown (treated as running) when the resolver has no process state. */
 	readonly status?: InstanceStatus;
+	readonly managed?: boolean;
 };
 
 /** Process control for the instances behind the endpoints. */
 type OpenCodeProcessControl<Start, Stop> = {
+	/** Spawns a managed instance; begins health checks of an external one. */
 	readonly start: (instanceId: string) => Effect.Effect<void, unknown, Start>;
 	readonly stop: (instanceId: string) => Effect.Effect<void, never, Stop>;
+	/** Instances running before any use: survivors re-adopted at startup. */
+	readonly adopted: Effect.Effect<ReadonlyArray<string>, never, Start>;
 };
 
 const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
@@ -105,7 +110,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const { log = createLogger("daemon").child("opencode"), control } =
 				options;
 			const context = yield* Effect.context<R | Start | Stop>();
+			const scope = yield* Effect.scope;
 			const gate = yield* Effect.makeSemaphore(1);
+			// One in-flight start per instance, joined by every `use`.
+			const starts = new Map<
+				string,
+				Deferred.Deferred<void, OpenCodeUnavailable>
+			>();
 			const subscribers = new Set<{
 				directories: ReadonlySet<string>;
 				send: (event: OpenCodeInstanceEvent) => void;
@@ -340,17 +351,59 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				return new OpenCodeAPI({ sdk, baseUrl: endpoint.url, authHeaders });
 			};
 
+			const spawnFailed = (instanceId: string, cause: unknown) =>
+				new OpenCodeUnavailable({
+					instanceId,
+					reason: "spawn-failed",
+					message: `OpenCode instance "${instanceId}" failed to start: ${
+						cause instanceof Error ? cause.message : String(cause)
+					}`,
+				});
+
+			// Runs in the module's scope, so a caller's interruption cannot abandon
+			// a spawn that other callers joined. A failure is not cached.
+			const start = (
+				instanceId: string,
+				control: OpenCodeProcessControl<Start, Stop>,
+			) =>
+				Effect.suspend(() => {
+					const running = starts.get(instanceId);
+					if (running) return Deferred.await(running);
+					const started = Deferred.unsafeMake<void, OpenCodeUnavailable>(
+						FiberId.none,
+					);
+					starts.set(instanceId, started);
+					return control.start(instanceId).pipe(
+						Effect.provide(context),
+						Effect.mapError((cause) => spawnFailed(instanceId, cause)),
+						Effect.zipRight(resolveIn(instanceId)),
+						Effect.filterOrFail(
+							(endpoint) => !endpoint?.managed || endpoint.status === "healthy",
+							(endpoint) =>
+								spawnFailed(instanceId, `status is ${endpoint?.status}`),
+						),
+						Effect.exit,
+						Effect.flatMap((exit) => {
+							starts.delete(instanceId);
+							return Deferred.done(started, Exit.asVoid(exit));
+						}),
+						Effect.forkIn(scope),
+						Effect.zipRight(Deferred.await(started)),
+					);
+				});
+
 			const use = (instanceId: string, directory?: string) =>
 				Effect.gen(function* () {
 					let endpoint = yield* resolveIn(instanceId);
-					// Start Instance after Stop Instance: a stopped instance comes
-					// back on its next use. Boot still spawns every instance.
-					if (endpoint?.status === "stopped" && control) {
-						const url = endpoint.url;
-						yield* control.start(instanceId).pipe(
-							Effect.provide(context),
-							Effect.mapError((cause) => unreachable(instanceId, url, cause)),
-						);
+					// Not running yet: never started, stopped, or a managed instance
+					// that failed or crashed. External instances are only checked.
+					if (
+						endpoint &&
+						control &&
+						(endpoint.status === "stopped" ||
+							(endpoint.managed && endpoint.status !== "healthy"))
+					) {
+						yield* start(instanceId, control);
 						endpoint = yield* resolveIn(instanceId);
 					}
 					if (!endpoint)
@@ -409,6 +462,26 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					);
 					return client;
 				});
+
+			// A survivor re-adopted at startup is running before any use. Hold its
+			// stream open so reconcile-on-connect recovers busy sessions and
+			// pending prompts for every subscribed directory.
+			if (control)
+				yield* Effect.forEach(
+					yield* control.adopted.pipe(Effect.provide(context)),
+					(instanceId) =>
+						Effect.flatMap(resolveIn(instanceId), (endpoint) =>
+							endpoint
+								? gate.withPermits(1)(
+										Effect.suspend(() => {
+											uses++;
+											return ensureStream(instanceId, endpoint);
+										}),
+									)
+								: Effect.void,
+						),
+					{ discard: true },
+				);
 
 			return {
 				// Subscribe path: registers a directory subscriber. Passive: only
@@ -514,11 +587,25 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 					? yield* getManagedOpenCodeProcessEnv(instance.id)
 					: instance.env,
 			);
-			return { url, status: instance.status, ...(auth ? { auth } : {}) };
+			return {
+				url,
+				status: instance.status,
+				managed: instance.managed,
+				...(auth ? { auth } : {}),
+			};
 		}),
 	{
 		control: {
 			start: startInstance,
+			adopted: Effect.map(getInstances, (instances) =>
+				Array.from(instances).flatMap(({ id, driver, managed, status }) =>
+					(driver ?? "opencode") === "opencode" &&
+					managed &&
+					status === "healthy"
+						? [id]
+						: [],
+				),
+			),
 			stop: (instanceId) =>
 				stopInstance(instanceId).pipe(
 					Effect.catchAllCause((cause) =>
@@ -540,10 +627,12 @@ export const makeStandaloneOpenCodeInstancesLive = (
 		(instanceId) =>
 			Effect.sync(() => {
 				if (instanceId === defaultInstanceIdForDriver("opencode"))
-					return {
-						url: config.opencodeUrl,
-						...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
-					};
+					return config.opencodeUrl === undefined
+						? undefined
+						: {
+								url: config.opencodeUrl,
+								...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
+							};
 				const daemonConfig = loadDaemonConfig(config.configDir);
 				const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
 				const auth = openCodeAuth(
@@ -555,26 +644,3 @@ export const makeStandaloneOpenCodeInstancesLive = (
 			}),
 		config.log ? { log: config.log.child("opencode") } : {},
 	);
-
-/** Base URL of the OpenCode instance a project's relay targets, or null. */
-export const resolveProjectOpencodeUrl = (project: {
-	readonly slug: string;
-	readonly instanceId?: string;
-}) =>
-	Effect.gen(function* () {
-		const instances = Array.from(yield* getInstances);
-		if (project.instanceId != null) {
-			const selected = instances.find(
-				(instance) => instance.id === project.instanceId,
-			);
-			if ((selected?.driver ?? "opencode") === "opencode") {
-				return yield* getInstanceUrl(project.instanceId);
-			}
-		}
-
-		const first = instances.find(
-			(instance) => (instance.driver ?? "opencode") === "opencode",
-		);
-		if (first == null) return null;
-		return yield* getInstanceUrl(first.id);
-	});

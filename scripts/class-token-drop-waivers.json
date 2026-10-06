@@ -341,5 +341,6 @@
 		"requires": "<ToolOutputMore",
 		"reason": "The \"Show full output\" row moved verbatim into ToolOutputMore, shared with ActivityRow."
 	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: text-text-dimmer": "conduit-test-r9h8: the session-skills hint moves from text-text-dimmer (#676e79, 3.24:1) to text-text-muted so the SessionBar 'With Skills' stories pass the axe AA colour-contrast check."
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: text-text-dimmer": "conduit-test-r9h8: the session-skills hint moves from text-text-dimmer (#676e79, 3.24:1) to text-text-muted so the SessionBar 'With Skills' stories pass the axe AA colour-contrast check.",
+	"src/lib/frontend/components/chat/PlanMode.svelte :: leading-[1.7],md-content,plan-approval,plan-approve-btn,plan-banner,plan-banner-hint,plan-banner-icon,plan-banner-text,plan-card-body,plan-card-chevron,plan-card-copy,plan-card-header,plan-card-icon,plan-card-title,plan-card-toggle,plan-enter,plan-exit,plan-reject-btn,text-sm": "conduit-test-ni8.37 deletes the orphaned PlanMode component with its stories, baselines and plan-mode.css. ni8.10 removed its only mount and the plan_* arms never had a server producer; plan approval is rendered by PermissionCard."
 }

@@ -32,8 +32,6 @@ export {
 	type GetModelsResponse,
 	GetProjects,
 	type GetProjectsResponse,
-	GetTodo,
-	type GetTodoResponse,
 	GetToolContent,
 	type GetToolContentResponse,
 	type GoalDetails,

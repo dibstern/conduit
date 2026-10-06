@@ -52,7 +52,7 @@ describe("OpenCode Instances use", () => {
 	const requests = (browser: ProcessBrowser, id: string) =>
 		browser.frames.filter(
 			({ message }) =>
-				message["type"] === "permission_request" && message["requestId"] === id,
+				message["type"] === "permission_pending" && message["requestId"] === id,
 		).length;
 
 	afterEach(async ({ task }) => {
@@ -95,10 +95,6 @@ describe("OpenCode Instances use", () => {
 			if (!pid) throw new Error(`No pid for OpenCode instance ${id}`);
 			return pid;
 		};
-		const pids = {
-			a: pidOf(instanceA.id),
-			b: pidOf(instanceB.id),
-		};
 		const a = await fixture.connect();
 		const sessionA = await a.createSession("Default A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
@@ -112,7 +108,12 @@ describe("OpenCode Instances use", () => {
 			new SetProjectInstance({ slug: slugB, instanceId: instanceB.id }),
 		);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession("Named B", "opencode", "opencode");
+		// Each first use spawns that project's instance.
+		const sessionB = await b.createSession("Named B", instanceB.id, "opencode");
+		const pids = {
+			a: pidOf(instanceA.id),
+			b: pidOf(instanceB.id),
+		};
 		evidence["instances"] = {
 			a: { id: instanceA.id, pid: pids.a },
 			b: { id: instanceB.id, pid: pids.b },

@@ -16,7 +16,6 @@ import {
 	type GetFileTreeResponse,
 	type GetModelsResponse,
 	type GetProjectsResponse,
-	type GetTodoResponse,
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
 	type PtyListResponse,
@@ -594,30 +593,6 @@ export class TestWsClient {
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
 						return yield* client.GetProjects({
-							projectSlug: "integration-test",
-						});
-					}),
-				).pipe(
-					Effect.provide(RpcClient.layerProtocolSocket()),
-					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
-					Effect.provide(Socket.layerWebSocketConstructorGlobal),
-					Effect.provide(RpcSerialization.layerJson),
-				),
-			);
-		} finally {
-			globalThis.WebSocket = previousWebSocket;
-		}
-	}
-
-	async getTodo(): Promise<GetTodoResponse> {
-		const previousWebSocket = globalThis.WebSocket;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-		try {
-			return await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup);
-						return yield* client.GetTodo({
 							projectSlug: "integration-test",
 						});
 					}),

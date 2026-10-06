@@ -1,8 +1,8 @@
 import { InstanceMgmtTag } from "./management-service.js";
 // Effect-based startup sequence for the daemon. Handles instance
-// rehydration, instance probing, smart default detection, and
-// auto-start. Each step uses error isolation — expected tagged errors are
-// caught and logged; programming defects propagate to the supervisor.
+// rehydration, instance probing and smart default detection. Each step
+// uses error isolation — expected tagged errors are caught and logged;
+// programming defects propagate to the supervisor.
 //
 // Error isolation policy:
 //   - Effect.catchTag for specific expected errors (tagged)
@@ -20,13 +20,6 @@ import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
 
 class InstanceRehydrationFailed extends Data.TaggedError(
 	"InstanceRehydrationFailed",
-)<{
-	readonly instanceId: string;
-	readonly cause: unknown;
-}> {}
-
-class InstanceAutoStartFailed extends Data.TaggedError(
-	"InstanceAutoStartFailed",
 )<{
 	readonly instanceId: string;
 	readonly cause: unknown;
@@ -150,52 +143,12 @@ export const detectSmartDefault: Effect.Effect<void> = Effect.gen(function* () {
 }).pipe(Effect.withSpan("detectSmartDefault"));
 
 /**
- * Auto-start stopped managed instances.
- */
-export const autoStartManagedDefault: Effect.Effect<
-	void,
-	never,
-	DaemonStateTag | InstanceMgmtTag
-> = Effect.gen(function* () {
-	const stateRef = yield* DaemonStateTag;
-	const state = yield* Ref.get(stateRef);
-	const mgmt = yield* InstanceMgmtTag;
-
-	yield* Effect.forEach(
-		state.instances.filter(
-			(i) => i.managed && (i.driver ?? "opencode") === "opencode",
-		),
-		(inst: DaemonInstanceConfig) =>
-			Effect.tryPromise({
-				try: () => mgmt.startInstance(inst.id),
-				catch: (cause) =>
-					new InstanceAutoStartFailed({
-						instanceId: inst.id,
-						cause,
-					}),
-			}).pipe(
-				Effect.catchTag("InstanceAutoStartFailed", (failure) => {
-					if (!isExpectedLegacyInstanceManagerError(failure.cause)) {
-						return Effect.die(failure.cause);
-					}
-					return Effect.logWarning(
-						`Failed to auto-start instance ${failure.instanceId}: ${formatInstanceManagerCause(failure.cause)}`,
-					);
-				}),
-				Effect.annotateLogs("instanceId", inst.id),
-			),
-		{ concurrency: 1, discard: true },
-	);
-}).pipe(Effect.withSpan("autoStartManagedDefault"));
-
-/**
  * Orchestrator Effect that runs the full startup sequence.
  *
  * Steps (sequential):
  *   1. rehydrateInstances — restore persisted instances
  *   2. probeAndConvert — probe unmanaged instances
  *   3. detectSmartDefault — probe localhost:4096
- *   4. autoStartManagedDefault — start stopped managed instances
  *
  * Expected errors are caught and logged by individual steps.
  */
@@ -212,9 +165,6 @@ export const runStartupSequence: Effect.Effect<
 
 	// Detect smart default
 	yield* detectSmartDefault;
-
-	// Auto-start managed instances
-	yield* autoStartManagedDefault;
 
 	yield* Effect.logInfo("Startup sequence complete");
 }).pipe(

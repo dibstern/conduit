@@ -67,8 +67,6 @@ export {
 	type GetSkillContentResponse,
 	GetStatus,
 	type GetStatusResponse,
-	GetTodo,
-	type GetTodoResponse,
 	GetToolContent,
 	type GetToolContentResponse,
 	type GoalDetails,

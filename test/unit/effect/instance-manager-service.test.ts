@@ -22,7 +22,6 @@ import {
 	getPersistedInstanceConfigs,
 	makeInstanceManagerStateLive,
 	persistConfig,
-	startInitialUnmanagedInstanceHealthPollers,
 	startInstance,
 	stopInstance,
 	updateInstance,
@@ -135,7 +134,6 @@ describe("InstanceManager — missing methods", () => {
 				);
 
 				return Effect.gen(function* () {
-					yield* startInitialUnmanagedInstanceHealthPollers;
 					yield* startInstance("work-claude");
 					yield* stopInstance("work-claude");
 					yield* Effect.yieldNow();

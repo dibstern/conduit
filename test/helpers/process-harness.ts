@@ -474,6 +474,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "XPC_SERVICE_NAME"
 				>
 			>;
+			/** An already-running OpenCode the default instance should point at. */
+			opencodeUrl?: string;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -481,6 +483,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
+		if (options.opencodeUrl) this.defaultOpenCodeUrl = options.opencodeUrl;
 		if (this.opencodeRecording && !this.recordedOpenCode) {
 			this.recordedOpenCode = new MockOpenCodeServer(
 				loadOpenCodeRecording(this.opencodeRecording),
@@ -504,7 +507,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			this.foregroundCli &&
 			!this.autoStartOpenCode &&
 			!this.defaultOpenCode &&
-			!this.recordedOpenCode
+			!this.recordedOpenCode &&
+			!options.opencodeUrl
 		) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {

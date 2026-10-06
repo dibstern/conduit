@@ -660,11 +660,6 @@ export const FindFoldersResponseSchema = Schema.Struct({
 	),
 });
 
-export const GetTodoResponseSchema = Schema.Struct({
-	projectSlug: Schema.String,
-	items: Schema.Array(TodoItemSchema),
-});
-
 export const GetFileTreeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	entries: Schema.Array(Schema.String),
@@ -733,7 +728,6 @@ export type PtyInfo = typeof PtyInfoSchema.Type;
 export type PtyListResponse = typeof PtyListResponseSchema.Type;
 export type FindFoldersResponse = typeof FindFoldersResponseSchema.Type;
 export type TodoItem = typeof TodoItemSchema.Type;
-export type GetTodoResponse = typeof GetTodoResponseSchema.Type;
 export type GetFileTreeResponse = typeof GetFileTreeResponseSchema.Type;
 export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
@@ -1126,14 +1120,6 @@ export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 		},
 	},
 ) {}
-
-export class GetTodo extends Schema.TaggedRequest<GetTodo>()("GetTodo", {
-	failure: WsRpcError,
-	success: GetTodoResponseSchema,
-	payload: {
-		projectSlug: NonEmptyString,
-	},
-}) {}
 
 export class SwitchAgent extends Schema.TaggedRequest<SwitchAgent>()(
 	"SwitchAgent",
@@ -1835,7 +1821,6 @@ export const WsRpcRequest = Schema.Union(
 	GetCommands,
 	GetProjects,
 	FindFolders,
-	GetTodo,
 	SwitchAgent,
 	SwitchContextWindow,
 	SwitchModel,
@@ -2096,7 +2081,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetCommands),
 	Rpc.fromTaggedRequest(GetProjects),
 	Rpc.fromTaggedRequest(FindFolders),
-	Rpc.fromTaggedRequest(GetTodo),
 	Rpc.fromTaggedRequest(SwitchAgent),
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),

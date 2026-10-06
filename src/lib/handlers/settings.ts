@@ -4,7 +4,6 @@ import {
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
-import type { TodoItem } from "../shared-types.js";
 
 export const MAX_PROJECT_TITLE_LENGTH = 100;
 
@@ -104,6 +103,3 @@ export const getSkillNamesForSession = (sessionId: string) =>
 				.map((command) => command.name),
 		);
 	});
-
-export const getTodoState = (): Effect.Effect<readonly TodoItem[]> =>
-	Effect.succeed([]);

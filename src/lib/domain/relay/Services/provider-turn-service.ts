@@ -1,4 +1,4 @@
-import { Context, Effect, FiberMap, Layer } from "effect";
+import { Context, Deferred, Effect, FiberMap, Layer } from "effect";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -122,16 +122,41 @@ const makeProviderTurnService = Effect.gen(function* () {
 		runtime,
 		overridesRef,
 	});
+	// A Stop ends with session-wide frames (idle status, done) that can trail
+	// the button press. A prompt sent before they go out would be ended by
+	// them, so a new prompt waits for the session's Stop to finish first.
+	const stopping = new Map<string, Deferred.Deferred<void>>();
+	const awaitStop = (sessionId: string) =>
+		Effect.suspend(() => {
+			const stop = stopping.get(sessionId);
+			return stop
+				? Deferred.await(stop).pipe(Effect.timeout("5 seconds"), Effect.ignore)
+				: Effect.void;
+		});
 	const service: ProviderTurnService = {
 		completeRecoveredQuestion: (question, result, answers) =>
 			completeRecoveredQuestion(question, result, answers).pipe(
 				Effect.provide(providedContext),
 			),
 		prepareTurnSession: (input) =>
-			prepareTurnSession(input).pipe(Effect.provide(providedContext)),
+			awaitStop(input.sessionId).pipe(
+				Effect.zipRight(prepareTurnSession(input)),
+				Effect.provide(providedContext),
+			),
 		sendTurn: (input) => sendTurn(input).pipe(Effect.provide(providedContext)),
 		interruptTurn: (input) =>
-			interruptTurn(input).pipe(Effect.provide(providedContext)),
+			Effect.gen(function* () {
+				const stop = yield* Deferred.make<void>();
+				stopping.set(input.sessionId, stop);
+				yield* interruptTurn(input).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							if (stopping.get(input.sessionId) === stop)
+								stopping.delete(input.sessionId);
+						}).pipe(Effect.zipRight(Deferred.succeed(stop, undefined))),
+					),
+				);
+			}).pipe(Effect.provide(providedContext)),
 	};
 	return service;
 });

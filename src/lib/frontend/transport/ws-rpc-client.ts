@@ -30,7 +30,6 @@ import type {
 	GetFileTreeResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
-	GetTodoResponse,
 	GetToolContentResponse,
 	InboxCommandResponse,
 	InstanceListResponse,
@@ -231,10 +230,6 @@ export interface RejectQuestionRpcInput {
 	readonly originId: string;
 	readonly commandId: string;
 	readonly toolId: string;
-}
-
-export interface GetTodoRpcInput {
-	readonly projectSlug: string;
 }
 
 export interface GetFileTreeRpcInput {
@@ -630,9 +625,6 @@ const callRejectQuestion = (input: RejectQuestionRpcInput) =>
 			})
 			.pipe(Effect.asVoid),
 	);
-
-const callGetTodo = (input: GetTodoRpcInput) =>
-	callControl(input.projectSlug, (client) => client.GetTodo(input));
 
 const callGetFileTree = (input: GetFileTreeRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetFileTree(input));
@@ -1034,12 +1026,6 @@ export async function rejectQuestionRpc(
 	input: RejectQuestionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callRejectQuestion(input));
-}
-
-export async function getTodoRpc(
-	input: GetTodoRpcInput,
-): Promise<GetTodoResponse> {
-	return await runTransportEffect(callGetTodo(input));
 }
 
 export async function getFileTreeRpc(
