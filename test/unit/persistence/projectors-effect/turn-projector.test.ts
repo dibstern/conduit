@@ -638,7 +638,73 @@ describe("TurnProjector", () => {
 			expect(row?.state).toBe("error");
 			expect(row?.completed_at).toBe(now + 3000);
 		});
+
+		it("ends the running turn when messageId matches nothing, leaving queued prompts pending", async () => {
+			await projectRunningWithQueued();
+			await project(
+				makeStored(
+					"turn.error",
+					"s1",
+					{ messageId: "", error: "boom" } satisfies TurnErrorPayload,
+					4,
+					now + 3000,
+				),
+			);
+
+			expect(await turnStates()).toEqual({
+				user_m1: "error",
+				user_m2: "pending",
+			});
+		});
 	});
+
+	/** user_m1 running, user_m2 queued behind it. */
+	const projectRunningWithQueued = async () => {
+		await project(
+			makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "user_m1",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				1,
+				now,
+			),
+		);
+		await project(
+			makeStored(
+				"session.status",
+				"s1",
+				{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
+				2,
+				now + 50,
+			),
+		);
+		await project(
+			makeStored(
+				"message.created",
+				"s1",
+				{
+					messageId: "user_m2",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload,
+				3,
+				now + 100,
+			),
+		);
+	};
+
+	const turnStates = async () =>
+		Object.fromEntries(
+			(
+				await harness.query<{ id: string; state: string }>(
+					"SELECT id, state FROM turns ORDER BY id",
+				)
+			).map((row) => [row.id, row.state]),
+		);
 
 	describe("turn.interrupted", () => {
 		it("marks the turn as interrupted", async () => {
@@ -770,6 +836,24 @@ describe("TurnProjector", () => {
 				"user_s2",
 			]);
 			expect(row?.state).toBe("pending");
+		});
+
+		it("stops prompts queued behind the running turn", async () => {
+			await projectRunningWithQueued();
+			await project(
+				makeStored(
+					"turn.interrupted",
+					"s1",
+					{ messageId: "" } satisfies TurnInterruptedPayload,
+					4,
+					now + 2000,
+				),
+			);
+
+			expect(await turnStates()).toEqual({
+				user_m1: "interrupted",
+				user_m2: "interrupted",
+			});
 		});
 	});
 

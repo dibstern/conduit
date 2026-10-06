@@ -288,11 +288,22 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"file.attached",
 		"turn.completed",
 		"turn.error",
+		"turn.interrupted",
 		"session.compaction",
 	],
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			// A turn that ends without thinking.end must not leave thinking open.
+			const closeThinking = (messageId: string) =>
+				Effect.map(
+					sql<{
+						message_id: string;
+					}>`UPDATE message_parts SET status = 'completed'
+						WHERE message_id = ${messageId} AND type = 'thinking' AND status = 'running'
+						RETURNING message_id`,
+					(rows) => [...new Set(rows.map((row) => row.message_id))],
+				);
 			if (isEventType(event, "message.removed")) {
 				const { messageId } = event.data;
 				yield* sql`UPDATE turns SET user_message_id = NULL
@@ -480,8 +491,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
-					VALUES (${event.data.partId}, ${event.data.messageId}, 'thinking', '',
+					INSERT INTO message_parts (id, message_id, type, text, status, sort_order, created_at, updated_at)
+					VALUES (${event.data.partId}, ${event.data.messageId}, 'thinking', '', 'running',
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
 						${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
@@ -528,6 +539,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "thinking.end")) {
+				// The part's own span ends here, not at its last delta.
+				yield* sql`UPDATE message_parts
+					SET status = 'completed', updated_at = ${event.createdAt}
+					WHERE id = ${event.data.partId} AND type = 'thinking'`;
 				return ids(
 					yield* sql<{
 						id: string;
@@ -572,6 +587,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 							WHEN status IN ('completed', 'error') THEN status
 							ELSE 'running'
 						END,
+						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
 						updated_at = ${event.createdAt}
 					WHERE id = ${event.data.partId}`;
@@ -594,7 +610,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}
+					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt},
+						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}`;
 				return ids(
 					yield* sql<{
@@ -638,6 +655,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// so the latest value wins. Tokens are per-execution, so a turn
 				// that ran twice sums them.
 				const tokens = event.data.tokens;
+				yield* closeThinking(event.data.messageId);
 				return ids(
 					yield* sql<{ id: string }>`
 					UPDATE messages SET
@@ -655,17 +673,42 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.error")) {
-				return ids(
-					yield* sql<{
-						id: string;
-					}>`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
-				);
+				yield* closeThinking(event.data.messageId);
+				// The error is the turn's last word, so it replays like any
+				// content: a synthetic message after the turn's own, keyed on the
+				// event sequence. A part on the turn's message would be lost when
+				// a REST snapshot rewrites that message's parts.
+				const errorMessageId = `turn-error-${event.sequence}`;
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
+					VALUES (${errorMessageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`
+					INSERT INTO message_parts
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					VALUES (${`turn-error-part-${event.sequence}`}, ${errorMessageId}, 'error', ${event.data.error},
+						${event.data.code === undefined ? null : encodeJson({ code: event.data.code })},
+						0, ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				return [
+					errorMessageId,
+					...ids(
+						yield* sql<{
+							id: string;
+						}>`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+					),
+				];
+			}
+
+			if (isEventType(event, "turn.interrupted")) {
+				return yield* closeThinking(event.data.messageId);
 			}
 
 			if (isEventType(event, "session.compaction")) {
-				// Only the terminal "completed" boundary reaches persistence at all —
-				// ingestion filters "started"/"failed" out before the append — but the
-				// guard stays because a replay or backfill can hand us either.
+				// Only the outcomes reach persistence — ingestion drops the transient
+				// "started" before the append — but the guard stays because a replay
+				// or backfill can hand us one. A failed outcome is kept as status.
 				// The `compaction` part keeps the divider and the reduced context gauge
 				// across a reload. An auto-compaction lands mid-message, so it joins
 				// the in-flight assistant message as its next part: a standalone
@@ -673,7 +716,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// and split the turn on reload. Between turns it gets a synthetic
 				// message. Ids keyed on the event sequence plus DO NOTHING make
 				// replay a no-op.
-				if (event.data.state !== "completed") return [];
+				if (event.data.state === "started") return [];
+				const status = event.data.state === "failed" ? "failed" : null;
 				const partId = `compaction-part-${event.sequence}`;
 				const [latest] = yield* sql<{
 					id: string;
@@ -693,8 +737,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 				if (latest?.role === "assistant" && latest.is_streaming === 1) {
 					yield* sql`
 						INSERT INTO message_parts
-						(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
-						VALUES (${partId}, ${latest.id}, 'compaction', ${event.data.detail}, ${metadata},
+						(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at)
+						VALUES (${partId}, ${latest.id}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
 							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${latest.id}), 0),
 							${event.createdAt}, ${event.createdAt})
 						ON CONFLICT (id) DO NOTHING`;
@@ -708,8 +752,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
-					VALUES (${partId}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, 0, ${event.createdAt}, ${event.createdAt})
+					(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at)
+					VALUES (${partId}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, ${status}, 0, ${event.createdAt}, ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
 				return [messageId];
 			}
@@ -989,10 +1033,15 @@ export const makeTurnProjector = (): EffectProjector => ({
 							RETURNING id, session_id`;
 					return { sessions: owners(written), messages: ids(written) };
 				}
+				// An error before the reply is named carries no id a turn owns, so
+				// it ends the running turn. Queued prompts stay pending: after an
+				// error result the SDK goes on to send them.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'error', completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE session_id = ${event.sessionId}
+						AND (assistant_message_id = ${event.data.messageId}
+							OR state = 'running')
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}
@@ -1000,13 +1049,14 @@ export const makeTurnProjector = (): EffectProjector => ({
 			if (isEventType(event, "turn.interrupted")) {
 				// Stop ends the session's work, so whatever is still running stops
 				// with the named turn. That also covers an empty id (stopped before
-				// naming its reply) and an id no turn owns.
+				// naming its reply) and an id no turn owns. Prompts queued behind it
+				// stop too: Stop closes the Claude query, which drops them unsent.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
 						WHERE session_id = ${event.sessionId}
 						AND (assistant_message_id = ${event.data.messageId}
-							OR state = 'running')
+							OR state IN ('running', 'pending'))
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}

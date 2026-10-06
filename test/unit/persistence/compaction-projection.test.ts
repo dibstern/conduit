@@ -112,12 +112,13 @@ describe("session.compaction projection (real ingestion path)", () => {
 		expect(parts[0]?.id).toBe(`compaction-part-${event?.sequence}`);
 	});
 
-	it("leaves started and failed compactions transient", async () => {
+	it("leaves a started compaction transient and keeps a failed outcome", async () => {
 		await harness.ingest(compaction("started"));
-		await harness.ingest(compaction("failed"));
-
-		expect(await compactionMessages()).toHaveLength(0);
 		expect(await compactionParts()).toHaveLength(0);
+
+		await harness.ingest(compaction("failed"));
+		expect(await compactionMessages()).toHaveLength(1);
+		expect(await compactionParts()).toHaveLength(1);
 	});
 
 	it("omits token fields that the provider did not report", async () => {

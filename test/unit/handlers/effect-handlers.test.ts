@@ -80,10 +80,6 @@ import {
 	setPermissionMode,
 	setVariant,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import {
-	ToolContentServiceLive,
-	ToolContentServiceNoop,
-} from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -114,7 +110,6 @@ import {
 	renameSessionForClient,
 	viewSessionForClient,
 } from "../../../src/lib/handlers/session.js";
-import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import {
@@ -902,6 +897,7 @@ describe("switchModelForSession", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -1383,87 +1379,6 @@ function makeSessionLifecycleLayer(options?: {
 		makeOverridesStateLive(),
 	);
 }
-
-describe("handleGetToolContent", () => {
-	it.effect(
-		"returns tool content when Effect read query is available and content exists",
-		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
-			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed("full tool output text")),
-				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-				getSession: vi.fn(() => Effect.succeed(undefined)),
-				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
-				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
-				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
-				getSessionsForReconciliation: () => Effect.succeed([]),
-				listSessions: vi.fn(() => Effect.succeed([])),
-				listSessionInfos: vi.fn(() => Effect.succeed([])),
-				readSessionTranscript: vi.fn(() =>
-					Effect.succeed({ messages: [], version: 0 }),
-				),
-				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-				readSessionTranscriptPage: vi.fn(() =>
-					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
-				),
-				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-				getSessionFamily: () => Effect.succeed([]),
-				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
-				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
-				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
-			} satisfies ReadQueryEffect;
-
-			const layer = Layer.provideMerge(
-				ToolContentServiceLive,
-				Layer.mergeAll(
-					Layer.succeed(WebSocketHandlerTag, ws),
-					Layer.succeed(ReadQueryEffectTag, readQuery),
-				),
-			);
-
-			return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(readQuery.getToolContent).toHaveBeenCalledWith("tool-42");
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "tool_content",
-						sessionId: "session-1",
-						toolId: "tool-42",
-						content: "full tool output text",
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect("returns NOT_FOUND when readQuery is absent", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-
-		// No persistence-backed tool content service provided.
-		const layer = Layer.merge(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			ToolContentServiceNoop,
-		);
-
-		return handleGetToolContent("client-1", { toolId: "tool-42" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "error",
-					sessionId: "session-1",
-					code: "NOT_FOUND",
-					message: "Full tool content not available",
-				});
-			}),
-		);
-	});
-});
 
 describe("handleForkSession", () => {
 	it.effect(
@@ -2600,6 +2515,7 @@ describe("handleNewSession", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2701,6 +2617,7 @@ describe("handleNewSession", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
@@ -3135,6 +3052,7 @@ describe("loadMoreHistoryForSession", () => {
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+			getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
 					{
@@ -3785,7 +3703,7 @@ describe("rewindSessionToMessage", () => {
 });
 
 describe("handleMessage", () => {
-	it.effect("sends error when no active session", () => {
+	it.effect("logs, without a browser error, when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
@@ -3812,13 +3730,10 @@ describe("handleMessage", () => {
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "system_error",
-						code: "NO_SESSION",
-					}),
+				expect(log.warn).toHaveBeenCalledWith(
+					expect.stringContaining("no active session"),
 				);
+				expect(ws.sendTo).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -4010,8 +3925,8 @@ describe("handleMessage", () => {
 		},
 	);
 
-	it.effect(
-		"passes prior SQLite history into Claude engine send_turn input",
+		it.effect(
+			"passes Claude history metadata without a transcript into send_turn input",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -4054,46 +3969,10 @@ describe("handleMessage", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "msg-user-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "Earlier question",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							version: 0,
-							is_streaming: 0,
-							is_backfilled: 0,
-							created_at: 1,
-							updated_at: 1,
-							parts: [
-								{
-									id: "part-user-1",
-									message_id: "msg-user-1",
-									type: "text",
-									text: "Earlier question",
-									tool_name: null,
-									call_id: null,
-									input: null,
-									result: null,
-									metadata: null,
-									duration: null,
-									status: null,
-									sort_order: 0,
-									created_at: 1,
-									updated_at: 1,
-								},
-							],
-						},
-					]),
-				),
+					getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+					getSessionHistoryMetadata: vi.fn(() =>
+						Effect.succeed({ messageCount: 1, cumulativeTokens: 42 }),
+					),
 			} satisfies ReadQueryEffect;
 
 			const layer = Layer.provideMerge(
@@ -4121,7 +4000,7 @@ describe("handleMessage", () => {
 					text: "new prompt",
 					commandId: "cmd-sqlite-history",
 				});
-				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
 					"session-1",
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -4129,17 +4008,8 @@ describe("handleMessage", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
-							history: [
-								expect.objectContaining({
-									role: "user",
-									parts: [
-										expect.objectContaining({
-											type: "text",
-											text: "Earlier question",
-										}),
-									],
-								}),
-							],
+							history: [],
+							cumulativeTokens: 42,
 						}),
 					}),
 				);
@@ -4365,6 +4235,7 @@ describe("handleMessage", () => {
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = withDispatchEffect({

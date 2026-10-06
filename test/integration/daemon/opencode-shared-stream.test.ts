@@ -6,6 +6,7 @@ import {
 	RemoveProject,
 	SaveProject,
 	SetProjectInstance,
+	StartInstance,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -257,6 +258,14 @@ describe("daemon shared OpenCode global stream", () => {
 		if (!defaultInstance || !namedInstance)
 			throw new Error("Expected two OpenCode instances");
 		const defaultId = defaultInstance.id;
+		// Managed OpenCode spawns on first use; the replacement must be running.
+		// That use opens its stream, which the default relay's subscription
+		// keeps open, so count connections after it.
+		await sendRpcRequest(
+			socket,
+			new StartInstance({ instanceId: namedInstance.id }),
+		);
+		const connectionsAfterStart = fixture.opencodeStreamConnections().length;
 		const replacement = loadDaemonConfig(fixture.configDir)?.instances?.find(
 			({ id }) => id === namedInstance.id,
 		);
@@ -282,6 +291,7 @@ describe("daemon shared OpenCode global stream", () => {
 			expect(
 				fixture
 					.opencodeStreamConnections()
+					.slice(connectionsAfterStart)
 					.filter(({ action }) => action === "open"),
 			).toHaveLength(2);
 		});
@@ -303,7 +313,9 @@ describe("daemon shared OpenCode global stream", () => {
 		evidence["routedEventCounts"] = { b: requests(b, "pa3r-fresh-b") };
 		expect(requests(b, "pa3r-fresh-b")).toBe(1);
 		await vi.waitFor(() => {
-			const connections = fixture.opencodeStreamConnections();
+			const connections = fixture
+				.opencodeStreamConnections()
+				.slice(connectionsAfterStart);
 			expect(
 				connections.filter(({ action }) => action === "open"),
 			).toHaveLength(2);
@@ -335,19 +347,22 @@ describe("daemon shared OpenCode global stream", () => {
 		await fixture.closeOpenCodeStreams();
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "disconnected",
 			cursor,
 		);
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "reconnecting",
 			cursor,
 		);
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "connected",
 			cursor,
 		);
@@ -374,6 +389,6 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 		evidence["connectionStates"] = b.frames
 			.map(({ message }) => message)
-			.filter((message) => message["type"] === "connection_status");
+			.filter((message) => message["_tag"] === "opencodeConnection");
 	}, 90_000);
 });

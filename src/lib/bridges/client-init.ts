@@ -25,11 +25,11 @@ import {
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
+import { formatErrorDetail } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
 import { findCatalogModel } from "../shared-types.js";
-import type { OpenCodeInstance, ProviderInfo } from "../types.js";
+import type { ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,
@@ -93,20 +93,14 @@ function addClaudeProvider(
 
 export interface ClientInitEffectOptions {
 	readonly skipDefaultSession?: boolean;
-	readonly getInstances?: () =>
-		| ReadonlyArray<Readonly<OpenCodeInstance>>
-		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 }
 
-const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
+// Init failures are background-task errors (fork 3.2): log only, the
+// browser renders whatever init did deliver.
+const logInitErrorEffect = (err: unknown, prefix: string) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		log.warn(`${prefix}: ${formatErrorDetail(err)}`);
-		wsHandler.sendTo(
-			clientId,
-			RelayError.fromCaught(err, "INIT_FAILED", prefix).toSystemError(),
-		);
 	});
 
 const switchClientToSessionForInitEffect = (
@@ -181,8 +175,7 @@ const resolveAndReplaySessionEffect = (
 		const activeId =
 			activeIdResult._tag === "Right" ? activeIdResult.right : undefined;
 		if (activeIdResult._tag === "Left") {
-			yield* sendInitErrorEffect(
-				clientId,
+			yield* logInitErrorEffect(
 				activeIdResult.left,
 				"Failed to load default session",
 			);
@@ -214,7 +207,7 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 		const sessionService = yield* SessionManagerServiceTag;
 		yield* sessionService.pushViewerFamilies().pipe(
 			Effect.catchAll((err) =>
-				sendInitErrorEffect(clientId, err, "Failed to push viewed families"),
+				logInitErrorEffect(err, "Failed to push viewed families"),
 			),
 			Effect.ensuring(
 				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
@@ -347,33 +340,10 @@ const sendProvidersAndSettingsEffect = (
 			}),
 		);
 		if (providerResult._tag === "Left") {
-			yield* sendInitErrorEffect(
-				clientId,
+			yield* logInitErrorEffect(
 				providerResult.left,
 				"Failed to list providers",
 			);
-		}
-	});
-
-const replayInstancesEffect = (
-	clientId: string,
-	options: ClientInitEffectOptions,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		if (options.getInstances) {
-			const instances = yield* Effect.tryPromise({
-				try: () => Promise.resolve(options.getInstances?.() ?? []),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to list instances").pipe(
-						Effect.as([] as ReadonlyArray<Readonly<OpenCodeInstance>>),
-					),
-				),
-			);
-			wsHandler.sendTo(clientId, { type: "instance_list", instances });
 		}
 	});
 
@@ -393,5 +363,4 @@ export const handleClientConnectedEffect = (
 		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
-		yield* replayInstancesEffect(clientId, options);
 	});

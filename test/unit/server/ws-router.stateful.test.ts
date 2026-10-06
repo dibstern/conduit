@@ -16,7 +16,6 @@ import fc from "fast-check";
 import { describe, it } from "vitest";
 import {
 	type ClientTracker,
-	createClientCountMessage,
 	createClientTracker,
 } from "../../../src/lib/server/ws-router.js";
 
@@ -266,31 +265,6 @@ class GetClientIdsCommand implements fc.Command<ModelState, RealState> {
 	}
 }
 
-class ClientCountMessageCommand implements fc.Command<ModelState, RealState> {
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(model: ModelState, real: RealState): void {
-		const msg = createClientCountMessage(real.tracker.getClientCount());
-
-		if (msg.type !== "client_count") {
-			throw new Error(`Expected "client_count" message, got "${msg.type}"`);
-		}
-
-		const countMsg = msg as { type: "client_count"; count: number };
-		if (countMsg.count !== model.clients.size) {
-			throw new Error(
-				`Client count message value: model=${model.clients.size}, message=${countMsg.count}`,
-			);
-		}
-	}
-
-	toString(): string {
-		return "ClientCountMessage()";
-	}
-}
-
 const arbClientId = fc.oneof(
 	{ weight: 5, arbitrary: fc.uuid() },
 	{ weight: 3, arbitrary: fc.stringMatching(/^client-[0-9]{1,5}$/) },
@@ -322,7 +296,6 @@ const allCommands = fc.commands(
 		fc.constant(new GetClientIdsCommand()),
 
 		// Client count message factory
-		fc.constant(new ClientCountMessageCommand()),
 	],
 	{ maxCommands: 50 },
 );

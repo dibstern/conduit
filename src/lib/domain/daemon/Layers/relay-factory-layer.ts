@@ -25,7 +25,6 @@ import {
 	Runtime,
 } from "effect";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
-import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import {
 	projectEventsDbPath,
 	projectStorageDir,
@@ -48,7 +47,6 @@ import {
 	addInstance as addEffectInstance,
 	getInstance as getEffectInstance,
 	getInstances as getEffectInstances,
-	getManagedOpenCodeProcessEnv,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
@@ -106,7 +104,6 @@ export const HttpServerRefLive: Layer.Layer<HttpServerRefTag> = Layer.effect(
 export interface RelayFactory {
 	readonly create: (
 		project: StoredProject,
-		opencodeUrl: string,
 		projectControls?: RelayFactoryProjectControls,
 	) => Effect.Effect<ProjectRelay, RelayFactoryError>;
 }
@@ -305,7 +302,6 @@ export const RelayFactoryLive = (
 			return {
 				create: (
 					project: StoredProject,
-					opencodeUrl: string,
 					projectControls?: RelayFactoryProjectControls,
 				): Effect.Effect<ProjectRelay, RelayFactoryError> =>
 					Effect.gen(function* () {
@@ -373,17 +369,6 @@ export const RelayFactoryLive = (
 									instance.driver !== "claude" &&
 									instance.id === project.instanceId,
 							) ?? instances.find((instance) => instance.driver !== "claude");
-						// Managed passwords live only in the private process record.
-						const opencodeAuth = openCodeAuth(
-							selectedInstance?.managed
-								? yield* getManagedOpenCodeProcessEnv(selectedInstance.id).pipe(
-										Effect.provideService(
-											InstanceManagerStateTag,
-											instanceState,
-										),
-									)
-								: selectedInstance?.env,
-						);
 						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -398,12 +383,10 @@ export const RelayFactoryLive = (
 							try: () => {
 								creation = createProjectRelay({
 									httpServer,
-									opencodeUrl,
 									openCodeInstances,
 									...(selectedInstance
 										? { openCodeInstanceId: selectedInstance.id }
 										: {}),
-									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
 									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {

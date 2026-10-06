@@ -12,7 +12,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { applyProjectMutationResponse, projectState } from "../../stores/project.svelte.js";
+	import { applyProjectList, projectState } from "../../stores/project.svelte.js";
 	import { setSessionScope } from "../../stores/session-scope.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
@@ -36,7 +36,7 @@
 	}
 
 	function handleProjectAdded(response: SaveProjectResponse) {
-		applyProjectMutationResponse(response);
+		applyProjectList(response);
 		setSessionScope(response.savedSlug);
 		addProjectOpen = false;
 	}

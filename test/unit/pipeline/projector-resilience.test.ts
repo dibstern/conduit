@@ -1330,8 +1330,8 @@ describe("MessageProjector resilience", () => {
 			// Part exists from thinking.start but delta text was lost
 			assert.exists(thinking, "expected thinking message");
 			expect(thinking.text).toBe("");
-			// History-loaded = always done
-			expect(thinking.done).toBe(true);
+			// No thinking.end and no turn end: still in progress
+			expect(thinking.done).toBe(false);
 		});
 	});
 

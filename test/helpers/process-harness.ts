@@ -474,6 +474,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "XPC_SERVICE_NAME"
 				>
 			>;
+			/** An already-running OpenCode the default instance should point at. */
+			opencodeUrl?: string;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -481,6 +483,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
+		if (options.opencodeUrl) this.defaultOpenCodeUrl = options.opencodeUrl;
 		if (this.opencodeRecording && !this.recordedOpenCode) {
 			this.recordedOpenCode = new MockOpenCodeServer(
 				loadOpenCodeRecording(this.opencodeRecording),
@@ -504,7 +507,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			this.foregroundCli &&
 			!this.autoStartOpenCode &&
 			!this.defaultOpenCode &&
-			!this.recordedOpenCode
+			!this.recordedOpenCode &&
+			!options.opencodeUrl
 		) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {
@@ -1557,6 +1561,7 @@ export class ProcessBrowser {
 	private failure: Error | undefined;
 	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private constructor(
 		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
@@ -1597,6 +1602,7 @@ export class ProcessBrowser {
 		);
 		const browser = new ProcessBrowser(ws, runtime, rpc, originId, projectSlug);
 		browser.watchApprovals();
+		browser.watchProjectSettings();
 		try {
 			await new Promise<void>((done, fail) => {
 				const timer = setTimeout(
@@ -1670,6 +1676,27 @@ export class ProcessBrowser {
 							this.record({ ...item, type: `${item._tag}_pending` });
 						if (envelope._tag === "remove")
 							this.record({ type: "approval_removed", id: envelope.id });
+					}),
+			).pipe(Effect.ignore),
+		);
+	}
+
+	// Project settings and live project facts, each row recorded as a
+	// `{ type: "project_setting", ...row }` frame.
+	private watchProjectSettings(): void {
+		this.projectSettings = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeProjectSettings({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						const rows =
+							envelope._tag === "snapshot"
+								? envelope.rows
+								: envelope._tag === "upsert"
+									? [envelope.item]
+									: [];
+						for (const row of rows)
+							this.record({ ...row, type: "project_setting" });
 					}),
 			).pipe(Effect.ignore),
 		);
@@ -1944,6 +1971,8 @@ export class ProcessBrowser {
 		if (this.ptys) await Effect.runPromise(Fiber.interrupt(this.ptys));
 		if (this.approvals)
 			await Effect.runPromise(Fiber.interrupt(this.approvals));
+		if (this.projectSettings)
+			await Effect.runPromise(Fiber.interrupt(this.projectSettings));
 		await this.runtime.dispose();
 		this.closed = true;
 	}

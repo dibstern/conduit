@@ -5,10 +5,7 @@ import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
-import {
-	isTerminalRuntimeEvent,
-	toEventSinkError,
-} from "./relay-event-sink.js";
+import { toEventSinkError } from "./relay-event-sink.js";
 import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
 
 /**
@@ -36,7 +33,9 @@ interface ProviderCommandOutboxRow {
 }
 
 interface SendTurnOutboxPayload
-	extends Omit<SendTurnInput, "eventSink" | "abortSignal"> {}
+	extends Omit<SendTurnInput, "eventSink" | "abortSignal" | "history"> {
+	readonly history?: SendTurnInput["history"];
+}
 
 class UnknownProviderCommandEffect extends Data.TaggedError(
 	"UnknownProviderCommandEffect",
@@ -370,6 +369,7 @@ export class ProviderSideEffectReactor {
 				const payload = yield* this.parseSendTurnPayload(row);
 				return yield* instance.sendTurnEffect({
 					...payload,
+					history: payload.history ?? [],
 					commandId: row.command_id,
 					...(driver === "claude" ? { commandAttempt } : {}),
 					eventSink: this.makeReactorEventSink(interactions),
@@ -538,13 +538,10 @@ export class ProviderSideEffectReactor {
 	 */
 	private makeReactorEventSink(interactions?: EventSink): EventSink {
 		// Streamed output bypasses the relay sink, so mark the session alive here
-		// or the relay's processing timeout fires mid-turn on long turns. End it
-		// before the terminal event publishes its done, or a client opening the
-		// session in between is told it is still busy.
+		// or the relay's processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
-				if (isTerminalRuntimeEvent(event)) interactions?.noteTurnEnd?.();
-				else interactions?.noteActivity?.();
+				interactions?.noteActivity?.(event);
 				return this.options.ingestion
 					.ingest(event)
 					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));
@@ -625,7 +622,7 @@ function isSendTurnOutboxPayload(
 		typeof value["sessionId"] === "string" &&
 		typeof value["turnId"] === "string" &&
 		typeof value["prompt"] === "string" &&
-		Array.isArray(value["history"]) &&
+		(value["history"] === undefined || Array.isArray(value["history"])) &&
 		isRecord(value["providerState"]) &&
 		typeof value["workspaceRoot"] === "string"
 	);

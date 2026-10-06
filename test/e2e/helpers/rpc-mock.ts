@@ -3,6 +3,7 @@ import {
 	type ProjectSetting,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -31,6 +32,8 @@ type RpcHandler = (
 	params: Record<string, unknown>,
 	request: JsonRpcRequest | EffectRpcRequest,
 ) => unknown | Promise<unknown>;
+
+type DaemonListTag = "SubscribeInstances" | "SubscribeProjects";
 
 export interface RpcMockOptions {
 	readonly handlers: Record<string, RpcHandler>;
@@ -201,6 +204,27 @@ export class RpcMockControl {
 				];
 	}
 
+	/** The daemon-global lists, keyed by subscription tag; unset lists stay silent. */
+	private readonly daemonLists = new Map<
+		DaemonListTag,
+		Record<string, unknown>
+	>();
+
+	setDaemonList(tag: DaemonListTag, value: Record<string, unknown>): void {
+		this.daemonLists.set(tag, value);
+		if (this.streams.has(tag)) this.sendChunk(tag, [value]);
+	}
+
+	initialDaemonList(tag: DaemonListTag): readonly unknown[] {
+		return this.daemonLists.has(tag) ? [this.daemonLists.get(tag)] : [];
+	}
+
+	/** GetProjects answers from the mocked list, as the daemon does. */
+	projectsHandler(): RpcHandler | undefined {
+		const list = this.daemonLists.get("SubscribeProjects");
+		return list && (() => ({ projectSlug: this.projectSlug, ...list }));
+	}
+
 	record(tag: string, payload: Record<string, unknown>): void {
 		this.requests.push({ tag, payload });
 	}
@@ -304,9 +328,14 @@ const sendJson = (ws: WebSocketRoute, message: unknown) => {
 };
 
 const controls = new WeakMap<Page, RpcMockControl>();
+const pendingDaemonLists = new WeakMap<
+	Page,
+	Map<DaemonListTag, Record<string, unknown>>
+>();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
+const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
@@ -318,6 +347,35 @@ export function setMockRpcCatalog(page: Page, catalog: MockCatalog): void {
 	const control = controls.get(page);
 	if (control) control.catalog = catalog;
 	else pendingCatalogs.set(page, catalog);
+}
+
+/** Mock-only input: deliver a daemon list through its subscription, never /ws. */
+export function sendMockDaemonList(
+	page: Page,
+	tag: DaemonListTag,
+	value: Record<string, unknown>,
+): void {
+	const control = controls.get(page);
+	if (control) control.setDaemonList(tag, value);
+	else
+		pendingDaemonLists.set(
+			page,
+			new Map(pendingDaemonLists.get(page)).set(tag, value),
+		);
+}
+
+/** Mock-only input: publish one project setting through its subscription. */
+export function sendMockProjectSetting(
+	page: Page,
+	setting: ProjectSetting,
+): void {
+	const control = controls.get(page);
+	if (control) control.setProjectSetting(setting);
+	else
+		pendingProjectSettings.set(page, [
+			...(pendingProjectSettings.get(page) ?? []),
+			setting,
+		]);
 }
 
 export function sendMockShellSnapshot(
@@ -352,6 +410,10 @@ async function handleMessage(
 	}
 	if (isEffectRpcRequest(raw)) {
 		control.record(raw.tag, raw.payload ?? {});
+		const daemonList =
+			raw.tag === "SubscribeInstances" || raw.tag === "SubscribeProjects"
+				? control.initialDaemonList(raw.tag)
+				: undefined;
 		const stream =
 			streams?.[raw.tag] ??
 			(raw.tag === "SubscribeShell" && control.initialShellFrames().length > 0
@@ -361,7 +423,9 @@ async function handleMessage(
 							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
 					: raw.tag === "SubscribeProjectSettings"
 						? () => control.initialProjectSettingsFrames()
-						: undefined);
+						: daemonList
+							? () => daemonList
+							: undefined);
 		if (stream) {
 			const sessionId =
 				raw.tag === "SubscribeSessionDetail"
@@ -378,6 +442,7 @@ async function handleMessage(
 			control.getResponseHandler(raw.tag) ??
 			handlers[raw.tag] ??
 			control.catalogHandler(raw.tag) ??
+			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 			(raw.tag === "ResolveSession"
 				? () => ({ projectSlug: control.projectSlug })
 				: raw.tag === "ViewSession"
@@ -386,6 +451,17 @@ async function handleMessage(
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
+			// A mutation's answer is the daemon's new list, which it also fans out.
+			if (!raw.tag.startsWith("Get") && isRecord(result)) {
+				if (Array.isArray(result["projects"]))
+					control.setDaemonList("SubscribeProjects", {
+						projects: result["projects"],
+					});
+				if (Array.isArray(result["instances"]))
+					control.setDaemonList("SubscribeInstances", {
+						instances: result["instances"],
+					});
+			}
 			sendJson(ws, {
 				_tag: "Exit",
 				requestId: raw.id,
@@ -457,6 +533,11 @@ export async function mockWsRpc(
 	});
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
+	for (const [tag, value] of pendingDaemonLists.get(page) ?? [])
+		control.setDaemonList(tag, value);
+	for (const setting of pendingProjectSettings.get(page) ?? [])
+		control.setProjectSetting(setting);
+	pendingProjectSettings.delete(page);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		ws.onMessage((data) => {
 			if (typeof data !== "string") return;

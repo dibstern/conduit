@@ -58,6 +58,9 @@ const makeReadQuery = (
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
+	getSessionHistoryMetadata: vi.fn(() =>
+		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+	),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),

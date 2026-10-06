@@ -64,13 +64,22 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 		match:
 			/^the mock relay reports OpenCode (reconnecting|disconnected|connected)$/,
 		run: async ({ world, match }) => {
-			const relay = requireRelayControl(world.page);
-			relay.sendMessage({ type: "connection_status", status: match[1] });
-			// A later message on the same socket confirms dispatch has finished,
+			const rpc = requireRpcControl(world.page);
+			// These facts ride the project-settings stream, which opens only once
+			// the page has attached its project.
+			await rpc.waitForRequest(
+				(request) => request.tag === "SubscribeProjectSettings",
+				15_000,
+			);
+			rpc.setProjectSetting({
+				_tag: "opencodeConnection",
+				status: match[1] as "reconnecting" | "disconnected" | "connected",
+			});
+			// A later fact on the same stream confirms dispatch has finished,
 			// so an absent-banner assertion cannot pass before the status arrives.
-			relay.sendMessage({ type: "client_count", count: 3 });
+			rpc.setProjectSetting({ _tag: "clientCount", count: 3 });
 			await expect(world.page.locator("#client-count-badge")).toHaveText("3");
-			relay.sendMessage({ type: "client_count", count: 2 });
+			rpc.setProjectSetting({ _tag: "clientCount", count: 2 });
 			await expect(world.page.locator("#client-count-badge")).toHaveText("2");
 		},
 	},

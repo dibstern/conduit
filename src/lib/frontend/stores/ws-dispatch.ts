@@ -34,8 +34,6 @@ import {
 	handleError,
 	handleInputSyncReceived,
 	handleStatus,
-	handleThinkingStop,
-	handleToolExecuting,
 	inputSyncState,
 	persistInputDraft,
 	type SessionActivity,
@@ -50,8 +48,7 @@ import {
 	handleVariantInfo,
 } from "./discovery.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
-import { clearScanInFlight, handleInstanceList } from "./instance.svelte.js";
-import { handleProjectList } from "./project.svelte.js";
+import { clearScanInFlight } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -78,17 +75,14 @@ import { handlePtyError } from "./terminal.svelte.js";
 import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
-	setClientCount,
 	showBanner,
 	showToast,
-	uiState,
 	updateContextPercent,
 } from "./ui.svelte.js";
 
 import {
 	fileBrowserListeners,
 	projectAttachedListeners,
-	projectListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
 
@@ -177,16 +171,6 @@ function routePerSession(event: PerSessionEvent): void {
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
 	switch (event.type) {
-		case "thinking_stop":
-			handleThinkingStop(activity, messages, event);
-			break;
-		case "tool_executing":
-			handleToolExecuting(activity, messages, event);
-			// Not tool_start: the server names the skill from the input, which
-			// arrives here.
-			if (event.name.toLowerCase() === "skill")
-				refreshSessionSkills(event.sessionId);
-			break;
 		case "user_message":
 			refreshSessionSkills(event.sessionId);
 			break;
@@ -317,9 +301,6 @@ export function handleMessage(msg: RelayMessage): void {
 
 		// Now routed through routePerSession (per-session events).
 
-		case "client_count":
-			setClientCount(msg.count ?? 0);
-			break;
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
 			handleBuildId(msg.buildId);
@@ -328,31 +309,16 @@ export function handleMessage(msg: RelayMessage): void {
 			if (!msg.restartAvailable) serverRestartAccepted = false;
 			handleServerUpdate(msg.restartAvailable);
 			break;
-		case "connection_status":
-			uiState.opencodeConnectionStatus = msg.status;
-			break;
 		case "input_sync":
 			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
 			break;
 
-		case "project_list":
-			handleProjectList(msg);
-			for (const fn of projectListeners) fn(msg);
-			break;
 		case "daemon_sessions_changed":
 			void refreshSessionList();
 			break;
 
 		// Now routed through routePerSession (per-session events).
-
-		case "instance_list":
-			handleInstanceList(msg);
-			break;
-		case "system_error":
-			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
-			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
-			break;
 
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.

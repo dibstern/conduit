@@ -222,7 +222,8 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
-	applyGetProjectsResponse: vi.fn(),
+	applyProjectList: vi.fn(),
+	followDaemonLists: vi.fn(),
 	projectState: { projects: [] },
 }));
 

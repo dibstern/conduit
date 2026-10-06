@@ -1,5 +1,5 @@
 // Full integration tests using a real Daemon pointed at a real OpenCode server.
-// Verifies: SPA loading, WS connection, instance_list delivery, health auth,
+// Verifies: SPA loading, WS connection, instance list delivery, health auth,
 // and that the "No healthy OpenCode instances" banner does not appear.
 //
 // Uses the daemon-fixtures.ts harness (worker-scoped Daemon).
@@ -8,7 +8,7 @@
 import { expect, test } from "../helpers/daemon-fixtures.js";
 
 test.describe("Daemon Smoke", () => {
-	test("browser connects via WS and receives instance_list", async ({
+	test("browser connects via WS and receives the instance list", async ({
 		page,
 		daemonProjectUrl,
 		isNarrow,
@@ -19,7 +19,7 @@ test.describe("Daemon Smoke", () => {
 		await expect(page).toHaveTitle("Conduit", { timeout: 10_000 });
 
 		// Connect overlay unmounts once WS connects and initClient runs.
-		// initClient sends instance_list, session_list, etc. Wait for detach,
+		// The instance list arrives over SubscribeInstances. Wait for detach,
 		// not hidden: a phone's list route hides the whole chat pane, overlay
 		// included, so "hidden" would pass before the socket connects.
 		await page.locator(".connect-overlay").waitFor({

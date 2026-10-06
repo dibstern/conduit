@@ -28,10 +28,23 @@ type ProjectSettingChange = Extract<
 	{ readonly _tag: "upsert" }
 >;
 
+/** Facts the relay observes rather than reads from config. */
+type LiveProjectFact = Extract<
+	ProjectSetting,
+	{ readonly _tag: "clientCount" | "opencodeConnection" }
+>;
+type LiveProjectFacts = Partial<
+	Record<LiveProjectFact["_tag"], LiveProjectFact>
+>;
+const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
+	setting._tag === "clientCount" || setting._tag === "opencodeConnection";
+
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
 	/** Counts publications; it orders envelopes and is not a resume cursor. */
 	readonly revision: Ref.Ref<number>;
+	/** The latest of each live fact, which has no other home to read from. */
+	readonly live: Ref.Ref<LiveProjectFacts>;
 }
 
 export class ProjectSettingsTag extends Context.Tag("ProjectSettings")<
@@ -45,22 +58,26 @@ export const ProjectSettingsLive: Layer.Layer<ProjectSettingsTag> =
 		Effect.all({
 			changes: PubSub.unbounded<ProjectSettingChange>(),
 			revision: Ref.make(0),
+			live: Ref.make<LiveProjectFacts>({}),
 		}),
 	);
 
 /** Tell every open subscriber about a setting that was just written. */
 export const publishProjectSetting = (setting: ProjectSetting) =>
-	Effect.flatMap(ProjectSettingsTag, ({ changes, revision }) =>
-		Effect.flatMap(
-			Ref.updateAndGet(revision, (n) => n + 1),
-			(sequence) =>
-				PubSub.publish(changes, {
-					_tag: "upsert" as const,
-					item: setting,
-					sequence,
-				}),
-		),
-	);
+	Effect.gen(function* () {
+		const { changes, revision, live } = yield* ProjectSettingsTag;
+		if (isLiveFact(setting))
+			yield* Ref.update(live, (facts) => ({
+				...facts,
+				[setting._tag]: setting,
+			}));
+		const sequence = yield* Ref.updateAndGet(revision, (n) => n + 1);
+		yield* PubSub.publish(changes, {
+			_tag: "upsert" as const,
+			item: setting,
+			sequence,
+		});
+	});
 
 const readProjectSettings = Effect.gen(function* () {
 	const config = yield* ConfigTag;
@@ -81,6 +98,7 @@ const readProjectSettings = Effect.gen(function* () {
 		},
 		{ _tag: "defaultPermissionMode", mode: yield* getDefaultPermissionMode() },
 		{ _tag: "claudeSettings", overrides: settings.claudeSettings ?? {} },
+		...Object.values(yield* Ref.get((yield* ProjectSettingsTag).live)),
 	] satisfies readonly ProjectSetting[];
 });
 

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
@@ -195,6 +196,8 @@ const historyRow = (text: string) => ({
 
 const makeReadQuery = (
 	getSessionMessagesWithParts: ReadQueryEffect["getSessionMessagesWithParts"],
+	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"] = () =>
+		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 ): ReadQueryEffect => ({
 	getToolContent: vi.fn(() => Effect.succeed(undefined)),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
@@ -211,6 +214,7 @@ const makeReadQuery = (
 	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
+	getSessionHistoryMetadata,
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
@@ -742,7 +746,7 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"dispatches the first Claude turn after loading empty persisted history and persisting the user message",
+		"dispatches the first Claude turn without reading the transcript and persists the user message",
 		() => {
 			const engine = makeEngine();
 			const events: string[] = [];
@@ -775,9 +779,7 @@ describe("ProviderTurnService", () => {
 				const command = vi.mocked(engine.dispatchEffect).mock
 					.calls[0]?.[0] as SendTurnCommand;
 
-				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
@@ -865,9 +867,7 @@ describe("ProviderTurnService", () => {
 			return Effect.gen(function* () {
 				yield* sendTurn();
 
-				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
-					"session-1",
-				);
+				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
 					"current prompt",
@@ -948,13 +948,18 @@ describe("ProviderTurnService", () => {
 				engine,
 				persist,
 				titleService,
-				readQuery: makeReadQuery(() =>
-					Effect.succeed([historyRow("Earlier prompt")]),
-				),
 				configDir,
 			});
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('session-1', 'claude', 'Existing session', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, text, tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, created_at, updated_at)
+					VALUES ('prior-message', 'session-1', 'assistant', 'Earlier reply', 10, 20, 30, 40, 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, tokens_cache_read, tokens_cache_write, rest_payload, created_at, updated_at)
+					VALUES ('cache-only', 'session-1', 'assistant', 9, 1, NULL, 2, 2),
+					('snapshot-cache', 'session-1', 'assistant', 5, 2, ${JSON.stringify({ id: "snapshot-cache", role: "assistant", parts: [], tokens: { cache: { read: 5, write: 2 } } })}, 3, 3)`;
 				yield* sendTurn();
 
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
@@ -968,7 +973,8 @@ describe("ProviderTurnService", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
-							history: [expect.objectContaining({ text: "Earlier prompt" })],
+							history: [],
+							cumulativeTokens: 107,
 						}),
 					}),
 				);
@@ -982,14 +988,15 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"dispatches with empty history and no title when Claude history load fails",
+		"dispatches with zero usage and no title when Claude history metadata load fails",
 		() => {
 			const engine = makeEngine({ providerId: "claude" });
 			const readQuery = makeReadQuery(
+				vi.fn(() => Effect.succeed([])),
 				vi.fn(() =>
 					Effect.fail(
 						new ReadQueryEffectError({
-							operation: "getSessionMessagesWithParts",
+							operation: "getSessionHistoryMetadata",
 							cause: new Error("db unavailable"),
 						}),
 					),
@@ -1008,7 +1015,12 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(log.warn).toHaveBeenCalledWith(
-					expect.stringContaining("Failed to load prior Claude history"),
+					expect.stringContaining(
+						"Failed to load prior Claude history metadata",
+					),
+				);
+				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
+					"session-1",
 				);
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(

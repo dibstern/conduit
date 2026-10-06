@@ -142,9 +142,12 @@ export interface ProjectRelayConfig {
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Shared HTTP server owned by the caller. */
 	httpServer: import("node:http").Server;
-	/** OpenCode server URL (e.g., "http://localhost:4096") */
-	opencodeUrl: string;
-	/** Credentials of the OpenCode instance selected for this relay. */
+	/**
+	 * Standalone relays' OpenCode server URL (e.g., "http://localhost:4096").
+	 * Daemon relays resolve theirs per request through `openCodeInstances`.
+	 */
+	opencodeUrl?: string;
+	/** Credentials for `opencodeUrl`. */
 	opencodeAuth?: { username: string; password: string };
 	/** Daemon-owned OpenCode Instances module shared by project relays. */
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;

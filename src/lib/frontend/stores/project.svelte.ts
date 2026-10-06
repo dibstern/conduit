@@ -1,71 +1,48 @@
 // Manages the list of registered projects and the current project slug.
 
+import { Effect, Fiber, Stream } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
+import { getRuntime, runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
+import { supervise } from "../transport/supervise.js";
 import type {
-	GetProjectsResponse,
 	ProjectMutationResponse,
+	WsRpcError,
 } from "../transport/ws-rpc.js";
 import { removeProjectRpc } from "../transport/ws-rpc-client.js";
-import type { ProjectInfo, RelayMessage } from "../types.js";
+import type { ProjectInfo } from "../types.js";
+import { applyInstanceListResponse } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentSlug,
-	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
 import { confirm } from "./ui.svelte.js";
 
 // This store has no client half: the project list and the current slug both
-// come from `project_list`, and `handleProjectList` below is the only writer.
+// come from the server, and `applyProjectList` below is the only writer.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
 });
 
-export function handleProjectList(
-	msg: Extract<RelayMessage, { type: "project_list" }>,
+/** Apply a full project list: the subscription's, or an RPC's reply. */
+export function applyProjectList(
+	response: Pick<ProjectMutationResponse, "projects" | "current">,
 ): void {
-	const { projects, current, addedSlug } = msg;
-	if (Array.isArray(projects)) {
-		projectState.projects = projects;
-	}
-	if (typeof current === "string") {
-		projectState.currentSlug = current;
-	}
-
-	// When the server confirms a newly added project, navigate to it.
-	// ChatLayout attaches the existing daemon socket to the new relay.
-	if (typeof addedSlug === "string") {
-		navigate(`/?${new URLSearchParams({ p: addedSlug })}`);
-	}
+	const projects = toProjectInfoList(response.projects);
+	projectState.projects = projects;
+	if (response.current != null) projectState.currentSlug = response.current;
 
 	// Removing the attached project returns to the session list.
 	if (
-		Array.isArray(projects) &&
 		attachedProjectState.slug !== null &&
 		!projects.some((p) => p.slug === attachedProjectState.slug)
 	) {
 		attachedProjectState.slug = null;
 		replaceRoute("/?");
 	}
-}
-
-export function applyGetProjectsResponse(response: GetProjectsResponse): void {
-	handleProjectList({
-		type: "project_list",
-		projects: toProjectInfoList(response.projects),
-		...(response.current != null ? { current: response.current } : {}),
-	});
-}
-
-export function applyProjectMutationResponse(
-	response: ProjectMutationResponse,
-): void {
-	handleProjectList({
-		type: "project_list",
-		projects: toProjectInfoList(response.projects),
-		...(response.current != null ? { current: response.current } : {}),
-	});
 }
 
 /** Asks once for all of them, then removes; resolves whether the user confirmed. */
@@ -96,7 +73,7 @@ export async function confirmRemoveProjects(
 	// replies could land out of order and resurrect a removed project.
 	void (async () => {
 		for (const slug of slugs) {
-			applyProjectMutationResponse(
+			applyProjectList(
 				await removeProjectRpc({ projectSlug: router ?? slug, slug }),
 			);
 		}
@@ -105,7 +82,7 @@ export async function confirmRemoveProjects(
 }
 
 const toProjectInfoList = (
-	projects: GetProjectsResponse["projects"],
+	projects: ProjectMutationResponse["projects"],
 ): ProjectInfo[] =>
 	projects.map((project) => ({
 		slug: project.slug,
@@ -117,3 +94,54 @@ const toProjectInfoList = (
 			: {}),
 		...(project.instanceId != null ? { instanceId: project.instanceId } : {}),
 	}));
+
+let followedConnection: string | null = null;
+let generation = 0;
+let fiber: RuntimeFiber<void, never> | null = null;
+
+/**
+ * Follow the daemon-global project and instance lists over `connection`'s
+ * socket pair. The lists are the same on every pair; the argument only picks
+ * the pair this tab already holds, so following never opens a second one.
+ * `null` stops following.
+ */
+export function followDaemonLists(connection: string | null): void {
+	if (followedConnection === connection) return;
+	followedConnection = connection;
+	const currentGeneration = ++generation;
+	const old = fiber;
+	fiber = null;
+	const follow = <A extends object>(
+		subscribe: () => Stream.Stream<A, WsRpcError>,
+		apply: (list: A) => void,
+	) =>
+		Stream.runForEach(
+			supervise(Stream.suspend(subscribe), () => undefined),
+			(list) =>
+				Effect.sync(() => {
+					if (currentGeneration === generation) apply(list);
+				}),
+		);
+	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
+		.catch(() => undefined)
+		.then(async () => {
+			if (currentGeneration !== generation || connection === null) return;
+			const runtime = await getRuntime();
+			if (currentGeneration !== generation) return;
+			const next = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(clients.forProject(connection), ({ subscriptions }) =>
+						Effect.all(
+							[
+								follow(subscriptions.projects, applyProjectList),
+								follow(subscriptions.instances, applyInstanceListResponse),
+							],
+							{ concurrency: "unbounded", discard: true },
+						),
+					),
+				),
+			);
+			if (currentGeneration === generation) fiber = next;
+			else runtime.runFork(Fiber.interrupt(next));
+		});
+}

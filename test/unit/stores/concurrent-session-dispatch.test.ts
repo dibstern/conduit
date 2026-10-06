@@ -230,13 +230,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 	});
 
 	it("returns false for global event types", () => {
-		const globalTypes = [
-			"session_list",
-			"model_info",
-			"client_count",
-			"connection_status",
-			"notification_event",
-		];
+		const globalTypes = ["session_list", "model_info", "notification_event"];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;
 			expect(isPerSessionEvent(msg)).toBe(false);

@@ -1,4 +1,5 @@
-// The attached project's settings, fed by its SubscribeProjectSettings stream.
+// The attached project's settings and live facts (browser count, OpenCode
+// upstream state), fed by its SubscribeProjectSettings stream.
 // Each fact lands in the store that already owns it, so a change made in
 // another tab, or by the CLI, shows here with no refetch.
 
@@ -14,6 +15,7 @@ import {
 	handleDefaultModelInfo,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
+import { setClientCount, uiState } from "./ui.svelte.js";
 
 export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
@@ -28,6 +30,12 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);
+			break;
+		case "clientCount":
+			setClientCount(setting.count);
+			break;
+		case "opencodeConnection":
+			uiState.opencodeConnectionStatus = setting.status;
 			break;
 	}
 };

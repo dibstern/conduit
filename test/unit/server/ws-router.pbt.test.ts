@@ -7,7 +7,7 @@
 // P6: Client tracker is idempotent for duplicate adds (AC1)
 // P7: buildNewClientMessages always includes status + client_count (AC5)  [REMOVED — dead code removed from ws-router.ts]
 // P8: State snapshot preserves pending state (AC5)                         [REMOVED — dead code removed from ws-router.ts]
-// P10: createClientCountMessage shape
+// P10: createClientCountMessage shape                                    [REMOVED — client count is a project fact (conduit-test-ni8.15)]
 // P12: parseIncomingMessage returns null for valid JSON without type field
 // (P1, P2, P9, P11 retired with message routing — conduit-test-ni8.11)
 // P13: buildNewClientMessages output shape verification                    [REMOVED — dead code removed from ws-router.ts]
@@ -15,7 +15,6 @@
 import fc from "fast-check";
 import { assert, describe, expect, it } from "vitest";
 import {
-	createClientCountMessage,
 	createClientTracker,
 	parseIncomingMessage,
 } from "../../../src/lib/server/ws-router.js";
@@ -219,19 +218,6 @@ describe("Ticket 2.2 — WebSocket Message Router PBT", () => {
 					tracker.addClient(clientId);
 					expect(tracker.getClientCount()).toBe(1);
 					expect(tracker.hasClient(clientId)).toBe(true);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	describe("P10: createClientCountMessage always returns valid shape", () => {
-		it("property: count is preserved exactly", () => {
-			fc.assert(
-				fc.property(fc.nat({ max: 10000 }), (count) => {
-					const msg = createClientCountMessage(count);
-					expect(msg.type).toBe("client_count");
-					expect((msg as { count: number }).count).toBe(count);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);

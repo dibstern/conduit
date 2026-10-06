@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
+import { formatErrorDetail } from "../../errors.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const terminalsHandlers = {
@@ -18,7 +19,14 @@ export const terminalsHandlers = {
 			const terminal = yield* OpenCodeTerminalServiceTag;
 			yield* terminal.create(request.originId);
 			return { ok: true as const };
-		}).pipe(Effect.catchAll(mapRpcFailure("CreatePty"))),
+		}).pipe(
+			Effect.mapError(
+				(error) =>
+					new WsRpcError({
+						message: `Failed to create terminal: ${formatErrorDetail(error.cause)}`,
+					}),
+			),
+		),
 	ResizePty: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;

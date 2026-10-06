@@ -1,9 +1,8 @@
 import { seedSessions } from "../stores/session-fixtures.js";
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
-// Gap 2: connection_status → stored OpenCode connection status
 //
-// Tests the handleMessage() dispatch for two message types that previously
-// had zero test coverage.
+// Tests the handleMessage() dispatch for message types that previously had
+// zero test coverage.
 
 import {
 	afterEach,
@@ -86,10 +85,7 @@ import {
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
-import {
-	clearInstanceState,
-	instanceState,
-} from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
@@ -291,168 +287,5 @@ describe("input_sync dispatch", () => {
 		expect(inputSyncState.text).toBe("other tab draft");
 		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
 		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
-	});
-});
-
-// Gap 2: connection_status → stored status (AC1/AC2)
-
-describe("connection_status via handleMessage (AC1/AC2)", () => {
-	it("stores disconnected status without showing an ungated banner", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "disconnected",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("stores reconnecting status without showing an ungated banner", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("stores connected status without directly changing banners", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "connected",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-		expect(removeBannerMock).not.toHaveBeenCalled();
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("replaces disconnected status with reconnecting", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "disconnected",
-		});
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-	});
-
-	it("handles full lifecycle: connected → disconnected → reconnecting → connected", () => {
-		handleMessage({ type: "connection_status", status: "connected" });
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-
-		handleMessage({ type: "connection_status", status: "disconnected" });
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-
-		handleMessage({ type: "connection_status", status: "connected" });
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-		expect(removeBannerMock).not.toHaveBeenCalled();
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-});
-
-describe("instance messages", () => {
-	it("instance_list is a valid RelayMessage type", () => {
-		const msg: import("../../../src/lib/shared-types.js").RelayMessage = {
-			type: "instance_list",
-			instances: [],
-		};
-		expect(msg.type).toBe("instance_list");
-	});
-
-	it("instance_list carries instances array", () => {
-		const msg: import("../../../src/lib/shared-types.js").RelayMessage = {
-			type: "instance_list",
-			instances: [
-				{
-					id: "personal",
-					name: "Personal",
-					port: 4096,
-					managed: true,
-					status: "healthy",
-					restartCount: 0,
-					createdAt: Date.now(),
-				},
-			],
-		};
-		expect(msg.type).toBe("instance_list");
-		if (msg.type === "instance_list") {
-			expect(msg.instances).toHaveLength(1);
-			const instance = msg.instances[0];
-			assert.exists(instance, "expected instance");
-			expect(instance.id).toBe("personal");
-		}
-	});
-
-	it("receiving instance_list message populates instanceState via handleMessage", () => {
-		handleMessage({
-			type: "instance_list",
-			instances: [
-				{
-					id: "personal",
-					name: "Personal",
-					port: 4096,
-					managed: true,
-					status: "healthy",
-					restartCount: 0,
-					createdAt: Date.now(),
-				},
-				{
-					id: "work",
-					name: "Work",
-					port: 4097,
-					managed: true,
-					status: "stopped",
-					restartCount: 0,
-					createdAt: Date.now(),
-				},
-			],
-		});
-
-		expect(instanceState.instances).toHaveLength(2);
-		const personal = instanceState.instances[0];
-		const work = instanceState.instances[1];
-		assert.exists(personal, "expected personal instance");
-		assert.exists(work, "expected work instance");
-		expect(personal.id).toBe("personal");
-		expect(work.id).toBe("work");
-	});
-});
-
-describe("instance WS message contracts", () => {
-	it("instance_list message matches store handler expectation", () => {
-		const msg = {
-			type: "instance_list" as const,
-			instances: [
-				{
-					id: "test",
-					name: "Test",
-					port: 3000,
-					managed: true,
-					status: "healthy" as const,
-					restartCount: 0,
-					createdAt: Date.now(),
-				},
-			],
-		};
-		handleMessage(msg);
-		expect(instanceState.instances).toHaveLength(1);
-		expect(instanceState.instances[0]).toMatchObject({
-			id: "test",
-			name: "Test",
-			status: "healthy",
-		});
 	});
 });

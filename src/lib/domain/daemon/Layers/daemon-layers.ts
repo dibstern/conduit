@@ -72,17 +72,11 @@ import {
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
 import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
+import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
-	InstanceHealthCheckLive,
-	type InstanceHealthCheckTag,
-} from "../Services/instance-health-service.js";
-import {
-	InstanceManagerStateTag,
 	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
-	type PollerFibersTag,
-	startInitialUnmanagedInstanceHealthPollers,
 } from "../Services/instance-manager-service.js";
 import {
 	broadcastProjectList,
@@ -113,10 +107,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
-import {
-	OpenCodeInstancesLive,
-	resolveProjectOpencodeUrl,
-} from "./opencode-instances-layer.js";
+import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import {
@@ -125,7 +116,6 @@ import {
 } from "./project-shell-env-layer.js";
 import {
 	HttpServerRefTag,
-	RelayFactoryError,
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "./relay-factory-layer.js";
@@ -317,15 +307,6 @@ export const DaemonWiringLive: Layer.Layer<
 	}),
 );
 
-const InstanceHealthPollingLive: Layer.Layer<
-	never,
-	never,
-	| DaemonEventBusTag
-	| InstanceHealthCheckTag
-	| InstanceManagerStateTag
-	| PollerFibersTag
-> = Layer.scopedDiscard(startInitialUnmanagedInstanceHealthPollers);
-
 /**
  * DaemonState layer — loads config from disk, seeds Ref.
  * Requires FileSystem.FileSystem in the environment (for testability).
@@ -353,7 +334,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| RelayFactoryTag
 	| ProjectRegistryTag
 	| ProjectSaveLockTag
-	| InstanceManagerStateTag
 	| DaemonConfigRefTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
@@ -365,7 +345,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 			const relayFactory = yield* RelayFactoryTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const projectSaveLock = yield* ProjectSaveLockTag;
-			const instanceState = yield* InstanceManagerStateTag;
 			const configRef = yield* DaemonConfigRefTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
@@ -418,14 +397,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					const project = yield* getProject(slug).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 					);
-					const opencodeUrl = yield* resolveProjectOpencodeUrl(project).pipe(
-						Effect.provideService(InstanceManagerStateTag, instanceState),
-					);
-					if (opencodeUrl == null) {
-						return yield* new RelayFactoryError({
-							reason: `No OpenCode instance URL available for project "${slug}"`,
-						});
-					}
 					const projectControls = {
 						saveProject: (
 							input: import("../../../contracts/ws-rpc.js").SaveProjectInput,
@@ -454,11 +425,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 								),
 							),
 					};
-					const relay = yield* relayFactory.create(
-						project,
-						opencodeUrl,
-						projectControls,
-					);
+					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
@@ -872,7 +839,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		AutoSettleLive(configDir),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
-		InstanceHealthPollingLive,
 		ServerBuildUpdateLive,
 	).pipe(Layer.provideMerge(withWsRelayRouter));
 

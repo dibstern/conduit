@@ -1,6 +1,11 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
-import { type Context, Effect, type Layer, Stream } from "effect";
-import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import { type Context, Effect, type Layer, Stream, Struct } from "effect";
+import {
+	type OpenCodeInstance,
+	type ProjectInfo,
+	WsRpcError,
+	WsRpcGroup,
+} from "../contracts/ws-rpc.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
@@ -232,6 +237,14 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			),
 		),
 	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeInstances: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeInstances requires daemon mode" }),
+		),
+	SubscribeProjects: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
+		),
 	...unaryHandlers,
 });
 
@@ -280,6 +293,15 @@ export type DaemonRpcHandlers = {
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>
 	>;
+} & {
+	readonly SubscribeInstances: () => Stream.Stream<
+		{ readonly instances: readonly OpenCodeInstance[] },
+		WsRpcError
+	>;
+	readonly SubscribeProjects: () => Stream.Stream<
+		{ readonly projects: readonly ProjectInfo[] },
+		WsRpcError
+	>;
 };
 
 export const makeRoutedWsRpcServerLayer = (
@@ -303,13 +325,16 @@ export const makeRoutedWsRpcServerLayer = (
 				return yield* Effect.provide(handler(payload), context);
 			});
 
+	const daemonUnaryHandlers =
+		daemonHandlers &&
+		Struct.omit(daemonHandlers, "SubscribeInstances", "SubscribeProjects");
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
 	const handlers = Object.fromEntries(
-		Object.entries({ ...unaryHandlers, ...daemonHandlers }).map(
+		Object.entries({ ...unaryHandlers, ...daemonUnaryHandlers }).map(
 			([name, handler]) => [
 				name,
-				(daemonHandlers && Object.hasOwn(daemonHandlers, name)) ||
+				(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
 				Object.hasOwn(daemonOnlyHandlers, name)
 					? handler
 					: routeHandler<never, unknown, unknown, unknown>(handler),
@@ -407,5 +432,13 @@ export const makeRoutedWsRpcServerLayer = (
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 		SubscribeProjectSettings: (request) =>
 			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeInstances: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeInstances())
+				: wsRpcHandlers.SubscribeInstances(),
+		SubscribeProjects: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeProjects())
+				: wsRpcHandlers.SubscribeProjects(),
 	});
 };

@@ -15,7 +15,6 @@ import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { phaseCurrentSessionToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
-import { clearInstanceState } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentSessionId,
@@ -37,11 +36,8 @@ export { handleMessage } from "./ws-dispatch.js";
 export {
 	type FileBrowserReply,
 	fileBrowserListeners,
-	type MessageListener,
 	onFileBrowser,
-	onProject,
 	onProjectAttached,
-	projectListeners,
 } from "./ws-listeners.js";
 export {
 	clearNavigateToSession,
@@ -289,8 +285,8 @@ function doConnect(
 		// correctly declines to end the turn a second time.
 		phaseCurrentSessionToIdle();
 
-		// Clear instance state — will be re-populated on reconnect
-		clearInstanceState();
+		// The instance list is not cleared: its subscription rides the RPC
+		// sockets, not this one, and nothing here would re-populate it.
 
 		// Schedule reconnect with backoff
 		scheduleReconnect();

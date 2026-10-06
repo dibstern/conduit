@@ -2026,7 +2026,8 @@ describe("ClaudeEventTranslator", () => {
 		expect(err).toBeDefined();
 		const data = dataOf(err);
 		expect(data["error"]).toContain("Something went wrong");
-		expect(data["messageId"]).toBe("assist-uuid-2");
+		// The SDK uuid names no turn, so it must not stand in for the reply id.
+		expect(data["messageId"]).toBe("");
 	});
 
 	it("translates result/error_max_turns to turn.error", async () => {

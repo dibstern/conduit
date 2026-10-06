@@ -30,6 +30,7 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
+	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
@@ -145,7 +146,7 @@ describe("RelayFactoryTag", () => {
 			};
 
 			const result = yield* factory
-				.create(project, "http://localhost:4096")
+				.create(project)
 				.pipe(Effect.scoped, Effect.either);
 
 			expect(result._tag).toBe("Left");
@@ -170,14 +171,11 @@ describe("RelayFactoryTag", () => {
 				yield* Ref.set(serverRef, server);
 				createProjectRelayMock.mockClear();
 				const result = yield* factory
-					.create(
-						{
-							slug: "missing",
-							title: "Missing",
-							folders: [missingDirectory],
-						},
-						"http://localhost:4096",
-					)
+					.create({
+						slug: "missing",
+						title: "Missing",
+						folders: [missingDirectory],
+					})
 					.pipe(Effect.either);
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")
@@ -196,7 +194,7 @@ describe("RelayFactoryTag", () => {
 		},
 	);
 
-	it.effect("broadcasts project_list only when refreshed git changes", () => {
+	it.effect("publishes ProjectsChanged only when refreshed git changes", () => {
 		const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
 		const server = createServer();
 		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
@@ -216,7 +214,7 @@ describe("RelayFactoryTag", () => {
 			const serverRef = yield* HttpServerRefTag;
 			yield* Ref.set(serverRef, server);
 			const factory = yield* RelayFactoryTag;
-			yield* factory.create(project, "http://localhost:4096");
+			yield* factory.create(project);
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
 			expect(config?.refreshSessionGit).toBeTypeOf("function");
 			if (!config?.refreshSessionGit)
@@ -224,18 +222,10 @@ describe("RelayFactoryTag", () => {
 
 			yield* Effect.promise(config.refreshSessionGit);
 			const first = yield* Queue.take(subscription);
-			expect(first).toMatchObject({
-				_tag: "RelayBroadcast",
-				message: {
-					type: "project_list",
-					projects: [
-						{
-							slug: "git-project",
-							git: { branch: "main", dirty: false },
-						},
-					],
-				},
-			});
+			expect(first).toMatchObject({ _tag: "ProjectsChanged" });
+			expect(yield* projectInfos).toMatchObject([
+				{ slug: "git-project", git: { branch: "main", dirty: false } },
+			]);
 			yield* Queue.take(subscription); // daemon_sessions_changed
 			yield* Effect.promise(config.refreshSessionGit);
 			expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
@@ -243,13 +233,10 @@ describe("RelayFactoryTag", () => {
 			writeFileSync(join(directory, "untracked"), "changed");
 			yield* Effect.promise(config.refreshSessionGit);
 			const changed = yield* Queue.take(subscription);
-			expect(changed).toMatchObject({
-				_tag: "RelayBroadcast",
-				message: {
-					type: "project_list",
-					projects: [{ slug: "git-project", git: { dirty: true } }],
-				},
-			});
+			expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
+			expect(yield* projectInfos).toMatchObject([
+				{ slug: "git-project", git: { dirty: true } },
+			]);
 			yield* Queue.take(subscription);
 		}).pipe(
 			Effect.scoped,

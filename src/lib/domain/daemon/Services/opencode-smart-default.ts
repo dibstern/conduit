@@ -1,8 +1,5 @@
 import { Data, Effect } from "effect";
-import {
-	DEFAULT_OPENCODE_PORT,
-	DEFAULT_OPENCODE_URL,
-} from "../../../constants.js";
+import { DEFAULT_OPENCODE_PORT } from "../../../constants.js";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
 	findFreePort,
@@ -38,6 +35,7 @@ export class OpenCodeUnavailableError extends Data.TaggedError(
 
 export interface SmartDefaultInstanceOptions {
 	readonly defaultOpencodeUrl?: string | undefined;
+	/** Resolve the default instance on first use instead of trusting its URL. */
 	readonly smartDefault?: boolean | undefined;
 	/** Where smart default looks for OpenCode (default: DEFAULT_OPENCODE_URL). */
 	readonly smartDefaultUrl?: string | undefined;
@@ -136,73 +134,15 @@ const resolvePersistedManagedDefault = (
 		} satisfies DaemonInstanceConfig;
 	});
 
-const detectDefaultInstance = (smartDefaultUrl: string) =>
-	Effect.gen(function* () {
-		const reachable = yield* probeReachable(smartDefaultUrl);
-		if (reachable) return defaultInstanceForUrl(smartDefaultUrl);
-
-		const port = portFromUrl(smartDefaultUrl);
-		const installed = yield* hasOpenCodeBinary;
-		if (!installed) {
-			return yield* new OpenCodeUnavailableError({
-				url: smartDefaultUrl,
-				port,
-			});
-		}
-
-		const freePort = yield* findAvailablePort(port);
-		return {
-			id: DEFAULT_OPENCODE_INSTANCE_ID,
-			name: "Default",
-			port: freePort,
-			managed: true,
-		} satisfies DaemonInstanceConfig;
-	});
-
-export const resolveSmartDefaultInstances = (
-	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
-	options: SmartDefaultInstanceOptions = {},
-): Effect.Effect<
-	ReadonlyArray<DaemonInstanceConfig>,
-	OpenCodeUnavailableError
-> =>
-	Effect.gen(function* () {
-		let instances = [...initialInstances];
-		const existingDefault = instances.find(
-			(instance) => instance.id === DEFAULT_OPENCODE_INSTANCE_ID,
-		);
-		if (existingDefault == null && options.defaultOpencodeUrl != null) {
-			instances = [
-				defaultInstanceForUrl(options.defaultOpencodeUrl),
-				...instances,
-			];
-		}
-
-		if (options.smartDefault !== true) return instances;
-		const smartDefaultUrl = options.smartDefaultUrl ?? DEFAULT_OPENCODE_URL;
-
-		const defaultIndex = instances.findIndex(
-			(instance) =>
-				instance.id === DEFAULT_OPENCODE_INSTANCE_ID &&
-				(instance.driver ?? "opencode") === "opencode",
-		);
-		if (defaultIndex >= 0) {
-			const defaultInstance = instances[defaultIndex];
-			if (defaultInstance == null) return instances;
-			const resolvedDefault = defaultInstance.managed
-				? yield* resolvePersistedManagedDefault(
-						defaultInstance,
-						smartDefaultUrl,
-					)
-				: yield* convertUnreachableDefault(defaultInstance);
-			return instances.map((instance, index) =>
-				index === defaultIndex ? resolvedDefault : instance,
-			);
-		}
-
-		return instances.some(
-			(instance) => instance.id === DEFAULT_OPENCODE_INSTANCE_ID,
-		)
-			? instances
-			: [yield* detectDefaultInstance(smartDefaultUrl), ...instances];
-	}).pipe(Effect.withSpan("daemon.smartDefault.resolveInstances"));
+/**
+ * First-use smart default: reuse a reachable OpenCode at the default URL and
+ * run a managed one only when nothing answers there at that moment.
+ */
+export const resolveSmartDefaultInstance = (
+	instance: DaemonInstanceConfig,
+	smartDefaultUrl: string,
+): Effect.Effect<DaemonInstanceConfig, OpenCodeUnavailableError> =>
+	(instance.managed
+		? resolvePersistedManagedDefault(instance, smartDefaultUrl)
+		: convertUnreachableDefault(instance)
+	).pipe(Effect.withSpan("daemon.smartDefault.resolveInstance"));

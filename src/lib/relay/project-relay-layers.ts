@@ -199,7 +199,26 @@ export function createProjectRelayLayers({
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
-	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
+	// One shared layer reference (Effect memoizes it), so orchestration wiring,
+	// the session manager, startup and the SSE adapter see one relay view.
+	const sharedInstances = config.openCodeInstances;
+	const openCodeInstancesLayer = Layer.map(
+		sharedInstances
+			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+			: makeStandaloneOpenCodeInstancesLive(config),
+		(context) =>
+			Context.make(
+				OpenCodeInstancesTag,
+				relayOpenCodeInstances(
+					Context.get(context, OpenCodeInstancesTag),
+					config,
+				),
+			),
+	);
+	// The relay's default client resolves its endpoint through that view.
+	const openCodeApiLayer = OpenCodeAPILive.pipe(
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+	);
 	const persistenceEffectLayer = makePersistenceEffectLayer(
 		config.persistenceDbPath,
 		undefined,
@@ -239,22 +258,6 @@ export function createProjectRelayLayers({
 				loggerLayer,
 			),
 		),
-	);
-	// One shared layer reference (Effect memoizes it), so orchestration wiring,
-	// the session manager, startup and the SSE adapter see one relay view.
-	const sharedInstances = config.openCodeInstances;
-	const openCodeInstancesLayer = Layer.map(
-		sharedInstances
-			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-			: makeStandaloneOpenCodeInstancesLive(config),
-		(context) =>
-			Context.make(
-				OpenCodeInstancesTag,
-				relayOpenCodeInstances(
-					Context.get(context, OpenCodeInstancesTag),
-					config,
-				),
-			),
 	);
 	// The orchestration engine's side-effect reactor consumes the SAME
 	// ProviderRuntimeIngestion instance the relay uses (Effect memoizes the shared

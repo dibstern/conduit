@@ -88,14 +88,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 				const factory = yield* RelayFactoryTag;
 				yield* factory
-					.create(
-						{
-							slug: "effect-project",
-							title: "Effect Project",
-							folders: [projectDir],
-						},
-						"http://localhost:4096",
-					)
+					.create({
+						slug: "effect-project",
+						title: "Effect Project",
+						folders: [projectDir],
+					})
 					.pipe(Effect.scoped);
 
 				expect(createProjectRelayMock).toHaveBeenCalledOnce();
@@ -174,15 +171,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 				const factory = yield* RelayFactoryTag;
 				yield* factory
-					.create(
-						{
-							slug: "effect-project",
-							title: "Effect Project",
-							folders: [projectDir],
-							instanceId: "opencode",
-						},
-						"http://localhost:4096",
-					)
+					.create({
+						slug: "effect-project",
+						title: "Effect Project",
+						folders: [projectDir],
+						instanceId: "opencode",
+					})
 					.pipe(Effect.scoped);
 
 				expect(createProjectRelayMock).toHaveBeenCalledOnce();
@@ -290,14 +284,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const factory = yield* RelayFactoryTag;
 			yield* factory
-				.create(
-					{
-						slug: "effect-project",
-						title: "Effect Project",
-						folders: [projectDir],
-					},
-					"http://localhost:4096",
-				)
+				.create({
+					slug: "effect-project",
+					title: "Effect Project",
+					folders: [projectDir],
+				})
 				.pipe(Effect.scoped);
 
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
@@ -434,14 +425,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const factory = yield* RelayFactoryTag;
 			yield* factory
-				.create(
-					{
-						slug: "effect-project",
-						title: "Effect Project",
-						folders: [projectDir],
-					},
-					"http://localhost:4096",
-				)
+				.create({
+					slug: "effect-project",
+					title: "Effect Project",
+					folders: [projectDir],
+				})
 				.pipe(Effect.scoped);
 
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
@@ -516,14 +504,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const factory = yield* RelayFactoryTag;
 			const fiber = yield* Effect.fork(
-				factory.create(
-					{
-						slug: "effect-project",
-						title: "Effect Project",
-						folders: [projectDir],
-					},
-					"http://localhost:4096",
-				),
+				factory.create({
+					slug: "effect-project",
+					title: "Effect Project",
+					folders: [projectDir],
+				}),
 			);
 			yield* Effect.promise(() => started);
 			expect(signal?.aborted).toBe(false);

@@ -1,14 +1,8 @@
-import { seedSessions } from "../stores/session-fixtures.js";
-// Verifies that the scanInFlight flag is properly managed across all outcomes:
-// success (ScanNow reply), error (INSTANCE_ERROR), and state reset.
+// Verifies that the scanInFlight flag is properly managed across outcomes:
+// success (ScanNow reply) and state reset. RPC failure is cleared by the
+// caller (InstancesSettingsTab), not by a raw socket error frame.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-// Mock DOMPurify (required by chat.svelte.ts → markdown.ts)
-vi.mock("dompurify", () => ({
-	default: { sanitize: (html: string) => html },
-}));
-
+import { describe, expect, it } from "vitest";
 import {
 	applyScanNowResponse,
 	beginScan,
@@ -16,18 +10,6 @@ import {
 	getScanResult,
 	isScanInFlight,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
-
-beforeEach(() => {
-	sessionState.currentId = "test-session";
-	// Register sessions so routePerSession's unknown-session guard passes.
-	seedSessions([
-		{ id: "test-session", title: "", status: "idle" },
-		{ id: "s1", title: "", status: "idle" },
-	]);
-});
 
 describe("scanInFlight state management", () => {
 	it("beginScan sets scanInFlight without depending on legacy WS commands", () => {
@@ -74,50 +56,5 @@ describe("scanInFlight state management", () => {
 			lost: [],
 			active: [4096, 4097],
 		});
-	});
-
-	it("clears scanInFlight when server responds with system_error INSTANCE_ERROR", () => {
-		clearInstanceState();
-		beginScan();
-		expect(isScanInFlight()).toBe(true);
-
-		// Server sends error instead of a scan reply.
-		const errorMsg: RelayMessage = {
-			type: "system_error",
-			code: "INSTANCE_ERROR",
-			message: "Port scanning not available",
-		};
-		handleMessage(errorMsg);
-
-		// scanInFlight must be cleared so the UI doesn't hang on "Scanning..."
-		expect(isScanInFlight()).toBe(false);
-	});
-
-	it("logs system_error messages to the browser console", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const details = {
-			sessionId: "ses_1",
-			fallbackTitle: "Claude Session 2026-05-17 14:32",
-		};
-		const errorMsg: RelayMessage = {
-			type: "system_error",
-			code: "SESSION_TITLE_GENERATION_FAILED",
-			message: "Claude session title generation failed; using fallback title.",
-			details,
-		};
-
-		try {
-			handleMessage(errorMsg);
-
-			expect(warnSpy).toHaveBeenCalledWith(
-				"[ws]",
-				"System error:",
-				"SESSION_TITLE_GENERATION_FAILED",
-				"Claude session title generation failed; using fallback title.",
-				details,
-			);
-		} finally {
-			warnSpy.mockRestore();
-		}
 	});
 });

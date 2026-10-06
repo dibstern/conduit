@@ -92,7 +92,6 @@ type TaggedRelayErrorMethods<Tag extends string> = {
 		details?: Record<string, unknown>;
 	};
 	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }>;
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }>;
 	toLog(): Record<string, unknown>;
 };
 
@@ -143,17 +142,6 @@ function withTaggedRelayErrorMethods(
 
 		toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
 			return { ...this.toWebSocket(), sessionId };
-		}
-
-		toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-			const details = contextDetails(this.context);
-			return {
-				type: "system_error",
-				code: this._tag,
-				message: this.message,
-				...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-				...(details ? { details } : {}),
-			};
 		}
 
 		toLog(): Record<string, unknown> {
@@ -325,25 +313,9 @@ export class RelayError extends Error {
 		};
 	}
 
-	/** Returns a RelayMessage `error` variant with required sessionId (AC1).
-	 *  For genuinely session-less errors, use {@link toSystemError} instead. */
+	/** Returns a RelayMessage `error` variant with required sessionId (AC1). */
 	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
 		return { ...this.toWebSocket(), sessionId };
-	}
-
-	/** Returns a RelayMessage `system_error` variant for session-less errors.
-	 *  Use this for broadcast errors that have no session context (e.g.
-	 *  HANDLER_ERROR, INIT_FAILED, terminal/settings errors). */
-	toSystemError(): Extract<RelayMessage, { type: "system_error" }> {
-		const details =
-			Object.keys(this.context).length > 0 ? this.context : undefined;
-		return {
-			type: "system_error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
 	}
 
 	/** Log-safe representation (redacts sensitive data) (AC6) */

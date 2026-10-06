@@ -458,12 +458,6 @@ describe("SessionTitleService", () => {
 					"Investigate OAuth Callback Loop In Production",
 				);
 				expect(pushViewerFamilies).toHaveBeenCalled();
-				expect(ws.broadcast).not.toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "system_error",
-						code: "SESSION_TITLE_GENERATION_FAILED",
-					}),
-				);
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
@@ -551,6 +545,7 @@ describe("SessionTitleService", () => {
 				pushViewerFamilies: vi.fn(() => Deferred.succeed(listsSent, undefined)),
 			});
 			const ws = makeWebSocketHandler();
+			const log = makeMockLogger();
 			const fallbackNow = new Date(2026, 4, 17, 10, 11, 0);
 			const layer = makePersistenceTestLayer({
 				queryFactory: () => {
@@ -558,6 +553,7 @@ describe("SessionTitleService", () => {
 				},
 				sessionManager,
 				wsHandler: ws.handler,
+				logger: log,
 				now: () => fallbackNow,
 				persistenceDbPath: filename,
 			});
@@ -572,17 +568,11 @@ describe("SessionTitleService", () => {
 
 				const fallbackTitle = "Claude Session 2026-05-17 10:11";
 				expect(yield* getSessionTitle()).toBe(fallbackTitle);
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "system_error",
-					code: "SESSION_TITLE_GENERATION_FAILED",
-					message:
-						"Claude session title generation failed; using fallback title.",
-					details: {
-						sessionId: "session-1",
-						reason: "SDK unavailable",
-						fallbackTitle,
-					},
-				});
+				// A background-task failure (fork 3.2): logged, never broadcast.
+				expect(log.warn).toHaveBeenCalledWith(
+					"SESSION_TITLE_GENERATION_FAILED sessionId=session-1 reason=SDK unavailable",
+				);
+				expect(ws.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
@@ -789,12 +779,6 @@ describe("SessionTitleService", () => {
 						]);
 						expect(yield* getSessionTitle()).toBe("Claude Session");
 						expect(pushViewerFamilies).not.toHaveBeenCalled();
-						expect(ws.broadcast).not.toHaveBeenCalledWith(
-							expect.objectContaining({
-								type: "system_error",
-								code: "SESSION_TITLE_GENERATION_FAILED",
-							}),
-						);
 						expect(log.warn).not.toHaveBeenCalled();
 
 						yield* projectionRunner.projectEvent(manualRename);

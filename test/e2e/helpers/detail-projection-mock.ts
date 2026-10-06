@@ -314,6 +314,36 @@ export function projectLegacyRelayMessage(
 		}
 		return;
 	}
+	// Like the message projector: a compaction's outcome is its own synthetic
+	// message; the "started" notice stays transient.
+	if (
+		event.type === "compaction" &&
+		(event["state"] === "completed" || event["state"] === "failed")
+	) {
+		const id = `compaction-${state.sequence + 1}`;
+		upsert(page, sessionId, {
+			id,
+			role: "assistant",
+			time: { created: Date.now() + state.sequence },
+			parts: [
+				{
+					id: `compaction-part-${state.sequence + 1}`,
+					type: "compaction",
+					...(typeof event["detail"] === "string"
+						? { text: event["detail"] }
+						: {}),
+					...(typeof event["preTokens"] === "number"
+						? { preTokens: event["preTokens"] }
+						: {}),
+					...(typeof event["postTokens"] === "number"
+						? { postTokens: event["postTokens"] }
+						: {}),
+					...(event["state"] === "failed" ? { failed: true } : {}),
+				},
+			],
+		});
+		return;
+	}
 	if (
 		event.type === "message_removed" &&
 		typeof event["messageId"] === "string"

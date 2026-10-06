@@ -16,12 +16,22 @@ import {
 import { ENV } from "../env.js";
 import { OpenCodeApiError } from "../errors.js";
 
+export interface OpenCodeEndpointAuth {
+	readonly baseUrl: string;
+	readonly authHeaders: Readonly<Record<string, string>>;
+}
+
 export interface SdkFactoryOptions {
 	baseUrl: string;
 	directory?: string;
 	auth?: { username: string; password: string };
 	fetch?: typeof fetch;
 	retry?: RetryFetchOptions;
+	/**
+	 * Resolves the server for each request at call time. Requests are built
+	 * against `baseUrl`, then moved onto the resolved base URL and auth.
+	 */
+	resolveEndpoint?: Effect.Effect<OpenCodeEndpointAuth, unknown>;
 }
 
 export interface SdkFactoryResult {
@@ -30,18 +40,32 @@ export interface SdkFactoryResult {
 	authHeaders: Record<string, string>;
 }
 
-function runRetryFetchAtFetchBoundary(
-	input: RequestInfo | URL,
-	init: RequestInit | undefined,
-	retry: RetryFetchOptions,
-): ReturnType<typeof fetch> {
-	return Effect.runPromise(fetchWithRetry(input, init, retry));
+function runAtFetchBoundary<A>(effect: Effect.Effect<A, unknown>): Promise<A> {
+	return Effect.runPromise(effect);
 }
 
 // The SDK sends SSE requests as a plain Request with no Accept header, so the
 // endpoint path is the only signal. Every SDK path ending in /event is SSE.
 function isEventStream(request: Request): boolean {
 	return new URL(request.url).pathname.endsWith("/event");
+}
+
+/** Moves `request` onto `baseUrl`, replacing its auth with `authHeaders`. */
+async function rebase(
+	request: Request,
+	{ baseUrl, authHeaders }: OpenCodeEndpointAuth,
+): Promise<Request> {
+	const { pathname, search } = new URL(request.url);
+	const headers = new Headers(request.headers);
+	headers.delete("Authorization");
+	for (const [name, value] of Object.entries(authHeaders))
+		headers.set(name, value);
+	return new Request(`${baseUrl.replace(/\/$/, "")}${pathname}${search}`, {
+		method: request.method,
+		headers,
+		body: request.body ? await request.arrayBuffer() : null,
+		signal: request.signal,
+	});
 }
 
 /**
@@ -54,7 +78,7 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const baseFetch: typeof fetch =
 		options.fetch ??
 		((input: RequestInfo | URL, init?: RequestInit) =>
-			runRetryFetchAtFetchBoundary(input, init, options.retry ?? {}));
+			runAtFetchBoundary(fetchWithRetry(input, init, options.retry ?? {})));
 
 	// The event stream lives for hours, so it must skip fetchWithRetry: its
 	// per-attempt timeout would abort the stream, and conduit owns reconnection.
@@ -93,7 +117,17 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 	const clientConfig: NonNullable<Parameters<typeof createOpencodeClient>[0]> =
 		{
 			baseUrl: options.baseUrl,
-			fetch: async (input, init) => {
+			fetch: async (requested, requestedInit) => {
+				const resolveEndpoint = options.resolveEndpoint;
+				const [input, init] = resolveEndpoint
+					? [
+							await rebase(
+								new Request(requested, requestedInit),
+								await runAtFetchBoundary(resolveEndpoint),
+							),
+							undefined,
+						]
+					: [requested, requestedInit];
 				if (input instanceof Request && isEventStream(input)) {
 					return streamFetch(input, init);
 				}

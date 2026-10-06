@@ -132,6 +132,12 @@ const makeSubscriptions = (
 		resumeStream(() =>
 			sockets.control.SubscribeProjectSettings({ projectSlug }),
 		),
+	/**
+	 * The daemon's instance and project lists. Daemon-global, so neither takes
+	 * the project; low-rate, so both ride the control socket.
+	 */
+	instances: () => resumeStream(() => sockets.control.SubscribeInstances({})),
+	projects: () => resumeStream(() => sockets.control.SubscribeProjects({})),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */

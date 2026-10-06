@@ -409,7 +409,7 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking";
+	type: PartType | "thinking" | "error";
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -436,6 +436,10 @@ export interface HistoryMessagePart {
 	 *  parts so the divider and context-% bar can be reconstructed on reload. */
 	preTokens?: number;
 	postTokens?: number;
+	/** A `compaction` part whose compaction failed. */
+	failed?: boolean;
+	/** Provider error code on an `error` part (a turn that ended in error). */
+	code?: string;
 	[key: string]: unknown;
 }
 
@@ -524,43 +528,6 @@ const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
 	label: Schema.String,
 	isDefault: Schema.optional(Schema.Boolean),
-});
-
-const ProjectInfoSchema = Schema.Struct({
-	slug: Schema.String,
-	title: Schema.String,
-	folders: Schema.NonEmptyArray(Schema.String),
-	missing: Schema.optional(Schema.Boolean),
-	git: Schema.optional(SessionGitSchema),
-	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
-});
-
-const InstanceStatusSchema = Schema.Literal(
-	"starting",
-	"healthy",
-	"unhealthy",
-	"stopped",
-);
-
-const OpenCodeInstanceSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	port: Schema.Number,
-	managed: Schema.Boolean,
-	driver: Schema.optional(Schema.String),
-	configDir: Schema.optional(Schema.String),
-	url: Schema.optional(Schema.String),
-	status: InstanceStatusSchema,
-	pid: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	needsRestart: Schema.optional(Schema.Boolean),
-	exitCode: Schema.optional(Schema.Number),
-	lastHealthCheck: Schema.optional(Schema.Number),
-	restartCount: Schema.Number,
-	createdAt: Schema.Number,
 });
 
 // -- Individual message variant schemas --
@@ -729,12 +696,6 @@ const ModelInfoMsgSchema = Schema.Struct({
 	provider: Schema.String,
 });
 
-const ProjectListSchema = Schema.Struct({
-	type: Schema.Literal("project_list"),
-	projects: Schema.Array(ProjectInfoSchema),
-	current: Schema.optional(Schema.String),
-	addedSlug: Schema.optional(Schema.String),
-});
 const DaemonSessionsChangedSchema = Schema.Struct({
 	type: Schema.Literal("daemon_sessions_changed"),
 });
@@ -755,11 +716,6 @@ const MessageRemovedSchema = Schema.Struct({
 	type: Schema.Literal("message_removed"),
 	sessionId: Schema.String,
 	messageId: Schema.String,
-});
-
-const ConnectionStatusSchema = Schema.Struct({
-	type: Schema.Literal("connection_status"),
-	status: Schema.Literal("disconnected", "reconnecting", "connected"),
 });
 
 const UserMessageSchema = Schema.Struct({
@@ -787,21 +743,6 @@ const ErrorSchema = Schema.Struct({
 	),
 });
 
-const SystemErrorSchema = Schema.Struct({
-	type: Schema.Literal("system_error"),
-	code: Schema.String,
-	message: Schema.String,
-	statusCode: Schema.optional(Schema.Number),
-	details: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
-});
-
-const ClientCountSchema = Schema.Struct({
-	type: Schema.Literal("client_count"),
-	count: Schema.Number,
-});
-
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
 export const WS_PROTOCOL_VERSION = 3;
@@ -821,11 +762,6 @@ const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
 	from: Schema.optional(Schema.String),
-});
-
-const InstanceListSchema = Schema.Struct({
-	type: Schema.Literal("instance_list"),
-	instances: Schema.Array(OpenCodeInstanceSchema),
 });
 
 const InstanceUpdateSchema = Schema.Struct({
@@ -893,27 +829,21 @@ export const RelayMessageSchema = Schema.Union(
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	// Projects
-	ProjectListSchema,
 	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
-	// Connection status
-	ConnectionStatusSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
 	SessionDeletedSchema,
 	// Misc
 	ErrorSchema,
-	SystemErrorSchema,
-	ClientCountSchema,
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
 	InputSyncSchema,
 	// Instance Management
-	InstanceListSchema,
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,

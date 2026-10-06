@@ -141,7 +141,9 @@ test.describe("Turn working clock", () => {
 			.locator(".turn-activity")
 			.last()
 			.locator(".turn-activity-toggle");
-		await expect(header).toContainText("Worked for");
+		// The Stop button may not have rendered when the wait above ran, so
+		// the settled header is what proves the turn ended.
+		await expect(header).toContainText("Worked for", { timeout: 60_000 });
 		const before = workedSeconds(await header.innerText());
 
 		await harness.restart();
@@ -295,6 +297,108 @@ test.describe("Turn working clock", () => {
 					2,
 				),
 			);
+		});
+	});
+
+	test.describe("Stop while a prompt waits in the queue", () => {
+		test.use({
+			claudeReplay: {
+				// Stop drops the queued prompt unsent, so only A and C play.
+				turns: ["extra-folder-read-turn", "skill-loads-turn"],
+				delayMs: 1_000,
+				joinOpenTurn: true,
+			},
+		});
+		test.describe.configure({ timeout: 120_000 });
+
+		test("the next prompt still ends idle, even reloaded the moment it finishes", async ({
+			page,
+			relayUrl,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			const idle = async (label: string) => {
+				await expect(chat.stopBtn).toBeHidden();
+				await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
+				await expect(page.locator(".queued-shimmer")).toHaveCount(0);
+				await page.screenshot({ path: testInfo.outputPath(`${label}.png`) });
+			};
+			await app.goto(relayUrl);
+			await app.sendMessage("Read the extra folder");
+			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+				timeout: 30_000,
+			});
+			await app.sendMessage("Queued prompt");
+			await chat.stopBtn.click();
+			await chat.waitForStreamingComplete();
+			await idle("stopped");
+
+			await app.sendMessage("Load the skill");
+			await expect(page.locator(".turn-activity")).toHaveCount(1, {
+				timeout: 30_000,
+			});
+			await expect(page.getByText("notes ready").last()).toBeVisible({
+				timeout: 60_000,
+			});
+			await chat.waitForStreamingComplete();
+			const finishedAt = Date.now();
+			// Claude stores idle a moment after the turn's done. A client that
+			// connects in between must still end up idle.
+			await gotoRelay(page, page.url());
+			await expect(page.locator("#connect-overlay")).toBeHidden({
+				timeout: 30_000,
+			});
+			const reloadedAfterMs = Date.now() - finishedAt;
+			await idle("reloaded");
+			writeFileSync(
+				testInfo.outputPath("stop-queued-readings.json"),
+				JSON.stringify({ reloadedAfterMs }, null, 2),
+			);
+		});
+		test("Stop stays on through the whole of the next prompt", async ({
+			page,
+			relayUrl,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			await app.sendMessage("Read the extra folder");
+			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+				timeout: 30_000,
+			});
+			await app.sendMessage("Queued prompt");
+			await chat.stopBtn.click();
+			await chat.waitForStreamingComplete();
+
+			// Sample every 50ms in the page, from the moment Stop first shows, so
+			// a blink of a few frames is caught.
+			await page.evaluate(() => {
+				const w = window as unknown as { stopGaps: number[] };
+				w.stopGaps = [];
+				let start: number | undefined;
+				const timer = setInterval(() => {
+					if (document.body.innerText.includes("notes ready"))
+						return clearInterval(timer);
+					const stopShown = Boolean(document.querySelector("#stop"));
+					if (start === undefined) {
+						if (stopShown) start = performance.now();
+					} else if (!stopShown) {
+						w.stopGaps.push(Math.round(performance.now() - start));
+					}
+				}, 50);
+			});
+			await app.sendMessage("Load the skill");
+			await expect(page.getByText("notes ready").last()).toBeVisible({
+				timeout: 60_000,
+			});
+			const stopGaps = await page.evaluate(
+				() => (window as unknown as { stopGaps: number[] }).stopGaps,
+			);
+			writeFileSync(
+				testInfo.outputPath("stop-gaps.json"),
+				JSON.stringify({ stopGaps }, null, 2),
+			);
+			expect(stopGaps).toEqual([]);
 		});
 	});
 

@@ -21,4 +21,3 @@ export {
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 } from "./session.js";
-export { handleGetToolContent } from "./tool-content.js";

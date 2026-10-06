@@ -74,6 +74,7 @@ import {
 	type SessionCommand,
 	type SessionUpstreamAdapter,
 } from "./session-command.js";
+import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import {
 	CURSOR_SCAN_LIMIT,
@@ -927,6 +928,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const overrides = yield* OverridesStateTag;
 		const ownership = yield* PendingSendOwnershipTag;
+		// Captured here, not read at call time: the auto-settle sweep calls in from
+		// a daemon fiber that lacks the project's bus, and a commit without it
+		// never reaches the sidebar's shell subscription.
+		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -1094,7 +1099,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				| LoggerTag
 			>,
 		): Effect.Effect<A, E> => {
-			return effect.pipe(
+			const provided = effect.pipe(
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
 				Effect.provideService(EventStoreEffectTag, eventStore),
@@ -1103,6 +1108,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
 			);
+			return Option.isSome(sessionEventBus)
+				? Effect.provideService(
+						provided,
+						SessionEventBusTag,
+						sessionEventBus.value,
+					)
+				: provided;
 		};
 
 		const triageLock = yield* Effect.makeSemaphore(1);

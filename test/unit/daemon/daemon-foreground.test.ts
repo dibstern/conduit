@@ -14,6 +14,7 @@ import {
 	GetInstanceStatus,
 	GetInstances,
 	RemoveInstance,
+	StartInstance,
 	StopInstance,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -43,6 +44,37 @@ async function closeServer(server: Server): Promise<void> {
 
 const expectedBasicAuth = (username: string, password: string) =>
 	`Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+
+/**
+ * Minimal OpenCode: health, path and a live event stream. `healthAuthorization`
+ * guards only the health probe, the request under test.
+ */
+const fakeOpenCode = (
+	requests: string[],
+	healthAuthorization?: string,
+): Server =>
+	createServer((req, res) => {
+		requests.push(req.url ?? "");
+		if (
+			req.url === "/global/health" &&
+			healthAuthorization &&
+			req.headers.authorization !== healthAuthorization
+		) {
+			res.writeHead(401);
+			res.end("unauthorized");
+			return;
+		}
+		if (req.url?.startsWith("/global/event")) {
+			res.writeHead(200, { "content-type": "text/event-stream" });
+			res.write(
+				`data: ${JSON.stringify({ payload: { id: "1", type: "server.connected", properties: {} } })}\n\n`,
+			);
+			return;
+		}
+		const path = { state: "/", config: "/", worktree: "/", directory: "/" };
+		res.writeHead(200, { "content-type": "application/json" });
+		res.end(JSON.stringify(req.url === "/path" ? path : { healthy: true }));
+	});
 
 describe("startForegroundDaemon", () => {
 	it("starts an Effect-backed foreground handle with isolated config", async () => {
@@ -111,15 +143,14 @@ describe("startForegroundDaemon", () => {
 		}
 	});
 
-	it("starts health polling for an opencodeUrl default instance", async () => {
-		const healthServer = createServer((_req, res) => {
-			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ healthy: true }));
-		});
+	it("health-checks an opencodeUrl default instance only once it starts", async () => {
+		const requests: string[] = [];
+		const healthServer = fakeOpenCode(requests);
 		const opencodePort = await listen(healthServer);
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-health-"));
 		const configDir = join(root, "config");
 		const staticDir = join(root, "static");
+		const socketPath = join(root, "relay.sock");
 		mkdirSync(staticDir);
 		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
 			flag: "w",
@@ -128,7 +159,7 @@ describe("startForegroundDaemon", () => {
 		const daemon = await startForegroundDaemon({
 			port: 0,
 			configDir,
-			socketPath: join(root, "relay.sock"),
+			socketPath,
 			staticDir,
 			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
 			tlsEnabled: false,
@@ -138,6 +169,14 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
+			expect(daemon.getInstances()).toEqual([
+				expect.objectContaining({ id: "opencode", status: "stopped" }),
+			]);
+			expect(requests).toEqual([]);
+			await sendRpcRequest(
+				socketPath,
+				new StartInstance({ instanceId: "opencode" }),
+			);
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
@@ -150,6 +189,7 @@ describe("startForegroundDaemon", () => {
 			});
 		} finally {
 			await daemon.stop();
+			healthServer.closeAllConnections();
 			await closeServer(healthServer);
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -161,22 +201,15 @@ describe("startForegroundDaemon", () => {
 		process.env["OPENCODE_SERVER_PASSWORD"] = "health-secret";
 		process.env["OPENCODE_SERVER_USERNAME"] = "opencode";
 
-		const healthServer = createServer((req, res) => {
-			if (
-				req.headers.authorization !==
-				expectedBasicAuth("opencode", "health-secret")
-			) {
-				res.writeHead(401);
-				res.end("unauthorized");
-				return;
-			}
-			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ healthy: true }));
-		});
+		const healthServer = fakeOpenCode(
+			[],
+			expectedBasicAuth("opencode", "health-secret"),
+		);
 		const opencodePort = await listen(healthServer);
 		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-auth-health-"));
 		const configDir = join(root, "config");
 		const staticDir = join(root, "static");
+		const socketPath = join(root, "relay.sock");
 		mkdirSync(staticDir);
 		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
 			flag: "w",
@@ -185,7 +218,7 @@ describe("startForegroundDaemon", () => {
 		const daemon = await startForegroundDaemon({
 			port: 0,
 			configDir,
-			socketPath: join(root, "relay.sock"),
+			socketPath,
 			staticDir,
 			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
 			tlsEnabled: false,
@@ -195,6 +228,10 @@ describe("startForegroundDaemon", () => {
 		});
 
 		try {
+			await sendRpcRequest(
+				socketPath,
+				new StartInstance({ instanceId: "opencode" }),
+			);
 			await vi.waitFor(() => {
 				expect(daemon.getInstances()).toEqual([
 					expect.objectContaining({
@@ -207,6 +244,7 @@ describe("startForegroundDaemon", () => {
 			});
 		} finally {
 			await daemon.stop();
+			healthServer.closeAllConnections();
 			await closeServer(healthServer);
 			if (previousPassword === undefined) {
 				delete process.env["OPENCODE_SERVER_PASSWORD"];

@@ -9,6 +9,7 @@ import {
 	type ProjectSettingsEnvelope,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { publishProjectSetting } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -158,5 +159,46 @@ describe("SubscribeProjectSettings", () => {
 				item: { _tag: "defaultPermissionMode", mode: "acceptEdits" },
 			});
 		}).pipe(Effect.provide(makeLayer())),
+	);
+});
+
+// ni8.15 / ni8.40: live project facts ride the same subscription. The relay
+// publishes them as they change; a tab that opens later still sees the latest.
+describe("SubscribeProjectSettings live facts", () => {
+	it.scoped(
+		"the browser count and OpenCode upstream state reach open tabs and later snapshots",
+		() =>
+			Effect.gen(function* () {
+				const { subscribe } = yield* open;
+				const early = yield* subscribe;
+				if (early.snapshot._tag !== "snapshot") throw new Error("snapshot");
+				expect(early.snapshot.rows.map((row) => row._tag)).not.toContain(
+					"opencodeConnection",
+				);
+
+				yield* publishProjectSetting({ _tag: "clientCount", count: 2 });
+				yield* publishProjectSetting({
+					_tag: "opencodeConnection",
+					status: "reconnecting",
+				});
+
+				expect(yield* Queue.take(early.q)).toMatchObject({
+					_tag: "upsert",
+					item: { _tag: "clientCount", count: 2 },
+				});
+				expect(yield* Queue.take(early.q)).toMatchObject({
+					_tag: "upsert",
+					item: { _tag: "opencodeConnection", status: "reconnecting" },
+				});
+
+				const late = yield* subscribe;
+				if (late.snapshot._tag !== "snapshot") throw new Error("snapshot");
+				expect(late.snapshot.rows).toEqual(
+					expect.arrayContaining([
+						{ _tag: "clientCount", count: 2 },
+						{ _tag: "opencodeConnection", status: "reconnecting" },
+					]),
+				);
+			}).pipe(Effect.provide(makeLayer())),
 	);
 });

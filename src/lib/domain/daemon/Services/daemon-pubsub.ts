@@ -25,6 +25,9 @@ export type DaemonEvent = Data.TaggedEnum<{
 	SessionDeleted: { readonly sessionId: string };
 	RelayBroadcast: { readonly message: unknown };
 	ConfigChanged: Record<never, never>;
+	// The daemon's instance or project list changed (conduit-test-ni8.14).
+	InstancesChanged: Record<never, never>;
+	ProjectsChanged: Record<never, never>;
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();

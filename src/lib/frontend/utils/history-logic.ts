@@ -206,7 +206,7 @@ function convertAssistantParts(
 					type: "thinking",
 					uuid,
 					text,
-					done: settled,
+					done: settled && part.state?.status !== "running",
 					...(duration != null && { duration }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),
@@ -257,15 +257,15 @@ function convertAssistantParts(
 				break;
 			}
 			case "compaction": {
-				// Persisted `/compact` boundary → the same "Context compacted"
-				// divider the live path renders via addSystemMessage. postTokens
-				// lets restoreContextFromMessages recover the reduced context bar.
+				// Persisted `/compact` outcome. A completed one is the "Context
+				// compacted" divider; postTokens lets restoreContextFromMessages
+				// recover the reduced context bar. A failed one stays a notice.
 				result.push({
 					type: "system",
 					uuid,
 					text: part.text ?? "",
-					variant: "info",
-					compaction: "completed",
+					variant: part.failed ? "error" : "info",
+					compaction: part.failed ? "failed" : "completed",
 					...(typeof part.preTokens === "number" && part.preTokens > 0
 						? { preTokens: part.preTokens }
 						: {}),
@@ -276,6 +276,17 @@ function convertAssistantParts(
 				} satisfies SystemMessage);
 				break;
 			}
+			case "error":
+				// A turn that ended in error: the notice the live error event shows.
+				result.push({
+					type: "system",
+					uuid,
+					text: part.text ?? "",
+					variant: "error",
+					...(part.code !== undefined && { errorCode: part.code }),
+					...(partCreatedAt != null && { createdAt: partCreatedAt }),
+				} satisfies SystemMessage);
+				break;
 			default:
 				// Intentionally skipped structural part types:
 				// step_start, step_finish, snapshot, agent
