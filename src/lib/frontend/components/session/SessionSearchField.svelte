@@ -3,7 +3,7 @@
 <!-- same chip. Both write ?p=<slug> in the URL (stores/session-scope.ts).      -->
 
 <script lang="ts">
-	import { applyProjectMutationResponse, confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
+	import { applyProjectList, confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
 	import {
 		getSessionScope,
 		setSessionScope,
@@ -358,7 +358,7 @@
 		project={editing}
 		projects={projectState.projects}
 		onclose={() => { editing = null; }}
-		onsaved={applyProjectMutationResponse}
+		onsaved={applyProjectList}
 		returnFocus={() => scopeChip ?? null}
 	/>
 {/if}

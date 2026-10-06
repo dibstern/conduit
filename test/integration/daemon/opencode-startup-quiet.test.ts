@@ -61,7 +61,10 @@ describe("OpenCode stays quiet at relay startup and browser attach", () => {
 		const startedAt = Date.now();
 		await fixture.restart();
 		const browser = await fixture.connect();
-		await browser.waitFor((message) => message["type"] === "instance_list");
+		// context_window_info is the last frame of the attach sequence.
+		await browser.waitFor(
+			(message) => message["type"] === "context_window_info",
+		);
 		await new Promise<void>((done) => setTimeout(done, 1500));
 		const window = fixture
 			.opencodeRequests()

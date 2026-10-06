@@ -525,43 +525,6 @@ const ContextWindowOptionSchema = Schema.Struct({
 	isDefault: Schema.optional(Schema.Boolean),
 });
 
-const ProjectInfoSchema = Schema.Struct({
-	slug: Schema.String,
-	title: Schema.String,
-	folders: Schema.NonEmptyArray(Schema.String),
-	missing: Schema.optional(Schema.Boolean),
-	git: Schema.optional(SessionGitSchema),
-	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
-});
-
-const InstanceStatusSchema = Schema.Literal(
-	"starting",
-	"healthy",
-	"unhealthy",
-	"stopped",
-);
-
-const OpenCodeInstanceSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	port: Schema.Number,
-	managed: Schema.Boolean,
-	driver: Schema.optional(Schema.String),
-	configDir: Schema.optional(Schema.String),
-	url: Schema.optional(Schema.String),
-	status: InstanceStatusSchema,
-	pid: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	needsRestart: Schema.optional(Schema.Boolean),
-	exitCode: Schema.optional(Schema.Number),
-	lastHealthCheck: Schema.optional(Schema.Number),
-	restartCount: Schema.Number,
-	createdAt: Schema.Number,
-});
-
 // -- Individual message variant schemas --
 
 const DeltaSchema = Schema.Struct({
@@ -728,12 +691,6 @@ const ModelInfoMsgSchema = Schema.Struct({
 	provider: Schema.String,
 });
 
-const ProjectListSchema = Schema.Struct({
-	type: Schema.Literal("project_list"),
-	projects: Schema.Array(ProjectInfoSchema),
-	current: Schema.optional(Schema.String),
-	addedSlug: Schema.optional(Schema.String),
-});
 const DaemonSessionsChangedSchema = Schema.Struct({
 	type: Schema.Literal("daemon_sessions_changed"),
 });
@@ -822,11 +779,6 @@ const InputSyncSchema = Schema.Struct({
 	from: Schema.optional(Schema.String),
 });
 
-const InstanceListSchema = Schema.Struct({
-	type: Schema.Literal("instance_list"),
-	instances: Schema.Array(OpenCodeInstanceSchema),
-});
-
 const InstanceUpdateSchema = Schema.Struct({
 	type: Schema.Literal("instance_update"),
 	instanceId: Schema.String,
@@ -892,7 +844,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
 	// Projects
-	ProjectListSchema,
 	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
 	// Part lifecycle
@@ -912,7 +863,6 @@ export const RelayMessageSchema = Schema.Union(
 	ServerUpdateSchema,
 	InputSyncSchema,
 	// Instance Management
-	InstanceListSchema,
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,

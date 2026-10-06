@@ -12,11 +12,7 @@ import type {
 	InstanceListResponse,
 	ScanNowResponse,
 } from "../transport/ws-rpc.js";
-import type {
-	InstanceStatus,
-	OpenCodeInstance,
-	RelayMessage,
-} from "../types.js";
+import type { InstanceStatus, OpenCodeInstance } from "../types.js";
 
 // This store has no client half: every field is an instance row, a cached copy
 // of one, or the result of a probe the server answered.
@@ -28,7 +24,7 @@ export const instanceState = $state({
 /**
  * Cached copy of the last-known instance list. Survives WS disconnect
  * so the SettingsPanel and ConnectOverlay can still show instance data.
- * Updated whenever a fresh instance_list arrives.
+ * Updated whenever a fresh instance list arrives.
  *
  * Must be $state() so that $derived(getCachedInstances()) in SettingsPanel
  * and ConnectOverlay re-renders when the cache is updated.
@@ -101,43 +97,34 @@ export function applyScanNowResponse(response: ScanNowResponse): void {
 	scanInFlight = false;
 }
 
-export function handleInstanceList(
-	msg: Extract<RelayMessage, { type: "instance_list" }>,
-): void {
-	if (Array.isArray(msg.instances)) {
-		instanceState.instances = msg.instances;
-		// Keep a cached copy that survives disconnect
-		cachedInstances = [...msg.instances];
-	}
-}
-
+/** Apply a full instance list: the subscription's, or a mutation's reply. */
 export function applyInstanceListResponse(
-	response: InstanceListResponse,
+	response: Pick<InstanceListResponse, "instances">,
 ): void {
-	handleInstanceList({
-		type: "instance_list",
-		instances: response.instances.map((instance) => ({
-			id: instance.id,
-			name: instance.name,
-			port: instance.port,
-			managed: instance.managed,
-			status: instance.status,
-			restartCount: instance.restartCount,
-			createdAt: instance.createdAt,
-			...(instance.driver != null ? { driver: instance.driver } : {}),
-			...(instance.configDir != null ? { configDir: instance.configDir } : {}),
-			...(instance.url != null ? { url: instance.url } : {}),
-			...(instance.pid != null ? { pid: instance.pid } : {}),
-			...(instance.env != null ? { env: { ...instance.env } } : {}),
-			...(instance.needsRestart != null
-				? { needsRestart: instance.needsRestart }
-				: {}),
-			...(instance.exitCode != null ? { exitCode: instance.exitCode } : {}),
-			...(instance.lastHealthCheck != null
-				? { lastHealthCheck: instance.lastHealthCheck }
-				: {}),
-		})),
-	});
+	const instances: OpenCodeInstance[] = response.instances.map((instance) => ({
+		id: instance.id,
+		name: instance.name,
+		port: instance.port,
+		managed: instance.managed,
+		status: instance.status,
+		restartCount: instance.restartCount,
+		createdAt: instance.createdAt,
+		...(instance.driver != null ? { driver: instance.driver } : {}),
+		...(instance.configDir != null ? { configDir: instance.configDir } : {}),
+		...(instance.url != null ? { url: instance.url } : {}),
+		...(instance.pid != null ? { pid: instance.pid } : {}),
+		...(instance.env != null ? { env: { ...instance.env } } : {}),
+		...(instance.needsRestart != null
+			? { needsRestart: instance.needsRestart }
+			: {}),
+		...(instance.exitCode != null ? { exitCode: instance.exitCode } : {}),
+		...(instance.lastHealthCheck != null
+			? { lastHealthCheck: instance.lastHealthCheck }
+			: {}),
+	}));
+	instanceState.instances = instances;
+	// Keep a cached copy that survives disconnect
+	cachedInstances = [...instances];
 }
 
 export function getInstanceById(id: string): OpenCodeInstance | undefined {

@@ -146,16 +146,12 @@
 			case "client_count":
 				return `${properties["count"] ?? 0} clients`;
 
-			case "instance_list":
-				return Array.isArray(properties["instances"]) ? `${properties["instances"].length} instances` : "";
 			case "variant_info":
 				return properties["variant"] ? String(properties["variant"]) : "";
 			case "context_window_info":
 				return properties["contextWindow"] ? String(properties["contextWindow"]) : "";
 			case "model_info":
 				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
-			case "project_list":
-				return Array.isArray(properties["projects"]) ? `${properties["projects"].length} projects${properties["current"] ? ` current=${properties["current"]}` : ""}` : "";
 			default:
 				return "";
 		}

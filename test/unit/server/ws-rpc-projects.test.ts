@@ -99,7 +99,7 @@ describe("WsRpcServerLayer project management", () => {
 		);
 	});
 
-	it.effect("removes a project and broadcasts the updated list", () => {
+	it.effect("removes a project and returns the updated list", () => {
 		const removeProject = vi.fn(async () => undefined);
 		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
@@ -121,11 +121,6 @@ describe("WsRpcServerLayer project management", () => {
 				projects: [],
 				current: "proj-1",
 			});
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "project_list",
-				projects: [],
-				current: "proj-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -136,7 +131,7 @@ describe("WsRpcServerLayer project management", () => {
 		);
 	});
 
-	it.effect("renames a project and broadcasts the updated list", () => {
+	it.effect("renames a project and returns the updated list", () => {
 		const renamed = { ...project, title: "Renamed" };
 		const saveProject = vi.fn(async () => ({ project: renamed, warnings: [] }));
 		const wsHandler = makeMockWebSocketHandler();
@@ -161,11 +156,6 @@ describe("WsRpcServerLayer project management", () => {
 				folders: project.folders,
 			});
 			expect(response.projects).toEqual([renamed]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "project_list",
-				projects: [renamed],
-				current: "proj-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -176,7 +166,7 @@ describe("WsRpcServerLayer project management", () => {
 		);
 	});
 
-	it.effect("sets a project instance and broadcasts the updated list", () => {
+	it.effect("sets a project instance and returns the updated list", () => {
 		const rebound = { ...project, instanceId: "inst-2" };
 		const setProjectInstance = vi.fn(async () => undefined);
 		const wsHandler = makeMockWebSocketHandler();
@@ -196,11 +186,6 @@ describe("WsRpcServerLayer project management", () => {
 
 			expect(setProjectInstance).toHaveBeenCalledWith("proj-1", "inst-2");
 			expect(response.projects).toEqual([rebound]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "project_list",
-				projects: [rebound],
-				current: "proj-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

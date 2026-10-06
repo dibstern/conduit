@@ -5,7 +5,6 @@ import {
 	WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
-import { WebSocketHandlerTag } from "../../domain/relay/Services/services.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
@@ -34,7 +33,6 @@ export const projectsHandlers = {
 	SaveProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const title =
 				request.title === undefined
 					? undefined
@@ -52,11 +50,6 @@ export const projectsHandlers = {
 				}),
 			});
 			const current = yield* projectService.currentSlug();
-			wsHandler.broadcast({
-				type: "project_list",
-				projects: result.projects,
-				...(current ? { current } : {}),
-			});
 			return {
 				projectSlug: request.projectSlug,
 				projects: result.projects,
@@ -78,15 +71,8 @@ export const projectsHandlers = {
 	RemoveProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const projects = yield* projectService.remove(request.slug);
 			const current = yield* projectService.currentSlug();
-			const message = {
-				type: "project_list" as const,
-				projects,
-				...(current ? { current } : {}),
-			};
-			wsHandler.broadcast(message);
 			return {
 				projectSlug: request.projectSlug,
 				projects,
@@ -104,18 +90,11 @@ export const projectsHandlers = {
 	SetProjectInstance: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const projects = yield* projectService.setProjectInstance(
 				request.slug,
 				request.instanceId,
 			);
 			const current = yield* projectService.currentSlug();
-			const message = {
-				type: "project_list" as const,
-				projects,
-				...(current ? { current } : {}),
-			};
-			wsHandler.broadcast(message);
 			return {
 				projectSlug: request.projectSlug,
 				projects,

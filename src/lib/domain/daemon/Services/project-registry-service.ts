@@ -217,9 +217,11 @@ export const projectInfos = allProjects.pipe(
 );
 
 export const broadcastProjectList = Effect.gen(function* () {
-	const projects = yield* projectInfos;
-	yield* broadcastToAll({ type: "project_list", projects });
-	return projects;
+	yield* PubSub.publish(
+		yield* DaemonEventBusTag,
+		DaemonEvent.ProjectsChanged(),
+	);
+	return yield* projectInfos;
 });
 
 /** Get all ready entries as [slug, ProjectReady] pairs. */

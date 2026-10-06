@@ -2,8 +2,6 @@ import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { InstanceManagementServiceTag } from "../../domain/relay/Services/instance-management-service.js";
 import { ScanServiceTag } from "../../domain/relay/Services/scan-service.js";
-import { WebSocketHandlerTag } from "../../domain/relay/Services/services.js";
-import type { OpenCodeInstance } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const CCS_DEFAULT_PORT = 8317;
@@ -24,18 +22,11 @@ const instanceServiceOrFail = (operation: string) =>
 		return serviceOption.value;
 	});
 
-const broadcastInstanceList = (instances: ReadonlyArray<OpenCodeInstance>) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		wsHandler.broadcast({ type: "instance_list", instances });
-	});
-
 export const instancesHandlers = {
 	StartInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("StartInstance");
 			const instances = yield* instanceService.start(request.instanceId);
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
@@ -45,7 +36,6 @@ export const instancesHandlers = {
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("StopInstance");
 			const instances = yield* instanceService.stop(request.instanceId);
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
@@ -55,7 +45,6 @@ export const instancesHandlers = {
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("RemoveInstance");
 			const instances = yield* instanceService.remove(request.instanceId);
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
@@ -73,7 +62,6 @@ export const instancesHandlers = {
 				);
 			}
 			const instances = yield* instanceService.rename(request.instanceId, name);
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
@@ -99,7 +87,6 @@ export const instancesHandlers = {
 					configDir: request.configDir,
 				}),
 			});
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
@@ -116,7 +103,6 @@ export const instancesHandlers = {
 					configDir: request.configDir,
 				}),
 			});
-			yield* broadcastInstanceList(instances);
 			return {
 				projectSlug: request.projectSlug,
 				instances,

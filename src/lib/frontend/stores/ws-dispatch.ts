@@ -50,8 +50,7 @@ import {
 	handleVariantInfo,
 } from "./discovery.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
-import { clearScanInFlight, handleInstanceList } from "./instance.svelte.js";
-import { handleProjectList } from "./project.svelte.js";
+import { clearScanInFlight } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -88,7 +87,6 @@ import {
 import {
 	fileBrowserListeners,
 	projectAttachedListeners,
-	projectListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
 
@@ -336,19 +334,12 @@ export function handleMessage(msg: RelayMessage): void {
 			handleInputSyncReceived(msg);
 			break;
 
-		case "project_list":
-			handleProjectList(msg);
-			for (const fn of projectListeners) fn(msg);
-			break;
 		case "daemon_sessions_changed":
 			void refreshSessionList();
 			break;
 
 		// Now routed through routePerSession (per-session events).
 
-		case "instance_list":
-			handleInstanceList(msg);
-			break;
 		case "system_error":
 			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
 			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();

@@ -4,11 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetProjects,
 	GetStatus,
+	type ProjectInfo,
 	ProjectSaveRejected,
 	SaveProject,
 	type SaveProjectInput,
@@ -17,7 +18,6 @@ import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { FolderIssue } from "../../../src/lib/project-folders.js";
 import { discoverClaudeRunners } from "../../../src/lib/provider/claude/claude-runner-registry.js";
-import { isRecord } from "../../../src/lib/utils.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
 import {
 	ProcessHarness,
@@ -362,45 +362,42 @@ describe("SaveProject through the built daemon", () => {
 		const directory = join(fixture.root, "broadcast-project");
 		mkdirSync(directory);
 		folders.add(directory);
-		const cursor = observer.frames.length;
+		const lists: (readonly ProjectInfo[])[] = [];
+		const following = Effect.runFork(
+			Stream.runForEach(observer.rpc.SubscribeProjects({}), ({ projects }) =>
+				Effect.sync(() => lists.push(projects)),
+			),
+		);
+		const latest = () => lists.at(-1) ?? [];
 		const input = { folders: [directory] };
 		const saved = await Effect.runPromise(first.rpc.SaveProject(input));
 		operations.push({ input, result: saved });
-		const added = await observer.waitFor(
-			(message) =>
-				message["type"] === "project_list" &&
-				Array.isArray(message["projects"]) &&
-				message["projects"].some(
-					(project: unknown) =>
-						isRecord(project) && project["slug"] === saved.savedSlug,
+		await vi.waitFor(
+			() =>
+				expect(latest()).toContainEqual(
+					expect.objectContaining({
+						slug: saved.savedSlug,
+						folders: [directory],
+					}),
 				),
-			cursor,
+			{ timeout: 15_000 },
 		);
-		evidence["saveBroadcast"] = added;
-		expect(added["projects"]).toContainEqual(
-			expect.objectContaining({
-				slug: saved.savedSlug,
-				folders: [directory],
-			}),
-		);
+		evidence["saveBroadcast"] = latest();
 
-		const removalCursor = observer.frames.length;
 		const removed = await Effect.runPromise(
 			first.rpc.RemoveProject({ slug: saved.savedSlug }),
 		);
 		evidence["removeResponse"] = removed;
-		const removal = await observer.waitFor(
-			(message) =>
-				message["type"] === "project_list" &&
-				Array.isArray(message["projects"]) &&
-				!message["projects"].some(
-					(project: unknown) =>
-						isRecord(project) && project["slug"] === saved.savedSlug,
+		await vi.waitFor(
+			() =>
+				expect(latest().some(({ slug }) => slug === saved.savedSlug)).toBe(
+					false,
 				),
-			removalCursor,
+			{ timeout: 15_000 },
 		);
-		evidence["removeBroadcast"] = removal;
-		expect(removal["projects"]).toContainEqual(
+		evidence["removeBroadcast"] = latest();
+		await Effect.runPromise(Fiber.interrupt(following));
+		expect(latest()).toContainEqual(
 			expect.objectContaining({ slug: "process-test" }),
 		);
 		expect(removed.projects.some(({ slug }) => slug === saved.savedSlug)).toBe(

@@ -29,7 +29,7 @@ import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
 import { findCatalogModel } from "../shared-types.js";
-import type { OpenCodeInstance, ProviderInfo } from "../types.js";
+import type { ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,
@@ -93,9 +93,6 @@ function addClaudeProvider(
 
 export interface ClientInitEffectOptions {
 	readonly skipDefaultSession?: boolean;
-	readonly getInstances?: () =>
-		| ReadonlyArray<Readonly<OpenCodeInstance>>
-		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 }
 
 const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
@@ -355,28 +352,6 @@ const sendProvidersAndSettingsEffect = (
 		}
 	});
 
-const replayInstancesEffect = (
-	clientId: string,
-	options: ClientInitEffectOptions,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		if (options.getInstances) {
-			const instances = yield* Effect.tryPromise({
-				try: () => Promise.resolve(options.getInstances?.() ?? []),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to list instances").pipe(
-						Effect.as([] as ReadonlyArray<Readonly<OpenCodeInstance>>),
-					),
-				),
-			);
-			wsHandler.sendTo(clientId, { type: "instance_list", instances });
-		}
-	});
-
 /**
  * Effect-owned production client bootstrap. This is the canonical relay path.
  */
@@ -393,5 +368,4 @@ export const handleClientConnectedEffect = (
 		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
-		yield* replayInstancesEffect(clientId, options);
 	});

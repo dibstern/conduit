@@ -1,5 +1,5 @@
 import { Cause, Effect, Layer } from "effect";
-import { assert, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleClientConnectedEffect } from "../../../src/lib/bridges/client-init.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { AgentService } from "../../../src/lib/domain/relay/Services/agent-service.js";
@@ -934,103 +934,5 @@ describe("handleClientConnectedEffect — processing status on connect", () => {
 			sessionId: expect.any(String),
 			status: "processing",
 		});
-	});
-});
-
-describe("handleClientConnectedEffect — instance list", () => {
-	it("sends instance_list when getInstances is provided", async () => {
-		const instances = [
-			{
-				id: "inst-1",
-				name: "default",
-				port: 4096,
-				managed: true,
-				status: "healthy" as const,
-				restartCount: 0,
-				createdAt: 1000,
-			},
-		];
-		const deps = makeClientInitEffectLayer();
-
-		await runClientInit(deps, "client-1", undefined, {
-			getInstances: vi.fn().mockReturnValue(instances),
-		});
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "instance_list",
-			instances,
-		});
-	});
-
-	it("does NOT send instance_list when getInstances is omitted", async () => {
-		const deps = makeClientInitEffectLayer();
-		// getInstances is not set
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const instanceListCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "instance_list",
-		);
-		expect(instanceListCalls).toHaveLength(0);
-	});
-
-	it("sends correct instances array from getInstances", async () => {
-		const instances = [
-			{
-				id: "inst-a",
-				name: "alpha",
-				port: 4096,
-				managed: true,
-				status: "healthy" as const,
-				restartCount: 0,
-				createdAt: 1000,
-			},
-			{
-				id: "inst-b",
-				name: "beta",
-				port: 4097,
-				managed: false,
-				status: "stopped" as const,
-				restartCount: 2,
-				createdAt: 2000,
-			},
-		];
-		const deps = makeClientInitEffectLayer();
-
-		await runClientInit(deps, "client-1", undefined, {
-			getInstances: vi.fn().mockReturnValue(instances),
-		});
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const instanceListCall = sendToCalls.find(
-			(c) => (c[1] as { type: string }).type === "instance_list",
-		);
-		expect(instanceListCall).toBeDefined();
-		assert.exists(instanceListCall, "expected instance-list call");
-		expect(
-			(instanceListCall[1] as { type: string; instances: unknown[] }).instances,
-		).toHaveLength(2);
-		expect(instanceListCall[1]).toEqual({ type: "instance_list", instances });
-	});
-
-	it("sends instance_list via sendTo (not broadcast) to the specific client", async () => {
-		const deps = makeClientInitEffectLayer();
-
-		await runClientInit(deps, "client-xyz", undefined, {
-			getInstances: vi.fn().mockReturnValue([]),
-		});
-
-		// sendTo called with the correct clientId
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-xyz",
-			expect.objectContaining({ type: "instance_list" }),
-		);
-		// broadcast NOT called with instance_list
-		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
-		const broadcastInstanceListCalls = broadcastCalls.filter(
-			(c) => (c[0] as { type: string }).type === "instance_list",
-		);
-		expect(broadcastInstanceListCalls).toHaveLength(0);
 	});
 });

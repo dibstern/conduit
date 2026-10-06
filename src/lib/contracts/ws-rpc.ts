@@ -1929,6 +1929,25 @@ export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
 });
 
 /**
+ * The daemon's instance and project lists (conduit-test-ni8.14). Both are
+ * daemon-global, so neither takes a project: the scope is the daemon itself.
+ * Each emits the current list on subscribe, then a fresh full list per change.
+ */
+export const SubscribeInstances = Rpc.make("SubscribeInstances", {
+	payload: {},
+	success: Schema.Struct({ instances: Schema.Array(OpenCodeInstanceSchema) }),
+	error: WsRpcError,
+	stream: true,
+});
+
+export const SubscribeProjects = Rpc.make("SubscribeProjects", {
+	payload: {},
+	success: Schema.Struct({ projects: Schema.Array(ProjectInfoSchema) }),
+	error: WsRpcError,
+	stream: true,
+});
+
+/**
  * One project-global setting, whole. Each member owns one slot, keyed by its
  * `_tag`, so a duplicate or late delivery is idempotent and a new fact is a new
  * member rather than a reshape.
@@ -1969,6 +1988,8 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,
+	SubscribeInstances,
+	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
