@@ -139,8 +139,6 @@
 			case "session_list":
 				return Array.isArray(properties["sessions"]) ? `${properties["sessions"].length} sessions` : "";
 
-			case "notification_event":
-				return `${properties["eventType"] ?? "?"}${properties["sessionId"] ? ` sess=${id(properties["sessionId"])}` : ""}${properties["message"] ? `: ${properties["message"]}` : ""}`;
 			default:
 				return "";
 		}

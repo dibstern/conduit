@@ -7,6 +7,8 @@
 import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../daemon/Services/instance-manager-service.js";
+import { AlertsLive } from "../Services/alerts.js";
+import { InputDraftsLive } from "../Services/input-drafts.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { PendingSendOwnershipLive } from "../Services/pending-send-ownership.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
@@ -87,6 +89,9 @@ export const makeRelayStateLive = (
 		SessionEventBusLive,
 		// Per-relay project-settings change fanout
 		ProjectSettingsLive,
+		// Per-relay alert and composer-draft fanout (live-only subscriptions)
+		AlertsLive,
+		InputDraftsLive,
 		// PTY state
 		PtyManagerStateLive,
 		// Instance management state

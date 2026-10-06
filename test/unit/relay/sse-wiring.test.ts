@@ -132,7 +132,7 @@ describe("handleSSEEventEffect", () => {
 		// sendToSession no longer used for chat events — only for viewer-scoped
 		// status routing (handled elsewhere).
 		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
-		// Cross-session notification_event only fires when no viewers — mock has c1 viewing.
+		// Cross-session alert only fires when no viewers — mock has c1 viewing.
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 
@@ -185,7 +185,7 @@ describe("handleSSEEventEffect", () => {
 		await runSSEEvent(deps, event);
 
 		// Event still fires on the firehose — the "no viewers" signal only
-		// controls cross-session notification_event fallback (not tested here
+		// controls cross-session alert fallback (not tested here
 		// because delta is not notification-worthy).
 		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
 			"other-session",
@@ -688,7 +688,7 @@ describe("handleSSEEventEffect", () => {
 			},
 		};
 		// Should not throw even without statusPoller
-		await expect(runSSEEvent(deps, event)).resolves.toBeUndefined();
+		await expect(runSSEEvent(deps, event)).resolves.toEqual([]);
 	});
 });
 
@@ -942,8 +942,8 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 });
 
 // When the pipeline drops a notification-worthy event (done, error) because no
-// clients are viewing that session, the server should broadcast a
-// notification_event so clients on other sessions can fire sound/browser alerts.
+// clients are viewing that session, the server should publish an alert
+// (SubscribeAlerts) so clients on other sessions can fire sound/browser alerts.
 
 // Notification routing through resolveNotifications (F2 wiring)
 // Verifies that handleSSEEventEffect gates push and cross-session broadcast through
@@ -1080,13 +1080,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			type: "session.status",
 			properties: { sessionID: "child-session" },
 		};
-		await runSSEEvent(deps, event, services);
-
-		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
-		const notifCalls = broadcastCalls.filter(
-			(call) => (call[0] as RelayMessage).type === "notification_event",
-		);
-		expect(notifCalls).toHaveLength(0);
+		expect(await runSSEEvent(deps, event, services)).toEqual([]);
 	});
 
 	it("DOES call push for subagent error (errors always notify)", async () => {
@@ -1130,8 +1124,8 @@ describe("notification routing: push gating via resolveNotifications", () => {
 	});
 });
 
-describe("notification_event broadcast for dropped notification-worthy events", () => {
-	it("broadcasts notification_event when done is dropped (no viewers)", async () => {
+describe("alert published for dropped notification-worthy events", () => {
+	it("publishes an alert when done is dropped (no viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
@@ -1149,17 +1143,19 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "other-session" },
 		};
-		await runSSEEvent(deps, event);
+		const alerts = await runSSEEvent(deps, event);
 
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "notification_event",
-			eventType: "done",
-			alertId: "done-1",
-			sessionId: "other-session",
-		});
+		expect(alerts).toEqual([
+			{
+				_tag: "alert",
+				kind: "done",
+				alertId: "done-1",
+				sessionId: "other-session",
+			},
+		]);
 	});
 
-	it("broadcasts notification_event with message when error is dropped", async () => {
+	it("publishes an alert with message when error is dropped", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
@@ -1178,18 +1174,20 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "other-session" },
 		};
-		await runSSEEvent(deps, event);
+		const alerts = await runSSEEvent(deps, event);
 
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "notification_event",
-			eventType: "error",
-			alertId: "error-1",
-			message: "Something broke",
-			sessionId: "other-session",
-		});
+		expect(alerts).toEqual([
+			{
+				_tag: "alert",
+				kind: "error",
+				alertId: "error-1",
+				message: "Something broke",
+				sessionId: "other-session",
+			},
+		]);
 	});
 
-	it("does NOT broadcast notification_event when done is sent (has viewers)", async () => {
+	it("does NOT publish an alert when done is sent (has viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		// Has viewers — event is sent normally
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
@@ -1208,17 +1206,11 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "session.status",
 			properties: { sessionID: "my-session" },
 		};
-		await runSSEEvent(deps, event);
-
-		// Should NOT broadcast notification_event — the event was sent to the session
-		const broadcastCalls = vi.mocked(deps.wsHandler.broadcast).mock.calls;
-		const notifCalls = broadcastCalls.filter(
-			(call) => (call[0] as RelayMessage).type === "notification_event",
-		);
-		expect(notifCalls).toHaveLength(0);
+		// The event was sent to the session's viewer, so no alert.
+		expect(await runSSEEvent(deps, event)).toEqual([]);
 	});
 
-	it("does NOT broadcast notification_event for non-notification types (delta)", async () => {
+	it("does NOT publish an alert for non-notification types (delta)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
@@ -1235,8 +1227,7 @@ describe("notification_event broadcast for dropped notification-worthy events", 
 			type: "message.part.delta",
 			properties: { sessionID: "other-session" },
 		};
-		await runSSEEvent(deps, event);
-
+		expect(await runSSEEvent(deps, event)).toEqual([]);
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 });

@@ -38,8 +38,10 @@ import {
 	type AgentService,
 	AgentServiceLive,
 } from "../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../src/lib/domain/relay/Services/alerts.js";
 import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
+import { InputDraftsLive } from "../../src/lib/domain/relay/Services/input-drafts.js";
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -1116,6 +1118,8 @@ export function makeTestHandlerLayer(
 		wsHandlerLayer,
 		overridesStateLayer,
 		ProjectSettingsLive,
+		AlertsLive,
+		InputDraftsLive,
 		ptyManagerLayer,
 		configLayer,
 		loggerLayer,

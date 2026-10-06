@@ -145,6 +145,12 @@ vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({
 	viewProjectSettings: vi.fn(),
 }));
+vi.mock("../../../src/lib/frontend/stores/alerts.js", () => ({
+	viewAlerts: vi.fn(),
+}));
+vi.mock("../../../src/lib/frontend/stores/input-draft.js", () => ({
+	viewInputDraft: vi.fn(),
+}));
 
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	sessionState: {

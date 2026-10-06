@@ -19,10 +19,10 @@ describe("resolveNotifications", () => {
 				{ action: "drop", reason: "no viewers" },
 				false,
 				"s1",
-			).crossSessionPayload,
+			).alert,
 		).toEqual({
-			type: "notification_event",
-			eventType: "done",
+			_tag: "alert",
+			kind: "done",
 			sessionId: "s1",
 			alertId: "origin-T1",
 		});
@@ -39,9 +39,9 @@ describe("resolveNotifications", () => {
 		).toEqual({
 			sendPush: false,
 			broadcastCrossSession: true,
-			crossSessionPayload: {
-				type: "notification_event",
-				eventType: "done",
+			alert: {
+				_tag: "alert",
+				kind: "done",
 				sessionId: "s1",
 				alertId: "poller-transition-1",
 			},
@@ -65,7 +65,7 @@ describe("resolveNotifications", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toBeDefined();
+		expect(result.alert).toBeDefined();
 	});
 
 	it("done + subagent → push no, broadcast no", () => {
@@ -105,10 +105,7 @@ describe("resolveNotifications", () => {
 			false,
 		);
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toHaveProperty(
-			"message",
-			"something broke",
-		);
+		expect(result.alert).toHaveProperty("message", "something broke");
 	});
 
 	it("non-notifiable type (delta) → push no, broadcast no", () => {

@@ -746,12 +746,6 @@ const ServerUpdateSchema = Schema.Struct({
 	restartAvailable: Schema.Boolean,
 });
 
-const InputSyncSchema = Schema.Struct({
-	type: Schema.Literal("input_sync"),
-	text: Schema.String,
-	from: Schema.optional(Schema.String),
-});
-
 const InstanceUpdateSchema = Schema.Struct({
 	type: Schema.Literal("instance_update"),
 	instanceId: Schema.String,
@@ -770,14 +764,6 @@ const ProviderSessionReloadedSchema = Schema.Struct({
 const SessionGoalChangedSchema = Schema.Struct({
 	type: Schema.Literal("session.goal_changed"),
 	...SessionGoalChangedPayloadSchema.fields,
-});
-
-const NotificationEventSchema = Schema.Struct({
-	type: Schema.Literal("notification_event"),
-	alertId: Schema.optional(Schema.String),
-	eventType: Schema.String,
-	message: Schema.optional(Schema.String),
-	sessionId: Schema.optional(Schema.String),
 });
 
 // -- Combined RelayMessage schema union --
@@ -815,14 +801,11 @@ export const RelayMessageSchema = Schema.Union(
 	ErrorSchema,
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
-	InputSyncSchema,
 	// Instance Management
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,
 	SessionGoalChangedSchema,
-	// Cross-session notifications
-	NotificationEventSchema,
 );
 
 export type RelayMessage = typeof RelayMessageSchema.Type;

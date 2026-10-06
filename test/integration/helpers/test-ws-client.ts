@@ -22,6 +22,9 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 
+const makeWsClient = () => RpcClient.make(WsRpcGroup);
+type WsClient = Effect.Effect.Success<ReturnType<typeof makeWsClient>>;
+
 export interface ReceivedMessage {
 	type: string;
 	[key: string]: unknown;
@@ -42,6 +45,7 @@ export class TestWsClient {
 	private openPromise: Promise<void>;
 	private ptySubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private shellSubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private feeds: Fiber.RuntimeFiber<void, unknown>[] = [];
 
 	constructor(url: string, initialSessionId?: string) {
 		const wsUrl = new URL(url);
@@ -760,6 +764,67 @@ export class TestWsClient {
 		}
 	}
 
+	/**
+	 * Follow the project's alerts over SubscribeAlerts, as the browser does.
+	 * Each envelope lands in `received` as `{ type: "alerts", ...envelope }`.
+	 */
+	subscribeAlerts(projectSlug = "integration-test"): Promise<void> {
+		return this.follow("alerts", (client) =>
+			client.SubscribeAlerts({ projectSlug }),
+		);
+	}
+
+	/**
+	 * Follow a session's composer draft over SubscribeInputDraft. Each envelope
+	 * lands in `received` as `{ type: "input_draft", ...envelope }`.
+	 */
+	subscribeInputDraft(
+		sessionId: string,
+		projectSlug = "integration-test",
+	): Promise<void> {
+		return this.follow("input_draft", (client) =>
+			client.SubscribeInputDraft({ projectSlug, sessionId }),
+		);
+	}
+
+	/** Run a live-only feed until close(); resolves once it is synchronized. */
+	private async follow(
+		type: string,
+		open: (
+			client: WsClient,
+		) => Stream.Stream<{ readonly _tag: string }, unknown>,
+	): Promise<void> {
+		const previousWebSocket = globalThis.WebSocket;
+		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+		const receive = (msg: ReceivedMessage) => this.receive(msg);
+		try {
+			this.feeds.push(
+				Effect.runFork(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const client = yield* RpcClient.make(WsRpcGroup);
+							yield* open(client).pipe(
+								Stream.runForEach((envelope) =>
+									Effect.sync(() => receive({ type, ...envelope })),
+								),
+							);
+						}),
+					).pipe(
+						Effect.provide(RpcClient.layerProtocolSocket()),
+						Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
+						Effect.provide(Socket.layerWebSocketConstructorGlobal),
+						Effect.provide(RpcSerialization.layerJson),
+					),
+				),
+			);
+			await this.waitFor(type, {
+				predicate: (msg) => msg["_tag"] === "synchronized",
+			});
+		} finally {
+			globalThis.WebSocket = previousWebSocket;
+		}
+	}
+
 	async ptyInput(ptyId: string, data: string): Promise<void> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -1018,6 +1083,7 @@ export class TestWsClient {
 			await Effect.runPromise(Fiber.interrupt(this.ptySubscription));
 		if (this.shellSubscription)
 			await Effect.runPromise(Fiber.interrupt(this.shellSubscription));
+		await Effect.runPromise(Fiber.interruptAll(this.feeds));
 
 		if (
 			this.ws.readyState === WebSocket.OPEN ||

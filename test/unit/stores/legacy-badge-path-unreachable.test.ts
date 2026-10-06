@@ -1,15 +1,15 @@
 import { seedSessions } from "./session-fixtures.js";
 // The Legacy Badge Path Is Unreachable (ni8.23)
-// The badge used to be client state: a reducer fed by `notification_event`
-// broadcasts, plus a per-tab set of "sessions I have looked at". Both are gone —
-// what a session is waiting on, and whether it has been looked at, are derived
+// The badge used to be client state: a reducer fed by the retired
+// `notification_event` broadcasts, plus a per-tab set of "sessions I have
+// looked at". Both are gone — what a session is waiting on, and whether it has been looked at, are derived
 // server-side onto the session row.
 //
 // Deleting code is not the same as making it unreachable, and the way this
 // regresses is quiet: someone re-adds a local counter "just for responsiveness",
 // it drifts from the row, and two tabs disagree about a badge with no error
 // anywhere. So this test asserts both halves — that the source can no longer
-// reach the old path, and that a legacy broadcast changes no badge at runtime.
+// reach the old path, and that an alert changes no badge at runtime.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -19,13 +19,13 @@ vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
 }));
 
+import { applyAlert } from "../../../src/lib/frontend/stores/alerts.js";
 import {
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 const REPO_ROOT = process.cwd();
 const FRONTEND = join(REPO_ROOT, "src/lib/frontend");
@@ -126,11 +126,12 @@ describe("a legacy notification broadcast moves no badge", () => {
 		]);
 	});
 
-	it("leaves the indicator alone for ask_user, done and error", () => {
-		for (const eventType of ["ask_user", "done", "error"] as const) {
-			handleMessage({
-				type: "notification_event",
-				eventType,
+	it("leaves the indicator alone for done and error alerts", () => {
+		for (const kind of ["done", "error"] as const) {
+			applyAlert({
+				_tag: "alert",
+				kind,
+				alertId: `ses_other:${kind}`,
 				sessionId: "ses_other",
 			});
 			expect(getSessionIndicator("ses_other", "ses_current")).toBeNull();
@@ -141,9 +142,10 @@ describe("a legacy notification broadcast moves no badge", () => {
 	});
 
 	it("shows the badge only once the row itself says so", () => {
-		handleMessage({
-			type: "notification_event",
-			eventType: "ask_user",
+		applyAlert({
+			_tag: "alert",
+			kind: "done",
+			alertId: "ses_other:done",
 			sessionId: "ses_other",
 		});
 		expect(getSessionIndicator("ses_other", "ses_current")).toBeNull();

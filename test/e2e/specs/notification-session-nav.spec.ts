@@ -1,10 +1,10 @@
-// Verifies that when a notification_event arrives via WebSocket with a
-// sessionId, the frontend can navigate to that session.
+// Verifies that when an alert arrives on SubscribeAlerts with a sessionId,
+// the frontend can navigate to that session.
 //
 // Since Playwright cannot click OS-level browser notifications, we test the
 // pipeline by:
 //   1. Setting up a multi-session WS mock
-//   2. Injecting a notification_event with a sessionId for a different session
+//   2. Publishing an alert with a sessionId for a different session
 //   3. Simulating the notification click via navigator.serviceWorker message
 //      dispatch (the same path a real push notification click takes)
 //   4. Verifying the frontend sends ViewSession RPC and the URL updates
@@ -97,7 +97,7 @@ async function waitForChatReady(page: Page): Promise<void> {
 }
 
 test.describe("Notification → Session Navigation", () => {
-	test("notification_event is dispatched to triggerNotifications via WS", async ({
+	test("an alert for another session is delivered over SubscribeAlerts", async ({
 		page,
 		baseURL,
 	}) => {
@@ -107,7 +107,7 @@ test.describe("Notification → Session Navigation", () => {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
-		const control = await mockRelayWebSocket(page, {
+		await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -126,11 +126,13 @@ test.describe("Notification → Session Navigation", () => {
 			{ timeout: 5_000 },
 		);
 
-		// Inject notification_event from server — simulates a "done" event
-		// on sess-B that was dropped by the pipeline because we're viewing sess-A
-		control.sendMessage({
-			type: "notification_event",
-			eventType: "done",
+		// Publish an alert — simulates a "done" event on sess-B that the
+		// pipeline dropped because we're viewing sess-A.
+		await expect.poll(() => rpc.hasStream("SubscribeAlerts")).toBe(true);
+		rpc.sendAlert({
+			_tag: "alert",
+			kind: "done",
+			alertId: `${SESS_B}:done`,
 			sessionId: SESS_B,
 		});
 
@@ -223,12 +225,17 @@ test.describe("Notification → Session Navigation", () => {
 		expect(page.url()).toContain(`/s/${SESS_B}`);
 	});
 
-	test("notification_event without sessionId does not crash", async ({
+	test("an alert without sessionId does not crash", async ({
 		page,
 		baseURL,
 	}) => {
-		// Verify the pipeline handles a notification_event without sessionId
+		// Verify the pipeline handles an alert without sessionId
 		// gracefully (no navigation, no crash).
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				ViewSession: () => ({ ok: true }),
+			},
+		});
 		await mockRelayWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
@@ -241,12 +248,20 @@ test.describe("Notification → Session Navigation", () => {
 
 		// This should not throw or navigate — just trigger sound/browser notif
 		// (which are suppressed in test since Notification.permission !== "granted")
-		await page.evaluate(() => {
-			// Manually dispatch a notification_event WS message without sessionId
-			// by finding the WS and injecting it. But since we're using WS mock,
-			// we can't easily do this from the page context.
-			// Instead we verify no errors occur by checking the page stays on sess-A.
+		const errors: Error[] = [];
+		page.on("pageerror", (error) => errors.push(error));
+		await expect.poll(() => rpc.hasStream("SubscribeAlerts")).toBe(true);
+		rpc.sendAlert({
+			_tag: "alert",
+			kind: "error",
+			alertId: "no-session",
+			message: "Provider quota exhausted",
 		});
+		// The in-app ding for a tab without push: an error toast.
+		await expect(
+			page.getByText("Error — Provider quota exhausted"),
+		).toBeVisible();
+		expect(errors).toEqual([]);
 
 		// Page should still be on sess-A (no unintended navigation)
 		const url = page.url();

@@ -6,10 +6,15 @@
 
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Runtime } from "effect";
+import type { Alert } from "../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
+import {
+	type AlertsTag,
+	publishAlert,
+} from "../domain/relay/Services/alerts.js";
 import { OPENCODE_PROVIDER_ID } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
@@ -120,6 +125,8 @@ export interface MonitoringWiringDeps {
 	sseLog: Logger;
 	pipelineLog: Logger;
 	state?: MonitoringWiringStateAccess;
+	/** Sync wiring only; the Effect wiring publishes to AlertsTag. */
+	publishAlert: (alert: Alert) => void;
 }
 
 export interface MonitoringWiringStateAccess {
@@ -146,7 +153,7 @@ export interface MonitoringWiringResult {
 
 export type EffectMonitoringWiringDeps = Omit<
 	MonitoringWiringDeps,
-	"sessionService" | "processingTimeouts" | "statusPoller"
+	"sessionService" | "processingTimeouts" | "statusPoller" | "publishAlert"
 >;
 
 export type EffectMonitoringWiringResult = Omit<
@@ -307,16 +314,7 @@ const processAndApplyDoneEffect = (
 				),
 			);
 		}
-		if (
-			notification.broadcastCrossSession &&
-			notification.crossSessionPayload
-		) {
-			yield* Effect.sync(() =>
-				deps.wsHandler.broadcast(
-					notification.crossSessionPayload as RelayMessage,
-				),
-			);
-		}
+		if (notification.alert) yield* publishAlert(notification.alert);
 	});
 
 const executeMonitoringEffectsEffect = (
@@ -501,12 +499,7 @@ export function wireMonitoring(
 					sessionId,
 				});
 			}
-			if (
-				notification.broadcastCrossSession &&
-				notification.crossSessionPayload
-			) {
-				wsHandler.broadcast(notification.crossSessionPayload as RelayMessage);
-			}
+			if (notification.alert) deps.publishAlert(notification.alert);
 		},
 		clearProcessingTimeout: (sessionId) =>
 			processingTimeouts.clearProcessingTimeout(sessionId),
@@ -609,12 +602,12 @@ export const wireMonitoringEffect = (
 ): Effect.Effect<
 	EffectMonitoringWiringResult,
 	never,
-	SessionManagerServiceTag | StatusPollerTag | OverridesStateTag
+	SessionManagerServiceTag | StatusPollerTag | OverridesStateTag | AlertsTag
 > =>
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
 		const runtime = yield* Effect.runtime<
-			SessionManagerServiceTag | OverridesStateTag
+			SessionManagerServiceTag | OverridesStateTag | AlertsTag
 		>();
 		const {
 			wsHandler,

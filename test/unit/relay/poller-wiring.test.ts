@@ -1,5 +1,7 @@
-import { Effect, Layer } from "effect";
+import { Chunk, Effect, Layer, PubSub, Queue, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
+import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -15,7 +17,7 @@ describe("wirePollers", () => {
 		let pollerEvents:
 			| ((messages: RelayMessage[], sessionId: string) => void)
 			| undefined;
-		const broadcast = vi.fn();
+		const publishAlert = vi.fn();
 		const pushManager = {
 			sendToAll: vi.fn(async () => undefined),
 		};
@@ -34,7 +36,7 @@ describe("wirePollers", () => {
 				markMessageActivity: vi.fn(),
 			} as never,
 			wsHandler: {
-				broadcast,
+				broadcast: vi.fn(),
 				broadcastPerSessionEvent: vi.fn(),
 				getClientsForSession: vi.fn(() => []),
 				sendToSession: vi.fn(),
@@ -61,6 +63,7 @@ describe("wirePollers", () => {
 				slug: "project",
 			},
 			pollerLog: createSilentLogger(),
+			publishAlert,
 		});
 
 		pollerEvents?.(
@@ -69,25 +72,23 @@ describe("wirePollers", () => {
 		);
 
 		expect(pushManager.sendToAll).not.toHaveBeenCalled();
-		expect(broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "notification_event",
-				eventType: "done",
-				sessionId: "child-session",
-			}),
-		);
+		expect(publishAlert).not.toHaveBeenCalled();
 	});
 
 	it("effect-owned production wiring reads parent map from SessionManagerService", async () => {
 		let pollerEvents:
 			| ((messages: RelayMessage[], sessionId: string) => void)
 			| undefined;
-		const broadcast = vi.fn();
+		const alerts = Effect.runSync(PubSub.unbounded<Alert>());
+		const alertsSeen = Effect.runSync(
+			PubSub.subscribe(alerts).pipe(Scope.extend(Effect.runSync(Scope.make()))),
+		);
 		const pushManager = {
 			sendToAll: vi.fn(async () => undefined),
 		};
 
 		const layer = Layer.mergeAll(
+			Layer.succeed(AlertsTag, alerts),
 			Layer.succeed(SessionManagerServiceTag, {
 				getSessionParentMap: () =>
 					Effect.succeed(new Map([["child-session", "parent-session"]])),
@@ -110,7 +111,7 @@ describe("wirePollers", () => {
 					on: vi.fn(),
 				},
 				wsHandler: {
-					broadcast,
+					broadcast: vi.fn(),
 					broadcastPerSessionEvent: vi.fn(),
 					getClientsForSession: vi.fn(() => []),
 					sendToSession: vi.fn(),
@@ -140,12 +141,8 @@ describe("wirePollers", () => {
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(pushManager.sendToAll).not.toHaveBeenCalled();
-		expect(broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "notification_event",
-				eventType: "done",
-				sessionId: "child-session",
-			}),
+		expect(Chunk.toArray(Effect.runSync(Queue.takeAll(alertsSeen)))).toEqual(
+			[],
 		);
 	});
 });

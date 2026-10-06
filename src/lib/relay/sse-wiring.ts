@@ -11,6 +11,10 @@ import {
 	AlertLedgerTag,
 	type SessionAlert,
 } from "../domain/relay/Services/alert-ledger.js";
+import {
+	type AlertsTag,
+	publishAlert,
+} from "../domain/relay/Services/alerts.js";
 import type { OpenCodeRuntimeIngressResult } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { PendingPermissionRequestInput } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
@@ -630,16 +634,7 @@ const handleSSEEventAfterPendingEffect = (
 					buildPushContext(deps.slug, targetSessionId),
 				);
 			}
-			if (
-				notification.broadcastCrossSession &&
-				notification.crossSessionPayload
-			) {
-				yield* Effect.sync(() =>
-					wsHandler.broadcast(
-						notification.crossSessionPayload as import("../shared-types.js").RelayMessage,
-					),
-				);
-			}
+			if (notification.alert) yield* publishAlert(notification.alert);
 		}
 	});
 
@@ -784,6 +779,7 @@ export const wireSSEConsumerEffect = (
 			| OverridesStateTag
 			| SessionManagerServiceTag
 			| ProjectSettingsTag
+			| AlertsTag
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);

@@ -88,6 +88,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribePtys: () => Stream.empty,
 				SubscribeApprovals: () => Stream.empty,
 				SubscribeProjectSettings: () => Stream.empty,
+				SubscribeAlerts: () => Stream.empty,
+				SubscribeInputDraft: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
 				SubscribeProjects: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ projectSlug: null }),

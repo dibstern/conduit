@@ -1,5 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { publishAlert } from "../domain/relay/Services/alerts.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -12,7 +13,7 @@ export const publishProviderRelayMessage = (
 	deps: {
 		wsHandler: Pick<
 			WebSocketHandlerShape,
-			"sendToSession" | "getClientsForSession" | "broadcast"
+			"sendToSession" | "getClientsForSession"
 		>;
 		pushManager?: Pick<PushNotificationSender, "sendToAll">;
 		log: Logger;
@@ -37,8 +38,7 @@ export const publishProviderRelayMessage = (
 			rows[0]?.parent_id != null,
 			sessionId,
 		);
-		if (notification.crossSessionPayload)
-			deps.wsHandler.broadcast(notification.crossSessionPayload);
+		if (notification.alert) yield* publishAlert(notification.alert);
 		if (notification.sendPush && deps.pushManager)
 			yield* sendPushForEventEffect(deps.pushManager, msg, deps.log, {
 				slug: deps.slug,

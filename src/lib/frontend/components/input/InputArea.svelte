@@ -657,7 +657,7 @@
 		if (sessionState.currentId) {
 			inputDrafts.delete(sessionState.currentId);
 		}
-		// Cancel any pending debounced input_sync (it would re-sync the old
+		// Cancel any pending debounced draft sync (it would re-sync the old
 		// draft text to the server after we just cleared it) and send an
 		// immediate empty sync so the server-side draft store is cleared too.
 		if (inputSyncTimer) {

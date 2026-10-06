@@ -139,7 +139,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("input_sync reaches clients viewing the same session", async () => {
+	it("a draft reaches clients following the same session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -154,16 +154,20 @@ describe("Integration: Per-Tab Sessions", () => {
 		client2.clearReceived();
 		await client2.viewSession(sharedId);
 
-		// Clear and send input_sync from client1
+		// Clear and send a draft from client1
 		client1.clearReceived();
 		client2.clearReceived();
+		await client2.subscribeInputDraft(sharedId);
 		await client1.syncInputDraft("typing from tab1", {
 			sessionId: sharedId,
 			originId: "browser-tab-a",
 		});
 
 		// Client2 should receive it (same session)
-		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
+		const msg = await client2.waitFor("input_draft", {
+			timeout: 3000,
+			predicate: (m) => m["_tag"] === "draft",
+		});
 		expect(msg["text"]).toBe("typing from tab1");
 		expect(msg["from"]).toBe("browser-tab-a");
 
@@ -171,7 +175,7 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("input_sync does NOT reach clients viewing a different session", async () => {
+	it("a draft does NOT reach clients following a different session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -190,9 +194,10 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client1.viewSession(a["id"] as string);
 		await client2.viewSession(b["id"] as string);
 
-		// Send input_sync from client1 (session A)
+		// Send a draft from client1 (session A)
 		client1.clearReceived();
 		client2.clearReceived();
+		await client2.subscribeInputDraft(b["id"] as string);
 		await client1.syncInputDraft("isolated input", {
 			sessionId: a["id"] as string,
 			originId: "browser-tab-a",
@@ -200,7 +205,9 @@ describe("Integration: Per-Tab Sessions", () => {
 
 		// Observe a full window to ensure the draft does not reach session B.
 		await new Promise((r) => setTimeout(r, 1000));
-		const syncs = client2.getReceivedOfType("input_sync");
+		const syncs = client2
+			.getReceivedOfType("input_draft")
+			.filter((m) => m["_tag"] === "draft");
 		expect(syncs).toHaveLength(0);
 
 		await client1.close();

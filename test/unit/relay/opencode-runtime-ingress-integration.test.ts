@@ -3,6 +3,7 @@
 
 import { Cause, Chunk, Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -48,6 +49,7 @@ function createEffectDeps(
 
 function createServicesLayer() {
 	return Layer.mergeAll(
+		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),

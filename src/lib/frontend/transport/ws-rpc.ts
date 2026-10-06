@@ -1,4 +1,6 @@
 export {
+	type Alert,
+	type AlertsEnvelope,
 	AnswerQuestion,
 	CancelSession,
 	type ClaudeSettingsResponse,
@@ -34,6 +36,7 @@ export {
 	GetToolContent,
 	type GetToolContentResponse,
 	type GoalDetails,
+	type InputDraftEnvelope,
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
@@ -88,6 +91,8 @@ export {
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
+	SubscribeAlerts,
+	SubscribeInputDraft,
 	SubscribeProjectSettings,
 	SubscribePtys,
 	SubscribeSessionDetail,

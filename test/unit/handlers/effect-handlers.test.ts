@@ -95,7 +95,6 @@ import {
 	handleMessage,
 	rewindSessionToMessage,
 	sendMessageToSession,
-	syncInputDraftForSession,
 } from "../../../src/lib/handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../../src/lib/handlers/reload.js";
 import {
@@ -3558,61 +3557,6 @@ describe("cancelSessionById", () => {
 				sessionId: "session-1",
 			});
 		}).pipe(Effect.provide(layer));
-	});
-});
-
-describe("syncInputDraftForSession", () => {
-	it.effect("forwards input to clients in the target session", () => {
-		const ws = mockWsHandler({
-			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
-		});
-
-		const layer = Layer.succeed(WebSocketHandlerTag, ws);
-
-		return syncInputDraftForSession({
-			sessionId: "session-1",
-			text: "hello",
-			from: "browser-tab-a",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.getClientsForSession).toHaveBeenCalledWith("session-1");
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "input_sync",
-					text: "hello",
-					from: "browser-tab-a",
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-2", {
-					type: "input_sync",
-					text: "hello",
-					from: "browser-tab-a",
-				});
-				expect(ws.sendTo).toHaveBeenCalledTimes(2);
-			}),
-		);
-	});
-
-	it.effect("clears the draft by forwarding an empty sync", () => {
-		const ws = mockWsHandler({
-			getClientsForSession: vi.fn(() => ["client-1"]),
-		});
-
-		const layer = Layer.succeed(WebSocketHandlerTag, ws);
-
-		return syncInputDraftForSession({
-			sessionId: "session-1",
-			text: "",
-			from: "browser-tab-a",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "input_sync",
-					text: "",
-					from: "browser-tab-a",
-				});
-			}),
-		);
 	});
 });
 

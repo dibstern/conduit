@@ -85,6 +85,7 @@ import {
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
+import { applyInputDraft } from "../../../src/lib/frontend/stores/input-draft.js";
 import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
@@ -262,13 +263,13 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 	});
 });
 
-describe("input_sync dispatch", () => {
+describe("input draft follower", () => {
 	it("ignores draft echoes from this browser tab", () => {
 		inputSyncState.text = "before";
 		inputSyncState.lastUpdated = 10;
 
-		handleMessage({
-			type: "input_sync",
+		applyInputDraft({
+			_tag: "draft",
 			text: "self echo",
 			from: getBrowserClientId(),
 		});
@@ -278,8 +279,8 @@ describe("input_sync dispatch", () => {
 	});
 
 	it("applies drafts from another browser tab", () => {
-		handleMessage({
-			type: "input_sync",
+		applyInputDraft({
+			_tag: "draft",
 			text: "other tab draft",
 			from: "browser-tab-b",
 		});

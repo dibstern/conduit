@@ -946,6 +946,9 @@ describe("Group 4: Cross-session and lifecycle", () => {
 });
 
 describe("Group 5: Notifications", () => {
+	const alertsOf = (client: TestWsClient) =>
+		client.getReceivedOfType("alerts").filter((m) => m["_tag"] === "alert");
+
 	let harness: TestHarness;
 
 	beforeAll(async () => {
@@ -963,6 +966,7 @@ describe("Group 5: Notifications", () => {
 
 	it("Scenario 12: Subagent done → no cross-session broadcast", async () => {
 		const client = await connectAndView(harness, "sess-1");
+		await client.subscribeAlerts();
 
 		// sess-2 (subagent of sess-1) goes busy then idle
 		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
@@ -970,12 +974,8 @@ describe("Group 5: Notifications", () => {
 		harness.mock.sessionStatuses["sess-2"] = { type: "idle" };
 		await waitForStatusPollCycles(harness.mock);
 
-		// Client viewing sess-1 should NOT receive notification_event for subagent done
-		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
-		const notifications = client
-			.getReceivedOfType("notification_event")
-			.filter((m) => m["eventType"] !== "session_viewed");
-		expect(notifications.length).toBe(0);
+		// Client viewing sess-1 should NOT receive an alert for subagent done
+		expect(alertsOf(client)).toEqual([]);
 
 		await client.close();
 	}, 5_000);
@@ -985,6 +985,7 @@ describe("Group 5: Notifications", () => {
 
 		// Client viewing sess-2 (no one viewing sess-1)
 		const client = await connectAndView(harness, "sess-2");
+		await client.subscribeAlerts();
 
 		// sess-1 (NOT a subagent) goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
@@ -995,13 +996,13 @@ describe("Group 5: Notifications", () => {
 		// sess-1 goes idle → should trigger cross-session broadcast
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
-		// Client on sess-2 should receive notification_event with eventType: "done"
-		const notification = await client.waitFor("notification_event", {
+		// Client on sess-2 should receive a "done" alert on SubscribeAlerts
+		const alert = await client.waitFor("alerts", {
 			timeout: 5000,
-			predicate: (m) => m["eventType"] === "done",
+			predicate: (m) => m["_tag"] === "alert" && m["kind"] === "done",
 		});
-		expect(notification["type"]).toBe("notification_event");
-		expect(notification["eventType"]).toBe("done");
+		expect(alert).toMatchObject({ sessionId: "sess-1" });
+		expect(alert["alertId"]).toEqual(expect.any(String));
 
 		await client.close();
 	}, 10_000);
@@ -1011,6 +1012,7 @@ describe("Group 5: Notifications", () => {
 
 		// Client viewing sess-1 (the session that will go busy/idle)
 		const client = await connectAndView(harness, "sess-1");
+		await client.subscribeAlerts();
 
 		// sess-1 goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
@@ -1026,13 +1028,9 @@ describe("Group 5: Notifications", () => {
 		const done = await client.waitFor("done", { timeout: 3000 });
 		expect(done["type"]).toBe("done");
 
-		// Should NOT receive notification_event (done was delivered to viewer directly)
-		// (filter out session_viewed which is the harmless indicator-clearing broadcast)
+		// Should NOT receive an alert (done was delivered to viewer directly)
 		await waitForStatusPollCycles(harness.mock);
-		const notifications = client
-			.getReceivedOfType("notification_event")
-			.filter((m) => m["eventType"] !== "session_viewed");
-		expect(notifications.length).toBe(0);
+		expect(alertsOf(client)).toEqual([]);
 
 		await client.close();
 	}, 5_000);
@@ -1042,6 +1040,7 @@ describe("Group 5: Notifications", () => {
 
 		// Client viewing sess-2 (no one viewing sess-1)
 		const client = await connectAndView(harness, "sess-2");
+		await client.subscribeAlerts();
 
 		// sess-1 goes busy (no viewer)
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
@@ -1052,11 +1051,11 @@ describe("Group 5: Notifications", () => {
 		// sess-1 goes idle → cross-session broadcast should fire
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
-		const notification = await client.waitFor("notification_event", {
+		const alert = await client.waitFor("alerts", {
 			timeout: 5000,
-			predicate: (m) => m["eventType"] === "done",
+			predicate: (m) => m["_tag"] === "alert" && m["kind"] === "done",
 		});
-		expect(notification["type"]).toBe("notification_event");
+		expect(alert).toMatchObject({ sessionId: "sess-1" });
 
 		await client.close();
 	}, 10_000);

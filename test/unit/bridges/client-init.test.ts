@@ -262,12 +262,6 @@ describe("handleClientConnectedEffect — session selection", () => {
 			"client-1",
 			expect.objectContaining({ type: "session_switched" }),
 		);
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "notification_event",
-				eventType: "session_viewed",
-			}),
-		);
 	});
 
 	it("selects no session when the requested session does not exist", async () => {

@@ -86,10 +86,10 @@ const _assertPersistedTypes: _AssertPersistedSubset = true;
 /**
  * Event types that warrant a notification (sound/browser alert/push).
  * When the pipeline drops one of these because no viewers are on the session,
- * the server broadcasts a `notification_event` so clients can still fire
+ * the server publishes an alert (SubscribeAlerts) so clients can still fire
  * sound/browser notifications without updating chat state.
  * Permissions and questions reach every browser through the approvals
- * subscription, so only done and error need the notification_event fallback.
+ * subscription, so only done and error need the alert fallback.
  */
 export const NOTIFICATION_EVENT_TYPES: ReadonlySet<RelayMessage["type"]> =
 	new Set(["done", "error"]);
@@ -154,7 +154,7 @@ export interface PipelineDeps {
  * viewer presence (`action: "send"` when at least one client has bound to
  * the target session, `action: "drop"` otherwise).
  * That signal drives downstream notification logic (cross-session
- * `notification_event` broadcasts fire only when no client is actively
+ * alerts fire only when no client is actively
  * viewing), but it no longer gates delivery: every per-session event is
  * sent to every connected client via `broadcastPerSessionEvent`.
  */

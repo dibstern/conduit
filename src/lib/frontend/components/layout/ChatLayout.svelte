@@ -58,6 +58,8 @@
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
+	import { viewAlerts } from "../../stores/alerts.js";
+	import { viewInputDraft } from "../../stores/input-draft.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
 	import { applyProjectList, followDaemonLists } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
@@ -442,10 +444,12 @@
 		untrack(() => {
 			viewTranscript(project, sessionId);
 			viewTodos(project, sessionId);
+			viewInputDraft(project, sessionId);
 		});
 		return () => {
 			viewTranscript(project, null);
 			viewTodos(project, null);
+			viewInputDraft(project, null);
 		};
 	});
 	$effect(() => {
@@ -453,10 +457,12 @@
 		untrack(() => {
 			viewPtys(project);
 			viewProjectSettings(project);
+			viewAlerts(project);
 		});
 		return () => {
 			viewPtys(null);
 			viewProjectSettings(null);
+			viewAlerts(null);
 		};
 	});
 	$effect(() => {

@@ -1991,6 +1991,53 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 	stream: true,
 });
 
+/** A session finished or failed in this project while no tab was viewing it. */
+export const AlertSchema = Schema.TaggedStruct("alert", {
+	kind: Schema.Literal("done", "error"),
+	alertId: NonEmptyString,
+	sessionId: Schema.optional(Schema.String),
+	message: Schema.optional(Schema.String),
+});
+export type Alert = typeof AlertSchema.Type;
+const AlertsEnvelopeSchema = Schema.Union(
+	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+	AlertSchema,
+);
+export type AlertsEnvelope = typeof AlertsEnvelopeSchema.Type;
+
+/**
+ * Live-only: opens with `synchronized` and has no snapshot, so a reconnect or
+ * reload never re-fires a ding. Cross-tab dedupe rides the alertId.
+ */
+export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
+	payload: { projectSlug: NonEmptyString },
+	success: AlertsEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
+const InputDraftEnvelopeSchema = Schema.Union(
+	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+	Schema.TaggedStruct("draft", {
+		text: Schema.String,
+		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
+		from: Schema.optional(Schema.String),
+	}),
+);
+export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
+
+/**
+ * Live-only: a session's composer draft as other tabs type it. The draft at
+ * session switch rides the ViewSession response, so resubscribing after a
+ * reconnect never clobbers text typed while offline.
+ */
+export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
+	payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	success: InputDraftEnvelopeSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
@@ -1998,6 +2045,8 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,
+	SubscribeAlerts,
+	SubscribeInputDraft,
 	SubscribeInstances,
 	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),
