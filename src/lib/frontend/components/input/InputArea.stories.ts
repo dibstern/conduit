@@ -86,7 +86,6 @@ async function assertSwapStyles(
 
 function setHighVariant() {
 	handleVariantInfo({
-		type: "variant_info",
 		variant: "high",
 		variants: ["low", "medium", "high"],
 	});
@@ -111,7 +110,6 @@ function setupDiscovery() {
 		],
 	});
 	handleModelInfo({
-		type: "model_info",
 		model: "claude-sonnet-4-20250514",
 		provider: "anthropic",
 	});
@@ -227,7 +225,6 @@ function setupWords(phone: boolean) {
 		],
 	});
 	handleModelInfo({
-		type: "model_info",
 		model: "claude-sonnet-5",
 		provider: "claude",
 	});
@@ -237,12 +234,10 @@ function setupWords(phone: boolean) {
 		variant: "",
 	});
 	handleContextWindowInfo({
-		type: "context_window_info",
 		contextWindow: "200k",
 		options: contextWindowOptions,
 	});
 	handleVariantInfo({
-		type: "variant_info",
 		variant: "high",
 		variants: ["low", "medium", "high", "xhigh", "max"],
 	});
@@ -367,7 +362,7 @@ function setupGoal(
 	const previous = sessionGoals.get(testId);
 	const model = discoveryState.currentModelId;
 	const provider = discoveryState.currentProviderId;
-	handleModelInfo({ type: "model_info", model, provider: "claude" });
+	handleModelInfo({ model, provider: "claude" });
 	goalStorySetAt = Math.max(goalStorySetAt + 1, Date.now() - 41 * 60_000);
 	const activeGoal = {
 		condition: "All 38 scenarios pass",
@@ -408,7 +403,7 @@ function setupGoal(
 		endTurn?.();
 		if (previous) handleGoalChanged(previous);
 		else sessionGoals.delete(testId);
-		handleModelInfo({ type: "model_info", model, provider });
+		handleModelInfo({ model, provider });
 		localStorage.removeItem(
 			`conduit:goal-met-dismissed:${testId}:${activeGoal.setAt}`,
 		);

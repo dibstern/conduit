@@ -9,10 +9,12 @@ import {
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	selectSessionModel,
+	selectSessionVariant,
+} from "../domain/relay/Services/session-model-settings.js";
+import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
-	setModel,
-	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	ReadQueryEffectTag,
@@ -189,13 +191,13 @@ export const createSessionForClient = ({
 				: yield* sessionManagerService.createSession(title);
 		if (model) {
 			const override = { providerID: model.providerId, modelID: model.modelId };
-			yield* setModel(session.id, override);
+			yield* selectSessionModel(session.id, override);
 			// The draft lists the default model's efforts, so keep a picked
 			// effort only if this model offers it. Without one, use the model's
 			// saved effort: the first turn would otherwise inherit the default's.
 			const { variant: saved, variants } = yield* savedVariantFor(override);
 			const picked = model.variant;
-			yield* setVariant(
+			yield* selectSessionVariant(
 				session.id,
 				picked === "" || (picked !== undefined && variants.includes(picked))
 					? picked

@@ -3,8 +3,8 @@ import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
 	holdUntilVisible,
+	refetchModelCatalog,
 	rejectedEffortSwitches,
-	requireRelayControl,
 	requireRpcControl,
 } from "./shared.js";
 
@@ -15,9 +15,7 @@ export const composerEffortHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const options = (match[1] ?? "").split(", ");
 			effortOptions.set(world.page, options);
-			await requireRelayControl(world.page).sendMessages([
-				{ type: "variant_info", variant: "", variants: options },
-			]);
+			await refetchModelCatalog(world.page);
 			await expect(
 				world.page.getByTestId(/^(variant-badge|composer-word-effort)$/),
 			).toBeVisible();

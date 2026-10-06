@@ -83,19 +83,13 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	it("SwitchModel RPC broadcasts model_info", async () => {
+	it("SwitchModel RPC records the session's model", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		client.clearReceived();
 
 		await client.switchModel("test-model", "test-provider");
-		// The connect handshake can send its own model_info late, so match ours.
-		const msg = await client.waitFor("model_info", {
-			timeout: 3000,
-			predicate: (m) => m["model"] === "test-model",
-		});
-		expect(msg["model"]).toBe("test-model");
-		expect(msg["provider"]).toBe("test-provider");
+		const { active } = await client.getModels();
+		expect(active).toEqual({ model: "test-model", provider: "test-provider" });
 		await client.close();
 	});
 

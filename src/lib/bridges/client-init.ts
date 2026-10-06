@@ -16,19 +16,14 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
-	getContextWindow,
-	getDefaultContextWindow,
 	getDefaultModel,
 	getDefaultVariant,
-	getModel,
-	getVariant,
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
-import { findCatalogModel } from "../shared-types.js";
 import type { ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
@@ -139,7 +134,6 @@ const resolveAndReplaySessionEffect = (
 	options: ClientInitEffectOptions,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -183,16 +177,6 @@ const resolveAndReplaySessionEffect = (
 
 		if (activeId) {
 			yield* switchClientToSessionForInitEffect(clientId, activeId);
-
-			const sessionModel = yield* getModel(activeId);
-			if (sessionModel) {
-				wsHandler.sendTo(clientId, {
-					type: "model_info",
-					sessionId: activeId,
-					model: sessionModel.modelID,
-					provider: sessionModel.providerID,
-				});
-			}
 		}
 
 		return {
@@ -215,12 +199,8 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 		);
 	});
 
-const sendProvidersAndSettingsEffect = (
-	clientId: string,
-	activeId: string | undefined,
-) =>
+const sendProvidersAndSettingsEffect = (clientId: string) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const modelService = yield* OpenCodeModelServiceTag;
 		const engine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
@@ -248,29 +228,9 @@ const sendProvidersAndSettingsEffect = (
 					return yield* Effect.fail(claudeCapsResult.left);
 				}
 
-				const currentVariant = activeId
-					? yield* getVariant(activeId)
-					: yield* getDefaultVariant();
-				const activeModel = activeId
-					? yield* getModel(activeId)
-					: yield* getDefaultModel();
-				// After a restart this snapshot is all an open tab gets, and a
-				// session restored from `opus[1m]` must still find today's `opus`.
-				const catalogModel = findCatalogModel(providers, activeModel);
-				wsHandler.sendTo(clientId, {
-					type: "variant_info",
-					variant: currentVariant,
-					variants: catalogModel?.variants ?? [],
-				});
-				wsHandler.sendTo(clientId, {
-					type: "context_window_info",
-					contextWindow: activeId
-						? yield* getContextWindow(activeId)
-						: yield* getDefaultContextWindow(),
-					options: catalogModel?.contextWindowOptions ?? [],
-				});
-				// The approval mode reaches the tab on the session's shell row and
-				// the GetModels response; defaults ride SubscribeProjectSettings.
+				// The session's model, effort, context window and approval mode
+				// reach the tab on its shell row and the GetModels response;
+				// defaults ride SubscribeProjectSettings.
 				const defaultModel = yield* getDefaultModel();
 				if (!defaultModel && Option.isSome(openCodeCatalog)) {
 					for (const providerId of openCodeCatalog.value.connected) {
@@ -285,11 +245,6 @@ const sendProvidersAndSettingsEffect = (
 								model: defaultModelId,
 								provider: providerId,
 								variant: yield* getDefaultVariant(),
-							});
-							wsHandler.broadcast({
-								type: "model_info",
-								model: defaultModelId,
-								provider: providerId,
 							});
 							log.info(
 								`Auto-selected default: ${defaultModelId} (${providerId})`,
@@ -315,11 +270,6 @@ const sendProvidersAndSettingsEffect = (
 							provider: "claude",
 							variant: yield* getDefaultVariant(),
 						});
-						wsHandler.broadcast({
-							type: "model_info",
-							model: defaultClaudeModel.id,
-							provider: "claude",
-						});
 						log.info(
 							`Auto-selected default: ${defaultClaudeModel.id} (claude)`,
 						);
@@ -328,11 +278,6 @@ const sendProvidersAndSettingsEffect = (
 					defaultModel &&
 					providers.some((provider) => provider.id === defaultModel.providerID)
 				) {
-					wsHandler.sendTo(clientId, {
-						type: "model_info",
-						model: defaultModel.modelID,
-						provider: defaultModel.providerID,
-					});
 					log.info(
 						`Default: ${defaultModel.modelID} (${defaultModel.providerID})`,
 					);
@@ -356,11 +301,7 @@ export const handleClientConnectedEffect = (
 	options: ClientInitEffectOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const { activeId } = yield* resolveAndReplaySessionEffect(
-			clientId,
-			requestedSessionId,
-			options,
-		);
+		yield* resolveAndReplaySessionEffect(clientId, requestedSessionId, options);
 		yield* pushViewedFamiliesForInitEffect(clientId);
-		yield* sendProvidersAndSettingsEffect(clientId, activeId);
+		yield* sendProvidersAndSettingsEffect(clientId);
 	});

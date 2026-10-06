@@ -70,7 +70,6 @@ function bottomRightFrame(): () => void {
 function seedClaude(): void {
 	handleModelList({ providers: [anthropic] });
 	handleModelInfo({
-		type: "model_info",
 		model: "claude-sonnet-4-5",
 		provider: "claude",
 	});
@@ -80,11 +79,10 @@ function seedClaude(): void {
 		variant: "",
 	});
 	handleContextWindowInfo({
-		type: "context_window_info",
 		contextWindow: "",
 		options: contextWindows,
 	});
-	handleVariantInfo({ type: "variant_info", variant: "high", variants });
+	handleVariantInfo({ variant: "high", variants });
 }
 
 /**
@@ -238,7 +236,7 @@ export const DefaultEffort: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
-		handleVariantInfo({ type: "variant_info", variant: "", variants });
+		handleVariantInfo({ variant: "", variants });
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -263,7 +261,6 @@ export const SingleContextWindow: Story = {
 	beforeEach: () => {
 		handleModelList({ providers: [opencode] });
 		handleModelInfo({
-			type: "model_info",
 			model: "gpt-5",
 			provider: "opencode",
 		});
@@ -314,7 +311,6 @@ export const PremiumContextDefault: Story = {
 			],
 		});
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "",
 			options: premiumOptions,
 		});
@@ -375,7 +371,6 @@ export const WithVariants: Story = {
 	beforeEach: () => {
 		seedClaude();
 		handleVariantInfo({
-			type: "variant_info",
 			variant: "high",
 			variants: ["low", "medium", "high"],
 		});
@@ -431,7 +426,6 @@ export const RoutingOptions: Story = {
 			],
 		});
 		handleModelInfo({
-			type: "model_info",
 			provider: "claude",
 			model: "claude-sonnet-4-5-eu",
 		});

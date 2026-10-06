@@ -8,6 +8,7 @@ import {
 	getContextWindow,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
@@ -56,11 +57,12 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 				options: contextWindowOptions,
 			});
 			expect(yield* getContextWindow("session-1")).toBe("1m");
-			expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-				type: "context_window_info",
-				contextWindow: "1m",
-				options: contextWindowOptions,
-			});
+			const committed = yield* (yield* EventStoreEffectTag).readAllBySession(
+				"session-1",
+			);
+			expect(committed.map((event) => event.type)).toEqual([
+				"session.context_window_changed",
+			]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

@@ -46,14 +46,26 @@ describe("Integration: Multi-Client", () => {
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
-		client1.clearReceived();
-		client2.clearReceived();
+		const sessionId = client1.getActiveSessionId();
+		await client2.subscribeShell();
 
 		await client1.switchModel("multi-test-model", "multi-test-provider");
 
-		const msg = await client2.waitFor("model_info", { timeout: 5000 });
-		expect(msg["model"]).toBe("multi-test-model");
-		expect(msg["provider"]).toBe("multi-test-provider");
+		const upsert = await client2.waitFor("shell", {
+			timeout: 5000,
+			predicate: (msg) => {
+				const item = msg["item"] as Record<string, unknown> | undefined;
+				return (
+					msg["_tag"] === "upsert" &&
+					item?.["id"] === sessionId &&
+					item?.["model"] !== undefined
+				);
+			},
+		});
+		expect((upsert["item"] as Record<string, unknown>)["model"]).toEqual({
+			model: "multi-test-model",
+			provider: "multi-test-provider",
+		});
 
 		await client1.close();
 		await client2.close();

@@ -20,6 +20,10 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import {
+	selectSessionModel,
+	selectSessionVariant,
+} from "../domain/relay/Services/session-model-settings.js";
+import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
@@ -32,8 +36,6 @@ import {
 	type OverridesStateTag,
 	setDefaultModel,
 	setDefaultVariant,
-	setModel,
-	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -487,54 +489,6 @@ export const getModelsResponse = (
 		};
 	});
 
-export const sendModelsStateToClient = (
-	clientId: string,
-	sessionId?: string,
-	instanceId?: string,
-): Effect.Effect<
-	void,
-	Cause.UnknownException,
-	| LoggerTag
-	| ConfigTag
-	| OpenCodeModelServiceTag
-	| OrchestrationEngineTag
-	| ReadQueryEffectTag
-	| OverridesStateTag
-	| WebSocketHandlerTag
-> =>
-	Effect.gen(function* () {
-		const activeId = sessionId ?? (yield* resolveSessionFromContext(clientId));
-		const response = yield* getModelsResponse({
-			clientId,
-			...(activeId ? { sessionId: activeId } : {}),
-			...(instanceId ? { instanceId } : {}),
-		});
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		if (response.active) {
-			wsHandler.sendTo(clientId, {
-				type: "model_info",
-				...(activeId ? { sessionId: activeId } : {}),
-				model: response.active.model,
-				provider: response.active.provider,
-			});
-		}
-		wsHandler.sendTo(clientId, {
-			type: "variant_info",
-			...(response.variant?.variant != null
-				? { variant: response.variant.variant }
-				: {}),
-			...(response.variant?.variants
-				? { variants: [...response.variant.variants] }
-				: {}),
-		});
-		wsHandler.sendTo(clientId, {
-			type: "context_window_info",
-			contextWindow: response.contextWindow?.contextWindow ?? "",
-			options: cloneContextWindowOptions(response.contextWindow?.options) ?? [],
-		});
-	});
-
 export interface SwitchModelInput {
 	readonly clientId: string;
 	readonly sessionId?: string | undefined;
@@ -581,13 +535,12 @@ export const applyLiveSessionSettings = (sessionId: string) =>
 
 export const switchModelForSession = (input: SwitchModelInput) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
 		const { modelId, providerId } = input;
 		const sessionId = input.sessionId;
 		if (sessionId) {
-			yield* setModel(sessionId, {
+			yield* selectSessionModel(sessionId, {
 				providerID: providerId,
 				modelID: modelId,
 			});
@@ -609,18 +562,6 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			);
 		}
 
-		const modelMessage = {
-			type: "model_info" as const,
-			...(sessionId ? { sessionId } : {}),
-			model: modelId,
-			provider: providerId,
-		};
-		if (sessionId) {
-			wsHandler.sendToSession(sessionId, modelMessage);
-		} else {
-			wsHandler.sendTo(input.clientId, modelMessage);
-		}
-
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched to: ${modelId} (${providerId})`,
 		);
@@ -629,22 +570,16 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			yield* savedVariantFor({ providerID: providerId, modelID: modelId });
 
 		if (sessionId) {
-			yield* setVariant(sessionId, validVariant);
+			yield* selectSessionVariant(sessionId, validVariant);
 			yield* applyLiveSessionSettings(sessionId);
 		}
 
-		const variantMessage = {
-			type: "variant_info" as const,
+		return {
+			model: modelId,
+			provider: providerId,
 			variant: validVariant,
 			variants: availableVariants,
 		};
-		if (sessionId) {
-			wsHandler.sendToSession(sessionId, variantMessage);
-		} else {
-			wsHandler.sendTo(input.clientId, variantMessage);
-		}
-
-		return { model: modelMessage, variant: variantMessage };
 	});
 
 export interface SetDefaultModelInput {
@@ -656,7 +591,6 @@ export interface SetDefaultModelInput {
 export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
@@ -686,8 +620,6 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			yield* savedVariantFor(override);
 		yield* setDefaultVariant(validVariant);
 
-		const modelMessage = { type: "model_info" as const, model, provider };
-		wsHandler.broadcast(modelMessage);
 		yield* publishProjectSetting({
 			_tag: "defaultModel",
 			model,
@@ -696,14 +628,12 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		});
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
-		const variantMessage = {
-			type: "variant_info",
+		return {
+			model,
+			provider,
 			variant: validVariant,
 			variants: availableVariants,
-		} as const;
-		wsHandler.broadcast(variantMessage);
-
-		return { model: modelMessage, variant: variantMessage };
+		};
 	});
 
 export interface SwitchVariantInput {
@@ -714,14 +644,13 @@ export interface SwitchVariantInput {
 
 export const switchVariantForSession = (input: SwitchVariantInput) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 
 		const { variant } = input;
 		const sessionId = input.sessionId;
 		if (sessionId) {
-			yield* setVariant(sessionId, variant);
+			yield* selectSessionVariant(sessionId, variant);
 			yield* applyLiveSessionSettings(sessionId);
 		} else {
 			yield* setDefaultVariant(variant);
@@ -742,15 +671,7 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 		}
 
 		const availableVariants = yield* loadVariantsForModel(activeModel);
-		const message = {
-			type: "variant_info" as const,
-			variant,
-			variants: availableVariants,
-		};
-		if (sessionId) {
-			wsHandler.sendToSession(sessionId, message);
-		} else {
-			wsHandler.sendTo(input.clientId, message);
+		if (!sessionId) {
 			yield* publishProjectSetting({
 				_tag: "defaultModel",
 				...(activeModel
@@ -762,5 +683,5 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,
 		);
-		return message;
+		return { variant, variants: availableVariants };
 	});

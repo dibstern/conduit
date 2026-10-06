@@ -9,7 +9,7 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
-		handleModelInfo({ type: "model_info", model: "", provider: "opencode" });
+		handleModelInfo({ model: "", provider: "opencode" });
 	},
 	args: {
 		open: false,
@@ -33,7 +33,7 @@ export const Claude: Story = {
 	tags: ["viewport-capture"],
 	args: { open: true },
 	beforeEach: () => {
-		handleModelInfo({ type: "model_info", model: "", provider: "claude" });
+		handleModelInfo({ model: "", provider: "claude" });
 	},
 	play: async () => {
 		const entry = within(document.body).getByTestId("attach-set-goal");

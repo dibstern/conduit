@@ -15,6 +15,7 @@ import {
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import { restoreSessionModelSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
 	setContextWindow,
 	setDefaultModel,
@@ -167,6 +168,17 @@ function acquireStartupServices(inputs: StartupInputs) {
 					),
 				),
 			);
+		// Settings recorded on the session row postdate the last turn that
+		// carried them, so they win over the turns-table restore above.
+		yield* restoreSessionModelSettings().pipe(
+			Effect.catchAll((error) =>
+				Effect.sync(() =>
+					log.warn(
+						`Could not restore session model settings: ${formatErrorDetail(error)}`,
+					),
+				),
+			),
+		);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {

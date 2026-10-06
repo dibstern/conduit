@@ -20,7 +20,7 @@ import type {
 	ModelInfo,
 	ProviderGroup,
 	ProviderInfo,
-	RelayMessage,
+	SessionInfo,
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
@@ -604,15 +604,10 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		providers: providersFromGetModelsResponse(response.providers),
 	});
 	if (response.active) {
-		handleModelInfo({
-			type: "model_info",
-			model: response.active.model,
-			provider: response.active.provider,
-		});
+		handleModelInfo(response.active);
 	}
 	if (response.variant) {
 		handleVariantInfo({
-			type: "variant_info",
 			...(response.variant.variant != null
 				? { variant: response.variant.variant }
 				: {}),
@@ -623,7 +618,6 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 	}
 	if (response.contextWindow) {
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: response.contextWindow.contextWindow,
 			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
 		});
@@ -639,9 +633,10 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 	}
 }
 
-export function handleModelInfo(
-	msg: Extract<RelayMessage, { type: "model_info" }>,
-): void {
+export function handleModelInfo(msg: {
+	readonly model: string;
+	readonly provider: string;
+}): void {
 	const { model, provider } = msg;
 	if (model) serverDiscovery.currentModelId = model;
 	if (provider) serverDiscovery.currentProviderId = provider;
@@ -690,28 +685,71 @@ export function getActiveModelVariants(): readonly string[] {
 
 /** Get the available context-window options for the currently active model.
  *  Prefer the selected model's own options so the dropdown appears the moment a
- *  supporting model is picked, without waiting for a server context_window_info
- *  round-trip; fall back to the last server-provided list otherwise. */
+ *  supporting model is picked, without waiting for a server round-trip; fall
+ *  back to the last server-provided list otherwise. */
 export function getActiveContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
 	const modelOptions = getActiveModel()?.contextWindowOptions;
 	if (modelOptions && modelOptions.length > 0) return modelOptions;
 	return discoveryState.availableContextWindowOptions;
 }
 
-export function handleVariantInfo(
-	msg: Extract<RelayMessage, { type: "variant_info" }>,
-): void {
+export function handleVariantInfo(msg: {
+	readonly variant?: string;
+	readonly variants?: readonly string[];
+}): void {
 	serverDiscovery.currentVariant = msg.variant ?? "";
 	serverDiscovery.availableVariants = [...(msg.variants ?? [])];
 	choice.variant = null;
 }
 
-export function handleContextWindowInfo(
-	msg: Extract<RelayMessage, { type: "context_window_info" }>,
-): void {
+export function handleContextWindowInfo(msg: {
+	readonly contextWindow: string;
+	readonly options: readonly ContextWindowOption[];
+}): void {
 	serverDiscovery.currentContextWindow = msg.contextWindow ?? "";
 	serverDiscovery.availableContextWindowOptions = msg.options ?? [];
 	choice.contextWindow = null;
+}
+
+type SessionModelSettings = Pick<
+	SessionInfo,
+	"model" | "variant" | "contextWindow"
+>;
+
+/**
+ * The viewed session's model, effort and context window follow its row, so a
+ * change made in another tab, or by the relay, lands in this tab's pickers.
+ * Only a change between two rows counts: the first sight of a row is GetModels'
+ * job, which resolves defaults the row leaves blank.
+ */
+export function followSessionModelSettings(
+	row: SessionModelSettings,
+	previous: SessionModelSettings | undefined,
+): void {
+	if (!previous) return;
+	if (
+		row.model &&
+		(row.model.model !== previous.model?.model ||
+			row.model.provider !== previous.model?.provider)
+	) {
+		handleModelInfo(row.model);
+		// The row carries no catalog, so take the new model's own lists.
+		const catalogModel = getActiveModel(row.model.model);
+		serverDiscovery.availableVariants = [...(catalogModel?.variants ?? [])];
+		serverDiscovery.availableContextWindowOptions =
+			cloneContextWindowOptions(catalogModel?.contextWindowOptions) ?? [];
+	}
+	if (row.variant !== undefined && row.variant !== previous.variant) {
+		serverDiscovery.currentVariant = row.variant;
+		choice.variant = null;
+	}
+	if (
+		row.contextWindow !== undefined &&
+		row.contextWindow !== previous.contextWindow
+	) {
+		serverDiscovery.currentContextWindow = row.contextWindow;
+		choice.contextWindow = null;
+	}
 }
 
 export function handlePermissionModeInfo(msg: {
@@ -889,16 +927,8 @@ export function chooseHiddenEntries(entries: {
 // server half and clears the click it confirms.
 
 export function applyModelSwitched(response: SwitchModelResponse): void {
-	handleModelInfo({
-		type: "model_info",
-		model: response.model,
-		provider: response.provider,
-	});
-	handleVariantInfo({
-		type: "variant_info",
-		variant: response.variant,
-		variants: [...response.variants],
-	});
+	handleModelInfo(response);
+	handleVariantInfo(response);
 }
 
 export function applyDefaultModelSet(response: SetDefaultModelResponse): void {
@@ -907,26 +937,17 @@ export function applyDefaultModelSet(response: SetDefaultModelResponse): void {
 		provider: response.provider,
 		variant: response.variant,
 	});
-	handleVariantInfo({
-		type: "variant_info",
-		variant: response.variant,
-		variants: [...response.variants],
-	});
+	handleVariantInfo(response);
 }
 
 export function applyVariantSwitched(response: SwitchVariantResponse): void {
-	handleVariantInfo({
-		type: "variant_info",
-		variant: response.variant,
-		variants: [...response.variants],
-	});
+	handleVariantInfo(response);
 }
 
 export function applyContextWindowSwitched(
 	response: SwitchContextWindowResponse,
 ): void {
 	handleContextWindowInfo({
-		type: "context_window_info",
 		contextWindow: response.contextWindow,
 		options: cloneContextWindowOptions(response.options) ?? [],
 	});

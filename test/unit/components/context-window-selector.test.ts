@@ -42,7 +42,6 @@ describe("InstanceModelPicker context window", () => {
 		switchContextWindowRpcSpy.mockClear();
 		clearDiscoveryState();
 		handleContextWindowInfo({
-			type: "context_window_info",
 			contextWindow: "",
 			options: [
 				{ value: "200k", label: "200K", isDefault: true },
