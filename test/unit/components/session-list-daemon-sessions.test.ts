@@ -33,7 +33,7 @@ describe("SessionList daemon sessions", () => {
 				updatedAt: Date.now(),
 			},
 		]);
-		seedFamilySessions("root-a", [...sessionState.rootSessions]);
+		seedFamilySessions([...sessionState.rootSessions]);
 		seedDaemonSessions([]);
 		clearSessionSearch();
 		sessionState.searchQuery = "";
@@ -169,7 +169,7 @@ describe("SessionList daemon sessions", () => {
 	// show, and the empty message would otherwise claim there is nothing to see.
 	it("still says a project is missing when that leaves the list empty", () => {
 		seedRootSessions([]);
-		seedFamilySessions("root-a", []);
+		seedFamilySessions([]);
 		applyListDaemonSessionsResponse({
 			projectSlug: "current-project",
 			sessions: [],

@@ -87,7 +87,7 @@ beforeEach(() => {
 	clearSessionState();
 	rpc.mockReset();
 	seedRootSessions([]);
-	seedFamilySessions("root-a", []);
+	seedFamilySessions([]);
 	seedDaemonSessions([]);
 	sessionState.currentId = null;
 	sessionState.searchQuery = "";

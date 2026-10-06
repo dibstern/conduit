@@ -68,7 +68,7 @@ beforeEach(() => {
 	seedRootSessions(
 		["session-a", "session-b", "session-c"].map((id) => ({ id, title: "" })),
 	);
-	seedFamilySessions("root-a", []);
+	seedFamilySessions([]);
 	sessionState.currentId = "session-a";
 	seedSessions([
 		...sessionState.sessions.values(),
@@ -208,7 +208,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 
 describe("family attention before membership", () => {
 	it("roots-only reconciliation preserves child indicators and uses rolled root counts", () => {
-		seedFamilySessions("root", [
+		seedFamilySessions([
 			{ id: "root", title: "Root" },
 			{
 				id: "new-child",

@@ -1,6 +1,5 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
-import { formatErrorDetail } from "../../../errors.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -10,9 +9,7 @@ import {
 	canonicalEvent,
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
-import { LoggerTag } from "./services.js";
 import { SessionManagerError } from "./session-manager-error.js";
-import { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	type ModelOverride,
 	setContextWindow,
@@ -25,8 +22,8 @@ import {
 // turn path, and on the session row for every tab (ni8.55). Each write goes
 // through here so the two cannot drift: memory first, then the canonical event
 // whose projection bumps the row version and reaches peers as a shell upsert.
-// Child sessions are not shell rows, so their viewers get the change in the
-// session_family push that follows.
+// Child sessions are not shell rows; the same version bump reaches their
+// viewers as a family-feed upsert (ni8.28).
 
 const commitSessionSetting = <T extends CanonicalEventType>(
 	type: T,
@@ -52,21 +49,6 @@ const commitSessionSetting = <T extends CanonicalEventType>(
 				(cause) =>
 					new SessionManagerError({ operation: `commit.${type}`, cause }),
 			),
-		);
-		const sessionManager = yield* SessionManagerServiceTag;
-		const log = yield* LoggerTag;
-		yield* Effect.forkDaemon(
-			sessionManager
-				.pushViewerFamilies()
-				.pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() =>
-							log.warn(
-								`session=${sessionId} Failed to push families after ${type}: ${formatErrorDetail(error)}`,
-							),
-						),
-					),
-				),
 		);
 	});
 

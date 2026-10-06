@@ -88,6 +88,8 @@ export class RpcMockControl {
 		{ ws: WebSocketRoute; id: string }
 	>();
 	shellRows: readonly unknown[] | null = null;
+	familyRows: readonly unknown[] | null = null;
+	private familySequence = 0;
 	catalog: MockCatalog = {};
 	private shellSequence = 0;
 	private readonly projectSettings = new Map<string, ProjectSetting>();
@@ -165,6 +167,27 @@ export class RpcMockControl {
 				{ _tag: "synchronized" },
 			]);
 		}
+	}
+
+	/** Replace the viewed family on the open SubscribeSessionFamily stream. */
+	setFamilyRows(rows: readonly unknown[]): void {
+		this.familyRows = rows;
+		this.familySequence++;
+		if (this.streams.has("SubscribeSessionFamily"))
+			this.sendChunk("SubscribeSessionFamily", this.initialFamilyFrames());
+	}
+
+	initialFamilyFrames(): readonly unknown[] {
+		return this.familyRows === null
+			? []
+			: [
+					{
+						_tag: "snapshot",
+						sequence: this.familySequence,
+						rows: this.familyRows,
+					},
+					{ _tag: "synchronized" },
+				];
 	}
 
 	/** Change the model settings GetModels reports, and make the app refetch
@@ -411,6 +434,7 @@ const pendingDaemonLists = new WeakMap<
 	Map<DaemonListTag, Record<string, unknown>>
 >();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
 const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
@@ -510,6 +534,13 @@ export function sendMockShellRowStatus(
 		);
 }
 
+/** Mock-only input: deliver the viewed family through SubscribeSessionFamily. */
+export function sendMockFamily(page: Page, rows: readonly unknown[]): void {
+	const control = controls.get(page);
+	if (control) control.setFamilyRows(rows);
+	else pendingFamilyRows.set(page, rows);
+}
+
 async function handleMessage(
 	ws: WebSocketRoute,
 	handlers: Record<string, RpcHandler>,
@@ -549,13 +580,15 @@ async function handleMessage(
 								control.initialSessionTodosFrames(
 									String(payload["sessionId"] ?? ""),
 								)
-						: raw.tag === "SubscribeProjectSettings"
-							? () => control.initialProjectSettingsFrames()
-							: isLiveOnlyStream(raw.tag)
-								? () => [{ _tag: "synchronized" }]
-								: daemonList
-									? () => daemonList
-									: undefined);
+						: raw.tag === "SubscribeSessionFamily"
+							? () => control.initialFamilyFrames()
+							: raw.tag === "SubscribeProjectSettings"
+								? () => control.initialProjectSettingsFrames()
+								: isLiveOnlyStream(raw.tag)
+									? () => [{ _tag: "synchronized" }]
+									: daemonList
+										? () => daemonList
+										: undefined);
 		if (stream) {
 			const sessionId = isSessionStream(raw.tag)
 				? String(raw.payload?.["sessionId"] ?? "")
@@ -669,6 +702,8 @@ export async function mockWsRpc(
 	});
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
+	const familyRows = pendingFamilyRows.get(page);
+	if (familyRows) control.setFamilyRows(familyRows);
 	for (const [tag, value] of pendingDaemonLists.get(page) ?? [])
 		control.setDaemonList(tag, value);
 	for (const setting of pendingProjectSettings.get(page) ?? [])

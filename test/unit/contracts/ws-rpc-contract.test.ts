@@ -85,6 +85,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
 				SubscribeSessionTodos: () => Stream.empty,
+				SubscribeSessionFamily: () => Stream.empty,
 				SubscribePtys: () => Stream.empty,
 				SubscribeApprovals: () => Stream.empty,
 				SubscribeProjectSettings: () => Stream.empty,
@@ -787,6 +788,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ClosePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("PtyInput")).toBe(true);
 		expect(WsRpcGroup.requests.has("SubscribePtys")).toBe(true);
+		expect(WsRpcGroup.requests.has("SubscribeSessionFamily")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);

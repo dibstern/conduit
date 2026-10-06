@@ -48,7 +48,6 @@ import {
 import {
 	findSession,
 	getFilteredSessions,
-	handleSessionFamily,
 	handleSessionForked,
 	isRoutable,
 	observeSessionActivity,
@@ -212,10 +211,6 @@ export function handleMessage(msg: RelayMessage): void {
 	}
 
 	switch (msg.type) {
-		case "session_family": {
-			handleSessionFamily(msg);
-			break;
-		}
 		case "session_forked": {
 			handleSessionForked(msg);
 			const parentTitle = msg.parentTitle ?? "session";

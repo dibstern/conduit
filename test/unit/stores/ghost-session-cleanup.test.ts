@@ -1,5 +1,6 @@
 import {
 	applySessionChange,
+	seedFamilySessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -53,7 +54,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
-	handleSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
@@ -261,34 +261,25 @@ describe("active-session teardown", () => {
 	});
 });
 
-// Direct legacy family handler behavior is kept deliberately for R4/R6 deletion.
 it("switching families preserves the target transcript and removes old family membership", () => {
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "old-root",
-		sessions: [
-			{ id: "old-root", title: "Old", status: "idle" },
-			{ id: "old-child", title: "Child", status: "idle", parentID: "old-root" },
-		],
-	});
+	seedFamilySessions([
+		{ id: "old-root", title: "Old", status: "idle" },
+		{ id: "old-child", title: "Child", status: "idle", parentID: "old-root" },
+	]);
 	const target = getOrCreateSessionSlot("new-child");
 	target.messages.messages = [
 		{ type: "user", uuid: "cached", text: "Keep this transcript" },
 	];
 	sessionState.currentId = "new-child";
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "new-root",
-		sessions: [
-			{ id: "new-root", title: "New", status: "idle" },
-			{
-				id: "new-child",
-				title: "Target",
-				status: "idle",
-				parentID: "new-root",
-			},
-		],
-	});
+	seedFamilySessions([
+		{ id: "new-root", title: "New", status: "idle" },
+		{
+			id: "new-child",
+			title: "Target",
+			status: "idle",
+			parentID: "new-root",
+		},
+	]);
 	expect(getOrCreateSessionSlot("new-child").messages.messages).toEqual(
 		target.messages.messages,
 	);

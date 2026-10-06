@@ -10,6 +10,7 @@ import {
 	type MockCatalog,
 	type MockModelState,
 	sendMockDaemonList,
+	sendMockFamily,
 	sendMockModelState,
 	sendMockProjectSetting,
 	sendMockShellRowStatus,
@@ -212,6 +213,11 @@ export async function mockRelayWebSocket(
 		setMockRpcProjectSlug(page, initialProject["current"]);
 	if (Array.isArray(initialShell?.["sessions"]))
 		sendMockShellSnapshot(page, initialShell["sessions"]);
+	const initialFamily = options.initMessages
+		.filter((message) => message.type === "session_family")
+		.pop();
+	if (Array.isArray(initialFamily?.["sessions"]))
+		sendMockFamily(page, initialFamily["sessions"]);
 	for (const message of options.initMessages) sendDaemonList(page, message);
 	const initDelay = options.initDelay ?? 0;
 	const msgDelay = options.messageDelay ?? 0;
@@ -234,6 +240,7 @@ export async function mockRelayWebSocket(
 		).filter(
 			(message) =>
 				message.type !== "shell_snapshot" &&
+				message.type !== "session_family" &&
 				!CATALOG_MESSAGE_TYPES.has(message.type) &&
 				!legacyModelState(message) &&
 				!DAEMON_LIST_TAGS.has(message.type),
@@ -333,6 +340,12 @@ export class WsMockControl {
 			Array.isArray(msg["sessions"])
 		) {
 			sendMockShellSnapshot(this.page, msg["sessions"]);
+			return;
+		}
+		// Legacy fixture vocabulary: the family rides SubscribeSessionFamily
+		// (conduit-test-ni8.28).
+		if (msg.type === "session_family" && Array.isArray(msg["sessions"])) {
+			sendMockFamily(this.page, msg["sessions"]);
 			return;
 		}
 		if (sendDaemonList(this.page, msg)) return;

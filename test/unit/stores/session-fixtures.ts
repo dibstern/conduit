@@ -1,10 +1,12 @@
 import {
+	applyFamilyChange,
 	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
-	handleSessionFamily,
 	pruneSessionLists,
+	resetSessionFamily,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { applySessionChange as applyFeedChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
+import type { Change } from "../../../src/lib/frontend/transport/subscription-state.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 export { clearSessionSearch } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -30,28 +32,20 @@ type TestChange =
 	| { readonly _tag: "remove"; readonly id: string; readonly sequence?: number }
 	| { readonly _tag: "synchronized" };
 
-export function applySessionChange(change: TestChange): void {
-	if (change._tag === "synchronized") {
-		applyFeedChange(change);
-		return;
-	}
+const sequenced = (change: TestChange): Change<SessionInfo> => {
+	if (change._tag === "synchronized") return change;
 	const version = change.sequence ?? ++sequence;
 	sequence = Math.max(sequence, version);
-	switch (change._tag) {
-		case "snapshot":
-			applyFeedChange({
-				_tag: "snapshot",
-				rows: change.rows,
-				sequence: version,
-			});
-			break;
-		case "upsert":
-			applyFeedChange({ _tag: "upsert", item: change.item, sequence: version });
-			break;
-		case "remove":
-			applyFeedChange({ _tag: "remove", id: change.id, sequence: version });
-			break;
-	}
+	return { ...change, sequence: version };
+};
+
+export function applySessionChange(change: TestChange): void {
+	applyFeedChange(sequenced(change));
+}
+
+/** A family feed change, sequenced like the shell's. */
+export function applyFamilyFeedChange(change: TestChange): void {
+	applyFamilyChange(sequenced(change));
 }
 
 export function seedSessions(rows: readonly Row[]): void {
@@ -66,11 +60,7 @@ export function seedSessions(rows: readonly Row[]): void {
 
 export function seedSessionsWithFamily(rows: readonly Row[]): void {
 	seedSessions(rows);
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "",
-		sessions: completeRows(rows),
-	});
+	seedFamilySessions(rows);
 }
 
 export function seedRootSessions(rows: readonly Row[]): void {
@@ -96,12 +86,15 @@ export function applySessionRemoved(id: string): void {
 	pruneSessionLists(id);
 }
 
-export function seedFamilySessions(rootId: string, rows: readonly Row[]): void {
-	handleSessionFamily({
-		type: "session_family",
-		rootId,
-		sessions: completeRows(rows),
+/** A fresh family feed: its snapshot, then `synchronized`. */
+export function seedFamilySessions(rows: readonly Row[]): void {
+	resetSessionFamily();
+	applyFamilyChange({
+		_tag: "snapshot",
+		rows: completeRows(rows),
+		sequence: ++sequence,
 	});
+	applyFamilyChange({ _tag: "synchronized" });
 }
 
 export function seedDaemonSessions(

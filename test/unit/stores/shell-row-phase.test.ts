@@ -9,8 +9,8 @@ import {
 	sessionActivity,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applyFamilyChange,
 	clearSessionState,
-	handleSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
@@ -99,10 +99,10 @@ it("a snapshot aligns the phase in both directions", () => {
 
 it("a child session, which has no shell row, starts from its family row", () => {
 	const { activity: slot } = getOrCreateSessionSlot("child");
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "root",
-		sessions: [
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 1,
+		rows: [
 			{ id: "root", title: "Root", status: "busy" },
 			{ id: "child", title: "Child", status: "busy", parentID: "root" },
 		],

@@ -19,14 +19,17 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
+	applyFamilyChange,
 	applyListDaemonSessionsResponse,
 	clearSessionState,
+	findSession,
 	getFilteredSessions,
 	groupSessionsByAttention,
 	groupSessionsByDate,
-	handleSessionFamily,
+	isSessionBusy,
 	isSessionSnoozed,
 	isSessionWoken,
+	parentOf,
 	sessionState,
 	setCurrentSession,
 	setSearchQuery,
@@ -117,22 +120,67 @@ it("keeps a newer root row when an older family arrives", () => {
 		sequence: 10,
 		rows: [{ id: "root", title: "New title", status: "busy" }],
 	});
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "root",
-		sessions: [
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 8,
+		rows: [
 			{ id: "root", title: "Old title", status: "idle" },
 			{ id: "child", title: "Child", status: "idle", parentID: "root" },
 		],
 	});
 
 	expect(sessionState.sessions.get("root")?.title).toBe("New title");
-	expect(sessionState.sessions.get("root")?.status).toBe("busy");
+	expect(findSession("root")?.title).toBe("New title");
+	expect(findSession("root")?.status).toBe("busy");
 	expect(sessionState.sessions.has("child")).toBe(false);
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 		"root",
 		"child",
 	]);
+});
+
+it("keeps a newer family row when an older family upsert arrives", () => {
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [
+			{ id: "root", title: "Root", status: "idle" },
+			{ id: "child", title: "New child", status: "busy", parentID: "root" },
+		],
+	});
+	applyFamilyChange({ _tag: "synchronized" });
+	applyFamilyChange({
+		_tag: "upsert",
+		sequence: 9,
+		item: { id: "child", title: "Old child", status: "idle", parentID: "root" },
+	});
+
+	expect(findSession("child")?.title).toBe("New child");
+	expect(isSessionBusy("child")).toBe(true);
+});
+
+it("a project switch forgets the family, and the next project's family applies", () => {
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 10,
+		rows: [
+			{ id: "root", title: "Root", status: "idle" },
+			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+		],
+	});
+	applyFamilyChange({ _tag: "synchronized" });
+
+	clearSessionState();
+	expect(sessionState.familySessions).toEqual([]);
+	expect(parentOf("child")).toBeNull();
+
+	// Another project's read model has its own versions, which can be lower.
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 3,
+		rows: [{ id: "other", title: "Other", status: "idle" }],
+	});
+	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
 });
 
 it("forgets chat and selection when the subscription snapshot omits a session", () => {
@@ -186,17 +234,13 @@ it("does not write a row from a fork notice", () => {
 	expect(sessionState.sessions.get("ses_original")?.title).toBe("Original");
 });
 
-it("keeps the family list owned by session_family messages", () => {
+it("keeps the family list owned by the family feed", () => {
 	const original = {
 		id: "root",
 		title: "Family title",
 		status: "idle",
 	} as const;
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "root",
-		sessions: [original],
-	});
+	applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [original] });
 	applySessionSnapshot(
 		[{ id: "root", title: "Snapshot title", status: "idle" }],
 		"complete",
@@ -569,11 +613,7 @@ describe("attention placement and daemon rows", () => {
 			parentID: "root",
 		});
 		seedSessions([root]);
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "root",
-			sessions: [root, child],
-		});
+		applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [root, child] });
 		applyListDaemonSessionsResponse({
 			projectSlug: "project-a",
 			sessions: [
@@ -629,11 +669,7 @@ describe("getFilteredSessions root view", () => {
 			updatedAt: 2000,
 		});
 		seedSessions([root]);
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "a",
-			sessions: [root, child],
-		});
+		applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [root, child] });
 		expect(getFilteredSessions().map((session) => session.id)).toEqual(["a"]);
 		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
 			"a",
@@ -644,16 +680,8 @@ describe("getFilteredSessions root view", () => {
 	it("an omitted family member does not leave a row in the session map", () => {
 		const root = makeSession({ id: "a" });
 		const child = makeSession({ id: "b", parentID: "a" });
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "a",
-			sessions: [root, child],
-		});
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "a",
-			sessions: [root],
-		});
+		applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [root, child] });
+		applyFamilyChange({ _tag: "snapshot", sequence: 2, rows: [root] });
 		expect(sessionState.familySessions.map((session) => session.id)).toEqual([
 			"a",
 		]);
