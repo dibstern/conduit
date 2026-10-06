@@ -3,8 +3,9 @@
 // the default OpenCode instance via probeOpenCode().
 //
 // Verifies:
-// - With smartDefault=true and no opencodeUrl, daemon probes the smart
-//   default URL (pointed at OPENCODE_URL here; http://localhost:4096 in prod).
+// - With smartDefault=true and no opencodeUrl, the first start of the default
+//   instance probes the smart default URL (pointed at OPENCODE_URL here;
+//   http://localhost:4096 in prod). Startup itself probes nothing.
 // - Probe succeeds → creates unmanaged "Default" instance on that port.
 // - Instance becomes healthy (auth-aware health check works)
 // - Browser can connect and use the relay normally
@@ -19,6 +20,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test as base, expect } from "@playwright/test";
+import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
@@ -78,15 +81,12 @@ const test = base.extend<{
 		const baseUrl = `http://127.0.0.1:${port}`;
 		const projectUrl = `${baseUrl}/?p=${encodeURIComponent(project.slug)}`;
 
-		// Wait for the default instance to become healthy
-		const start = Date.now();
-		const timeout = 15_000;
-		while (Date.now() - start < timeout) {
-			const instances = daemon.getInstances();
-			if (instances.some((i: { status: string }) => i.status === "healthy"))
-				break;
-			await new Promise((r) => setTimeout(r, 250));
-		}
+		// Startup never probes: the smart default resolves on first use, here
+		// Start Instance (what `conduit instance start opencode` sends).
+		await sendRpcRequest(
+			join(tmpDir, "relay.sock"),
+			new StartInstance({ instanceId: "opencode" }),
+		);
 
 		try {
 			await use({ daemon, port, baseUrl, projectUrl });

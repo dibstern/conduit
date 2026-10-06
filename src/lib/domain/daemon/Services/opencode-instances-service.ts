@@ -31,7 +31,7 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 	"OpenCodeUnavailable",
 )<{
 	readonly instanceId: string;
-	readonly reason: "not-configured" | "unreachable";
+	readonly reason: "not-configured" | "spawn-failed" | "unreachable";
 	readonly message: string;
 }> {}
 
@@ -46,8 +46,9 @@ export interface OpenCodeInstances {
 		instanceId?: string,
 	) => Stream.Stream<OpenCodeInstanceEvent>;
 	/**
-	 * Client for a reachable instance. Never starts a process, except that a
-	 * stopped instance (Stop Instance) starts again on its next use.
+	 * Client for a reachable instance, starting it first when it is not
+	 * running: managed instances spawn, external ones are health-checked.
+	 * Concurrent callers share one start.
 	 */
 	readonly use: (
 		instanceId: string,

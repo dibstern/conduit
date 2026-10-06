@@ -146,7 +146,7 @@ describe("RelayFactoryTag", () => {
 			};
 
 			const result = yield* factory
-				.create(project, "http://localhost:4096")
+				.create(project)
 				.pipe(Effect.scoped, Effect.either);
 
 			expect(result._tag).toBe("Left");
@@ -171,14 +171,11 @@ describe("RelayFactoryTag", () => {
 				yield* Ref.set(serverRef, server);
 				createProjectRelayMock.mockClear();
 				const result = yield* factory
-					.create(
-						{
-							slug: "missing",
-							title: "Missing",
-							folders: [missingDirectory],
-						},
-						"http://localhost:4096",
-					)
+					.create({
+						slug: "missing",
+						title: "Missing",
+						folders: [missingDirectory],
+					})
 					.pipe(Effect.either);
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")
@@ -217,7 +214,7 @@ describe("RelayFactoryTag", () => {
 			const serverRef = yield* HttpServerRefTag;
 			yield* Ref.set(serverRef, server);
 			const factory = yield* RelayFactoryTag;
-			yield* factory.create(project, "http://localhost:4096");
+			yield* factory.create(project);
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
 			expect(config?.refreshSessionGit).toBeTypeOf("function");
 			if (!config?.refreshSessionGit)

@@ -20,6 +20,7 @@ import {
 	Schedule,
 	Scope,
 } from "effect";
+import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
 	instanceAlreadyExists,
@@ -67,8 +68,7 @@ import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
 import { InstanceHealthCheckTag } from "./instance-health-service.js";
 import {
 	defaultInstanceForUrl,
-	type OpenCodeUnavailableError,
-	resolveSmartDefaultInstances,
+	resolveSmartDefaultInstance,
 	type SmartDefaultInstanceOptions,
 } from "./opencode-smart-default.js";
 
@@ -122,18 +122,12 @@ export interface InstanceManagerState {
 	stopManagedProcesses?: boolean;
 	/** Recovery identities and credentials never enter the browser read model. */
 	managedProcesses?: HashMap.HashMap<string, ManagedOpenCodeRecord>;
+	/** Set until the default instance's first start resolves the smart default there. */
+	smartDefaultUrl?: string;
 }
 
 export interface InstanceManagerStateOptions
 	extends SmartDefaultInstanceOptions {}
-
-type SmartDefaultEnabledOptions = InstanceManagerStateOptions & {
-	readonly smartDefault: true;
-};
-
-type SmartDefaultDisabledOptions = InstanceManagerStateOptions & {
-	readonly smartDefault?: false | undefined;
-};
 
 export const emptyInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
@@ -161,7 +155,8 @@ const buildInstanceManagerState = (
 					port: driver === "claude" ? 0 : instance.port,
 					managed: driver === "claude" ? false : instance.managed,
 					driver,
-					status: driver === "claude" ? "healthy" : "starting",
+					// Nothing runs at startup; re-adoption marks survivors healthy.
+					status: driver === "claude" ? "healthy" : "stopped",
 					restartCount: 0,
 					createdAt: now,
 					...(instance.env !== undefined
@@ -222,31 +217,31 @@ const buildInstanceManagerState = (
 	};
 };
 
-const withConfiguredDefaultInstance = (
+/** Seeds the default instance without probing; smart default resolves on first start. */
+const buildInitialInstanceManagerState = (
+	config: Partial<InstanceManagerConfig> | undefined,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
-	options?: InstanceManagerStateOptions,
-): ReadonlyArray<DaemonInstanceConfig> => {
-	if (options?.defaultOpencodeUrl == null) return initialInstances;
-	if (
-		initialInstances.some(
-			(instance) => instance.id === defaultInstanceIdForDriver("opencode"),
-		)
-	) {
-		return initialInstances;
-	}
-	return [
-		defaultInstanceForUrl(options.defaultOpencodeUrl),
-		...initialInstances,
-	];
+	options: InstanceManagerStateOptions | undefined,
+): InstanceManagerState => {
+	const smartDefaultUrl = options?.smartDefault
+		? (options.smartDefaultUrl ?? DEFAULT_OPENCODE_URL)
+		: undefined;
+	const defaultUrl = options?.defaultOpencodeUrl ?? smartDefaultUrl;
+	const existingDefault = initialInstances.find(
+		(instance) => instance.id === defaultInstanceIdForDriver("opencode"),
+	);
+	const state = buildInstanceManagerState(
+		config,
+		existingDefault || defaultUrl === undefined
+			? initialInstances
+			: [defaultInstanceForUrl(defaultUrl), ...initialInstances],
+	);
+	return smartDefaultUrl !== undefined &&
+		(existingDefault?.driver ?? "opencode") === "opencode" &&
+		HashMap.has(state.instances, defaultInstanceIdForDriver("opencode"))
+		? { ...state, smartDefaultUrl }
+		: state;
 };
-
-const resolveInitialInstanceConfigs = (
-	initialInstances: ReadonlyArray<DaemonInstanceConfig>,
-	options?: InstanceManagerStateOptions,
-) =>
-	options?.smartDefault === true
-		? resolveSmartDefaultInstances(initialInstances, options)
-		: Effect.succeed(withConfiguredDefaultInstance(initialInstances, options));
 
 /** Tag for the mutable InstanceManagerState Ref in the Effect Context. */
 export class InstanceManagerStateTag extends Context.Tag(
@@ -269,84 +264,32 @@ export class PollerFibersTag extends Context.Tag("PollerFibers")<
  */
 export function makeInstanceManagerStateLive(
 	config?: Partial<InstanceManagerConfig>,
-	initialInstances?: ReadonlyArray<DaemonInstanceConfig>,
-	options?: SmartDefaultDisabledOptions,
-): Layer.Layer<InstanceManagerStateTag | PollerFibersTag>;
-export function makeInstanceManagerStateLive(
-	config: Partial<InstanceManagerConfig> | undefined,
-	initialInstances: ReadonlyArray<DaemonInstanceConfig> | undefined,
-	options: SmartDefaultEnabledOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError
->;
-export function makeInstanceManagerStateLive(
-	config: Partial<InstanceManagerConfig> | undefined,
-	initialInstances: ReadonlyArray<DaemonInstanceConfig> | undefined,
-	options: InstanceManagerStateOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError
->;
-export function makeInstanceManagerStateLive(
-	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 	options?: InstanceManagerStateOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError
-> {
-	return Layer.scoped(
+): Layer.Layer<InstanceManagerStateTag | PollerFibersTag> {
+	return Layer.effect(
 		InstanceManagerStateTag,
-		resolveInitialInstanceConfigs(initialInstances, options).pipe(
-			Effect.map((instances) => buildInstanceManagerState(config, instances)),
-			Effect.flatMap(Ref.make),
+		Ref.make(
+			buildInitialInstanceManagerState(config, initialInstances, options),
 		),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
 }
 
 export function makeInstanceManagerStateFromDaemonStateLive(
 	config?: Partial<InstanceManagerConfig>,
-	options?: SmartDefaultDisabledOptions,
+	options?: InstanceManagerStateOptions,
 ): Layer.Layer<
 	InstanceManagerStateTag | PollerFibersTag,
 	never,
 	DaemonStateTag
->;
-export function makeInstanceManagerStateFromDaemonStateLive(
-	config: Partial<InstanceManagerConfig> | undefined,
-	options: SmartDefaultEnabledOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError,
-	DaemonStateTag
->;
-export function makeInstanceManagerStateFromDaemonStateLive(
-	config: Partial<InstanceManagerConfig> | undefined,
-	options: InstanceManagerStateOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError,
-	DaemonStateTag
->;
-export function makeInstanceManagerStateFromDaemonStateLive(
-	config?: Partial<InstanceManagerConfig>,
-	options?: InstanceManagerStateOptions,
-): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
-	OpenCodeUnavailableError,
-	DaemonStateTag
 > {
-	return Layer.scoped(
+	return Layer.effect(
 		InstanceManagerStateTag,
 		Effect.gen(function* () {
-			const stateRef = yield* DaemonStateTag;
-			const state = yield* Ref.get(stateRef);
-			const instances = yield* resolveInitialInstanceConfigs(
-				state.instances,
-				options,
+			const state = yield* Ref.get(yield* DaemonStateTag);
+			return yield* Ref.make(
+				buildInitialInstanceManagerState(config, state.instances, options),
 			);
-			return yield* Ref.make(buildInstanceManagerState(config, instances));
 		}),
 	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
 }
@@ -591,22 +534,6 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	return configs;
 }).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
-export const startInitialUnmanagedInstanceHealthPollers = Effect.gen(
-	function* () {
-		const ref = yield* InstanceManagerStateTag;
-		const state = yield* Ref.get(ref);
-
-		yield* Effect.forEach(
-			HashMap.values(state.instances),
-			(instance) =>
-				instance.managed || instance.driver === "claude"
-					? Effect.void
-					: startHealthPoller(instance.id),
-			{ concurrency: 1, discard: true },
-		);
-	},
-).pipe(Effect.withSpan("instance.startInitialUnmanagedHealthPollers"));
-
 /**
  * Start periodic health polling for an instance.
  * Uses raw HTTP fetch to the instance port. Publishes status changes
@@ -776,6 +703,7 @@ const markManagedInstanceUnhealthy = (
 const startManagedOpenCodeServer = (
 	instance: OpenCodeInstance,
 	configDir: string,
+	adoptOnly: boolean,
 ) =>
 	Effect.acquireRelease(
 		Effect.gen(function* () {
@@ -825,6 +753,8 @@ const startManagedOpenCodeServer = (
 					yield* save;
 					return owned;
 				}
+				// Startup only re-adopts; anything else waits for first use.
+				if (adoptOnly) return null;
 				// An authenticated supervisor can safely terminate its original
 				// group even if the recorded worker PID is stale or corrupted.
 				const original = yield* Effect.tryPromise({
@@ -1046,24 +976,29 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 				InstanceManagerStateTag | ConfigPersistenceTag | DaemonEventBusTag
 			>();
 			const semaphore = yield* Effect.makeSemaphore(1);
-			const start = (instance: OpenCodeInstance) =>
-				startManagedOpenCodeServer(instance, configDir).pipe(
+			const start = (instance: OpenCodeInstance, adoptOnly: boolean) =>
+				startManagedOpenCodeServer(instance, configDir, adoptOnly).pipe(
 					// RPC scopes end after each request; ownership lasts with the daemon.
 					Scope.extend(scope),
 					Effect.provide(context),
 					Effect.asVoid,
 				);
+			// Re-adopt managed OpenCode that outlived the previous daemon. Nothing
+			// spawns here: instances start on first use.
 			const state = yield* Ref.get(yield* InstanceManagerStateTag);
 			yield* Effect.forEach(
 				HashMap.values(state.instances),
 				(instance) =>
 					instance.managed && instance.driver !== "claude"
-						? semaphore.withPermits(1)(start(instance))
+						? semaphore.withPermits(1)(start(instance, true))
 						: Effect.void,
 				{ concurrency: 1, discard: true },
 			);
-			return { start, withLock: semaphore.withPermits(1) };
-		}).pipe(Effect.withSpan("instance.startManagedOpenCodeServers")),
+			return {
+				start: (instance: OpenCodeInstance) => start(instance, false),
+				withLock: semaphore.withPermits(1),
+			};
+		}).pipe(Effect.withSpan("instance.adoptManagedOpenCodeServers")),
 	);
 
 /**
@@ -1189,8 +1124,8 @@ export const cancelInstanceFibers = (instanceId: string) =>
 export const startInstance = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
-		const state = yield* Ref.get(stateRef);
-		const instance = HashMap.get(state.instances, instanceId);
+		let state = yield* Ref.get(stateRef);
+		let instance = HashMap.get(state.instances, instanceId);
 		if (Option.isSome(instance) && instance.value.driver === "claude") return;
 		const lifecycle = yield* Effect.serviceOption(ManagedOpenCodeLifecycleTag);
 		if (
@@ -1200,6 +1135,58 @@ export const startInstance = (instanceId: string) =>
 			Option.isSome(lifecycle)
 		)
 			return;
+		const { smartDefaultUrl } = state;
+		if (
+			smartDefaultUrl !== undefined &&
+			instanceId === defaultInstanceIdForDriver("opencode") &&
+			Option.isSome(instance)
+		) {
+			const current = instance.value;
+			const record = HashMap.get(
+				state.managedProcesses ?? HashMap.empty(),
+				instanceId,
+			);
+			const url = HashMap.get(state.externalUrls, instanceId);
+			const resolved = yield* resolveSmartDefaultInstance(
+				{
+					...Option.getOrUndefined(record),
+					id: current.id,
+					name: current.name,
+					port: current.port,
+					managed: current.managed,
+					...(Option.isSome(url) ? { url: url.value } : {}),
+					...(current.managed
+						? {}
+						: current.env !== undefined
+							? { env: current.env }
+							: {}),
+				},
+				smartDefaultUrl,
+			);
+			const seeded = buildInstanceManagerState(undefined, [resolved]);
+			const take = <V>(
+				from: HashMap.HashMap<string, V>,
+				into: HashMap.HashMap<string, V>,
+			) =>
+				Option.match(HashMap.get(from, instanceId), {
+					onNone: () => HashMap.remove(into, instanceId),
+					onSome: (value) => HashMap.set(into, instanceId, value),
+				});
+			state = yield* Ref.updateAndGet(
+				stateRef,
+				({ smartDefaultUrl: _resolved, ...s }) => ({
+					...s,
+					instances: take(seeded.instances, s.instances),
+					externalUrls: take(seeded.externalUrls, s.externalUrls),
+					managedProcesses: take(
+						seeded.managedProcesses ?? HashMap.empty(),
+						s.managedProcesses ?? HashMap.empty(),
+					),
+				}),
+			);
+			instance = HashMap.get(state.instances, instanceId);
+			yield* requestConfigSave;
+		}
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => ({

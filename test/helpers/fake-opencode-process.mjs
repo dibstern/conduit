@@ -270,6 +270,26 @@ const server = createServer(async (request, response) => {
 		response.end(
 			JSON.stringify((directory && readState()[kind][directory]) || []),
 		);
+	} else if (
+		/^\/session\/[^/]+\/prompt_async$/.test(path) &&
+		request.method === "POST"
+	) {
+		// The turn finishes at once: busy, then idle.
+		const sessionID = path.split("/")[2];
+		response.writeHead(204).end();
+		for (const type of ["busy", "idle"])
+			emitTyped(directory, "session.status", { sessionID, status: { type } });
+	} else if (
+		/^\/session\/[^/]+\/permissions\/[^/]+$/.test(path) &&
+		request.method === "POST"
+	) {
+		const requestID = path.split("/")[4];
+		updateState((state) => {
+			state.permissions[directory] = (
+				state.permissions[directory] ?? []
+			).filter(({ id }) => id !== requestID);
+		});
+		response.end("true");
 	} else if (/^\/session\/[^/]+$/.test(path)) {
 		response.end(
 			JSON.stringify(

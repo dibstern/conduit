@@ -14,6 +14,7 @@ import {
 	AddInstance,
 	type OpenCodeInstance,
 	type ProjectInfo,
+	StartInstance,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -215,12 +216,20 @@ describe("daemon instance and project lists fan out to every connection", () => 
 				socketPath,
 				new AddInstance({ name: "probe", managed: false, url: health.url }),
 			);
-			// Restart so the persisted instance gets a real health poller.
+			// Restart so the persisted instance gets a real health poller. External
+			// instances are health-checked from first use, so start it once; the
+			// start rejects while the server is unhealthy.
 			await daemon.stop();
 			daemon = await startForegroundDaemon(options);
 			subscriber = subscribe(daemon.getStatus().port);
-			const probeStatus = () =>
-				subscriber?.instances.at(-1)?.find((i) => i.name === "probe")?.status;
+			const probe = () =>
+				subscriber?.instances.at(-1)?.find((i) => i.name === "probe");
+			const probeStatus = () => probe()?.status;
+			await expect.poll(probeStatus, { timeout: 15_000 }).toBe("stopped");
+			await sendRpcRequest(
+				socketPath,
+				new StartInstance({ instanceId: probe()?.id ?? "" }),
+			).catch(() => undefined);
 			await expect
 				.poll(probeStatus, { timeout: 15_000, interval: 100 })
 				.toBe("unhealthy");
