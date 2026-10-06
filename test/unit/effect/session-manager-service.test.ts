@@ -205,6 +205,9 @@ function makeReadQueryEffect(
 			Effect.succeed(pendingApprovalCounts),
 		),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+		getSessionHistoryMetadata: vi.fn(() =>
+			Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+		),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readSessionTranscriptPage: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),

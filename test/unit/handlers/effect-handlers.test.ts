@@ -1043,6 +1043,7 @@ describe("switchModelForSession", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -1558,6 +1559,7 @@ describe("handleGetToolContent", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 
@@ -2824,6 +2826,7 @@ describe("handleNewSession", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
@@ -2923,6 +2926,7 @@ describe("handleNewSession", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const sessionManagerService = makeMockSessionManagerService({
@@ -3355,6 +3359,7 @@ describe("loadMoreHistoryForSession", () => {
 			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+			getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 			getSessionMessagesWithParts: vi.fn(() =>
 				Effect.succeed([
 					{
@@ -4230,8 +4235,8 @@ describe("handleMessage", () => {
 		},
 	);
 
-	it.effect(
-		"passes prior SQLite history into Claude engine send_turn input",
+		it.effect(
+			"passes Claude history metadata without a transcript into send_turn input",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -4272,46 +4277,10 @@ describe("handleMessage", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-				getSessionMessagesWithParts: vi.fn(() =>
-					Effect.succeed([
-						{
-							id: "msg-user-1",
-							session_id: "session-1",
-							turn_id: "turn-1",
-							role: "user",
-							text: "Earlier question",
-							cost: null,
-							tokens_in: null,
-							tokens_out: null,
-							tokens_cache_read: null,
-							tokens_cache_write: null,
-							context_window: null,
-							version: 0,
-							is_streaming: 0,
-							is_backfilled: 0,
-							created_at: 1,
-							updated_at: 1,
-							parts: [
-								{
-									id: "part-user-1",
-									message_id: "msg-user-1",
-									type: "text",
-									text: "Earlier question",
-									tool_name: null,
-									call_id: null,
-									input: null,
-									result: null,
-									metadata: null,
-									duration: null,
-									status: null,
-									sort_order: 0,
-									created_at: 1,
-									updated_at: 1,
-								},
-							],
-						},
-					]),
-				),
+					getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+					getSessionHistoryMetadata: vi.fn(() =>
+						Effect.succeed({ messageCount: 1, cumulativeTokens: 42 }),
+					),
 			} satisfies ReadQueryEffect;
 
 			const layer = Layer.provideMerge(
@@ -4339,7 +4308,7 @@ describe("handleMessage", () => {
 					text: "new prompt",
 					commandId: "cmd-sqlite-history",
 				});
-				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
 					"session-1",
 				);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
@@ -4347,17 +4316,8 @@ describe("handleMessage", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
-							history: [
-								expect.objectContaining({
-									role: "user",
-									parts: [
-										expect.objectContaining({
-											type: "text",
-											text: "Earlier question",
-										}),
-									],
-								}),
-							],
+							history: [],
+							cumulativeTokens: 42,
 						}),
 					}),
 				);
@@ -4581,6 +4541,7 @@ describe("handleMessage", () => {
 				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 			} satisfies ReadQueryEffect;
 			const engine = withDispatchEffect({

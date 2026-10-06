@@ -314,6 +314,12 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+	readonly getSessionHistoryMetadata: (
+		sessionId: string,
+	) => Effect.Effect<
+		{ readonly messageCount: number; readonly cumulativeTokens: number },
+		ReadQueryEffectError | SqlError
+	>;
 	readonly readSessionTranscriptPage: (
 		sessionId: string,
 		options: { readonly before?: string; readonly limit: number },
@@ -822,6 +828,37 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const getSessionHistoryMetadata = (sessionId: string) =>
+		Effect.gen(function* () {
+			const rows = yield* sql<{
+				messageCount: number;
+				cumulativeTokens: number;
+			}>`
+				SELECT COUNT(*) AS messageCount,
+					COALESCE(SUM(CASE WHEN rest_payload IS NOT NULL OR tokens_in IS NOT NULL
+						OR tokens_out IS NOT NULL OR context_window IS NOT NULL
+						THEN COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)
+							+ COALESCE(tokens_cache_read, 0) + COALESCE(tokens_cache_write, 0)
+						ELSE 0 END), 0) AS cumulativeTokens
+				FROM messages WHERE session_id = ${sessionId}`;
+			const metadata = rows[0];
+			if (!metadata)
+				return yield* new ReadQueryEffectError({
+					operation: "getSessionHistoryMetadata",
+					cause: new Error("Missing history metadata row"),
+				});
+			return metadata;
+		}).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ReadQueryEffectError
+					? cause
+					: new ReadQueryEffectError({
+							operation: "getSessionHistoryMetadata",
+							cause,
+						}),
+			),
+		);
+
 	const getGoalDetails = (sessionId: string) =>
 		sql
 			.withTransaction(
@@ -1209,6 +1246,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listPendingClaudeQuestionTools,
 		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,
+		getSessionHistoryMetadata,
 		readSessionTranscriptPage,
 		readSessionList,
 		readSessionTranscript,

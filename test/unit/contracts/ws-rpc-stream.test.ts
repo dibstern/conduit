@@ -109,6 +109,8 @@ const makeLayer = (options: {
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 					getSessionFamily: () => Effect.succeed([]),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
+					getSessionHistoryMetadata: () =>
+						Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					readSessionTranscriptPage: () =>
 						options.failRead
