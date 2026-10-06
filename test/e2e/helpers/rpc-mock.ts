@@ -35,6 +35,10 @@ type RpcHandler = (
 
 type DaemonListTag = "SubscribeInstances" | "SubscribeProjects";
 
+/** Subscriptions opened once per session, so each session gets its own stream. */
+const isSessionStream = (tag: string): boolean =>
+	tag === "SubscribeSessionDetail" || tag === "SubscribeSessionTodos";
+
 export interface RpcMockOptions {
 	readonly handlers: Record<string, RpcHandler>;
 	readonly streams?: Record<
@@ -74,6 +78,8 @@ export class RpcMockControl {
 	private projectSettingsSequence = 0;
 	private readonly detailRows = new Map<string, readonly unknown[]>();
 	private readonly detailSequences = new Map<string, number>();
+	private readonly sessionTodos = new Map<string, readonly unknown[]>();
+	private sessionTodosSequence = 0;
 
 	setResponse(tag: string, value: unknown): void {
 		this.responseHandlers.set(tag, () => value);
@@ -180,6 +186,37 @@ export class RpcMockControl {
 			]);
 	}
 
+	/** Replace one session's todo list, the way a TodoWrite does: an upsert on
+	 *  that session's open SubscribeSessionTodos stream. */
+	setSessionTodos(sessionId: string, items: readonly unknown[]): void {
+		this.sessionTodos.set(sessionId, items);
+		this.sessionTodosSequence++;
+		if (this.streams.has(this.streamKey("SubscribeSessionTodos", sessionId)))
+			this.sendChunk(
+				"SubscribeSessionTodos",
+				[
+					{
+						_tag: "upsert",
+						item: { sessionId, items },
+						sequence: this.sessionTodosSequence,
+					},
+				],
+				sessionId,
+			);
+	}
+
+	initialSessionTodosFrames(sessionId: string): readonly unknown[] {
+		const items = this.sessionTodos.get(sessionId);
+		return [
+			{
+				_tag: "snapshot",
+				sequence: this.sessionTodosSequence,
+				rows: items ? [{ sessionId, items }] : [],
+			},
+			{ _tag: "synchronized" },
+		];
+	}
+
 	initialProjectSettingsFrames(): readonly unknown[] {
 		return [
 			{
@@ -234,7 +271,7 @@ export class RpcMockControl {
 	}
 
 	private streamKey(tag: string, sessionId?: string): string {
-		return tag === "SubscribeSessionDetail" ? `${tag}:${sessionId ?? ""}` : tag;
+		return isSessionStream(tag) ? `${tag}:${sessionId ?? ""}` : tag;
 	}
 
 	registerStream(
@@ -421,16 +458,20 @@ async function handleMessage(
 				: raw.tag === "SubscribeSessionDetail"
 					? (payload: Record<string, unknown>) =>
 							control.initialDetailFrames(String(payload["sessionId"] ?? ""))
-					: raw.tag === "SubscribeProjectSettings"
-						? () => control.initialProjectSettingsFrames()
-						: daemonList
-							? () => daemonList
-							: undefined);
+					: raw.tag === "SubscribeSessionTodos"
+						? (payload: Record<string, unknown>) =>
+								control.initialSessionTodosFrames(
+									String(payload["sessionId"] ?? ""),
+								)
+						: raw.tag === "SubscribeProjectSettings"
+							? () => control.initialProjectSettingsFrames()
+							: daemonList
+								? () => daemonList
+								: undefined);
 		if (stream) {
-			const sessionId =
-				raw.tag === "SubscribeSessionDetail"
-					? String(raw.payload?.["sessionId"] ?? "")
-					: undefined;
+			const sessionId = isSessionStream(raw.tag)
+				? String(raw.payload?.["sessionId"] ?? "")
+				: undefined;
 			control.registerStream(raw.tag, ws, raw.id, sessionId);
 			const values = stream(raw.payload ?? {});
 			if (values.length > 0) control.sendChunk(raw.tag, values, sessionId);

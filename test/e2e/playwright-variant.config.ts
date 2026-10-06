@@ -11,6 +11,7 @@ export default defineConfig({
 		"permission-mode-selector.spec.ts",
 		"composer-drift-layout.spec.ts",
 		"composer-large-paste.spec.ts",
+		"todo-overlay-feed.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
