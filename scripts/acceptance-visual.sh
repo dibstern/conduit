@@ -31,7 +31,7 @@ if [ "$probe" -ne 7 ]; then
 fi
 
 preview_log="$ROOT_DIR/acceptance/visual/artifacts/vite-preview.log"
-pnpm exec vite preview --port 4173 --strictPort >"$preview_log" 2>&1 &
+pnpm exec vite preview --port "$ACCEPTANCE_PORT" --strictPort >"$preview_log" 2>&1 &
 preview_pid=$!
 
 stop_preview() {

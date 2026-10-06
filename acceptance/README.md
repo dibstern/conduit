@@ -52,7 +52,7 @@ pnpm acceptance:mutation:visual     # mutate example values to measure test stre
 ```
 
 `acceptance:visual` builds the frontend, starts a hot `vite preview` on
-`:4173`, mocks the relay WebSocket (`test/e2e/helpers/ws-mock.ts`), and drives
+`:4173` (set `ACCEPTANCE_PORT` to run beside another worktree), mocks the relay WebSocket (`test/e2e/helpers/ws-mock.ts`), and drives
 the live page with Playwright — no OpenCode/relay backend required.
 
 ## Visual regions
