@@ -1,11 +1,9 @@
 import type { Logger } from "../logger.js";
-import type { RelayMessage } from "../shared-types.js";
 import type { MonitoringEffect } from "./monitoring-types.js";
 
 export interface EffectDeps {
 	startPoller: (sessionId: string) => void;
 	stopPoller: (sessionId: string) => void;
-	sendStatusToSession: (sessionId: string, msg: RelayMessage) => void;
 	processAndApplyDone: (
 		sessionId: string,
 		isSubagent: boolean,
@@ -30,14 +28,6 @@ export function executeEffects(
 				deps.stopPoller(effect.sessionId);
 				deps.clearProcessingTimeout(effect.sessionId);
 				deps.clearMessageActivity(effect.sessionId);
-				break;
-
-			case "notify-busy":
-				deps.sendStatusToSession(effect.sessionId, {
-					type: "status",
-					sessionId: effect.sessionId,
-					status: "processing",
-				});
 				break;
 
 			case "clear-processing":

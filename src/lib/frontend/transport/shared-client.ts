@@ -121,6 +121,16 @@ const makeSubscriptions = (
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
 		),
+	/** The family (root and descendants) of one session. Session-row metadata
+	 *  at shell rate, not a hot stream, so it rides the control socket. */
+	family: (options: { readonly sessionId: string }) =>
+		resumeStream((resumeFromSequence) =>
+			sockets.control.SubscribeSessionFamily({
+				projectSlug,
+				sessionId: options.sessionId,
+				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+			}),
+		),
 	/**
 	 * The project's terminals. Hot, so it rides the stream socket. PTYs carry no
 	 * sequence, so every re-issue is a cold snapshot with each scrollback ring.

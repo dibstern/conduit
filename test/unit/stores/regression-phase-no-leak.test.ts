@@ -40,9 +40,9 @@ import {
 	chatState,
 	clearMessages,
 	currentChat,
+	followSessionBusy,
 	getOrCreateSessionSlot,
 	getSessionPhase,
-	handleStatus,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -75,17 +75,12 @@ afterEach(() => {
 });
 
 describe("Phase does not leak between sessions", () => {
-	it("status:idle clears the global phase for the dispatched session", () => {
+	it("an idle row clears the global phase for that session", () => {
 		const slotA = getOrCreateSessionSlot("session-a");
 
 		slotA.activity.phase = "processing";
 
-		// Send idle to A
-		handleStatus(slotA.activity, slotA.messages, {
-			type: "status",
-			sessionId: "session-a",
-			status: "idle",
-		});
+		followSessionBusy("session-a", false);
 
 		// Global phase should be idle
 		expect(chatState.phase).toBe("idle");

@@ -28,15 +28,14 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 	it("cancel during processing triggers done", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// Send a prompt that will take a moment to process
 		await client.sendMessage("Write a short paragraph about the weather.");
 
 		// Wait for processing to start
-		await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
+		await client.waitForTurnStart();
 
 		// Send cancel while processing
 		await client.cancelSession();
@@ -51,14 +50,13 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 	it("can send a new message after cancel", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// First: send + cancel
 		await client.sendMessage("Write a long essay about oceans.");
 
-		await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
+		await client.waitForTurnStart();
 
 		await client.cancelSession();
 		await client.waitFor("done", { timeout: 15_000 });
@@ -75,10 +73,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		await client.sendMessage("Reply with just 'ok'.");
 
 		// Should enter processing again
-		const status = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		await client.waitForTurnStart();
 
 		// Should complete — wait for done (delta may or may not arrive
 		// depending on model streaming behavior after abort)
@@ -91,6 +86,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 	it("cancel when idle is harmless (no crash)", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// Send cancel without having sent a message
@@ -121,10 +117,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Should still be able to send a message (relay not crashed)
 		await client.sendMessage("Reply with just 'ok'.");
 
-		const status = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		await client.waitForTurnStart();
 
 		await client.waitFor("done");
 		await client.close();

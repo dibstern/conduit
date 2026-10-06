@@ -13,15 +13,6 @@
 			"channel": "sendTo",
 			"clientId": "client-1",
 			"message": {
-				"type": "status",
-				"sessionId": "session-1",
-				"status": "idle"
-			}
-		},
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
 				"type": "session.goal_changed",
 				"sessionId": "session-1",
 				"goal": null
@@ -54,15 +45,6 @@
 				"type": "session_family",
 				"rootId": "new-session",
 				"sessions": []
-			}
-		},
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
-				"type": "status",
-				"sessionId": "new-session",
-				"status": "idle"
 			}
 		}
 	],

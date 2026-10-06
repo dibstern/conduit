@@ -6,6 +6,12 @@ import {
 	resetSessionSubscription,
 	sessionSubscription,
 } from "../transport/session-subscription.svelte.js";
+import {
+	type Change,
+	emptySubscription,
+	reduce,
+	type SubscriptionState,
+} from "../transport/subscription-state.js";
 import type { ListDaemonSessionsResponse } from "../transport/ws-rpc.js";
 import {
 	getAgentsRpc,
@@ -28,6 +34,7 @@ import type {
 import {
 	activateSessionChatState,
 	clearSessionChatState,
+	followSessionBusy,
 	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
@@ -66,7 +73,12 @@ const rootSessions = $derived(
 		(row) => !row.parentID && !row.sideThread,
 	),
 );
-let familySessions = $state.raw<readonly SessionInfo[]>([]);
+// The viewed session's family (root and descendants), owned by its
+// SubscribeSessionFamily feed: `applyFamilyChange` is the only writer.
+let familyApplied = $state.raw<SubscriptionState<SessionInfo>>(
+	emptySubscription(),
+);
+const familySessions = $derived([...familyApplied.rows.values()]);
 
 /** A session can receive events while its row is still arriving. */
 export function isRoutable(id: string): boolean {
@@ -485,17 +497,30 @@ function getSessionDate(session: SessionInfo): Date {
 			: new Date(0);
 }
 
-export function handleSessionFamily(
-	msg: Extract<RelayMessage, { type: "session_family" }>,
-): void {
-	// A child is not a shell row, so its settings follow the family push.
-	const viewed = msg.sessions.find((row) => row.id === sessionState.currentId);
-	if (viewed?.parentID)
-		followSessionModelSettings(
-			viewed,
-			familySessions.find((row) => row.id === viewed.id),
-		);
-	familySessions = msg.sessions;
+/** Apply one family feed change. Versioned, so a late row cannot regress. */
+export function applyFamilyChange(change: Change<SessionInfo>): void {
+	const next = reduce(familyApplied, change, (row) => row.id);
+	if (next === familyApplied) return;
+	// A child is not a shell row, so its settings follow the family feed.
+	const currentId = clientSession.currentId;
+	const viewed = currentId === null ? undefined : next.rows.get(currentId);
+	const previous = viewed && familyApplied.rows.get(viewed.id);
+	if (viewed?.parentID && viewed !== previous)
+		followSessionModelSettings(viewed, previous);
+	familyApplied = next;
+	// A child has no shell row, so its family row is the only status it has.
+	for (const row of next.rows.values()) {
+		if (
+			!serverSessions.has(row.id) &&
+			(row.status === "busy" || row.status === "retry")
+		)
+			followSessionBusy(row.id, true);
+	}
+}
+
+/** Forget the family we were watching (project or family switch). */
+export function resetSessionFamily(): void {
+	familyApplied = emptySubscription();
 }
 
 /** How many cross-project rows one page asks for. Exported so the caller that
@@ -1011,7 +1036,7 @@ export function clearSessionState(): void {
 	clientSession.currentId = null;
 	clientSession.announcedParent = null;
 	setSearchQuery("");
-	familySessions = [];
+	resetSessionFamily();
 	clientSession.daemonSessions = [];
 	clientSession.daemonUnavailableProjects = [];
 	clientSession.daemonCursor = null;

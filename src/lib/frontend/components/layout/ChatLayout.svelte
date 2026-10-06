@@ -53,6 +53,7 @@
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
@@ -424,6 +425,7 @@
 		return () => {
 			attachGeneration++;
 			detachSessionList();
+			viewFamily("", null);
 			detachApprovals();
 			unsubscribe();
 			unsubscribeShell();
@@ -451,6 +453,12 @@
 			viewTodos(project, null);
 			viewInputDraft(project, null);
 		};
+	});
+	// No null cleanup: moving within a family keeps its subscription.
+	$effect(() => {
+		const project = attachedProjectState.slug ?? "";
+		const sessionId = project ? sessionState.currentId : null;
+		untrack(() => viewFamily(project, sessionId));
 	});
 	$effect(() => {
 		const project = attachedProjectState.slug ?? null;

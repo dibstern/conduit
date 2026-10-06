@@ -85,11 +85,6 @@ describe("sendPushForEvent", () => {
 		);
 		sendPushForEvent(
 			push,
-			{ type: "status", sessionId: "s1", status: "processing" },
-			createSilentLogger(),
-		);
-		sendPushForEvent(
-			push,
 			{ type: "tool_start", sessionId: "s1", id: "t1", name: "Bash" },
 			createSilentLogger(),
 		);

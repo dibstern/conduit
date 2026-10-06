@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl } from "./shared.js";
+import { requireRelayControl, setSessionRowStatus } from "./shared.js";
 
 const STATUS_CLOCK = new Date("2026-10-02T00:00:00Z");
 
@@ -26,11 +26,7 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 				text: "Start a composer turn.",
 				createdAt,
 			});
-			relay.sendMessage({
-				type: "status",
-				status: "processing",
-				sessionId: "sess-mockup-001",
-			});
+			setSessionRowStatus(world.page, "sess-mockup-001", "busy");
 			await world.page.locator("#stop").waitFor({ state: "visible" });
 		},
 	},

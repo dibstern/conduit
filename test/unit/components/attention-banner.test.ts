@@ -1,4 +1,7 @@
-import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
+import {
+	seedFamilySessions,
+	seedSessionsWithFamily,
+} from "../stores/session-fixtures.js";
 // Verifies that AttentionBanner correctly merges two data sources:
 // 1. Local pending permissions (from permissions store)
 // 2. The server-derived per-session counts carried on the session row
@@ -46,7 +49,6 @@ import {
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
-	handleSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { PermissionId } from "../../../src/lib/frontend/types.js";
@@ -268,20 +270,16 @@ describe("AttentionBanner merge logic", () => {
 		await renderBanner();
 
 		const start = performance.now();
-		handleSessionFamily({
-			type: "session_family",
-			rootId: "ses_current",
-			sessions: [
-				{ id: "ses_current", title: "Parent", status: "idle", createdAt: 0 },
-				...Array.from({ length: 3000 }, (_, i) => ({
-					id: `ses_child${i}`,
-					title: `Child ${i}`,
-					status: "idle" as const,
-					createdAt: 0,
-					parentID: "ses_current",
-				})),
-			],
-		});
+		seedFamilySessions([
+			{ id: "ses_current", title: "Parent", status: "idle", createdAt: 0 },
+			...Array.from({ length: 3000 }, (_, i) => ({
+				id: `ses_child${i}`,
+				title: `Child ${i}`,
+				status: "idle" as const,
+				createdAt: 0,
+				parentID: "ses_current",
+			})),
+		]);
 		flushSync();
 
 		expect(performance.now() - start).toBeLessThan(200);

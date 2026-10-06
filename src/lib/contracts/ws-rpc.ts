@@ -1950,6 +1950,22 @@ export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
 });
 
 /**
+ * One session family: the root a session descends from and every descendant
+ * (subagent and fork rows), as versioned rows (conduit-test-ni8.28). A
+ * low-rate, family-scoped feed, so it rides the control socket beside the shell.
+ */
+export const SubscribeSessionFamily = Rpc.make("SubscribeSessionFamily", {
+	payload: {
+		projectSlug: NonEmptyString,
+		sessionId: NonEmptyString,
+		resumeFromSequence: Schema.optional(Schema.Number),
+	},
+	success: EnvelopeSchema(SessionInfoSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
+/**
  * A project's terminals (conduit-test-ni8.11). Not the read-model `Envelope`:
  * PTYs live in memory, not the event store, so nothing carries a sequence and
  * every (re)subscribe is a cold snapshot — each row with its scrollback ring.
@@ -2125,6 +2141,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
+	SubscribeSessionFamily,
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,

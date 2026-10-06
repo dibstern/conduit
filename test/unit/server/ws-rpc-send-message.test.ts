@@ -116,16 +116,8 @@ describe("WsRpcServerLayer input.submit", () => {
 					}),
 				}),
 			);
-			expect(calls).toContainEqual({
-				channel: "sendToSession",
-				sessionId: "session-1",
-				message: {
-					type: "status",
-					sessionId: "session-1",
-					status: "processing",
-				},
-			});
-			// The sender and every other tab see the message once it is placed.
+			// The phase follows the shell row (ni8.35), and the sender and every
+			// other tab see the message once it is placed: nothing is broadcast.
 			expect(calls).not.toContainEqual(
 				expect.objectContaining({
 					message: expect.objectContaining({ type: "user_message" }),

@@ -3,8 +3,8 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
+	followSessionBusy,
 	getOrCreateSessionSlot,
-	phaseCurrentSessionToIdle,
 	phaseToProcessing,
 	sessionActivity,
 	sessionMessages,
@@ -68,7 +68,7 @@ it("keeps a background session's row in its own slot", () => {
 	expect(foreground.activity.phase).toBe("idle");
 });
 
-it("socket close finalizes the visible turn once", () => {
+it("the row going idle finalizes the visible turn once", () => {
 	const { activity, messages } = getOrCreateSessionSlot("A");
 	sessionState.currentId = "A";
 	phaseToProcessing(activity);
@@ -95,8 +95,8 @@ it("socket close finalizes the visible turn once", () => {
 		},
 	);
 	messages.messages = deriveTranscriptMessages(entry, []);
-	phaseCurrentSessionToIdle();
-	phaseCurrentSessionToIdle();
+	followSessionBusy("A", false);
+	followSessionBusy("A", false);
 	expect(activity.phase).toBe("idle");
 	expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	expect(messages.messages[0]).toMatchObject({

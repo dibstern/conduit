@@ -1,5 +1,7 @@
 import {
+	applyFamilyFeedChange,
 	applySessionChange,
+	seedFamilySessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -94,64 +96,45 @@ describe("deleted sessions leave the sidebar", () => {
 	});
 
 	it("drops the root even when a family snapshot is loaded", () => {
-		handleMessage({
-			type: "session_family",
-			rootId: "victim",
-			sessions: [VICTIM],
-		});
+		seedFamilySessions([VICTIM]);
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("keeps family rows until the next family message", () => {
+	it("keeps family rows until the family feed removes them", () => {
 		const child = {
 			id: "child",
 			title: "Child",
 			status: "idle",
 			parentID: "victim",
 		} satisfies SessionInfo;
-		handleMessage({
-			type: "session_family",
-			rootId: "victim",
-			sessions: [VICTIM, child],
-		});
+		seedFamilySessions([VICTIM, child]);
 		deleteVictim();
 		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 			"victim",
 			"child",
 		]);
 		expect(sidebarIds()).toEqual(["keeper"]);
-		handleMessage({
-			type: "session_family",
-			rootId: "victim",
-			sessions: [],
-		});
+		applyFamilyFeedChange({ _tag: "remove", id: "child" });
+		applyFamilyFeedChange({ _tag: "remove", id: "victim" });
 		expect(sessionState.familySessions).toEqual([]);
 	});
 
-	it("removes a deleted subagent when the family message arrives", () => {
+	it("removes a deleted subagent when the family feed removes it", () => {
 		const child = {
 			id: "child",
 			title: "Child",
 			status: "idle",
 			parentID: "victim",
 		} satisfies SessionInfo;
-		handleMessage({
-			type: "session_family",
-			rootId: "victim",
-			sessions: [VICTIM, child],
-		});
+		seedFamilySessions([VICTIM, child]);
 		handleMessage({ type: "session_deleted", sessionId: "child" });
 		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 			"victim",
 			"child",
 		]);
 		expect(sidebarIds()).toEqual(["victim", "keeper"]);
-		handleMessage({
-			type: "session_family",
-			rootId: "victim",
-			sessions: [VICTIM],
-		});
+		applyFamilyFeedChange({ _tag: "remove", id: "child" });
 		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 			"victim",
 		]);
@@ -201,20 +184,16 @@ describe("root rows keep their subtree rollup", () => {
 	it("ignores the root's individual state from a later family snapshot", () => {
 		const rolled = { ...VICTIM, attention: "needs-approval" as const };
 		applySessionChange({ _tag: "upsert", item: rolled });
-		handleMessage({
-			type: "session_family",
-			rootId: VICTIM.id,
-			sessions: [
-				{ ...VICTIM, attention: "idle" },
-				{
-					id: "child",
-					title: "Child",
-					status: "idle",
-					updatedAt: 0,
-					parentID: VICTIM.id,
-				},
-			],
-		} as RelayMessage);
+		seedFamilySessions([
+			{ ...VICTIM, attention: "idle" },
+			{
+				id: "child",
+				title: "Child",
+				status: "idle",
+				updatedAt: 0,
+				parentID: VICTIM.id,
+			},
+		]);
 		expect(getFilteredSessions()[0]?.attention).toBe("needs-approval");
 		sessionState.searchQuery = "doomed";
 		seedSearchResults([VICTIM]);

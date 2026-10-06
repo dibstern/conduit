@@ -1,5 +1,5 @@
 import type { StepHandler } from "../runtime.js";
-import { openSessionRoute, requireRelayControl } from "./shared.js";
+import { openSessionRoute, setSessionRowStatus } from "./shared.js";
 
 export const composerFieldWidthHandlers: StepHandler[] = [
 	{
@@ -23,11 +23,11 @@ export const composerFieldWidthHandlers: StepHandler[] = [
 		name: "change composer processing state",
 		match: /^the mock relay sets composer status to (idle|processing)$/,
 		run: async ({ world, match }) => {
-			requireRelayControl(world.page).sendMessage({
-				type: "status",
-				status: match[1] ?? "idle",
-				sessionId: "sess-mockup-001",
-			});
+			setSessionRowStatus(
+				world.page,
+				"sess-mockup-001",
+				match[1] === "processing" ? "busy" : "idle",
+			);
 			await world.page.locator("#stop").waitFor({
 				state: match[1] === "processing" ? "visible" : "hidden",
 			});

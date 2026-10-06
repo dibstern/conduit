@@ -26,8 +26,10 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
 import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
+import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
+import { announceBackgroundWork } from "./session-attention.js";
 
 export type ProviderRuntimeIngestionError =
 	| EventStoreError
@@ -60,6 +62,10 @@ export interface ProviderRuntimeRelayPublisher {
 
 export interface ProviderRuntimeIngestionLiveOptions {
 	readonly relayPublisher?: ProviderRuntimeRelayPublisher;
+	readonly compactions?: Pick<
+		ReturnType<typeof makeSessionCompactions>,
+		"observe"
+	>;
 }
 
 export const makeProviderRuntimeIngestionLive = (
@@ -75,6 +81,9 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const eventStore = yield* EventStoreEffectTag;
 			const sql = yield* SqlClient.SqlClient;
+			const services = yield* Effect.context<
+				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
+			>();
 			const mapperStateRef = yield* Ref.make(
 				emptyProviderRuntimeDomainMapperState,
 			);
@@ -149,10 +158,10 @@ export const makeProviderRuntimeIngestionLive = (
 							nextState = result.state;
 						}
 
-						// A compaction's "started" notice is UI-only. Its outcome, completed
-						// or failed, persists so the divider or the failure notice survives
-						// a reload. All states still publish to the wire below
-						// (publishRelayMessages(domainEvents)).
+						// A compaction's "started" notice is transient status (C1) that
+						// rides the shell row (see `compactions` below). Its outcome,
+						// completed or failed, persists so the divider or the failure
+						// notice survives a reload.
 						const persistentEvents = domainEvents.filter(
 							(event) =>
 								event.type !== "session.compaction" ||
@@ -238,6 +247,19 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 						}
 						if (!appended) return 0;
+
+						// A compaction in progress lives in memory, not the log (C1).
+						// Stamp its row so the shell re-reads it.
+						yield* Effect.forEach(
+							options.compactions?.observe(domainEvents) ?? [],
+							announceBackgroundWork,
+							{ discard: true },
+						).pipe(
+							Effect.provide(services),
+							Effect.catchAllCause((cause) =>
+								Effect.logWarning("failed to announce a compaction", cause),
+							),
+						);
 
 						if (
 							options.relayPublisher &&

@@ -89,7 +89,7 @@ beforeEach(() => {
 			updatedAt: Date.now(),
 		},
 	]);
-	seedFamilySessions("root-a", [...sessionState.rootSessions]);
+	seedFamilySessions([...sessionState.rootSessions]);
 	seedDaemonSessions([]);
 	sessionState.searchQuery = "";
 	clearSessionSearch();

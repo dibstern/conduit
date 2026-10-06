@@ -412,6 +412,28 @@ async function waitForStatusPollCycles(_mock: MockOpenCode, cycles = 4) {
 	await wait(cycles * TEST_STATUS_POLL_MS + TEST_STATUS_POLL_MS / 2);
 }
 
+/** Wait until the status poller has seen the session busy: the viewer's
+ *  family push carries it, just ahead of the monitoring tick that reduces
+ *  it, so give that tick a poll cycle to land. (This harness writes status
+ *  straight to SQLite, so shell rows get no live upserts here.) */
+async function waitForMonitoredBusy(
+	harness: TestHarness,
+	client: TestWsClient,
+	sessionId: string,
+) {
+	await client.waitFor("session_family", {
+		timeout: 3000,
+		predicate: (msg) =>
+			Array.isArray(msg["sessions"]) &&
+			msg["sessions"].some(
+				(row: { id?: string; status?: string }) =>
+					row.id === sessionId &&
+					(row.status === "busy" || row.status === "retry"),
+			),
+	});
+	await waitForStatusPollCycles(harness.mock, 1);
+}
+
 /** Helper: connect client and switch to a session */
 async function connectAndView(
 	harness: TestHarness,
@@ -455,10 +477,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Inject SSE events for sess-1 every 80ms for 800ms (covers grace+staleness)
 		const sseInterval = setInterval(() => {
@@ -489,10 +508,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Session sess-1 goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Inject SSE events only for sess-2 (wrong session)
 		harness.mock.resetMessageRequestCounts();
@@ -530,10 +546,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Reset counts AFTER busy is confirmed to exclude init requests
 		harness.mock.resetMessageRequestCounts();
@@ -571,10 +584,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		harness.mock.resetMessageRequestCounts();
 		await vi.waitFor(
@@ -614,10 +624,7 @@ describe("Group 2: SSE dynamics", () => {
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// SSE events flow for a short burst
 		let injected = 0;
@@ -664,10 +671,7 @@ describe("Group 2: SSE dynamics", () => {
 
 		// Session goes busy, no SSE → wait for poller to start
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		harness.mock.resetMessageRequestCounts();
 		await vi.waitFor(
@@ -737,10 +741,7 @@ describe("Group 3: Idle transitions", () => {
 
 		// Session goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Reset counts AFTER busy is confirmed to exclude init/seeding requests
 		harness.mock.resetMessageRequestCounts();
@@ -767,10 +768,7 @@ describe("Group 3: Idle transitions", () => {
 
 		// Session goes busy with SSE events flowing
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Reset counts AFTER busy is confirmed to exclude init/seeding requests
 		// (same pattern as Scenarios 3 and 7)
@@ -815,10 +813,7 @@ describe("Group 3: Idle transitions", () => {
 
 		// Session goes busy, no SSE → wait for poller to start
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		harness.mock.resetMessageRequestCounts();
 		await vi.waitFor(
@@ -875,10 +870,7 @@ describe("Group 4: Cross-session and lifecycle", () => {
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
 		harness.mock.sessionStatuses["sess-2"] = { type: "busy" };
 
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// SSE events for sess-2 only
 		harness.mock.resetMessageRequestCounts();
@@ -1016,10 +1008,7 @@ describe("Group 5: Notifications", () => {
 
 		// sess-1 goes busy
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		client.clearReceived();
 
@@ -1083,12 +1072,8 @@ describe("Group 6: Retry status and cycling", () => {
 			next: Date.now() + 5000,
 		};
 
-		// Client should receive status:processing (retry is treated as busy)
-		const status = await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		// The shell row reports a running turn (retry is treated as busy)
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
@@ -1102,10 +1087,7 @@ describe("Group 6: Retry status and cycling", () => {
 
 		// First busy cycle
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
@@ -1114,20 +1096,14 @@ describe("Group 6: Retry status and cycling", () => {
 
 		// Second busy cycle
 		harness.mock.sessionStatuses["sess-1"] = { type: "busy" };
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await waitForMonitoredBusy(harness, client, "sess-1");
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
 
-		// Verify the sequence: status:processing, done, status:processing, done
+		// Verify the sequence: busy row, done, busy row, done
 		// (We cleared after the first done, so only the second cycle is in received)
-		const statuses = client.getReceivedOfType("status");
-		const dones = client.getReceivedOfType("done");
-		expect(statuses.length).toBeGreaterThanOrEqual(1);
-		expect(dones.length).toBeGreaterThanOrEqual(1);
+		expect(client.getReceivedOfType("done").length).toBeGreaterThanOrEqual(1);
 
 		await client.close();
 	}, 5_000);

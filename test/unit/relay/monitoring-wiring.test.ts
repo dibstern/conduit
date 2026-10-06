@@ -634,7 +634,7 @@ describe("wireMonitoring shutdown", () => {
 			harness.emitStatus({ "claude-1": { type: "busy" } });
 			await flushPromises();
 			expect(harness.messages).not.toHaveBeenCalled();
-			expect(harness.delivered).toEqual(["processing"]);
+			expect(harness.delivered).toEqual([]);
 			expect(harness.startPolling).not.toHaveBeenCalled();
 			if (!harness.runtime) throw new Error("Missing test runtime");
 			await harness.runtime.runPromise(
@@ -647,7 +647,7 @@ describe("wireMonitoring shutdown", () => {
 			).toBe(true);
 			harness.emitStatus({ "claude-1": { type: "idle" } });
 			await flushPromises();
-			expect(harness.delivered).toEqual(["processing"]);
+			expect(harness.delivered).toEqual([]);
 			expect(harness.alerts()).toEqual([]);
 			expect(pushManager.sendToAll).not.toHaveBeenCalled();
 			expect(
@@ -786,9 +786,7 @@ async function createEffectHarness(
 		client: { session: { messages } },
 		wsHandler: {
 			broadcast: vi.fn(),
-			sendToSession: (_id, message) => {
-				if (message.type === "status") delivered.push(message.status);
-			},
+			sendToSession: () => {},
 			getClientsForSession,
 			broadcastPerSessionEvent: (_id, message) => {
 				if (message.type === "done") delivered.push("done");

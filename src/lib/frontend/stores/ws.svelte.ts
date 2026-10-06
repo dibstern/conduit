@@ -13,7 +13,6 @@ import {
 } from "../transport/runtime.js";
 import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
-import { phaseCurrentSessionToIdle } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
 	attachedProjectState,
@@ -282,10 +281,8 @@ function doConnect(
 		sessionActivityBridge.clear();
 		disarmProtocolVersionCheck();
 
-		// End the on-screen turn so the UI isn't stuck mid-stream. The
-		// status:idle after reconnect then finds an idle slot and correctly
-		// declines to end the turn a second time.
-		phaseCurrentSessionToIdle();
+		// The turn is not ended here: the session's shell row rides the RPC
+		// socket, not this one, and it ends the turn when the row goes idle.
 
 		// The instance list is not cleared: its subscription rides the RPC
 		// sockets, not this one, and nothing here would re-populate it.

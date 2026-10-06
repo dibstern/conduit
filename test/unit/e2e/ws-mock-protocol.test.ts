@@ -11,7 +11,7 @@ describe("E2E WebSocket mock protocol normalizer", () => {
 
 		const normalized = normalizeMockRelayMessages(
 			[
-				{ type: "status", status: "idle" },
+				{ type: "thinking_stop" },
 				{ type: "user_message", text: "hello" },
 				{ type: "delta", text: "world" },
 				{ type: "done", code: 0 },
@@ -20,7 +20,7 @@ describe("E2E WebSocket mock protocol normalizer", () => {
 		);
 
 		expect(normalized).toEqual([
-			{ type: "status", status: "idle", sessionId: "sess-a" },
+			{ type: "thinking_stop", sessionId: "sess-a" },
 			{ type: "user_message", text: "hello", sessionId: "sess-a" },
 			{ type: "delta", text: "world", sessionId: "sess-a" },
 			{ type: "done", code: 0, sessionId: "sess-a" },

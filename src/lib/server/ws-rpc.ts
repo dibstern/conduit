@@ -13,6 +13,7 @@ import { subscribeProjectSettings } from "../domain/relay/Services/project-setti
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
+import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import { getSessionInputDraft } from "../handlers/prompt.js";
@@ -227,6 +228,22 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	SubscribeSessionFamily: (request) =>
+		Rpc.fork(
+			subscribeSessionFamily({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionFamily failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
 	SubscribePtys: () =>
 		Rpc.fork(
 			subscribePtys().pipe(
@@ -432,6 +449,15 @@ export const makeRoutedWsRpcServerLayer = (
 		SubscribeSessionTodos: (request) =>
 			routeStream(request.projectSlug, () =>
 				subscribeSessionTodos({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				}),
+			),
+		SubscribeSessionFamily: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeSessionFamily({
 					sessionId: request.sessionId,
 					...(request.resumeFromSequence === undefined
 						? {}

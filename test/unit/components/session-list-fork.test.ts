@@ -51,7 +51,7 @@ describe("SessionList fork", () => {
 			{ id: "open", title: "Open work" },
 			{ id: "other", title: "Other work" },
 		]);
-		seedFamilySessions("root-a", [...sessionState.rootSessions]);
+		seedFamilySessions([...sessionState.rootSessions]);
 		seedDaemonSessions([]);
 		sessionState.searchQuery = "";
 		clearSessionSearch();

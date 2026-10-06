@@ -99,12 +99,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat event types", () => {
-		const nonCacheable = [
-			"session_list",
-			// status events are sent directly via wsHandler, never through the
-			// pipeline — so they should NOT be cacheable.
-			"status",
-		] as const;
+		const nonCacheable = ["session_list"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}
@@ -173,10 +168,9 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("does not cache non-cacheable types", () => {
 		const msg: RelayMessage = {
-			type: "compaction",
+			type: "message_removed",
 			sessionId: "ses_abc",
-			state: "started",
-			detail: "",
+			messageId: "m1",
 		};
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.cache).toBe(false);

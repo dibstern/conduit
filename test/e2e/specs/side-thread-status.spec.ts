@@ -176,32 +176,13 @@ test.describe("OpenCode Side Thread status", () => {
 				"side-working-parent-idle",
 			);
 
-			const beforeOpen = pushes.length;
 			await chat.subagentBackBtn.click();
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
-			await expect
-				.poll(() =>
-					pushes
-						.slice(beforeOpen)
-						.filter(
-							(message) =>
-								message.type === "status" && message.sessionId === parentId,
-						)
-						.map((message) =>
-							message.type === "status" ? message.status : undefined,
-						),
-				)
-				.toContain("idle");
-			expect(
-				pushes
-					.slice(beforeOpen)
-					.some(
-						(message) =>
-							message.type === "status" &&
-							message.sessionId === parentId &&
-							message.status === "processing",
-					),
-			).toBe(false);
+			// The parent's shell row is its only busy signal (conduit-test-ni8.35):
+			// opening it must not show a running turn while the side thread works.
+			await expect(parentRow.locator(".session-status-glyph")).toHaveClass(
+				/text-session-idle/,
+			);
 			await expect(chat.stopBtn).toBeHidden();
 			await expect(chat.userMessages.filter({ hasText: question })).toHaveCount(
 				0,

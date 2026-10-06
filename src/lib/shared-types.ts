@@ -313,6 +313,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundWork: Schema.optional(BackgroundWorkSchema),
 	/** The live tasks behind backgroundWork, oldest first. */
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+	/** A compaction in progress: transient status, never logged (C1). */
+	compacting: Schema.optional(Schema.String),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),
@@ -647,21 +649,6 @@ const ResultSchema = Schema.Struct({
 	midTurn: Schema.optional(Schema.Literal(true)),
 });
 
-const StatusSchema = Schema.Struct({
-	type: Schema.Literal("status"),
-	sessionId: Schema.String,
-	status: Schema.String,
-});
-
-const CompactionSchema = Schema.Struct({
-	type: Schema.Literal("compaction"),
-	sessionId: Schema.String,
-	state: Schema.Literal("started", "completed", "failed"),
-	detail: Schema.String,
-	preTokens: Schema.optional(Schema.Number),
-	postTokens: Schema.optional(Schema.Number),
-});
-
 const DoneSchema = Schema.Struct({
 	type: Schema.Literal("done"),
 	alertId: Schema.optional(Schema.String),
@@ -789,8 +776,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Permissions / Questions
 	// Session lifecycle
 	ResultSchema,
-	StatusSchema,
-	CompactionSchema,
 	DoneSchema,
 	SessionListSchema,
 	SessionFamilySchema,
@@ -840,8 +825,6 @@ export type PerSessionEventType =
 	| "result"
 	| "done"
 	| "error"
-	| "status"
-	| "compaction"
 	| "user_message"
 	| "part_removed"
 	| "message_removed"

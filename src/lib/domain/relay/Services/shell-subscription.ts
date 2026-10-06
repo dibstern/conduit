@@ -21,14 +21,14 @@
 // reconnect anyway.
 
 import type { SqlError } from "@effect/sql/SqlError";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import { BackgroundLivenessTag } from "./services.js";
+import { BackgroundLivenessTag, SessionCompactionsTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
@@ -54,15 +54,27 @@ export const subscribeShell = (
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
+			// Optional so read-only hosts need not wire it; the relay always does.
+			const compactingOf = Option.getOrUndefined(
+				yield* Effect.serviceOption(SessionCompactionsTag),
+			);
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
 					read: (range) =>
-						readQuery.readSessionList({
-							...range,
-							roots: true,
-							backgroundOf,
-						}),
+						readQuery
+							.readSessionList({ ...range, roots: true, backgroundOf })
+							.pipe(
+								Effect.map((list) => ({
+									...list,
+									rows: list.rows.map((row) => {
+										const compacting = compactingOf?.(row.item.id);
+										return compacting === undefined
+											? row
+											: { ...row, item: { ...row.item, compacting } };
+									}),
+								})),
+							),
 					// A descendant advance can change its root summary. The read
 					// selects affected roots by the highest descendant version.
 					route: (advance) => ({

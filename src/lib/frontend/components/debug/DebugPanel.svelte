@@ -131,8 +131,6 @@
 				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;
 			case "done":
 				return `code=${properties["code"] ?? "?"}`;
-			case "status":
-				return String(properties["status"] ?? "");
 			case "error":
 				return `[${properties["code"]}] ${properties["message"]}`;
 

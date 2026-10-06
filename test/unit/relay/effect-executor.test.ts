@@ -21,9 +21,6 @@ function createMockDeps(): EffectDeps & {
 		calls,
 		startPoller: track("startPoller") as EffectDeps["startPoller"],
 		stopPoller: track("stopPoller") as EffectDeps["stopPoller"],
-		sendStatusToSession: track(
-			"sendStatusToSession",
-		) as EffectDeps["sendStatusToSession"],
 		processAndApplyDone: track(
 			"processAndApplyDone",
 		) as EffectDeps["processAndApplyDone"],
@@ -60,17 +57,6 @@ describe("executeEffects", () => {
 		expect(deps.calls["stopPoller"]).toEqual([["s1"]]);
 		expect(deps.calls["clearProcessingTimeout"]).toEqual([["s1"]]);
 		expect(deps.calls["clearMessageActivity"]).toEqual([["s1"]]);
-	});
-
-	it("notify-busy sends processing status to session", () => {
-		const deps = createMockDeps();
-		const effects: MonitoringEffect[] = [
-			{ effect: "notify-busy", sessionId: "s1" },
-		];
-		executeEffects(effects, deps);
-		expect(deps.calls["sendStatusToSession"]).toEqual([
-			["s1", { type: "status", sessionId: "s1", status: "processing" }],
-		]);
 	});
 
 	it("notify-idle processes done + clears processing timeout + clears message activity", () => {
@@ -112,7 +98,6 @@ describe("executeEffects", () => {
 		expect(deps.calls["clearProcessingTimeout"]).toEqual([["claude-1"]]);
 		expect(deps.calls["clearMessageActivity"]).toEqual([["claude-1"]]);
 		expect(deps.calls["processAndApplyDone"]).toEqual([]);
-		expect(deps.calls["sendStatusToSession"]).toEqual([]);
 	});
 
 	it("processes multiple effects in order", () => {

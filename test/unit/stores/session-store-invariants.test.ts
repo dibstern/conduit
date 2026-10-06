@@ -281,11 +281,7 @@ describe("deleting the session being viewed", () => {
 		try {
 			applySessionUpsert({ id: "ses_doomed", title: "Doomed", status: "idle" });
 			sessionState.currentId = "ses_doomed";
-			handleMessage({
-				type: "status",
-				sessionId: "ses_doomed",
-				status: "processing",
-			} as RelayMessage);
+			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
 			expect(sessionActivity.has("ses_doomed")).toBe(true);
 
 			// The server deletes it. Deleting the last session leaves no other to
@@ -298,12 +294,8 @@ describe("deleting the session being viewed", () => {
 			expect(sessionState.sessions.has("ses_doomed")).toBe(false);
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 
-			// A status that was already in flight when it went.
-			handleMessage({
-				type: "status",
-				sessionId: "ses_doomed",
-				status: "processing",
-			} as RelayMessage);
+			// An event that was already in flight when it went.
+			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
 			await vi.advanceTimersByTimeAsync(200);
 
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
@@ -322,14 +314,10 @@ describe("event routing for the session being viewed", () => {
 			sessionState.currentId = "ses_new";
 			expect(sessionState.sessions.has("ses_new")).toBe(false);
 
-			handleMessage({
-				type: "status",
-				sessionId: "ses_new",
-				status: "processing",
-			} as RelayMessage);
+			handleMessage({ type: "thinking_stop", sessionId: "ses_new" });
 			await vi.advanceTimersByTimeAsync(200);
 
-			expect(sessionActivity.get("ses_new")?.phase).toBe("processing");
+			expect(sessionActivity.has("ses_new")).toBe(true);
 		} finally {
 			vi.useRealTimers();
 		}

@@ -8,6 +8,10 @@
 
 import type { Stream } from "effect";
 import {
+	followSessionBusy,
+	followSessionCompaction,
+} from "../stores/chat.svelte.js";
+import {
 	followSessionModelSettings,
 	handlePermissionModeInfo,
 } from "../stores/discovery.svelte.js";
@@ -33,6 +37,9 @@ export type ShellEnvelope = Stream.Stream.Success<
 >;
 
 const identify = (session: SessionInfo): string => session.id;
+
+const isBusy = (row: SessionInfo | undefined): boolean =>
+	row?.status === "busy" || row?.status === "retry";
 
 // `$state.raw`, not `$state`: the applier replaces the state whole and never
 // mutates it, so a deep proxy would cost work to track writes that cannot
@@ -101,6 +108,14 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
 		hydrateSessionGoal(change.item);
 		followViewedSession(change.item);
+		// Only a transition moves the phase: an idle write (the user message)
+		// must not end the sender's optimistic turn, and a late busy write
+		// must not restart one `done` already ended.
+		const busy = isBusy(change.item);
+		if (busy !== isBusy(applied.rows.get(change.item.id)))
+			followSessionBusy(change.item.id, busy);
+		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
+			followSessionCompaction(change.item.id, change.item.compacting);
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
@@ -120,6 +135,9 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			sessionActivityBridge.retire(row.id, receivedSequence, "row");
 			hydrateSessionGoal(row);
 			followViewedSession(row);
+			// A snapshot (cold start, resume) is absolute.
+			followSessionBusy(row.id, isBusy(row));
+			followSessionCompaction(row.id, row.compacting);
 		}
 	}
 	applied = next;

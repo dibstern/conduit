@@ -206,6 +206,10 @@ vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
 	viewTodos: vi.fn(),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/session-family-feed.js", () => ({
+	viewFamily: vi.fn(),
+}));
+
 vi.mock("../../../src/lib/frontend/stores/file-tree.svelte.js", () => ({
 	applyGetFileTreeResponse: vi.fn(),
 	requestFileTree: vi.fn(),

@@ -27,7 +27,7 @@ describe("SessionList search summary", () => {
 		routerState.search = "";
 		routerState.sessionNotFound = false;
 		seedRootSessions([]);
-		seedFamilySessions("root-a", []);
+		seedFamilySessions([]);
 		seedDaemonSessions([]);
 		sessionState.currentId = null;
 		sessionState.searchQuery = "report";

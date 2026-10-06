@@ -25,13 +25,6 @@ describe("Integration: Initial State on Connect", () => {
 		await client.close();
 	});
 
-	it("sends status: idle on connect", async () => {
-		const client = await harness.connectWsClient();
-		const msg = await client.waitFor("status");
-		expect(msg["status"]).toBe("idle");
-		await client.close();
-	});
-
 	it("sends the viewed session family on connect", async () => {
 		const client = await harness.connectWsClient();
 		const msg = await client.waitFor("session_family");
@@ -71,7 +64,6 @@ describe("Integration: Initial State on Connect", () => {
 		await client2.waitForInitialState();
 
 		const types2 = client2.getReceived().map((m) => m.type);
-		expect(types2).toContain("status");
 		expect(types2).toContain("session_family");
 
 		await client1.close();

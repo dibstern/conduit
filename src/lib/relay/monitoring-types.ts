@@ -66,7 +66,6 @@ export type MonitoringEffect =
 			readonly sessionId: string;
 			readonly reason: PollerStopReason;
 	  }
-	| { readonly effect: "notify-busy"; readonly sessionId: string }
 	| { readonly effect: "clear-processing"; readonly sessionId: string }
 	| {
 			readonly effect: "notify-idle";

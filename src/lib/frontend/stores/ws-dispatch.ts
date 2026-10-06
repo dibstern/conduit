@@ -28,10 +28,8 @@ import {
 	findMessage,
 	getMessages,
 	getOrCreateSessionSlot,
-	handleCompaction,
 	handleDone,
 	handleError,
-	handleStatus,
 	inputSyncState,
 	persistInputDraft,
 	type SessionActivity,
@@ -50,7 +48,6 @@ import {
 import {
 	findSession,
 	getFilteredSessions,
-	handleSessionFamily,
 	handleSessionForked,
 	isRoutable,
 	observeSessionActivity,
@@ -96,8 +93,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"result",
 		"done",
 		"error",
-		"status",
-		"compaction",
 		"user_message",
 		"part_removed",
 		"message_removed",
@@ -175,12 +170,6 @@ function routePerSession(event: PerSessionEvent): void {
 			}
 			break;
 		}
-		case "status":
-			handleStatus(activity, messages, event);
-			break;
-		case "compaction":
-			handleCompaction(activity, messages, event);
-			break;
 		case "error":
 			handleChatError(activity, messages, event);
 			triggerNotifications(event);
@@ -219,10 +208,6 @@ export function handleMessage(msg: RelayMessage): void {
 	}
 
 	switch (msg.type) {
-		case "session_family": {
-			handleSessionFamily(msg);
-			break;
-		}
 		case "session_forked": {
 			handleSessionForked(msg);
 			const parentTitle = msg.parentTitle ?? "session";

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sessionMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
-	handleSessionFamily,
 	isSessionBusy,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -12,7 +11,7 @@ import {
 	disconnect,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import { applySessionChange } from "./session-fixtures.js";
+import { applySessionChange, seedFamilySessions } from "./session-fixtures.js";
 
 beforeEach(() => clearSessionState());
 afterEach(() => {
@@ -23,14 +22,10 @@ afterEach(() => {
 });
 
 it("routes family-only child activity and propagates busy to its parent", () => {
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "root",
-		sessions: [
-			{ id: "root", title: "Root", status: "idle" },
-			{ id: "child", title: "Child", status: "idle", parentID: "root" },
-		],
-	});
+	seedFamilySessions([
+		{ id: "root", title: "Root", status: "idle" },
+		{ id: "child", title: "Child", status: "idle", parentID: "root" },
+	]);
 	sessionState.currentId = "root";
 	handleMessage({ type: "delta", sessionId: "child", text: "working" });
 
@@ -42,21 +37,17 @@ it("routes family-only child activity and propagates busy to its parent", () => 
 });
 
 it("rolls a Side Thread's subagents into it without making its parent busy", () => {
-	handleSessionFamily({
-		type: "session_family",
-		rootId: "root",
-		sessions: [
-			{ id: "root", title: "Root", status: "idle" },
-			{
-				id: "side",
-				title: "Side Thread",
-				status: "idle",
-				parentID: "root",
-				sideThread: true,
-			},
-			{ id: "agent", title: "Agent", status: "idle", parentID: "side" },
-		],
-	});
+	seedFamilySessions([
+		{ id: "root", title: "Root", status: "idle" },
+		{
+			id: "side",
+			title: "Side Thread",
+			status: "idle",
+			parentID: "root",
+			sideThread: true,
+		},
+		{ id: "agent", title: "Agent", status: "idle", parentID: "side" },
+	]);
 	sessionState.currentId = "side";
 	handleMessage({ type: "delta", sessionId: "agent", text: "working" });
 	expect(isSessionBusy("agent")).toBe(true);
@@ -323,29 +314,5 @@ it("retires activity on shell authority and cannot resurrect it after removal or
 	handleMessage({ type: "delta", sessionId: "s", text: "new project" });
 	expect(isSessionBusy("s")).toBe(true);
 	clearSessionState();
-	expect(isSessionBusy("s")).toBe(false);
-});
-
-it("does not flicker when a legacy poller status hint precedes the authoritative row", () => {
-	vi.useFakeTimers();
-	sessionState.currentId = "s";
-	handleMessage({ type: "delta", sessionId: "s", text: "hello" });
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "processing" });
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "idle" });
-	expect(isSessionBusy("s")).toBe(true);
-	applySessionChange({
-		_tag: "upsert",
-		item: { id: "s", title: "s", status: "busy" },
-	});
-	vi.advanceTimersByTime(20_000);
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "idle" });
-	expect(isSessionBusy("s")).toBe(true);
-	applySessionChange({
-		_tag: "upsert",
-		item: { id: "s", title: "s", status: "idle" },
-	});
 	expect(isSessionBusy("s")).toBe(false);
 });

@@ -28,7 +28,10 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
-import { sessionFamilyQuery } from "../session-family-query.js";
+import {
+	sessionFamilyQuery,
+	sessionFamilyWindowQuery,
+} from "../session-family-query.js";
 import {
 	messageRowsToHistory,
 	toolOutputText,
@@ -409,6 +412,8 @@ export interface ReadQueryEffect {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
+		/** Only the family (root and descendants) of this session. */
+		readonly familyOf?: string;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
 		readonly backgroundOf?: (
 			sessionId: string,
@@ -1233,6 +1238,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly after?: number;
 		readonly through?: number;
 		readonly roots?: boolean;
+		readonly familyOf?: string;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -1252,8 +1258,16 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
-					const rows = range?.roots
-						? yield* sql<SessionRow & { effective_version: number }>`
+					const rows: readonly (SessionRow & {
+						readonly effective_version?: number;
+					})[] =
+						range?.familyOf !== undefined
+							? yield* sql.unsafe<SessionRow & { effective_version: number }>(
+									sessionFamilyWindowQuery,
+									[range.familyOf, floor, ceiling],
+								)
+							: range?.roots
+								? yield* sql<SessionRow & { effective_version: number }>`
 							WITH RECURSIVE descendants(root_id, id, version) AS (
 								SELECT id, id, version FROM sessions WHERE parent_id IS NULL
 								UNION ALL
@@ -1266,7 +1280,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							JOIN roots ON roots.root_id = sessions.id
 							WHERE roots.effective_version > ${floor} AND roots.effective_version <= ${ceiling}
 							ORDER BY sessions.updated_at DESC`
-						: yield* sql<SessionRow>`
+								: yield* sql<SessionRow>`
 							SELECT * FROM sessions
 							WHERE version > ${floor} AND version <= ${ceiling}
 							ORDER BY updated_at DESC`;
@@ -1311,10 +1325,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							return [
 								{
 									item,
-									version: range?.roots
-										? (row as SessionRow & { effective_version: number })
-												.effective_version
-										: row.version,
+									version: row.effective_version ?? row.version,
 								},
 							];
 						}),

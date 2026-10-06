@@ -12,16 +12,12 @@ import {
 	selectSessionModel,
 	selectSessionVariant,
 } from "../domain/relay/Services/session-model-settings.js";
-import {
-	clearSession as clearEffectOverrideSession,
-	hasActiveProcessingTimeout,
-} from "../domain/relay/Services/session-overrides-state.js";
+import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	ReadQueryEffectTag,
 	sessionGoalState,
 } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import { busySessionIds } from "../session-busy.js";
 import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
@@ -95,26 +91,12 @@ const switchClientToSession = (
 
 		const wsHandler = yield* WebSocketHandlerTag;
 		const pollerManager = yield* PollerManagerTag;
-		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
 		wsHandler.setClientSession(clientId, sessionId);
 
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
-
-		// The persisted family (children included) is the live status. The
-		// poller only holds a copy up to one poll old, which would leave a
-		// just-stopped session reading busy after a reload.
-		const isProcessing =
-			busySessionIds(
-				new Map(family.sessions.map((session) => [session.id, session])),
-			).has(sessionId) || hasActiveTimeout;
-		wsHandler.sendTo(clientId, {
-			type: "status",
-			sessionId,
-			status: isProcessing ? "processing" : "idle",
-		});
 
 		const canUseOpenCodePoller = yield* shouldStartOpenCodePoller(sessionId);
 		if (

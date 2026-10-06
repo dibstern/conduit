@@ -232,9 +232,7 @@ describe("createRelayEventSink — translation", () => {
 				makeEvent("session.status", { sessionId: "ses-1", status: "busy" }),
 			),
 		);
-		expect(send.mock.calls).toEqual([
-			[{ type: "status", sessionId: "ses-1", status: "idle" }],
-		]);
+		expect(send).not.toHaveBeenCalled();
 		expect(clearTimeout).not.toHaveBeenCalled();
 	});
 

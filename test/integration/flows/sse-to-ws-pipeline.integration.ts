@@ -48,19 +48,16 @@ describe("Integration: SSE to WS Pipeline", () => {
 		});
 	});
 
-	it("sending a prompt produces status:processing then done", async () => {
+	it("sending a prompt starts a turn that ends in done", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// Should get processing status (sent immediately by the relay on message send)
-		const processing = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-			timeout: 10_000,
-		});
-		expect(processing["status"]).toBe("processing");
+		// The session's shell row shows the turn started
+		await client.waitForTurnStart(undefined, 10_000);
 
 		// The event translator maps session.updated(idle) → { type: "done", code: 0 }
 		// So we wait for "done" not "status: idle"

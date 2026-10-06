@@ -188,30 +188,14 @@ export function translateDomainEventToRelay(
 					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
 				});
 			}
-			// Claude stores idle just after the turn's done goes out. A client
-			// that connects in between is told the session is busy, and no
-			// later done reaches it, so the stored idle is announced too.
-			if (event.data.status === "idle")
-				return emit({
-					type: "status",
-					sessionId: event.sessionId,
-					status: "idle",
-				});
 			return silent(
-				"prompt handler owns lifecycle; terminal done/error covers completion",
+				"the shell row carries session status; terminal done/error covers completion",
 			);
 
-		case "session.compaction": {
-			const { state, detail, preTokens, postTokens } = event.data;
-			return emit({
-				type: "compaction",
-				sessionId: event.sessionId,
-				state,
-				detail,
-				...(preTokens != null ? { preTokens } : {}),
-				...(postTokens != null ? { postTokens } : {}),
-			});
-		}
+		case "session.compaction":
+			return silent(
+				"the shell row carries a compaction in progress; the transcript projects its outcome",
+			);
 
 		case "message.created":
 		case "message.removed":

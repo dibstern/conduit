@@ -52,23 +52,6 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("ViewSession RPC sends status to the requesting client", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-
-		const sessionId = client.getActiveSessionId();
-		if (!sessionId) throw new Error("No initial session");
-
-		client.clearReceived();
-		const switched = await client.viewSession(sessionId);
-		expect(switched["id"]).toBe(sessionId);
-
-		const status = await client.waitFor("status");
-		expect(status["status"]).toBe("idle");
-
-		await client.close();
-	});
-
 	it("new session only switches the requesting client", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();

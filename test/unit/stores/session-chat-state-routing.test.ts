@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { seedSessions } from "./session-fixtures.js";
+import { applySessionUpsert, seedSessions } from "./session-fixtures.js";
 
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
@@ -18,7 +18,7 @@ afterEach(() => {
 	sessionState.currentId = null;
 });
 
-it("routes status to the named background session", () => {
+it("a background session's busy row moves only that session's phase", () => {
 	seedSessions([
 		{ id: "A", title: "A", status: "idle" },
 		{ id: "B", title: "B", status: "idle" },
@@ -26,7 +26,7 @@ it("routes status to the named background session", () => {
 	sessionState.currentId = "A";
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
-	handleMessage({ type: "status", sessionId: "B", status: "processing" });
+	applySessionUpsert({ id: "B", title: "B", status: "busy" });
 	expect(b.activity.phase).toBe("processing");
 	expect(a.activity.phase).toBe("idle");
 });

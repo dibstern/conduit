@@ -10,8 +10,10 @@ import {
 	type MockCatalog,
 	type MockModelState,
 	sendMockDaemonList,
+	sendMockFamily,
 	sendMockModelState,
 	sendMockProjectSetting,
+	sendMockShellRowStatus,
 	sendMockShellSnapshot,
 	setMockRpcCatalog,
 	setMockRpcProjectSlug,
@@ -211,6 +213,11 @@ export async function mockRelayWebSocket(
 		setMockRpcProjectSlug(page, initialProject["current"]);
 	if (Array.isArray(initialShell?.["sessions"]))
 		sendMockShellSnapshot(page, initialShell["sessions"]);
+	const initialFamily = options.initMessages
+		.filter((message) => message.type === "session_family")
+		.pop();
+	if (Array.isArray(initialFamily?.["sessions"]))
+		sendMockFamily(page, initialFamily["sessions"]);
 	for (const message of options.initMessages) sendDaemonList(page, message);
 	const initDelay = options.initDelay ?? 0;
 	const msgDelay = options.messageDelay ?? 0;
@@ -233,6 +240,7 @@ export async function mockRelayWebSocket(
 		).filter(
 			(message) =>
 				message.type !== "shell_snapshot" &&
+				message.type !== "session_family" &&
 				!CATALOG_MESSAGE_TYPES.has(message.type) &&
 				!legacyModelState(message) &&
 				!DAEMON_LIST_TAGS.has(message.type),
@@ -338,6 +346,12 @@ export class WsMockControl {
 			sendMockShellSnapshot(this.page, msg["sessions"]);
 			return;
 		}
+		// Legacy fixture vocabulary: the family rides SubscribeSessionFamily
+		// (conduit-test-ni8.28).
+		if (msg.type === "session_family" && Array.isArray(msg["sessions"])) {
+			sendMockFamily(this.page, msg["sessions"]);
+			return;
+		}
 		if (sendDaemonList(this.page, msg)) return;
 		// Legacy fixture vocabulary for live project facts, which now ride
 		// SubscribeProjectSettings (conduit-test-ni8.15 / ni8.40).
@@ -367,9 +381,25 @@ export class WsMockControl {
 		if (!this._ws) throw new Error("WebSocket not connected yet");
 		this._context.activeSessionId =
 			new URL(this.page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;
+		// Legacy fixture vocabulary for session status, which now rides the
+		// shell row (conduit-test-ni8.35).
+		if (msg.type === "status") {
+			const sessionId =
+				typeof msg["sessionId"] === "string"
+					? msg["sessionId"]
+					: this._context.activeSessionId;
+			if (sessionId)
+				sendMockShellRowStatus(
+					this.page,
+					sessionId,
+					msg["status"] === "processing" ? "busy" : "idle",
+				);
+			return;
+		}
 		const normalized = normalizeMockRelayMessage(msg, this._context);
 		projectLegacyRelayMessage(this.page, normalized);
-		this._ws.send(JSON.stringify(normalized));
+		// The transcript projects a compaction's outcome; /ws has no arm for it.
+		if (msg.type !== "compaction") this._ws.send(JSON.stringify(normalized));
 	}
 
 	/** Send multiple messages with optional delay between them. */

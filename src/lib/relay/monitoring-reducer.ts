@@ -62,9 +62,6 @@ export function evaluateSession(
 			}
 			return { phase: { phase: "idle" }, effects };
 		}
-		if (current.phase === "idle") {
-			effects.push({ effect: "notify-busy", sessionId });
-		}
 		return {
 			phase:
 				current.phase === "busy-provider-covered"
@@ -86,7 +83,6 @@ export function evaluateSession(
 	switch (current.phase) {
 		case "idle": {
 			if (!isBusy) return { phase: current, effects: [] };
-			effects.push({ effect: "notify-busy", sessionId });
 			if (sse.kind === "active") {
 				return {
 					phase: {

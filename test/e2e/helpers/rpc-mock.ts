@@ -88,6 +88,8 @@ export class RpcMockControl {
 		{ ws: WebSocketRoute; id: string }
 	>();
 	shellRows: readonly unknown[] | null = null;
+	familyRows: readonly unknown[] | null = null;
+	private familySequence = 0;
 	catalog: MockCatalog = {};
 	private shellSequence = 0;
 	private readonly projectSettings = new Map<string, ProjectSetting>();
@@ -165,6 +167,27 @@ export class RpcMockControl {
 				{ _tag: "synchronized" },
 			]);
 		}
+	}
+
+	/** Replace the viewed family on the open SubscribeSessionFamily stream. */
+	setFamilyRows(rows: readonly unknown[]): void {
+		this.familyRows = rows;
+		this.familySequence++;
+		if (this.streams.has("SubscribeSessionFamily"))
+			this.sendChunk("SubscribeSessionFamily", this.initialFamilyFrames());
+	}
+
+	initialFamilyFrames(): readonly unknown[] {
+		return this.familyRows === null
+			? []
+			: [
+					{
+						_tag: "snapshot",
+						sequence: this.familySequence,
+						rows: this.familyRows,
+					},
+					{ _tag: "synchronized" },
+				];
 	}
 
 	/** Change the model settings GetModels reports, and make the app refetch
@@ -411,6 +434,7 @@ const pendingDaemonLists = new WeakMap<
 	Map<DaemonListTag, Record<string, unknown>>
 >();
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
+const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
 const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
@@ -488,6 +512,35 @@ export function sendMockShellSnapshot(
 	else pendingShellRows.set(page, rows);
 }
 
+/** Set an existing session row's status the way a live write does (ni8.35:
+ *  the shell row is the only server signal for a running turn). */
+export function sendMockShellRowStatus(
+	page: Page,
+	sessionId: string,
+	status: "busy" | "idle",
+): void {
+	const control = controls.get(page);
+	const rows = control?.shellRows ?? pendingShellRows.get(page) ?? [];
+	const existing = rows.find(
+		(row) => (row as { id?: string }).id === sessionId,
+	);
+	if (!existing) return;
+	const row = { ...(existing as object), id: sessionId, status };
+	if (control) control.upsertShellRow(row);
+	else
+		pendingShellRows.set(
+			page,
+			rows.map((candidate) => (candidate === existing ? row : candidate)),
+		);
+}
+
+/** Mock-only input: deliver the viewed family through SubscribeSessionFamily. */
+export function sendMockFamily(page: Page, rows: readonly unknown[]): void {
+	const control = controls.get(page);
+	if (control) control.setFamilyRows(rows);
+	else pendingFamilyRows.set(page, rows);
+}
+
 async function handleMessage(
 	ws: WebSocketRoute,
 	handlers: Record<string, RpcHandler>,
@@ -527,13 +580,15 @@ async function handleMessage(
 								control.initialSessionTodosFrames(
 									String(payload["sessionId"] ?? ""),
 								)
-						: raw.tag === "SubscribeProjectSettings"
-							? () => control.initialProjectSettingsFrames()
-							: isLiveOnlyStream(raw.tag)
-								? () => [{ _tag: "synchronized" }]
-								: daemonList
-									? () => daemonList
-									: undefined);
+						: raw.tag === "SubscribeSessionFamily"
+							? () => control.initialFamilyFrames()
+							: raw.tag === "SubscribeProjectSettings"
+								? () => control.initialProjectSettingsFrames()
+								: isLiveOnlyStream(raw.tag)
+									? () => [{ _tag: "synchronized" }]
+									: daemonList
+										? () => daemonList
+										: undefined);
 		if (stream) {
 			const sessionId = isSessionStream(raw.tag)
 				? String(raw.payload?.["sessionId"] ?? "")
@@ -647,6 +702,8 @@ export async function mockWsRpc(
 	});
 	const rows = pendingShellRows.get(page);
 	if (rows) control.setShellRows(rows);
+	const familyRows = pendingFamilyRows.get(page);
+	if (familyRows) control.setFamilyRows(familyRows);
 	for (const [tag, value] of pendingDaemonLists.get(page) ?? [])
 		control.setDaemonList(tag, value);
 	for (const setting of pendingProjectSettings.get(page) ?? [])

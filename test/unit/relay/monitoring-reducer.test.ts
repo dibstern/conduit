@@ -357,9 +357,7 @@ describe("evaluateSession", () => {
 			phase: "busy-provider-covered",
 			busySince: 1000,
 		});
-		expect(result.effects).toEqual([
-			{ effect: "notify-busy", sessionId: "claude-1" },
-		]);
+		expect(result.effects).toEqual([]);
 	});
 
 	it("keeps provider lifecycle coverage after grace and SSE deadlines expire", () => {
@@ -449,9 +447,7 @@ describe("evaluateSession", () => {
 		expect(result.state.sessions.get("claude-1")?.phase).toBe(
 			"busy-provider-covered",
 		);
-		expect(result.effects).toEqual([
-			{ effect: "notify-busy", sessionId: "claude-1" },
-		]);
+		expect(result.effects).toEqual([]);
 	});
 
 	it("idle + idle status → idle, no effects", () => {
@@ -465,7 +461,7 @@ describe("evaluateSession", () => {
 		expect(result.effects).toEqual([]);
 	});
 
-	it("idle + busy + SSE active → busy-sse-covered + notify-busy", () => {
+	it("idle + busy + SSE active → busy-sse-covered", () => {
 		const result = evaluateSession(
 			"s1",
 			{ phase: "idle" },
@@ -477,12 +473,10 @@ describe("evaluateSession", () => {
 			busySince: 1000,
 			lastSSEAt: 900,
 		});
-		expect(result.effects).toEqual([
-			{ effect: "notify-busy", sessionId: "s1" },
-		]);
+		expect(result.effects).toEqual([]);
 	});
 
-	it("idle + busy + no SSE → busy-grace + notify-busy", () => {
+	it("idle + busy + no SSE → busy-grace", () => {
 		const result = evaluateSession(
 			"s1",
 			{ phase: "idle" },
@@ -490,9 +484,7 @@ describe("evaluateSession", () => {
 			DEFAULT_CONFIG,
 		);
 		expect(result.phase).toEqual({ phase: "busy-grace", busySince: 1000 });
-		expect(result.effects).toEqual([
-			{ effect: "notify-busy", sessionId: "s1" },
-		]);
+		expect(result.effects).toEqual([]);
 	});
 
 	it("idle + retry status → treated as busy", () => {
@@ -505,10 +497,6 @@ describe("evaluateSession", () => {
 			DEFAULT_CONFIG,
 		);
 		expect(result.phase.phase).toBe("busy-grace");
-		expect(result.effects).toContainEqual({
-			effect: "notify-busy",
-			sessionId: "s1",
-		});
 	});
 
 	it("busy-grace + idle → idle + notify-idle", () => {
@@ -822,10 +810,6 @@ describe("evaluateAll", () => {
 			DEFAULT_CONFIG,
 		);
 		expect(result.state.sessions.get("s1")?.phase).toBe("busy-grace");
-		expect(result.effects).toContainEqual({
-			effect: "notify-busy",
-			sessionId: "s1",
-		});
 	});
 
 	it("deleted session with active poller emits stop-poller(session-deleted) and notify-idle", () => {

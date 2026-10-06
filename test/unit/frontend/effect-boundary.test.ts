@@ -103,12 +103,12 @@ describe("Frontend Effect boundary", () => {
 			text: "a",
 		});
 		const r2 = await validateIncomingMessage({
-			type: "status",
+			type: "done",
 			sessionId: "s2",
-			status: "idle",
+			code: 0,
 		});
 		expect(r1).toHaveProperty("type", "delta");
-		expect(r2).toHaveProperty("type", "status");
+		expect(r2).toHaveProperty("type", "done");
 	});
 
 	it("preloads and decodes synchronously", async () => {

@@ -614,17 +614,13 @@ const sendViaEngine = (
 		yield* dispatchEngineTurn(resolvedInput, providerId, driver, sendTurnInput);
 	});
 
-/** The handoff is where a turn starts working: status and its timeout. */
+/** The handoff is where a turn starts working: arm its timeout. The browser's
+ *  processing phase follows the session's shell row (ni8.35). */
 const startProcessing = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const { sessionId } = input;
-		wsHandler.sendToSession(sessionId, {
-			type: "status",
-			sessionId,
-			status: "processing",
-		});
 		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
 			Effect.sync(() => {
 				log.warn(

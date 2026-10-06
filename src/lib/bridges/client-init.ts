@@ -18,12 +18,10 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import {
 	getDefaultModel,
 	getDefaultVariant,
-	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
-import { busySessionIds } from "../session-busy.js";
 import type { ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
@@ -106,25 +104,12 @@ const switchClientToSessionForInitEffect = (
 		if (!sessionId) return;
 
 		const wsHandler = yield* WebSocketHandlerTag;
-		const hasActiveTimeout = yield* hasActiveProcessingTimeout(sessionId);
 
 		wsHandler.setClientSession(clientId, sessionId);
 
 		const sessionService = yield* SessionManagerServiceTag;
 		const family = yield* sessionService.getSessionFamily(sessionId);
 		wsHandler.sendTo(clientId, family);
-		// The persisted family (children included) is the live status. The
-		// poller only holds a copy up to one poll old, which would leave a
-		// just-stopped session reading busy after a reload.
-		const isProcessing =
-			busySessionIds(
-				new Map(family.sessions.map((session) => [session.id, session])),
-			).has(sessionId) || hasActiveTimeout;
-		wsHandler.sendTo(clientId, {
-			type: "status",
-			sessionId,
-			status: isProcessing ? "processing" : "idle",
-		});
 		return family;
 	});
 

@@ -1,10 +1,6 @@
-// Verifies that when the status poller detects a session transition (idle→busy
-// or busy→idle), the relay sends `{ type: "status", status: "processing" }`
-// and `{ type: "done" }` to browser clients viewing that session.
-//
-// This was the root cause of the bouncing-bar not appearing: the status
-// poller broadcast a `session_list` (which updates the sidebar spinner) but
-// never sent a `status` message to update `isProcessing`.
+// Verifies that when the status poller detects a busy→idle transition, the
+// relay sends `{ type: "done" }` to browser clients viewing that session.
+// Busy itself reaches clients only as the session's shell row (ni8.35).
 
 import { randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
@@ -343,7 +339,7 @@ async function createTestHarness(): Promise<TestHarness> {
 	};
 }
 
-describe("Status poller → browser processing/done transitions", () => {
+describe("Status poller → browser done transitions", () => {
 	let harness: TestHarness;
 	const publishStatus = (sessionId: string, status: "busy" | "idle") => {
 		harness.mock.sessionStatuses[sessionId] = { type: status };
@@ -391,32 +387,6 @@ describe("Status poller → browser processing/done transitions", () => {
 		);
 	});
 
-	it("sends status:processing to clients viewing a session that becomes busy", async () => {
-		const client = await harness.connectClient();
-		await client.waitForInitialState();
-
-		// View session A
-		await client.viewSession("sess-A");
-		client.clearReceived();
-
-		// Persist session A's status through the provider event stream.
-		publishStatus("sess-A", "busy");
-
-		// Wait for status poller to detect the change (polls every 500ms)
-		const status = await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
-
-		// Reset for cleanup
-		publishStatus("sess-A", "idle");
-		// Wait for idle transition to settle
-		await client.waitFor("done", { timeout: 3000 });
-
-		await client.close();
-	});
-
 	it("sends done to clients viewing a session that becomes idle", async () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
@@ -426,10 +396,10 @@ describe("Status poller → browser processing/done transitions", () => {
 
 		// First make session B busy
 		publishStatus("sess-B", "busy");
-		await client.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
+		await vi.waitFor(
+			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
+			{ timeout: 3000 },
+		);
 		client.clearReceived();
 
 		// Now make session B idle again
@@ -441,59 +411,23 @@ describe("Status poller → browser processing/done transitions", () => {
 		await client.close();
 	});
 
-	it("does NOT send status:processing to clients viewing a different session", async () => {
-		const clientA = await harness.connectClient();
-		const clientB = await harness.connectClient();
-		await clientA.waitForInitialState();
-		await clientB.waitForInitialState();
-
-		// Client A views session A, Client B views session B
-		await clientA.viewSession("sess-A");
-		await clientB.viewSession("sess-B");
-		clientA.clearReceived();
-		clientB.clearReceived();
-
-		// Only session A becomes busy
-		publishStatus("sess-A", "busy");
-
-		// Client A should get status:processing
-		await clientA.waitFor("status", {
-			timeout: 3000,
-			predicate: (m) => m["status"] === "processing",
-		});
-
-		// Client B must receive no processing status during this window.
-		await new Promise((r) => setTimeout(r, 150));
-		const bStatuses = clientB
-			.getReceivedOfType("status")
-			.filter((m) => m["status"] === "processing");
-		expect(bStatuses).toHaveLength(0);
-
-		// Cleanup
-		publishStatus("sess-A", "idle");
-		await clientA.waitFor("done", { timeout: 3000 });
-
-		await clientA.close();
-		await clientB.close();
-	});
-
 	it("shares status-poller state with the relay Effect runtime", async () => {
 		publishStatus("sess-A", "busy");
 
 		await vi.waitFor(
-			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
+			async () =>
+				expect(
+					await harness.relay.effectRuntime.runtime.runPromise(
+						Effect.gen(function* () {
+							const ref = yield* PollerStateTag;
+							const state = yield* Ref.get(ref);
+							return state.previousStatuses["sess-A"]?.type;
+						}),
+					),
+				).toBe("busy"),
 			{ timeout: 3000 },
 		);
-
-		const relayRuntimeStatus =
-			await harness.relay.effectRuntime.runtime.runPromise(
-				Effect.gen(function* () {
-					const ref = yield* PollerStateTag;
-					const state = yield* Ref.get(ref);
-					return state.previousStatuses["sess-A"]?.type;
-				}),
-			);
-		expect(relayRuntimeStatus).toBe("busy");
+		expect(harness.relay.isAnySessionProcessing()).toBe(true);
 
 		publishStatus("sess-A", "idle");
 		await vi.waitFor(

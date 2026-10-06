@@ -1,7 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import {
+	requireRelayControl,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
 
 const goals = new WeakMap<Page, SessionGoalChangedPayload>();
 
@@ -23,7 +27,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 			};
 			goals.set(world.page, facts);
 			const relay = requireRelayControl(world.page);
-			relay.sendMessage({ type: "status", sessionId, status: "processing" });
+			setSessionRowStatus(world.page, sessionId, "busy", { goalState: facts });
 			relay.sendMessage({ type: "session.goal_changed", ...facts });
 		},
 	},
@@ -54,10 +58,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const facts = goals.get(world.page);
 			if (!facts) throw new Error("No goal was set");
-			requireRelayControl(world.page).sendMessage({
-				type: "status",
-				sessionId: facts.sessionId,
-				status: "idle",
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
 			});
 		},
 	},
@@ -73,10 +75,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 			};
 			goals.set(world.page, facts);
 			const relay = requireRelayControl(world.page);
-			relay.sendMessage({
-				type: "status",
-				sessionId: facts.sessionId,
-				status: "idle",
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
 			});
 			relay.sendMessage({ type: "session.goal_changed", ...facts });
 		},
@@ -93,10 +93,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 			};
 			goals.set(world.page, facts);
 			const relay = requireRelayControl(world.page);
-			relay.sendMessage({
-				type: "status",
-				sessionId: facts.sessionId,
-				status: "idle",
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
 			});
 			relay.sendMessage({ type: "session.goal_changed", ...facts });
 		},
@@ -122,10 +120,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 			};
 			goals.set(world.page, facts);
 			const relay = requireRelayControl(world.page);
-			relay.sendMessage({
-				type: "status",
-				sessionId: facts.sessionId,
-				status: "idle",
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
 			});
 			relay.sendMessage({ type: "session.goal_changed", ...facts });
 		},
@@ -156,25 +152,34 @@ export const sessionGoalHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const subtitle = world.page.getByTestId("session-goal-subtitle");
 			await expect(subtitle).toHaveText(match[2] ?? "");
-			const presentation = await subtitle.evaluate((el, amber) => {
-				const style = getComputedStyle(el);
-				const expected = new Option().style;
-				const label = el.textContent?.trim() ?? "";
-				const token = amber
-					? "--color-status-amber"
-					: label.startsWith("Goal met")
-						? "--color-status-green"
-						: "--color-status-violet";
-				expected.color = style.getPropertyValue(token);
-				const text = el.querySelector("span");
-				return {
-					color: style.color,
-					tone: expected.color,
-					icon: el.querySelector("svg") !== null,
-					ellipsis: text ? getComputedStyle(text).textOverflow : null,
-				};
-			}, match[1] !== undefined);
-			expect(presentation.color).toBe(presentation.tone);
+			// The tone follows the shell row, which arrives on its own socket,
+			// so the text can settle before the colour does.
+			const read = () =>
+				subtitle.evaluate((el, amber) => {
+					const style = getComputedStyle(el);
+					const expected = new Option().style;
+					const label = el.textContent?.trim() ?? "";
+					const token = amber
+						? "--color-status-amber"
+						: label.startsWith("Goal met")
+							? "--color-status-green"
+							: "--color-status-violet";
+					expected.color = style.getPropertyValue(token);
+					const text = el.querySelector("span");
+					return {
+						color: style.color,
+						tone: expected.color,
+						icon: el.querySelector("svg") !== null,
+						ellipsis: text ? getComputedStyle(text).textOverflow : null,
+					};
+				}, match[1] !== undefined);
+			await expect
+				.poll(async () => {
+					const { color, tone } = await read();
+					return color === tone ? "toned" : `${color} is not ${tone}`;
+				})
+				.toBe("toned");
+			const presentation = await read();
 			expect(presentation.icon).toBe(true);
 			expect(presentation.ellipsis).toBe("ellipsis");
 			const titleBox = await world.page
