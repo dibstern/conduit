@@ -30,7 +30,10 @@ export class SidebarPage {
 	}
 
 	async clickSession(id: string): Promise<void> {
-		await this.sessionList.locator(`[data-session-id="${id}"]`).click();
+		// The row centre can land on the hover-revealed "Mark unread" button.
+		await this.sessionList
+			.locator(`[data-session-id="${id}"] .session-item-title`)
+			.click();
 	}
 
 	/** `+` opens a draft; the session exists once its first message is sent. */
@@ -47,7 +50,7 @@ export class SidebarPage {
 		const row = this.sessionList.locator(`[data-session-id="${id}"]`);
 		await expect(row).toHaveAttribute("aria-label", /^Done/);
 		if (!(await row.isVisible())) return;
-		await row.click();
+		await row.locator(".session-item-title").click();
 		await expect(row).not.toHaveAttribute("aria-label", /^Done/);
 	}
 
