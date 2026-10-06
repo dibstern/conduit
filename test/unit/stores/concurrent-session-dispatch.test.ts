@@ -4,8 +4,8 @@ import {
 	seedSessions,
 } from "./session-fixtures.js";
 // Verifies that interleaved per-session events for sessions A/B/C are routed
-// independently. Covers: live event buffering during replay, notification_event
-// non-routing, prod missing-sessionId drop, and unknown-session drop.
+// independently. Covers: live event buffering during replay, prod
+// missing-sessionId drop, and unknown-session drop.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,9 +43,6 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
-	getOrCreateSessionSlot,
-	isStreaming,
-	phaseToStreaming,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -90,29 +87,6 @@ afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	clearSessionState();
-});
-
-describe("notification_event — non-routing (global dispatch)", () => {
-	it("notification_event is NOT a per-session event", () => {
-		const msg = {
-			type: "notification_event",
-			eventType: "done",
-			sessionId: "session-a",
-		} as RelayMessage;
-		// notification_event should NOT be classified as per-session
-		expect(isPerSessionEvent(msg)).toBe(false);
-	});
-
-	it("notification_event does not update chat state", () => {
-		phaseToStreaming(getOrCreateSessionSlot("session-a").activity);
-		handleMessage({
-			type: "notification_event",
-			eventType: "done",
-		});
-		// Chat state should be unchanged — notification_event doesn't route
-		// through routePerSession
-		expect(isStreaming()).toBe(true);
-	});
 });
 
 describe("Missing sessionId — dev throws, prod drops", () => {
@@ -230,7 +204,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 	});
 
 	it("returns false for global event types", () => {
-		const globalTypes = ["session_list", "model_info", "notification_event"];
+		const globalTypes = ["session_list", "model_info"];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;
 			expect(isPerSessionEvent(msg)).toBe(false);

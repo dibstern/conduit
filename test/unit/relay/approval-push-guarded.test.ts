@@ -17,6 +17,10 @@ import { Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import {
+	AlertsLive,
+	type AlertsTag,
+} from "../../../src/lib/domain/relay/Services/alerts.js";
+import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -85,6 +89,7 @@ const run = async (
 		| PendingInteractionServiceTag
 		| OverridesStateTag
 		| SessionManagerServiceTag
+		| AlertsTag
 	>,
 ): Promise<string[]> => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-approval-push-"));
@@ -97,6 +102,7 @@ const run = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		silentBus,
+		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		Layer.succeed(SessionManagerServiceTag, {

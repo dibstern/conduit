@@ -6,6 +6,7 @@
 import type { Page } from "@playwright/test";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
+import { sendMockInputDraft } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const SESSION_ID = "sess-pwa";
@@ -111,7 +112,7 @@ test.describe("PWA background/resume", () => {
 		page,
 		relayUrl,
 	}) => {
-		const ws = await mockRelayWebSocket(page, {
+		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
@@ -124,10 +125,9 @@ test.describe("PWA background/resume", () => {
 		const composer = page.locator("#input");
 		await composer.fill("the newest thing I typed");
 
-		// A reconnect replays the server's draft, which lags the last keystrokes
-		// by at least the 300 ms sync debounce.
-		ws.sendMessage({
-			type: "input_sync",
+		// Another tab's draft lags the last keystrokes by at least the 300 ms
+		// sync debounce.
+		await sendMockInputDraft(page, SESSION_ID, {
 			text: "the newest thi",
 			from: "other",
 		});

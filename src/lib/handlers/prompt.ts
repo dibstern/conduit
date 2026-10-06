@@ -2,6 +2,7 @@ import { Data, Effect } from "effect";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
@@ -16,8 +17,8 @@ import {
 	isModelUserSelected,
 } from "../domain/relay/Services/session-overrides-state.js";
 
-// Stores the last input_sync text per session so that newly connecting clients
-// (e.g. opening on a different device) receive the current draft.
+// Stores the last draft per session so that a tab switching to it (e.g. on a
+// different device) reads the current draft in its ViewSession response.
 
 const sessionInputDrafts = new Map<string, string>();
 
@@ -234,21 +235,12 @@ export const syncInputDraftForSession = ({
 	from?: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		// Store the draft so newly connecting clients receive it
+		// Store the draft so a tab switching to the session reads it
 		if (text) {
 			sessionInputDrafts.set(sessionId, text);
 		} else {
 			sessionInputDrafts.delete(sessionId);
 		}
 
-		const targets = wsHandler.getClientsForSession(sessionId);
-		for (const targetId of targets) {
-			wsHandler.sendTo(targetId, {
-				type: "input_sync",
-				text,
-				...(from ? { from } : {}),
-			});
-		}
+		yield* publishInputDraft({ sessionId, text, ...(from ? { from } : {}) });
 	});

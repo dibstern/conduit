@@ -101,11 +101,7 @@ test.describe("E2E Smoke Test", () => {
 				(frame) =>
 					(frame["type"] === "session_switched" &&
 						frame["sessionId"] === unknownId) ||
-					(frame["type"] === "session_family" &&
-						frame["rootId"] === unknownId) ||
-					(frame["type"] === "notification_event" &&
-						frame["eventType"] === "session_viewed" &&
-						frame["sessionId"] === unknownId),
+					(frame["type"] === "session_family" && frame["rootId"] === unknownId),
 			),
 		).toEqual([]);
 	});

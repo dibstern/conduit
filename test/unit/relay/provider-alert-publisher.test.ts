@@ -1,10 +1,15 @@
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Chunk, Effect, PubSub, Queue } from "effect";
 import { expect, it, vi } from "vitest";
+import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	AlertLedgerTag,
 	makeAlertLedger,
 } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
+import {
+	AlertsLive,
+	AlertsTag,
+} from "../../../src/lib/domain/relay/Services/alerts.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -18,9 +23,9 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 		failed: [],
 		expired: [],
 	}));
-	const broadcast = vi.fn();
-	await Effect.runPromise(
+	const alerts = await Effect.runPromise(
 		Effect.gen(function* () {
+			const subscribed = yield* PubSub.subscribe(yield* AlertsTag);
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at) VALUES ('s1', 's1', 'claude', 1, 1)`;
 			yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, parent_id) VALUES ('child', 'child', 'claude', 1, 1, 's1')`;
@@ -29,7 +34,6 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 				wsHandler: {
 					sendToSession: vi.fn(),
 					getClientsForSession: () => [],
-					broadcast,
 				},
 				pushManager: { sendToAll },
 				log: createSilentLogger(),
@@ -52,7 +56,12 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 						deps,
 					).pipe(Effect.provideService(AlertLedgerTag, ledger));
 			}
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			return Chunk.toArray(yield* Queue.takeAll(subscribed));
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(AlertsLive),
+			Effect.provide(makePersistenceEffectLayer(":memory:")),
+		),
 	);
 	expect(sendToAll).toHaveBeenCalledTimes(2);
 	expect(sendToAll).toHaveBeenNthCalledWith(
@@ -63,7 +72,14 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 		2,
 		expect.objectContaining({ alertId: '["s1","m2","done"]' }),
 	);
-	expect(broadcast).toHaveBeenCalledWith(
-		expect.objectContaining({ alertId: '["s1","m1","done"]' }),
+	expect(alerts).toContainEqual(
+		expect.objectContaining<Partial<Alert>>({
+			_tag: "alert",
+			kind: "done",
+			alertId: '["s1","m1","done"]',
+			sessionId: "s1",
+		}),
 	);
+	// Subagent completion is suppressed in-app as well as on push.
+	expect(alerts.map((alert) => alert.sessionId)).not.toContain("child");
 });

@@ -469,7 +469,7 @@ export async function persistInputDraft(): Promise<boolean> {
 	return (await persistInputDraftHook?.()) ?? true;
 }
 
-/** Handle an incoming input_sync message from another tab. */
+/** Apply a draft typed in another tab, or the one read at session switch. */
 export function handleInputSyncReceived(msg: {
 	text?: string | undefined;
 	from?: string | undefined;

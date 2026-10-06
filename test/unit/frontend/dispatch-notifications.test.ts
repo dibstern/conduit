@@ -69,6 +69,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	setClientCount: vi.fn(),
 }));
 
+import { applyAlert } from "../../../src/lib/frontend/stores/alerts.js";
 import {
 	clearMessages,
 	getOrCreateSessionActivity,
@@ -77,6 +78,7 @@ import {
 	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 
 beforeEach(() => {
@@ -89,6 +91,7 @@ beforeEach(() => {
 	]);
 	clearMessages();
 	triggerNotificationsMock.mockClear();
+	vi.mocked(showToast).mockClear();
 });
 
 afterEach(() => {
@@ -120,34 +123,32 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 	});
 });
 
-describe("handleMessage calls triggerNotifications for notification_event (cross-session)", () => {
-	it("calls triggerNotifications with synthetic done message for notification_event", () => {
-		handleMessage({
-			type: "notification_event",
-			eventType: "done",
-		});
+describe("applyAlert fires the ding for a session no tab is viewing", () => {
+	it("calls triggerNotifications with a synthetic done message", () => {
+		applyAlert({ _tag: "alert", kind: "done", alertId: "a1" });
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "done" }),
+			expect.objectContaining({ type: "done", alertId: "a1" }),
 		);
 	});
 
-	it("calls triggerNotifications with synthetic error message for notification_event", () => {
-		handleMessage({
-			type: "notification_event",
-			eventType: "error",
+	it("calls triggerNotifications and toasts for an error", () => {
+		applyAlert({
+			_tag: "alert",
+			kind: "error",
+			alertId: "a2",
 			message: "Something failed",
 		});
-		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "error", message: "Something failed" }),
 		);
+		expect(showToast).toHaveBeenCalledOnce();
 	});
 
-	it("threads sessionId from notification_event to triggerNotifications", () => {
-		handleMessage({
-			type: "notification_event",
-			eventType: "done",
+	it("threads sessionId and alertId to triggerNotifications", () => {
+		applyAlert({
+			_tag: "alert",
+			kind: "done",
 			sessionId: "sess-xyz",
 			alertId: "turn-1:done",
 		});
@@ -160,15 +161,16 @@ describe("handleMessage calls triggerNotifications for notification_event (cross
 		);
 	});
 
-	it("does NOT update chat state for notification_event (only triggers notification)", () => {
+	it("does NOT update chat state (only triggers notification)", () => {
 		phaseToStreaming(getOrCreateSessionActivity("test-session"));
 
-		handleMessage({
-			type: "notification_event",
-			eventType: "done",
+		applyAlert({
+			_tag: "alert",
+			kind: "done",
+			sessionId: "test-session",
+			alertId: "a3",
 		});
 
-		// Chat state should be unchanged — notification_event doesn't call handleDone
 		expect(isProcessing()).toBe(true);
 		expect(isStreaming()).toBe(true);
 	});

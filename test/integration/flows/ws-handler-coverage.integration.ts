@@ -104,7 +104,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	it("input_sync broadcasts to clients", async () => {
+	it("a draft reaches another tab following the session", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
@@ -114,12 +114,16 @@ describe("Integration: WS Handler Coverage", () => {
 		await client2.viewSession(sessionId);
 		client1.clearReceived();
 		client2.clearReceived();
+		await client2.subscribeInputDraft(sessionId);
 
 		await client1.syncInputDraft("typing something", {
 			sessionId,
 			originId: "browser-tab-a",
 		});
-		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
+		const msg = await client2.waitFor("input_draft", {
+			timeout: 3000,
+			predicate: (m) => m["_tag"] === "draft",
+		});
 		expect(msg["text"]).toBe("typing something");
 		expect(msg["from"]).toBe("browser-tab-a");
 

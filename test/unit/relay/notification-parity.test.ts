@@ -26,7 +26,7 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(false);
-		expect(result.crossSessionPayload).toBeUndefined();
+		expect(result.alert).toBeUndefined();
 	});
 
 	it("root done without viewers → push yes, cross-session yes with payload", () => {
@@ -38,9 +38,9 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toEqual({
-			type: "notification_event",
-			eventType: "done",
+		expect(result.alert).toEqual({
+			_tag: "alert",
+			kind: "done",
 			alertId: "turn-1:done",
 			sessionId: "s1",
 		});
@@ -60,9 +60,9 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toEqual({
-			type: "notification_event",
-			eventType: "error",
+		expect(result.alert).toEqual({
+			_tag: "alert",
+			kind: "error",
 			alertId: "turn-1:error",
 			message: "Something broke",
 			sessionId: "s1",
@@ -78,7 +78,7 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(false);
 		expect(result.broadcastCrossSession).toBe(false);
-		expect(result.crossSessionPayload).toBeUndefined();
+		expect(result.alert).toBeUndefined();
 	});
 
 	it("subagent error → NOT suppressed (errors always notify)", () => {
@@ -95,9 +95,9 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toMatchObject({
-			type: "notification_event",
-			eventType: "error",
+		expect(result.alert).toMatchObject({
+			_tag: "alert",
+			kind: "error",
 			alertId: "turn-1:error",
 			message: "subagent failed",
 			sessionId: "sub-1",
@@ -113,7 +113,7 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(false);
 		expect(result.broadcastCrossSession).toBe(false);
-		expect(result.crossSessionPayload).toBeUndefined();
+		expect(result.alert).toBeUndefined();
 	});
 
 	it("error with viewers (route send) → push yes, cross-session no", () => {
@@ -130,7 +130,7 @@ describe("notification parity contract", () => {
 		);
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(false);
-		expect(result.crossSessionPayload).toBeUndefined();
+		expect(result.alert).toBeUndefined();
 	});
 
 	it("non-notifiable tool_result → no push, no cross-session", () => {

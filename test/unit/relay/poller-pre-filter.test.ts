@@ -26,7 +26,7 @@ describe("classifyPollerBatch", () => {
 	it("returns hasContentActivity false for metadata-only batch", () => {
 		const events = [
 			{ type: "session_list" },
-			{ type: "input_sync", text: "" },
+			{ type: "instance_update", instanceId: "i1" },
 		] as RelayMessage[];
 		expect(classifyPollerBatch(events).hasContentActivity).toBe(false);
 	});

@@ -91,19 +91,25 @@ describe("Integration: Multi-Client", () => {
 		await client2.close();
 	});
 
-	it("input_sync from one client reaches the other", async () => {
+	it("a draft from one client reaches the other", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 		client1.clearReceived();
 		client2.clearReceived();
+		const sessionId = client1.getActiveSessionId();
+		if (!sessionId) throw new Error("Expected active session after init");
+		await client2.subscribeInputDraft(sessionId);
 
 		await client1.syncInputDraft("hello from client1", {
 			originId: "browser-tab-a",
 		});
 
-		const msg = await client2.waitFor("input_sync", { timeout: 3000 });
+		const msg = await client2.waitFor("input_draft", {
+			timeout: 3000,
+			predicate: (m) => m["_tag"] === "draft",
+		});
 		expect(msg["text"]).toBe("hello from client1");
 		expect(msg["from"]).toBe("browser-tab-a");
 

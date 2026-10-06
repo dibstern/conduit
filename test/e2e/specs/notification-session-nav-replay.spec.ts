@@ -2,7 +2,7 @@
 // Full-pipeline test: real relay + MockOpenCodeServer (no WS mock).
 //
 // Proves the complete path:
-//   SSE event → relay event pipeline → notification_event WS broadcast →
+//   SSE event → relay event pipeline → alert on SubscribeAlerts →
 //   frontend receives it → SW message → switchToSession → ViewSession RPC.
 //
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
@@ -23,10 +23,29 @@ function findTargetSessionId(recording: OpenCodeRecording): string | undefined {
 	return undefined;
 }
 
+/** True when a received RPC frame carries an error alert for `sessionId`. */
+function isErrorAlertFor(frame: string, sessionId: string): boolean {
+	try {
+		const msg = JSON.parse(frame);
+		return (
+			msg._tag === "Chunk" &&
+			Array.isArray(msg.values) &&
+			msg.values.some(
+				(value: { _tag?: string; kind?: string; sessionId?: string }) =>
+					value._tag === "alert" &&
+					value.kind === "error" &&
+					value.sessionId === sessionId,
+			)
+		);
+	} catch {
+		return false;
+	}
+}
+
 test.use({ recording: "chat-simple" });
 
 test.describe("Notification → session navigation (replay)", () => {
-	test("notification_event fires for unwatched session error", async ({
+	test("an alert fires for unwatched session error", async ({
 		page,
 		relayUrl,
 		mockServer,
@@ -60,7 +79,7 @@ test.describe("Notification → session navigation (replay)", () => {
 		// session.error is translated by the event translator into an
 		// { type: "error", ... } relay message, which is notification-worthy.
 		// Since no browser client is viewing this session, the pipeline
-		// drops the message and broadcasts a notification_event instead.
+		// drops the message and publishes an alert instead.
 		const TARGET = "ses_notification_target";
 		mockServer.injectSSEEvents([
 			{
@@ -75,26 +94,12 @@ test.describe("Notification → session navigation (replay)", () => {
 			},
 		]);
 
-		// Wait for notification_event to arrive via WS.
+		// Wait for the alert to arrive on the SubscribeAlerts stream.
 		await expect
-			.poll(
-				() => {
-					return receivedFrames.some((f) => {
-						try {
-							const msg = JSON.parse(f);
-							return (
-								msg.type === "notification_event" && msg.sessionId === TARGET
-							);
-						} catch {
-							return false;
-						}
-					});
-				},
-				{
-					timeout: 5000,
-					message: "notification_event with target sessionId not received",
-				},
-			)
+			.poll(() => receivedFrames.some((f) => isErrorAlertFor(f, TARGET)), {
+				timeout: 5000,
+				message: "alert with target sessionId not received",
+			})
 			.toBe(true);
 
 		// Simulate SW notification click → navigate_to_session.
@@ -140,7 +145,7 @@ test.describe("Notification → session navigation (replay)", () => {
 		await expect(page).toHaveURL(new RegExp(`/s/${TARGET}`));
 	});
 
-	test("no notification_event when session HAS viewers", async ({
+	test("no alert when session HAS viewers", async ({
 		page,
 		relayUrl,
 		mockServer,
@@ -191,7 +196,7 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// Inject a session.error for the session the browser IS viewing.
 		// Because there ARE viewers, the pipeline should send the error
-		// directly to the session (not broadcast notification_event).
+		// directly to the session (not publish an alert).
 		mockServer.injectSSEEvents([
 			{
 				type: "session.error",
@@ -208,22 +213,9 @@ test.describe("Notification → session navigation (replay)", () => {
 		// No notification for the watched session may arrive during this window.
 		await page.waitForTimeout(1500);
 
-		// Filter frames received AFTER injection for an error notification_event
-		// targeting the watched session. There should be none. The relay's own
-		// "session_viewed" broadcast can land late in this window and is unrelated.
+		// Filter frames received AFTER injection for an error alert targeting
+		// the watched session. There should be none.
 		const newFrames = receivedFrames.slice(frameCountBefore);
-		const notifEvents = newFrames.filter((f) => {
-			try {
-				const msg = JSON.parse(f);
-				return (
-					msg.type === "notification_event" &&
-					msg.eventType === "error" &&
-					msg.sessionId === watchedId
-				);
-			} catch {
-				return false;
-			}
-		});
-		expect(notifEvents).toHaveLength(0);
+		expect(newFrames.filter((f) => isErrorAlertFor(f, watchedId))).toEqual([]);
 	});
 });

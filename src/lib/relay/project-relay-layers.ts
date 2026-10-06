@@ -26,6 +26,7 @@ import {
 	AlertLedgerLive,
 	AlertLedgerTag,
 } from "../domain/relay/Services/alert-ledger.js";
+import { AlertsLive, AlertsTag } from "../domain/relay/Services/alerts.js";
 import { DaemonSessionQueryServiceLive } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import {
@@ -231,6 +232,7 @@ export function createProjectRelayLayers({
 	const providerRuntimeIngestionLayer = Layer.unwrapEffect(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
+			const alerts = yield* AlertsTag;
 			const sql = yield* SqlClient.SqlClient;
 			const log = yield* LoggerTag;
 			return makeProviderRuntimeIngestionLive({
@@ -246,6 +248,7 @@ export function createProjectRelayLayers({
 						}).pipe(
 							Effect.provideService(SqlClient.SqlClient, sql),
 							Effect.provideService(AlertLedgerTag, ledger),
+							Effect.provideService(AlertsTag, alerts),
 						),
 				},
 			});
@@ -256,6 +259,9 @@ export function createProjectRelayLayers({
 				persistenceEffectLayer,
 				SessionEventBusLive,
 				alertLedgerLayer,
+				// The same reference makeRelayStateLive merges, so it memoizes to the
+				// one PubSub SubscribeAlerts reads.
+				AlertsLive,
 				loggerLayer,
 			),
 		),

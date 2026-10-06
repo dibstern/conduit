@@ -1,8 +1,13 @@
-import { Effect, Layer } from "effect";
+import { Chunk, Effect, Layer, PubSub, Queue } from "effect";
+import type { Alert } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type AlertLedger,
 	AlertLedgerTag,
 } from "../../src/lib/domain/relay/Services/alert-ledger.js";
+import {
+	AlertsLive,
+	AlertsTag,
+} from "../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -33,23 +38,38 @@ export function makeSSETestServices() {
 	const alertLedger: AlertLedger = {
 		deliver: (_alert, send) => send.pipe(Effect.as(true)),
 	};
+	const alerts = Effect.runSync(AlertsTag.pipe(Effect.provide(AlertsLive)));
 	const layer = Layer.mergeAll(
 		Layer.succeed(AlertLedgerTag, alertLedger),
+		Layer.succeed(AlertsTag, alerts),
 		Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
 		makeOverridesStateLive(),
 		Layer.succeed(SessionManagerServiceTag, sessionService),
 		Layer.succeed(ProjectSettingsTag, projectSettings),
 	);
-	return { pendingInteractions, projectSettings, sessionService, layer };
+	return {
+		pendingInteractions,
+		projectSettings,
+		sessionService,
+		alerts,
+		layer,
+	};
 }
 
+/** Runs one SSE event and returns the alerts it published. */
 export async function runSSEEvent(
 	deps: SSEWiringDeps,
 	event: Parameters<typeof handleSSEEventEffect>[1],
 	services = makeSSETestServices(),
-) {
-	await Effect.runPromise(
-		handleSSEEventEffect(deps, event).pipe(Effect.provide(services.layer)),
+): Promise<Alert[]> {
+	return Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const seen = yield* PubSub.subscribe(services.alerts);
+				yield* handleSSEEventEffect(deps, event);
+				return Chunk.toArray(yield* Queue.takeAll(seen));
+			}),
+		).pipe(Effect.provide(services.layer)),
 	);
 }
 

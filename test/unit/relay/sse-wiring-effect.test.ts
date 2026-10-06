@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -34,6 +35,7 @@ const permissionAskedEvent = (
 
 const makeEffectLayer = () =>
 	Layer.mergeAll(
+		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		Layer.succeed(SessionManagerServiceTag, {
@@ -93,6 +95,7 @@ describe("handleSSEEventEffect", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.mergeAll(
+						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
 						Layer.succeed(SessionManagerServiceTag, {
@@ -133,6 +136,7 @@ describe("handleSSEEventEffect", () => {
 			handleSSEEventEffect(effectDeps, event).pipe(
 				Effect.provide(
 					Layer.mergeAll(
+						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
 						Layer.succeed(SessionManagerServiceTag, {

@@ -132,6 +132,18 @@ const makeSubscriptions = (
 		resumeStream(() =>
 			sockets.control.SubscribeProjectSettings({ projectSlug }),
 		),
+	/** Done/error alerts for sessions no tab is viewing. Live-only: a re-issue
+	 *  never replays one, so a reconnect cannot re-fire a ding. */
+	alerts: () =>
+		resumeStream(() => sockets.control.SubscribeAlerts({ projectSlug })),
+	/** One session's composer draft as other tabs type it. Live-only. */
+	inputDraft: (options: { readonly sessionId: string }) =>
+		resumeStream(() =>
+			sockets.control.SubscribeInputDraft({
+				projectSlug,
+				sessionId: options.sessionId,
+			}),
+		),
 	/**
 	 * The daemon's instance and project lists. Daemon-global, so neither takes
 	 * the project; low-rate, so both ride the control socket.

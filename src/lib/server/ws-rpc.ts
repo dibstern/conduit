@@ -6,7 +6,9 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
+import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
+import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
@@ -237,6 +239,9 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			),
 		),
 	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeAlerts: () => Rpc.fork(subscribeAlerts()),
+	SubscribeInputDraft: (request) =>
+		Rpc.fork(subscribeInputDraft(request.sessionId)),
 	SubscribeInstances: () =>
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeInstances requires daemon mode" }),
@@ -436,6 +441,12 @@ export const makeRoutedWsRpcServerLayer = (
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 		SubscribeProjectSettings: (request) =>
 			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeAlerts: (request) =>
+			routeStream(request.projectSlug, subscribeAlerts),
+		SubscribeInputDraft: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeInputDraft(request.sessionId),
+			),
 		SubscribeInstances: () =>
 			daemonHandlers
 				? Rpc.fork(daemonHandlers.SubscribeInstances())

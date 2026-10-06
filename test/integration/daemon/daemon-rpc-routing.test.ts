@@ -314,18 +314,18 @@ describe("daemon shared RPC routing", () => {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
 				handlerA.broadcast({
-					type: "input_sync",
-					text: "from-a",
+					type: "instance_update",
+					instanceId: "from-a",
 				});
 				handlerB.broadcast({
-					type: "input_sync",
-					text: "from-b",
+					type: "instance_update",
+					instanceId: "from-b",
 				});
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "input_sync" &&
+								message["type"] === "instance_update" &&
 								JSON.stringify(message).includes("from-b"),
 						),
 					).toBe(true);
@@ -333,7 +333,7 @@ describe("daemon shared RPC routing", () => {
 				expect(
 					eventMessages.some(
 						(message) =>
-							message["type"] === "input_sync" &&
+							message["type"] === "instance_update" &&
 							JSON.stringify(message).includes("from-a"),
 					),
 				).toBe(false);

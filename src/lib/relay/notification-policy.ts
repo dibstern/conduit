@@ -6,21 +6,18 @@
 // - Subagent "done" events are completely suppressed (parent emits its own).
 // - Subagent "error" events still fire notifications (errors are always important).
 // - Push fires for all notification-worthy events (unless suppressed).
-// - Cross-session broadcast fires only when route dropped (no viewers on session).
+// - The in-app alert (SubscribeAlerts) fires only when route dropped (no
+//   viewers on session).
 
+import type { Alert } from "../contracts/ws-rpc.js";
 import type { RelayMessage } from "../shared-types.js";
 import type { RouteDecision } from "./event-pipeline.js";
 
 export interface NotificationResolution {
 	readonly sendPush: boolean;
 	readonly broadcastCrossSession: boolean;
-	readonly crossSessionPayload?: {
-		readonly type: "notification_event";
-		readonly eventType: string;
-		readonly message?: string;
-		readonly sessionId?: string;
-		readonly alertId: string;
-	};
+	/** Published to the project's SubscribeAlerts feed. */
+	readonly alert?: Alert;
 }
 
 /**
@@ -55,14 +52,14 @@ export function resolveNotifications(
 	if (broadcastCrossSession) {
 		const errorMessage =
 			msg.type === "error" ? (msg as { message: string }).message : undefined;
-		const payload: NotificationResolution["crossSessionPayload"] = {
-			type: "notification_event",
-			eventType: msg.type,
+		const alert: Alert = {
+			_tag: "alert",
+			kind: msg.type,
 			alertId,
 			...(errorMessage !== undefined ? { message: errorMessage } : {}),
 			...(sessionId != null ? { sessionId } : {}),
 		};
-		return { sendPush, broadcastCrossSession, crossSessionPayload: payload };
+		return { sendPush, broadcastCrossSession, alert };
 	}
 
 	return { sendPush, broadcastCrossSession };

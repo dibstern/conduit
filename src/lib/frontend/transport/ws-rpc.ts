@@ -1,4 +1,6 @@
 export {
+	type Alert,
+	type AlertsEnvelope,
 	AnswerQuestion,
 	CancelInput,
 	CancelSession,
@@ -36,6 +38,7 @@ export {
 	type GetToolContentResponse,
 	type GoalDetails,
 	type InboxCommandResponse,
+	type InputDraftEnvelope,
 	type InstanceListResponse,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
@@ -91,6 +94,8 @@ export {
 	StopInstance,
 	SubmitInput,
 	type SubmitInputResponse,
+	SubscribeAlerts,
+	SubscribeInputDraft,
 	SubscribeProjectSettings,
 	SubscribePtys,
 	SubscribeSessionDetail,

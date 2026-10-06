@@ -38,12 +38,7 @@ it("preserves originating identity across delivery shapes after the latest turn 
 			yield* sendTo("c1", done);
 			yield* sendToSession("s1", done);
 			yield* broadcastPerSessionEvent("s1", done);
-			yield* broadcast({
-				type: "notification_event",
-				sessionId: "s1",
-				eventType: "done",
-				alertId: done.alertId,
-			});
+			yield* broadcast(done);
 			expect(sent[0]?.alertId).toBeTypeOf("string");
 			expect(new Set(sent.map((x) => x.alertId)).size).toBe(1);
 			yield* sql`INSERT INTO turns (id, session_id, requested_at) VALUES ('t2', 's1', 2)`;
@@ -83,9 +78,9 @@ it("preserves explicit error identity across paths without reading mutable messa
 				alertId: "rate-limit-1",
 			});
 			yield* broadcast({
-				type: "notification_event",
+				type: "error",
 				sessionId: "s1",
-				eventType: "error",
+				code: "ERR",
 				message: "rate limited",
 				alertId: "rate-limit-1",
 			});

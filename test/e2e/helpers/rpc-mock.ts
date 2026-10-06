@@ -1,5 +1,6 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import {
+	type Alert,
 	type ProjectSetting,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -37,7 +38,13 @@ type DaemonListTag = "SubscribeInstances" | "SubscribeProjects";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
 const isSessionStream = (tag: string): boolean =>
-	tag === "SubscribeSessionDetail" || tag === "SubscribeSessionTodos";
+	tag === "SubscribeSessionDetail" ||
+	tag === "SubscribeSessionTodos" ||
+	tag === "SubscribeInputDraft";
+
+/** Live-only feeds open synchronized, with nothing to replay. */
+const isLiveOnlyStream = (tag: string): boolean =>
+	tag === "SubscribeAlerts" || tag === "SubscribeInputDraft";
 
 export interface RpcMockOptions {
 	readonly handlers: Record<string, RpcHandler>;
@@ -200,6 +207,24 @@ export class RpcMockControl {
 					sequence: this.projectSettingsSequence,
 				},
 			]);
+	}
+
+	/** Publish one alert on the open SubscribeAlerts stream, as the relay does
+	 *  when a session no tab is viewing finishes or fails. */
+	sendAlert(alert: Alert): void {
+		this.sendChunk("SubscribeAlerts", [alert]);
+	}
+
+	/** Publish a draft another tab typed on that session's SubscribeInputDraft. */
+	sendInputDraft(
+		sessionId: string,
+		draft: { readonly text: string; readonly from?: string },
+	): void {
+		this.sendChunk(
+			"SubscribeInputDraft",
+			[{ _tag: "draft", ...draft }],
+			sessionId,
+		);
 	}
 
 	/** Replace one session's todo list, the way a TodoWrite does: an upsert on
@@ -437,6 +462,23 @@ export function sendMockProjectSetting(
 		]);
 }
 
+/** Mock-only input: once the page follows `sessionId`'s draft, deliver one
+ *  typed in another tab. */
+export async function sendMockInputDraft(
+	page: Page,
+	sessionId: string,
+	draft: { readonly text: string; readonly from?: string },
+): Promise<void> {
+	const control = controls.get(page);
+	if (!control) throw new Error("mockWsRpc is not installed on this page");
+	await control.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeInputDraft" &&
+			request.payload["sessionId"] === sessionId,
+	);
+	control.sendInputDraft(sessionId, draft);
+}
+
 export function sendMockShellSnapshot(
 	page: Page,
 	rows: readonly unknown[],
@@ -487,9 +529,11 @@ async function handleMessage(
 								)
 						: raw.tag === "SubscribeProjectSettings"
 							? () => control.initialProjectSettingsFrames()
-							: daemonList
-								? () => daemonList
-								: undefined);
+							: isLiveOnlyStream(raw.tag)
+								? () => [{ _tag: "synchronized" }]
+								: daemonList
+									? () => daemonList
+									: undefined);
 		if (stream) {
 			const sessionId = isSessionStream(raw.tag)
 				? String(raw.payload?.["sessionId"] ?? "")

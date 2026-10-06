@@ -98,7 +98,7 @@ describe("sendPushForEvent with context", () => {
 });
 
 describe("resolveNotifications with sessionId", () => {
-	it("includes sessionId in crossSessionPayload when route drops", () => {
+	it("includes sessionId in alert when route drops", () => {
 		const result = resolveNotifications(
 			{
 				type: "done",
@@ -112,11 +112,11 @@ describe("resolveNotifications with sessionId", () => {
 		);
 
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toBeDefined();
-		expect(result.crossSessionPayload?.sessionId).toBe("sess-456");
+		expect(result.alert).toBeDefined();
+		expect(result.alert?.sessionId).toBe("sess-456");
 	});
 
-	it("omits sessionId from crossSessionPayload when not provided", () => {
+	it("omits sessionId from alert when not provided", () => {
 		const result = resolveNotifications(
 			{
 				type: "done",
@@ -129,8 +129,8 @@ describe("resolveNotifications with sessionId", () => {
 		);
 
 		expect(result.broadcastCrossSession).toBe(true);
-		expect(result.crossSessionPayload).toBeDefined();
-		expect(result.crossSessionPayload).not.toHaveProperty("sessionId");
+		expect(result.alert).toBeDefined();
+		expect(result.alert).not.toHaveProperty("sessionId");
 	});
 
 	it("does not include sessionId when route sends (no cross-session payload)", () => {
@@ -148,6 +148,6 @@ describe("resolveNotifications with sessionId", () => {
 
 		expect(result.sendPush).toBe(true);
 		expect(result.broadcastCrossSession).toBe(false);
-		expect(result.crossSessionPayload).toBeUndefined();
+		expect(result.alert).toBeUndefined();
 	});
 });

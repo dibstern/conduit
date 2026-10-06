@@ -323,8 +323,8 @@ describe("applyPipelineResult", () => {
 			msg,
 		);
 		// The drop reason is still logged as the "no active viewers" signal
-		// — used by downstream notification routing to fire cross-session
-		// notification_event broadcasts.
+		// — used by downstream notification routing to publish cross-session
+		// alerts.
 		expect(deps.log.info).toHaveBeenCalledWith(
 			"no viewers for session ses_abc — delta (sse)",
 		);

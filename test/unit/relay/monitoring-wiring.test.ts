@@ -2,9 +2,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import {
+	Chunk,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	PubSub,
+	Queue,
+	Scope,
+} from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
+import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -49,6 +59,7 @@ function createHarness(
 	const startPolling = vi.fn();
 	const getClientsForSession = vi.fn((_sessionId: string): string[] => []);
 	const broadcast = vi.fn();
+	const publishAlert = vi.fn<(alert: Alert) => void>();
 
 	const result = wireMonitoring({
 		client: {
@@ -99,10 +110,12 @@ function createHarness(
 		statusLog: createSilentLogger(),
 		sseLog: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
+		publishAlert,
 	});
 
 	return {
 		broadcast,
+		publishAlert,
 		broadcastPerSessionEvent,
 		clearProcessingTimeout,
 		result,
@@ -124,12 +137,8 @@ it("broadcasts a synthetic root done when its session has no viewer", async () =
 		]),
 	});
 	await harness.emitStatus({ root: { type: "idle" } });
-	expect(harness.broadcast).toHaveBeenCalledWith(
-		expect.objectContaining({
-			type: "notification_event",
-			eventType: "done",
-			sessionId: "root",
-		}),
+	expect(harness.publishAlert).toHaveBeenCalledWith(
+		expect.objectContaining({ _tag: "alert", kind: "done", sessionId: "root" }),
 	);
 });
 
@@ -147,9 +156,7 @@ it("uses the busy cycle to identify anonymous poller broadcasts", async () => {
 		await harness.emitStatus({ root: { type: "idle" } });
 	}
 	expect(
-		harness.broadcast.mock.calls.map(([message]) =>
-			message.type === "notification_event" ? message.alertId : undefined,
-		),
+		harness.publishAlert.mock.calls.map(([alert]) => alert.alertId),
 	).toEqual(['["root","poller",101,"done"]', '["root","poller",202,"done"]']);
 });
 
@@ -216,7 +223,7 @@ describe("wireMonitoring shutdown", () => {
 		expect(harness.messages).not.toHaveBeenCalled();
 		expect(harness.clearProcessingTimeout).toHaveBeenCalledWith("claude-1");
 		expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalled();
-		expect(harness.broadcast).not.toHaveBeenCalled();
+		expect(harness.publishAlert).not.toHaveBeenCalled();
 		harness.result.stopMonitoring();
 	});
 
@@ -359,10 +366,10 @@ describe("wireMonitoring shutdown", () => {
 		});
 		harness.emitStatus({ root: { type: "idle" } }, true);
 		await flushPromises();
-		expect(harness.broadcast).toHaveBeenCalledWith(
+		expect(harness.alerts()).toContainEqual(
 			expect.objectContaining({
-				type: "notification_event",
-				eventType: "done",
+				_tag: "alert",
+				kind: "done",
 				sessionId: "root",
 			}),
 		);
@@ -417,7 +424,7 @@ describe("wireMonitoring shutdown", () => {
 						),
 					);
 					expect(sendToAll).toHaveBeenCalledOnce();
-					expect(harness.broadcast).toHaveBeenCalledWith(
+					expect(harness.alerts()).toContainEqual(
 						expect.objectContaining({ alertId: '["root","message-1","done"]' }),
 					);
 				} finally {
@@ -641,7 +648,7 @@ describe("wireMonitoring shutdown", () => {
 			harness.emitStatus({ "claude-1": { type: "idle" } });
 			await flushPromises();
 			expect(harness.delivered).toEqual(["processing"]);
-			expect(harness.broadcast).not.toHaveBeenCalled();
+			expect(harness.alerts()).toEqual([]);
 			expect(pushManager.sendToAll).not.toHaveBeenCalled();
 			expect(
 				await harness.runtime.runPromise(
@@ -720,12 +727,16 @@ async function createEffectHarness(
 		pollerEvents.push(`start:${id}`);
 	});
 	const getClientsForSession = vi.fn((_id: string): string[] => []);
-	const broadcast = vi.fn();
+	const alerts = Effect.runSync(PubSub.unbounded<Alert>());
+	const alertsSeen = Effect.runSync(
+		PubSub.subscribe(alerts).pipe(Scope.extend(Effect.runSync(Scope.make()))),
+	);
 	const unused = () => Effect.die("Unexpected service call");
 	const getSessionProviders = vi.fn<
 		SessionStatusPollerService["getSessionProviders"]
 	>(() => Effect.succeed(new Map()));
 	const layer = Layer.mergeAll(
+		Layer.succeed(AlertsTag, alerts),
 		Layer.succeed(SessionManagerServiceTag, {
 			initialize: unused,
 			getDefaultSessionId: unused,
@@ -774,7 +785,7 @@ async function createEffectHarness(
 	const monitoring = wireMonitoringEffect({
 		client: { session: { messages } },
 		wsHandler: {
-			broadcast,
+			broadcast: vi.fn(),
 			sendToSession: (_id, message) => {
 				if (message.type === "status") delivered.push(message.status);
 			},
@@ -828,7 +839,7 @@ async function createEffectHarness(
 			)
 		: await Effect.runPromise(monitoring.pipe(Effect.provide(layer)));
 	return {
-		broadcast,
+		alerts: () => Chunk.toArray(Effect.runSync(Queue.takeAll(alertsSeen))),
 		result,
 		runtime,
 		dispose: () => runtime?.dispose() ?? Promise.resolve(),

@@ -4,6 +4,11 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import { Cause, Effect, Runtime } from "effect";
+import type { Alert } from "../contracts/ws-rpc.js";
+import {
+	type AlertsTag,
+	publishAlert,
+} from "../domain/relay/Services/alerts.js";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
@@ -63,11 +68,13 @@ export interface PollerWiringDeps {
 	pollerLog: Logger;
 	/** Optional: record that a "done" was delivered via poller (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
+	/** Sync wiring only; the Effect wiring publishes to AlertsTag. */
+	publishAlert: (alert: Alert) => void;
 }
 
 export type EffectPollerWiringDeps = Omit<
 	PollerWiringDeps,
-	"sessionService" | "pipelineDeps" | "statusPoller"
+	"sessionService" | "pipelineDeps" | "statusPoller" | "publishAlert"
 > & {
 	pipelineDeps: Omit<PipelineDeps, "processingTimeouts">;
 };
@@ -128,16 +135,8 @@ const handlePollerEventsEffect = (
 					sessionId: polledSessionId ?? undefined,
 				});
 			}
-			if (
-				pollerNotification.broadcastCrossSession &&
-				pollerNotification.crossSessionPayload
-			) {
-				yield* Effect.sync(() =>
-					wsHandler.broadcast(
-						pollerNotification.crossSessionPayload as RelayMessage,
-					),
-				);
-			}
+			if (pollerNotification.alert)
+				yield* publishAlert(pollerNotification.alert);
 		}
 	});
 
@@ -209,14 +208,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 					sessionId: polledSessionId ?? undefined,
 				});
 			}
-			if (
-				pollerNotification.broadcastCrossSession &&
-				pollerNotification.crossSessionPayload
-			) {
-				wsHandler.broadcast(
-					pollerNotification.crossSessionPayload as RelayMessage,
-				);
-			}
+			if (pollerNotification.alert) deps.publishAlert(pollerNotification.alert);
 		}
 	});
 
@@ -233,7 +225,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 	Effect.gen(function* () {
 		const runtime = yield* Effect.runtime<
-			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag
+			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag | AlertsTag
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
