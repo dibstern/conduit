@@ -195,32 +195,10 @@ export async function mockRelayWebSocket(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
-	const streamedTranscript = [...options.responses.values()].some((messages) =>
-		messages.some((message) =>
-			[
-				"user_message",
-				"delta",
-				"thinking_start",
-				"thinking_delta",
-				"tool_start",
-				"result",
-			].includes(message.type),
-		),
-	);
 	const catalog = mockCatalog(options.initMessages);
 	if (catalog) setMockRpcCatalog(page, catalog);
-	if (
-		streamedTranscript ||
-		catalog ||
-		options.initMessages.some((message) =>
-			[
-				"shell_snapshot",
-				"mock_transcript_snapshot",
-				...DAEMON_LIST_TAGS.keys(),
-			].includes(message.type),
-		)
-	)
-		await ensureMockTranscriptRpc(page);
+	// The project attach is an RPC reply, so every mocked relay needs /rpc.
+	await ensureMockTranscriptRpc(page);
 	const control = new WsMockControl(page);
 	// Mock-only input: deliver roots through SubscribeShell, never through /ws.
 	const initialShell = options.initMessages.find(
@@ -243,18 +221,7 @@ export async function mockRelayWebSocket(
 		control._context.activeSessionId =
 			new URL(page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;
 
-		// The daemon socket announces its project before the relay bootstrap;
-		// the frontend hydrates on this message.
 		const params = new URL(ws.url()).searchParams;
-		const projectList = options.initMessages.find(
-			(message) => message.type === "project_list",
-		);
-		const slug =
-			params.get("p") ??
-			(typeof projectList?.["current"] === "string"
-				? projectList["current"]
-				: "myapp");
-		ws.send(JSON.stringify({ type: "project_attached", slug }));
 
 		// Send init messages on connect (instant by default)
 		const initMessages = (

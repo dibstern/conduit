@@ -20,7 +20,6 @@ const startupLoads = [
 	"GetAgents",
 	"GetModels",
 	"GetCommands",
-	"ListPtys",
 	"ListDaemonSessions",
 ];
 
@@ -52,7 +51,8 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 					this.addEventListener("message", ({ data }) => {
 						if (!probe.__holdRpc || typeof data !== "string") return;
 						const message = JSON.parse(data) as { type: string };
-						if (message.type === "project_attached") {
+						// The relay handshake: /ws reattached while /rpc stays down.
+						if (message.type === "protocol_version") {
 							probe.__wsAttachedWhileHeld = true;
 						}
 					});

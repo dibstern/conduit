@@ -27,6 +27,8 @@ interface QueuedRestResponse {
 	responseBody: unknown;
 	/** Mutation events that must wait for the corresponding HTTP operation. */
 	sseEvents?: SseEvent[];
+	/** prompt_async calls recorded before this response. */
+	promptsBefore?: number;
 }
 
 /** PTY interaction for replay. */
@@ -535,6 +537,7 @@ export class MockOpenCodeServer {
 				const queued: QueuedRestResponse = {
 					status: ix.status,
 					responseBody: ix.responseBody,
+					promptsBefore: this.recordedPromptSessionIds.length,
 					...(sseEvents ? { sseEvents } : {}),
 				};
 
@@ -1069,8 +1072,19 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// Dequeue next response, or repeat last if exhausted
-		const shifted = queue.length > 1 ? queue.shift() : undefined;
+		// Dequeue next response, or repeat last if exhausted. A message list
+		// recorded after a prompt waits for that prompt: served early, it would
+		// show history the session has not reached yet.
+		const next = queue[1];
+		const shifted =
+			next &&
+			!(
+				method === "GET" &&
+				/^\/session\/[^/]+\/message$/.test(basePath) &&
+				(next.promptsBefore ?? 0) > this.promptsFired
+			)
+				? queue.shift()
+				: undefined;
 		const entry = shifted ?? queue[0];
 		if (!entry) {
 			res.writeHead(404);

@@ -24,6 +24,7 @@
  */
 
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
+import { setAttachedProject } from "../stores/ws-dispatch.js";
 
 type Listener = (event?: unknown) => void;
 
@@ -55,15 +56,9 @@ export function connectedSocket(): () => void {
 				if (this.readyState !== OpenSocket.CONNECTING) return;
 				this.readyState = OpenSocket.OPEN;
 				this.emit("open");
+				// Stands in for the AttachProject reply: Storybook has no RPC server.
 				const slug = new URL(this.url).searchParams.get("p");
-				if (slug) {
-					this.emit(
-						"message",
-						new MessageEvent("message", {
-							data: JSON.stringify({ type: "project_attached", slug }),
-						}),
-					);
-				}
+				if (slug) setAttachedProject(slug);
 				this.emit(
 					"message",
 					new MessageEvent("message", {

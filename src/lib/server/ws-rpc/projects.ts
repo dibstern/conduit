@@ -9,8 +9,15 @@ import { normalizeProjectTitle } from "../../handlers/settings.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 export const projectsHandlers = {
+	// A standalone relay serves one project, so every tab attaches to it.
 	AttachProject: (_request: AttachProject) =>
-		Effect.succeed({ ok: true as const }),
+		Effect.flatMap(ProjectManagementServiceTag, (projectService) =>
+			projectService.currentSlug(),
+		).pipe(
+			Effect.map((projectSlug): { readonly projectSlug: string | null } => ({
+				projectSlug,
+			})),
+		),
 	GetProjects: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;

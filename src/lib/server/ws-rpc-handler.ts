@@ -17,6 +17,7 @@ import {
 } from "../domain/relay/Layers/ws-transport-layer.js";
 import { isRecord } from "../utils.js";
 import {
+	type AttachDaemonProject,
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
 	type ReattachDaemonViewSession,
@@ -154,6 +155,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	defaultProjectSlug?: string,
 	reattachViewSession?: ReattachDaemonViewSession,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
+	attachProject?: AttachDaemonProject,
 ) =>
 	Effect.gen(function* () {
 		const transportContext = yield* Layer.build(
@@ -168,6 +170,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			daemonHandlers,
 			defaultProjectSlug,
 			reattachViewSession,
+			attachProject,
 		);
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),

@@ -190,17 +190,25 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped.each([true, false])(
-		"AttachProject returns ok without resolving a relay context when reattached=%s",
-		(reattached) =>
+	it.scoped(
+		"AttachProject replies with the daemon's resolved project without resolving a relay context",
+		() =>
 			Effect.gen(function* () {
 				const resolve = vi.fn(() =>
 					Effect.fail(new WsRpcError({ message: "unexpected relay context" })),
 				);
-				const reattach = vi.fn(() => Effect.succeed(reattached));
+				const attachProject = vi.fn(() =>
+					Effect.succeed({ projectSlug: "project-c" }),
+				);
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
+						makeRoutedWsRpcServerLayer(
+							resolve,
+							undefined,
+							undefined,
+							undefined,
+							attachProject,
+						),
 					),
 				);
 				expect(
@@ -208,14 +216,37 @@ describe("routed RPC server", () => {
 						projectSlug: "project-b",
 						originId: "daemon-client",
 					}),
-				).toEqual({ ok: true });
-				expect(reattach).toHaveBeenCalledWith(
+				).toEqual({ projectSlug: "project-c" });
+				expect(attachProject).toHaveBeenCalledWith(
 					expect.objectContaining({
 						projectSlug: "project-b",
 						originId: "daemon-client",
 					}),
+					expect.anything(),
 				);
 				expect(resolve).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.scoped(
+		"AttachProject on a standalone relay replies with its own project",
+		() =>
+			Effect.gen(function* () {
+				const context = yield* Layer.build(
+					makeTestHandlerLayer({
+						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+					}),
+				);
+				const resolve = vi.fn(() => Effect.succeed(context));
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, "initial"),
+					),
+				);
+				expect(
+					yield* client.AttachProject({ originId: "relay-client" }),
+				).toEqual({ projectSlug: "initial" });
+				expect(resolve).toHaveBeenCalledWith("initial");
 			}),
 	);
 

@@ -286,12 +286,6 @@ async function createTestHarness(): Promise<TestHarness> {
 					.searchParams;
 				const clientId = params.get("client");
 				const requestedSessionId = params.get("session");
-				ws.send(
-					JSON.stringify({
-						type: "project_attached",
-						slug: "test-status-poller",
-					}),
-				);
 				relay.wsHandler.attach(ws, {
 					clientId:
 						clientId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientId)

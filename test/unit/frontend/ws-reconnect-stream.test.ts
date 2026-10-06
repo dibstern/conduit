@@ -63,11 +63,23 @@ class MockWebSocket {
 	}
 }
 
-vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", () => ({
-	handleMessage: handleMessageMock,
-	armProtocolVersionCheck: () => {},
-	disarmProtocolVersionCheck: () => {},
-}));
+vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", async () => {
+	const { attachedProjectState } = await import(
+		"../../../src/lib/frontend/stores/router.svelte.js"
+	);
+	const { projectAttachedListeners } = await import(
+		"../../../src/lib/frontend/stores/ws-listeners.js"
+	);
+	return {
+		handleMessage: handleMessageMock,
+		armProtocolVersionCheck: () => {},
+		disarmProtocolVersionCheck: () => {},
+		setAttachedProject: (slug: string) => {
+			attachedProjectState.slug = slug;
+			for (const listener of projectAttachedListeners) listener(slug);
+		},
+	};
+});
 
 import { getBrowserClientId } from "../../../src/lib/frontend/stores/client-identity.js";
 import {
@@ -83,6 +95,7 @@ import {
 import {
 	connect,
 	disconnect,
+	setAttachedProject,
 	wsState,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import {
@@ -119,9 +132,6 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		instances.length = 0;
 		handleMessageMock.mockReset();
 		handleMessageMock.mockImplementation((message: RelayMessage) => {
-			if (message.type === "project_attached") {
-				attachedProjectState.slug = message.slug;
-			}
 			if (message.type === "session_list" && message.roots === true)
 				seedSessions(message.sessions);
 		});
@@ -234,9 +244,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
-		ws?.emitMessage(
-			JSON.stringify({ type: "project_attached", slug: "project-b" }),
-		);
+		setAttachedProject("project-b");
 
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
 		expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
@@ -263,13 +271,9 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		connect();
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
-		ws?.emitMessage(
-			JSON.stringify({ type: "project_attached", slug: "project-a" }),
-		);
+		setAttachedProject("project-a");
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-		ws?.emitMessage(
-			JSON.stringify({ type: "project_attached", slug: "project-b" }),
-		);
+		setAttachedProject("project-b");
 		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
 		resolveOldStatus(new Response(null, { status: 401 }));
 		// Flush the stale response handler before asserting it did not replace the new status.

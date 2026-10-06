@@ -4,10 +4,6 @@
 	"recordedAt": "2026-10-05T01:41:48.901Z",
 	"initMessages": [
 		{
-			"type": "project_attached",
-			"slug": "e2e-record"
-		},
-		{
 			"type": "protocol_version",
 			"version": 3,
 			"buildId": "dev"

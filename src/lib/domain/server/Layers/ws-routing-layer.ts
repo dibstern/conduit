@@ -22,7 +22,10 @@ import {
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import { getClientIp, parseCookies } from "../../../server/http-utils.js";
-import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
+import type {
+	AttachDaemonProject,
+	ResolveRpcContext,
+} from "../../../server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
@@ -351,16 +354,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 					() => {},
 				);
 				if (!detached) return false;
-				yield* Effect.try({
-					try: () =>
-						latest.value.ws.send(
-							JSON.stringify({
-								type: "project_attached",
-								slug: payload.projectSlug,
-							}),
-						),
-					catch: (cause) => toRpcUnavailable(payload.projectSlug, cause),
-				});
 				const detach = yield* Effect.try({
 					try: () =>
 						relay.attach(latest.value.ws, {
@@ -383,6 +376,46 @@ export const WebSocketRoutingLive: Layer.Layer<
 				return attached;
 			});
 
+		// The session's project, else the hinted project if registered, else the
+		// most recent project. Cold /ws attach and AttachProject share it, so a
+		// tab's legacy socket and its RPC reply agree on the project.
+		const resolveAttachSlug = (hints: {
+			readonly projectSlug?: string | undefined;
+			readonly sessionId?: string | undefined;
+		}) =>
+			Effect.gen(function* () {
+				const projects = yield* allProjects;
+				const sessionSlug = hints.sessionId
+					? yield* resolveDaemonSession(configDir, hints.sessionId)
+					: null;
+				const slug =
+					sessionSlug ??
+					projects.find((project) => project.slug === hints.projectSlug)
+						?.slug ??
+					projects[0]?.slug ??
+					null;
+				return { slug, sessionSlug };
+			}).pipe(Effect.provideService(ProjectRegistryTag, projectRegistry));
+
+		const attachProject: AttachDaemonProject = (payload) =>
+			resolveAttachSlug(payload).pipe(
+				Effect.mapError(
+					(cause) =>
+						new WsRpcError({
+							message: `AttachProject failed: ${formatCause(cause)}`,
+						}),
+				),
+				Effect.tap(({ slug }) =>
+					slug === null
+						? Effect.void
+						: reattachViewSession({
+								projectSlug: slug,
+								originId: payload.originId,
+							}),
+				),
+				Effect.map(({ slug }) => ({ projectSlug: slug })),
+			);
+
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
 			(slug) => resolveProjectRpcContext(relayRouter, slug),
 			daemonHandlers,
@@ -393,6 +426,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 					shutdownSignal,
 					tag === "Shutdown" ? "stop" : "restart",
 				).pipe(Effect.asVoid),
+			attachProject,
 		);
 
 		const attachDaemonSocket = (ws: WebSocket, req: http.IncomingMessage) =>
@@ -442,20 +476,10 @@ export const WebSocketRoutingLive: Layer.Layer<
 					);
 				});
 
-				const projects = yield* allProjects.pipe(
-					Effect.provideService(ProjectRegistryTag, projectRegistry),
-				);
-				const sessionSlug = requestedSessionId
-					? yield* resolveDaemonSession(configDir, requestedSessionId).pipe(
-							Effect.provideService(ProjectRegistryTag, projectRegistry),
-						)
-					: null;
-				const slug =
-					sessionSlug ??
-					projects.find((project) => project.slug === requestedProjectSlug)
-						?.slug ??
-					projects[0]?.slug ??
-					null;
+				const { slug, sessionSlug } = yield* resolveAttachSlug({
+					projectSlug: requestedProjectSlug,
+					sessionId: requestedSessionId,
+				});
 				if (slug === null) return;
 
 				const relay = yield* Effect.option(resolveRelay(slug));
@@ -467,9 +491,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 					current.value.slug !== null
 				)
 					return;
-				yield* Effect.try(() =>
-					ws.send(JSON.stringify({ type: "project_attached", slug })),
-				);
 				const detach = relay.value.attach(ws, {
 					clientId,
 					skipDefaultSession: true,
