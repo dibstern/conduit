@@ -1,0 +1,675 @@
+{
+	"name": "v2-queue-during-tool",
+	"recordedAt": "2026-10-06T02:06:25.124Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"title": "v2-queue"
+			},
+			"status": 200,
+			"responseBody": {
+				"id": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"slug": "tidy-panda",
+				"projectID": "global",
+				"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "v2-queue",
+				"version": "1.18.34",
+				"time": {
+					"created": 1791252352497,
+					"updated": 1791252352497
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.created",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"info": {
+					"id": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+					"slug": "tidy-panda",
+					"version": "1.18.34",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "v2-queue",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252352497,
+						"updated": 1791252352497
+					}
+				}
+			},
+			"delayMs": 112
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a320effe8ZBOZvmkRz67Wp/model?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"id": "big-pickle"
+				}
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.model.switched",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"messageID": "msg_10ef5cdf5001nbveEsGoHX60NE",
+				"timestamp": "2026-10-06T02:05:52.501Z",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode"
+				}
+			},
+			"delayMs": 4
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a320effe8ZBOZvmkRz67Wp/prompt?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				}
+			},
+			"status": 200,
+			"responseBody": {
+				"data": {
+					"admittedSeq": 2,
+					"id": "msg_10ef5cdfe0014DakOHklU3zfGO",
+					"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+					"prompt": {
+						"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+					},
+					"delivery": "steer",
+					"timeCreated": 1791252352510
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompt.admitted",
+			"properties": {
+				"messageID": "msg_10ef5cdfe0014DakOHklU3zfGO",
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:52.510Z",
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 14
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompted",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:52.510Z",
+				"messageID": "msg_10ef5cdfe0014DakOHklU3zfGO",
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 115
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"agent": "build",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"timestamp": "2026-10-06T02:05:53.812Z"
+			},
+			"delayMs": 1182
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.813Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"callID": "call_01a10ef5d2af76a68ace17b3",
+				"name": "bash"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.delta",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.813Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"callID": "call_01a10ef5d2af76a68ace17b3",
+				"delta": "{\"command\":\"sleep 10 && echo first-done\",\"timeout\":30000}"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.866Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"callID": "call_01a10ef5d2af76a68ace17b3",
+				"text": "{\"command\":\"sleep 10 && echo first-done\",\"timeout\":30000}"
+			},
+			"delayMs": 55
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.called",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.867Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"callID": "call_01a10ef5d2af76a68ace17b3",
+				"tool": "bash",
+				"input": {
+					"command": "sleep 10 && echo first-done",
+					"timeout": 30000
+				},
+				"provider": {
+					"executed": false
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a320effe8ZBOZvmkRz67Wp/prompt?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "queue"
+			},
+			"status": 200,
+			"responseBody": {
+				"data": {
+					"admittedSeq": 8,
+					"id": "msg_10ef5d39b001f5kBEY1eFSU7QB",
+					"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+					"prompt": {
+						"text": "Also reply with the single word SECOND."
+					},
+					"delivery": "queue",
+					"timeCreated": 1791252353947
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompt.admitted",
+			"properties": {
+				"messageID": "msg_10ef5d39b001f5kBEY1eFSU7QB",
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.947Z",
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "queue"
+			},
+			"delayMs": 79
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 8444
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.success",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:06:04.031Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"callID": "call_01a10ef5d2af76a68ace17b3",
+				"structured": {
+					"exit": 0,
+					"truncated": false
+				},
+				"content": [
+					{
+						"type": "text",
+						"text": "first-done\n"
+					},
+					{
+						"type": "text",
+						"text": "Command exited with code 0."
+					}
+				],
+				"outputPaths": [],
+				"provider": {
+					"executed": false
+				}
+			},
+			"delayMs": 1664
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:06:04.053Z",
+				"assistantMessageID": "msg_10ef5d314001H6UTUCzBZxaiLd",
+				"finish": "tool-calls",
+				"cost": 0,
+				"tokens": {
+					"input": 3097,
+					"output": 44,
+					"reasoning": 0,
+					"cache": {
+						"read": 144,
+						"write": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"agent": "build",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"assistantMessageID": "msg_10ef617d30017rPnI2YFd5a1E2",
+				"timestamp": "2026-10-06T02:06:11.411Z"
+			},
+			"delayMs": 7358
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef617d30017rPnI2YFd5a1E2",
+				"timestamp": "2026-10-06T02:06:11.412Z",
+				"textID": "text-0"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef617d30017rPnI2YFd5a1E2",
+				"timestamp": "2026-10-06T02:06:11.413Z",
+				"textID": "text-0",
+				"delta": "FIRST"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef617d30017rPnI2YFd5a1E2",
+				"timestamp": "2026-10-06T02:06:11.524Z",
+				"textID": "text-0",
+				"text": "FIRST"
+			},
+			"delayMs": 116
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:06:11.526Z",
+				"assistantMessageID": "msg_10ef617d30017rPnI2YFd5a1E2",
+				"finish": "stop",
+				"cost": 0,
+				"tokens": {
+					"input": 69,
+					"output": 3,
+					"reasoning": 0,
+					"cache": {
+						"read": 3241,
+						"write": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompted",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:05:53.947Z",
+				"messageID": "msg_10ef5d39b001f5kBEY1eFSU7QB",
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "queue"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 864
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 10001
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"agent": "build",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"timestamp": "2026-10-06T02:06:24.341Z"
+			},
+			"delayMs": 1953
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.started",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"timestamp": "2026-10-06T02:06:24.345Z",
+				"textID": "text-0"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"timestamp": "2026-10-06T02:06:24.347Z",
+				"textID": "text-0",
+				"delta": "SEC"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"timestamp": "2026-10-06T02:06:25.063Z",
+				"textID": "text-0",
+				"delta": "OND"
+			},
+			"delayMs": 716
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"timestamp": "2026-10-06T02:06:25.094Z",
+				"textID": "text-0",
+				"text": "SECOND"
+			},
+			"delayMs": 33
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.ended",
+			"properties": {
+				"sessionID": "ses_ef10a320effe8ZBOZvmkRz67Wp",
+				"timestamp": "2026-10-06T02:06:25.095Z",
+				"assistantMessageID": "msg_10ef64a55001dFpEpP1HZW7UdG",
+				"finish": "stop",
+				"cost": 0,
+				"tokens": {
+					"input": 20,
+					"output": 4,
+					"reasoning": 0,
+					"cache": {
+						"read": 3310,
+						"write": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_ef10a320effe8ZBOZvmkRz67Wp/message?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"status": 200,
+			"responseBody": []
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/api/session/ses_ef10a320effe8ZBOZvmkRz67Wp/message?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"status": 200,
+			"responseBody": {
+				"data": [
+					{
+						"id": "msg_10ef64a55001dFpEpP1HZW7UdG",
+						"time": {
+							"created": 1791252384341,
+							"completed": 1791252385095
+						},
+						"type": "assistant",
+						"agent": "build",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"content": [
+							{
+								"type": "text",
+								"id": "text-0",
+								"text": "SECOND"
+							}
+						],
+						"finish": "stop",
+						"cost": 0,
+						"tokens": {
+							"input": 20,
+							"output": 4,
+							"reasoning": 0,
+							"cache": {
+								"read": 3310,
+								"write": 0
+							}
+						}
+					},
+					{
+						"id": "msg_10ef5d39b001f5kBEY1eFSU7QB",
+						"time": {
+							"created": 1791252353947
+						},
+						"text": "Also reply with the single word SECOND.",
+						"type": "user"
+					},
+					{
+						"id": "msg_10ef617d30017rPnI2YFd5a1E2",
+						"time": {
+							"created": 1791252371411,
+							"completed": 1791252371526
+						},
+						"type": "assistant",
+						"agent": "build",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"content": [
+							{
+								"type": "text",
+								"id": "text-0",
+								"text": "FIRST"
+							}
+						],
+						"finish": "stop",
+						"cost": 0,
+						"tokens": {
+							"input": 69,
+							"output": 3,
+							"reasoning": 0,
+							"cache": {
+								"read": 3241,
+								"write": 0
+							}
+						}
+					},
+					{
+						"id": "msg_10ef5d314001H6UTUCzBZxaiLd",
+						"time": {
+							"created": 1791252353812,
+							"completed": 1791252364053
+						},
+						"type": "assistant",
+						"agent": "build",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"content": [
+							{
+								"type": "tool",
+								"id": "call_01a10ef5d2af76a68ace17b3",
+								"name": "bash",
+								"provider": {
+									"executed": false
+								},
+								"state": {
+									"status": "completed",
+									"input": {
+										"command": "sleep 10 && echo first-done",
+										"timeout": 30000
+									},
+									"content": [
+										{
+											"type": "text",
+											"text": "first-done\n"
+										},
+										{
+											"type": "text",
+											"text": "Command exited with code 0."
+										}
+									],
+									"outputPaths": [],
+									"structured": {
+										"exit": 0,
+										"truncated": false
+									}
+								},
+								"time": {
+									"created": 1791252353813,
+									"ran": 1791252353867,
+									"completed": 1791252364031
+								}
+							}
+						],
+						"finish": "tool-calls",
+						"cost": 0,
+						"tokens": {
+							"input": 3097,
+							"output": 44,
+							"reasoning": 0,
+							"cache": {
+								"read": 144,
+								"write": 0
+							}
+						}
+					},
+					{
+						"id": "msg_10ef5cdfe0014DakOHklU3zfGO",
+						"time": {
+							"created": 1791252352510
+						},
+						"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST.",
+						"type": "user"
+					},
+					{
+						"id": "msg_10ef5cdf5001nbveEsGoHX60NE",
+						"time": {
+							"created": 1791252352501
+						},
+						"type": "model-switched",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode"
+						}
+					}
+				],
+				"cursor": {
+					"previous": "eyJpZCI6Im1zZ18xMGVmNjRhNTUwMDFkRnBFcFAxSFpXN1VkRyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+					"next": "eyJpZCI6Im1zZ18xMGVmNWNkZjUwMDFuYnZlRXNHb0hYNjBORSIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+				}
+			}
+		}
+	]
+}

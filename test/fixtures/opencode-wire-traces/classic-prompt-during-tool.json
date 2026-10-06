@@ -1,0 +1,1494 @@
+{
+	"name": "classic-prompt-during-tool",
+	"recordedAt": "2026-10-06T02:06:39.902Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"title": "classic"
+			},
+			"status": 200,
+			"responseBody": {
+				"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"slug": "curious-panda",
+				"projectID": "global",
+				"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "classic",
+				"version": "1.18.34",
+				"time": {
+					"created": 1791252385229,
+					"updated": 1791252385229
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.created",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"version": "1.18.34",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252385229
+					}
+				}
+			},
+			"delayMs": 106
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_ef109b232ffeq0hsY7NBBdOKbV/prompt_async?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"parts": [
+					{
+						"type": "text",
+						"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+					}
+				],
+				"model": {
+					"providerID": "opencode",
+					"modelID": "big-pickle"
+				}
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252385253
+					}
+				}
+			},
+			"delayMs": 187
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"role": "user",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"time": {
+						"created": 1791252385253
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "big-pickle"
+					}
+				}
+			},
+			"delayMs": 65
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST.",
+					"messageID": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"id": "prt_10ef64de8001TbILxAPPCqcPyq"
+				},
+				"time": 1791252385439
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252385443
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 18
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"parentID": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252385470
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV"
+				}
+			},
+			"delayMs": 1
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252385498
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 1791252385253
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "big-pickle"
+					},
+					"id": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "core/config-reference"
+			},
+			"delayMs": 11
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "agent"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "command"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "skill"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "models-dev"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-agent"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-command"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-skill"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "alibaba"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "amazon-bedrock"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "anthropic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "azure-cognitive-services"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "azure"
+			},
+			"delayMs": 4
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cerebras"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cloudflare-ai-gateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cloudflare-workers-ai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cohere"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "deepinfra"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "gateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "github-copilot"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "gitlab"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google-vertex-anthropic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google-vertex"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "groq"
+			},
+			"delayMs": 54
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "kilo"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "llmgateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "mistral"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "nvidia"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "opencode"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "snowflake-cortex"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openai-compatible"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openrouter"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "perplexity"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "sap-ai-core"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "catalog.updated",
+			"properties": {},
+			"delayMs": 6
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "togetherai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "vercel"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "venice"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "xai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "zenmux"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "dynamic-provider"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-plugin"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-provider"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "variant"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "reference.updated",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "integration.updated",
+			"properties": {},
+			"delayMs": 64
+		},
+		{
+			"kind": "sse",
+			"type": "catalog.updated",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 17
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef658d20016UYUP76eAIzReg",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "step-start"
+				},
+				"time": 1791252388050
+			},
+			"delayMs": 2392
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef659f20017sB0oxV6mTeT2Y",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call-94ab9000-b55f-4c83-8879-12784e137641",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 1791252388338
+			},
+			"delayMs": 289
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call-94ab9000-b55f-4c83-8879-12784e137641",
+					"state": {
+						"status": "running",
+						"input": {
+							"command": "sleep 10 && echo first-done",
+							"timeout": 20000
+						},
+						"time": {
+							"start": 1791252388544
+						}
+					},
+					"id": "prt_10ef659f20017sB0oxV6mTeT2Y",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq"
+				},
+				"time": 1791252388544
+			},
+			"delayMs": 207
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call-94ab9000-b55f-4c83-8879-12784e137641",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 10 && echo first-done",
+							"timeout": 20000
+						},
+						"time": {
+							"start": 1791252388544
+						}
+					},
+					"id": "prt_10ef659f20017sB0oxV6mTeT2Y",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq"
+				},
+				"time": 1791252388557
+			},
+			"delayMs": 12
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_ef109b232ffeq0hsY7NBBdOKbV/prompt_async?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"parts": [
+					{
+						"type": "text",
+						"text": "Also reply with the single word SECOND."
+					}
+				],
+				"model": {
+					"providerID": "opencode",
+					"modelID": "big-pickle"
+				}
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"role": "user",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"time": {
+						"created": 1791252388587
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "big-pickle"
+					}
+				}
+			},
+			"delayMs": 31
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "text",
+					"text": "Also reply with the single word SECOND.",
+					"messageID": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"id": "prt_10ef65aeb002DLz9J190G6wtrF"
+				},
+				"time": 1791252388588
+			},
+			"delayMs": 1
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252388589
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 6538
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call-94ab9000-b55f-4c83-8879-12784e137641",
+					"state": {
+						"metadata": {
+							"output": "first-done\n"
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 10 && echo first-done",
+							"timeout": 20000
+						},
+						"time": {
+							"start": 1791252388544
+						}
+					},
+					"id": "prt_10ef659f20017sB0oxV6mTeT2Y",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq"
+				},
+				"time": 1791252398710
+			},
+			"delayMs": 3582
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call-94ab9000-b55f-4c83-8879-12784e137641",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "sleep 10 && echo first-done",
+							"timeout": 20000
+						},
+						"output": "first-done\n",
+						"metadata": {
+							"output": "first-done\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "sleep 10 && echo first-done",
+						"time": {
+							"start": 1791252388544,
+							"end": 1791252398713
+						}
+					},
+					"id": "prt_10ef659f20017sB0oxV6mTeT2Y",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq"
+				},
+				"time": 1791252398713
+			},
+			"delayMs": 39
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef6827c001KMq6MrVizTNr80",
+					"reason": "tool-calls",
+					"messageID": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "step-finish",
+					"tokens": {
+						"total": 17853,
+						"input": 15889,
+						"output": 43,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 1920
+						}
+					},
+					"cost": 0
+				},
+				"time": 1791252398716
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"parentID": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 17853,
+						"input": 15889,
+						"output": 43,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 1920
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252385470,
+						"completed": 1791252398730
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef64ebe001QVX4vjlb6eOnuq",
+					"parentID": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 17853,
+						"input": 15889,
+						"output": 43,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 1920
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252385470,
+						"completed": 1791252398730
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"parentID": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252398731
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 15889,
+						"output": 43,
+						"reasoning": 1,
+						"cache": {
+							"read": 1920,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252398745
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 1791252385253
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "big-pickle"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_10ef64de5001D416ZeP4tnQxj3",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 8
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef686dc001cOGA3kPDq8ELPL",
+					"messageID": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "step-start"
+				},
+				"time": 1791252399836
+			},
+			"delayMs": 1080
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef686e4001IiAluLokW2hPZI",
+					"messageID": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 1791252399844
+					}
+				},
+				"time": 1791252399844
+			},
+			"delayMs": 8
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"messageID": "msg_10ef6828b001oCqH4h4vaRyToQ",
+				"partID": "prt_10ef686e4001IiAluLokW2hPZI",
+				"field": "text",
+				"delta": "FIRST SECOND"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef686e4001IiAluLokW2hPZI",
+					"messageID": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "text",
+					"text": "FIRST SECOND",
+					"time": {
+						"start": 1791252399844,
+						"end": 1791252399881
+					}
+				},
+				"time": 1791252399881
+			},
+			"delayMs": 42
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"part": {
+					"id": "prt_10ef6870a001Oeav33KbtbmTec",
+					"reason": "stop",
+					"messageID": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"type": "step-finish",
+					"tokens": {
+						"total": 17889,
+						"input": 93,
+						"output": 3,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 17792
+						}
+					},
+					"cost": 0
+				},
+				"time": 1791252399882
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"parentID": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 17889,
+						"input": 93,
+						"output": 3,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 17792
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252398731,
+						"completed": 1791252399884
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "msg_10ef6828b001oCqH4h4vaRyToQ",
+					"parentID": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 17889,
+						"input": 93,
+						"output": 3,
+						"reasoning": 1,
+						"cache": {
+							"write": 0,
+							"read": 17792
+						}
+					},
+					"modelID": "big-pickle",
+					"providerID": "opencode",
+					"time": {
+						"created": 1791252398731,
+						"completed": 1791252399884
+					},
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"id": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"slug": "curious-panda",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "classic",
+					"agent": "build",
+					"model": {
+						"id": "big-pickle",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 15982,
+						"output": 46,
+						"reasoning": 2,
+						"cache": {
+							"read": 19712,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252385229,
+						"updated": 1791252399886
+					}
+				}
+			},
+			"delayMs": 1
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 1791252388587
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "big-pickle"
+					},
+					"id": "msg_10ef65aeb001pYfC0uVuqkDhJz",
+					"sessionID": "ses_ef109b232ffeq0hsY7NBBdOKbV",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		}
+	]
+}
