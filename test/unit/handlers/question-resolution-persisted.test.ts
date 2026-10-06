@@ -25,6 +25,7 @@ import {
 	PendingSendOwnershipLive,
 	type PendingSendOwnershipTag,
 } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
+import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -63,6 +64,7 @@ import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
+	NoopProviderRuntimeIngestionLive,
 } from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
@@ -104,6 +106,7 @@ type HandlerStack =
 	| SessionManagerServiceTag
 	| AgentServiceTag
 	| ProviderTurnServiceTag
+	| ProviderRuntimeIngestionTag
 	| OverridesStateTag;
 
 const withHandlerStack = async (
@@ -141,6 +144,7 @@ const withHandlerStack = async (
 		Layer.succeed(LoggerTag, createSilentLogger()),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 		Layer.succeed(AgentServiceTag, makeMockAgentService()),
+		NoopProviderRuntimeIngestionLive,
 		Layer.succeed(ProviderTurnServiceTag, {
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,

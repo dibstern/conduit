@@ -9,7 +9,7 @@ import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
 import type { PtyEnvelope } from "../transport/ws-rpc.js";
-import type { Immutable, RelayMessage, TabEntry } from "../types.js";
+import type { Immutable, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
 const SCROLLBACK_MAX_BYTES = 50 * 1024; // 50 KB per tab
@@ -349,20 +349,6 @@ export function viewPtys(project: string | null): void {
 		});
 }
 
-export function handlePtyError(
-	msg: Extract<RelayMessage, { type: "error" }>,
-): void {
-	clientTerminal.pendingCreate = false;
-	if (pendingCreateTimer !== null) {
-		clearTimeout(pendingCreateTimer);
-		pendingCreateTimer = null;
-	}
-	clientTerminal.statusMessage = msg.message || "Terminal creation failed";
-	setTimeout(() => {
-		clientTerminal.statusMessage = null;
-	}, STATUS_MESSAGE_MS);
-}
-
 export function beginCreateTab(): boolean {
 	if (!getCanCreateTab()) return false;
 
@@ -383,12 +369,15 @@ export function beginCreateTab(): boolean {
 }
 
 export function failCreateTab(message = "Terminal creation failed"): void {
-	handlePtyError({
-		type: "error",
-		sessionId: "",
-		code: "PTY_CREATE_FAILED",
-		message,
-	});
+	clientTerminal.pendingCreate = false;
+	if (pendingCreateTimer !== null) {
+		clearTimeout(pendingCreateTimer);
+		pendingCreateTimer = null;
+	}
+	clientTerminal.statusMessage = message || "Terminal creation failed";
+	setTimeout(() => {
+		clientTerminal.statusMessage = null;
+	}, STATUS_MESSAGE_MS);
 }
 
 /** Switch to a different tab. */

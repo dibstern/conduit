@@ -633,8 +633,8 @@ export class ClaudeEventTranslator {
 				}
 
 				// SDK is retrying a failed API call. Surface it as
-				// session.status:retry so the UI can display retry progress
-				// instead of silence. Attempt/delay/error details travel via metadata.
+				// session.status:retry so the shell row can show retry progress
+				// instead of silence. The reason travels as the status message.
 				case "api_retry": {
 					const {
 						attempt,
@@ -665,11 +665,9 @@ export class ClaudeEventTranslator {
 							{
 								sessionId: ctx.sessionId,
 								status: "retry",
+								message: reason,
 							},
-							{
-								source: "api_retry",
-								correlationId: reason,
-							},
+							{ source: "api_retry" },
 						),
 					);
 					return;

@@ -4,9 +4,9 @@ import {
 	beginCreateTab,
 	closePanel,
 	destroyAll,
+	failCreateTab,
 	getScrollback,
 	getScrollbackSize,
-	handlePtyError,
 	handlePtyOutput,
 	handlePtyRemove,
 	handlePtySnapshot,
@@ -282,33 +282,23 @@ describe("handlePtyRemove", () => {
 	});
 });
 
-describe("handlePtyError", () => {
+describe("failCreateTab", () => {
 	it("clears pending create and shows server error message", () => {
 		beginCreateTab();
-		handlePtyError({
-			type: "error",
-			sessionId: "s1",
-			code: "PTY_CONNECT_FAILED",
-			message: "Connection refused",
-		});
+		failCreateTab("Connection refused");
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBe("Connection refused");
 	});
 
 	it("falls back to default message when server message is empty", () => {
 		beginCreateTab();
-		handlePtyError({ type: "error", sessionId: "s1", code: "", message: "" });
+		failCreateTab("");
 		expect(terminalState.pendingCreate).toBe(false);
 		expect(terminalState.statusMessage).toBe("Terminal creation failed");
 	});
 
 	it("clears error message after 3 seconds", () => {
-		handlePtyError({
-			type: "error",
-			sessionId: "s1",
-			code: "TIMEOUT",
-			message: "Timeout",
-		});
+		failCreateTab("Timeout");
 		expect(terminalState.statusMessage).toBe("Timeout");
 		vi.advanceTimersByTime(3000);
 		expect(terminalState.statusMessage).toBeNull();

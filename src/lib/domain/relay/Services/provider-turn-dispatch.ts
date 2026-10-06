@@ -16,6 +16,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
+import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
@@ -24,7 +25,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
@@ -38,6 +38,7 @@ import {
 	setPermissionMode,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
+import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
@@ -57,14 +58,17 @@ export const resolveProjectLaunchFolders = (sessionId: string) =>
 		for (const folder of config.extraFolders ?? []) {
 			if (existsSync(folder)) extraFolders.push(folder);
 			else {
-				const wsHandler = yield* WebSocketHandlerTag;
-				// RETRY is the existing informational session notice; it does not
-				// terminate the turn or clear the browser's processing state.
-				wsHandler.sendToSession(sessionId, {
-					type: "error",
-					code: "RETRY",
+				// Not the turn's failure: the launch goes on without the folder, so
+				// the user is warned rather than shown a failed turn.
+				const message = `Extra folder "${folder}" does not exist and was skipped.`;
+				const log = yield* LoggerTag;
+				log.warn(`session=${sessionId} ${message}`);
+				yield* publishAlert({
+					_tag: "alert",
+					kind: "warning",
+					alertId: randomUUID(),
 					sessionId,
-					message: `Warning: extra folder "${folder}" does not exist and was skipped.`,
+					message,
 				});
 			}
 		}
@@ -115,18 +119,6 @@ function targetSessionForRelayMessage(
 		? sessionId
 		: fallbackSessionId;
 }
-
-const sendErrorMessage = (
-	input: ProviderTurnServiceSendInput,
-	message: ReturnType<RelayError["toMessage"]>,
-	wsHandler: WebSocketHandlerShape,
-) => {
-	if (input.errorDelivery === "session") {
-		wsHandler.sendToSession(input.sessionId, message);
-	} else {
-		wsHandler.sendTo(input.clientId, message);
-	}
-};
 
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -249,49 +241,42 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 const handleDispatchFailure = (
 	input: ProviderTurnServiceSendInput,
 	sendErr: unknown,
+	recordedByProvider = false,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const ownership = yield* PendingSendOwnershipTag;
+		const failTurn = yield* makeFailTurn;
 		ownership.remove(input.sessionId, input.commandId);
 		log.warn(
 			`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 			formatErrorDetail(sendErr),
 		);
 		yield* clearProcessingTimeout(input.sessionId);
-		wsHandler.sendToSession(input.sessionId, {
-			type: "done",
-			sessionId: input.sessionId,
-			code: 1,
-		});
-		sendErrorMessage(
-			input,
-			RelayError.fromCaught(
-				sendErr,
-				"SEND_FAILED",
-				"Failed to send message",
-			).toMessage(input.sessionId),
-			wsHandler,
+		if (recordedByProvider) return;
+		const error = RelayError.fromCaught(
+			sendErr,
+			"SEND_FAILED",
+			"Failed to send message",
 		);
+		yield* failTurn(input.sessionId, error.message, error.code);
 	});
 
 const handleDispatchResult = (
 	input: ProviderTurnServiceSendInput,
 	result: TurnResult,
+	recordedByProvider: boolean,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		// The interrupter already sent done; finalizing again can end a newer turn.
 		if (result.status === "interrupted" && !result.error) return;
 
 		// Other non-`completed` terminal statuses (error / cancelled / orphaned)
 		// must finalize the turn: a completed turn's `done` arrives via the
-		// streamed provider events, but these results emit no such stream, so
-		// without this the browser stays "processing" until the 2-minute
-		// PROCESSING_TIMEOUT. Clear the timeout, broadcast `done`, and surface
-		// the reason.
+		// streamed provider events. A provider that streamed its own turn.error
+		// already sent the failed `done`; otherwise the browser would stay
+		// "processing" until the 2-minute PROCESSING_TIMEOUT, so record it here.
 		if (result.status !== "completed") {
 			const ownership = yield* PendingSendOwnershipTag;
 			ownership.remove(input.sessionId, input.commandId);
@@ -302,18 +287,9 @@ const handleDispatchResult = (
 				`client=${input.clientId} session=${input.sessionId} engine dispatch ${result.status}: ${msg}`,
 			);
 			yield* clearProcessingTimeout(input.sessionId);
-			wsHandler.sendToSession(input.sessionId, {
-				type: "done",
-				sessionId: input.sessionId,
-				code: 1,
-			});
-			sendErrorMessage(
-				input,
-				new RelayError(msg, {
-					code: "SEND_FAILED",
-				}).toMessage(input.sessionId),
-				wsHandler,
-			);
+			if (recordedByProvider) return;
+			const failTurn = yield* makeFailTurn;
+			yield* failTurn(input.sessionId, msg, "SEND_FAILED");
 			return;
 		}
 
@@ -344,7 +320,6 @@ const resolveClaudeModel = (
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		let resolvedInput = input;
 		if (isClaudeDriver(driver) && input.model === undefined) {
 			const discovery = yield* Effect.either(
@@ -368,21 +343,12 @@ const resolveClaudeModel = (
 					`client=${input.clientId} session=${input.sessionId} Claude model inference failed: ${reason}`,
 				);
 				yield* clearProcessingTimeout(input.sessionId);
-				sendErrorMessage(
-					input,
-					{
-						type: "error",
-						code: "MODEL_REQUIRED",
-						message: "A Claude model is required, but none could be selected.",
-						sessionId: input.sessionId,
-					},
-					wsHandler,
+				const failTurn = yield* makeFailTurn;
+				yield* failTurn(
+					input.sessionId,
+					"A Claude model is required, but none could be selected.",
+					"MODEL_REQUIRED",
 				);
-				wsHandler.sendToSession(input.sessionId, {
-					type: "done",
-					sessionId: input.sessionId,
-					code: 1,
-				});
 				return undefined;
 			}
 
@@ -536,21 +502,47 @@ const dispatchEngineTurn = (
 			orchestrationEngine.bindSession(resolvedInput.sessionId, providerId),
 		);
 
+		// Each failure gets exactly one turn.error. A provider that failed the
+		// turn it was handed records its own, through this send's sink: `push`
+		// on the inline path, `noteActivity` where the reactor ingests output.
+		// Only a failure it did not record is Conduit's to record.
+		let recordedByProvider = false;
+		const { eventSink } = sendTurnInput;
+		const watchedInput: SendTurnInput = {
+			...sendTurnInput,
+			eventSink: {
+				...eventSink,
+				push: (event) =>
+					eventSink.push(event).pipe(
+						Effect.tap(() => {
+							if (event.type === "turn.error") recordedByProvider = true;
+						}),
+					),
+				noteActivity: (event) => {
+					if (event.type === "turn.error") recordedByProvider = true;
+					eventSink.noteActivity?.(event);
+				},
+			},
+		};
 		const dispatchProgram = Effect.try({
 			try: () =>
 				orchestrationEngine.dispatchEffect({
 					type: "send_turn",
 					commandId: resolvedInput.commandId,
 					providerId,
-					input: sendTurnInput,
+					input: watchedInput,
 				}),
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.flatten,
-			Effect.flatMap((result) => handleDispatchResult(resolvedInput, result)),
+			Effect.flatMap((result) =>
+				handleDispatchResult(resolvedInput, result, recordedByProvider),
+			),
 			Effect.catchAll((error) =>
 				restorePreviousBinding.pipe(
-					Effect.zipRight(handleDispatchFailure(resolvedInput, error)),
+					Effect.zipRight(
+						handleDispatchFailure(resolvedInput, error, recordedByProvider),
+					),
 				),
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),

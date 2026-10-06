@@ -81,10 +81,10 @@ describe("resolveNotifications", () => {
 	it("error + subagent → push yes (only done suppressed for subagents)", () => {
 		const result = resolveNotifications(
 			{
-				type: "error",
-				code: "ERR",
+				type: "done",
+				code: 1,
 				alertId: "error-1",
-				message: "something broke",
+				error: "something broke",
 			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			true,
@@ -96,10 +96,10 @@ describe("resolveNotifications", () => {
 	it("error + not subagent + route drop → includes error message in payload", () => {
 		const result = resolveNotifications(
 			{
-				type: "error",
-				code: "ERR",
+				type: "done",
+				code: 1,
 				alertId: "error-1",
-				message: "something broke",
+				error: "something broke",
 			} as RelayMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,

@@ -28,7 +28,11 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import { BackgroundLivenessTag, SessionCompactionsTag } from "./services.js";
+import {
+	BackgroundLivenessTag,
+	SessionCompactionsTag,
+	SessionRetriesTag,
+} from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
@@ -58,6 +62,9 @@ export const subscribeShell = (
 			const compactingOf = Option.getOrUndefined(
 				yield* Effect.serviceOption(SessionCompactionsTag),
 			);
+			const retryingOf = Option.getOrUndefined(
+				yield* Effect.serviceOption(SessionRetriesTag),
+			);
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
@@ -69,9 +76,17 @@ export const subscribeShell = (
 									...list,
 									rows: list.rows.map((row) => {
 										const compacting = compactingOf?.(row.item.id);
-										return compacting === undefined
+										const retrying = retryingOf?.(row.item.id);
+										return compacting === undefined && retrying === undefined
 											? row
-											: { ...row, item: { ...row.item, compacting } };
+											: {
+													...row,
+													item: {
+														...row.item,
+														...(compacting === undefined ? {} : { compacting }),
+														...(retrying === undefined ? {} : { retrying }),
+													},
+												};
 									}),
 								})),
 							),

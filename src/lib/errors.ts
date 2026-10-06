@@ -6,7 +6,6 @@
 
 import { Schema } from "effect";
 import { formatErrorDetail, redactSensitive } from "./errors-utils.js";
-import type { RelayMessage } from "./shared-types.js";
 
 // Re-export utility functions for backward compatibility
 export { formatErrorDetail, redactSensitive } from "./errors-utils.js";
@@ -28,10 +27,8 @@ export type ErrorCode =
 	| "AGENT_SWITCH_FAILED"
 	| "FILE_NOT_FOUND"
 	| "FILE_READ_FAILED"
-	| "PTY_CONNECT_FAILED"
 	| "PTY_CREATE_FAILED"
 	| "PTY_INPUT_FAILED"
-	| "HANDLER_ERROR"
 	| "UNKNOWN_MESSAGE_TYPE"
 	| "PARSE_ERROR"
 	| "INTERNAL_ERROR"
@@ -84,14 +81,6 @@ type TaggedRelayErrorConstructor = abstract new (
 type TaggedRelayErrorMethods<Tag extends string> = {
 	readonly code: Tag;
 	toJSON(): { error: { code: string; message: string; details?: unknown } };
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	};
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }>;
 	toLog(): Record<string, unknown>;
 };
 
@@ -121,27 +110,6 @@ function withTaggedRelayErrorMethods(
 					...(details ? { details } : {}),
 				},
 			};
-		}
-
-		toWebSocket(): {
-			type: "error";
-			code: string;
-			message: string;
-			statusCode?: number;
-			details?: Record<string, unknown>;
-		} {
-			const details = contextDetails(this.context);
-			return {
-				type: "error",
-				code: this._tag,
-				message: this.message,
-				...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-				...(details ? { details } : {}),
-			};
-		}
-
-		toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-			return { ...this.toWebSocket(), sessionId };
 		}
 
 		toLog(): Record<string, unknown> {
@@ -292,30 +260,6 @@ export class RelayError extends Error {
 				...(details ? { details } : {}),
 			},
 		};
-	}
-
-	/** WebSocket error message shape (AC1: consistent { type, code, message }) */
-	toWebSocket(): {
-		type: "error";
-		code: string;
-		message: string;
-		statusCode?: number;
-		details?: Record<string, unknown>;
-	} {
-		const details =
-			Object.keys(this.context).length > 0 ? this.context : undefined;
-		return {
-			type: "error",
-			code: this._tag,
-			message: this.message,
-			...(this.statusCode !== 500 ? { statusCode: this.statusCode } : {}),
-			...(details ? { details } : {}),
-		};
-	}
-
-	/** Returns a RelayMessage `error` variant with required sessionId (AC1). */
-	toMessage(sessionId: string): Extract<RelayMessage, { type: "error" }> {
-		return { ...this.toWebSocket(), sessionId };
 	}
 
 	/** Log-safe representation (redacts sensitive data) (AC6) */

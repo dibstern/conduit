@@ -991,11 +991,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					(message) =>
 						message["type"] === "done" && message["sessionId"] === sessionId,
 				),
-			).toMatchObject({ code: 1 });
-			await after.waitFor(
-				(message) =>
-					message["type"] === "error" && message["sessionId"] === sessionId,
-			);
+			).toMatchObject({ code: 1, error: expect.any(String) });
 			await after.close();
 			const reconnect = await harness.connect(sessionId);
 			await reconnect.view(sessionId);

@@ -17,7 +17,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { RelayError } from "../errors.js";
+import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 
 // Stores the last draft per session so that a tab switching to it (e.g. on a
 // different device) reads the current draft in its ViewSession response.
@@ -48,7 +48,6 @@ export interface SendMessageToSessionInput {
 	readonly originId?: string;
 	readonly commandId: string;
 	readonly excludeClientId?: string;
-	readonly errorDelivery?: "client" | "session";
 }
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
@@ -129,24 +128,18 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
+		const failTurn = yield* makeFailTurn;
 		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.sync(() => {
+			Effect.suspend(() => {
 				ownership.remove(activeId, input.commandId);
 				log.warn(
-					`client=${clientId} session=${activeId} Processing timeout (120s) — broadcasting done`,
+					`client=${clientId} session=${activeId} Processing timeout (120s) — failing the turn`,
 				);
-				wsHandler.sendToSession(
+				return failTurn(
 					activeId,
-					new RelayError(
-						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-						{ code: "PROCESSING_TIMEOUT" },
-					).toMessage(activeId),
+					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+					"PROCESSING_TIMEOUT",
 				);
-				wsHandler.sendToSession(activeId, {
-					type: "done",
-					sessionId: activeId,
-					code: 1,
-				});
 			}),
 		);
 
@@ -167,7 +160,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				...(sessionAgent ? { agent: sessionAgent } : {}),
 				...(variant ? { variant } : {}),
 				...(contextWindow ? { contextWindow } : {}),
-				...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 			})
 			.pipe(
 				Effect.onError(() =>

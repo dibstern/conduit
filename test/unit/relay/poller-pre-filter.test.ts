@@ -44,13 +44,6 @@ describe("classifyPollerBatch", () => {
 		expect(classifyPollerBatch(events).hasContentActivity).toBe(true);
 	});
 
-	it("returns hasContentActivity true for error events", () => {
-		const events = [
-			{ type: "error", code: "ERR", message: "fail" },
-		] as RelayMessage[];
-		expect(classifyPollerBatch(events).hasContentActivity).toBe(true);
-	});
-
 	it("returns hasContentActivity true for thinking_delta", () => {
 		const events = [{ type: "thinking_delta" }] as RelayMessage[];
 		expect(classifyPollerBatch(events).hasContentActivity).toBe(true);

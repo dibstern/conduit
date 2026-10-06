@@ -44,10 +44,10 @@ describe("sendPushForEvent", () => {
 		sendPushForEvent(
 			push,
 			{
-				type: "error",
+				type: "done",
 				sessionId: "s1",
-				code: "SEND_FAILED",
-				message: "Something broke",
+				code: 1,
+				error: "Something broke",
 			},
 			createSilentLogger(),
 		);
@@ -64,7 +64,7 @@ describe("sendPushForEvent", () => {
 		const push = createMockPushManager();
 		sendPushForEvent(
 			push,
-			{ type: "error", sessionId: "s1", code: "UNKNOWN", message: "" },
+			{ type: "done", sessionId: "s1", code: 1, error: "" },
 			createSilentLogger(),
 		);
 

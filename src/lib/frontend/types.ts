@@ -203,6 +203,8 @@ export interface SystemMessage {
 	/** Set when this notice reports a context compaction. A completed one leaves
 	 *  the notices and becomes a boundary inside the turn's activity log. */
 	compaction?: "started" | "completed" | "failed";
+	/** Set on the transient notice of a provider retry the shell row carries. */
+	retry?: true;
 	preTokens?: number;
 	createdAt?: number;
 }

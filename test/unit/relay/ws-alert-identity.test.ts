@@ -57,7 +57,7 @@ it("preserves originating identity across delivery shapes after the latest turn 
 	);
 });
 
-it("preserves explicit error identity across paths without reading mutable message timestamps", async () => {
+it("preserves explicit failure identity across paths without reading mutable message timestamps", async () => {
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -71,24 +71,24 @@ it("preserves explicit error identity across paths without reading mutable messa
 				},
 			});
 			yield* broadcast({
-				type: "error",
+				type: "done",
 				sessionId: "s1",
-				code: "ERR",
-				message: "rate limited",
+				code: 1,
+				error: "rate limited",
 				alertId: "rate-limit-1",
 			});
 			yield* broadcast({
-				type: "error",
+				type: "done",
 				sessionId: "s1",
-				code: "ERR",
-				message: "rate limited",
+				code: 1,
+				error: "rate limited",
 				alertId: "rate-limit-1",
 			});
 			yield* broadcast({
-				type: "error",
+				type: "done",
 				sessionId: "s1",
-				code: "ERR",
-				message: "disk full",
+				code: 1,
+				error: "disk full",
 				alertId: "disk-error-1",
 			});
 			expect(sent[0]?.alertId).toBeTypeOf("string");
@@ -96,27 +96,13 @@ it("preserves explicit error identity across paths without reading mutable messa
 			expect(sent[2]?.alertId).not.toBe(sent[0]?.alertId);
 			yield* sql`UPDATE sessions SET last_message_at = 200 WHERE id = 's1'`;
 			yield* broadcast({
-				type: "error",
+				type: "done",
 				sessionId: "s1",
-				code: "ERR",
-				message: "rate limited",
+				code: 1,
+				error: "rate limited",
 				alertId: "rate-limit-1",
 			});
 			expect(sent[3]?.alertId).toBe(sent[0]?.alertId);
-			yield* broadcast({
-				type: "error",
-				sessionId: "s1",
-				code: "ERR",
-				message: "legacy error",
-			});
-			yield* broadcast({
-				type: "error",
-				sessionId: "s1",
-				code: "ERR",
-				message: "legacy error",
-			});
-			expect(sent[4]?.alertId).toBeTypeOf("string");
-			expect(sent[5]?.alertId).not.toBe(sent[4]?.alertId);
 		}).pipe(
 			Effect.provide(
 				Layer.merge(

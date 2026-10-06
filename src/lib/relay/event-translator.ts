@@ -232,7 +232,7 @@ export function translateReasoningPartUpdated(
 }
 
 /** Format a human-readable retry message with proper delay display */
-function formatRetryMessage(
+export function formatRetryMessage(
 	reason: string,
 	attempt: number,
 	delayMs: number | undefined,
@@ -323,23 +323,7 @@ export function translateSessionStatus(
 		return { type: "done", code: 0 };
 	}
 
-	// Retry messages are translated for immediate user feedback.
-	if (statusType === "retry") {
-		const attempt = props.status?.attempt ?? 0;
-		const reason = props.status?.message ?? "Retrying";
-		// `next` is an absolute timestamp (ms since epoch) — compute relative delay
-		const nextMs = props.status?.next;
-		const delayMs =
-			nextMs && nextMs > Date.now() ? nextMs - Date.now() : undefined;
-		const retryMsg = formatRetryMessage(reason, attempt, delayMs);
-		return {
-			type: "error",
-			code: "RETRY",
-			message: retryMsg,
-			alertId: crypto.randomUUID(),
-		};
-	}
-
+	// A retry is transient status on the session's shell row (C1).
 	return null;
 }
 
@@ -657,15 +641,14 @@ export function createTranslator(
 				if (!isSessionErrorEvent(event)) {
 					return { ok: false, reason: "session error: invalid event" };
 				}
-				const errName = event.properties.error?.name ?? "Unknown";
 				const errMsg = sessionErrorText(event.properties.error);
 				return {
 					ok: true,
 					messages: [
 						{
-							type: "error",
-							code: errName,
-							message: errMsg,
+							type: "done",
+							code: 1,
+							error: errMsg,
 							alertId: crypto.randomUUID(),
 						},
 					],

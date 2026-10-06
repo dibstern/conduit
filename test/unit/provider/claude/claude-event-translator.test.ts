@@ -1051,7 +1051,7 @@ describe("ClaudeEventTranslator", () => {
 
 	// 3b. system (subtype api_retry)
 
-	it("translates system/api_retry to session.status:retry with detail metadata", async () => {
+	it("translates system/api_retry to session.status:retry with its reason", async () => {
 		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "api_retry",
@@ -1068,13 +1068,11 @@ describe("ClaudeEventTranslator", () => {
 			(e) => e.type === "session.status" && dataOf(e)["status"] === "retry",
 		);
 		expect(statusEvent).toBeDefined();
-		// Detail (attempt, delay, error) is passed via metadata.correlationId
-		// so the relay sink can render it without parsing canonical payloads.
-		const meta = statusEvent?.metadata as Record<string, unknown>;
-		expect(typeof meta["correlationId"]).toBe("string");
-		expect(meta["correlationId"]).toMatch(/attempt 3\/10/);
-		expect(meta["correlationId"]).toMatch(/HTTP 502/);
-		expect(meta["correlationId"]).toMatch(/next in 2\.2s/);
+		// The reason (attempt, error, delay) rides the payload for the shell row.
+		const message = statusEvent ? dataOf(statusEvent)["message"] : undefined;
+		expect(message).toMatch(/attempt 3\/10/);
+		expect(message).toMatch(/HTTP 502/);
+		expect(message).toMatch(/next in 2\.2s/);
 	});
 
 	// 3b-compaction. system (compact_boundary / status compaction)

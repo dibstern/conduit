@@ -22,7 +22,7 @@ import {
 	setDefaultPermissionMode,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { RelayError } from "../errors.js";
+import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -118,26 +118,19 @@ function formatAnswers(rawAnswers: Record<string, string>): string[][] {
 const restartProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
+		const failTurn = yield* makeFailTurn;
 
 		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.sync(() => {
+			Effect.suspend(() => {
 				log.warn(
-					`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
+					`session=${sessionId} Processing timeout (120s) after question answered — failing the turn`,
 				);
-				wsHandler.sendToSession(
+				return failTurn(
 					sessionId,
-					new RelayError(
-						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-						{ code: "PROCESSING_TIMEOUT" },
-					).toMessage(sessionId),
+					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+					"PROCESSING_TIMEOUT",
 				);
-				wsHandler.sendToSession(sessionId, {
-					type: "done",
-					sessionId,
-					code: 1,
-				});
 			}),
 		);
 	});

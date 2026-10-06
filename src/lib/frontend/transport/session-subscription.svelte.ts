@@ -10,6 +10,7 @@ import type { Stream } from "effect";
 import {
 	followSessionBusy,
 	followSessionCompaction,
+	followSessionRetry,
 } from "../stores/chat.svelte.js";
 import {
 	followSessionModelSettings,
@@ -116,6 +117,8 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionBusy(change.item.id, busy);
 		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
+		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
+			followSessionRetry(change.item.id, change.item.retrying);
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
@@ -138,6 +141,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			// A snapshot (cold start, resume) is absolute.
 			followSessionBusy(row.id, isBusy(row));
 			followSessionCompaction(row.id, row.compacting);
+			followSessionRetry(row.id, row.retrying);
 		}
 	}
 	applied = next;

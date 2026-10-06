@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -31,6 +32,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	NoopProviderRuntimeIngestionLive,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -65,6 +67,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
@@ -111,6 +114,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				),
 				makeOverridesStateLive(),
 				PendingInteractionServiceLive,
+				NoopProviderRuntimeIngestionLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 			);
 

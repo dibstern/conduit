@@ -120,16 +120,15 @@ describe("createRelayEventSink — translation", () => {
 			),
 		);
 		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(
-			calls.some((m) => m.type === "error" && m.code === "provider_error"),
-		).toBe(true);
-		expect(calls.some((m) => m.type === "done" && m.code === 1)).toBe(true);
+		expect(calls).toContainEqual(
+			expect.objectContaining({ type: "done", code: 1, error: "boom" }),
+		);
 		expect(clearTimeout).toHaveBeenCalled();
 	});
 
-	// Regression: before this fix, api_retry system events never reached the
-	// UI, so users saw silence for 1-5 minutes while the SDK retried 502s.
-	it("maps session.status:retry → non-terminal error(RETRY)", async () => {
+	// A retry is transient status on the shell row (C1), not a relay message;
+	// it must still keep the turn alive while the SDK retries.
+	it("keeps session.status:retry off the relay without ending the turn", async () => {
 		const send = vi.fn();
 		const clearTimeout = vi.fn();
 		const resetTimeout = vi.fn();
@@ -141,23 +140,15 @@ describe("createRelayEventSink — translation", () => {
 		});
 		await Effect.runPromise(
 			sink.push(
-				makeEvent(
-					"session.status",
-					{ sessionId: "ses-1", status: "retry" },
-					{
-						correlationId: "Retrying (attempt 3/10) · HTTP 502 · next in 2.2s",
-					},
-				),
+				makeEvent("session.status", {
+					sessionId: "ses-1",
+					status: "retry",
+					message: "Retrying (attempt 3/10) · HTTP 502 · next in 2.2s",
+				}),
 			),
 		);
-		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(calls).toHaveLength(1);
-		const msg = calls[0];
-		expect(msg).toBeDefined();
-		if (msg?.type !== "error") throw new Error("expected error");
-		expect(msg.code).toBe("RETRY");
-		expect(msg.message).toMatch(/attempt 3\/10/);
-		// RETRY is NON-terminal — must NOT clear the processing timeout.
+		expect(send).not.toHaveBeenCalled();
+		// A retry is NON-terminal — must NOT clear the processing timeout.
 		expect(clearTimeout).not.toHaveBeenCalled();
 		// It DOES reset the timeout (activity observed).
 		expect(resetTimeout).toHaveBeenCalled();

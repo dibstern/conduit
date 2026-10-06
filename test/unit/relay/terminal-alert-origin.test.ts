@@ -4,7 +4,7 @@ import { translateDomainEventToRelay } from "../../../src/lib/relay/domain-event
 import { createTranslator } from "../../../src/lib/relay/event-translator.js";
 
 describe("terminal alert origins", () => {
-	it("gives raw legacy errors an observation identity instead of suppressing them", () => {
+	it("gives raw legacy failures an observation identity instead of suppressing them", () => {
 		const translator = createTranslator();
 		const result = translator.translate({
 			type: "session.error",
@@ -15,18 +15,22 @@ describe("terminal alert origins", () => {
 		});
 		expect(result).toMatchObject({
 			ok: true,
-			messages: [{ type: "error", alertId: expect.any(String) }],
+			messages: [{ type: "done", code: 1, alertId: expect.any(String) }],
 		});
 	});
-	it("identifies failure, interruption, and retry observations without current session state", () => {
+	it("identifies failure and interruption observations without current session state", () => {
 		const failure = translateDomainEventToRelay(
 			canonicalEvent("turn.error", "s1", { messageId: "m1", error: "failed" }),
 		);
 		expect(failure).toMatchObject({
 			kind: "emit",
 			messages: [
-				{ type: "error", alertId: '["s1","m1","error","failed"]' },
-				{ type: "done", alertId: '["s1","m1","done"]' },
+				{
+					type: "done",
+					code: 1,
+					error: "failed",
+					alertId: '["s1","m1","error","failed"]',
+				},
 			],
 		});
 		expect(
@@ -37,19 +41,15 @@ describe("terminal alert origins", () => {
 			kind: "emit",
 			messages: [{ type: "done", alertId: '["s1","m1","done"]' }],
 		});
-		const retry = canonicalEvent("session.status", "s1", {
-			sessionId: "s1",
-			status: "retry",
-		});
-		expect(translateDomainEventToRelay(retry)).toMatchObject({
-			kind: "emit",
-			messages: [
-				{
-					type: "error",
-					alertId: JSON.stringify(["s1", retry.eventId, "error"]),
-				},
-			],
-		});
+		// A retry is transient shell-row status, never an alert.
+		expect(
+			translateDomainEventToRelay(
+				canonicalEvent("session.status", "s1", {
+					sessionId: "s1",
+					status: "retry",
+				}),
+			),
+		).toMatchObject({ kind: "silent" });
 	});
 	it("keeps T1 replay identity after T2 and gives T2 its own identity", () => {
 		const first = canonicalEvent("turn.completed", "s1", { messageId: "m1" });

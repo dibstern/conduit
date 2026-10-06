@@ -315,6 +315,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */
 	compacting: Schema.optional(Schema.String),
+	/** A provider retry's reason while it waits: transient status, never logged (C1). */
+	retrying: Schema.optional(Schema.String),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),
@@ -650,6 +652,8 @@ const DoneSchema = Schema.Struct({
 	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.Number,
+	/** Why the turn failed. The transcript carries the notice; this is the alert's. */
+	error: Schema.optional(Schema.String),
 });
 
 const SessionListSchema = Schema.Struct({
@@ -700,21 +704,9 @@ const SessionDeletedSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
 
-const ErrorSchema = Schema.Struct({
-	type: Schema.Literal("error"),
-	alertId: Schema.optional(Schema.String),
-	sessionId: Schema.String,
-	code: Schema.String,
-	message: Schema.String,
-	statusCode: Schema.optional(Schema.Number),
-	details: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
-});
-
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 3;
+export const WS_PROTOCOL_VERSION = 4;
 
 const ProtocolVersionSchema = Schema.Struct({
 	type: Schema.Literal("protocol_version"),
@@ -776,7 +768,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Session deletion
 	SessionDeletedSchema,
 	// Misc
-	ErrorSchema,
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
 	// Instance Management
@@ -810,7 +801,6 @@ export type PerSessionEventType =
 	| "tool_content"
 	| "result"
 	| "done"
-	| "error"
 	| "user_message"
 	| "part_removed"
 	| "message_removed"

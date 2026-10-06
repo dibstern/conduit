@@ -3,6 +3,7 @@ import { Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	PendingSendOwnershipLive,
@@ -76,6 +77,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
@@ -128,6 +130,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			});
 			const persistence = makePersistenceEffectLayer(":memory:");
 			const baseLayer = Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),

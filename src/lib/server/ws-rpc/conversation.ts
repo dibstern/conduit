@@ -137,7 +137,6 @@ export const conversationHandlers = {
 				commandId: request.commandId,
 				...(request.images ? { images: request.images } : {}),
 				...(request.originId ? { originId: request.originId } : {}),
-				errorDelivery: "session",
 			});
 			return { ok: true as const, sessionId: sessionId ?? request.sessionId };
 		}).pipe(

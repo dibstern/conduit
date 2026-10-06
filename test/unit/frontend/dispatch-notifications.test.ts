@@ -110,12 +110,12 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);
 	});
 
-	it("calls triggerNotifications for 'error' messages", () => {
+	it("calls triggerNotifications for a failed 'done'", () => {
 		const msg: RelayMessage = {
-			type: "error",
+			type: "done",
 			sessionId: "test-session",
-			message: "test error",
-			code: "UNKNOWN",
+			code: 1,
+			error: "test error",
 		};
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
@@ -140,7 +140,11 @@ describe("applyAlert fires the ding for a session no tab is viewing", () => {
 			message: "Something failed",
 		});
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "error", message: "Something failed" }),
+			expect.objectContaining({
+				type: "done",
+				code: 1,
+				error: "Something failed",
+			}),
 		);
 		expect(showToast).toHaveBeenCalledOnce();
 	});

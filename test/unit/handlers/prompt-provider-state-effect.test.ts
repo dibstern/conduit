@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -142,6 +143,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(LoggerTag, log),
@@ -240,6 +242,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
@@ -341,6 +344,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
@@ -456,6 +460,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(LoggerTag, log),
@@ -599,6 +604,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),

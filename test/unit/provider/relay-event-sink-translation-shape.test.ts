@@ -97,18 +97,12 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 		{
 			type: "turn.error",
 			data: { messageId: "m", error: "boom", code: "err" },
-			expectedTypes: ["error", "done"],
+			expectedTypes: ["done"],
 		},
 		{
 			type: "turn.interrupted",
 			data: { messageId: "m" },
 			expectedTypes: ["done"],
-		},
-		{
-			type: "session.status",
-			data: { sessionId: "s", status: "retry" },
-			meta: { correlationId: "Retrying" },
-			expectedTypes: ["error"],
 		},
 	];
 
@@ -167,6 +161,8 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 		},
 		{ type: "session.status", data: { sessionId: "s", status: "busy" } },
 		{ type: "session.status", data: { sessionId: "s", status: "idle" } },
+		// A retry is transient shell-row status (C1).
+		{ type: "session.status", data: { sessionId: "s", status: "retry" } },
 		{ type: "session.status", data: { sessionId: "s", status: "error" } },
 		{
 			type: "message.created",

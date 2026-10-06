@@ -69,14 +69,9 @@ describe("Integration: Send Message", () => {
 
 		await client.sendMessage("Reply with just 'ok'");
 
-		await client.waitFor("done");
-
-		// Should NOT have received a HANDLER_ERROR about 400
-		const errors = client.getReceivedOfType("error");
-		const promptErrors = errors.filter(
-			(e) => typeof e["message"] === "string" && e["message"].includes("400"),
-		);
-		expect(promptErrors).toHaveLength(0);
+		// A rejected prompt (the original 400) would end the turn failed.
+		const done = await client.waitFor("done");
+		expect(done["error"]).toBeUndefined();
 
 		await client.close();
 	}, 15_000);

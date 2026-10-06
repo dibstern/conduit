@@ -552,7 +552,9 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.viewSession(newId);
 		const back = await client1.loadMoreHistory(newId);
 		expect(JSON.stringify(back.messages)).toContain("pong");
-		const errorFrames = client1.getReceived().filter((m) => m.type === "error");
+		const errorFrames = client1
+			.getReceived()
+			.filter((m) => m.type === "done" && m["error"] !== undefined);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-D] errorFrames=${JSON.stringify(errorFrames)}`);
 		expect(errorFrames).toEqual([]);

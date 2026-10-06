@@ -29,16 +29,13 @@ import {
 	getMessages,
 	getOrCreateSessionSlot,
 	handleDone,
-	handleError,
 	inputSyncState,
 	persistInputDraft,
-	type SessionActivity,
 	type SessionMessages,
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
-import { clearScanInFlight } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -60,7 +57,6 @@ import {
 	refreshSessionSkills,
 	sessionSkillsState,
 } from "./session-skills.svelte.js";
-import { handlePtyError } from "./terminal.svelte.js";
 import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
@@ -92,7 +88,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"tool_content",
 		"result",
 		"done",
-		"error",
 		"user_message",
 		"part_removed",
 		"message_removed",
@@ -167,16 +162,13 @@ function routePerSession(event: PerSessionEvent): void {
 			refreshSessionSkills(event.sessionId);
 			// Only notify for root agent sessions — subagent completions are
 			// intermediate steps; the parent emits its own done when finished.
+			// A failure is always worth telling.
 			const doneSession = findSession(event.sessionId);
-			if (!doneSession?.parentID) {
+			if (!doneSession?.parentID || event.error !== undefined) {
 				triggerNotifications(event);
 			}
 			break;
 		}
-		case "error":
-			handleChatError(activity, messages, event);
-			triggerNotifications(event);
-			break;
 		case "tool_content":
 			handleToolContentResponse(messages, event);
 			break;
@@ -319,41 +311,6 @@ export function applyGetFileContentResponse(
 	response: GetFileContentResponse,
 ): void {
 	for (const fn of fileBrowserListeners) fn({ kind: "content", response });
-}
-
-/** Error routing: PTY errors vs chat errors. */
-function handleChatError(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "error" }>,
-): void {
-	const code = msg.code;
-
-	// PTY-related errors
-	if (code === "PTY_CONNECT_FAILED") {
-		handlePtyError(msg);
-		return;
-	}
-
-	// Handler errors (e.g., question reply failed): show toast so the user
-	// knows something went wrong, rather than silently swallowing.
-	if (code === "HANDLER_ERROR") {
-		const text = msg.message ?? "An operation failed on the server";
-		showToast(text, { variant: "warn" });
-		return;
-	}
-
-	// Instance errors — show as toast and clear scan state if pending
-	if (code === "INSTANCE_ERROR") {
-		clearScanInFlight();
-		showToast(msg.message ?? "Instance operation failed", {
-			variant: "warn",
-		});
-		return;
-	}
-
-	// Chat errors
-	handleError(activity, messages, msg);
 }
 
 /** The daemon sends protocol_version on connect. An older daemon needs a

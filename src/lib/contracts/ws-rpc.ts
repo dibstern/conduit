@@ -2023,7 +2023,8 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
-	kind: Schema.Literal("done", "error"),
+	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
+	kind: Schema.Literal("done", "error", "warning"),
 	alertId: NonEmptyString,
 	sessionId: Schema.optional(Schema.String),
 	message: Schema.optional(Schema.String),

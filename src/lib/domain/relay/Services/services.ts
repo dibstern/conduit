@@ -284,6 +284,12 @@ export class SessionCompactionsTag extends Context.Tag("SessionCompactions")<
 	(sessionId: string) => string | undefined
 >() {}
 
+/** The provider retry a session is waiting on; see makeSessionRetries. */
+export class SessionRetriesTag extends Context.Tag("SessionRetries")<
+	SessionRetriesTag,
+	(sessionId: string) => string | undefined
+>() {}
+
 export class PollerManagerTag extends Context.Tag("PollerManager")<
 	PollerManagerTag,
 	PollerManagerShape

@@ -114,6 +114,7 @@ import {
 	makeMockStatusPoller,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	NoopProviderRuntimeIngestionLive,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
@@ -1466,6 +1467,7 @@ describe("SessionManagerService", () => {
 					Effect.provideService(ConfigTag, makeMockConfig()),
 					Effect.provide(PendingInteractionServiceLive),
 					Effect.provide(makeOverridesStateLive()),
+					Effect.provide(NoopProviderRuntimeIngestionLive),
 				);
 				yield* service.deleteSession(sessionId);
 				expect(

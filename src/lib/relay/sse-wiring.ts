@@ -26,6 +26,8 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import {
 	getPermissionMode,
 	type OverridesStateTag,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
@@ -199,16 +201,18 @@ export function sendPushForEvent(
 }
 
 /**
- * The push payload's `type`. Approvals keep the names the old relay messages
- * had, because the service worker (sw.ts) and the alert ledger's persisted
- * kinds still key on them.
+ * The push payload's `type`. Approvals and failed turns keep the names the old
+ * relay messages had, because the service worker (sw.ts) and the alert
+ * ledger's persisted kinds still key on them.
  */
 const pushKind = (msg: RelayMessage | Approval): string =>
 	"_tag" in msg
 		? msg._tag === "permission"
 			? "permission_request"
 			: "ask_user"
-		: msg.type;
+		: msg.type === "done" && msg.error !== undefined
+			? "error"
+			: msg.type;
 
 /** A push that did not reach the push layer. Tagged so the ledger's own failures are distinguishable. */
 class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
@@ -245,18 +249,15 @@ const pushAlert = (
 				};
 	switch (msg.type) {
 		case "done":
-			return msg.alertId
+			if (!msg.alertId) return undefined;
+			return msg.error === undefined
 				? { sessionId, kind: "done", originId: msg.alertId }
-				: undefined;
-		case "error":
-			return msg.alertId
-				? {
+				: {
 						sessionId,
 						kind: "error",
 						originId: msg.alertId,
-						detail: msg.message ?? "",
-					}
-				: undefined;
+						detail: msg.error,
+					};
 		default:
 			return undefined;
 	}
@@ -570,6 +571,14 @@ const handleSSEEventAfterPendingEffect = (
 			)?.type;
 			if (statusType === "idle" && eventSessionId && deps.statusPoller) {
 				yield* deps.statusPoller.notifySSEIdle(eventSessionId);
+			}
+			// A retry is shell-row status, not a relay message, but the provider
+			// is still working, so it keeps the turn's timeout alive.
+			if (statusType === "retry" && eventSessionId) {
+				yield* resetProcessingTimeout(
+					eventSessionId,
+					PROCESSING_TIMEOUT_DURATION,
+				);
 			}
 		}
 

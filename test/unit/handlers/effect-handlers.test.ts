@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -5,6 +6,7 @@ import {
 	AgentServiceTag,
 	filterAgents,
 } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingSendOwnershipLive,
 	PendingSendOwnershipTag,
@@ -311,7 +313,7 @@ const persistentHandlerPersistence = Layer.merge(
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, PendingSendOwnershipLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, PendingSendOwnershipLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -4119,19 +4121,17 @@ describe("handleMessage", () => {
 				expect(yield* hasActiveProcessingTimeout("session-rejected")).toBe(
 					false,
 				);
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-rejected", {
-					type: "done",
-					sessionId: "session-rejected",
-					code: 1,
-				});
-				expect(ws.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "error",
-						sessionId: "session-rejected",
-						code: "SEND_FAILED",
-					}),
-				);
+				// The failure is recorded as the turn's error; the relay's failed
+				// `done` idles the composer from there.
+				const sql = yield* SqlClient.SqlClient;
+				const failures = yield* sql<{ code: string; error: string }>`
+					SELECT json_extract(data, '$.code') AS code,
+						json_extract(data, '$.error') AS error
+					FROM events
+					WHERE session_id = 'session-rejected' AND type = 'turn.error'`;
+				expect(failures).toEqual([
+					{ code: "SEND_FAILED", error: expect.any(String) },
+				]);
 			}).pipe(Effect.provide(layer));
 		},
 	);

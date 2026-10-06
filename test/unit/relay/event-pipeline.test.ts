@@ -91,7 +91,6 @@ describe("shouldCache", () => {
 			"tool_result",
 			"result",
 			"done",
-			"error",
 		] as const;
 		for (const type of cacheableTypes) {
 			expect(shouldCache(type)).toBe(true);

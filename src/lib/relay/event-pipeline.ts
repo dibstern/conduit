@@ -68,7 +68,6 @@ export const PERSISTED_EVENT_TYPES = [
 	"tool_result",
 	"result",
 	"done",
-	"error",
 ] as const;
 
 export type PersistedEventType = (typeof PERSISTED_EVENT_TYPES)[number];
@@ -89,10 +88,10 @@ const _assertPersistedTypes: _AssertPersistedSubset = true;
  * the server publishes an alert (SubscribeAlerts) so clients can still fire
  * sound/browser notifications without updating chat state.
  * Permissions and questions reach every browser through the approvals
- * subscription, so only done and error need the alert fallback.
+ * subscription, so only done (finished or failed) needs the alert fallback.
  */
 export const NOTIFICATION_EVENT_TYPES: ReadonlySet<RelayMessage["type"]> =
-	new Set(["done", "error"]);
+	new Set(["done"]);
 
 /** Check if a message type warrants a cross-session notification broadcast. */
 export function isNotificationWorthy(type: RelayMessage["type"]): boolean {

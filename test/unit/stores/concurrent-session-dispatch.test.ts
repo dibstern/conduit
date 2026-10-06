@@ -183,7 +183,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"tool_content",
 			"result",
 			"done",
-			"error",
 			"user_message",
 			"part_removed",
 			"message_removed",

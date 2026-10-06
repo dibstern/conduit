@@ -126,29 +126,20 @@ export function translateDomainEventToRelay(
 		}
 
 		case "turn.error": {
-			const { error, code } = event.data;
-			return emit(
-				{
-					type: "error",
-					code: code ?? "TURN_ERROR",
-					message: error,
-					alertId: JSON.stringify([
-						event.sessionId,
-						event.data.messageId || event.eventId,
-						"error",
-						error,
-					]),
-				},
-				{
-					type: "done",
-					code: 1,
-					alertId: JSON.stringify([
-						event.sessionId,
-						event.data.messageId || event.eventId,
-						"done",
-					]),
-				},
-			);
+			// The transcript projects the notice; the failed `done` idles the
+			// composer and carries the reason for the alert.
+			const { error } = event.data;
+			return emit({
+				type: "done",
+				code: 1,
+				error,
+				alertId: JSON.stringify([
+					event.sessionId,
+					event.data.messageId || event.eventId,
+					"error",
+					error,
+				]),
+			});
 		}
 
 		case "turn.interrupted":
@@ -166,20 +157,8 @@ export function translateDomainEventToRelay(
 			return silent("persistence/ws-rpc-only event");
 
 		case "session.status":
-			if (event.data.status === "retry") {
-				const reason =
-					typeof event.metadata.correlationId === "string"
-						? event.metadata.correlationId
-						: "Retrying";
-				return emit({
-					type: "error",
-					code: "RETRY",
-					message: reason,
-					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
-				});
-			}
 			return silent(
-				"the shell row carries session status; terminal done/error covers completion",
+				"the shell row carries session status, including a retry; the terminal done covers completion",
 			);
 
 		case "session.compaction":

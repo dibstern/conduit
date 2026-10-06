@@ -4,7 +4,10 @@ import {
 	createEventId,
 	type SessionStatusValue,
 } from "../../persistence/events.js";
-import { mapToolName } from "../../relay/event-translator.js";
+import {
+	formatRetryMessage,
+	mapToolName,
+} from "../../relay/event-translator.js";
 import type { SSEEvent } from "../../relay/opencode-events.js";
 import {
 	isMessageCreatedEvent,
@@ -630,11 +633,23 @@ export class OpenCodeRuntimeEventTranslator {
 		const statusType = event.properties.status?.type;
 		const status = statusType ? validStatuses[statusType] : undefined;
 		if (!status) return null;
+		const retry = event.properties.status;
+		const message =
+			status === "retry" && retry
+				? formatRetryMessage(
+						retry.message ?? "Retrying",
+						retry.attempt ?? 0,
+						retry.next && retry.next > Date.now()
+							? retry.next - Date.now()
+							: undefined,
+					)
+				: undefined;
 
 		return [
 			opencodeRuntimeEvent("session.status", sessionId, event, {
 				sessionId,
 				status,
+				...(message ? { message } : {}),
 			}),
 		];
 	}

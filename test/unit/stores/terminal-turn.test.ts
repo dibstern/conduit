@@ -84,12 +84,7 @@ it.each([
 		"idle row": () => chat.followSessionBusy("s", false),
 		done: () => handleMessage({ type: "done", sessionId: "s", code: 0 }),
 		error: () =>
-			handleMessage({
-				type: "error",
-				sessionId: "s",
-				code: "TURN_FAILED",
-				message: "failed",
-			}),
+			handleMessage({ type: "done", sessionId: "s", code: 1, error: "failed" }),
 	};
 	const before = activity.turnEpoch;
 	events[order[0]]();

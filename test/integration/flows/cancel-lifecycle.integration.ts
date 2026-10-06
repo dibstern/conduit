@@ -95,24 +95,11 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Observe a full window to ensure idle cancel produces no unexpected errors.
 		await new Promise((r) => setTimeout(r, 1000));
 
-		// Filter out model/quota errors from the SSE stream (session.error events)
-		// — those aren't caused by the cancel itself. We only care that cancel
-		// didn't produce a relay-level handler crash.
-		const errors = client.getReceivedOfType("error");
-		const cancelErrors = errors.filter(
-			(e: Record<string, unknown>) =>
-				![
-					"insufficient_quota",
-					"api_error",
-					"Unknown",
-					"SEND_FAILED",
-					"NO_SESSION",
-					"CANCEL_FAILED",
-					"HANDLER_ERROR",
-					"provider_error",
-				].includes(String(e["code"] ?? "")),
-		);
-		expect(cancelErrors).toHaveLength(0);
+		// Nothing was running, so the cancel must not fail a turn.
+		const failedTurns = client
+			.getReceivedOfType("done")
+			.filter((done) => done["error"] !== undefined);
+		expect(failedTurns).toHaveLength(0);
 
 		// Should still be able to send a message (relay not crashed)
 		await client.sendMessage("Reply with just 'ok'.");

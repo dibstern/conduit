@@ -128,10 +128,10 @@ describe("daemon shared RPC routing", () => {
 									wsHandler.setClientSession(clientId, requestedSessionId);
 								}
 								wsHandler.sendTo(clientId, {
-									type: "error",
+									type: "user_message",
 									sessionId: requestedSessionId ?? `${slug}-default`,
-									code: "BOOTSTRAP",
-									message: `${slug} bootstrap`,
+									messageId: "BOOTSTRAP",
+									text: `${slug} bootstrap`,
 								});
 							},
 						);
@@ -218,14 +218,14 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["code"] === "BOOTSTRAP" &&
+								message["messageId"] === "BOOTSTRAP" &&
 								JSON.stringify(message).includes("project-a bootstrap"),
 						),
 					).toBe(true);
 				});
 				const bootstrapA = eventMessages.findIndex(
 					(message) =>
-						message["code"] === "BOOTSTRAP" &&
+						message["messageId"] === "BOOTSTRAP" &&
 						JSON.stringify(message).includes("project-a bootstrap"),
 				);
 				expect(bootstrapA).toBeGreaterThanOrEqual(0);
@@ -262,35 +262,35 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["code"] === "BOOTSTRAP" &&
+								message["messageId"] === "BOOTSTRAP" &&
 								JSON.stringify(message).includes("project-b bootstrap"),
 						),
 					).toBe(true);
 				});
 				const bootstrapB = eventMessages.findIndex(
 					(message) =>
-						message["code"] === "BOOTSTRAP" &&
+						message["messageId"] === "BOOTSTRAP" &&
 						JSON.stringify(message).includes("project-b bootstrap"),
 				);
 				expect(bootstrapB).toBeGreaterThan(bootstrapA);
 				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
 				expect(
-					eventMessages.filter((message) => message["code"] === "BOOTSTRAP"),
+					eventMessages.filter(
+						(message) => message["messageId"] === "BOOTSTRAP",
+					),
 				).toEqual([
 					{
-						type: "error",
-						alertId: expect.any(String),
+						type: "user_message",
 						sessionId: "session-a",
-						code: "BOOTSTRAP",
-						message: "project-a bootstrap",
+						messageId: "BOOTSTRAP",
+						text: "project-a bootstrap",
 					},
 					{
-						type: "error",
-						alertId: expect.any(String),
+						type: "user_message",
 						sessionId:
 							operation === "ViewSession" ? "session-b" : "project-b-default",
-						code: "BOOTSTRAP",
-						message: "project-b bootstrap",
+						messageId: "BOOTSTRAP",
+						text: "project-b bootstrap",
 					},
 				]);
 

@@ -27,6 +27,7 @@ import {
 } from "../../../provider/provider-runtime-event-to-domain.js";
 import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
+import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { announceBackgroundWork } from "./session-attention.js";
@@ -66,6 +67,7 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		ReturnType<typeof makeSessionCompactions>,
 		"observe"
 	>;
+	readonly retries?: Pick<ReturnType<typeof makeSessionRetries>, "observe">;
 }
 
 export const makeProviderRuntimeIngestionLive = (
@@ -158,14 +160,21 @@ export const makeProviderRuntimeIngestionLive = (
 							nextState = result.state;
 						}
 
-						// A compaction's "started" notice is transient status (C1) that
-						// rides the shell row (see `compactions` below). Its outcome,
+						// A compaction's "started" notice and a provider retry are
+						// transient status (C1) that rides the shell row (see
+						// `compactions` and `retries` below). A compaction's outcome,
 						// completed or failed, persists so the divider or the failure
 						// notice survives a reload.
 						const persistentEvents = domainEvents.filter(
 							(event) =>
-								event.type !== "session.compaction" ||
-								event.data.state !== "started",
+								!(
+									event.type === "session.compaction" &&
+									event.data.state === "started"
+								) &&
+								!(
+									event.type === "session.status" &&
+									event.data.status === "retry"
+								),
 						);
 
 						// Projectors write rows that reference sessions(id), and a
@@ -248,16 +257,19 @@ export const makeProviderRuntimeIngestionLive = (
 						}
 						if (!appended) return 0;
 
-						// A compaction in progress lives in memory, not the log (C1).
-						// Stamp its row so the shell re-reads it.
+						// A compaction in progress and a retry live in memory, not the
+						// log (C1). Stamp their rows so the shell re-reads them.
 						yield* Effect.forEach(
-							options.compactions?.observe(domainEvents) ?? [],
+							new Set([
+								...(options.compactions?.observe(domainEvents) ?? []),
+								...(options.retries?.observe(domainEvents) ?? []),
+							]),
 							announceBackgroundWork,
 							{ discard: true },
 						).pipe(
 							Effect.provide(services),
 							Effect.catchAllCause((cause) =>
-								Effect.logWarning("failed to announce a compaction", cause),
+								Effect.logWarning("failed to announce transient status", cause),
 							),
 						);
 

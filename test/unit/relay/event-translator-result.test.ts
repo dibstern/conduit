@@ -70,10 +70,7 @@ describe("translator returns TranslateResult", () => {
 	it("returns ok: true with messages for known events", () => {
 		const result = translator.translate({
 			type: "session.status",
-			properties: {
-				sessionID: "s1",
-				status: { type: "retry", attempt: 1, message: "Rate limited" },
-			},
+			properties: { sessionID: "s1", status: { type: "idle" } },
 		});
 		expect(result).toHaveProperty("ok", true);
 		if (result.ok) {
@@ -97,9 +94,9 @@ describe("translator returns TranslateResult", () => {
 		expect(result).toHaveProperty("ok", true);
 		if (result.ok) {
 			expect(result.messages[0]).toMatchObject({
-				type: "error",
-				code: "APIError",
-				message: "The provided model identifier is invalid.",
+				type: "done",
+				code: 1,
+				error: "The provided model identifier is invalid.",
 			});
 		}
 	});
@@ -139,7 +136,7 @@ describe("translator returns TranslateResult", () => {
 		}
 	});
 
-	it("returns single error message for retry status", () => {
+	it("returns ok: false for retry status (transient shell-row status)", () => {
 		const result = translator.translate({
 			type: "session.status",
 			properties: {
@@ -147,11 +144,7 @@ describe("translator returns TranslateResult", () => {
 				status: { type: "retry", attempt: 1, message: "Rate limited" },
 			},
 		});
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.messages.length).toBe(1);
-			expect(result.messages[0]?.type).toBe("error");
-		}
+		expect(result.ok).toBe(false);
 	});
 
 	it("returns ok: false for session.status busy (handled by status poller)", () => {

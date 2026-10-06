@@ -88,7 +88,6 @@ describe("shouldCache", () => {
 			"tool_result",
 			"result",
 			"done",
-			"error",
 		] as const;
 		for (const type of cacheableTypes) {
 			expect(shouldCache(type)).toBe(true);
@@ -240,25 +239,25 @@ describe("handleSSEEventEffect", () => {
 	] as const)("%s", async (_name, kind, sessionId, expected) => {
 		const deps = createMockSSEWiringDeps();
 		const services = makeSSETestServices();
-		const message: RelayMessage =
-			kind === "done"
-				? { type: "done", sessionId: "s1", code: 0, alertId: "done-1" }
-				: kind === "retry"
-					? {
-							type: "error",
-							sessionId: "s1",
-							alertId: "error-1",
-							code: "RETRY",
-							message: "Retrying...",
-						}
-					: { type: "delta", sessionId: "s1", text: "hello" };
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [message],
-		});
+		// A retry translates to nothing: it rides the shell row.
+		vi.mocked(deps.translator.translate).mockReturnValue(
+			kind === "retry"
+				? { ok: false, reason: "retry rides the shell row" }
+				: {
+						ok: true,
+						messages: [
+							kind === "done"
+								? { type: "done", sessionId: "s1", code: 0, alertId: "done-1" }
+								: { type: "delta", sessionId: "s1", text: "hello" },
+						],
+					},
+		);
 		const event: OpenCodeEvent = {
 			type: kind === "delta" ? "message.part.delta" : "session.status",
-			properties: sessionId ? { sessionID: sessionId } : {},
+			properties: {
+				...(sessionId ? { sessionID: sessionId } : {}),
+				...(kind === "retry" ? { status: { type: "retry" } } : {}),
+			},
 		};
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -564,11 +563,11 @@ describe("handleSSEEventEffect", () => {
 		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
 		const translated: RelayMessage = {
-			type: "error",
+			type: "done",
 			alertId: "error-1",
 			sessionId: "s1",
-			code: "SEND_FAILED",
-			message: "Something broke",
+			code: 1,
+			error: "Something broke",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
@@ -1096,11 +1095,11 @@ describe("notification routing: push gating via resolveNotifications", () => {
 			ok: true,
 			messages: [
 				{
-					type: "error",
+					type: "done",
 					alertId: "error-1",
 					sessionId: "s1",
-					code: "FATAL",
-					message: "crashed",
+					code: 1,
+					error: "crashed",
 				} as RelayMessage,
 			],
 		});
@@ -1150,11 +1149,11 @@ describe("alert published for dropped notification-worthy events", () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
 		const translated: RelayMessage = {
-			type: "error",
+			type: "done",
 			alertId: "error-1",
 			sessionId: "s1",
-			code: "FATAL",
-			message: "Something broke",
+			code: 1,
+			error: "Something broke",
 		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,

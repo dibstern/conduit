@@ -238,16 +238,18 @@ describe("triggerNotifications", () => {
 		expect(notificationInstances[0]?.options.tag).toBe("opencode-done");
 	});
 
-	it("fires browser notification for 'error' message", async () => {
+	it("fires browser notification for a failed 'done'", async () => {
 		const mod = await import(
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 
 		await mod.triggerNotifications({
-			type: "error",
-			message: "Something broke",
-			code: "UNKNOWN",
-		} as RelayMessage);
+			type: "done",
+			sessionId: "s1",
+			code: 1,
+			error: "Something broke",
+			alertId: "turn-1:error",
+		});
 
 		expect(notificationInstances).toHaveLength(1);
 		expect(notificationInstances[0]?.title).toBe("Error");

@@ -48,7 +48,10 @@ import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Servic
 import { PendingSendOwnershipLive } from "../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
-import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
@@ -1085,6 +1088,7 @@ export function makeTestHandlerLayer(
 				providerTurnPersistenceLayer,
 				providerRuntimeIngestionLayer,
 				sessionTitleServiceLayer,
+				AlertsLive,
 			),
 		),
 	);
@@ -1190,3 +1194,13 @@ export function makeTestFullLayer(
 		makeTestDaemonStateLayer(opts),
 	);
 }
+
+/** Drops every event: for tests whose turns never reach the store. */
+export const NoopProviderRuntimeIngestionLive = Layer.succeed(
+	ProviderRuntimeIngestionTag,
+	{
+		ingest: () => Effect.succeed(0),
+		ingestBatch: () => Effect.succeed(0),
+		drain: () => Effect.void,
+	},
+);

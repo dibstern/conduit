@@ -98,7 +98,10 @@ try {
 		) {
 			const error = captured
 				.slice(firstMessage)
-				.find((message) => message.type === "error");
+				.find(
+					(message) =>
+						message.type === "done" && message["error"] !== undefined,
+				);
 			if (error) throw new Error(JSON.stringify(error));
 			if (Date.now() >= deadline) throw new Error(`Turn timed out: ${prompt}`);
 			await new Promise((resolve) => setTimeout(resolve, 100));

@@ -33,8 +33,6 @@ export function isLastTurnActive(events: readonly RelayMessage[]): boolean {
 			active = true;
 		} else if (e.type === "done") {
 			active = false;
-		} else if (e.type === "error" && e.code !== "RETRY") {
-			active = false;
 		}
 	}
 	return active;

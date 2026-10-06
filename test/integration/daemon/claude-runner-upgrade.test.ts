@@ -613,7 +613,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await completed(harness, sessionId, [before, retry, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) => message["type"] === "done" && message["code"] === 1,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["replacement"] = replacement;
@@ -2264,7 +2266,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toHaveLength(1);
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) => message["type"] === "done" && message["code"] === 1,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["descendantInstructions"] = {
@@ -2339,7 +2343,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toMatchObject({ queryId: oldQuery.queryId });
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) => message["type"] === "done" && message["code"] === 1,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["changedTrustSettings"] = JSON.parse(
@@ -2410,7 +2416,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toHaveLength(1);
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) => message["type"] === "done" && message["code"] === 1,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["legacyMcpConfiguration"] = {

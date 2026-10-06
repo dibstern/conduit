@@ -699,7 +699,9 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(
 			browser.frames
 				.slice(cursor)
-				.some(({ message }) => message["type"] === "error"),
+				.some(
+					({ message }) => message["type"] === "done" && message["code"] === 1,
+				),
 		).toBe(false);
 		expect(
 			snapshot(harness, sessionId).events.some(
@@ -794,11 +796,9 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		const runner = started(harness);
 		process.kill(runner.pid, "SIGKILL");
-		expect((await pending).done["code"]).toBe(1);
-		await browser.waitFor(
-			(message) =>
-				message["type"] === "error" && message["sessionId"] === sessionId,
-		);
+		const { done } = await pending;
+		expect(done["code"]).toBe(1);
+		expect(done["error"]).toEqual(expect.any(String));
 		await vi.waitFor(
 			() => {
 				const state = snapshot(harness, sessionId);
@@ -910,11 +910,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		const turn = await browser.send(sessionId, "protocol-refusal");
 		expect(turn.done["code"]).toBe(1);
-		const error = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" && message["code"] === "provider_error",
-		);
-		expect(error["message"]).toMatch(/protocol.*mismatch.*999/i);
+		expect(turn.done["error"]).toMatch(/protocol.*mismatch.*999/i);
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });

@@ -138,7 +138,9 @@ try {
 		let responded = false;
 		while (true) {
 			const messages = captured.slice(firstMessage);
-			const error = messages.find((message) => message.type === "error");
+			const error = messages.find(
+				(message) => message.type === "done" && message["error"] !== undefined,
+			);
 			if (error) throw new Error(JSON.stringify(error));
 			if (!responded) {
 				const approval = messages.find(

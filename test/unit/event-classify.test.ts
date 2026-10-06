@@ -15,7 +15,6 @@ describe("LLM_CONTENT_START_TYPES", () => {
 	it("does not contain non-start types", () => {
 		expect(LLM_CONTENT_START_TYPES.has("done")).toBe(false);
 		expect(LLM_CONTENT_START_TYPES.has("result")).toBe(false);
-		expect(LLM_CONTENT_START_TYPES.has("error")).toBe(false);
 		expect(LLM_CONTENT_START_TYPES.has("user_message")).toBe(false);
 		expect(LLM_CONTENT_START_TYPES.has("thinking_delta")).toBe(false);
 		expect(LLM_CONTENT_START_TYPES.has("thinking_stop")).toBe(false);
@@ -91,22 +90,13 @@ describe("isLastTurnActive", () => {
 		expect(isLastTurnActive(events)).toBe(true);
 	});
 
-	it("returns false when non-retry error ends the turn", () => {
+	it("returns false when a failed done ends the turn", () => {
 		const events: RelayMessage[] = [
 			{ type: "user_message", sessionId: "s1", text: "hello" },
 			{ type: "delta", sessionId: "s1", text: "partial" },
-			{ type: "error", sessionId: "s1", code: "STREAM_ERR", message: "fail" },
+			{ type: "done", sessionId: "s1", code: 1, error: "fail" },
 		];
 		expect(isLastTurnActive(events)).toBe(false);
-	});
-
-	it("returns true when RETRY error does NOT end the turn", () => {
-		const events: RelayMessage[] = [
-			{ type: "user_message", sessionId: "s1", text: "hello" },
-			{ type: "delta", sessionId: "s1", text: "partial" },
-			{ type: "error", sessionId: "s1", code: "RETRY", message: "retrying..." },
-		];
-		expect(isLastTurnActive(events)).toBe(true);
 	});
 
 	it("returns true when thinking_start without done", () => {

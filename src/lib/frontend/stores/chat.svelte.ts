@@ -721,26 +721,10 @@ export function handleDone(
  * Legacy push events lack that identity; their fallback identifies the
  * current monotone generation, not an old envelope.
  * The turn projection currently has no per-turn revision. */
-/** Whether the current turn (since the last user message) already shows this
- *  error, e.g. from the projected turn error that landed first. */
-function turnShowsError(messages: SessionMessages, text: string): boolean {
-	const msgs = getMessages(messages);
-	for (let i = msgs.length - 1; i >= 0; i--) {
-		const m = msgs[i];
-		if (m?.type === "user") return false;
-		if (m?.type === "system" && m.variant === "error" && m.text === text)
-			return true;
-	}
-	return false;
-}
-
 export function applyTerminalTurn(
 	activity: SessionActivity,
 	messages: SessionMessages,
-	terminal?: {
-		readonly turnId?: string;
-		readonly error?: Extract<RelayMessage, { type: "error" }>;
-	},
+	terminal?: { readonly turnId?: string },
 ): boolean {
 	if (terminal?.turnId !== undefined) {
 		if (activity.terminalTurnIds.has(terminal.turnId)) return false;
@@ -789,15 +773,6 @@ export function applyTerminalTurn(
 			return m;
 		});
 		if (mutated) setMessages(messages, patched);
-	}
-
-	if (terminal?.error && !turnShowsError(messages, terminal.error.message)) {
-		const { code, message, statusCode, details } = terminal.error;
-		addSystemMessage(activity, messages, message, "error", {
-			code,
-			...(statusCode !== undefined ? { statusCode } : {}),
-			...(details !== undefined ? { details } : {}),
-		});
 	}
 
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
@@ -867,33 +842,19 @@ export function consumeScrollRequest(
 	return false;
 }
 
-export function handleError(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "error" }>,
-): void {
-	if (msg.code === "RETRY") {
-		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, msg.message, "info");
-	} else {
-		applyTerminalTurn(activity, messages, { error: msg });
-	}
-}
-
-/** Follow the shell row's compaction in progress (ni8.33, C1): show it as a
- *  transient notice. The transcript projects the outcome, which supersedes
- *  the notice once the row clears it. */
-export function followSessionCompaction(
+/** Show a shell-row status as a transient notice, replacing the previous one;
+ *  `undefined` removes it. */
+function followRowNotice(
 	id: string,
-	compacting: string | undefined,
+	text: string | undefined,
+	marker: Pick<SystemMessage, "compaction" | "retry">,
+	isNotice: (message: SystemMessage) => boolean,
 ): void {
 	const messages = sessionMessages.get(id);
 	if (!messages) return;
 	const current = getMessages(messages);
-	const settled = current.filter(
-		(m) => m.type !== "system" || m.compaction !== "started",
-	);
-	if (compacting === undefined) {
+	const settled = current.filter((m) => m.type !== "system" || !isNotice(m));
+	if (text === undefined) {
 		if (settled.length !== current.length) setMessages(messages, settled);
 		return;
 	}
@@ -903,12 +864,36 @@ export function followSessionCompaction(
 		{
 			type: "system",
 			uuid: generateUuid(),
-			text: compacting,
+			text,
 			variant: "info",
-			compaction: "started",
+			...marker,
 			createdAt: Date.now(),
 		},
 	]);
+}
+
+/** Follow the shell row's compaction in progress (ni8.33, C1): show it as a
+ *  transient notice. The transcript projects the outcome, which supersedes
+ *  the notice once the row clears it. */
+export function followSessionCompaction(
+	id: string,
+	compacting: string | undefined,
+): void {
+	followRowNotice(
+		id,
+		compacting,
+		{ compaction: "started" },
+		(m) => m.compaction === "started",
+	);
+}
+
+/** Follow the shell row's provider retry (C1): its reason shows while the
+ *  provider waits and leaves once the row clears it. */
+export function followSessionRetry(
+	id: string,
+	retrying: string | undefined,
+): void {
+	followRowNotice(id, retrying, { retry: true }, (m) => m.retry === true);
 }
 
 // Keep per-origin FIFO entries even when a provisional bubble is removed.

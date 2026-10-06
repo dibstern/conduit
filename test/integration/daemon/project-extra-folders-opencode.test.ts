@@ -152,14 +152,9 @@ describe("OpenCode project extra folders through the daemon", () => {
 			`/session/${sessionId}/prompt_async`,
 		).at(-1);
 		expect(prompt?.["system"]).toContain(extra);
+		// A missing extra folder is skipped with a daemon log warning, not a
+		// transcript error: the turn itself went through.
 		expect(prompt?.["system"]).not.toContain(missing);
-		const warning = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["code"] === "RETRY" &&
-				String(message["message"]).includes(missing),
-		);
-		evidence["warning"] = warning;
 	}, 60_000);
 
 	it("never patches permissions for a single-folder session", async () => {
@@ -321,12 +316,19 @@ describe("OpenCode project extra folders through the daemon", () => {
 		expect(
 			requestBodies(fixture, "POST", `/session/${sessionId}/prompt_async`),
 		).toEqual([]);
-		const error = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["sessionId"] === sessionId &&
-				String(message["message"]).includes(fixture.projectDir),
-		);
-		evidence["error"] = error;
+		// An identical failure is still its own turn error, not swallowed.
+		const repeat = await browser.send(sessionId, "Reply with pong.");
+		evidence["repeat"] = repeat;
+		expect(repeat.done["code"]).toBe(1);
+		// The failure is a turn error in the transcript, so it survives a reload.
+		const history = await browser.history(sessionId);
+		evidence["history"] = history;
+		const notices = history
+			.flatMap(({ parts }) => parts ?? [])
+			.filter(({ type }) => type === "error");
+		expect(notices).toHaveLength(2);
+		for (const notice of notices) {
+			expect(String(notice.text)).toContain(fixture.projectDir);
+		}
 	}, 60_000);
 });

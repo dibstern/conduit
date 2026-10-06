@@ -178,13 +178,19 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			// Attempt persistence before WS send; failures are logged and delivery continues.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
-			// A compaction's "started" notice is transient status (C1) that rides the
-			// shell row. Its outcome, completed or failed, persists so the divider or
+			// A compaction's "started" notice and a retry are transient status (C1) on the
+			// shell row. A compaction's outcome, completed or failed, persists so the divider or
 			// the failure notice survives a reload.
 			const persistentEvents = result.events.filter(
 				(domainEvent) =>
-					domainEvent.type !== "session.compaction" ||
-					domainEvent.data.state !== "started",
+					!(
+						domainEvent.type === "session.compaction" &&
+						domainEvent.data.state === "started"
+					) &&
+					!(
+						domainEvent.type === "session.status" &&
+						domainEvent.data.status === "retry"
+					),
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
@@ -226,10 +232,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								domainEvent.sessionId || sessionId,
 							);
 							send(message);
-							const isTerminal =
-								message.type === "done" ||
-								(message.type === "error" && message.code !== "RETRY");
-							if (isTerminal) finish();
+							if (message.type === "done") finish();
 						}
 					}
 				});
@@ -303,13 +306,19 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Attempt persistence before WS send; failures are logged and delivery continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				// A compaction's "started" notice is transient status (C1) that rides the
-				// shell row. Its outcome, completed or failed, persists so the divider or
+				// A compaction's "started" notice and a retry are transient status (C1) on the
+				// shell row. A compaction's outcome, completed or failed, persists so the divider or
 				// the failure notice survives a reload.
 				const persistentEvents = result.events.filter(
 					(domainEvent) =>
-						domainEvent.type !== "session.compaction" ||
-						domainEvent.data.state !== "started",
+						!(
+							domainEvent.type === "session.compaction" &&
+							domainEvent.data.state === "started"
+						) &&
+						!(
+							domainEvent.type === "session.status" &&
+							domainEvent.data.status === "retry"
+						),
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
@@ -351,10 +360,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									domainEvent.sessionId || sessionId,
 								);
 								send(message);
-								const isTerminal =
-									message.type === "done" ||
-									(message.type === "error" && message.code !== "RETRY");
-								if (isTerminal) finish();
+								if (message.type === "done") finish();
 							}
 						}
 					});

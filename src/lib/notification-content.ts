@@ -31,17 +31,17 @@ export function notificationContent(
 				};
 	switch (msg.type) {
 		case "done":
-			return {
-				title: "Response complete",
-				body: "Agent finished its response.",
-				tag: "opencode-done",
-			};
-		case "error":
-			return {
-				title: "Error",
-				body: msg.message || "An error occurred",
-				tag: "opencode-error",
-			};
+			return msg.error === undefined
+				? {
+						title: "Response complete",
+						body: "Agent finished its response.",
+						tag: "opencode-done",
+					}
+				: {
+						title: "Error",
+						body: msg.error || "An error occurred",
+						tag: "opencode-error",
+					};
 		default:
 			return null;
 	}

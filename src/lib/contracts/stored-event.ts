@@ -325,6 +325,8 @@ export interface SessionStatusPayload {
 	readonly sessionId: string;
 	readonly status: SessionStatusValue;
 	readonly turnId?: string;
+	/** A retry's reason, for the shell row while the provider waits. */
+	readonly message?: string;
 }
 
 export interface SessionCompactionPayload {
@@ -872,6 +874,7 @@ const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	message: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const SessionCompactionPayloadSchema = Schema.Struct({

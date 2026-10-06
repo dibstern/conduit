@@ -6,6 +6,7 @@ import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/proj
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import type { AlertsTag } from "./alerts.js";
 import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
@@ -48,7 +49,6 @@ export interface ProviderTurnServiceSendInput {
 	readonly agent?: string;
 	readonly variant?: string;
 	readonly contextWindow?: string;
-	readonly errorDelivery?: "client" | "session";
 }
 
 export interface ProviderTurnServicePrepareInput {
@@ -112,6 +112,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ReadQueryEffectTag
 		| ClaudeEventPersistEffectTag
 		| ProviderRuntimeIngestionTag
+		| AlertsTag
 		| ProviderStateEffectTag
 		| SessionTitleServiceTag
 		| ProviderTurnDispatchFibersTag
@@ -184,6 +185,7 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ReadQueryEffectTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| AlertsTag
 	| ProviderStateEffectTag
 	| SessionTitleServiceTag
 	| SqlClient.SqlClient

@@ -414,10 +414,12 @@ export function translateProviderRuntimeEventToDomain(
 
 		case "session.status": {
 			const status = sessionStatus(data["status"]);
+			const message = data["message"];
 			return singleEvent(event, state, "session.status", {
 				sessionId: event.sessionId,
 				status,
 				...(event.turnId ? { turnId: event.turnId } : {}),
+				...(typeof message === "string" ? { message } : {}),
 			});
 		}
 

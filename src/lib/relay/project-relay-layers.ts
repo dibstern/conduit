@@ -54,6 +54,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	type OrchestrationEngineTag,
 	SessionCompactionsTag,
+	SessionRetriesTag,
 	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
@@ -79,6 +80,7 @@ import {
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import { makeSessionCompactions } from "../session/session-compactions.js";
+import { makeSessionRetries } from "../session/session-retries.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
@@ -185,6 +187,7 @@ export function createProjectRelayLayers({
 		fork: defaultClaudeSessionForkSdk,
 	};
 	const compactions = makeSessionCompactions();
+	const retries = makeSessionRetries();
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.shellEnv && { shellEnv: config.shellEnv }),
@@ -255,6 +258,7 @@ export function createProjectRelayLayers({
 						),
 				},
 				compactions,
+				retries,
 			});
 		}),
 	).pipe(
@@ -383,6 +387,7 @@ export function createProjectRelayLayers({
 		messagePollerManagerLayer,
 		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
 		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
+		Layer.sync(SessionRetriesTag, () => retries.retryingOf),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

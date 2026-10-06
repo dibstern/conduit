@@ -256,9 +256,14 @@ describe("Claude session rejoin — event flow contracts", () => {
 		// Timeout should have been cleared
 		expect(timeoutCleared).toBe(true);
 
-		// Should have error + done messages
-		expect(sent.some((m) => m.type === "error")).toBe(true);
-		expect(sent.some((m) => m.type === "done")).toBe(true);
+		// Should end the turn with a failed done that carries the reason
+		expect(sent).toContainEqual(
+			expect.objectContaining({
+				type: "done",
+				code: 1,
+				error: "Processing timeout",
+			}),
+		);
 	});
 });
 

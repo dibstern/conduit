@@ -293,7 +293,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		]);
 	}, 60_000);
 
-	it("drops a deleted extra folder and shows a session warning", async () => {
+	it("drops a deleted extra folder from the launch", async () => {
 		const fixture = await start("missing-extra", ["pong-thinking-text-turn"]);
 		const extra = join(fixture.root, "deleted-extra-folder");
 		mkdirSync(extra);
@@ -307,23 +307,10 @@ describe("Claude project extra folders through the built daemon", () => {
 			additionalDirectories: [extra],
 		});
 		rmSync(extra, { recursive: true });
-		const cursor = browser.frames.length;
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
 		expect(reply.done["code"]).toBe(0);
 		expect(reply.chunks.join("")).toBe("pong");
-		const warning = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["code"] === "RETRY" &&
-				message["sessionId"] === sessionId &&
-				typeof message["message"] === "string" &&
-				message["message"].includes(extra) &&
-				/skip|warn|missing|no longer|does not exist/i.test(message["message"]),
-			cursor,
-		);
-		evidence["warning"] = warning;
-		expect(String(warning["message"])).toContain(extra);
 		const current = runnerOptions(fixture, sessionId).at(-1)?.options;
 		expect(current?.["cwd"]).toBe(fixture.projectDir);
 		expect(current).not.toHaveProperty("additionalDirectories");
@@ -337,20 +324,23 @@ describe("Claude project extra folders through the built daemon", () => {
 		evidence["sessionId"] = sessionId;
 		await browser.preWarmSession(sessionId);
 		rmSync(fixture.projectDir, { recursive: true });
-		const cursor = browser.frames.length;
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
 		expect(reply.done["code"]).toBe(1);
 		expect(reply.chunks).toEqual([]);
-		const error = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["sessionId"] === sessionId &&
-				typeof message["message"] === "string" &&
-				message["message"].includes(fixture.projectDir),
-			cursor,
-		);
-		evidence["error"] = error;
-		expect(String(error["message"])).toContain(fixture.projectDir);
+		// An identical failure is still its own turn error, not swallowed.
+		const repeat = await browser.send(sessionId, "Reply with pong.");
+		evidence["repeat"] = repeat;
+		expect(repeat.done["code"]).toBe(1);
+		// The failure is a turn error in the transcript, so it survives a reload.
+		const history = await browser.history(sessionId);
+		evidence["history"] = history;
+		const notices = history
+			.flatMap(({ parts }) => parts ?? [])
+			.filter(({ type }) => type === "error");
+		expect(notices).toHaveLength(2);
+		for (const notice of notices) {
+			expect(String(notice.text)).toContain(fixture.projectDir);
+		}
 	}, 60_000);
 });

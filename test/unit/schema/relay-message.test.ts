@@ -19,12 +19,12 @@ describe("RelayMessage Schema", () => {
 		expect(Either.isRight(result)).toBe(true);
 	});
 
-	it("decodes error message", () => {
+	it("decodes a failed done", () => {
 		const raw = {
-			type: "error",
+			type: "done",
 			sessionId: "s1",
-			code: "AUTH_REQUIRED",
-			message: "PIN required",
+			code: 1,
+			error: "Rate limited",
 		};
 		const result = Schema.decodeUnknownEither(RelayMessageSchema)(raw);
 		expect(Either.isRight(result)).toBe(true);
