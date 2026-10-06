@@ -94,17 +94,99 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"perm-1",
 				"once",
 			);
+			expect(client.permission.list).not.toHaveBeenCalled();
+			expect(client.session.update).not.toHaveBeenCalled();
 		});
 
-		it("handles 'always' decision", async () => {
+		it("appends session allow rules for 'always' before replying 'once'", async () => {
+			instance = new OpenCodeProviderInstance({
+				client,
+				workspaceRoot: "/workspace",
+			});
+			vi.mocked(client.permission.list).mockResolvedValue([
+				{
+					id: "other-perm",
+					sessionID: "ses-1",
+					permission: "bash",
+					always: ["*"],
+				},
+				{
+					id: "perm-2",
+					sessionID: "ses-1",
+					permission: "edit",
+					patterns: ["/tmp/current-file.txt"],
+					always: ["/tmp/*.txt", "/workspace/*"],
+				},
+			]);
+			const calls: string[] = [];
+			vi.mocked(client.session.update).mockImplementationOnce(async () => {
+				await Promise.resolve();
+				calls.push("update");
+			});
+			vi.mocked(client.permission.reply).mockImplementationOnce(async () => {
+				calls.push("reply");
+			});
+
 			await Effect.runPromise(
 				instance.resolvePermissionEffect("s1", "perm-2", "always"),
 			);
 
+			expect(client.permission.list).toHaveBeenCalledWith("/workspace");
+			expect(client.session.update).toHaveBeenCalledWith("s1", {
+				permission: [
+					{ permission: "edit", pattern: "/tmp/*.txt", action: "allow" },
+					{ permission: "edit", pattern: "/workspace/*", action: "allow" },
+				],
+			});
 			expect(client.permission.reply).toHaveBeenCalledWith(
 				"s1",
 				"perm-2",
-				"always",
+				"once",
+			);
+			expect(calls).toEqual(["update", "reply"]);
+		});
+
+		it("replies 'once' without updating the session when the request is missing", async () => {
+			vi.mocked(client.permission.list).mockResolvedValue([
+				{
+					id: "other-perm",
+					sessionID: "ses-1",
+					permission: "bash",
+					always: ["*"],
+				},
+			]);
+
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("s1", "missing-perm", "always"),
+			);
+
+			expect(client.session.update).not.toHaveBeenCalled();
+			expect(client.permission.reply).toHaveBeenCalledWith(
+				"s1",
+				"missing-perm",
+				"once",
+			);
+		});
+
+		it.each([
+			{ always: undefined },
+			{ always: [] },
+		])("replies 'once' without updating the session when always patterns are $always", async ({
+			always,
+		}) => {
+			vi.mocked(client.permission.list).mockResolvedValue([
+				{ id: "perm-2", sessionID: "ses-1", permission: "edit", always },
+			]);
+
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("s1", "perm-2", "always"),
+			);
+
+			expect(client.session.update).not.toHaveBeenCalled();
+			expect(client.permission.reply).toHaveBeenCalledWith(
+				"s1",
+				"perm-2",
+				"once",
 			);
 		});
 
@@ -118,6 +200,40 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"perm-3",
 				"reject",
 			);
+			expect(client.permission.list).not.toHaveBeenCalled();
+			expect(client.session.update).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			"list",
+			"update",
+		] as const)("returns a typed failure without replying when 'always' %s fails", async (operation) => {
+			vi.mocked(client.permission.list).mockResolvedValue([
+				{ id: "perm-2", sessionID: "ses-1", permission: "edit", always: ["*"] },
+			]);
+			const cause = new Error(`${operation} failed`);
+			if (operation === "list") {
+				vi.mocked(client.permission.list).mockRejectedValue(cause);
+			} else {
+				vi.mocked(client.session.update).mockRejectedValue(cause);
+			}
+
+			const result = await Effect.runPromise(
+				instance
+					.resolvePermissionEffect("s1", "perm-2", "always")
+					.pipe(Effect.either),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left).toMatchObject({
+					_tag: "ProviderInstanceFailure",
+					providerId: "opencode",
+					operation: "resolvePermission",
+				});
+				expect(result.left.message).toContain(`${operation} failed`);
+			}
+			expect(client.permission.reply).not.toHaveBeenCalled();
 		});
 
 		it("propagates errors from client", async () => {
@@ -245,6 +361,36 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"perm-1",
 				"once",
 			);
+			expect(client.permission.reply).not.toHaveBeenCalled();
+		});
+
+		it("routes 'always' lookup, session rules and reply to the named instance client", async () => {
+			vi.mocked(namedClient.permission.list).mockResolvedValue([
+				{
+					id: "perm-1",
+					sessionID: "ses-1",
+					permission: "edit",
+					always: ["/workspace/*"],
+				},
+			]);
+
+			await Effect.runPromise(
+				instance.resolvePermissionEffect("bound-s", "perm-1", "always"),
+			);
+
+			expect(namedClient.permission.list).toHaveBeenCalledOnce();
+			expect(namedClient.session.update).toHaveBeenCalledWith("bound-s", {
+				permission: [
+					{ permission: "edit", pattern: "/workspace/*", action: "allow" },
+				],
+			});
+			expect(namedClient.permission.reply).toHaveBeenCalledWith(
+				"bound-s",
+				"perm-1",
+				"once",
+			);
+			expect(client.permission.list).not.toHaveBeenCalled();
+			expect(client.session.update).not.toHaveBeenCalled();
 			expect(client.permission.reply).not.toHaveBeenCalled();
 		});
 

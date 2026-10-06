@@ -48,6 +48,7 @@ import {
 	decodeOpenCodeUndefinedResponse,
 	decodeOpenCodeVcsResponse,
 	type OpenCodeMessageWithParts,
+	type OpenCodePendingPermission,
 } from "../contracts/providers/opencode-sdk.js";
 import { OpenCodeApiError, OpenCodeConnectionError } from "../errors.js";
 import type {
@@ -438,11 +439,7 @@ class PermissionNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
 
 	/** OpenCode scopes pending permissions by directory; unscoped lists are empty. */
-	async list(
-		directory?: string,
-	): Promise<
-		Array<{ [key: string]: unknown; id: string; permission: string }>
-	> {
+	async list(directory?: string): Promise<OpenCodePendingPermission[]> {
 		const permissions = await this.api.sdk(
 			"permission.list",
 			decodeOpenCodePendingPermissionListResponse,
