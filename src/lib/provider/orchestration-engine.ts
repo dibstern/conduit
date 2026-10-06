@@ -502,6 +502,7 @@ export class OrchestrationEngine {
 				const {
 					eventSink: _eventSink,
 					abortSignal: _abortSignal,
+					history: _history,
 					...payload
 				} = command.input;
 				const payloadJson = yield* Effect.try({

@@ -228,6 +228,9 @@ describe("session handler metadata", () => {
 				},
 			),
 			readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			getSessionHistoryMetadata: vi.fn(() =>
+				Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+			),
 			getSessionMessagesWithParts: vi.fn(() => Effect.succeed(projectedRows)),
 		} satisfies ReadQueryEffect;
 	};
