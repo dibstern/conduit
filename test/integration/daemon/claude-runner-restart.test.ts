@@ -336,7 +336,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			scenario === "uncommitted-ask"
 				? undefined
 				: await before.waitFor(
-						(message) => message["type"] === "permission_request",
+						(message) => message["type"] === "permission_pending",
 					);
 		if (scenario === "committed-answer" && request)
 			await before.answerApproval(request, "allow_always");
@@ -364,7 +364,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const recovered =
 				request ??
 				(await after.waitFor(
-					(message) => message["type"] === "permission_request",
+					(message) => message["type"] === "permission_pending",
 				));
 			await after.answerApproval(recovered, "allow");
 		}
@@ -756,7 +756,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const after = await harness.connect(sessionId);
 			await after.view(sessionId);
 			const approval = await after.waitFor(
-				(message) => message["type"] === "permission_request",
+				(message) => message["type"] === "permission_pending",
 			);
 			expect(
 				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
@@ -832,7 +832,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			.send(sessionId, "approval-repeated-restart")
 			.catch(() => undefined);
 		const approval = await before.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -844,7 +844,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		await adopted.view(sessionId);
 		await adopted.waitFor(
 			(message) =>
-				message["type"] === "permission_request" &&
+				message["type"] === "permission_pending" &&
 				message["requestId"] === approval["requestId"],
 		);
 		expect(
@@ -860,7 +860,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			await after.view(sessionId);
 			const recovered = await after.waitFor(
 				(message) =>
-					message["type"] === "permission_request" &&
+					message["type"] === "permission_pending" &&
 					message["requestId"] === approval["requestId"],
 			);
 			const attachments = harness.marks.filter(
@@ -930,7 +930,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			.send(sessionId, "approval-adopted-crash")
 			.catch(() => undefined);
 		const approval = await before.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -950,7 +950,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		await after.view(sessionId);
 		await after.waitFor(
 			(message) =>
-				message["type"] === "permission_request" &&
+				message["type"] === "permission_pending" &&
 				message["requestId"] === approval["requestId"],
 		);
 		expect(
@@ -1006,7 +1006,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			).toMatchObject({ status: "idle" });
 			expect(
 				reconnect.frames.some(
-					({ message }) => message["type"] === "permission_request",
+					({ message }) => message["type"] === "permission_pending",
 				),
 			).toBe(false);
 			reconnectProof = {

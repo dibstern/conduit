@@ -62,8 +62,7 @@ export interface DaemonConfig {
 	claudeConfigDir?: string;
 	projects: Array<{
 		path: string;
-		directory?: string;
-		folders?: readonly string[];
+		folders: readonly [string, ...string[]];
 		slug: string;
 		title?: string;
 		addedAt: number;
@@ -87,10 +86,9 @@ export interface DaemonConfig {
 	}>;
 }
 
-const PersistedProjectSchema = Schema.Struct({
+const ProjectSchema = Schema.Struct({
 	path: Schema.String,
-	directory: Schema.optional(Schema.String),
-	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
+	folders: Schema.NonEmptyArray(Schema.String),
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
@@ -99,9 +97,23 @@ const PersistedProjectSchema = Schema.Struct({
 	sessionCount: Schema.optional(Schema.Number),
 });
 
+/** A project as any daemon version wrote it; older ones have no `folders`, only `directory` or `path`. */
+const PersistedProjectSchema = Schema.Struct({
+	...ProjectSchema.fields,
+	directory: Schema.optional(Schema.String),
+	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
+});
+export type PersistedProject = Omit<
+	DaemonConfig["projects"][number],
+	"folders"
+> & {
+	directory?: string;
+	folders?: readonly string[];
+};
+
 const DaemonProjectSchema = Schema.transform(
 	PersistedProjectSchema,
-	Schema.typeSchema(PersistedProjectSchema),
+	Schema.typeSchema(ProjectSchema),
 	{
 		strict: true,
 		decode: (project) => migrateProjectFolders(project),
@@ -109,24 +121,23 @@ const DaemonProjectSchema = Schema.transform(
 	},
 );
 
+/** Resolve a project's folders, reading a legacy `directory` or `path` when `folders` is absent. Drops `directory`. */
 export const migrateProjectFolders = <
 	T extends {
 		readonly path: string;
 		readonly directory?: string | undefined;
 		readonly folders?: readonly string[] | undefined;
 	},
->(
-	project: T,
-) => {
-	const directory = resolve(
-		project.folders?.[0] ?? project.directory ?? project.path,
-	);
+>({
+	directory: legacyDirectory,
+	...project
+}: T) => {
+	const main = resolve(project.folders?.[0] ?? legacyDirectory ?? project.path);
 	return {
 		...project,
-		path: directory,
-		directory,
+		path: main,
 		folders: [
-			directory,
+			main,
 			...(project.folders?.slice(1) ?? []).map((folder) => resolve(folder)),
 		] as const,
 	};
@@ -484,6 +495,35 @@ export async function saveDaemonConfig(
 	await rename(tmpPath, finalPath);
 }
 
+/** Rewrite daemon.json once at startup when a project still has the pre-folders shape (`directory`, no `folders`). */
+export const migrateDaemonConfigFolders = (configDir?: string) =>
+	Effect.gen(function* () {
+		const raw = yield* Effect.try(
+			() =>
+				JSON.parse(
+					readFileSync(join(resolveDir(configDir), "daemon.json"), "utf-8"),
+				) as unknown,
+		).pipe(Effect.orElseSucceed(() => undefined));
+		const legacy =
+			isRecord(raw) &&
+			Array.isArray(raw["projects"]) &&
+			raw["projects"].some(
+				(project) =>
+					isRecord(project) &&
+					(!("folders" in project) || "directory" in project),
+			);
+		const config = legacy ? loadDaemonConfig(configDir) : null;
+		if (!config) return;
+		yield* Effect.promise(() => saveDaemonConfig(config, configDir));
+		yield* Effect.logInfo("Migrated project config to folders", {
+			projects: config.projects.map((project) => project.slug),
+		});
+	}).pipe(
+		Effect.catchAllCause((cause) =>
+			Effect.logWarning("Project config migration failed", { cause }),
+		),
+	);
+
 /** Remove daemon.json and relay.sock. Ignores ENOENT. */
 export function clearDaemonConfig(configDir?: string): void {
 	const dir = resolveDir(configDir);
@@ -506,24 +546,24 @@ export function syncRecentProjects(
 	const dir = resolveDir(configDir);
 	ensureDir(dir);
 
-	const recentPath = join(dir, "recent.json");
-
-	// Load existing recent projects
-	let existing: RecentProject[] = [];
-	try {
-		const data = readFileSync(recentPath, "utf-8");
-		existing = deserializeRecent(data);
-	} catch {
-		// File doesn't exist or is corrupt — start fresh
-	}
-
 	// Merge new projects into existing list using the addRecent function
-	let merged = existing;
+	let merged = loadRecentProjects(dir);
 	const now = Date.now();
 	for (const project of projects) {
 		merged = addRecent(merged, project.path, project.slug, project.title, now);
 	}
 
 	// Write back
-	writeFileSync(recentPath, serializeRecent(merged), "utf-8");
+	writeFileSync(join(dir, "recent.json"), serializeRecent(merged), "utf-8");
+}
+
+/** Read recent.json; a missing or corrupt file is an empty list. */
+export function loadRecentProjects(configDir?: string): RecentProject[] {
+	try {
+		return deserializeRecent(
+			readFileSync(join(resolveDir(configDir), "recent.json"), "utf-8"),
+		);
+	} catch {
+		return [];
+	}
 }

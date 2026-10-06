@@ -37,7 +37,7 @@ const configWithoutInstances: DaemonConfig = {
 
 describe("provider instance resolution", () => {
 	it("loads and resolves an old OpenCode-only daemon config with migrated folders", () => {
-		const oldConfig: DaemonConfig = {
+		const oldConfig = {
 			pid: 1234,
 			port: 2633,
 			pinHash: null,
@@ -73,7 +73,6 @@ describe("provider instance resolution", () => {
 			projects: [
 				{
 					...oldConfig.projects[0],
-					directory: "/src/project",
 					folders: ["/src/project"],
 				},
 			],

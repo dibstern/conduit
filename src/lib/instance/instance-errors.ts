@@ -26,13 +26,6 @@ export class InvalidInstanceUrl extends Data.TaggedError("InvalidInstanceUrl")<{
 	readonly message?: string;
 }> {}
 
-export class CannotStartExternalInstance extends Data.TaggedError(
-	"CannotStartExternalInstance",
-)<{
-	readonly id: string;
-	readonly message?: string;
-}> {}
-
 export const instanceAlreadyExists = (id: string) =>
 	new InstanceAlreadyExists({
 		id,
@@ -57,10 +50,4 @@ export const instanceNotFound = (id: string) =>
 	new InstanceNotFound({
 		id,
 		message: `Instance "${id}" not found`,
-	});
-
-export const cannotStartExternalInstance = (id: string) =>
-	new CannotStartExternalInstance({
-		id,
-		message: "Cannot start external instance",
 	});

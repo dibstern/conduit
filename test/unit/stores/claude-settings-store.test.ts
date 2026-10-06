@@ -39,7 +39,7 @@ function seedSettings(
 	resolved: Partial<ResolvedClaudeSettings> = {},
 ): void {
 	beginClaudeSettingsResolution("project-a");
-	handleClaudeSettingsInfo({ type: "claude_settings_info", overrides });
+	handleClaudeSettingsInfo({ overrides });
 	applyResolvedClaudeSettingsResponse({
 		projectSlug: "project-a",
 		instanceId: "claude",
@@ -63,7 +63,6 @@ describe("Claude settings store", () => {
 		});
 
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactEnabled: false },
 		});
 		expect(claudeSettingsState.overrides).toEqual({
@@ -75,7 +74,6 @@ describe("Claude settings store", () => {
 		setClaudeSettingEdited("autoCompactEnabled", true);
 
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactWindow: 12_000 },
 		});
 
@@ -84,14 +82,12 @@ describe("Claude settings store", () => {
 
 	it("reverts a failed write to the relay's value, not a remembered one", () => {
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactEnabled: true },
 		});
 		const undo = proposeClaudeSettingsOverrides({ autoCompactEnabled: false });
 
 		// Someone else's change lands while our write is still in flight.
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactWindow: 8_000 },
 		});
 		undo(); // ...and then ours is rejected.
@@ -101,7 +97,6 @@ describe("Claude settings store", () => {
 
 	it("lets a newer write stand when an older one is rejected", () => {
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactEnabled: true },
 		});
 
@@ -288,7 +283,6 @@ describe("Claude setting provenance", () => {
 
 	it("shows the next-session notice after an edit unless policy locks the key", () => {
 		handleClaudeSettingsInfo({
-			type: "claude_settings_info",
 			overrides: { autoCompactEnabled: false },
 		});
 

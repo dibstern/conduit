@@ -14,6 +14,7 @@ import type {
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import {
 	commitClaudeRunnerOutput,
+	createClaudeRunnerPermissionReplies,
 	currentClaudeRunnerOutput,
 	currentClaudeRunnerPermissionReply,
 	ownsClaudeRunnerAttachment,
@@ -148,14 +149,14 @@ export const makeProviderRuntimeIngestionLive = (
 							nextState = result.state;
 						}
 
-						// Compaction notices are UI-only EXCEPT the terminal "completed"
-						// boundary, which persists as a synthetic marker so the "Context
-						// compacted" divider survives a page reload. All states still
-						// publish to the wire below (publishRelayMessages(domainEvents)).
+						// A compaction's "started" notice is UI-only. Its outcome, completed
+						// or failed, persists so the divider or the failure notice survives
+						// a reload. All states still publish to the wire below
+						// (publishRelayMessages(domainEvents)).
 						const persistentEvents = domainEvents.filter(
 							(event) =>
 								event.type !== "session.compaction" ||
-								event.data.state === "completed",
+								event.data.state !== "started",
 						);
 
 						// Projectors write rows that reference sessions(id), and a
@@ -191,8 +192,10 @@ export const makeProviderRuntimeIngestionLive = (
 						let appended = true;
 						const beforeCommit = Effect.gen(function* () {
 							yield* ingestOptions.beforeCommit ?? Effect.void;
-							if (permissionReply)
+							if (permissionReply) {
+								yield* createClaudeRunnerPermissionReplies(sql);
 								yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
+							}
 						});
 						const afterCommit = Effect.gen(function* () {
 							if (appended) {

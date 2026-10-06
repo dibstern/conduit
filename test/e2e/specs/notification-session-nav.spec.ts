@@ -51,7 +51,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "model_list",
+		type: "mock_model_catalog",
 		providers: [
 			{
 				id: "anthropic",
@@ -68,7 +68,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
@@ -80,7 +80,7 @@ const twoSessionInit: MockMessage[] = [
 			{
 				slug: PROJECT_SLUG,
 				title: PROJECT_SLUG,
-				directory: "/src/test-project",
+				folders: ["/src/test-project"],
 			},
 		],
 		current: PROJECT_SLUG,
@@ -198,10 +198,10 @@ test.describe("Notification → Session Navigation", () => {
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
 
-		// Click session B in the sidebar to switch
+		// Click session B's title end in the sidebar; the row's hover actions cover its centre.
 		await page
 			.locator(`[data-session-id="${SESS_B}"]`)
-			.click({ timeout: 5_000 });
+			.click({ position: { x: 48, y: 12 }, timeout: 5_000 });
 
 		// Verify the frontend sent ViewSession with sess-B
 		const viewRequest = await rpc.waitForRequest((request) => {

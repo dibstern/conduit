@@ -164,6 +164,7 @@ describe("saveDaemonConfig", () => {
 			projects: [
 				{
 					path: "/home/user/project",
+					folders: ["/home/user/project"],
 					slug: "project",
 					title: "My Project",
 					addedAt: 1000,
@@ -174,16 +175,37 @@ describe("saveDaemonConfig", () => {
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
-		expect(loaded).toEqual({
-			...config,
-			projects: [
-				{
-					...config.projects[0],
-					directory: "/home/user/project",
-					folders: ["/home/user/project"],
-				},
-			],
-		});
+		expect(loaded).toEqual(config);
+	});
+
+	it("loads legacy projects without folders, using directory or path as the main folder", async () => {
+		writeFileSync(
+			join(tempDir, "daemon.json"),
+			JSON.stringify({
+				...makeSampleConfig(),
+				projects: [
+					{
+						path: "/src/old",
+						directory: "/src/old-dir",
+						slug: "dir",
+						addedAt: 1,
+					},
+					{ path: "/src/path-only", slug: "path", addedAt: 2 },
+				],
+			}),
+		);
+
+		const loaded = loadDaemonConfig(tempDir);
+		expect(loaded?.projects.map(({ folders }) => folders)).toEqual([
+			["/src/old-dir"],
+			["/src/path-only"],
+		]);
+
+		assert(loaded);
+		await saveDaemonConfig(loaded, tempDir);
+		expect(readFileSync(join(tempDir, "daemon.json"), "utf8")).not.toContain(
+			'"directory"',
+		);
 	});
 });
 
@@ -405,6 +427,7 @@ describe("DaemonConfig with instances", () => {
 			projects: [
 				{
 					path: "/src/myapp",
+					folders: ["/src/myapp"],
 					slug: "myapp",
 					addedAt: Date.now(),
 					instanceId: "personal",

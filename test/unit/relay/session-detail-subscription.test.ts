@@ -35,6 +35,11 @@ import {
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import {
+	applyTranscriptEnvelope,
+	deriveTranscriptMessages,
+	type TranscriptEntry,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { resumeStream } from "../../../src/lib/frontend/transport/resume.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -499,15 +504,15 @@ describe("subscribeSessionDetail", () => {
 				resumeFromSequence: cursor,
 			});
 
-			// Detail is append-only, so the version alone is enough: no row it
-			// serves can have disappeared while the client was away.
-			const [first, second] = yield* takeN(q, 2);
+			// Timing writes also refresh the prompt the client already holds.
+			const [first, prompt, second] = yield* takeN(q, 3);
 			const boundary = yield* Queue.take(q);
 			expect(boundary).toEqual({ _tag: "synchronized" });
-			expect([expectMessage(first).id, expectMessage(second).id]).toEqual([
-				"m1",
-				"m2",
-			]);
+			expect([
+				expectMessage(first).id,
+				expectMessage(prompt).id,
+				expectMessage(second).id,
+			]).toEqual(["m1", "m0", "m2"]);
 			// Each replayed message carries the version of the commit that wrote
 			// it, not the counter the replay happened to read. That is what lets a
 			// client recognise a row it already holds as the SAME envelope rather
@@ -934,5 +939,206 @@ describe("subscribeSessionDetail", () => {
 					),
 				);
 			}),
+	);
+});
+
+// ni8.31-35: transcript states the legacy chat arms used to carry. Each one has
+// to reach a browser through the projection alone: projector → detail feed →
+// the client's own envelope reducer and converter, no legacy relay message.
+describe("transcript states carried by the detail feed alone", () => {
+	const ev = <K extends CanonicalEvent["type"]>(
+		type: K,
+		data: Parameters<typeof canonicalEvent<K>>[2],
+		createdAt = at(),
+	) => canonicalEvent(type, SID, data, { provider: "claude", createdAt });
+
+	/** What the browser renders from these envelopes and nothing else. */
+	const chatOf = (envelopes: readonly Envelope<SessionDetailItem>[]) =>
+		deriveTranscriptMessages(
+			envelopes.reduce<TranscriptEntry>(applyTranscriptEnvelope, {
+				project: "project",
+				rows: [],
+				hwm: null,
+				hasMore: false,
+				status: { _tag: "live" },
+				pending: [],
+			}),
+			[],
+		);
+
+	it.scoped(
+		"thinking is in progress until thinking.end, which stamps its end",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const startedAt = at();
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "m1", "assistant"),
+					ev("thinking.start", { messageId: "m1", partId: "t1" }, startedAt),
+					ev("thinking.delta", { messageId: "m1", partId: "t1", text: "hm" }),
+				]);
+				const { q } = yield* openDetail({ sessionId: SID });
+				const opening = yield* takeN(q, 2);
+				expect(chatOf(opening)).toMatchObject([
+					{ type: "thinking", text: "hm", done: false },
+				]);
+
+				const endedAt = at() + 100;
+				yield* commit([
+					ev("thinking.end", { messageId: "m1", partId: "t1" }, endedAt),
+				]);
+				const ended = yield* Queue.take(q);
+				expect(chatOf([...opening, ended])).toMatchObject([
+					{ type: "thinking", done: true, duration: endedAt - startedAt },
+				]);
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped("an interrupted turn closes thinking that never ended", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				messageCreated(SID, "m1", "assistant"),
+				ev("thinking.start", { messageId: "m1", partId: "t1" }),
+				ev("turn.interrupted", { messageId: "m1" }),
+			]);
+			const { q } = yield* openDetail({ sessionId: SID });
+			expect(chatOf(yield* takeN(q, 2))).toMatchObject([
+				{ type: "thinking", done: true },
+			]);
+		}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped("a tool's input refreshed after tool.started reaches the row", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				messageCreated(SID, "m1", "assistant"),
+				toolStarted(SID, "m1", "p1"),
+			]);
+			const { q } = yield* openDetail({ sessionId: SID });
+			const opening = yield* takeN(q, 2);
+
+			yield* commit([
+				ev("tool.running", {
+					messageId: "m1",
+					partId: "p1",
+					callId: "p1",
+					toolName: "Bash",
+					input: { tool: "Bash", command: "ls" },
+				}),
+			]);
+			const running = yield* Queue.take(q);
+			expect(chatOf([...opening, running])).toMatchObject([
+				{ type: "tool", input: { command: "ls" } },
+			]);
+
+			yield* commit([
+				ev("tool.completed", {
+					messageId: "m1",
+					partId: "p1",
+					result: "ok",
+					duration: 1,
+					input: { tool: "Bash", command: "ls -la" },
+				}),
+			]);
+			const completed = yield* Queue.take(q);
+			expect(chatOf([...opening, running, completed])).toMatchObject([
+				{ type: "tool", input: { command: "ls -la" } },
+			]);
+		}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped("a turn error is transcript content and survives a reload", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				messageCreated(SID, "m1", "assistant"),
+				toolStarted(SID, "m1", "p1"),
+			]);
+			const { q } = yield* openDetail({ sessionId: SID });
+			const opening = yield* takeN(q, 2);
+
+			yield* commit([
+				ev("turn.error", {
+					messageId: "m1",
+					error: "Rate limited",
+					code: "provider_error",
+				}),
+			]);
+			const live = [...opening, ...(yield* takeN(q, 2))];
+			const expected = [
+				{ type: "tool", name: "Bash" },
+				{
+					type: "system",
+					variant: "error",
+					text: "Rate limited",
+					errorCode: "provider_error",
+				},
+			];
+			expect(chatOf(live)).toMatchObject(expected);
+
+			// A fresh subscriber (a reload) sees the same thing from the store.
+			const reload = yield* openDetail({ sessionId: SID });
+			expect(chatOf(yield* takeN(reload.q, 2))).toMatchObject(expected);
+		}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped(
+		"ingestion keeps a compaction's outcome and drops its transient start",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const compaction = (state: "started" | "failed", detail: string) =>
+					runtimeEvent({
+						eventId: `rt-compaction-${state}`,
+						type: "session.compaction",
+						data: { sessionId: SID, state, detail },
+					});
+				yield* ingestion.ingestBatch([
+					runtimeEvent({
+						eventId: "rt-session-created",
+						type: "session.created",
+						data: { sessionId: SID, title: "Detail", provider: "claude" },
+					}),
+					compaction("started", "Compacting conversation…"),
+					compaction("failed", "Compaction failed: too large"),
+				]);
+				const { q } = yield* openDetail({ sessionId: SID });
+				expect(chatOf(yield* takeN(q, 2))).toEqual([
+					expect.objectContaining({
+						compaction: "failed",
+						text: "Compaction failed: too large",
+					}),
+				]);
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+	);
+
+	it.scoped("a failed compaction is an error notice, not a boundary", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				ev("session.compaction", {
+					sessionId: SID,
+					state: "failed",
+					detail: "Compaction failed",
+				}),
+			]);
+			const { q } = yield* openDetail({ sessionId: SID });
+			expect(chatOf(yield* takeN(q, 2))).toMatchObject([
+				{
+					type: "system",
+					variant: "error",
+					compaction: "failed",
+					text: "Compaction failed",
+				},
+			]);
+		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 });

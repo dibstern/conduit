@@ -39,12 +39,12 @@ describe("SessionList search summary", () => {
 			{
 				slug: "current-project",
 				title: "Current project",
-				directory: "/projects/current",
+				folders: ["/projects/current"],
 			},
 			{
 				slug: "other-project",
 				title: "Other project",
-				directory: "/projects/other",
+				folders: ["/projects/other"],
 			},
 		];
 	});

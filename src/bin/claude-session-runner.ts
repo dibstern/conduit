@@ -400,6 +400,10 @@ const main = Effect.gen(function* () {
 											? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
 											: {}),
 										onSubagentFinalizationComplete: reportUpgradeState,
+										onTurnStateChanged: (_sessionId, inFlight) => {
+											idle?.setTurnInFlight(inFlight);
+											reportUpgradeState();
+										},
 									},
 									(output) => {
 										if (output.type === "background-task") {

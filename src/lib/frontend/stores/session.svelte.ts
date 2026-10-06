@@ -11,6 +11,7 @@ import {
 	getCommandsRpc,
 	getModelsRpc,
 	listDaemonSessionsRpc,
+	reloadProviderSessionRpc,
 	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
@@ -508,6 +509,11 @@ export async function loadDaemonSessions(): Promise<void> {
 		const response = await listDaemonSessionsRpc({
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			// The sidebar shows other projects' roots only; this project's roots
+			// come from the shell feed. Pages of rows that never render keep the
+			// scroll sentinel in view, so the pager would walk the whole store.
+			roots: true,
+			exclude: projectSlug,
 			...(scope === null ? {} : { scope }),
 		});
 		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
@@ -552,6 +558,8 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor,
+			roots: true,
+			exclude: projectSlug,
 			...(scope === null ? {} : { scope }),
 		});
 		if (token !== daemonBrowseToken) return;
@@ -920,7 +928,7 @@ export function switchToSession(
 					clientSession.currentId === sessionId &&
 					getCurrentSlug() === slug
 				)
-					applyGetAgentsResponse(response);
+					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
 		void getCommandsRpc({ projectSlug: slug, sessionId })
@@ -946,6 +954,29 @@ export function switchToSession(
 			})
 			.catch(() => undefined);
 	}
+}
+
+/**
+ * Reload the provider session so it picks up skills/commands added on disk,
+ * then refetch the command and model catalogs it changes.
+ */
+export async function reloadProviderSession(
+	projectSlug: string,
+	sessionId: string,
+): Promise<void> {
+	await reloadProviderSessionRpc({
+		projectSlug,
+		sessionId,
+		commandId: crypto.randomUUID(),
+	});
+	const [commands, models] = await Promise.all([
+		getCommandsRpc({ projectSlug, sessionId }),
+		getModelsRpc({ projectSlug, sessionId }),
+	]);
+	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
+		return;
+	applyGetCommandsResponse(commands);
+	applyGetModelsResponse(models);
 }
 
 /** Clear all session state (for project switch). */

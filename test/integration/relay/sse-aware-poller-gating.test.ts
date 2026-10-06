@@ -27,6 +27,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -64,7 +65,6 @@ interface MockOpenCode {
 	sessionStatuses: Record<string, { type: string; [key: string]: unknown }>;
 	sessionList: SessionDef[];
 	messageRequestCounts: Record<string, number>;
-	statusRequestCount: number;
 	injectSSE(event: { type: string; properties: Record<string, unknown> }): void;
 	getMessageRequestCount(sessionId: string): number;
 	resetMessageRequestCounts(): void;
@@ -75,6 +75,7 @@ async function createMockOpenCode(
 	config?: MockOpenCodeConfig,
 ): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	let eventId = 0;
 
 	const sessionList: SessionDef[] = config?.sessions ?? [
 		{ id: "sess-1", title: "Session 1" },
@@ -89,7 +90,6 @@ async function createMockOpenCode(
 	}
 
 	const messageRequestCounts: Record<string, number> = {};
-	let statusRequestCount = 0;
 	const toOpenCodeSession = (session: SessionDef) => ({
 		id: session.id,
 		projectID: "proj-test",
@@ -105,13 +105,15 @@ async function createMockOpenCode(
 	function handler(req: IncomingMessage, res: ServerResponse) {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
-		if (url.pathname === "/event") {
+		if (url.pathname === "/global/event") {
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
 				Connection: "keep-alive",
 			});
-			res.write(": heartbeat\n\n");
+			res.write(
+				`data: ${JSON.stringify({ payload: { id: "evt_connected", type: "server.connected", properties: {} } })}\n\n`,
+			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));
 			return;
@@ -150,7 +152,6 @@ async function createMockOpenCode(
 		}
 
 		if (url.pathname === "/session/status") {
-			statusRequestCount++;
 			res.end(JSON.stringify(sessionStatuses));
 			return;
 		}
@@ -202,11 +203,11 @@ async function createMockOpenCode(
 		sessionStatuses,
 		sessionList,
 		messageRequestCounts,
-		get statusRequestCount() {
-			return statusRequestCount;
-		},
 		injectSSE(event) {
-			const data = JSON.stringify(event);
+			const data = JSON.stringify({
+				directory: process.cwd(),
+				payload: { id: `evt_${++eventId}`, ...event },
+			});
 			for (const client of sseClients) {
 				client.write(`data: ${data}\n\n`);
 			}
@@ -371,6 +372,14 @@ async function createTestHarness(
 		},
 	});
 
+	// Relay startup makes no OpenCode requests; the first use opens the stream.
+	await relay.effectRuntime.runtime.runPromise(
+		Effect.scoped(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.use("opencode"),
+			),
+		),
+	);
 	await vi.waitFor(
 		() => {
 			expect(mock.sseClients.size).toBeGreaterThan(0);
@@ -404,14 +413,9 @@ async function createTestHarness(
 /** Only used for windows that assert activity stays absent. */
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function waitForStatusPollCycles(mock: MockOpenCode, cycles = 4) {
-	const before = mock.statusRequestCount;
-	await vi.waitFor(
-		() => {
-			expect(mock.statusRequestCount).toBeGreaterThanOrEqual(before + cycles);
-		},
-		{ timeout: 3000 },
-	);
+/** The status poller reads SQLite only, so cycles are measured in time. */
+async function waitForStatusPollCycles(_mock: MockOpenCode, cycles = 4) {
+	await wait(cycles * TEST_STATUS_POLL_MS + TEST_STATUS_POLL_MS / 2);
 }
 
 /** Helper: connect client and switch to a session */
@@ -449,6 +453,8 @@ describe("Group 1: SSE coverage and grace period", () => {
 		if (harness) await harness.stop();
 	}, 5_000);
 
+	// Longer timeout: the file's first attach pays the one-time Claude capability
+	// probe (model_list waits on it while no OpenCode catalog is cached).
 	it("Scenario 1: Busy + continuous SSE → no poller starts", async () => {
 		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
@@ -480,7 +486,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 		await client.waitFor("done", { timeout: 3000 });
 		await client.close();
-	}, 5_000);
+	}, 10_000);
 
 	it("Scenario 2: SSE events for wrong session don't count as coverage", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
@@ -701,15 +707,7 @@ describe("Group 2: SSE dynamics", () => {
 			},
 			{ timeout: 3000 },
 		);
-		const statusBefore = harness.mock.statusRequestCount;
-		await vi.waitFor(
-			() => {
-				expect(harness.mock.statusRequestCount).toBeGreaterThan(
-					statusBefore + 1,
-				);
-			},
-			{ timeout: 3000 },
-		);
+		await waitForStatusPollCycles(harness.mock, 2);
 
 		// Measure rate with SSE
 		harness.mock.resetMessageRequestCounts();

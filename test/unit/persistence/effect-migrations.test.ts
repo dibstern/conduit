@@ -64,6 +64,9 @@ const expectedNames = [
 	"sessions_history_complete",
 	"message_tombstones",
 	"session_goals",
+	"startup_restore_indexes",
+	"tool_call_index",
+	"pending_approvals_version",
 	"messages_input_id",
 	"pending_inputs",
 	"messages_steered",
@@ -453,7 +456,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(22);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(25);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -601,9 +604,12 @@ describe("Effect migration lineage", () => {
 				[28, "sessions_history_complete"],
 				[29, "message_tombstones"],
 				[30, "session_goals"],
-				[31, "messages_input_id"],
-				[32, "pending_inputs"],
-				[33, "messages_steered"],
+				[31, "startup_restore_indexes"],
+				[32, "tool_call_index"],
+				[33, "pending_approvals_version"],
+				[34, "messages_input_id"],
+				[35, "pending_inputs"],
+				[36, "messages_steered"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -671,9 +677,12 @@ describe("Effect migration lineage", () => {
 					[28, "sessions_history_complete"],
 					[29, "message_tombstones"],
 					[30, "session_goals"],
-					[31, "messages_input_id"],
-					[32, "pending_inputs"],
-					[33, "messages_steered"],
+					[31, "startup_restore_indexes"],
+					[32, "tool_call_index"],
+					[33, "pending_approvals_version"],
+					[34, "messages_input_id"],
+					[35, "pending_inputs"],
+					[36, "messages_steered"],
 				]);
 				const rows = yield* sql<{
 					id: string;

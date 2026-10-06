@@ -14,7 +14,6 @@ import type {
 	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
-	WsMessageEvent,
 } from "../../../src/lib/server/ws-handler-shape.js";
 
 let cleanup: Array<() => Promise<void> | void> = [];
@@ -70,10 +69,6 @@ function onceConnected(
 	return new Promise((resolve) => handler.once("client_connected", resolve));
 }
 
-function onceMessage(handler: EffectWsHandler): Promise<WsMessageEvent> {
-	return new Promise((resolve) => handler.once("message", resolve));
-}
-
 function onceDisconnected(
 	handler: EffectWsHandler,
 ): Promise<WsClientDisconnectedEvent> {
@@ -101,18 +96,6 @@ function waitOpen(ws: WebSocket): Promise<void> {
 	});
 }
 
-function waitForMessage(
-	ws: WebSocket,
-	predicate: (msg: Record<string, unknown>) => boolean,
-): Promise<Record<string, unknown>> {
-	return new Promise((resolve) => {
-		ws.on("message", (data) => {
-			const parsed = JSON.parse(data.toString()) as Record<string, unknown>;
-			if (predicate(parsed)) resolve(parsed);
-		});
-	});
-}
-
 describe("Effect WS handler bridge", () => {
 	it("attaches and detaches an open socket without closing it", async () => {
 		const addClient = vi.spyOn(wsHandlerService, "addClient");
@@ -133,16 +116,6 @@ describe("Effect WS handler bridge", () => {
 			requestedSessionId: "session-a",
 			skipDefaultSession: true,
 		});
-
-		const delivered = vi.fn();
-		handler.on("message", delivered);
-		socket.emit(
-			"message",
-			Buffer.from(
-				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "a" }),
-			),
-		);
-		expect(delivered).toHaveBeenCalledTimes(1);
 
 		const disconnected = onceDisconnected(handler);
 		const sentAtDetach = socket.send.mock.calls.length;
@@ -165,20 +138,20 @@ describe("Effect WS handler bridge", () => {
 			expect(socket.listenerCount(event)).toBe(0);
 		}
 		const sentBeforeBroadcast = socket.send.mock.calls.length;
-		handler.broadcast({ type: "client_count", count: 99 });
+		handler.broadcast({ type: "server_update", restartAvailable: true });
 		detach();
 		await handler.drain();
 		expect(socket.send).toHaveBeenCalledTimes(sentBeforeBroadcast);
 		expect(socket.close).not.toHaveBeenCalled();
 
-		delivered.mockClear();
 		socket.emit(
 			"message",
 			Buffer.from(
 				JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "b" }),
 			),
 		);
-		expect(delivered).not.toHaveBeenCalled();
+		await handler.drain();
+		expect(socket.send).toHaveBeenCalledTimes(sentBeforeBroadcast);
 	});
 
 	it("drain closes sockets attached without an upgrade", async () => {
@@ -210,20 +183,17 @@ describe("Effect WS handler bridge", () => {
 
 		first.close();
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		handler.broadcast({ type: "client_count", count: 99 });
+		handler.broadcast({ type: "server_update", restartAvailable: true });
 
 		await vi.waitFor(() => {
 			expect(second.send).toHaveBeenCalledWith(
-				JSON.stringify({ type: "client_count", count: 99 }),
+				JSON.stringify({ type: "server_update", restartAvailable: true }),
 			);
 		});
 		expect(handler.getClientIds()).toEqual(["same-client"]);
 		expect(handler.getClientSession("same-client")).toBe("session-b");
 		expect(handler.getClientsForSession("session-b")).toEqual(["same-client"]);
 		expect(disconnected).not.toHaveBeenCalled();
-		expect(second.send).not.toHaveBeenCalledWith(
-			JSON.stringify({ type: "client_count", count: 0 }),
-		);
 
 		const secondDisconnected = onceDisconnected(handler);
 		second.close();
@@ -236,7 +206,9 @@ describe("Effect WS handler bridge", () => {
 		expect(handler.getClientCount()).toBe(0);
 	});
 
-	it("emits routed messages for attached connections", async () => {
+	it("ignores raw inbound frames without replying or disconnecting", async () => {
+		// Every browser request is an @effect/rpc call; the raw socket carries no
+		// requests, so a stray frame earns no system_error reply (fork 3.2).
 		const handler = await createHandler({ heartbeatInterval: 300_000 });
 		const { url } = await startServer(handler, {
 			clientId: "test-client",
@@ -245,41 +217,18 @@ describe("Effect WS handler bridge", () => {
 		const connected = onceConnected(handler);
 		const client = new WebSocket(url);
 		cleanup.push(() => client.close());
-
 		await waitOpen(client);
-		const connectedInfo = await connected;
-		expect(connectedInfo.requestedSessionId).toBe("s1");
-		expect(connectedInfo.clientCount).toBe(1);
+		await connected;
 
-		const message = onceMessage(handler);
+		const replies: unknown[] = [];
+		client.on("message", (data) => replies.push(JSON.parse(data.toString())));
 		client.send(
 			JSON.stringify({ type: "pty_input", ptyId: "pty-1", data: "x" }),
 		);
-		const routed = await message;
-
-		expect(routed.clientId).toBe(connectedInfo.clientId);
-		expect(routed.handler).toBe("pty_input");
-		expect(routed.payload).toEqual({ ptyId: "pty-1", data: "x" });
-	});
-
-	it("sends system_error for invalid JSON without disconnecting", async () => {
-		const handler = await createHandler({ heartbeatInterval: 300_000 });
-		const { url } = await startServer(handler);
-		const client = new WebSocket(url);
-		cleanup.push(() => client.close());
-
-		await waitOpen(client);
-		const errorMessage = waitForMessage(
-			client,
-			(msg) => msg["type"] === "system_error",
-		);
 		client.send("not json{");
-		const msg = await errorMessage;
+		await new Promise((resolve) => setTimeout(resolve, 100));
 
-		expect(msg).toMatchObject({
-			type: "system_error",
-			code: "PARSE_ERROR",
-		});
+		expect(replies).toEqual([]);
 		expect(handler.getClientCount()).toBe(1);
 	});
 

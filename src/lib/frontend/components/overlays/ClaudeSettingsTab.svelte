@@ -30,11 +30,10 @@
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getClaudeSettingsRpc,
-		reloadProviderSessionRpc,
 		resolveClaudeSettingsRpc,
 		setClaudeSettingsRpc,
 		setDefaultModelRpc,
@@ -329,11 +328,7 @@
 
 		reloadInFlight = true;
 		try {
-			await reloadProviderSessionRpc({
-				projectSlug,
-				sessionId,
-				commandId: crypto.randomUUID(),
-			});
+			await reloadProviderSession(projectSlug, sessionId);
 			showToast("Session reloaded");
 		} catch {
 			showToast("Failed to reload the session", { variant: "warn" });

@@ -33,7 +33,6 @@ import type { StoredProject } from "../../../src/lib/types.js";
 
 const testProject: StoredProject = {
 	slug: "test-project",
-	directory: "/tmp/test",
 	folders: ["/tmp/test"],
 	title: "Test Project",
 	lastUsed: Date.now(),
@@ -78,13 +77,11 @@ describe("projectInfos", () => {
 		return Effect.gen(function* () {
 			yield* addWithoutRelay({
 				...testProject,
-				directory,
 				folders: [directory],
 			});
 			yield* addWithoutRelay({
 				...testProject,
 				slug: "missing",
-				directory: missingDirectory,
 				folders: [missingDirectory],
 			});
 			const projects = yield* projectInfos;
@@ -129,16 +126,14 @@ describe("projectInfos", () => {
 				],
 				{ cwd: directory },
 			);
-			const cached = {
+			const cached: StoredProject = {
 				...testProject,
 				slug: "cached",
-				directory,
 				folders: [directory],
 			};
-			const uncached = {
+			const uncached: StoredProject = {
 				...testProject,
 				slug: "uncached",
-				directory: join(directory, "other"),
 				folders: [join(directory, "other")],
 			};
 
@@ -170,7 +165,7 @@ describe("explicit project registration", () => {
 			yield* removeProjectFromEffectRegistry(first.project.slug);
 			expect(yield* allProjects).toEqual([]);
 			const added = yield* saveProject({ folders: [directory] });
-			expect(added.project.directory).toBe(directory);
+			expect(added.project.folders[0]).toBe(directory);
 			expect(yield* allProjects).toEqual([added.project]);
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});

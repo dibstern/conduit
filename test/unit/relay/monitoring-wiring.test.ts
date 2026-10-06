@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	hasActiveProcessingTimeout,
+	makeOverridesStateLive,
+	startProcessingTimeout,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	makePollerStateLive,
 	type SessionStatusPollerService,
@@ -15,6 +19,7 @@ import {
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
@@ -27,7 +32,10 @@ type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 const flushPromises = () =>
 	new Promise<void>((resolve) => setImmediate(resolve));
 
-function createHarness(parentMap = new Map<string, string>()) {
+function createHarness(
+	parentMap = new Map<string, string>(),
+	providers = new Map<string, string>(),
+) {
 	const broadcastPerSessionEvent = vi.fn();
 	const clearProcessingTimeout = vi.fn();
 	let changed: ChangedCallback | undefined;
@@ -68,11 +76,11 @@ function createHarness(parentMap = new Map<string, string>()) {
 			stop: vi.fn(),
 			drain: vi.fn(async () => {}),
 			getCurrentStatuses: vi.fn(() => ({})),
+			getSessionProviders: () => providers,
 			isProcessing: vi.fn(() => false),
 			markMessageActivity: vi.fn(),
 			clearMessageActivity: vi.fn(),
 			notifySSEIdle: vi.fn(),
-			reconcileNow: vi.fn(async () => {}),
 		},
 		pollerManager: {
 			startPolling,
@@ -187,6 +195,30 @@ describe("wireMonitoring shutdown", () => {
 		vi.spyOn(Date, "now").mockImplementation(() => ++now);
 	});
 	afterEach(() => vi.restoreAllMocks());
+
+	it.each([
+		"opencode",
+		"unknown",
+		"",
+	])("keeps polling for an OpenCode or unresolved provider: %s", async (provider) => {
+		const harness = createHarness(new Map(), new Map([["s1", provider]]));
+		await harness.emitStatus({ s1: { type: "busy" } });
+		await harness.emitStatus({ s1: { type: "busy" } });
+		expect(harness.messages).toHaveBeenCalledWith("s1");
+		harness.result.stopMonitoring();
+	});
+
+	it("legacy wiring clears Claude idle state without emitting a done", async () => {
+		const harness = createHarness(new Map(), new Map([["claude-1", "claude"]]));
+		await harness.emitStatus({ "claude-1": { type: "busy" } });
+		await harness.emitStatus({ "claude-1": { type: "busy" } });
+		await harness.emitStatus({ "claude-1": { type: "idle" } });
+		expect(harness.messages).not.toHaveBeenCalled();
+		expect(harness.clearProcessingTimeout).toHaveBeenCalledWith("claude-1");
+		expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalled();
+		expect(harness.broadcast).not.toHaveBeenCalled();
+		harness.result.stopMonitoring();
+	});
 
 	it("assembles contexts only for non-settled sessions", async () => {
 		const harness = createHarness();
@@ -561,6 +593,68 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
+	it("never seeds an OpenCode message poller for a Claude-owned session", async () => {
+		const pushManager = {
+			getPublicKey: () => null,
+			addSubscription: vi.fn(),
+			removeSubscription: vi.fn(),
+			sendToAll: vi.fn(async () => ({
+				delivered: [],
+				failed: [],
+				expired: [],
+			})),
+		};
+		const harness = await createEffectHarness(
+			() => Effect.void,
+			pushManager,
+			":memory:",
+			false,
+		);
+		try {
+			await harness.runtime?.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
+						VALUES ('claude-1', 'c', 'claude', 1, 1)`;
+				}),
+			);
+			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).
+			harness.messages.mockRejectedValue(
+				new Error("Session not found: claude-1"),
+			);
+			harness.emitStatus({ "claude-1": { type: "busy" } });
+			await flushPromises();
+			harness.emitStatus({ "claude-1": { type: "busy" } });
+			await flushPromises();
+			expect(harness.messages).not.toHaveBeenCalled();
+			expect(harness.delivered).toEqual(["processing"]);
+			expect(harness.startPolling).not.toHaveBeenCalled();
+			if (!harness.runtime) throw new Error("Missing test runtime");
+			await harness.runtime.runPromise(
+				startProcessingTimeout("claude-1", "1 minute", () => Effect.void),
+			);
+			expect(
+				await harness.runtime.runPromise(
+					hasActiveProcessingTimeout("claude-1"),
+				),
+			).toBe(true);
+			harness.emitStatus({ "claude-1": { type: "idle" } });
+			await flushPromises();
+			expect(harness.delivered).toEqual(["processing"]);
+			expect(harness.broadcast).not.toHaveBeenCalled();
+			expect(pushManager.sendToAll).not.toHaveBeenCalled();
+			expect(
+				await harness.runtime.runPromise(
+					hasActiveProcessingTimeout("claude-1"),
+				),
+			).toBe(false);
+			expect(harness.result.getMonitoringState().sessions.size).toBe(0);
+		} finally {
+			harness.result.stopMonitoring();
+			await harness.dispose();
+		}
+	});
+
 	it("keeps a seed valid across continuing busy ticks", async () => {
 		const harness = await createEffectHarness();
 		harness.result.setMonitoringState({
@@ -628,6 +722,9 @@ async function createEffectHarness(
 	const getClientsForSession = vi.fn((_id: string): string[] => []);
 	const broadcast = vi.fn();
 	const unused = () => Effect.die("Unexpected service call");
+	const getSessionProviders = vi.fn<
+		SessionStatusPollerService["getSessionProviders"]
+	>(() => Effect.succeed(new Map()));
 	const layer = Layer.mergeAll(
 		Layer.succeed(SessionManagerServiceTag, {
 			initialize: unused,
@@ -664,11 +761,11 @@ async function createEffectHarness(
 			stop: unused,
 			drain: unused,
 			getCurrentStatuses: unused,
+			getSessionProviders,
 			isProcessing: unused,
 			markMessageActivity: unused,
 			clearMessageActivity: unused,
 			notifySSEIdle: unused,
-			reconcileNow: unused,
 		}),
 		makePollerStateLive(),
 		makeOverridesStateLive(),
@@ -710,6 +807,15 @@ async function createEffectHarness(
 	const result = runtime
 		? await runtime.runPromise(
 				Effect.gen(function* () {
+					const readQuery = yield* ReadQueryEffectTag;
+					getSessionProviders.mockImplementation(() =>
+						readQuery.getAllSessionStatusesWithProviders().pipe(
+							Effect.map(
+								(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+							),
+							Effect.orDie,
+						),
+					);
 					if (seedTurn) {
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)

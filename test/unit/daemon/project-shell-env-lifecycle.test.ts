@@ -53,7 +53,15 @@ describe("daemon project shell env lifecycle", () => {
 			Layer.provideMerge(
 				makeDaemonStateLive({
 					configDir,
-					projects: [{ path: project, slug: "initial", addedAt: 1, shellEnv }],
+					projects: [
+						{
+							path: project,
+							folders: [project],
+							slug: "initial",
+							addedAt: 1,
+							shellEnv,
+						},
+					],
 				}),
 			),
 		);
@@ -94,7 +102,6 @@ describe("daemon project shell env lifecycle", () => {
 					yield* addWithoutRelay({
 						slug: "added",
 						title: "Added",
-						directory: added,
 						folders: [added],
 						shellEnv: { overrides: { PROJECT_CONFIG: "added" } },
 					});

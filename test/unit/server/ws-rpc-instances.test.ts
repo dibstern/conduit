@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("WsRpcServerLayer instance management", () => {
-	it.effect("starts an instance and broadcasts the updated list", () => {
+	it.effect("starts an instance and returns the updated list", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const startInstance = vi.fn(async () => undefined);
 		const instanceMgmt = makeInstanceMgmt({ startInstance });
@@ -59,10 +59,6 @@ describe("WsRpcServerLayer instance management", () => {
 			expect(startInstance).toHaveBeenCalledWith("inst-1");
 			expect(response).toEqual({
 				projectSlug: "proj-1",
-				instances: [instance],
-			});
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "instance_list",
 				instances: [instance],
 			});
 		}).pipe(
@@ -99,7 +95,7 @@ describe("WsRpcServerLayer instance management", () => {
 				}),
 			).toEqual({ projectSlug: "proj-1", instances: [instance] });
 			expect(removeInstance).toHaveBeenCalledWith("inst-1");
-			expect(wsHandler.broadcast).toHaveBeenCalledTimes(2);
+			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -129,10 +125,6 @@ describe("WsRpcServerLayer instance management", () => {
 			});
 			expect(persistConfig).toHaveBeenCalled();
 			expect(response.instances).toEqual([instance]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "instance_list",
-				instances: [instance],
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -170,10 +162,6 @@ describe("WsRpcServerLayer instance management", () => {
 			);
 			expect(persistConfig).toHaveBeenCalled();
 			expect(response.instances).toEqual([instance]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "instance_list",
-				instances: [instance],
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -219,7 +207,7 @@ describe("WsRpcServerLayer instance management", () => {
 		);
 	});
 
-	it.effect("updates an instance name + configDir and broadcasts", () => {
+	it.effect("updates an instance name + configDir", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const updateInstance = vi.fn(() => instance);
 		const persistConfig = vi.fn();
@@ -240,10 +228,6 @@ describe("WsRpcServerLayer instance management", () => {
 			});
 			expect(persistConfig).toHaveBeenCalled();
 			expect(response.instances).toEqual([instance]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "instance_list",
-				instances: [instance],
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

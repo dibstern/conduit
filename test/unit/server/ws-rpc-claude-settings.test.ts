@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
-import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	type ProjectSettingsEnvelope,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -16,12 +19,18 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("WsRpcServerLayer Claude settings", () => {
-	it.effect("reads, persists, and broadcasts global overrides", () => {
+	it.effect("reads, persists, and publishes global overrides", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-rpc-claude-"));
-		const wsHandler = makeMockWebSocketHandler();
 
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const settings = yield* Queue.unbounded<ProjectSettingsEnvelope>();
+			yield* Stream.runForEach(
+				client.SubscribeProjectSettings({ projectSlug: "project-a" }),
+				(envelope) => Queue.offer(settings, envelope),
+			).pipe(Effect.forkScoped);
+			yield* Queue.take(settings); // snapshot
+			yield* Queue.take(settings); // synchronized
 			expect(
 				yield* client.GetClaudeSettings({ projectSlug: "project-a" }),
 			).toEqual({
@@ -45,9 +54,9 @@ describe("WsRpcServerLayer Claude settings", () => {
 			expect(loadRelaySettings(configDir).claudeSettings).toEqual(
 				result.overrides,
 			);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "claude_settings_info",
-				overrides: result.overrides,
+			expect(yield* Queue.take(settings)).toMatchObject({
+				_tag: "upsert",
+				item: { _tag: "claudeSettings", overrides: result.overrides },
 			});
 
 			rmSync(configDir, { recursive: true, force: true });
@@ -56,10 +65,7 @@ describe("WsRpcServerLayer Claude settings", () => {
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
-						makeTestHandlerLayer({
-							config: makeMockConfig({ configDir }),
-							wsHandler,
-						}),
+						makeTestHandlerLayer({ config: makeMockConfig({ configDir }) }),
 					),
 				),
 			),

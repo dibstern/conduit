@@ -55,7 +55,13 @@ function projectTool(name: "Task" | "Read") {
 						type: "tool",
 						tool: name,
 						callID: "call",
-						state: { status: "pending" },
+						state: {
+							status: "running",
+							input:
+								name === "Task"
+									? { subagent_type: "explore" }
+									: { path: "foo.ts" },
+						},
 					},
 				],
 			},
@@ -67,13 +73,6 @@ function projectTool(name: "Task" | "Read") {
 		slot.messages,
 		slot.messages.messages,
 	);
-	handleMessage({
-		type: "tool_executing",
-		sessionId,
-		id: "call",
-		name,
-		input: name === "Task" ? { subagent_type: "explore" } : { path: "foo.ts" },
-	});
 	return slot;
 }
 

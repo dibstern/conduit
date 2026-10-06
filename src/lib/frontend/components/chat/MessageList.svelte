@@ -404,9 +404,9 @@
 
 	{#snippet goalNotice()}
 		{#if goal}
-			<div data-testid="session-goal-notice" class="max-w-[760px] mx-auto mb-3 px-5 flex items-center gap-1.5 text-[11px] text-status-violet">
-				<Icon name="target" size={12} class="shrink-0" />
-				<span>Goal set · {goal.condition}</span>
+			<div data-testid="session-goal-notice" class="max-w-[760px] mx-auto mb-3 px-5 flex items-start gap-1.5 text-[11px] text-status-violet">
+				<Icon name="target" size={12} class="shrink-0 mt-[2px]" />
+				<span class="whitespace-pre-wrap break-words min-w-0">Goal set · {goal.condition}</span>
 			</div>
 		{/if}
 	{/snippet}

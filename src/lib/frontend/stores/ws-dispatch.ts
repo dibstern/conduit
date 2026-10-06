@@ -34,8 +34,6 @@ import {
 	handleError,
 	handleInputSyncReceived,
 	handleStatus,
-	handleThinkingStop,
-	handleToolExecuting,
 	inputSyncState,
 	persistInputDraft,
 	type SessionActivity,
@@ -43,37 +41,14 @@ import {
 	sessionActivity,
 	setMessages,
 } from "./chat.svelte.js";
-import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
 import {
-	applyDefaultPermissionMode,
-	handleAgentList,
-	handleCommandList,
 	handleContextWindowInfo,
-	handleDefaultModelInfo,
 	handleModelInfo,
-	handleModelList,
-	handlePermissionModeInfo,
 	handleVariantInfo,
-	handleVisibilityInfo,
 } from "./discovery.svelte.js";
-import { handleFileTree } from "./file-tree.svelte.js";
 import { handleGoalChanged } from "./goal.svelte.js";
-import {
-	clearScanInFlight,
-	handleInstanceList,
-	handleInstanceStatus,
-	handleProxyDetected,
-	handleScanResult,
-} from "./instance.svelte.js";
-import {
-	handleAskUser,
-	handleAskUserError,
-	handleAskUserResolved,
-	handlePermissionRequest,
-	handlePermissionResolved,
-} from "./permissions.svelte.js";
-import { handleProjectList } from "./project.svelte.js";
+import { clearScanInFlight } from "./instance.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -96,22 +71,10 @@ import {
 	refreshSessionSkills,
 	sessionSkillsState,
 } from "./session-skills.svelte.js";
-import {
-	handlePtyCreated,
-	handlePtyDeleted,
-	handlePtyError,
-	handlePtyExited,
-	handlePtyList,
-	handlePtyOutput,
-} from "./terminal.svelte.js";
-import {
-	clearTodoState,
-	handleTodoState,
-	updateTodosFromToolResult,
-} from "./todo.svelte.js";
+import { handlePtyError } from "./terminal.svelte.js";
+import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
-	setClientCount,
 	showBanner,
 	showToast,
 	updateContextPercent,
@@ -119,13 +82,9 @@ import {
 
 import {
 	fileBrowserListeners,
-	fileHistoryListeners,
-	planModeListeners,
 	projectAttachedListeners,
-	projectListeners,
 } from "./ws-listeners.js";
 import { triggerNotifications } from "./ws-notifications.js";
-import { wsSend } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
 
@@ -150,11 +109,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"user_message",
 		"part_removed",
 		"message_removed",
-		"ask_user",
-		"ask_user_resolved",
-		"ask_user_error",
-		"permission_request",
-		"permission_resolved",
 		"session_forked",
 		"provider_session_reloaded",
 		"session_deleted",
@@ -193,30 +147,12 @@ function routePerSession(event: PerSessionEvent): void {
 		return;
 	}
 
-	// Lives outside chat slots and accepts sessions not yet in membership
-	// (a new child's first question). Never allocate a slot here:
-	// resolutions are broadcast to every client, and a slot per unrelated
-	// session would evict cached transcripts from the LRU.
+	// Lives outside chat slots and accepts sessions not yet in membership.
+	// Never allocate a slot here: a slot per unrelated session would evict
+	// cached transcripts from the LRU.
 	switch (event.type) {
 		case "session.goal_changed":
 			handleGoalChanged(event);
-			return;
-		case "permission_request":
-			handlePermissionRequest(event, wsSend);
-			triggerNotifications(event);
-			return;
-		case "permission_resolved":
-			handlePermissionResolved(event);
-			return;
-		case "ask_user":
-			handleAskUser(event, event.sessionId);
-			triggerNotifications(event);
-			return;
-		case "ask_user_resolved":
-			handleAskUserResolved(event);
-			return;
-		case "ask_user_error":
-			handleAskUserError(event);
 			return;
 	}
 
@@ -235,29 +171,10 @@ function routePerSession(event: PerSessionEvent): void {
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
 	switch (event.type) {
-		case "thinking_stop":
-			handleThinkingStop(activity, messages, event);
-			break;
-		case "tool_executing":
-			handleToolExecuting(activity, messages, event);
-			// Not tool_start: the server names the skill from the input, which
-			// arrives here.
-			if (event.name.toLowerCase() === "skill")
-				refreshSessionSkills(event.sessionId);
-			break;
-		case "tool_result": {
+		case "tool_result":
 			if (sessionSkillsState.loads.some((load) => load.running))
 				refreshSessionSkills(event.sessionId);
-			// If this was a TodoWrite result, also update the todo store.
-			const msgs = getMessages(messages);
-			const toolMsg = msgs.find(
-				(m): m is ToolMessage => m.type === "tool" && m.id === event.id,
-			);
-			if (toolMsg?.name === "TodoWrite" && !event.is_error && event.content) {
-				updateTodosFromToolResult(event.content);
-			}
 			break;
-		}
 		case "done": {
 			handleDone(activity, messages, event);
 			refreshSessionSkills(event.sessionId);
@@ -363,34 +280,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 		}
 
-		case "pty_list":
-			handlePtyList(msg);
-			break;
-		case "pty_created":
-			handlePtyCreated(msg);
-			break;
-		case "pty_output":
-			handlePtyOutput(msg);
-			break;
-		case "pty_exited":
-			handlePtyExited(msg);
-			break;
-		case "pty_deleted":
-			handlePtyDeleted(msg);
-			break;
-
-		case "agent_list":
-			handleAgentList(msg);
-			break;
-		case "model_list":
-			handleModelList(msg);
-			break;
-		case "visibility_info":
-			handleVisibilityInfo(msg);
-			break;
-		case "claude_settings_info":
-			handleClaudeSettingsInfo(msg);
-			break;
 		case "model_info":
 			// Unkeyed legacy/default metadata cannot identify the active session.
 			if (
@@ -400,30 +289,15 @@ export function handleMessage(msg: RelayMessage): void {
 				return;
 			handleModelInfo(msg);
 			break;
-		case "default_model_info":
-			handleDefaultModelInfo(msg);
-			break;
-		case "default_permission_mode_info":
-			applyDefaultPermissionMode(msg.mode);
-			break;
-		case "permission_mode_info":
-			handlePermissionModeInfo(msg);
-			break;
 		case "variant_info":
 			handleVariantInfo(msg);
 			break;
 		case "context_window_info":
 			handleContextWindowInfo(msg);
 			break;
-		case "command_list":
-			handleCommandList(msg);
-			break;
 
 		// Now routed through routePerSession (per-session events).
 
-		case "client_count":
-			setClientCount(msg.count ?? 0);
-			break;
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
 			handleBuildId(msg.buildId);
@@ -432,75 +306,16 @@ export function handleMessage(msg: RelayMessage): void {
 			if (!msg.restartAvailable) serverRestartAccepted = false;
 			handleServerUpdate(msg.restartAvailable);
 			break;
-		case "connection_status":
-			handleConnectionStatus(msg);
-			break;
-		case "banner":
-		case "skip_permissions":
-		case "update_available":
-			handleBannerMessage(msg);
-			break;
 		case "input_sync":
 			if (isOwnBrowserClientId(msg.from)) break;
 			handleInputSyncReceived(msg);
 			break;
 
-		case "plan_enter":
-		case "plan_exit":
-		case "plan_content":
-		case "plan_approval":
-			for (const fn of planModeListeners) fn(msg);
-			break;
-
-		// File Tree (@ autocomplete)
-		case "file_tree":
-			handleFileTree(msg as { type: "file_tree"; entries: unknown });
-			break;
-
-		case "file_list":
-		case "file_content":
-			for (const fn of fileBrowserListeners) fn(msg);
-			break;
-
-		// File Changes (routed to both browser and history)
-		case "file_changed":
-			for (const fn of fileBrowserListeners) fn(msg);
-			for (const fn of fileHistoryListeners) fn(msg);
-			break;
-		case "file_history_result":
-			for (const fn of fileHistoryListeners) fn(msg);
-			break;
-
-		case "project_list":
-			handleProjectList(msg);
-			for (const fn of projectListeners) fn(msg);
-			break;
 		case "daemon_sessions_changed":
 			void refreshSessionList();
 			break;
 
-		case "todo_state":
-			handleTodoState(msg);
-			break;
-
 		// Now routed through routePerSession (per-session events).
-
-		case "instance_list":
-			handleInstanceList(msg);
-			break;
-		case "instance_status":
-			handleInstanceStatus(msg);
-			break;
-		case "proxy_detected":
-			handleProxyDetected(msg);
-			break;
-		case "scan_result":
-			handleScanResult(msg);
-			break;
-		case "system_error":
-			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
-			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
-			break;
 
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.
@@ -532,10 +347,9 @@ export function handleMessage(msg: RelayMessage): void {
 			// are suppressed: all "done" messages are synthetic (generated by
 			// conduit from session.status:idle), and OpenCode can emit idle
 			// between tool rounds (e.g. after a bash call completes), causing
-			// spurious "Task Complete" toasts mid-turn. Users still get sound,
+			// spurious "Response complete" toasts mid-turn. Users still get sound,
 			// browser/push notifications, and the sidebar green dot for
-			// genuine completions. Skip ask_user and ask_user_resolved since
-			// the AttentionBanner already handles those.
+			// genuine completions.
 			if (!isSubagentDone && msg.eventType === "error") {
 				const content = notificationContent(syntheticMsg);
 				if (content) {
@@ -601,28 +415,13 @@ export function applyToolContentResponse(msg: {
 }
 
 export function applyGetFileListResponse(response: GetFileListResponse): void {
-	const msg = {
-		type: "file_list" as const,
-		path: response.path,
-		entries: response.entries.map((entry) => ({
-			name: entry.name,
-			type: entry.type,
-			...(entry.size != null ? { size: entry.size } : {}),
-		})),
-	};
-	for (const fn of fileBrowserListeners) fn(msg);
+	for (const fn of fileBrowserListeners) fn({ kind: "list", response });
 }
 
 export function applyGetFileContentResponse(
 	response: GetFileContentResponse,
 ): void {
-	const msg = {
-		type: "file_content" as const,
-		path: response.path,
-		content: response.content,
-		...(response.binary != null ? { binary: response.binary } : {}),
-	};
-	for (const fn of fileBrowserListeners) fn(msg);
+	for (const fn of fileBrowserListeners) fn({ kind: "content", response });
 }
 
 /** Error routing: PTY errors vs chat errors. */
@@ -658,36 +457,6 @@ function handleChatError(
 
 	// Chat errors
 	handleError(activity, messages, msg);
-}
-
-/** Connection status: show/remove reconnection banner. */
-const CONNECTION_BANNER_ID = "opencode-connection-status";
-
-function handleConnectionStatus(
-	msg: Extract<RelayMessage, { type: "connection_status" }>,
-): void {
-	if (msg.status === "connected") {
-		removeBanner(CONNECTION_BANNER_ID);
-	} else {
-		const text =
-			msg.status === "reconnecting"
-				? "Reconnecting to OpenCode\u2026"
-				: "OpenCode server disconnected";
-		const summary =
-			msg.status === "reconnecting"
-				? "OpenCode reconnecting\u2026"
-				: "OpenCode disconnected";
-		// Remove first so text updates if status changes (e.g. disconnected -> reconnecting)
-		removeBanner(CONNECTION_BANNER_ID);
-		showBanner({
-			id: CONNECTION_BANNER_ID,
-			variant: "warning",
-			icon: "alert-triangle",
-			text,
-			summary,
-			dismissible: false,
-		});
-	}
 }
 
 /** The daemon sends protocol_version on connect. An older daemon needs a
@@ -860,47 +629,5 @@ function handleProtocolVersion(version: number): void {
 			dismissible: true,
 			action: { label: "Reload", run: () => location.reload() },
 		});
-	}
-}
-
-/** Banner messages: update_available, skip_permissions, custom banners. */
-function handleBannerMessage(msg: RelayMessage): void {
-	switch (msg.type) {
-		case "update_available": {
-			const ver = msg.version ?? "new version";
-			showBanner({
-				id: "update-available",
-				variant: "update",
-				icon: "arrow-up-circle",
-				text: `Update available: v${ver}`,
-				dismissible: true,
-				link: "https://www.npmjs.com/package/conduit-code",
-			});
-			break;
-		}
-		case "skip_permissions":
-			showBanner({
-				id: "skip-permissions",
-				variant: "skip-permissions",
-				icon: "shield-off",
-				text: "Permissions are being skipped",
-				summary: "Permissions skipped",
-				dismissible: true,
-			});
-			break;
-		case "banner":
-			showBanner({
-				id: msg.config.id ?? "custom",
-				variant:
-					(msg.config.variant as
-						| "update"
-						| "onboarding"
-						| "skip-permissions"
-						| "warning") ?? "onboarding",
-				icon: msg.config.icon ?? "info",
-				text: msg.config.text ?? "",
-				dismissible: msg.config.dismissible ?? true,
-			});
-			break;
 	}
 }

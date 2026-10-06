@@ -14,8 +14,10 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -52,6 +54,7 @@ interface MockOpenCode {
 
 async function createMockOpenCode(): Promise<MockOpenCode> {
 	const sseClients = new Set<ServerResponse>();
+	let eventId = 0;
 	const sessions: MockOpenCode["sessions"] = {
 		"sess-A": {
 			id: "sess-A",
@@ -80,14 +83,16 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		const url = new URL(req.url ?? "/", "http://localhost");
 
 		// SSE event stream — keep connection open
-		if (url.pathname === "/event") {
+		if (url.pathname === "/global/event") {
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
 				Connection: "keep-alive",
 			});
 			// Send initial heartbeat so SSE consumer registers as connected
-			res.write(": heartbeat\n\n");
+			res.write(
+				`data: ${JSON.stringify({ payload: { id: "evt_connected", type: "server.connected", properties: {} } })}\n\n`,
+			);
 			sseClients.add(res);
 			req.on("close", () => sseClients.delete(res));
 			return;
@@ -206,7 +211,10 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		sseClients,
 		sessions,
 		injectSSE(event) {
-			const data = JSON.stringify(event);
+			const data = JSON.stringify({
+				directory: process.cwd(),
+				payload: { id: `evt_${++eventId}`, ...event },
+			});
 			for (const client of sseClients) {
 				client.write(`data: ${data}\n\n`);
 			}
@@ -284,6 +292,14 @@ async function createTestHarness(): Promise<TestHarness> {
 		socket.destroy();
 	});
 
+	// Relay startup makes no OpenCode requests; the first use opens the stream.
+	await relay.effectRuntime.runtime.runPromise(
+		Effect.scoped(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.use("opencode"),
+			),
+		),
+	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {

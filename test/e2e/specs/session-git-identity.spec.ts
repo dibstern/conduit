@@ -2,10 +2,12 @@ import type { Page } from "@playwright/test";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 
+// The pill labels the main folder's basename; a long one stresses the phone bar.
+const folderName = "conduit-project-with-a-long-name";
 const project: ProjectInfo = {
 	slug: "e2e-replay",
-	title: "Conduit Project With A Long Name",
-	directory: "/work/conduit",
+	title: "Conduit",
+	folders: [`/work/${folderName}`],
 };
 
 // Keep the replay relay for the session; replace only its project-list RPC response.
@@ -81,8 +83,15 @@ for (const viewport of [
 		await gotoRelay(page, relayUrl);
 
 		const identity = page.getByTestId("session-bar-identity");
+		await expect(identity.locator('[data-part="project"]')).toHaveText(
+			folderName,
+		);
 		await expect(identity).toContainText("feature/git");
-		await expect(identity).toContainText("linked-17xt");
+		// A linked worktree shows its icon; the name lives in the checkout details.
+		await expect(
+			identity.locator('[data-part="worktree"][data-icon="worktree"] svg'),
+		).toBeVisible();
+		await expect(identity).not.toContainText("linked-17xt");
 		const back = page.getByTestId("session-bar-back");
 		const identityBox = await identity.boundingBox();
 		const backBox = await back.boundingBox();
@@ -90,27 +99,34 @@ for (const viewport of [
 		expect(backBox).not.toBeNull();
 		if (!identityBox || !backBox) return;
 		expect(identityBox.x).toBeGreaterThanOrEqual(backBox.x + backBox.width);
-		const height = await identity.evaluate((element) => ({
-			actual: element.getBoundingClientRect().height,
-			line: Number.parseFloat(getComputedStyle(element).lineHeight),
-		}));
-		expect(height.actual).toBeLessThanOrEqual(height.line + 1);
+		// The pill is a fixed-height segment, so check its labels stay on one line.
+		for (const part of ["project", "branch"]) {
+			const height = await identity
+				.locator(`[data-part="${part}"]`)
+				.evaluate((element) => ({
+					actual: element.getBoundingClientRect().height,
+					line: Number.parseFloat(getComputedStyle(element).lineHeight),
+				}));
+			expect(height.actual).toBeLessThanOrEqual(height.line + 1);
+		}
 		const branch = identity.locator('[title="Branch: feature/git"]');
 		await expect(branch).toBeVisible();
-		if (viewport.width === 390) {
-			const widths = await branch.evaluate((element) => ({
-				scroll: element.scrollWidth,
-				client: element.clientWidth,
-			}));
-			expect(widths.scroll).toBe(widths.client);
-		}
+		// Phones cap the pill at 150px; the long folder name gives up its room
+		// before the branch does.
+		expect(identityBox.width).toBeLessThanOrEqual(150);
+		const projectWidth = await identity
+			.locator('[data-part="project"]')
+			.evaluate((element) => element.clientWidth);
+		const branchWidth = await branch.evaluate((element) => element.clientWidth);
+		expect(branchWidth).toBeGreaterThan(projectWidth);
 		const dirty = identity.locator('[title="Uncommitted changes"]');
-		await expect(dirty).toHaveText("●Uncommitted changes");
+		await expect(dirty).toBeVisible();
+		await expect(dirty).toHaveText("Uncommitted changes");
 		await expect(dirty.locator(".sr-only")).toHaveText("Uncommitted changes");
 	});
 }
 
-test("a project without git shows only its name", async ({
+test("a project without git shows only its folder name", async ({
 	page,
 	relayUrl,
 }) => {
@@ -118,7 +134,8 @@ test("a project without git shows only its name", async ({
 	await supplyProject(page);
 	await gotoRelay(page, relayUrl);
 	const identity = page.getByTestId("session-bar-identity");
-	await expect(identity).toHaveText(project.title);
+	await expect(identity).toHaveText(folderName);
+	await expect(identity.locator('[data-icon="folder"] svg')).toBeVisible();
 	await expect(identity.locator('[title="Uncommitted changes"]')).toHaveCount(
 		0,
 	);

@@ -188,6 +188,15 @@ export function translateDomainEventToRelay(
 					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
 				});
 			}
+			// Claude stores idle just after the turn's done goes out. A client
+			// that connects in between is told the session is busy, and no
+			// later done reaches it, so the stored idle is announced too.
+			if (event.data.status === "idle")
+				return emit({
+					type: "status",
+					sessionId: event.sessionId,
+					status: "idle",
+				});
 			return silent(
 				"prompt handler owns lifecycle; terminal done/error covers completion",
 			);
@@ -227,17 +236,13 @@ export function translateDomainEventToRelay(
 		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
 
-		// The SDK owns the live mode, so a change reported mid-session has to
-		// reach the picker; a stale picker is the difference between "Full
-		// access" on screen and an ask the user did not expect.
 		case "session.goal_changed":
 			return emit({ type: "session.goal_changed", ...event.data });
 
+		// The SDK owns the live mode, so a change reported mid-session has to
+		// reach the picker; it does, as the session's shell row (ni8.12).
 		case "session.permission_mode_changed":
-			return emit({
-				type: "permission_mode_info",
-				mode: event.data.mode,
-			});
+			return silent("delivered as the shell row's permissionMode");
 
 		case "permission.asked":
 		case "permission.resolved":

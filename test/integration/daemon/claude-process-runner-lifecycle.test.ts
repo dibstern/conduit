@@ -683,7 +683,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const turn = browser.send(sessionId, "approval-idle-race");
 		void turn.catch(() => {});
 		const approval = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
 		expect(started(harness).pid).not.toBe(first.pid);
@@ -753,7 +753,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const { harness, browser, sessionId } = await start({ idleTimeoutMs: 100 });
 		const pending = browser.send(sessionId, "approval-idle");
 		const request = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const runner = started(harness);
 		await new Promise<void>((done) => setTimeout(done, 400));
@@ -786,9 +786,9 @@ describe("built-dist Claude runner lifecycle", () => {
 			(message) =>
 				message["type"] ===
 				(phase === "approval"
-					? "permission_request"
+					? "permission_pending"
 					: phase === "question"
-						? "ask_user"
+						? "question_pending"
 						: "delta"),
 		);
 		const runner = started(harness);
@@ -826,8 +826,8 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(
 			reconnect.frames.some(
 				({ message }) =>
-					message["type"] === "permission_request" ||
-					message["type"] === "ask_user",
+					message["type"] === "permission_pending" ||
+					message["type"] === "question_pending",
 			),
 		).toBe(false);
 	}, 30_000);
@@ -841,7 +841,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		});
 		const failed = browser.send(sessionId, "approval-overlap-crash");
 		await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		if (phase === "crash") {
 			process.kill(started(harness).pid, "SIGKILL");
@@ -854,7 +854,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const cursor = browser.frames.length;
 		const replacement = browser.send(sessionId, "approval-overlap-recovery");
 		const approval = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
 		await failed;
@@ -955,7 +955,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const { harness, browser, sessionId } = await start();
 		const first = browser.send(sessionId, "approval-failure-queued-first");
 		const approval = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 		);
 		const second = browser.send(sessionId, "stall-queued-second");
 		await vi.waitFor(() =>

@@ -18,7 +18,7 @@ import type {
 export const mockProject: ProjectInfo = {
 	slug: "conduit",
 	title: "Conduit",
-	directory: "/Users/dev/src/conduit",
+	folders: ["/Users/dev/src/conduit"],
 	clientCount: 2,
 	instanceId: "instance-local",
 };

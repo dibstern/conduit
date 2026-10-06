@@ -4,6 +4,7 @@ import type { SessionStatus } from "../instance/sdk-types.js";
 export type SessionMonitorPhase =
 	| { readonly phase: "idle" }
 	| { readonly phase: "busy-grace"; readonly busySince: number }
+	| { readonly phase: "busy-provider-covered"; readonly busySince: number }
 	| {
 			readonly phase: "busy-sse-covered";
 			readonly busySince: number;
@@ -33,6 +34,7 @@ export interface SessionEvalContext {
 	readonly lastSSEEventAt: number | undefined;
 	readonly isSubagent: boolean;
 	readonly hasViewers: boolean;
+	readonly providerStreamsLifecycle: boolean;
 }
 
 // Effect reasons (const-derived)
@@ -48,6 +50,7 @@ export const POLLER_STOP_REASONS = [
 	"idle-no-viewers",
 	"idle-has-viewers",
 	"sse-now-covering",
+	"provider-now-covering",
 	"session-deleted",
 ] as const;
 export type PollerStopReason = (typeof POLLER_STOP_REASONS)[number];
@@ -64,6 +67,7 @@ export type MonitoringEffect =
 			readonly reason: PollerStopReason;
 	  }
 	| { readonly effect: "notify-busy"; readonly sessionId: string }
+	| { readonly effect: "clear-processing"; readonly sessionId: string }
 	| {
 			readonly effect: "notify-idle";
 			readonly sessionId: string;

@@ -135,6 +135,57 @@ export const HandBack: Story = {
 	args: { turn: handBack, segment: handBackSegment, final: false },
 };
 
+const truncatedMessages = [
+	{ type: "user", uuid: "truncated-user", text: "Run the test suite." },
+	{
+		type: "tool",
+		uuid: "truncated-read",
+		id: "truncated-read",
+		name: "Read",
+		input: { tool: "Read", filePath: "package.json" },
+		status: "completed",
+	},
+	{
+		type: "tool",
+		uuid: "truncated-test",
+		id: "truncated-test",
+		name: "Bash",
+		input: { tool: "Bash", command: "pnpm test:unit" },
+		status: "completed",
+		result:
+			" ✓ test/unit/utils/turns.test.ts (42 tests) 31ms\n ✓ test/unit/stores/chat.test.ts (118 tests) 204ms\n ✓ test/unit/persistence/projectors.test.ts (87 tests) 412ms",
+		isTruncated: true,
+		fullContentLength: 131_993,
+	},
+	{
+		type: "assistant",
+		uuid: "truncated-reply",
+		rawText: "All tests pass.",
+		html: "<p>All tests pass.</p>",
+		finalized: true,
+	},
+] satisfies ChatMessage[];
+const [truncated = EMPTY_TURN] = segmentTurns(truncatedMessages, false);
+const [truncatedSegment = EMPTY_SEGMENT] = truncated.segments;
+
+/** A tool output the server cut short says how much is shown and offers the rest. */
+export const TruncatedOutput: Story = {
+	args: { turn: truncated, segment: truncatedSegment, final: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const toggle = canvas.getByRole("button", { expanded: false });
+		await userEvent.click(toggle);
+		toggle.blur();
+		// The strip labels its steps too, but only the log row shows the subject as text.
+		const subject = canvas.getByText("pnpm test:unit");
+		await userEvent.click(subject);
+		subject.closest("button")?.blur();
+		await expect(
+			canvas.getByRole("button", { name: "Show full output" }),
+		).toBeVisible();
+	},
+};
+
 function compaction(
 	uuid: string,
 	at: ActivityPart | undefined,

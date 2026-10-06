@@ -57,10 +57,10 @@ const meta = {
 			{
 				slug: "conduit",
 				title: "Conduit",
-				directory: "/conduit",
+				folders: ["/conduit"],
 				clientCount: 1,
 			},
-			{ slug: "gym", title: "Gym", directory: "/gym", clientCount: 1 },
+			{ slug: "gym", title: "Gym", folders: ["/gym"], clientCount: 1 },
 		];
 		return () => {
 			attachedProjectState.slug = null;

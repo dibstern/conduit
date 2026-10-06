@@ -13,6 +13,7 @@
 		isDesktop,
 		isSafari,
 		isIPad,
+		showReinstallNote = false,
 		onnextstep,
 	}: {
 		totalSteps: number;
@@ -22,6 +23,8 @@
 		isDesktop: boolean;
 		isSafari: boolean;
 		isIPad: boolean;
+		/** True when Conduit is served on its Tailscale address, which replaces older ones. */
+		showReinstallNote?: boolean;
 		onnextstep: () => void;
 	} = $props();
 </script>
@@ -33,6 +36,14 @@
 		title="Add to Home Screen"
 		description="Install Conduit as an app for quick access and a full-screen experience."
 	/>
+
+	{#if showReinstallNote}
+		<StatusBox status="warn">
+			Already added Conduit from another address? Remove that app, add this
+			one, then turn notifications on again. Both are tied to the address you
+			used.
+		</StatusBox>
+	{/if}
 
 	{#if isIOS}
 		<StatusBox status="warn">

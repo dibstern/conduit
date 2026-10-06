@@ -22,7 +22,6 @@ import {
 	sessionGoalState,
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
-import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
@@ -137,29 +136,22 @@ const sendErrorMessage = (
 	}
 };
 
-const loadClaudeHistory = (sessionId: string) =>
+const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const result = yield* Effect.either(
-			readQuery.getSessionMessagesWithParts(sessionId).pipe(
-				Effect.map(
-					(rows) =>
-						messageRowsToHistory(rows, {
-							pageSize: Number.MAX_SAFE_INTEGER,
-						}).messages,
-				),
-			),
+			readQuery.getSessionHistoryMetadata(sessionId),
 		);
 		if (result._tag === "Right") {
-			return { history: result.right, loaded: true };
+			return result.right;
 		}
 		log.warn(
-			`Failed to load prior Claude history for ${sessionId}: ${
+			`Failed to load prior Claude history metadata for ${sessionId}: ${
 				result.left instanceof Error ? result.left.message : result.left
 			}`,
 		);
-		return { history: [], loaded: false };
+		return undefined;
 	});
 
 /**
@@ -438,10 +430,9 @@ const prepareEngineTurnInput = (
 ) =>
 	Effect.gen(function* () {
 		const folders = yield* resolveProjectLaunchFolders(resolvedInput.sessionId);
-		const priorHistoryResult = isClaudeDriver(driver)
-			? yield* loadClaudeHistory(resolvedInput.sessionId)
-			: { history: [], loaded: false };
-		const priorHistory = priorHistoryResult.history;
+		const priorHistoryMetadata = isClaudeDriver(driver)
+			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
+			: undefined;
 		const readQuery = yield* ReadQueryEffectTag;
 		const goalRow = isClaudeDriver(driver)
 			? yield* readQuery.getSession(resolvedInput.sessionId).pipe(
@@ -457,9 +448,7 @@ const prepareEngineTurnInput = (
 				)
 			: undefined;
 		const isFirstClaudeMessage =
-			isClaudeDriver(driver) &&
-			priorHistoryResult.loaded &&
-			priorHistory.length === 0;
+			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;
 		if (isFirstClaudeMessage) {
 			const titleService = yield* SessionTitleServiceTag;
@@ -493,7 +482,7 @@ const prepareEngineTurnInput = (
 			sessionId: resolvedInput.sessionId,
 			inputId,
 			prompt: resolvedInput.text,
-			history: priorHistory,
+			history: [],
 			providerState,
 			...(sendModel && resolvedInput.model
 				? {
@@ -508,15 +497,7 @@ const prepareEngineTurnInput = (
 			...(goalRow ? { goalState: sessionGoalState(goalRow) } : {}),
 			...(isClaudeDriver(driver)
 				? {
-						cumulativeTokens: priorHistory.reduce(
-							(total, message) =>
-								total +
-								(message.tokens?.input ?? 0) +
-								(message.tokens?.output ?? 0) +
-								(message.tokens?.cache?.read ?? 0) +
-								(message.tokens?.cache?.write ?? 0),
-							0,
-						),
+						cumulativeTokens: priorHistoryMetadata?.cumulativeTokens ?? 0,
 					}
 				: {}),
 			eventSink,

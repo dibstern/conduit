@@ -258,7 +258,7 @@
 					</MenuItem>
 				{/each}
 			</MenuGroup>
-			<div class="text-xs text-text-dimmer {presentation === 'sheet' ? 'px-4 pb-[5px] pt-[10px]' : 'px-3 py-1.5'}" data-testid="session-skills-hint">
+			<div class="text-xs text-text-muted {presentation === 'sheet' ? 'px-4 pb-[5px] pt-[10px]' : 'px-3 py-1.5'}" data-testid="session-skills-hint">
 				{presentation === "sheet" ? "Hold a skill for earlier runs and SKILL.md" : "Right-click a skill for earlier runs and SKILL.md"}
 			</div>
 		{/if}

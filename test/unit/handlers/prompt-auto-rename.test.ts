@@ -9,7 +9,6 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import type { MessageWithParts } from "../../../src/lib/persistence/read-model-types.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import {
@@ -47,51 +46,15 @@ const makeTitleService = (): SessionTitleService => ({
 	startForFirstClaudeMessage: vi.fn(() => Effect.void),
 });
 
-const userHistoryMessage = (text: string): MessageWithParts => ({
-	id: `history-${text}`,
-	session_id: "session-1",
-	turn_id: "turn-1",
-	role: "user",
-	text,
-	cost: null,
-	tokens_in: null,
-	tokens_out: null,
-	tokens_cache_read: null,
-	tokens_cache_write: null,
-	context_window: null,
-	version: 0,
-	is_streaming: 0,
-	is_backfilled: 0,
-	created_at: 1,
-	updated_at: 1,
-	parts: [
-		{
-			id: `part-${text}`,
-			message_id: `history-${text}`,
-			type: "text",
-			text,
-			tool_name: null,
-			call_id: null,
-			input: null,
-			result: null,
-			metadata: null,
-			duration: null,
-			status: null,
-			sort_order: 0,
-			created_at: 1,
-			updated_at: 1,
-		},
-	],
-});
-
 const makeReadQuery = (
-	getSessionMessagesWithParts: ReadQueryEffect["getSessionMessagesWithParts"],
+	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"],
 ): ReadQueryEffect => ({
 	getToolContent: vi.fn(() => Effect.succeed(undefined)),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
@@ -101,21 +64,24 @@ const makeReadQuery = (
 	),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
-	getSessionMessagesWithParts,
+	getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+	getSessionHistoryMetadata,
 });
 
 const providePromptLayer = (input: {
 	readonly engine: OrchestrationEngine;
 	readonly titleService: SessionTitleService;
 	readonly persistService?: ClaudeEventPersistEffect;
-	readonly priorMessages?: MessageWithParts[];
+	readonly priorMessageCount?: number;
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientSession: vi.fn(() => "session-1"),
@@ -128,7 +94,10 @@ const providePromptLayer = (input: {
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,
 		readQueryEffect: makeReadQuery(() =>
-			Effect.succeed(input.priorMessages ?? []),
+			Effect.succeed({
+				messageCount: input.priorMessageCount ?? 0,
+				cumulativeTokens: 0,
+			}),
 		),
 		...(input.persistService
 			? { claudeEventPersistEffect: input.persistService }
@@ -149,7 +118,9 @@ describe("Claude prompt title generation", () => {
 		const layer = makeTestHandlerLayer({
 			wsHandler,
 			orchestrationEngine: engine,
-			readQueryEffect: makeReadQuery(() => Effect.succeed([])),
+			readQueryEffect: makeReadQuery(() =>
+				Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+			),
 			claudeEventPersistEffect: persistService,
 			sessionTitleService: {
 				startForFirstClaudeMessage: vi.fn((input) =>
@@ -193,7 +164,7 @@ describe("Claude prompt title generation", () => {
 			engine,
 			titleService,
 			persistService,
-			priorMessages: [userHistoryMessage("Earlier prompt")],
+			priorMessageCount: 1,
 		});
 
 		return Effect.gen(function* () {
@@ -254,7 +225,7 @@ describe("Claude prompt title generation", () => {
 				vi.fn(() =>
 					Effect.fail(
 						new ReadQueryEffectError({
-							operation: "getSessionMessagesWithParts",
+							operation: "getSessionHistoryMetadata",
 							cause: new Error("history unavailable"),
 						}),
 					),
@@ -282,7 +253,7 @@ describe("Claude prompt title generation", () => {
 					commandId: "cmd-auto-rename-maybe-first",
 				});
 
-				expect(readQuery.getSessionMessagesWithParts).toHaveBeenCalledWith(
+				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
 					"session-1",
 				);
 				expect(persistService.persistUserMessage).not.toHaveBeenCalled();

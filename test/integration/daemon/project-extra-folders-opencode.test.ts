@@ -121,7 +121,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		expect(reply.chunks.join("")).toContain(MARKER);
 		expect(
 			browser.frames.filter(
-				({ message }) => message["type"] === "permission_request",
+				({ message }) => message["type"] === "permission_pending",
 			),
 		).toEqual([]);
 		await vi.waitFor(async () => {

@@ -1,12 +1,11 @@
 import { EventEmitter } from "node:events";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
-import type { RawData, WebSocket } from "ws";
+import type { WebSocket } from "ws";
 import { makeHeartbeatFiber } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	addClient,
 	bindClientSession,
-	broadcast,
 	broadcastPerSessionEvent,
 	closeAllClients,
 	markClientAlive,
@@ -24,19 +23,11 @@ import type {
 	WsAttachOptions,
 	WsClientConnectedEvent,
 	WsClientDisconnectedEvent,
-	WsMessageEvent,
 } from "./ws-handler-shape.js";
-import {
-	createClientCountMessage,
-	isRouteError,
-	parseIncomingMessage,
-	routeMessage,
-} from "./ws-router.js";
 
 type WsEventMap = {
 	client_connected: WsClientConnectedEvent;
 	client_disconnected: WsClientDisconnectedEvent;
-	message: WsMessageEvent;
 	client_error: { clientId: string; error: Error };
 };
 
@@ -175,7 +166,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 				if (attached) ws.terminate();
 			},
 		};
-		const onMessage = (data: RawData) => this.onMessage(clientId, data);
 		const onError = (error: Error) => {
 			this.events.emit("client_error", { clientId, error });
 		};
@@ -185,7 +175,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 		const detach = () => {
 			if (!attached) return;
 			attached = false;
-			ws.off("message", onMessage);
 			ws.off("close", detach);
 			ws.off("error", onError);
 			ws.off("pong", onPong);
@@ -193,7 +182,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			this.removeAttachedClient(clientId, connection);
 		};
 
-		ws.on("message", onMessage);
 		ws.on("close", detach);
 		ws.on("error", onError);
 		ws.on("pong", onPong);
@@ -233,9 +221,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 						});
 					}),
 				),
-				Effect.flatMap((clientCount) =>
-					broadcast(createClientCountMessage(clientCount)),
-				),
 			),
 		);
 
@@ -274,40 +259,8 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 							})
 						: Effect.void,
 				),
-				Effect.flatMap(({ removed, newCount }) =>
-					removed ? broadcast(createClientCountMessage(newCount)) : Effect.void,
-				),
 			),
 		);
-	}
-
-	private onMessage(clientId: string, raw: RawData): void {
-		if (this.closed) return;
-		const parsed = parseIncomingMessage(raw.toString());
-		if (!parsed) {
-			this.sendTo(clientId, {
-				type: "system_error",
-				code: "PARSE_ERROR",
-				message: "Could not parse message as JSON",
-			});
-			return;
-		}
-
-		const routed = routeMessage(parsed);
-		if (isRouteError(routed)) {
-			this.sendTo(clientId, {
-				type: "system_error",
-				code: routed.code,
-				message: routed.message,
-			});
-			return;
-		}
-
-		this.events.emit("message", {
-			clientId,
-			handler: routed.handler,
-			payload: routed.payload,
-		});
 	}
 
 	private forkLogged<A, E>(

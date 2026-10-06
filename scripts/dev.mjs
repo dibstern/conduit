@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync, watch } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -48,6 +48,8 @@ function fail(error) {
 
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
+// Closing the terminal must not orphan the detached server on its port.
+process.on("SIGHUP", stop);
 
 function build() {
 	log("building");
@@ -95,6 +97,68 @@ async function waitForServer(previousSocket) {
 	return false;
 }
 
+/** PIDs listening on the port; empty when there are none or lsof is missing. */
+function portHolders(port) {
+	const { stdout } = spawnSync(
+		"lsof",
+		["-nP", `-tiTCP:${port}`, "-sTCP:LISTEN"],
+		{ encoding: "utf8" },
+	);
+	return (stdout ?? "").split("\n").filter(Boolean).map(Number);
+}
+
+/**
+ * Stops an old conduit server still holding the port (an orphaned dev:all
+ * child, a wedged daemon, another config dir) so the child can bind it.
+ * Returns true when a supervisor brought the service back on our socket
+ * instead; killing it again would only race the respawn, so drive it.
+ */
+async function freePort(port) {
+	const holders = portHolders(port);
+	for (const pid of holders) {
+		const command = spawnSync("ps", ["-o", "command=", "-p", String(pid)], {
+			encoding: "utf8",
+		}).stdout?.trim();
+		if (!command || !/\b(cli\.[jt]s|conduit)\s+serve\b/.test(command)) {
+			throw new Error(
+				`port ${port} is held by PID ${pid} (${command || "unknown"}), which is not a conduit server; stop it and re-run`,
+			);
+		}
+		log(`stopping old conduit PID ${pid} on port ${port}`);
+		try {
+			process.kill(pid, "SIGTERM");
+		} catch {}
+	}
+	const started = Date.now();
+	let forced = false;
+	while (holders.length > 0 && !stopping) {
+		const current = portHolders(port);
+		if (current.length === 0) return false;
+		if (
+			current.every((pid) => !holders.includes(pid)) &&
+			(await rpc.isDaemonRunning(rpc.DEFAULT_SOCKET_PATH))
+		) {
+			return true;
+		}
+		const elapsed = Date.now() - started;
+		if (elapsed > 15_000) {
+			throw new Error(
+				`port ${port} is still held by PID ${current.join(", ")}; is it managed by a service on another config dir?`,
+			);
+		}
+		if (elapsed > 10_000 && !forced) {
+			forced = true;
+			for (const pid of holders) {
+				try {
+					process.kill(pid, "SIGKILL");
+				} catch {}
+			}
+		}
+		await delay(200);
+	}
+	return false;
+}
+
 async function restart() {
 	log("restarting");
 	if (mode === "child") {
@@ -115,6 +179,12 @@ async function restart() {
 			mode = "service";
 			return;
 		}
+	}
+	if (stopping) return;
+	if (await freePort(rpc.port)) {
+		log("dev:all is driving the conduit service");
+		mode = "service";
+		return;
 	}
 	if (stopping) return;
 	mode = "child";
@@ -181,17 +251,24 @@ async function rebuild() {
 		} else {
 			if (!rpc) {
 				const [
-					{ DEFAULT_SOCKET_PATH },
+					{ DEFAULT_CONFIG_DIR, DEFAULT_PORT, DEFAULT_SOCKET_PATH, parseArgs },
+					{ loadDaemonConfig },
 					{ isDaemonRunning },
 					{ sendRpcRequest },
 					{ GetStatus, RestartWithConfig },
 				] = await Promise.all([
 					import("../dist/src/bin/cli-utils.js"),
+					import("../dist/src/lib/daemon/config-persistence.js"),
 					import("../dist/src/lib/daemon/daemon-utils.js"),
 					import("../dist/src/lib/daemon/daemon-rpc-client.js"),
 					import("../dist/src/lib/contracts/ws-rpc.js"),
 				]);
+				// The port `serve` will bind: flag, then persisted config, then default.
+				const parsed = parseArgs(["serve", ...args]);
 				rpc = {
+					port: parsed.portExplicit
+						? parsed.port
+						: (loadDaemonConfig(DEFAULT_CONFIG_DIR)?.port ?? DEFAULT_PORT),
 					DEFAULT_SOCKET_PATH,
 					isDaemonRunning,
 					sendRpcRequest,

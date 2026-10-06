@@ -131,7 +131,6 @@ describe("visibility filtering", () => {
 
 	it("handleVisibilityInfo updates state and clearDiscoveryState resets it", () => {
 		handleVisibilityInfo({
-			type: "visibility_info",
 			hiddenModels: ["a/b"],
 			hiddenAgents: ["c/d"],
 		});
@@ -176,7 +175,6 @@ describe("visibility filtering", () => {
 
 	it("responses omitting hidden fields leave existing hidden state untouched", () => {
 		handleVisibilityInfo({
-			type: "visibility_info",
 			hiddenModels: ["openai/gpt-4o"],
 			hiddenAgents: ["opencode/plan"],
 		});
@@ -199,7 +197,6 @@ describe("visibility filtering", () => {
 describe("an undo of a visibility change", () => {
 	beforeEach(() => {
 		handleVisibilityInfo({
-			type: "visibility_info",
 			hiddenModels: [],
 			hiddenAgents: [],
 		});

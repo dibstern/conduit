@@ -7,9 +7,73 @@ import type { MockMessage } from "../fixtures/mockup-state.js";
 import { projectLegacyRelayMessage } from "./detail-projection-mock.js";
 import {
 	ensureMockTranscriptRpc,
+	type MockCatalog,
+	sendMockDaemonList,
+	sendMockProjectSetting,
 	sendMockShellSnapshot,
+	setMockRpcCatalog,
 	setMockRpcProjectSlug,
 } from "./rpc-mock.js";
+
+const OPENCODE_CONNECTION_STATES = [
+	"disconnected",
+	"reconnecting",
+	"connected",
+] as const;
+
+/** Mock-only inputs served over GetModels/GetAgents/GetCommands, never over /ws. */
+const CATALOG_MESSAGE_TYPES = new Set([
+	"mock_model_catalog",
+	"mock_agent_catalog",
+	"mock_command_catalog",
+]);
+
+/** Mock-only inputs served over the daemon list subscriptions, never over /ws. */
+const DAEMON_LIST_TAGS = new Map<
+	string,
+	"SubscribeProjects" | "SubscribeInstances"
+>([
+	["project_list", "SubscribeProjects"],
+	["instance_list", "SubscribeInstances"],
+]);
+
+/** Deliver a list message through its subscription; false if it is not one. */
+function sendDaemonList(page: Page, message: MockMessage): boolean {
+	const tag = DAEMON_LIST_TAGS.get(message.type);
+	if (tag)
+		sendMockDaemonList(
+			page,
+			tag,
+			Object.fromEntries(
+				Object.entries(message).filter(([key]) => key !== "type"),
+			),
+		);
+	return tag !== undefined;
+}
+
+function mockCatalog(messages: readonly MockMessage[]): MockCatalog | null {
+	const last = (type: string) => messages.filter((m) => m.type === type).at(-1);
+	const models = last("mock_model_catalog");
+	const commands = last("mock_command_catalog");
+	const agents = messages.flatMap((m) =>
+		m.type === "mock_agent_catalog"
+			? [
+					{
+						providerScope: (m["providerScope"] as
+							| { id: string; name: string }
+							| undefined) ?? { id: "opencode", name: "OpenCode" },
+						agents: m["agents"] as unknown[],
+					},
+				]
+			: [],
+	);
+	if (!models && !commands && agents.length === 0) return null;
+	return {
+		...(models ? { providers: models["providers"] as unknown[] } : {}),
+		...(commands ? { commands: commands["commands"] as unknown[] } : {}),
+		...(agents.length > 0 ? { agents } : {}),
+	};
+}
 
 export interface WsMockOptions {
 	/** Messages to send immediately on WebSocket connect */
@@ -44,16 +108,11 @@ export interface MockRelayProtocolContext {
 }
 
 const SESSION_SCOPED_MESSAGE_TYPES = new Set([
-	"ask_user",
-	"ask_user_error",
-	"ask_user_resolved",
 	"delta",
 	"done",
 	"error",
 	"message_removed",
 	"part_removed",
-	"permission_request",
-	"permission_resolved",
 	"provider_session_reloaded",
 	"result",
 	"session_deleted",
@@ -126,10 +185,17 @@ export async function mockRelayWebSocket(
 			].includes(message.type),
 		),
 	);
+	const catalog = mockCatalog(options.initMessages);
+	if (catalog) setMockRpcCatalog(page, catalog);
 	if (
 		streamedTranscript ||
+		catalog ||
 		options.initMessages.some((message) =>
-			["shell_snapshot", "mock_transcript_snapshot"].includes(message.type),
+			[
+				"shell_snapshot",
+				"mock_transcript_snapshot",
+				...DAEMON_LIST_TAGS.keys(),
+			].includes(message.type),
 		)
 	)
 		await ensureMockTranscriptRpc(page);
@@ -145,6 +211,7 @@ export async function mockRelayWebSocket(
 		setMockRpcProjectSlug(page, initialProject["current"]);
 	if (Array.isArray(initialShell?.["sessions"]))
 		sendMockShellSnapshot(page, initialShell["sessions"]);
+	for (const message of options.initMessages) sendDaemonList(page, message);
 	const initDelay = options.initDelay ?? 0;
 	const msgDelay = options.messageDelay ?? 0;
 
@@ -174,7 +241,12 @@ export async function mockRelayWebSocket(
 				: options.initMessages.filter(
 						(message) => !SESSION_SCOPED_MESSAGE_TYPES.has(message.type),
 					)
-		).filter((message) => message.type !== "shell_snapshot");
+		).filter(
+			(message) =>
+				message.type !== "shell_snapshot" &&
+				!CATALOG_MESSAGE_TYPES.has(message.type) &&
+				!DAEMON_LIST_TAGS.has(message.type),
+		);
 		void sendSequence(control, initMessages, initDelay);
 
 		// Listen for frontend messages and respond
@@ -193,15 +265,6 @@ export async function mockRelayWebSocket(
 					const response = options.responses.get(parsed.text);
 					if (response) {
 						void sendSequence(control, response, msgDelay);
-					}
-				}
-
-				if (parsed.type === "get_agents") {
-					const agentList = options.initMessages.find(
-						(m) => m.type === "agent_list",
-					);
-					if (agentList) {
-						ws.send(JSON.stringify(agentList));
 					}
 				}
 			} catch {
@@ -248,6 +311,13 @@ export class WsMockControl {
 	/** @internal */
 	_setWs(ws: WebSocketRoute): void {
 		this._ws = ws;
+		this._connections++;
+	}
+
+	private _connections = 0;
+	/** Relay sockets opened so far; each page load opens a new one. */
+	get connections(): number {
+		return this._connections;
 	}
 
 	/** @internal */
@@ -276,6 +346,27 @@ export class WsMockControl {
 			Array.isArray(msg["sessions"])
 		) {
 			sendMockShellSnapshot(this.page, msg["sessions"]);
+			return;
+		}
+		if (sendDaemonList(this.page, msg)) return;
+		// Legacy fixture vocabulary for live project facts, which now ride
+		// SubscribeProjectSettings (conduit-test-ni8.15 / ni8.40).
+		if (msg.type === "client_count" && typeof msg["count"] === "number") {
+			sendMockProjectSetting(this.page, {
+				_tag: "clientCount",
+				count: msg["count"],
+			});
+			return;
+		}
+		if (msg.type === "connection_status") {
+			const status = OPENCODE_CONNECTION_STATES.find(
+				(state) => state === msg["status"],
+			);
+			if (status)
+				sendMockProjectSetting(this.page, {
+					_tag: "opencodeConnection",
+					status,
+				});
 			return;
 		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");

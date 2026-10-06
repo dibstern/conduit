@@ -1,11 +1,6 @@
 // Tests for Phase 0B: new types, client methods, router types, todo extraction.
 
-import { assert, describe, expect, it } from "vitest";
-import {
-	isRouteError,
-	parseIncomingMessage,
-	routeMessage,
-} from "../../../src/lib/server/ws-router.js";
+import { describe, expect, it } from "vitest";
 import type {
 	AgentInfo,
 	CommandInfo,
@@ -14,28 +9,6 @@ import type {
 	TodoItem,
 	TodoStatus,
 } from "../../../src/lib/types.js";
-
-describe("ws-router — retired M4 browser commands", () => {
-	it("rejects question_reject after the RPC cutover", () => {
-		const msg = parseIncomingMessage(
-			JSON.stringify({ type: "question_reject" }),
-		);
-		expect(msg).not.toBeNull();
-		assert.exists(msg, "expected message");
-		const result = routeMessage(msg);
-		expect(isRouteError(result)).toBe(true);
-	});
-
-	it("still rejects unknown types", () => {
-		const msg = parseIncomingMessage(
-			JSON.stringify({ type: "nonexistent_type" }),
-		);
-		expect(msg).not.toBeNull();
-		assert.exists(msg, "expected message");
-		const result = routeMessage(msg);
-		expect(isRouteError(result)).toBe(true);
-	});
-});
 
 describe("types — M4 interfaces", () => {
 	it("TodoItem has required fields", () => {

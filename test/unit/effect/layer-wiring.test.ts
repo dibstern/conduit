@@ -433,7 +433,6 @@ describe("makeDaemonLive wiring", () => {
 					yield* addWithoutRelay(
 						{
 							slug: "alpha",
-							directory: "/tmp/alpha",
 							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,

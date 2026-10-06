@@ -20,6 +20,14 @@ const HARD_RULES = [
 		name: "HARD arbitrary rgba shadow",
 		pattern: /shadow-\[[^\]]*rgba\(/i,
 	},
+	{
+		// iOS Safari honours only -webkit-user-select. The build adds that prefix to
+		// stylesheets, but inline styles and JS style writes skip the build, so iOS
+		// silently ignores them: a long-press then selects text (conduit-test-wmzr).
+		name: "HARD unprefixed user-select (iOS ignores it; use select-none / select-text)",
+		pattern:
+			/(?<![\w-])user-select\s*:|style:user-select|\.userSelect\s*=(?!=)/,
+	},
 ];
 
 const INTERACTION_STATE_RULES = [

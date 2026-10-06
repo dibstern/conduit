@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
 	getFileListResponse,
@@ -13,22 +14,16 @@ import { getToolContentValue } from "../../handlers/tool-content.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const filesHandlers = {
-	ListDirectories: (request) =>
+	FindFolders: (request) =>
 		Effect.gen(function* () {
 			const directoryListing = yield* DirectoryListingServiceTag;
-			const result = yield* directoryListing.list(request.path);
-			return {
-				projectSlug: request.projectSlug,
-				path: result.path,
-				entries: [...result.entries],
-			};
+			return yield* directoryListing.find(request.query);
 		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.fail(
+			Effect.mapError(
+				(error) =>
 					new WsRpcError({
-						message: `ListDirectories failed: ${String(error)}`,
+						message: `FindFolders failed: ${formatErrorDetail(error)}`,
 					}),
-				),
 			),
 		),
 	GetTodo: (request) =>
@@ -135,7 +130,7 @@ export const filesHandlers = {
 		}).pipe(Effect.catchAll(mapRpcFailure("GetSkillContent"))),
 } satisfies Pick<
 	WsRpcHandlerMap,
-	| "ListDirectories"
+	| "FindFolders"
 	| "GetTodo"
 	| "GetFileTree"
 	| "GetFileList"

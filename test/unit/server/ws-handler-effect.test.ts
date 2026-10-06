@@ -96,7 +96,7 @@ describe("WebSocket Handler Effect", () => {
 			yield* addClient("c1", ws1);
 			yield* addClient("c2", ws2);
 
-			const msg = testMsg("client_count", { count: 2 });
+			const msg = testMsg("server_update", { restartAvailable: true });
 			yield* broadcast(msg);
 
 			const expected = JSON.stringify(msg);
@@ -112,7 +112,7 @@ describe("WebSocket Handler Effect", () => {
 			yield* addClient("c1", wsOpen);
 			yield* addClient("c2", wsClosed);
 
-			yield* broadcast(testMsg("client_count", { count: 2 }));
+			yield* broadcast(testMsg("server_update", { restartAvailable: true }));
 
 			expect(wsOpen.sent.length).toBe(1);
 			expect(wsClosed.sent.length).toBe(0);

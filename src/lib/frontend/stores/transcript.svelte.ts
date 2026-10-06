@@ -48,6 +48,7 @@ const partTypes: ReadonlySet<string> = new Set([
 	"compaction",
 	"subtask",
 	"thinking",
+	"error",
 ]);
 const isPartType = (type: string): type is HistoryMessagePart["type"] =>
 	partTypes.has(type);
@@ -74,6 +75,8 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 			tool,
 			preTokens,
 			postTokens,
+			failed,
+			code,
 			...base
 		} = part;
 		const partTime = record(time);
@@ -115,6 +118,8 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 						}),
 				...(typeof preTokens === "number" ? { preTokens } : {}),
 				...(typeof postTokens === "number" ? { postTokens } : {}),
+				...(failed === true ? { failed } : {}),
+				...(typeof code === "string" ? { code } : {}),
 			},
 		];
 	});
@@ -127,6 +132,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 		time,
 		cost,
 		modelExecution,
+		turnTiming,
 		...base
 	} = source;
 	const tokens = record(sourceTokens);
@@ -148,6 +154,21 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 					},
 				}),
 		...(cost === undefined ? {} : { cost }),
+		...(turnTiming === undefined
+			? {}
+			: {
+					turnTiming: {
+						startedAt: turnTiming.startedAt,
+						...(turnTiming.endedAt === undefined
+							? {}
+							: { endedAt: turnTiming.endedAt }),
+						waits: turnTiming.waits.map((wait) => ({
+							id: wait.id,
+							from: wait.from,
+							...(wait.to === undefined ? {} : { to: wait.to }),
+						})),
+					},
+				}),
 		...(modelExecution === undefined
 			? {}
 			: {
@@ -344,18 +365,34 @@ export function deriveTranscriptMessages(
 		for (const item of items)
 			projected.push(mergeSticky(item, previousByUuid.get(item.uuid)));
 	}
-	const projectedUuids = new Set(projected.map((item) => item.uuid));
+	const projectedIndex = new Map(projected.map((item, i) => [item.uuid, i]));
 	const after = new Map<string, ChatMessage[]>();
 	const atEnd: ChatMessage[] = [];
 	let anchor: string | null = null;
 	for (const item of previous) {
-		if (projectedUuids.has(item.uuid)) {
+		if (projectedIndex.has(item.uuid)) {
 			anchor = item.uuid;
 			continue;
 		}
 		// A removed projected row must disappear, not become a local item.
 		if (item.uuid.includes("/")) continue;
-		if (anchor && projectedUuids.has(anchor)) {
+		// The legacy error arm's notice gives way to the projected turn error
+		// that landed after it.
+		const anchorIndex =
+			anchor === null ? -1 : (projectedIndex.get(anchor) ?? -1);
+		if (
+			item.type === "system" &&
+			item.variant === "error" &&
+			projected.some(
+				(other, i) =>
+					i > anchorIndex &&
+					other.type === "system" &&
+					other.variant === "error" &&
+					other.text === item.text,
+			)
+		)
+			continue;
+		if (anchor && projectedIndex.has(anchor)) {
 			const group = after.get(anchor) ?? [];
 			group.push(item);
 			after.set(anchor, group);
@@ -483,6 +520,20 @@ export function viewTranscript(
 								) {
 									const row = envelope.item.message;
 									const held = before.rows.find((old) => old.id === row.id);
+									// The server names a skill from the tool's input, which can
+									// land after the tool starts.
+									if (
+										row.parts?.some(
+											(part) =>
+												part.tool?.toLowerCase() === "skill" &&
+												JSON.stringify(part.state?.["input"]) !==
+													JSON.stringify(
+														held?.parts?.find((old) => old.id === part.id)
+															?.state?.["input"],
+													),
+										)
+									)
+										refreshSessionSkills(sessionId);
 									// A user row is new when it first has parts to show.
 									newUserMessage =
 										row.role === "user" &&

@@ -420,7 +420,16 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const sessionId = await openSessionId(world.page);
 			mockSessionSkills.set(world.page, parseLoads(match[1] ?? ""));
-			requireRelayControl(world.page).sendMessage({
+			const relay = requireRelayControl(world.page);
+			// As the server does: the tool starts, then its input lands on it.
+			relay.sendMessage({
+				type: "tool_start",
+				sessionId,
+				id: SKILL_TOOL_ID,
+				name: "Skill",
+				messageId: "skill-live-turn",
+			});
+			relay.sendMessage({
 				type: "tool_executing",
 				sessionId,
 				id: SKILL_TOOL_ID,

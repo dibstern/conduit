@@ -14,7 +14,7 @@
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
 import { tmpdir } from "node:os";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { vi } from "vitest";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
@@ -26,6 +26,11 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { InstanceMgmtTag } from "../../src/lib/domain/daemon/Services/management-service.js";
+import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+	OpenCodeUnavailable,
+} from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import {
@@ -37,9 +42,9 @@ import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Servic
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
-import { OpenCodeInstanceClientsLive } from "../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
 import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceLive,
@@ -487,6 +492,33 @@ export function deferredRelayFactory(): DeferredRelay {
 // Each returns a minimal mock that satisfies its service Tag's type.
 
 /** Create a mock OpenCodeAPI for Effect tests. */
+/**
+ * OpenCode Instances with fixed clients per instance id. Unknown ids fail with
+ * OpenCodeUnavailable, like an unconfigured instance.
+ */
+export function makeOpenCodeInstancesStub(
+	clients: Readonly<Record<string, OpenCodeAPI>> = {},
+): OpenCodeInstances {
+	const use = (instanceId: string) => {
+		const client = clients[instanceId];
+		return client
+			? Effect.succeed(client)
+			: Effect.fail(
+					new OpenCodeUnavailable({
+						instanceId,
+						reason: "not-configured",
+						message: `OpenCode instance "${instanceId}" is not configured`,
+					}),
+				);
+	};
+	return {
+		events: () => Stream.empty,
+		use,
+		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		stop: () => Effect.void,
+	};
+}
+
 export function makeMockOpenCodeAPI(
 	overrides?: Partial<OpenCodeAPI>,
 ): OpenCodeAPI {
@@ -790,11 +822,11 @@ export function makeMockStatusPoller(
 		stop: vi.fn(() => Effect.void),
 		drain: vi.fn(() => Effect.void),
 		getCurrentStatuses: vi.fn(() => Effect.succeed({})),
+		getSessionProviders: vi.fn(() => Effect.succeed(new Map())),
 		isProcessing: vi.fn(() => Effect.succeed(false)),
 		markMessageActivity: vi.fn(() => Effect.void),
 		clearMessageActivity: vi.fn(() => Effect.void),
 		notifySSEIdle: vi.fn(() => Effect.void),
-		reconcileNow: vi.fn(() => Effect.void),
 		...overrides,
 	};
 }
@@ -889,7 +921,7 @@ export function makeTestHandlerLayer(
 		notifySSEEvent: vi.fn(),
 	};
 	const connectPtyUpstream: ConnectPtyUpstreamShape =
-		opts?.connectPtyUpstream ?? vi.fn(async () => undefined);
+		opts?.connectPtyUpstream ?? vi.fn(() => Effect.void);
 	const sessionTitleService =
 		opts?.sessionTitleService ?? makeMockSessionTitleService();
 	const localPty: LocalPtyService = opts?.localPty ?? {
@@ -958,8 +990,9 @@ export function makeTestHandlerLayer(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
-	const openCodeInstanceClientsLayer = OpenCodeInstanceClientsLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, loggerLayer)),
+	const openCodeInstancesLayer = Layer.succeed(
+		OpenCodeInstancesTag,
+		makeOpenCodeInstancesStub({ opencode: api }),
 	);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -975,7 +1008,14 @@ export function makeTestHandlerLayer(
 		Layer.provide(openCodeApiLayer),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				openCodeInstancesLayer,
+				configLayer,
+				loggerLayer,
+			),
+		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(openCodeApiLayer),
@@ -1002,7 +1042,7 @@ export function makeTestHandlerLayer(
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				openCodeInstancesLayer,
 				wsHandlerLayer,
 				loggerLayer,
 				configLayer,
@@ -1025,7 +1065,7 @@ export function makeTestHandlerLayer(
 						configLayer,
 						wsHandlerLayer,
 						RelayStatusSnapshotLive,
-						openCodeInstanceClientsLayer,
+						openCodeInstancesLayer,
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						overridesStateLayer,
 						sessionManagerOrchestrationLayer,
@@ -1059,7 +1099,7 @@ export function makeTestHandlerLayer(
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
-		openCodeInstanceClientsLayer,
+		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
@@ -1080,6 +1120,7 @@ export function makeTestHandlerLayer(
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),
 		wsHandlerLayer,
 		overridesStateLayer,
+		ProjectSettingsLive,
 		ptyManagerLayer,
 		configLayer,
 		loggerLayer,

@@ -21,6 +21,10 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyQuery } from "../../../src/lib/persistence/session-family-query.js";
+import {
+	latestTurnSettingsQuery,
+	pendingClaudeQuestionToolsQuery,
+} from "../../../src/lib/persistence/startup-restore-queries.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -590,6 +594,30 @@ describe("ReadQueryEffect session lookups", () => {
 		}).pipe(Effect.provide(testLayer)),
 	);
 
+	it.effect(
+		"reads all providers alongside statuses without changing status consumers",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
+					('claude-1', 'claude', 'Claude', 'busy', 2, 2),
+					('unknown-1', 'unknown', 'Unknown', 'idle', 3, 3)`;
+				const readQuery = yield* makeReadQueryEffect;
+				expect(yield* readQuery.getAllSessionStatusesWithProviders()).toEqual([
+					{ id: "opencode-1", status: "busy", provider: "opencode" },
+					{ id: "claude-1", status: "busy", provider: "claude" },
+					{ id: "unknown-1", status: "idle", provider: "unknown" },
+				]);
+				expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+					"opencode-1": "busy",
+					"claude-1": "busy",
+					"unknown-1": "idle",
+				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect("lists nothing for an empty store", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
@@ -723,6 +751,39 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 					row.detail.includes("idx_pending_approvals_pending"),
 				),
 			).toBe(true);
+		}).pipe(Effect.provide(testLayer)),
+	);
+});
+
+// Relay startup runs both reads synchronously before the first session can
+// open. Driven from sessions or the outbox table, they read the store's largest
+// rows (tool output, prompt payloads with images): over a second on an 8 GB store.
+describe("startup restore reads", () => {
+	const planOf = (query: string) =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			return (yield* sql.unsafe<{ detail: string }>(
+				`EXPLAIN QUERY PLAN ${query}`,
+			)).map((row) => row.detail);
+		});
+
+	it.effect("finds open questions from their index, not every part", () =>
+		Effect.gen(function* () {
+			const plan = yield* planOf(pendingClaudeQuestionToolsQuery);
+			expect(plan[0]).toBe(
+				"SCAN mp USING INDEX idx_message_parts_open_questions",
+			);
+			expect(plan.join("\n")).not.toContain("idx_message_parts_message");
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("reads turn settings from the index, not the payloads", () =>
+		Effect.gen(function* () {
+			const plan = yield* planOf(latestTurnSettingsQuery);
+			expect(plan).toContain(
+				"SEARCH outbox USING INDEX idx_provider_command_outbox_turn_settings (request_sequence=?)",
+			);
 		}).pipe(Effect.provide(testLayer)),
 	);
 });
@@ -974,13 +1035,17 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 			const newest = yield* readQuery.readSessionTranscriptPage("s1", {
 				limit: 1,
 			});
-			const newestCursor = newest.messages[0];
+			const newestCursor = newest.messages.at(-1);
 			if (!newestCursor) throw new Error("expected newest message");
 			const oldest = yield* readQuery.readSessionTranscriptPage("s1", {
 				before: newestCursor.id,
 				limit: 1,
 			});
-			expect(newest.hasMore).toBe(true);
+			expect(newest.messages.map((message) => message.id)).toEqual([
+				"m-a",
+				"m-b",
+			]);
+			expect(newest.hasMore).toBe(false);
 			expect(oldest.hasMore).toBe(false);
 			expect(oldest.version).toBe(7);
 			expect(oldest.messages).toMatchObject([
@@ -1071,6 +1136,45 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				false,
 			]);
 		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"anchors the first page at the running prompt, not one queued behind it",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				// A crash left 'stale' running before 'done' settled; it never wins.
+				yield* sql`
+					INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
+					VALUES
+					('stale', 's1', 'running', 'stale', 1),
+					('done', 's1', 'completed', 'done', 2),
+					('a', 's1', 'running', 'a', 3),
+					('b', 's1', 'pending', 'b', 6)`;
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, created_at, updated_at)
+					VALUES
+					('stale', 's1', 'user', 'stale', 1, 1),
+					('done', 's1', 'user', 'done', 2, 2),
+					('a', 's1', 'user', 'a', 3, 3),
+					('a-reply-1', 's1', 'assistant', 'a1', 4, 4),
+					('a-reply-2', 's1', 'assistant', 'a2', 5, 5),
+					('b', 's1', 'user', 'b', 6, 6)`;
+				const readQuery = yield* makeReadQueryEffect;
+				const first = yield* readQuery.readSessionTranscriptPage("s1", {
+					limit: 1,
+				});
+				expect(first.messages.map((message) => message.id)).toEqual([
+					"a",
+					"a-reply-1",
+					"a-reply-2",
+					"b",
+				]);
+				expect(first.hasMore).toBe(true);
+			}).pipe(Effect.provide(testLayer)),
 	);
 });
 

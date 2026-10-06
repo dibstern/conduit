@@ -248,15 +248,11 @@ async function bindOpenCodeSession(
 	client: TestWsClient,
 	title: string,
 ): Promise<string> {
-	const modelList = await client.waitFor("model_list");
-	const providers = modelList["providers"] as Array<{
-		id: string;
-		models: Array<{ id: string }>;
-	}>;
-	const provider = providers?.find(
+	const { providers } = await client.getModels();
+	const provider = providers.find(
 		(candidate) => candidate.id !== "claude" && candidate.models.length > 0,
 	);
-	if (!provider) throw new Error("model_list has no OpenCode provider");
+	if (!provider) throw new Error("GetModels has no OpenCode provider");
 	const model = provider.models[0];
 	if (!model) throw new Error("OpenCode provider has no models");
 
@@ -464,13 +460,10 @@ describe("Integration: Session Visibility Repros", () => {
 		const detourId = client1.getActiveSessionId();
 		if (!detourId) throw new Error("No initial session");
 
-		// Providers come from the init model_list broadcast.
-		const modelList = await client1.waitFor("model_list");
-		const providers = modelList["providers"] as Array<{
-			id: string;
-			models: Array<{ id: string }>;
-		}>;
-		const provider = providers?.find((p) => p.models.length > 0);
+		const { providers } = await client1.getModels();
+		const provider = providers.find(
+			(p) => p.id !== "claude" && p.models.length > 0,
+		);
 		expect(provider).toBeDefined();
 		assert.exists(provider, "expected a provider with models");
 		const model = provider.models[0];
@@ -556,9 +549,7 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.viewSession(newId);
 		const back = await client1.loadMoreHistory(newId);
 		expect(JSON.stringify(back.messages)).toContain("pong");
-		const errorFrames = client1
-			.getReceived()
-			.filter((m) => m.type === "error" || m.type === "system_error");
+		const errorFrames = client1.getReceived().filter((m) => m.type === "error");
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-D] errorFrames=${JSON.stringify(errorFrames)}`);
 		expect(errorFrames).toEqual([]);
@@ -1034,13 +1025,27 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				"List the files in the current directory using bash: ls -la",
 			);
-			const requested = await client1.waitFor("permission_request", {
-				timeout: 15_000,
-			});
-			await client1.respondPermission(
-				requested["requestId"] as string,
-				"allow",
+			// The card reaches browsers through the approvals subscription (ni8.9),
+			// which reads this row; this harness serves the socket, not /rpc. The
+			// recording may resolve it first, so the row's status is not asserted.
+			const requestId = await vi.waitFor(
+				async () => {
+					const [row] = await readStore(
+						dbPath,
+						Effect.flatMap(
+							SqlClient.SqlClient,
+							(sql) =>
+								sql<{
+									id: string;
+								}>`SELECT id FROM pending_approvals WHERE session_id = ${sessionId}`,
+						),
+					);
+					if (!row) throw new Error("permission not asked yet");
+					return row.id;
+				},
+				{ timeout: 15_000 },
 			);
+			await client1.respondPermission(requestId, "allow");
 			await client1.waitFor("tool_result", { timeout: 20_000 });
 			await vi.waitFor(
 				async () => {

@@ -47,7 +47,7 @@ async function setup(page: import("@playwright/test").Page) {
 					{
 						slug: projectSlug,
 						title: projectSlug,
-						directory: "/tmp/e2e-replay",
+						folders: ["/tmp/e2e-replay"],
 					},
 				],
 				current: projectSlug,

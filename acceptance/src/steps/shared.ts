@@ -40,6 +40,21 @@ export function requireRpcControl(page: Page): RpcMockControl {
 	return control;
 }
 
+/** Serve a new GetModels catalog and make the app refetch it the way a
+ *  reconnect does: every shell `synchronized` marker refetches the catalogs. */
+export async function serveModelCatalog(
+	page: Page,
+	response: Record<string, unknown>,
+): Promise<void> {
+	const rpc = requireRpcControl(page);
+	const fetches = () =>
+		rpc.getRequests().filter((request) => request.tag === "GetModels").length;
+	const before = fetches();
+	rpc.setResponse("GetModels", { projectSlug: "myapp", ...response });
+	rpc.setShellRows(rpc.shellRows ?? []);
+	await expect.poll(fetches).toBeGreaterThan(before);
+}
+
 /**
  * Long-press like a person: press, wait for the menu, release. A fixed-length
  * press races the hold timer, and a busy page runs the release first.
@@ -79,9 +94,14 @@ export function exampleValue(
 }
 
 export const openSessionRoute = async (page: Page, sessionId: string) => {
+	const relay = requireRelayControl(page);
+	const connections = relay.connections;
 	await page.goto(
 		new URL(`/s/${encodeURIComponent(sessionId)}`, page.url()).toString(),
 	);
+	// The relay and RPC sockets reconnect independently. Until the new relay
+	// socket opens, injected messages go to the old page's closed one.
+	await expect.poll(() => relay.connections).toBeGreaterThan(connections);
 	await requireRpcControl(page).waitForRequest(
 		(request) =>
 			request.tag === "ViewSession" &&

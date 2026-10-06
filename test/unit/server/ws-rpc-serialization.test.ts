@@ -14,7 +14,10 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
-import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
+import {
+	PermissionId,
+	RelayMessageSchema,
+} from "../../../src/lib/shared-types.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 
 const session = {
@@ -27,6 +30,7 @@ const session = {
 	parentID: "parent-1",
 	forkMessageId: "message-0",
 	forkPointTimestamp: 90,
+	permissionMode: "plan",
 } as const;
 const shellEnvelopes = [
 	{ _tag: "snapshot", rows: [session], sequence: 40 },
@@ -262,9 +266,146 @@ const sessionList = {
 	search: true,
 } as const;
 
+const todoEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [{ sessionId: "session-1", items: [] }],
+		sequence: 7,
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		item: {
+			sessionId: "session-1",
+			items: [
+				{ id: "t1", subject: "Plan", status: "completed" },
+				{
+					id: "t2",
+					subject: "Build",
+					description: "the subscription",
+					status: "in_progress",
+				},
+			],
+		},
+		sequence: 8,
+	},
+] as const;
+
+const ptyRow = {
+	id: "pty-1",
+	title: "Shell",
+	command: "zsh",
+	cwd: "/repo",
+	status: "running",
+	pid: 42,
+} as const;
+const ptyEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [{ pty: ptyRow, scrollback: '\u001b[1m$ echo "雪"\r\n' }],
+	},
+	{ _tag: "synchronized" },
+	{ _tag: "output", ptyId: "pty-1", data: "\u0007\u001b]0;title\u0007ok\r\n" },
+	{ _tag: "output", ptyId: "pty-1", data: "fresh", replace: true },
+	{ _tag: "upsert", item: { ...ptyRow, status: "exited" } },
+	{ _tag: "remove", id: "pty-1" },
+] as const;
+
+// Every optional field set, so a field the schema forgot is stripped and fails
+// the equality below rather than vanishing silently.
+const approvalEnvelopes = [
+	{
+		_tag: "snapshot",
+		sequence: 40,
+		rows: [
+			{
+				_tag: "question",
+				sessionId: "session-1",
+				toolId: "que-1",
+				toolUseId: "call-1",
+				providerId: "opencode",
+				questions: [
+					{
+						question: 'Pick "one"\n雪',
+						header: "Choice",
+						options: [{ label: "A", description: "first" }, { label: "B" }],
+						multiSelect: true,
+						custom: false,
+					},
+				],
+			},
+		],
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		sequence: 41,
+		item: {
+			_tag: "permission",
+			sessionId: "child-1",
+			requestId: PermissionId.make("perm-1"),
+			toolName: "Bash",
+			toolInput: { command: "rm -rf build", nested: { flag: true } },
+			toolUseId: "toolu-1",
+			always: ["rm *"],
+			permissionSuggestions: [
+				{
+					type: "addRules",
+					rules: [{ toolName: "Bash", ruleContent: "rm:*" }],
+					behavior: "allow",
+					destination: "localSettings",
+				},
+			],
+			permissionTitle: "Claude wants to run rm",
+			permissionDisplayName: "Run rm",
+			permissionDescription: "Deletes the build directory",
+			permissionReason: "Cleanup",
+		},
+	},
+	{ _tag: "remove", sequence: 42, id: "perm-1" },
+] as const;
+
+const projectSettingsEnvelopes = [
+	{
+		_tag: "snapshot",
+		rows: [
+			{
+				_tag: "defaultModel",
+				model: "claude-sonnet-4",
+				provider: "anthropic",
+				variant: "high",
+			},
+			{
+				_tag: "visibility",
+				hiddenModels: ["anthropic/claude-haiku"],
+				hiddenAgents: [],
+			},
+			{ _tag: "defaultPermissionMode", mode: "acceptEdits" },
+			{
+				_tag: "claudeSettings",
+				overrides: { model: "opus", env: { FOO: 'b"ar' } },
+			},
+			{ _tag: "clientCount", count: 2 },
+			{ _tag: "opencodeConnection", status: "reconnecting" },
+		],
+		sequence: 1,
+	},
+	{ _tag: "synchronized" },
+	{
+		_tag: "upsert",
+		item: { _tag: "defaultModel", variant: "" },
+		sequence: 2,
+	},
+] as const;
+
 const group = RpcGroup.make(
 	Contracts.SubscribeShell,
+	Contracts.SubscribeApprovals,
 	Contracts.SubscribeSessionDetail,
+	Contracts.SubscribeSessionTodos,
+	Contracts.SubscribeProjectSettings,
+	Contracts.SubscribePtys,
+	Rpc.fromTaggedRequest(Contracts.PtyInput),
 	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(Contracts.GetClaudeSettings),
 	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
@@ -273,6 +414,12 @@ const group = RpcGroup.make(
 	SessionListProbe,
 );
 const handlers = group.toLayer({
+	SubscribeApprovals: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
+		return Rpc.fork(
+			Stream.fromIterable(approvalEnvelopes).pipe(Stream.rechunk(1)),
+		);
+	},
 	SessionListProbe: () => Effect.succeed(sessionList),
 	RewindSession: (payload) => {
 		expect(payload).toEqual({
@@ -326,6 +473,31 @@ const handlers = group.toLayer({
 			resumeFromSequence: 39,
 		});
 		return Rpc.fork(Stream.fromIterable(detailEnvelopes));
+	},
+	SubscribeSessionTodos: (payload) => {
+		expect(payload).toEqual({
+			projectSlug: "project",
+			sessionId: "session-1",
+			resumeFromSequence: 7,
+		});
+		return Rpc.fork(Stream.fromIterable(todoEnvelopes));
+	},
+	SubscribePtys: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project" });
+		return Rpc.fork(Stream.fromIterable(ptyEnvelopes));
+	},
+	PtyInput: (payload) => {
+		expect(payload).toEqual({
+			_tag: "PtyInput",
+			projectSlug: "project",
+			ptyId: "pty-1",
+			data: "\u0003ls -la 雪\r",
+		});
+		return Effect.succeed({ ok: true as const });
+	},
+	SubscribeProjectSettings: (payload) => {
+		expect(payload).toEqual({ projectSlug: "project" });
+		return Rpc.fork(Stream.fromIterable(projectSettingsEnvelopes));
 	},
 	SubscribeShell: (payload) => {
 		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
@@ -435,6 +607,28 @@ it("SubscribeSessionDetail preserves transcript, model identity and stored tool 
 	);
 });
 
+it("SubscribeApprovals preserves both approval kinds and every envelope variant through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, serverFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeApprovals({
+						projectSlug: "project",
+						resumeFromSequence: 39,
+					}),
+				);
+				expect(Array.from(result)).toEqual(approvalEnvelopes);
+				for (const envelope of approvalEnvelopes) {
+					expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+						expect.objectContaining({ _tag: "Chunk", values: [envelope] }),
+					);
+				}
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
 it("SetDefaultPermissionMode preserves the new permission mode through JSON", async () => {
 	await Effect.runPromise(
 		Effect.scoped(
@@ -524,6 +718,89 @@ it("session_list keeps notification state and required status on sessions", asyn
 			Effect.gen(function* () {
 				const { client } = yield* connect;
 				expect(yield* client.SessionListProbe()).toEqual(sessionList);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribeSessionTodos preserves the session id and todo items through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeSessionTodos({
+						projectSlug: "project",
+						sessionId: "session-1",
+						resumeFromSequence: 7,
+					}),
+				);
+				expect(Array.from(result)).toEqual(todoEnvelopes);
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "SubscribeSessionTodos",
+						payload: {
+							projectSlug: "project",
+							sessionId: "session-1",
+							resumeFromSequence: 7,
+						},
+					}),
+				);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribePtys and PtyInput carry terminal bytes through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribePtys({ projectSlug: "project" }),
+				);
+				expect(Array.from(result)).toEqual(ptyEnvelopes);
+				expect(
+					yield* client.PtyInput({
+						projectSlug: "project",
+						ptyId: "pty-1",
+						data: "\u0003ls -la 雪\r",
+					}),
+				).toEqual({ ok: true });
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "PtyInput",
+						payload: {
+							_tag: "PtyInput",
+							projectSlug: "project",
+							ptyId: "pty-1",
+							data: "\u0003ls -la 雪\r",
+						},
+					}),
+				);
+			}),
+		).pipe(Effect.timeout("3 seconds")),
+	);
+});
+
+it("SubscribeProjectSettings preserves every project-setting fact through JSON", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { client, clientFrames } = yield* connect;
+				const result = yield* Stream.runCollect(
+					client.SubscribeProjectSettings({ projectSlug: "project" }),
+				);
+				expect(Array.from(result)).toEqual(projectSettingsEnvelopes);
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "SubscribeProjectSettings",
+						payload: { projectSlug: "project" },
+					}),
+				);
 			}),
 		).pipe(Effect.timeout("3 seconds")),
 	);

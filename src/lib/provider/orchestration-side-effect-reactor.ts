@@ -33,7 +33,9 @@ interface ProviderCommandOutboxRow {
 }
 
 interface SendTurnOutboxPayload
-	extends Omit<SendTurnInput, "eventSink" | "abortSignal"> {}
+	extends Omit<SendTurnInput, "eventSink" | "abortSignal" | "history"> {
+	readonly history?: SendTurnInput["history"];
+}
 
 class UnknownProviderCommandEffect extends Data.TaggedError(
 	"UnknownProviderCommandEffect",
@@ -368,6 +370,7 @@ export class ProviderSideEffectReactor {
 				const payload = yield* this.parseSendTurnPayload(row);
 				return yield* instance.sendTurnEffect({
 					...payload,
+					history: payload.history ?? [],
 					...(driver === "claude" ? { commandAttempt } : {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
@@ -554,7 +557,7 @@ export class ProviderSideEffectReactor {
 		// or the relay's processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
-				interactions?.noteActivity?.();
+				interactions?.noteActivity?.(event);
 				return this.options.ingestion
 					.ingest(event)
 					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));
@@ -635,7 +638,7 @@ function isSendTurnOutboxPayload(
 		typeof value["sessionId"] === "string" &&
 		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
-		Array.isArray(value["history"]) &&
+		(value["history"] === undefined || Array.isArray(value["history"])) &&
 		isRecord(value["providerState"]) &&
 		typeof value["workspaceRoot"] === "string"
 	);

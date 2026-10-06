@@ -90,6 +90,18 @@ None of them record video, deliberately. Traces already cover what video showed,
 
 The one place that genuinely needs that binary is the media scene runner, which records a WebM to convert to a GIF. Its test checks both ffmpeg binaries by running them, so it skips honestly on a machine that cannot do it.
 
+### iOS Safari (Simulator)
+
+Run this when changing touch gestures, long-press, or text selection on phones. Chromium cannot see these bugs: it treats `-webkit-user-select` as an alias of `user-select` and has no native text-selection hold. Every Playwright lane passed while iPhones selected text in the session action sheet (conduit-test-wmzr). This lane drives Safari in the iOS Simulator through `safaridriver`, which sends real UIKit touches.
+
+```bash
+pnpm test:e2e:ios
+```
+
+Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold.
+
+WebDriver lifts the finger at (0,0), which drags any live selection toward the top-left, so a screenshot can show a bigger highlight than a person would get. The assertions count only selections made while the finger is still down.
+
 ### Live E2E
 
 Run this for full-pipeline validation against a real, ephemeral OpenCode instance. Requires `opencode` on `$PATH` and valid API credentials. Do not assume the instance uses port `4096`; tests and logs report the active URL.

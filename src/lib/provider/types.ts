@@ -85,10 +85,11 @@ export interface EventSink {
 	detachInteractions?(): Effect.Effect<void>;
 	/**
 	 * Relay liveness hook. Providers never call this; the orchestration reactor
-	 * calls it for every streamed event so the relay's processing timeout stays
-	 * alive on the path where provider output goes straight to ingestion.
+	 * calls it for every streamed event on the path where provider output goes
+	 * straight to ingestion, so the relay's processing timeout stays alive
+	 * mid-turn and ends with the turn.
 	 */
-	noteActivity?(): void;
+	noteActivity?(event: ProviderRuntimeEvent): void;
 }
 
 /**

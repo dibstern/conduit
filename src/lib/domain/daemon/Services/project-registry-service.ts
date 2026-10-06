@@ -15,6 +15,7 @@ import { lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import {
+	Array as Arr,
 	Context,
 	Data,
 	Duration,
@@ -102,8 +103,7 @@ export type ProjectRegistryState = HashMap.HashMap<string, ProjectState>;
 
 const toStoredProject = (project: DaemonProject): StoredProject => ({
 	slug: project.slug,
-	directory: project.folders?.[0] ?? project.directory ?? project.path,
-	folders: project.folders ?? [project.directory ?? project.path],
+	folders: project.folders,
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
 	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
@@ -175,14 +175,14 @@ export const isReady = (slug: string) =>
 		return Option.isSome(entry) && entry.value._tag === "Ready";
 	}).pipe(Effect.withSpan("projectRegistry.isReady"));
 
-/** Find a project entry by directory path. Returns Option. */
+/** Find a project entry by its main folder. Returns Option. */
 export const findByDirectory = (directory: string) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
 		const state = yield* Ref.get(ref);
 		const entries = HashMap.values(state);
 		for (const entry of entries) {
-			if (entry.project.directory === directory) {
+			if (entry.project.folders[0] === directory) {
 				return Option.some(entry);
 			}
 		}
@@ -205,7 +205,6 @@ export const projectInfos = allProjects.pipe(
 		withCachedProjectGit(
 			projects.map((project) => ({
 				slug: project.slug,
-				directory: project.directory,
 				folders: project.folders,
 				title: project.title,
 				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
@@ -218,9 +217,11 @@ export const projectInfos = allProjects.pipe(
 );
 
 export const broadcastProjectList = Effect.gen(function* () {
-	const projects = yield* projectInfos;
-	yield* broadcastToAll({ type: "project_list", projects });
-	return projects;
+	yield* PubSub.publish(
+		yield* DaemonEventBusTag,
+		DaemonEvent.ProjectsChanged(),
+	);
+	return yield* projectInfos;
 });
 
 /** Get all ready entries as [slug, ProjectReady] pairs. */
@@ -404,7 +405,7 @@ export const remove = (slug: string) =>
 					yield* relayCache.invalidate(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
 					yield* stopRegisteredClaudeRunners(
-						removed.value.project.directory,
+						removed.value.project.folders[0],
 						state.configDir,
 					);
 				}).pipe(
@@ -444,9 +445,7 @@ export const remove = (slug: string) =>
  */
 export const updateProject = (
 	slug: string,
-	updates: Partial<
-		Pick<StoredProject, "title" | "instanceId" | "directory" | "folders">
-	>,
+	updates: Partial<Pick<StoredProject, "title" | "instanceId" | "folders">>,
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
@@ -767,11 +766,11 @@ export const saveProject = (input: SaveProjectInput) =>
 				}
 				if (issues.length > 0)
 					return yield* new ProjectSaveRejected({ issues });
-				const directory = folders[0];
-				if (directory === undefined)
+				if (!Arr.isNonEmptyReadonlyArray(folders))
 					return yield* new ProjectSaveRejected({
 						issues: [{ kind: "empty" }],
 					});
+				const mainFolder = folders[0];
 				const title =
 					input.title === undefined
 						? undefined
@@ -782,7 +781,7 @@ export const saveProject = (input: SaveProjectInput) =>
 					});
 				const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 				const mainChanged =
-					existing !== undefined && existing.directory !== directory;
+					existing !== undefined && existing.folders[0] !== mainFolder;
 				if (mainChanged) {
 					if (
 						projectEventsDbPath({ configDir, ...existing }) !==
@@ -816,7 +815,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						try: () =>
 							chooseProjectSlug({
 								configDir,
-								directory,
+								mainFolder,
 								liveSlugs: new Set(projects.map((project) => project.slug)),
 							}),
 						catch: (cause) =>
@@ -887,15 +886,13 @@ export const saveProject = (input: SaveProjectInput) =>
 				const project: StoredProject = existing
 					? {
 							...existing,
-							directory,
 							folders,
 							...(title !== undefined && { title }),
 						}
 					: {
 							slug,
-							directory,
 							folders,
-							title: title ?? titleForDirectory(directory),
+							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 							...(input.instanceId !== undefined && {
 								instanceId: input.instanceId,
@@ -903,7 +900,6 @@ export const saveProject = (input: SaveProjectInput) =>
 						};
 				if (existing) {
 					yield* updateProject(slug, {
-						directory,
 						folders,
 						title: project.title,
 					});
@@ -918,7 +914,7 @@ export const saveProject = (input: SaveProjectInput) =>
 					yield* replaceRelay(slug);
 					if (mainChanged) {
 						yield* stopRegisteredClaudeRunners(
-							existing.directory,
+							existing.folders[0],
 							configDir,
 						).pipe(
 							Effect.catchAllCause((cause) =>

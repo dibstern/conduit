@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
 	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
-	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc, listPtysRpc } from "../../transport/ws-rpc-client.js";
+	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -26,7 +26,6 @@
 	import RewindBanner from "../overlays/RewindBanner.svelte";
 	import TodoOverlay from "../todo/TodoOverlay.svelte";
 	import TerminalPanel from "../terminal/TerminalPanel.svelte";
-	import PlanMode from "../chat/PlanMode.svelte";
 	import FileViewer from "../file/FileViewer.svelte";
 	import Button from "../ui/Button.svelte";
 	import {
@@ -47,24 +46,23 @@
 		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
-		onPlanMode,
-		wsSend,
 	} from "../../stores/ws.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
-	import { applyPtyListResponse, terminalState, destroyAll } from "../../stores/terminal.svelte.js";
+	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList } from "../../stores/session-list.svelte.js";
+	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
-	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
+	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
+	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyGetProjectsResponse } from "../../stores/project.svelte.js";
+	import { applyProjectList, followDaemonLists } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
-	import type { RelayMessage } from "../../types.js";
 	import {
 		observeOpenSession,
 		trackSeen,
@@ -75,12 +73,6 @@
 	let settingsVisible = $state(false);
 	let settingsInitialTab = $state("notifications");
 	let debugPanelVisible = $state(false);
-	let planModeData = $state<{
-		mode: "enter" | "exit" | "content" | "approval" | null;
-		content: string;
-		onApprove?: () => void;
-		onReject?: () => void;
-	}>({ mode: null, content: "" });
 
 	const TERMINAL_MIN_HEIGHT = 100;
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
@@ -338,7 +330,7 @@
 		document.addEventListener("touchend", onEnd);
 	}
 
-	// Todo items (from reactive todo store, updated by SSE + tool results)
+	// Todo items (the viewed session's todo subscription)
 
 	const todoItems = $derived(todoState.items);
 
@@ -352,7 +344,7 @@
 		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
 			if (requestedProject === slug) requestedProject = null;
-			const generation = ++attachGeneration;
+			attachGeneration++;
 			if (slug !== previousSlug) {
 				clearMessages();
 				clearSessionState();
@@ -361,7 +353,6 @@
 				clearTodoState();
 				clearFileTreeState();
 				resetProjectUI();
-				planModeData = { mode: null, content: "" };
 				previousSlug = slug;
 			}
 			// Fetch current version for sidebar footer
@@ -370,6 +361,11 @@
 			// First page only. The cross-project read is keyset-paged now; the
 			// sidebar's scroll sentinel asks for the rest.
 			attachSessionList(slug);
+			attachApprovals(slug);
+		});
+		const unsubscribeShell = onShellSynchronized((slug) => {
+			if (slug !== previousSlug) return;
+			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
@@ -382,7 +378,7 @@
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetAgentsResponse(response);
+					if (generation === attachGeneration) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({
@@ -403,7 +399,7 @@
 				.catch(() => undefined);
 			void getProjectsRpc({ projectSlug: slug })
 				.then((response) => {
-					if (generation === attachGeneration) applyGetProjectsResponse(response);
+					if (generation === attachGeneration) applyProjectList(response);
 				})
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
@@ -416,14 +412,6 @@
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
 				});
-			void listPtysRpc({
-				projectSlug: slug,
-				originId: getBrowserClientId(),
-			})
-				.then((response) => {
-					if (generation === attachGeneration) applyPtyListResponse(response);
-				})
-				.catch(() => undefined);
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
@@ -431,7 +419,9 @@
 		return () => {
 			attachGeneration++;
 			detachSessionList();
+			detachApprovals();
 			unsubscribe();
+			unsubscribeShell();
 			clearNavigateToSession();
 			interruptStream();
 			disconnect();
@@ -446,8 +436,30 @@
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? sessionState.currentId : null;
-		untrack(() => viewTranscript(project, sessionId));
-		return () => viewTranscript(project, null);
+		untrack(() => {
+			viewTranscript(project, sessionId);
+			viewTodos(project, sessionId);
+		});
+		return () => {
+			viewTranscript(project, null);
+			viewTodos(project, null);
+		};
+	});
+	$effect(() => {
+		const project = attachedProjectState.slug ?? null;
+		untrack(() => {
+			viewPtys(project);
+			viewProjectSettings(project);
+		});
+		return () => {
+			viewPtys(null);
+			viewProjectSettings(null);
+		};
+	});
+	$effect(() => {
+		const connection = attachedProjectState.slug ?? "";
+		untrack(() => followDaemonLists(connection));
+		return () => followDaemonLists(null);
 	});
 	$effect(() => {
 		const route = getCurrentRoute();
@@ -496,35 +508,6 @@
 			if (!event.persisted) void disposeRuntime();
 		});
 	}
-
-	$effect(() => {
-		const unsub = onPlanMode((msg: RelayMessage) => {
-			switch (msg.type) {
-				case "plan_enter":
-					planModeData = { mode: "enter", content: "" };
-					break;
-				case "plan_exit":
-					planModeData = { mode: null, content: "" };
-					break;
-				case "plan_content":
-					planModeData = {
-						...planModeData,
-						mode: "content",
-						content: msg.content ?? "",
-					};
-					break;
-				case "plan_approval":
-					planModeData = {
-						...planModeData,
-						mode: "approval",
-						onApprove: () => wsSend({ type: "plan_approve" }),
-						onReject: () => wsSend({ type: "plan_reject" }),
-					};
-					break;
-			}
-		});
-		return unsub;
-	});
 
 	// A full-screen phone terminal has no room for the todo overlay.
 	$effect(() => {
@@ -684,16 +667,6 @@
 
 			<!-- Todo Sticky Overlay -->
 			<TodoOverlay items={todoItems} />
-
-			<!-- Plan Mode UI -->
-			{#if planModeData.mode}
-				<PlanMode
-					mode={planModeData.mode}
-					content={planModeData.content}
-					{...planModeData.onApprove != null ? { onApprove: planModeData.onApprove } : {}}
-					{...planModeData.onReject != null ? { onReject: planModeData.onReject } : {}}
-				/>
-			{/if}
 
 			<!-- Rewind Banner -->
 			{#if uiState.rewindActive}

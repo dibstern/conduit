@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -22,6 +24,7 @@ import {
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
+	getModelsResponse,
 	sendModelsStateToClient,
 	setDefaultModelForRelay,
 	switchModelForSession,
@@ -37,6 +40,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -44,7 +48,7 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
-		"loads providers and active-session model info without requiring the Promise OpenCode API tag",
+		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -70,18 +74,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn((sessionId: string) =>
-					Effect.succeed({
-						id: sessionId,
-						projectID: "project-1",
-						directory: "/tmp/project",
-						title: "Session 1",
-						version: "1.0.0",
-						time: { created: 0, updated: 0 },
-						modelID: "gpt-4",
-						providerID: "openai",
-					}),
-				),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -96,11 +89,16 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(),
 			);
 
-			return sendModelsStateToClient("client-1").pipe(
+			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "openai",
+					modelID: "gpt-4",
+				});
+				yield* sendModelsStateToClient("client-1");
+			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
-					expect(modelService.getSession).toHaveBeenCalledWith("session-1");
 					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 						type: "model_info",
 						sessionId: "session-1",
@@ -138,7 +136,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 			const engine = withDispatchEffect({
@@ -169,13 +167,13 @@ describe("model handlers with Effect-native model service", () => {
 					providerID: "claude",
 					modelID: "sonnet",
 				});
-				yield* sendModelsStateToClient("client-1");
+				const response = yield* getModelsResponse({
+					clientId: "client-1",
+					sessionId: "session-1",
+				});
 
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(modelService.getSession).not.toHaveBeenCalled();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_list",
-					providers: [
+				expect(response.providers).toEqual([
 						{
 							id: "openai",
 							name: "OpenAI",
@@ -200,8 +198,7 @@ describe("model handlers with Effect-native model service", () => {
 								},
 							],
 						},
-					],
-				});
+				]);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -233,7 +230,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -248,6 +245,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -298,7 +296,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -363,7 +361,7 @@ describe("model handlers with Effect-native model service", () => {
 						],
 					}),
 				),
-				getSession: vi.fn(),
+				cachedProviders: vi.fn(() => Effect.succeedNone),
 				persistDefaultModel: vi.fn(() => Effect.succeed(undefined)),
 			};
 
@@ -379,6 +377,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -397,12 +396,6 @@ describe("model handlers with Effect-native model service", () => {
 					"gpt-4",
 				);
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "default_model_info",
-					model: "gpt-4",
-					provider: "openai",
-					variant: "",
-				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "variant_info",
 					variant: "",
@@ -450,6 +443,10 @@ describe("model handlers with Effect-native model service", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag, api),
+						Layer.succeed(
+							OpenCodeInstancesTag,
+							makeOpenCodeInstancesStub({ opencode: api }),
+						),
 						Layer.succeed(ConfigTag, makeMockConfig({ configDir, projectDir })),
 						Layer.succeed(LoggerTag, logger),
 					),

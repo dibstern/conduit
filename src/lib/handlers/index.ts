@@ -1,18 +1,10 @@
-// Re-exports all handler functions and builds the EFFECT_MESSAGE_HANDLERS
-// dispatch table. This module replaces the monolithic message-handlers.ts.
+// Re-exports the handler functions.
 
-export { filterAgents, handleGetAgents } from "./agent.js";
-export { handleSwitchContextWindow } from "./context-window.js";
-export {
-	handleGetFileContent,
-	handleGetFileList,
-} from "./files.js";
 export {
 	setDefaultModelForRelay,
 	switchModelForSession,
 	switchVariantForSession,
 } from "./model.js";
-export type { PayloadMap } from "./payloads.js";
 export {
 	clearSessionInputDraft,
 	getSessionInputDraft,
@@ -29,70 +21,3 @@ export {
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 } from "./session.js";
-export {
-	handleGetCommands,
-	handleGetProjects,
-} from "./settings.js";
-export { handlePtyInput } from "./terminal.js";
-export { handleGetToolContent } from "./tool-content.js";
-
-// Schema-validate the raw payload, then route to the matching Effect handler.
-
-import { Effect, Schema } from "effect";
-import { WebSocketError } from "../errors.js";
-import { PayloadSchemas } from "./payload-schemas.js";
-import type { PayloadMap } from "./payloads.js";
-import { handlePtyInput as handlePtyInputImpl } from "./terminal.js";
-
-type AnyEffectHandler = (
-	clientId: string,
-	// biome-ignore lint/suspicious/noExplicitAny: handler union — payload varies per message type; erased at dispatch boundary
-	payload: any,
-	// biome-ignore lint/suspicious/noExplicitAny: handler union — E/R vary per handler; erased at dispatch boundary
-) => Effect.Effect<void, any, any>;
-
-/**
- * Maps every message type to its Effect-based handler implementation.
- *
- * Handlers pull their dependencies from the Effect context via Tags.
- */
-export const EFFECT_MESSAGE_HANDLERS: Record<
-	keyof PayloadMap,
-	AnyEffectHandler
-> = {
-	// Terminal
-	pty_input: handlePtyInputImpl,
-};
-
-/**
- * Effect-based message dispatch with Schema validation.
- *
- * 1. Looks up the handler by message type
- * 2. Decodes the raw payload through the matching Schema
- * 3. Invokes the handler
- *
- * Error semantics:
- * - Unknown message type: fails with WebSocketError
- * - Schema decode failure: fails with ParseError (a defect — the client
- *   sent malformed data)
- * - Handler domain errors: propagate as RelayError subtypes for the caller
- *   to handle (e.g. serialize as error responses)
- */
-export const dispatchMessageEffect = (
-	clientId: string,
-	type: string,
-	raw: unknown,
-) =>
-	Effect.gen(function* () {
-		const handler = EFFECT_MESSAGE_HANDLERS[type as keyof PayloadMap];
-		if (!handler) {
-			return yield* Effect.fail(
-				new WebSocketError({
-					message: `Unknown message type: ${type}`,
-				}),
-			);
-		}
-		const schema = PayloadSchemas[type as keyof PayloadMap];
-		const payload = yield* Schema.decodeUnknown(schema)(raw);
-		return yield* handler(clientId, payload);
-	});

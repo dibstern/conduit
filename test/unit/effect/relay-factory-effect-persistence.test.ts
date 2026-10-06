@@ -12,7 +12,6 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
-import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -22,6 +21,7 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
@@ -30,6 +30,7 @@ import type {
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -38,14 +39,11 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
 		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
-	}),
-	Layer.succeed(VersionCheckerTag, {
-		getLatestKnown: () => Effect.succeed(null),
-		getCurrentVersion: () => Effect.succeed("unknown"),
 	}),
 	Layer.succeed(PushManagerTag, {
 		subscribe: () => Effect.void,
@@ -94,7 +92,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 						"http://localhost:4096",
@@ -149,7 +146,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							{
 								slug: "effect-project",
 								title: "Effect Project",
-								directory: projectDir,
 								folders: [projectDir],
 								instanceId: "opencode",
 							},
@@ -182,7 +178,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 							instanceId: "opencode",
 						},
@@ -227,7 +222,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 						instanceId: "opencode",
 						missing: false,
@@ -273,6 +267,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			Layer.provide(
 				Layer.mergeAll(
 					InstanceHealthCheckLive,
+					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
@@ -280,7 +275,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
@@ -300,7 +294,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -412,18 +405,14 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
 					makeInstanceManagerStateLive(),
+					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					Layer.succeed(PortScannerTag, {
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
-					}),
-					Layer.succeed(VersionCheckerTag, {
-						getLatestKnown: () => Effect.succeed("9.9.9"),
-						getCurrentVersion: () => Effect.succeed("1.0.0"),
 					}),
 					Layer.succeed(PushManagerTag, {
 						subscribe: () => Effect.void,
@@ -449,7 +438,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -458,11 +446,9 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
 			expect(config?.triggerScan).toBeTypeOf("function");
-			expect(config?.getCachedUpdate).toBeTypeOf("function");
 			expect(config?.pushManager).toBe(pushManager);
 			const triggerScan = config?.triggerScan;
-			const getCachedUpdate = config?.getCachedUpdate;
-			if (triggerScan == null || getCachedUpdate == null) {
+			if (triggerScan == null) {
 				expect.fail("expected relay auxiliary callbacks");
 			}
 
@@ -471,12 +457,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				catch: (cause) => cause,
 			});
 			expect(scan).toEqual(scanResult);
-
-			const cachedUpdate = yield* Effect.tryPromise({
-				try: () => Promise.resolve(getCachedUpdate()),
-				catch: (cause) => cause,
-			});
-			expect(cachedUpdate).toBe("9.9.9");
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
 			Effect.ensuring(
@@ -521,7 +501,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						{
 							slug: "effect-project",
 							title: "Effect Project",
-							directory: projectDir,
 							folders: [projectDir],
 						},
 					]),
@@ -541,7 +520,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 					},
 					"http://localhost:4096",
@@ -590,7 +568,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					{
 						slug: "effect-project",
 						title: "Effect Project",
-						directory: projectDir,
 						folders: [projectDir],
 						instanceId: "opencode",
 					},
@@ -662,7 +639,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(added).toEqual(
 					expect.objectContaining({
 						title: "added",
-						directory: join(dir, "added"),
+						folders: [join(dir, "added")],
 						instanceId: "remote",
 					}),
 				);
@@ -671,7 +648,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					try: () =>
 						saveProject({
 							slug: added.slug,
-							folders: added.folders ?? [added.directory],
+							folders: added.folders,
 							title: "Added Project",
 						}),
 					catch: (cause) => cause,

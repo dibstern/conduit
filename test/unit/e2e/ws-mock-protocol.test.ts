@@ -47,16 +47,14 @@ describe("E2E WebSocket mock protocol normalizer", () => {
 		expect(
 			normalizeMockRelayMessage(
 				{
-					type: "permission_request",
+					type: "done",
 					sessionId: "sess-other",
-					id: "perm-1",
-					toolName: "Read",
-					description: "Read package.json",
+					code: 0,
 				},
 				context,
 			),
 		).toMatchObject({
-			type: "permission_request",
+			type: "done",
 			sessionId: "sess-other",
 		});
 	});

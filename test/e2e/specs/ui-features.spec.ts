@@ -121,7 +121,7 @@ test.describe("Input Area", () => {
 
 // Slash Commands test removed: The command menu requires both a populated
 // discoveryState.commands store AND Svelte $derived reactivity to trigger
-// commandMenuVisible from fill(). The WS mock delivers command_list but
+// commandMenuVisible from fill(). The mock serves the command catalog but
 // Svelte's $derived(inputText.startsWith("/")) doesn't reliably evaluate
 // in the headless Playwright environment. Duplicate #command-menu IDs
 // (InputArea wrapper + CommandMenu inner) also cause strict-mode violations.

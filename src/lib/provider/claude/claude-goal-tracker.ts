@@ -230,6 +230,13 @@ export class ClaudeGoalTracker {
 		});
 	}
 
+	/** A successful turn means the goal is running again, even when Claude
+	 *  writes no new goal fact (e.g. it only waits on background work). */
+	resume(): SessionGoalChangedPayload | undefined {
+		if (!this.goal || this.state.pausedReason === undefined) return undefined;
+		return this.update({ sessionId: this.sessionId, goal: this.goal });
+	}
+
 	private update(
 		next: SessionGoalChangedPayload,
 		messageId?: string,

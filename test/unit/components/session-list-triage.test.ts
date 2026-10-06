@@ -70,7 +70,7 @@ beforeEach(() => {
 	routerState.sessionNotFound = false;
 	attachedProjectState.slug = "current-project";
 	projectState.projects = [
-		{ slug: "current-project", title: "Current", directory: "/current" },
+		{ slug: "current-project", title: "Current", folders: ["/current"] },
 	];
 	seedRootSessions([
 		{ id: "idle", title: "Idle work", attention: "idle" },

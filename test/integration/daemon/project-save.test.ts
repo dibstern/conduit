@@ -4,11 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetProjects,
 	GetStatus,
+	type ProjectInfo,
 	ProjectSaveRejected,
 	SaveProject,
 	type SaveProjectInput,
@@ -17,7 +18,6 @@ import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { FolderIssue } from "../../../src/lib/project-folders.js";
 import { discoverClaudeRunners } from "../../../src/lib/provider/claude/claude-runner-registry.js";
-import { isRecord } from "../../../src/lib/utils.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
 import {
 	ProcessHarness,
@@ -35,9 +35,8 @@ async function projectFolders(harness: ProcessHarness) {
 		socket(harness),
 		new GetProjects({}),
 	);
-	return projects.map(({ slug, directory, folders, title }) => ({
+	return projects.map(({ slug, folders, title }) => ({
 		slug,
-		directory,
 		folders,
 		title,
 	}));
@@ -193,7 +192,7 @@ describe("SaveProject through the built daemon", () => {
 		const legacy = readConfig(fixture);
 		const project = legacy.projects.find(({ slug }) => slug === "process-test");
 		if (!project) throw new Error("Missing initial project in daemon.json");
-		delete project.folders;
+		delete (project as { folders?: unknown }).folders;
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify(legacy),
@@ -207,7 +206,6 @@ describe("SaveProject through the built daemon", () => {
 		expect(projects).toMatchObject([
 			{
 				slug: "process-test",
-				directory: fixture.projectDir,
 				folders: [fixture.projectDir],
 			},
 		]);
@@ -218,7 +216,7 @@ describe("SaveProject through the built daemon", () => {
 				({ slug }) => slug === project.slug,
 			);
 			expect(migrated?.folders).toEqual([fixture.projectDir]);
-			expect(migrated?.directory).toBe(migrated?.folders?.[0]);
+			expect(migrated).not.toHaveProperty("directory");
 		});
 	}, 60_000);
 
@@ -302,7 +300,6 @@ describe("SaveProject through the built daemon", () => {
 		expect(
 			saved.projects.find(({ slug }) => slug === saved.savedSlug),
 		).toMatchObject({
-			directory: valid,
 			folders: [valid, nested],
 		});
 		evidence["projectsAfter"] = await projectFolders(fixture);
@@ -353,7 +350,6 @@ describe("SaveProject through the built daemon", () => {
 		evidence["projectsAfter"] = projects;
 		expect(projects.find(({ slug }) => slug === saved.savedSlug)).toMatchObject(
 			{
-				directory: git,
 				folders: [git, plain],
 			},
 		);
@@ -366,46 +362,42 @@ describe("SaveProject through the built daemon", () => {
 		const directory = join(fixture.root, "broadcast-project");
 		mkdirSync(directory);
 		folders.add(directory);
-		const cursor = observer.frames.length;
+		const lists: (readonly ProjectInfo[])[] = [];
+		const following = Effect.runFork(
+			Stream.runForEach(observer.rpc.SubscribeProjects({}), ({ projects }) =>
+				Effect.sync(() => lists.push(projects)),
+			),
+		);
+		const latest = () => lists.at(-1) ?? [];
 		const input = { folders: [directory] };
 		const saved = await Effect.runPromise(first.rpc.SaveProject(input));
 		operations.push({ input, result: saved });
-		const added = await observer.waitFor(
-			(message) =>
-				message["type"] === "project_list" &&
-				Array.isArray(message["projects"]) &&
-				message["projects"].some(
-					(project: unknown) =>
-						isRecord(project) && project["slug"] === saved.savedSlug,
+		await vi.waitFor(
+			() =>
+				expect(latest()).toContainEqual(
+					expect.objectContaining({
+						slug: saved.savedSlug,
+						folders: [directory],
+					}),
 				),
-			cursor,
+			{ timeout: 15_000 },
 		);
-		evidence["saveBroadcast"] = added;
-		expect(added["projects"]).toContainEqual(
-			expect.objectContaining({
-				slug: saved.savedSlug,
-				directory,
-				folders: [directory],
-			}),
-		);
+		evidence["saveBroadcast"] = latest();
 
-		const removalCursor = observer.frames.length;
 		const removed = await Effect.runPromise(
 			first.rpc.RemoveProject({ slug: saved.savedSlug }),
 		);
 		evidence["removeResponse"] = removed;
-		const removal = await observer.waitFor(
-			(message) =>
-				message["type"] === "project_list" &&
-				Array.isArray(message["projects"]) &&
-				!message["projects"].some(
-					(project: unknown) =>
-						isRecord(project) && project["slug"] === saved.savedSlug,
+		await vi.waitFor(
+			() =>
+				expect(latest().some(({ slug }) => slug === saved.savedSlug)).toBe(
+					false,
 				),
-			removalCursor,
+			{ timeout: 15_000 },
 		);
-		evidence["removeBroadcast"] = removal;
-		expect(removal["projects"]).toContainEqual(
+		evidence["removeBroadcast"] = latest();
+		await Effect.runPromise(Fiber.interrupt(following));
+		expect(latest()).toContainEqual(
 			expect.objectContaining({ slug: "process-test" }),
 		);
 		expect(removed.projects.some(({ slug }) => slug === saved.savedSlug)).toBe(
@@ -493,7 +485,6 @@ describe("SaveProject through the built daemon", () => {
 			expect(projects).toMatchObject([
 				{
 					slug: "process-test",
-					directory: fixture.projectDir,
 					folders: [fixture.projectDir, extra],
 				},
 			]);
@@ -606,7 +597,7 @@ describe("SaveProject through the built daemon", () => {
 		const projects = await projectFolders(fixture);
 		evidence["projectsAfter"] = projects;
 		expect(projects).toMatchObject([
-			{ slug: "process-test", directory: newMain, folders: [newMain] },
+			{ slug: "process-test", folders: [newMain] },
 		]);
 		const after = await fixture.connect(sessionId);
 		const retained = await after.history(sessionId);
@@ -648,7 +639,9 @@ describe("SaveProject through the built daemon", () => {
 		evidence["cliResult"] = { exitCode: 0, ...result };
 		const projects = await projectFolders(fixture);
 		evidence["projectsAfter"] = projects;
-		const added = projects.filter((project) => project.directory === directory);
+		const added = projects.filter(
+			(project) => project.folders[0] === directory,
+		);
 		expect(added).toHaveLength(1);
 		expect(added[0]?.folders).toEqual([directory]);
 		expect(result.stdout).toContain(`Project added: ${added[0]?.slug}`);

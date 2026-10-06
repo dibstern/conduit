@@ -55,7 +55,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "model_list",
+		type: "mock_model_catalog",
 		providers: [
 			{
 				id: "anthropic",
@@ -72,7 +72,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },
@@ -84,7 +84,7 @@ const twoSessionInit: MockMessage[] = [
 			{
 				slug: PROJECT_SLUG,
 				title: PROJECT_SLUG,
-				directory: "/src/test-project",
+				folders: ["/src/test-project"],
 			},
 		],
 		current: PROJECT_SLUG,
@@ -336,7 +336,11 @@ test.describe("server-derived notification indicators", () => {
 
 		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
 
-		await sessionItem(page, SESS_B).click({ timeout: 5_000 });
+		// The title end: the row's hover actions cover its centre.
+		await sessionItem(page, SESS_B).click({
+			position: { x: 48, y: 12 },
+			timeout: 5_000,
+		});
 		await page.waitForFunction(
 			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
 			SESS_B,

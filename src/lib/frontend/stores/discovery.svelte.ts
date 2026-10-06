@@ -139,6 +139,8 @@ const serverDiscovery = $state({
 	providers: [] as ProviderInfo[],
 	currentModelId: "" as string,
 	currentProviderId: "" as string,
+	/** Retain session-scoped metadata so a switch never uses the previous provider. */
+	sessionProviderIds: {} as Record<string, string>,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
 	defaultModelId: "" as string,
@@ -206,6 +208,9 @@ export const discoveryState = {
 	},
 	get providers(): readonly Immutable<ProviderInfo>[] {
 		return serverDiscovery.providers;
+	},
+	get sessionProviderIds(): Readonly<Record<string, string>> {
+		return serverDiscovery.sessionProviderIds;
 	},
 	get commands(): readonly Immutable<CommandInfo>[] {
 		return serverDiscovery.commands;
@@ -435,8 +440,12 @@ export function selectInstance(instanceId: string): void {
 	}
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
-	const currentInScope = models.some((m) =>
-		modelMatchesId(m, discoveryState.currentModelId),
+	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
+	// and the other harness's provider id would reach this one on first send.
+	const currentInScope = models.some(
+		(m) =>
+			m.provider === discoveryState.currentProviderId &&
+			modelMatchesId(m, discoveryState.currentModelId),
 	);
 	if (currentInScope) return;
 	const preferred =
@@ -531,16 +540,17 @@ export function toProviderCommands(
 	);
 }
 
-export function handleAgentList(
-	msg: Extract<RelayMessage, { type: "agent_list" }>,
-): void {
-	const { agents, activeAgentId, providerScope } = msg;
-	if (Array.isArray(agents)) {
-		serverDiscovery.agents = agents;
-	}
-	if (providerScope) {
-		serverDiscovery.agentProviderScope = providerScope;
-	}
+export function handleAgentList({
+	agents,
+	activeAgentId,
+	providerScope,
+}: {
+	readonly agents: readonly AgentInfo[];
+	readonly providerScope: AgentProviderScope;
+	readonly activeAgentId?: string;
+}): void {
+	serverDiscovery.agents = [...agents];
+	serverDiscovery.agentProviderScope = providerScope;
 	if (activeAgentId) {
 		serverDiscovery.activeAgentId = activeAgentId;
 	} else {
@@ -549,9 +559,11 @@ export function handleAgentList(
 	choice.agentId = null;
 }
 
-export function applyGetAgentsResponse(response: GetAgentsResponse): void {
+export function applyGetAgentsResponse(
+	response: GetAgentsResponse,
+	sessionId?: string,
+): void {
 	handleAgentList({
-		type: "agent_list",
 		providerScope: response.providerScope,
 		agents: response.agents.map((agent) => ({
 			id: agent.id,
@@ -563,23 +575,23 @@ export function applyGetAgentsResponse(response: GetAgentsResponse): void {
 			? { activeAgentId: response.activeAgentId }
 			: {}),
 	});
+	if (sessionId)
+		serverDiscovery.sessionProviderIds[sessionId] = response.providerScope.id;
 	if (response.hiddenAgents) {
 		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
 	}
 }
 
-export function handleModelList(
-	msg: Extract<RelayMessage, { type: "model_list" }>,
-): void {
-	const { providers } = msg;
-	if (Array.isArray(providers)) {
-		serverDiscovery.providers = providers;
-	}
+export function handleModelList({
+	providers,
+}: {
+	readonly providers: readonly ProviderInfo[];
+}): void {
+	serverDiscovery.providers = [...providers];
 }
 
 export function applyGetModelsResponse(response: GetModelsResponse): void {
 	handleModelList({
-		type: "model_list",
 		providers: providersFromGetModelsResponse(response.providers),
 	});
 	if (response.active) {
@@ -611,10 +623,7 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		? { ...response.modelExecution }
 		: null;
 	if (response.permissionMode) {
-		handlePermissionModeInfo({
-			type: "permission_mode_info",
-			mode: response.permissionMode,
-		});
+		handlePermissionModeInfo({ mode: response.permissionMode });
 	}
 	if (response.hiddenModels) {
 		serverDiscovery.hiddenModels = [...response.hiddenModels];
@@ -631,19 +640,17 @@ export function handleModelInfo(
 	choice.providerId = null;
 }
 
-export function handleCommandList(
-	msg: Extract<RelayMessage, { type: "command_list" }>,
-): void {
-	const { commands } = msg;
-	if (Array.isArray(commands)) {
-		serverDiscovery.commands = commands;
-		serverDiscovery.commandsFetched = true;
-	}
+export function handleCommandList({
+	commands,
+}: {
+	readonly commands: readonly CommandInfo[];
+}): void {
+	serverDiscovery.commands = [...commands];
+	serverDiscovery.commandsFetched = true;
 }
 
 export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 	handleCommandList({
-		type: "command_list",
 		commands: response.commands.map((command) => ({
 			name: command.name,
 			...(command.description != null
@@ -655,9 +662,11 @@ export function applyGetCommandsResponse(response: GetCommandsResponse): void {
 	});
 }
 
-export function handleDefaultModelInfo(
-	msg: Extract<RelayMessage, { type: "default_model_info" }>,
-): void {
+export function handleDefaultModelInfo(msg: {
+	readonly model?: string | undefined;
+	readonly provider?: string | undefined;
+	readonly variant?: string | undefined;
+}): void {
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
@@ -696,16 +705,17 @@ export function handleContextWindowInfo(
 	choice.contextWindow = null;
 }
 
-export function handlePermissionModeInfo(
-	msg: Extract<RelayMessage, { type: "permission_mode_info" }>,
-): void {
+export function handlePermissionModeInfo(msg: {
+	readonly mode: SessionPermissionMode;
+}): void {
 	serverDiscovery.permissionMode = msg.mode;
 	choice.permissionMode = null;
 }
 
-export function handleVisibilityInfo(
-	msg: Extract<RelayMessage, { type: "visibility_info" }>,
-): void {
+export function handleVisibilityInfo(msg: {
+	readonly hiddenModels: readonly string[];
+	readonly hiddenAgents: readonly string[];
+}): void {
 	serverDiscovery.hiddenModels = [...msg.hiddenModels];
 	serverDiscovery.hiddenAgents = [...msg.hiddenAgents];
 	choice.hiddenModels = null;
@@ -795,6 +805,35 @@ export function chooseModel(model: {
 	]);
 }
 
+/** This tab's model and effort picks, if `instanceId` lists the model.
+ *  Nothing without a pick: the server's default applies then. An effort pick
+ *  commits the model it was picked for, which may be the one the server
+ *  reported. Drops a model carried over from another harness, which
+ *  `selectInstance` keeps when the new harness has no models yet. */
+export function getChosenModel(instanceId: string):
+	| {
+			readonly modelId: string;
+			readonly providerId: string;
+			readonly variant?: string;
+	  }
+	| undefined {
+	if (choice.modelId == null && choice.variant == null) return undefined;
+	const { currentModelId: modelId, currentProviderId: providerId } =
+		discoveryState;
+	const listed = getProviderGroupsForInstance(instanceId).some((group) =>
+		group.models.some(
+			(model) =>
+				model.provider === providerId && modelMatchesId(model, modelId),
+		),
+	);
+	if (!listed) return undefined;
+	return {
+		modelId,
+		providerId,
+		...(choice.variant == null ? {} : { variant: choice.variant }),
+	};
+}
+
 export function chooseVariant(variant: string): UndoChoice {
 	return propose("variant", variant);
 }
@@ -855,7 +894,6 @@ export function applyModelSwitched(response: SwitchModelResponse): void {
 
 export function applyDefaultModelSet(response: SetDefaultModelResponse): void {
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: response.model,
 		provider: response.provider,
 		variant: response.variant,
@@ -889,7 +927,6 @@ export function applyHiddenEntriesSet(
 	response: SetHiddenEntriesResponse,
 ): void {
 	handleVisibilityInfo({
-		type: "visibility_info",
 		hiddenModels: [...response.hiddenModels],
 		hiddenAgents: [...response.hiddenAgents],
 	});
@@ -908,6 +945,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.providers = [];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
+	serverDiscovery.sessionProviderIds = {};
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
 	serverDiscovery.defaultModelId = "";

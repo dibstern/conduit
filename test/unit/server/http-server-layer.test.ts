@@ -44,7 +44,7 @@ import {
 const testProjects: RouterProjectInfo[] = [
 	{
 		slug: "test-project",
-		directory: "/tmp/test-project",
+		folders: ["/tmp/test-project"],
 		title: "Test Project",
 		status: "ready",
 		clients: 2,
@@ -69,6 +69,7 @@ let setupInfoIsTls = false;
 const TestSetupInfoLayer = Layer.succeed(SetupInfoProvider, {
 	getPort: () => Effect.sync(() => setupInfoPort),
 	getIsTls: () => Effect.sync(() => setupInfoIsTls),
+	getPublicUrl: () => Effect.succeed(null),
 });
 
 let staticDir = "";
@@ -239,6 +240,7 @@ describe("Effect HTTP Router - Extended Routes", () => {
 				httpsUrl: `https://localhost:${setupInfoPort}`,
 				hasCert: setupInfoIsTls,
 				lanMode: false,
+				publicUrl: null,
 			});
 		});
 	});

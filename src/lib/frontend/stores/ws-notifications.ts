@@ -2,6 +2,7 @@
 // tab is hidden and a notable event arrives, plus push-active tracking.
 
 import { notificationContent } from "../../notification-content.js";
+import type { Approval } from "../../shared-types.js";
 import type { RelayMessage } from "../types.js";
 import { NOTIFICATION_DISMISS_MS } from "../ui-constants.js";
 import { getNotifSettings } from "../utils/notif-settings.js";
@@ -149,21 +150,18 @@ export function initSWMessageListener(): void {
 
 // Deliver through one channel when a notable event arrives.
 
-export const NOTIF_TYPES = new Set([
-	"done",
-	"error",
-	"permission_request",
-	"ask_user",
-]);
+// Approvals (from the approvals subscription) always deserve an alert.
+export const NOTIF_TYPES = new Set(["done", "error"]);
 
-function alertIdentity(msg: RelayMessage): string {
-	const session = "sessionId" in msg ? msg.sessionId : "";
+// The same ids the server's push ledger uses, so one receipt covers both.
+function alertIdentity(msg: RelayMessage | Approval): string {
 	const project = getCurrentSlug() ?? "";
+	if ("_tag" in msg)
+		return msg._tag === "permission"
+			? `${project}:${msg.sessionId}:permission:${msg.requestId}`
+			: `${project}:${msg.sessionId}:question:${msg.toolId}`;
+	const session = "sessionId" in msg ? msg.sessionId : "";
 	if ("alertId" in msg && msg.alertId) return `${project}:${msg.alertId}`;
-	if (msg.type === "permission_request")
-		return `${project}:${session}:permission:${msg.requestId}`;
-	if (msg.type === "ask_user")
-		return `${project}:${session}:question:${msg.toolId}`;
 	return `${project}:${session}:${msg.type}`;
 }
 
@@ -194,10 +192,14 @@ function showBrowserNotification(
 const unpersistedReceipts = new Set<string>();
 let receiptStorageWarningLogged = false;
 
-export async function triggerNotifications(msg: RelayMessage): Promise<void> {
-	if (!NOTIF_TYPES.has(msg.type)) return;
-	// Idle hints update the UI; only an identified terminal event proves completion.
-	if (msg.type === "done" && !msg.alertId) return;
+export async function triggerNotifications(
+	msg: RelayMessage | Approval,
+): Promise<void> {
+	if (!("_tag" in msg)) {
+		if (!NOTIF_TYPES.has(msg.type)) return;
+		// Idle hints update the UI; only an identified terminal event proves completion.
+		if (msg.type === "done" && !msg.alertId) return;
+	}
 	// A subscription survives reload and can change in another tab. Resolve it
 	// before choosing a channel, including the first event after page load.
 	if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
@@ -231,7 +233,7 @@ export async function triggerNotifications(msg: RelayMessage): Promise<void> {
 				await registration.showNotification(content.title, {
 					body: content.body,
 					tag: content.tag,
-					data: { type: msg.type, sessionId },
+					data: { type: "_tag" in msg ? msg._tag : msg.type, sessionId },
 				});
 				return true;
 			}

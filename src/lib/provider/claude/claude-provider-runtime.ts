@@ -218,6 +218,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 > & {
 	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
+	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
 	readonly prepareQuery?: () => Promise<void>;
 };
 
@@ -2277,6 +2278,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				if (next.done) break;
+				if (ctx.stopped || !(yield* isCurrentSession(this.stateRef, ctx)))
+					break;
 				captureClaudeSdkMessage(ctx.sessionId, next.value);
 
 				// A single message failing decode (SDK vocabulary drift) must not
@@ -2306,6 +2309,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				if (yield* pushForwardedSubagentMessageEffect(ctx, decodedMessage)) {
 					continue;
 				}
+				if (
+					(decodedMessage.type === "system" &&
+						decodedMessage.subtype === "task_notification") ||
+					((decodedMessage.type === "assistant" ||
+						(decodedMessage.type === "stream_event" &&
+							decodedMessage.event.type === "message_start")) &&
+						decodedMessage.parent_tool_use_id == null)
+				) {
+					ctx.turnInFlight = true;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
+				}
+				if (decodedMessage.type === "result") ctx.turnInFlight = false;
 				yield* translator.translate(ctx, decodedMessage);
 				yield* handleSubagentTaskStartedEffect(
 					(input) => this.ensureSubagentSessionEffect(ctx, input),
@@ -2313,6 +2328,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					decodedMessage,
 				);
 				if (decodedMessage.type === "result") {
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					const finalizationCtx = detachSubagentFinalizationContext(ctx);
 					markResultFinalizationStarted();
 					yield* this.runSubagentFinalizationEffect(
@@ -2496,6 +2512,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				Effect.gen(this, function* () {
 					const current = yield* getSession(this.stateRef, ctx.sessionId);
 					if (current === undefined || current === ctx) {
+						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 						yield* this.recordBackgroundTaskEffect({
 							sessionId: ctx.sessionId,
 							kind: "session-ended",
@@ -2625,6 +2642,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
+			ctx.stopped = true;
+			const turnInFlight = ctx.turnInFlight === true;
+			const messageId = ctx.activeAssistantMessageId ?? "";
 
 			stopSubagentPollers(ctx);
 			yield* this.interruptSubagentFinalizersForSession(ctx.sessionId);
@@ -2650,10 +2670,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			// `stopped` is set), so without this the turn row stays 'running'
 			// and the session stays 'busy' forever — the UI keeps showing the
 			// session as processing until the next turn accidentally resets it.
-			if (
-				ctx.eventSink &&
-				(yield* hasPendingTurn(this.stateRef, ctx.sessionId))
-			) {
+			if (ctx.eventSink && turnInFlight) {
 				const goalChange = ctx.goalTracker?.pause("Interrupted");
 				if (goalChange) {
 					yield* ctx.eventSink
@@ -2669,7 +2686,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				yield* ctx.eventSink
 					.push(
 						claudeRuntimeEvent("turn.interrupted", ctx.sessionId, {
-							messageId: ctx.lastAssistantUuid ?? "",
+							messageId,
 						}),
 					)
 					.pipe(Effect.ignore);
@@ -2684,6 +2701,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			}
 
 			ctx.turnInFlight = false;
+			this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
@@ -2692,8 +2710,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
-
-			(ctx as { stopped: boolean }).stopped = true;
 		});
 	}
 

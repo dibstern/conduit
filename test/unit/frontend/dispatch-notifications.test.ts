@@ -1,8 +1,9 @@
 import { seedSessions } from "../stores/session-fixtures.js";
 // Verifies that handleMessage() calls triggerNotifications() for exactly the
-// four notification-worthy message types: done, error, permission_request,
-// ask_user. This test catches wiring bugs where the triggerNotifications call
-// is accidentally removed from a switch branch in ws-dispatch.ts.
+// notification-worthy message types: done and error. (Approvals alert from the
+// approvals subscription, stores/approvals.ts.) This test catches wiring bugs
+// where the triggerNotifications call is accidentally removed from a switch
+// branch in ws-dispatch.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
@@ -52,7 +53,7 @@ vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
 	triggerNotifications: triggerNotificationsMock,
 	setPushActive: vi.fn(),
 	isPushActive: vi.fn(() => false),
-	NOTIF_TYPES: new Set(["done", "error", "permission_request", "ask_user"]),
+	NOTIF_TYPES: new Set(["done", "error"]),
 }));
 
 // Mock DOMPurify (required by chat.svelte.ts → markdown.ts)
@@ -113,33 +114,6 @@ describe("handleMessage calls triggerNotifications for notification-worthy types
 			message: "test error",
 			code: "UNKNOWN",
 		};
-		handleMessage(msg);
-		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
-		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);
-	});
-
-	it("calls triggerNotifications for 'permission_request' messages", () => {
-		const msg: RelayMessage = {
-			type: "permission_request",
-			sessionId: "test-session",
-			toolName: "bash",
-			requestId: "req-1",
-			toolInput: {},
-		} as RelayMessage;
-		handleMessage(msg);
-		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
-		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);
-	});
-
-	it("calls triggerNotifications for 'ask_user' messages", () => {
-		const msg: RelayMessage = {
-			type: "ask_user",
-			sessionId: "test-session",
-			toolId: "q-1",
-			questions: [
-				{ question: "What?", header: "", options: [], multiSelect: false },
-			],
-		} as RelayMessage;
 		handleMessage(msg);
 		expect(triggerNotificationsMock).toHaveBeenCalledOnce();
 		expect(triggerNotificationsMock).toHaveBeenCalledWith(msg);

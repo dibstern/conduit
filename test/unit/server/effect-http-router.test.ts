@@ -26,7 +26,7 @@ import {
 const testProjects: RouterProjectInfo[] = [
 	{
 		slug: "test-project",
-		directory: "/tmp/test-project",
+		folders: ["/tmp/test-project"],
 		title: "Test Project",
 		status: "ready",
 		clients: 2,
@@ -293,6 +293,7 @@ describe("Effect HTTP Router", () => {
 					Layer.succeed(SetupInfoProvider, {
 						getPort: () => Effect.succeed(2633),
 						getIsTls: () => Effect.succeed(false),
+						getPublicUrl: () => Effect.succeed(null),
 					}),
 				),
 			);

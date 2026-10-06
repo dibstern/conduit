@@ -118,6 +118,44 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	for (const providerId of ["claude", "opencode"]) {
+		it.effect(
+			`commits ${providerId} send_turn without a transcript in the outbox`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const registry = new ProviderRegistry();
+					const instance = makeStubInstance(providerId);
+					registry.registerInstance(instance);
+					const engine = new OrchestrationEngine({
+						registry,
+						durableCommands: yield* makeDurableOptions({ sql }),
+					});
+					const command = sendTurnCommand({ providerId });
+					yield* engine.dispatchEffect({
+						...command,
+						input: {
+							...command.input,
+							inputId: "current-user",
+							history: [{ role: "assistant", text: "prior transcript" }],
+						},
+					});
+
+					const [row] = yield* sql<{ payload_json: string }>`
+					SELECT payload_json FROM provider_command_outbox
+					WHERE command_id = ${command.commandId}`;
+					expect(row).toBeDefined();
+					const payload: unknown = JSON.parse(row?.payload_json ?? "null");
+					expect(payload).not.toHaveProperty("history");
+					expect(payload).toMatchObject({
+						prompt: "hello",
+						inputId: "current-user",
+					});
+					expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
+				}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		);
+	}
+
 	it.effect("uses injected id and time sources", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;

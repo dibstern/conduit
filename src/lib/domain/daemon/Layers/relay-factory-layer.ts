@@ -46,16 +46,16 @@ import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daem
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
+	getInstance as getEffectInstance,
 	getInstances as getEffectInstances,
 	getManagedOpenCodeProcessEnv,
 	InstanceManagerStateTag,
 	PollerFibersTag,
 	persistConfig as persistEffectInstanceConfig,
 	removeInstance as removeEffectInstance,
-	startInstance as startEffectInstance,
-	stopInstance as stopEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import {
 	broadcastProjectList,
 	broadcastToAll,
@@ -64,7 +64,6 @@ import {
 } from "../Services/project-registry-service.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
-import { VersionCheckerTag } from "./version-checker-layer.js";
 
 export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
 	reason: string;
@@ -153,8 +152,8 @@ export const RelayFactoryLive = (
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
-	| VersionCheckerTag
 	| PushManagerTag
+	| OpenCodeInstancesTag
 > =>
 	Layer.effect(
 		RelayFactoryTag,
@@ -171,8 +170,8 @@ export const RelayFactoryLive = (
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
-			const versionChecker = yield* VersionCheckerTag;
 			const pushManager = yield* PushManagerTag;
+			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -250,11 +249,20 @@ export const RelayFactoryLive = (
 			const removeInstance = (id: string) =>
 				runCallback(provideInstanceDeps(removeEffectInstance(id)));
 
+			// Claude instances have no process to start.
 			const startInstance = (id: string) =>
-				runCallback(provideInstanceDeps(startEffectInstance(id)));
+				runCallback(
+					provideInstanceDeps(getEffectInstance(id)).pipe(
+						Effect.flatMap((instance) =>
+							instance.driver === "claude"
+								? Effect.void
+								: Effect.asVoid(Effect.scoped(openCodeInstances.use(id))),
+						),
+					),
+				);
 
 			const stopInstance = (id: string) =>
-				runCallback(provideInstanceDeps(stopEffectInstance(id)));
+				runCallback(openCodeInstances.stop(id));
 
 			const updateInstance = (
 				id: string,
@@ -294,9 +302,6 @@ export const RelayFactoryLive = (
 
 			const triggerScan = () => runCallback(portScanner.scanNow());
 
-			const getCachedUpdate = () =>
-				runCallback(versionChecker.getLatestKnown());
-
 			return {
 				create: (
 					project: StoredProject,
@@ -313,9 +318,9 @@ export const RelayFactoryLive = (
 						}
 
 						// Create persistence DB directory and open SQLite
-						if (!existsSync(project.directory)) {
+						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
-								reason: `Project directory does not exist: ${project.directory}`,
+								reason: `Project directory does not exist: ${project.folders[0]}`,
 							});
 						}
 						const dbPath = projectEventsDbPath({ configDir, ...project });
@@ -326,7 +331,7 @@ export const RelayFactoryLive = (
 								writeProjectStorageOwner(
 									configDir,
 									project.slug,
-									project.directory,
+									project.folders[0],
 								);
 							},
 							catch: (cause) =>
@@ -379,7 +384,7 @@ export const RelayFactoryLive = (
 									)
 								: selectedInstance?.env,
 						);
-						envResolver?.register(project.directory, project.shellEnv);
+						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
 						);
@@ -394,8 +399,12 @@ export const RelayFactoryLive = (
 								creation = createProjectRelay({
 									httpServer,
 									opencodeUrl,
+									openCodeInstances,
+									...(selectedInstance
+										? { openCodeInstanceId: selectedInstance.id }
+										: {}),
 									...(opencodeAuth !== undefined ? { opencodeAuth } : {}),
-									projectDir: project.directory,
+									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {
 										shellEnv: (directory: string) => envResolver.get(directory),
@@ -412,7 +421,7 @@ export const RelayFactoryLive = (
 									broadcastSessionListChanged,
 									refreshSessionGit: async () => {
 										const git = await daemonSessionGitCache.refresh(
-											project.directory,
+											project.folders[0],
 										);
 										if (isDeepStrictEqual(git, lastPublishedGit)) return;
 										await publishProjectList();
@@ -427,7 +436,6 @@ export const RelayFactoryLive = (
 									updateInstance,
 									persistConfig,
 									triggerScan,
-									getCachedUpdate,
 									...(relayPushSender != null && {
 										pushManager: relayPushSender,
 									}),
@@ -474,7 +482,7 @@ export const RelayFactoryLive = (
 						Effect.withSpan("RelayFactory.create", {
 							attributes: {
 								slug: project.slug,
-								directory: project.directory,
+								mainFolder: project.folders[0],
 							},
 						}),
 					),

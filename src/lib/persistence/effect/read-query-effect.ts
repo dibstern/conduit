@@ -7,23 +7,48 @@ import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
-import type { GoalDetails } from "../../contracts/ws-rpc.js";
+import type {
+	GoalDetails,
+	SessionTodos,
+	TodoItem,
+} from "../../contracts/ws-rpc.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
-import type { SessionAttention, SessionInfo } from "../../shared-types.js";
+import {
+	type SessionAttention,
+	type SessionInfo,
+	SessionPermissionModeSchema,
+} from "../../shared-types.js";
 import type {
 	MessagePartRow,
 	MessageRow,
 	MessageWithParts,
 	PendingApprovalCountRow,
+	PendingApprovalRow,
 	PendingClaudeQuestionToolRow,
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
 import { sessionFamilyQuery } from "../session-family-query.js";
-import { messageRowsToHistory } from "../session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	toolOutputText,
+} from "../session-history-adapter.js";
+import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
+const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
+);
+const decodeTurnWaits = Schema.decodeUnknownSync(
+	Schema.parseJson(
+		Schema.Array(
+			Schema.Struct({
+				id: Schema.String,
+				from: Schema.Number,
+				to: Schema.NullOr(Schema.Number),
+			}),
+		),
+	),
 );
 
 export const sessionGoalState = (
@@ -166,6 +191,9 @@ export const sessionRowsToSessionInfoList = (
 			updatedAt: row.updated_at,
 			messageCount: 0,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
+			...(isSessionPermissionMode(row.permission_mode)
+				? { permissionMode: row.permission_mode }
+				: {}),
 			...(parentID ? { parentID } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null
@@ -235,6 +263,11 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	readonly getAllSessionStatusesWithProviders: () => Effect.Effect<
+		readonly Pick<SessionRow, "id" | "status" | "provider">[],
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly getSessionsForReconciliation: (
 		reportedIds: readonly string[],
 	) => Effect.Effect<
@@ -281,6 +314,19 @@ export interface ReadQueryEffect {
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
 	>;
+	/**
+	 * The approvals subscription's read (ni8.9), in the shape of
+	 * {@link readSessionList}. A base read (no `range`) is every pending
+	 * approval; a windowed read is every approval that moved inside it,
+	 * resolved ones included, because a resolution is a removal to announce.
+	 */
+	readonly readPendingApprovals: (range?: {
+		readonly after?: number;
+		readonly through?: number;
+	}) => Effect.Effect<
+		{ readonly rows: readonly PendingApprovalRow[]; readonly version: number },
+		ReadQueryEffectError | SqlError
+	>;
 	readonly listPendingClaudeQuestionTools?: () => Effect.Effect<
 		readonly PendingClaudeQuestionToolRow[],
 		ReadQueryEffectError | SqlError
@@ -296,6 +342,12 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+	readonly getSessionHistoryMetadata: (
+		sessionId: string,
+	) => Effect.Effect<
+		{ readonly messageCount: number; readonly cumulativeTokens: number },
+		ReadQueryEffectError | SqlError
+	>;
 	readonly readSessionTranscriptPage: (
 		sessionId: string,
 		options: { readonly before?: string; readonly limit: number },
@@ -359,6 +411,30 @@ export interface ReadQueryEffect {
 				readonly id: string;
 				readonly version: number;
 			}[];
+		},
+		ReadQueryEffectError | SqlError
+	>;
+
+	/**
+	 * One session's todo list: the items its newest completed TodoWrite left
+	 * behind, as one row. Todos are not a table of their own; they are the
+	 * TodoWrite tool parts the message projector already keeps, so they inherit
+	 * the owning message's version and survive a reload with the transcript.
+	 *
+	 * A ranged read answers with the row only when a TodoWrite message (or a
+	 * removed message) moved inside `range`, at the newest such version, so an
+	 * ordinary text delta in the session costs one indexed probe and no row.
+	 */
+	readonly readSessionTodos: (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	) => Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionTodos;
+				readonly version: number;
+			}[];
+			readonly version: number;
 		},
 		ReadQueryEffectError | SqlError
 	>;
@@ -428,30 +504,72 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 	ReadQueryEffect
 >() {}
 
-/** Attach each part to its message, preserving message and part order. */
-function groupMessagesWithParts(
-	messages: readonly MessageRow[],
-	parts: readonly MessagePartRow[],
-): MessageWithParts[] {
-	const partsByMessage = new Map<string, MessagePartRow[]>();
-	for (const part of parts) {
-		let existing = partsByMessage.get(part.message_id);
-		if (!existing) {
-			existing = [];
-			partsByMessage.set(part.message_id, existing);
-		}
-		existing.push(part);
-	}
-	return messages.map((message) => ({
-		...message,
-		parts: partsByMessage.get(message.id) ?? [],
-	}));
-}
-
 type MessageWithTurnModelRow = MessageRow & {
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
+	turn_started_at: number | null;
+	turn_completed_at: number | null;
+	turn_waits: string;
+};
+
+const TODO_STATUSES: readonly TodoItem["status"][] = [
+	"pending",
+	"in_progress",
+	"completed",
+	"cancelled",
+];
+
+const parseStoredJson = (text: string | null): unknown => {
+	if (text === null) return undefined;
+	try {
+		const value: unknown = JSON.parse(text);
+		// A provider's text output is stored as a JSON string, and OpenCode's
+		// todowrite output is itself JSON.
+		return typeof value === "string" ? parseStoredJson(value) : value;
+	} catch {
+		return undefined;
+	}
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The todo list a TodoWrite carried: its input's `todos` (stored canonically
+ * as `{ tool: "Unknown", raw }`), else the list OpenCode echoes as its output.
+ * Items speak `content` on the wire and `subject` here. `undefined` when
+ * neither side holds a list.
+ */
+const todoWriteItems = (
+	input: string | null,
+	result: string | null,
+): TodoItem[] | undefined => {
+	const listOf = (value: unknown): unknown[] | undefined =>
+		Array.isArray(value)
+			? value
+			: !isRecord(value)
+				? undefined
+				: Array.isArray(value["todos"])
+					? value["todos"]
+					: listOf(value["raw"]);
+	const list =
+		listOf(parseStoredJson(input)) ?? listOf(parseStoredJson(result));
+	return list?.filter(isRecord).map((todo, index) => {
+		const status = TODO_STATUSES.find((known) => known === todo["status"]);
+		const description = todo["description"];
+		return {
+			id:
+				typeof todo["id"] === "string" && todo["id"]
+					? todo["id"]
+					: `todo-${index}`,
+			subject: String(todo["subject"] ?? todo["content"] ?? ""),
+			...(typeof description === "string" && description
+				? { description }
+				: {}),
+			status: status ?? "pending",
+		};
+	});
 };
 
 function groupMessagesWithPartsAndTurnModels(
@@ -469,11 +587,29 @@ function groupMessagesWithPartsAndTurnModels(
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
+			turn_started_at,
+			turn_completed_at,
+			turn_waits,
 			...messageRow
 		} = message;
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(message.role === "user" && turn_started_at !== null
+				? {
+						turnTiming: {
+							startedAt: turn_started_at,
+							...(turn_completed_at === null
+								? {}
+								: { endedAt: turn_completed_at }),
+							waits: decodeTurnWaits(turn_waits).map(({ id, from, to }) => ({
+								id,
+								from,
+								...(to === null ? {} : { to }),
+							})),
+						},
+					}
+				: {}),
 			...(turn_actual_model === null
 				? {}
 				: {
@@ -493,6 +629,23 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	// A prompt queued behind a running turn starts working when that turn
+	// ends, not when it was sent: waiting in the queue is not work.
+	const turnTimingColumns = sql`
+		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
+			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
+		) AS turn_started_at,
+		t.completed_at AS turn_completed_at,
+		(SELECT json_group_array(json_object(
+			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at
+		))
+		FROM (
+			SELECT id, created_at, resolved_at FROM pending_approvals
+			WHERE session_id = t.session_id
+				AND created_at >= t.requested_at
+				AND (t.completed_at IS NULL OR created_at <= t.completed_at)
+			ORDER BY created_at ASC, id ASC
+		) pa) AS turn_waits`;
 
 	const getToolContent = (
 		toolId: string,
@@ -500,7 +653,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const rows = yield* sql<{ content: string }>`
 				SELECT content FROM tool_content WHERE tool_id = ${toolId}`;
-			return rows[0]?.content;
+			if (rows[0]) return rows[0].content;
+			// Nothing writes tool_content any more: the part keeps the whole
+			// output, and transcripts ship a preview of it.
+			const parts = yield* sql<{ result: string }>`
+				SELECT result FROM message_parts
+				WHERE type = 'tool' AND call_id = ${toolId} AND result IS NOT NULL
+				LIMIT 1`;
+			return parts[0] && toolOutputText(parts[0].result);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -545,6 +705,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getSession",
 							cause: e,
 						}),
+			),
+		);
+
+	const getAllSessionStatusesWithProviders = () =>
+		sql<Pick<SessionRow, "id" | "status" | "provider">>`
+			SELECT id, status, provider FROM sessions`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getAllSessionStatusesWithProviders",
+						cause,
+					}),
 			),
 		);
 
@@ -695,28 +867,47 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const listSessionInfos: ReadQueryEffect["listSessionInfos"] = (opts) =>
 		Effect.gen(function* () {
-			const [rows, lineage, approvals, projectedStatuses] = yield* Effect.all([
-				listSessions(opts),
-				getSessionLineage(),
+			const rows = yield* listSessions(opts);
+			// Roll-ups (busy, unread, pending counts) only need the listed rows and
+			// their descendants. Reading lineage and status for every session made
+			// each page cost a full scan of the store, twice.
+			const [family, approvals] = yield* Effect.all([
+				sql<{
+					id: string;
+					parent_id: string | null;
+					status: string;
+					unread: number;
+				}>`
+					WITH RECURSIVE family(id) AS (
+						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
+						UNION
+						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
+					)
+					SELECT id, parent_id, status, unread FROM sessions JOIN family USING (id)`,
 				countPendingApprovalsBySession(),
-				getAllSessionStatuses(),
-			]);
+			]).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ReadQueryEffectError
+						? cause
+						: new ReadQueryEffectError({
+								operation: "listSessionInfos",
+								cause,
+							}),
+				),
+			);
 			const pending = pendingApprovalCountsByType(approvals);
 			return sessionRowsToSessionInfoList(rows, {
 				parentMap: new Map(
-					lineage.rows.flatMap((row) =>
+					family.flatMap((row) =>
 						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
 					),
 				),
 				unreadSessionIds: new Set(
-					lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+					family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
 				statuses: {
 					...Object.fromEntries(
-						Object.entries(projectedStatuses).map(([id, type]) => [
-							id,
-							{ type },
-						]),
+						family.map((row) => [row.id, { type: row.status }]),
 					),
 					...opts?.statuses,
 				},
@@ -729,31 +920,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		});
 
 	const listPendingClaudeQuestionTools = () =>
-		sql<PendingClaudeQuestionToolRow>`
-			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
-			FROM message_parts mp
-			JOIN messages m ON m.id = mp.message_id
-			JOIN sessions s ON s.id = m.session_id
-			WHERE s.provider = 'claude'
-				AND mp.type = 'tool'
-				AND mp.tool_name = 'AskUserQuestion'
-				AND mp.status IN ('started', 'running', 'pending')
-				-- A later user message means the conversation moved on (e.g. after a
-				-- crash), so the question is abandoned rather than still pending.
-				AND NOT EXISTS (
-					SELECT 1 FROM messages later
-					WHERE later.session_id = m.session_id
-						AND later.role = 'user'
-						AND later.created_at > m.created_at
-				)`.pipe(
-			Effect.mapError(
-				(cause) =>
-					new ReadQueryEffectError({
-						operation: "listPendingClaudeQuestionTools",
-						cause,
-					}),
-			),
-		);
+		sql
+			.unsafe<PendingClaudeQuestionToolRow>(pendingClaudeQuestionToolsQuery)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "listPendingClaudeQuestionTools",
+							cause,
+						}),
+				),
+			);
 
 	const getPendingClaudeQuestionTool = (sessionId: string, callId: string) =>
 		sql<PendingClaudeQuestionToolRow>`
@@ -783,9 +960,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT messages.*,
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
-					turns.actual_model AS turn_actual_model
+					turns.actual_model AS turn_actual_model,
+					${turnTimingColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
+				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 				WHERE messages.session_id = ${sessionId}
 				ORDER BY messages.created_at ASC, messages.id ASC`;
 			if (messages.length === 0) return [];
@@ -808,6 +987,37 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					: new ReadQueryEffectError({
 							operation: "getSessionMessagesWithParts",
 							cause: e,
+						}),
+			),
+		);
+
+	const getSessionHistoryMetadata = (sessionId: string) =>
+		Effect.gen(function* () {
+			const rows = yield* sql<{
+				messageCount: number;
+				cumulativeTokens: number;
+			}>`
+				SELECT COUNT(*) AS messageCount,
+					COALESCE(SUM(CASE WHEN rest_payload IS NOT NULL OR tokens_in IS NOT NULL
+						OR tokens_out IS NOT NULL OR context_window IS NOT NULL
+						THEN COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)
+							+ COALESCE(tokens_cache_read, 0) + COALESCE(tokens_cache_write, 0)
+						ELSE 0 END), 0) AS cumulativeTokens
+				FROM messages WHERE session_id = ${sessionId}`;
+			const metadata = rows[0];
+			if (!metadata)
+				return yield* new ReadQueryEffectError({
+					operation: "getSessionHistoryMetadata",
+					cause: new Error("Missing history metadata row"),
+				});
+			return metadata;
+		}).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ReadQueryEffectError
+					? cause
+					: new ReadQueryEffectError({
+							operation: "getSessionHistoryMetadata",
+							cause,
 						}),
 			),
 		);
@@ -902,14 +1112,34 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							before: options.before,
 						});
 					}
+					// The first page reaches back to the newest prompt, or further to
+					// the prompt still running, which a prompt queued behind it would
+					// otherwise push off the page. A turn left running before a later
+					// one settled is a crash leftover and is ignored.
+					const [anchor] = cursor
+						? []
+						: yield* sql<{ created_at: number; id: string }>`
+								SELECT created_at, id FROM messages
+								WHERE session_id = ${sessionId} AND role = 'user'
+								ORDER BY id IS (
+									SELECT id FROM turns
+									WHERE session_id = ${sessionId} AND state = 'running'
+									AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
+										WHERE session_id = ${sessionId}
+										AND state NOT IN ('pending', 'running'))
+									ORDER BY requested_at ASC, rowid ASC LIMIT 1
+								) DESC, created_at DESC, id DESC
+								LIMIT 1`;
 					const rows = cursor
 						? yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
-									turns.actual_model AS turn_actual_model
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
 									AND (messages.created_at < ${cursor.created_at}
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
@@ -919,13 +1149,27 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
-									turns.actual_model AS turn_actual_model
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
 								ORDER BY messages.created_at DESC, messages.id DESC
-								LIMIT ${options.limit + 1}`;
-					const page = rows.slice(0, options.limit).reverse();
+								LIMIT (
+									SELECT MAX(${options.limit}, COUNT(*)) + 1
+									FROM messages m
+									WHERE m.session_id = ${sessionId}
+										AND (m.created_at > ${anchor?.created_at ?? null}
+											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
+								)`;
+					const pageLimit = cursor
+						? options.limit
+						: Math.max(
+								options.limit,
+								rows.findIndex((message) => message.id === anchor?.id) + 1,
+							);
+					const page = rows.slice(0, pageLimit).reverse();
 					const parts = page.length
 						? yield* sql<MessagePartRow>`
 								SELECT * FROM message_parts
@@ -934,7 +1178,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						: [];
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(page, parts),
-						hasMore: rows.length > options.limit,
+						hasMore: rows.length > pageLimit,
 						version,
 					};
 				}),
@@ -1049,6 +1293,40 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readPendingApprovals: ReadQueryEffect["readPendingApprovals"] = (
+		range,
+	) =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const rows =
+						range === undefined
+							? yield* sql<PendingApprovalRow>`
+								SELECT id, session_id, type, status, tool_name, input, details, version
+								FROM pending_approvals
+								WHERE status = 'pending'
+								ORDER BY created_at, id`
+							: yield* sql<PendingApprovalRow>`
+								SELECT id, session_id, type, status, tool_name, input, details, version
+								FROM pending_approvals
+								WHERE version > ${floor} AND version <= ${ceiling}
+								ORDER BY version, created_at, id`;
+					return { rows, version };
+				}),
+			)
+			.pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "readPendingApprovals",
+							cause,
+						}),
+				),
+			);
+
 	const readSessionTranscript = (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
@@ -1069,11 +1347,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
-					const messages = yield* sql<MessageRow>`
-						SELECT * FROM messages
-						WHERE session_id = ${sessionId}
-							AND version > ${floor} AND version <= ${ceiling}
-						ORDER BY created_at ASC, id ASC`;
+					const messages = yield* sql<MessageWithTurnModelRow>`
+						SELECT messages.*,
+							turns.requested_model AS turn_requested_model,
+							turns.expected_model AS turn_expected_model,
+							turns.actual_model AS turn_actual_model,
+							${turnTimingColumns}
+						FROM messages
+						LEFT JOIN turns ON turns.id = messages.turn_id
+						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
+						WHERE messages.session_id = ${sessionId}
+							AND messages.version > ${floor} AND messages.version <= ${ceiling}
+						ORDER BY messages.created_at ASC, messages.id ASC`;
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
@@ -1099,7 +1384,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						ORDER BY version, message_id`;
 
 					return {
-						messages: groupMessagesWithParts(messages, parts),
+						messages: groupMessagesWithPartsAndTurnModels(messages, parts),
 						version,
 						...(removed === undefined ? {} : { removed }),
 					};
@@ -1194,6 +1479,81 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					: new ReadQueryEffectError({ operation: "readPendingInputs", cause }),
 			),
 		);
+	const readSessionTodos = (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	): Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionTodos;
+				readonly version: number;
+			}[];
+			readonly version: number;
+		},
+		ReadQueryEffectError | SqlError
+	> =>
+		sql
+			.withTransaction(
+				Effect.gen(function* () {
+					const version = yield* readModelVersion;
+					const floor = range?.after ?? BEFORE_FIRST_VERSION;
+					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const moved =
+						range === undefined
+							? undefined
+							: ((yield* sql<{ moved: number | null }>`
+						SELECT MAX(v) AS moved FROM (
+							SELECT messages.version AS v FROM messages
+							JOIN message_parts mp ON mp.message_id = messages.id
+							WHERE messages.session_id = ${sessionId}
+								AND messages.version > ${floor} AND messages.version <= ${ceiling}
+								AND mp.tool_name = 'TodoWrite'
+							UNION ALL
+							SELECT version AS v FROM message_tombstones
+							WHERE session_id = ${sessionId}
+								AND version > ${floor} AND version <= ${ceiling}
+						)`)[0]?.moved ?? null);
+					if (moved === null) return { rows: [], version };
+					// The newest few writes are plenty: the first one that still
+					// parses is the list, and older ones are history.
+					const writes = yield* sql<{
+						input: string | null;
+						result: string | null;
+						version: number;
+					}>`
+						SELECT mp.input, mp.result, messages.version
+						FROM message_parts mp
+						JOIN messages ON messages.id = mp.message_id
+						WHERE messages.session_id = ${sessionId}
+							AND messages.version <= ${ceiling}
+							AND mp.tool_name = 'TodoWrite' AND mp.status = 'completed'
+						ORDER BY messages.created_at DESC, messages.id DESC, mp.sort_order DESC
+						LIMIT 10`;
+					const items =
+						writes
+							.map((write) => todoWriteItems(write.input, write.result))
+							.find((parsed) => parsed !== undefined) ?? [];
+					return {
+						rows: [
+							{
+								item: { sessionId, items },
+								version: moved ?? writes[0]?.version ?? 0,
+							},
+						],
+						version,
+					};
+				}),
+			)
+			.pipe(
+				Effect.mapError((e) =>
+					e instanceof ReadQueryEffectError
+						? e
+						: new ReadQueryEffectError({
+								operation: "readSessionTodos",
+								cause: e,
+							}),
+				),
+			);
 
 	const getLatestTurnModelExecution = (
 		sessionId: string,
@@ -1227,18 +1587,22 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getGoalDetails,
 		getAllSessionStatuses,
+		getAllSessionStatusesWithProviders,
 		listSessions,
 		listSessionInfos,
 		getSessionLineage,
 		getSessionFamily,
 		getSessionsForReconciliation,
 		countPendingApprovalsBySession,
+		readPendingApprovals,
 		listPendingClaudeQuestionTools,
 		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,
+		getSessionHistoryMetadata,
 		readSessionTranscriptPage,
 		readSessionList,
 		readSessionTranscript,
+		readSessionTodos,
 		getLatestTurnModelExecution,
 		readPendingInputs,
 		readInboxState,

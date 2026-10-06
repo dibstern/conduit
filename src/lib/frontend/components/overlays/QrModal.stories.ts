@@ -19,6 +19,37 @@ const LAN_HEALTH = {
 /** The origin QrModal should rewrite the share URL to, given LAN_HEALTH. */
 const SHARE_ORIGIN = "http://192.168.1.42:2633";
 
+/** The Tailscale Serve URL, which serve mode advertises instead of any IP. */
+const SERVE_URL = "https://conduit-mac.tail1234.ts.net:2633";
+
+/** `/health` in serve mode: conduit on loopback, a LAN IP it doesn't listen on. */
+const SERVE_HEALTH = {
+	...LAN_HEALTH,
+	host: "127.0.0.1",
+	tailscaleServe: { url: SERVE_URL },
+};
+
+/** Answer `/health` with `health` and reject every other request. */
+function stubHealth(health: object) {
+	return () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (input: RequestInfo | URL, _init?: RequestInit) => {
+			const url = input instanceof Request ? input.url : String(input);
+			return url.endsWith("/health")
+				? Promise.resolve(
+						new Response(JSON.stringify(health), {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						}),
+					)
+				: Promise.reject(new TypeError("Failed to fetch"));
+		};
+		return () => {
+			globalThis.fetch = realFetch;
+		};
+	};
+}
+
 const meta = {
 	title: "Overlays/QrModal",
 	component: QrModal,
@@ -44,27 +75,36 @@ const meta = {
 	//
 	// Anything other than /health is rejected, so a new request can't silently
 	// reintroduce network dependence.
-	beforeEach: () => {
-		const realFetch = globalThis.fetch;
-		globalThis.fetch = (input: RequestInfo | URL, _init?: RequestInit) => {
-			const url = input instanceof Request ? input.url : String(input);
-			return url.endsWith("/health")
-				? Promise.resolve(
-						new Response(JSON.stringify(LAN_HEALTH), {
-							status: 200,
-							headers: { "content-type": "application/json" },
-						}),
-					)
-				: Promise.reject(new TypeError("Failed to fetch"));
-		};
-		return () => {
-			globalThis.fetch = realFetch;
-		};
-	},
+	beforeEach: stubHealth(LAN_HEALTH),
 } satisfies Meta<typeof QrModal>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+/** Wait for the QR to render, then check the share URL starts at `origin`. */
+function expectShareOrigin(origin: string): NonNullable<Story["play"]> {
+	return async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		expect(dialog.matches(":modal")).toBe(true);
+
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector("svg"),
+				"QR code SVG never rendered — the capture would be a blank white box",
+			).not.toBeNull();
+		});
+
+		// The share URL must be the rewritten origin, never the Storybook one.
+		// This is the assertion that keeps the baseline port-independent: if the
+		// rewrite ever stops applying, the URL falls back to localhost:<port> and
+		// this fails loudly instead of at recapture time on someone else's port.
+		const shareUrl = await canvas.findByRole("button", { name: /^http/ });
+		expect(shareUrl.textContent).toContain(origin);
+		expect(shareUrl.textContent).not.toContain("localhost");
+	};
+}
 
 /**
  * Modal visible with QR code rendering the current page URL.
@@ -85,27 +125,7 @@ export const Visible: Story = {
 	// - Before that, the component renders a "Detecting network..." placeholder
 	//   while /health is in flight, which is a third distinct frame this story
 	//   could have captured.
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(dialog).toBeVisible();
-		expect(dialog.matches(":modal")).toBe(true);
-
-		await waitFor(() => {
-			expect(
-				canvasElement.querySelector("svg"),
-				"QR code SVG never rendered — the capture would be a blank white box",
-			).not.toBeNull();
-		});
-
-		// The share URL must be the rewritten LAN origin, never the Storybook one.
-		// This is the assertion that keeps the baseline port-independent: if the
-		// rewrite ever stops applying, the URL falls back to localhost:<port> and
-		// this fails loudly instead of at recapture time on someone else's port.
-		const shareUrl = await canvas.findByRole("button", { name: /^http/ });
-		expect(shareUrl.textContent).toContain(SHARE_ORIGIN);
-		expect(shareUrl.textContent).not.toContain("localhost");
-	},
+	play: expectShareOrigin(SHARE_ORIGIN),
 };
 
 /**
@@ -121,4 +141,14 @@ export const Hidden: Story = {
 export const Hover: Story = {
 	...Visible,
 	parameters: { pseudo: { hover: true } },
+};
+
+/** Serve mode: the QR encodes the Tailscale Serve URL, not a LAN IP. */
+export const TailscaleServe: Story = {
+	args: {
+		visible: true,
+		onClose: noop,
+	},
+	beforeEach: stubHealth(SERVE_HEALTH),
+	play: expectShareOrigin(SERVE_URL),
 };

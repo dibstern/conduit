@@ -102,8 +102,8 @@ test.describe("Picker context row", () => {
 						...message,
 						options: [{ value: "200k", label: "200K", isDefault: true }],
 					}
-				: message.type === "model_list"
-					? { type: "model_list", providers: [] }
+				: message.type === "mock_model_catalog"
+					? { type: "mock_model_catalog", providers: [] }
 					: message,
 		);
 		const { rpc } = await setup(page, baseURL, initMessages);
@@ -126,14 +126,14 @@ test.describe("Picker context row", () => {
 	}) => {
 		const initMessages = contextWindowInitMessages.filter(
 			(message) =>
-				!["model_info", "model_list", "context_window_info"].includes(
+				!["model_info", "mock_model_catalog", "context_window_info"].includes(
 					message.type,
 				),
 		);
 		initMessages.push(
 			{ type: "model_info", model: "gpt-5", provider: "openai" },
 			{
-				type: "model_list",
+				type: "mock_model_catalog",
 				providers: [
 					{
 						id: "openai",

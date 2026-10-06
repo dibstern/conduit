@@ -167,6 +167,7 @@ export const subscribeSessionDetail = (options: {
 								rows: [
 									...messageRowsToHistory(result.messages, {
 										pageSize: result.messages.length,
+										toolOutputPreview: true,
 									}).messages.map((message, index) => ({
 										item: {
 											_tag: "transcriptMessage" as const,

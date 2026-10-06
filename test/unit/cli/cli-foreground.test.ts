@@ -10,7 +10,7 @@ const { mockRegisterProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 	() => {
 		const mockRegisterProject = vi
 			.fn()
-			.mockResolvedValue({ slug: "test-project", directory: "/test/project" });
+			.mockResolvedValue({ slug: "test-project", folders: ["/test/project"] });
 
 		const mockStartForegroundDaemon = vi
 			.fn()

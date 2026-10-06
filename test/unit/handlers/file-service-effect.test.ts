@@ -1,21 +1,13 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import {
-	OpenCodeFileServiceTag,
-	WebSocketHandlerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { handleGetFileList } from "../../../src/lib/handlers/files.js";
-import {
-	makeMockWebSocketHandler,
-	type RecordedWebSocketCall,
-} from "../../helpers/mock-factories.js";
+import { OpenCodeFileServiceTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { getFileListResponse } from "../../../src/lib/handlers/files.js";
 
-describe("file handlers with Effect-native file service", () => {
+describe("file reads with Effect-native file service", () => {
 	it.effect(
 		"lists files without requiring the Promise OpenCode API tag",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const fileService = {
 				list: vi.fn((_path: string) =>
 					Effect.succeed([
@@ -33,27 +25,18 @@ describe("file handlers with Effect-native file service", () => {
 				),
 			};
 
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeFileServiceTag, fileService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
-			);
-
-			return handleGetFileList("client-1", {}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
+			return getFileListResponse().pipe(
+				Effect.provideService(OpenCodeFileServiceTag, fileService),
+				Effect.tap((reply) => {
 					expect(fileService.list).toHaveBeenCalledWith(".");
 					expect(fileService.read).toHaveBeenCalledWith(".gitignore");
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "file_list",
+					expect(reply).toEqual({
 						path: ".",
 						entries: [
 							{ name: "src", type: "directory" },
 							{ name: "README.md", type: "file" },
 						],
-					} satisfies Extract<
-						RecordedWebSocketCall,
-						{ channel: "sendTo" }
-					>["message"]);
+					});
 				}),
 			);
 		},

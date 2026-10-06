@@ -204,7 +204,7 @@ const makeDaemonProjectsReader = (deps: {
 						0;
 					return {
 						slug,
-						directory: entry.project.directory,
+						folders: entry.project.folders,
 						title: entry.project.title,
 						status: routerStatusForProjectState(entry),
 						...(entry._tag === "Error" && { error: entry.error }),
@@ -226,6 +226,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			setupInfoLayer: Layer.succeed(SetupInfoProvider, {
 				getPort: () => Effect.sync(options.getPort),
 				getIsTls: () => Effect.sync(options.getIsTls),
+				getPublicUrl: () => Effect.succeed(null),
 			}),
 			staticDir: options.staticDir,
 			getProjects: () => Effect.sync(options.getProjects),
@@ -257,6 +258,14 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 						Ref.get(configRef).pipe(Effect.map((config) => config.port)),
 					getIsTls: () =>
 						Ref.get(configRef).pipe(Effect.map((config) => config.tlsEnabled)),
+					getPublicUrl: () =>
+						Ref.get(configRef).pipe(
+							Effect.map(({ tailscaleServe }) =>
+								tailscaleServe && "url" in tailscaleServe
+									? tailscaleServe.url
+									: null,
+							),
+						),
 				}),
 				staticDir,
 				getProjects: makeDaemonProjectsReader({

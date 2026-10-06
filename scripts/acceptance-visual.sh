@@ -31,7 +31,7 @@ if [ "$probe" -ne 7 ]; then
 fi
 
 preview_log="$ROOT_DIR/acceptance/visual/artifacts/vite-preview.log"
-pnpm exec vite preview --port 4173 --strictPort >"$preview_log" 2>&1 &
+pnpm exec vite preview --port "$ACCEPTANCE_PORT" --strictPort >"$preview_log" 2>&1 &
 preview_pid=$!
 
 stop_preview() {
@@ -55,7 +55,7 @@ until curl --fail --silent --output /dev/null --max-time 2 "$CONDUIT_BASE_URL"; 
   sleep 0.1
 done
 
-for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar transcript-feed-states composer-effort-meter session-goal composer-set-goal composer-field-width composer-live-status composer-picker session-goal-states session-goal-details composer-controls-words composer-context-warning composer-builtin-commands session-skills-chip session-background-tasks composer-final-design pending-input-tray steer; do
+for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar transcript-feed-states composer-effort-meter session-goal composer-set-goal composer-field-width composer-live-status composer-picker session-goal-states session-goal-details composer-controls-words composer-context-warning composer-builtin-commands session-skills-chip session-background-tasks composer-final-design opencode-connection-banner pending-input-tray steer; do
   gherkin-parser \
     "features/$feature.feature" \
     "build/acceptance/ir/$feature.json"

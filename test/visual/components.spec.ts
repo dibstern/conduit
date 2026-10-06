@@ -63,6 +63,14 @@ const LIGHT_STORY_IDS = new Set([
 	"ui-dialog--default",
 	"ui-dialog--dark-backdrop",
 	"ui-dialog--subtle-backdrop",
+	"project-projectdialog--empty",
+	"project-projectdialog--path-matches-open",
+	"project-projectdialog--several-folders",
+	"project-projectdialog--new-folder",
+	"project-projectdialog--errors",
+	"project-projectdialog--warnings",
+	"project-projectdialog--suggestions-open",
+	"project-projectdialog--edit",
 	"session-sessionverbitems--sheet",
 	"layout-sessionbar--collapsed",
 	"layout-sessionbar--overflow-menu-open",
@@ -449,6 +457,8 @@ if (stories.length > 0) {
 		["overlays-connectoverlay--connected", "all"],
 		// Settles to the cleared viewer; the back-to-tree contract is its play().
 		["file-fileviewer--back-to-file-tree", "all"],
+		// Behavior-only: clicks through to Done; its contract is the play().
+		["pages-setuppage--done-on-localhost", "all"],
 
 		// Renders no pixels at either width, so both captures were blank. Note it
 		// is deliberately NOT added to build-health's EXPECTED_EMPTY_ROOT: it does

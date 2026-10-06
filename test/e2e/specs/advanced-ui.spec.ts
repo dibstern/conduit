@@ -10,6 +10,8 @@ import { PermissionPage } from "../page-objects/permission.page.js";
 test.describe("Split Diff View", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "advanced-diff" });
+	// The recording answers each permission itself; wait for the browser's.
+	test.beforeEach(({ mockServer }) => mockServer.holdRepliesUntilAnswered());
 
 	// Skip: diff toggle component is not wired up yet — these tests will
 	// pass once the split diff view feature is implemented.
@@ -135,6 +137,8 @@ test.describe("Rewind Timeline", () => {
 test.describe("File History Panel", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "advanced-diff" });
+	// The recording answers each permission itself; wait for the browser's.
+	test.beforeEach(({ mockServer }) => mockServer.holdRepliesUntilAnswered());
 
 	test("file history panel structure is correct when present", async ({
 		page,

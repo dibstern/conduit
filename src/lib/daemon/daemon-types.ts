@@ -60,7 +60,7 @@ export interface DaemonStatus {
 	keepAwake: boolean;
 	projects: Array<{
 		slug: string;
-		directory: string;
+		folders: readonly [string, ...string[]];
 		title: string;
 		status?: string;
 		lastUsed?: number;

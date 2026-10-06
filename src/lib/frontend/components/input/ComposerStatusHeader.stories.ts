@@ -11,22 +11,15 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "padded", a11y: { test: "error" } },
 	args: {
-		startedAt: STORY_NOW - 65_000,
+		elapsed: 65_000,
 		activity: "Bash · pnpm acceptance:visual",
 		following: true,
 		onlive: fn(),
 	},
 	argTypes: {
-		startedAt: { control: "number" },
+		elapsed: { control: "number" },
 		activity: { control: "text" },
 		following: { control: "boolean" },
-	},
-	beforeEach: () => {
-		const realNow = Date.now;
-		Date.now = () => STORY_NOW;
-		return () => {
-			Date.now = realNow;
-		};
 	},
 } satisfies Meta<typeof ComposerStatusHeader>;
 
@@ -46,7 +39,7 @@ export const Working: Story = {
 };
 
 export const NewTurn: Story = {
-	args: { startedAt: STORY_NOW, activity: "" },
+	args: { elapsed: 0, activity: "" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -59,7 +52,7 @@ export const NewTurn: Story = {
 };
 
 export const UnderAnHour: Story = {
-	args: { startedAt: STORY_NOW - 3_599_000, activity: "Thinking" },
+	args: { elapsed: 3_599_000, activity: "Thinking" },
 	play: async ({ canvasElement }) => {
 		await expect(
 			within(canvasElement).getByTestId("composer-status-elapsed"),
@@ -68,7 +61,7 @@ export const UnderAnHour: Story = {
 };
 
 export const OverAnHour: Story = {
-	args: { startedAt: STORY_NOW - 3_665_000 },
+	args: { elapsed: 3_665_000 },
 	play: async ({ canvasElement }) => {
 		await expect(
 			within(canvasElement).getByTestId("composer-status-elapsed"),
@@ -130,7 +123,7 @@ export const PhoneActivityLight: Story = {
 
 export const CheckingGoal: Story = {
 	args: {
-		startedAt: null,
+		elapsed: undefined,
 		goal: goalView(
 			{
 				sessionId: "checking-story",

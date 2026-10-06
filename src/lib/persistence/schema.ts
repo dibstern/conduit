@@ -46,9 +46,14 @@ export const SESSIONS_HISTORY_COMPLETE_MIGRATION =
 	"0027_sessions_history_complete.sql";
 export const MESSAGE_TOMBSTONES_MIGRATION = "0028_message_tombstones.sql";
 export const SESSION_GOALS_MIGRATION = "0029_session_goals.sql";
-export const MESSAGES_INPUT_ID_MIGRATION = "0030_messages_input_id.sql";
-export const PENDING_INPUTS_MIGRATION = "0031_pending_inputs.sql";
-export const MESSAGES_STEERED_MIGRATION = "0032_messages_steered.sql";
+export const STARTUP_RESTORE_INDEXES_MIGRATION =
+	"0030_startup_restore_indexes.sql";
+export const TOOL_CALL_INDEX_MIGRATION = "0031_tool_call_index.sql";
+export const PENDING_APPROVALS_VERSION_MIGRATION =
+	"0032_pending_approvals_version.sql";
+export const MESSAGES_INPUT_ID_MIGRATION = "0033_messages_input_id.sql";
+export const PENDING_INPUTS_MIGRATION = "0034_pending_inputs.sql";
+export const MESSAGES_STEERED_MIGRATION = "0035_messages_steered.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

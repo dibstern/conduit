@@ -7,7 +7,7 @@ import {
 	holdUntilVisible,
 	openSessionRoute,
 	relayControls,
-	requireRelayControl,
+	requireRpcControl,
 	rpcControls,
 } from "./shared.js";
 
@@ -223,9 +223,21 @@ export const composerHandlers: StepHandler[] = [
 		name: "seed approvals mode",
 		match: /^approvals are (dontAsk|plan|ask|acceptEdits|auto|full)$/,
 		run: async ({ world, match }) => {
-			await requireRelayControl(world.page).sendMessages([
-				{ type: "permission_mode_info", mode: match[1] },
-			]);
+			// The open session's shell row carries its approval mode.
+			const rpc = requireRpcControl(world.page);
+			const id = decodeURIComponent(
+				new URL(world.page.url()).pathname.split("/")[2] ?? "",
+			);
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === id,
+			);
+			rpc.upsertShellRow({
+				title: id,
+				status: "idle",
+				...(row as object | undefined),
+				id,
+				permissionMode: match[1],
+			});
 		},
 	},
 	{

@@ -110,6 +110,11 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 			meta: { correlationId: "Retrying" },
 			expectedTypes: ["error"],
 		},
+		{
+			type: "session.status",
+			data: { sessionId: "s", status: "idle" },
+			expectedTypes: ["status"],
+		},
 	];
 
 	for (const { type, data, meta, expectedTypes } of EMIT_CASES) {
@@ -165,7 +170,6 @@ describe("translateCanonicalEvent — TranslationResult shape", () => {
 			type: "tool.input_updated",
 			data: { messageId: "m", partId: "c" },
 		},
-		{ type: "session.status", data: { sessionId: "s", status: "idle" } },
 		{ type: "session.status", data: { sessionId: "s", status: "busy" } },
 		{ type: "session.status", data: { sessionId: "s", status: "error" } },
 		{

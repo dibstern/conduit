@@ -12,8 +12,8 @@ import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -46,6 +46,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 const waitForAssertion = (assertion: () => void) =>
@@ -145,13 +146,9 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
-		OpenCodeInstanceClientsLive.pipe(
-			Layer.provide(
-				Layer.merge(
-					Layer.succeed(ConfigTag, makeMockConfig()),
-					Layer.succeed(LoggerTag, services.log),
-				),
-			),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: api }),
 		),
 		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
 		Layer.succeed(OpenCodeAPITag, api),

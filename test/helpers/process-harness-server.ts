@@ -142,7 +142,7 @@ async function main(): Promise<void> {
 		kind: "ready",
 		port: activeDaemon.port,
 		pid: process.pid,
-		projects: activeDaemon.getProjects().map((project) => project.directory),
+		projects: activeDaemon.getProjects().map((project) => project.folders[0]),
 		instances: activeDaemon
 			.getInstances()
 			.map((instance) => ({ managed: instance.managed, url: instance.url })),

@@ -1,6 +1,5 @@
 import type { WebSocket } from "ws";
 import type { RelayMessage } from "../shared-types.js";
-import type { IncomingMessageType } from "./ws-router.js";
 
 export interface WsAttachOptions {
 	clientId: string;
@@ -22,12 +21,6 @@ export interface WsClientDisconnectedEvent {
 	clientId: string;
 	clientCount: number;
 	sessionId?: string;
-}
-
-export interface WsMessageEvent {
-	clientId: string;
-	handler: IncomingMessageType;
-	payload: Record<string, unknown>;
 }
 
 export interface WebSocketHandlerShape {
@@ -52,7 +45,6 @@ export interface WebSocketHandlerShape {
 		event: "client_disconnected",
 		cb: (data: WsClientDisconnectedEvent) => void,
 	): void;
-	on(event: "message", cb: (data: WsMessageEvent) => void): void;
 	on(
 		event: "client_error",
 		cb: (data: { clientId: string; error: Error }) => void,
@@ -65,7 +57,6 @@ export interface WebSocketHandlerShape {
 		event: "client_disconnected",
 		cb: (data: WsClientDisconnectedEvent) => void,
 	): void;
-	once(event: "message", cb: (data: WsMessageEvent) => void): void;
 	once(
 		event: "client_error",
 		cb: (data: { clientId: string; error: Error }) => void,

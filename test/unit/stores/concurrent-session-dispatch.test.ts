@@ -1,4 +1,3 @@
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	seedFamilySessions,
 	seedRootSessions,
@@ -51,10 +50,7 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
-import {
-	clearAllPermissions,
-	permissionsState,
-} from "../../../src/lib/frontend/stores/permissions.svelte.js";
+import { clearAllPermissions } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
 	clearSessionState,
 	getAttentionSessions,
@@ -66,10 +62,7 @@ import {
 	handleMessage,
 	isPerSessionEvent,
 } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type {
-	PermissionId,
-	RelayMessage,
-} from "../../../src/lib/shared-types.js";
+import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 beforeEach(() => {
 	clearMessages();
@@ -226,11 +219,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"user_message",
 			"part_removed",
 			"message_removed",
-			"ask_user",
-			"ask_user_resolved",
-			"ask_user_error",
-			"permission_request",
-			"permission_resolved",
 			"session_forked",
 			"provider_session_reloaded",
 			"session_deleted",
@@ -242,20 +230,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 	});
 
 	it("returns false for global event types", () => {
-		const globalTypes = [
-			"session_list",
-			"model_list",
-			"model_info",
-			"agent_list",
-			"command_list",
-			"client_count",
-			"connection_status",
-			"notification_event",
-			"pty_list",
-			"pty_created",
-			"file_tree",
-			"todo_state",
-		];
+		const globalTypes = ["session_list", "model_info", "notification_event"];
 		for (const type of globalTypes) {
 			const msg = { type } as RelayMessage;
 			expect(isPerSessionEvent(msg)).toBe(false);
@@ -264,93 +239,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 });
 
 describe("family attention before membership", () => {
-	it("accepts an unknown child permission and its resolution", () => {
-		handleMessage({
-			type: "permission_request",
-			sessionId: "new-child",
-			requestId: "permission-1" as PermissionId,
-			toolName: "bash",
-			toolInput: {},
-		});
-		expect(
-			permissionsState.pendingPermissions.map(
-				(permission) => permission.requestId,
-			),
-		).toContain("permission-1");
-		handleMessage({
-			type: "permission_resolved",
-			sessionId: "new-child",
-			requestId: "permission-1" as PermissionId,
-			decision: "once",
-		});
-		expect(permissionsState.pendingPermissions).toEqual([]);
-	});
-
-	it("accepts unknown child questions and preserves replay through a switch", () => {
-		handleMessage({
-			type: "ask_user",
-			sessionId: "new-child",
-			toolId: "question-1",
-			questions: [],
-		});
-		handleMessage({
-			type: "session_family",
-			rootId: "root",
-			sessions: [
-				{ id: "root", title: "Root", status: "idle" },
-				{ id: "new-child", title: "Child", status: "idle", parentID: "root" },
-			],
-		});
-		routerState.path = "/s/root";
-		sessionState.currentId = "root";
-		expect(
-			permissionsState.pendingQuestions.map((question) => question.toolId),
-		).toEqual(["question-1"]);
-		handleMessage({
-			type: "ask_user_error",
-			sessionId: "unknown-child",
-			toolId: "question-1",
-			message: "Retry",
-		});
-		expect(permissionsState.questionErrors.get("question-1")).toBe("Retry");
-		handleMessage({
-			type: "ask_user_resolved",
-			sessionId: "unknown-child",
-			toolId: "question-1",
-		});
-		expect(permissionsState.pendingQuestions).toEqual([]);
-	});
-
-	// Resolutions are broadcast to every client, so a slot per unrelated
-	// session would evict cached transcripts from the LRU.
-	it("keeps permission and question events out of chat slots", () => {
-		handleMessage({
-			type: "ask_user",
-			sessionId: "other-child",
-			toolId: "question-2",
-			questions: [],
-		});
-		handleMessage({
-			type: "ask_user_error",
-			sessionId: "other-child",
-			toolId: "question-2",
-			message: "Retry",
-		});
-		handleMessage({
-			type: "ask_user_resolved",
-			sessionId: "other-child",
-			toolId: "question-2",
-		});
-		handleMessage({
-			type: "permission_resolved",
-			sessionId: "other-child",
-			requestId: "permission-2" as PermissionId,
-			decision: "once",
-		});
-		expect(sessionActivity.has("other-child")).toBe(false);
-		expect(sessionMessages.has("other-child")).toBe(false);
-	});
-
 	it("roots-only reconciliation preserves child indicators and uses rolled root counts", () => {
 		seedFamilySessions("root", [
 			{ id: "root", title: "Root" },

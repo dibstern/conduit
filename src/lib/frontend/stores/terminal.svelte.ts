@@ -1,8 +1,14 @@
-// Terminal tabs, PTY state, scrollback buffers.
+// Terminal tabs, PTY state, scrollback buffers, fed by the project's
+// SubscribePtys stream (conduit-test-ni8.11).
 // Uses callback pattern for high-throughput PTY output (not reactive).
 
+import { Effect, Fiber, Stream } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
 import { SvelteMap } from "svelte/reactivity";
-import type { PtyListResponse } from "../transport/ws-rpc.js";
+import { getRuntime, runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
+import { supervise } from "../transport/supervise.js";
+import type { PtyEnvelope } from "../transport/ws-rpc.js";
 import type { Immutable, RelayMessage, TabEntry } from "../types.js";
 import { STATUS_MESSAGE_MS } from "../ui-constants.js";
 
@@ -35,7 +41,7 @@ const clientTerminal = $state({
 });
 
 /** Read view over both halves. The server half is readable but has no setter:
- *  write it by applying a `pty_*` message. */
+ *  write it by applying a PTY envelope. */
 export const terminalState = {
 	/** Server rows joined to this tab's labels, keyed by pty id. */
 	get tabs(): ReadonlyMap<string, Immutable<TabEntry>> {
@@ -155,33 +161,21 @@ export function getScrollback(ptyId: string): readonly string[] {
 	return scrollbackBuffers.get(ptyId) ?? [];
 }
 
-/** Handle pty_list — sync frontend tabs with server's existing PTYs. */
-export function handlePtyList(
-	msg: Extract<RelayMessage, { type: "pty_list" }>,
-): void {
-	const ptys = msg.ptys ?? [];
+type PtyRows = Extract<PtyEnvelope, { _tag: "snapshot" }>["rows"];
+type PtyUpsert = Extract<PtyEnvelope, { _tag: "upsert" }>;
+type PtyOutput = Extract<PtyEnvelope, { _tag: "output" }>;
+type PtyRemove = Extract<PtyEnvelope, { _tag: "remove" }>;
 
-	if (ptys.length === 0) {
-		for (const id of [...serverPtys.keys()]) forgetPty(id);
-		clientTerminal.activeTabId = null;
-		clientTerminal.unreadPtyIds = new Set();
-		return;
-	}
-
-	const serverIds = new Set<string>();
-	for (const pty of ptys) {
-		const ptyId = pty.id;
-		if (!ptyId) continue;
-		serverIds.add(ptyId);
-		// Lists may arrive after a newer exit event.
-		rememberPty(
-			ptyId,
-			pty.status === "exited" || serverPtys.get(ptyId)?.exited === true,
-		);
-	}
-
+/** A snapshot: sync the tabs with the server's PTYs and restore each ring. */
+export function handlePtySnapshot(rows: PtyRows): void {
+	const serverIds = new Set(rows.map(({ pty }) => pty.id));
 	for (const id of [...serverPtys.keys()]) {
 		if (!serverIds.has(id)) forgetPty(id);
+	}
+	for (const { pty, scrollback } of rows) {
+		rememberPty(pty.id, pty.status === "exited");
+		// Replayed history, not new output: it restores the ring, unread stays.
+		writeOutput(pty.id, scrollback, true);
 	}
 
 	if ([...clientTerminal.unreadPtyIds].some((id) => !serverIds.has(id))) {
@@ -196,33 +190,13 @@ export function handlePtyList(
 	}
 }
 
-export function applyPtyListResponse(response: PtyListResponse): void {
-	handlePtyList({
-		type: "pty_list",
-		ptys: response.ptys.map((pty) => ({
-			id: pty.id,
-			title: pty.title,
-			command: pty.command,
-			cwd: pty.cwd,
-			status: pty.status,
-			pid: pty.pid,
-		})),
-	});
-}
-
-export function handlePtyCreated(
-	msg: Extract<RelayMessage, { type: "pty_created" }>,
-): void {
-	const { pty } = msg;
-	const ptyId = pty?.id;
-
-	if (!ptyId) return;
-
-	// Dedup: the relay broadcasts pty_created directly AND OpenCode fires a
-	// pty.created SSE event that also gets translated + broadcast. Without this
-	// guard the second arrival regenerates the title (e.g. "Terminal 1" → "Terminal 2")
-	// because generateTabTitle() sees the first title as already taken.
-	if (serverPtys.has(ptyId)) return;
+/** A PTY appeared or changed status. A new one becomes the active tab. */
+export function handlePtyUpsert({ item: pty }: PtyUpsert): void {
+	const exited = pty.status === "exited";
+	if (serverPtys.has(pty.id)) {
+		serverPtys.set(pty.id, { ptyId: pty.id, exited });
+		return;
+	}
 
 	// Clear pending state
 	clientTerminal.pendingCreate = false;
@@ -232,28 +206,24 @@ export function handlePtyCreated(
 	}
 	clientTerminal.statusMessage = null;
 
-	rememberPty(ptyId, false);
-	clientTerminal.activeTabId = ptyId;
+	rememberPty(pty.id, exited);
+	clientTerminal.activeTabId = pty.id;
 	// Visibility stays with whoever opened the panel. The confirmation can land
 	// after the user has switched away, or come from another browser, and must
 	// not pull the terminal back over the view they chose.
 }
 
-export function handlePtyOutput(
-	msg: Extract<RelayMessage, { type: "pty_output" }>,
-): void {
-	const { ptyId, data, replace, restored } = msg;
-	if (!ptyId || typeof data !== "string") return;
-	if (replace && restored && serverPtys.has(ptyId)) {
-		serverPtys.set(ptyId, { ptyId, exited: false });
-	}
+export function handlePtyOutput({ ptyId, data, replace }: PtyOutput): void {
 	if (!clientTerminal.panelOpen && !clientTerminal.unreadPtyIds.has(ptyId)) {
 		clientTerminal.unreadPtyIds = new Set([
 			...clientTerminal.unreadPtyIds,
 			ptyId,
 		]);
 	}
+	writeOutput(ptyId, data, replace === true);
+}
 
+function writeOutput(ptyId: string, data: string, replace: boolean): void {
 	// A host snapshot replaces this browser's previous history on reconnect.
 	let buffer = scrollbackBuffers.get(ptyId);
 	if (!buffer) {
@@ -297,21 +267,7 @@ export function handlePtyOutput(
 	}
 }
 
-export function handlePtyExited(
-	msg: Extract<RelayMessage, { type: "pty_exited" }>,
-): void {
-	const { ptyId } = msg;
-	if (!ptyId) return;
-
-	if (serverPtys.has(ptyId)) serverPtys.set(ptyId, { ptyId, exited: true });
-}
-
-export function handlePtyDeleted(
-	msg: Extract<RelayMessage, { type: "pty_deleted" }>,
-): void {
-	const { ptyId } = msg;
-	if (!ptyId) return;
-
+export function handlePtyRemove({ id: ptyId }: Pick<PtyRemove, "id">): void {
 	forgetPty(ptyId);
 	if (clientTerminal.unreadPtyIds.has(ptyId)) {
 		const unread = new Set(clientTerminal.unreadPtyIds);
@@ -329,6 +285,68 @@ export function handlePtyDeleted(
 	if (serverPtys.size === 0) {
 		clientTerminal.panelOpen = false;
 	}
+}
+
+export function applyPtyEnvelope(envelope: PtyEnvelope): void {
+	switch (envelope._tag) {
+		case "snapshot":
+			handlePtySnapshot(envelope.rows);
+			return;
+		case "upsert":
+			handlePtyUpsert(envelope);
+			return;
+		case "output":
+			handlePtyOutput(envelope);
+			return;
+		case "remove":
+			handlePtyRemove(envelope);
+			return;
+		case "synchronized":
+			return;
+	}
+}
+
+let viewedProject: string | null = null;
+let generation = 0;
+let fiber: RuntimeFiber<void, never> | null = null;
+
+/**
+ * Follow `project`'s terminals: subscribe for that project (an explicit
+ * argument; PTYs belong to the project, not a session) until the view moves.
+ * `null` stops following. Every (re)subscribe opens with a full snapshot.
+ */
+export function viewPtys(project: string | null): void {
+	if (viewedProject === project) return;
+	viewedProject = project;
+	const currentGeneration = ++generation;
+	const old = fiber;
+	fiber = null;
+	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
+		.catch(() => undefined)
+		.then(async () => {
+			if (currentGeneration !== generation || !project) return;
+			const runtime = await getRuntime();
+			if (currentGeneration !== generation) return;
+			const next = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+						Stream.runForEach(
+							supervise(
+								Stream.suspend(() => subscriptions.ptys()),
+								() => undefined,
+							),
+							(envelope) =>
+								Effect.sync(() => {
+									if (currentGeneration === generation)
+										applyPtyEnvelope(envelope);
+								}),
+						),
+					),
+				),
+			);
+			if (currentGeneration === generation) fiber = next;
+			else runtime.runFork(Fiber.interrupt(next));
+		});
 }
 
 export function handlePtyError(

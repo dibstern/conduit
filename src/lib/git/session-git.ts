@@ -204,10 +204,10 @@ export const withCachedProjectGit = <T extends ProjectInfo>(
 	projects: ReadonlyArray<T>,
 ): Array<T & { readonly missing: boolean }> =>
 	projects.map((project) => {
-		const git = daemonSessionGitCache.peek(project.directory);
+		const git = daemonSessionGitCache.peek(project.folders[0]);
 		return {
 			...project,
-			missing: !existsSync(project.directory),
+			missing: !existsSync(project.folders[0]),
 			...(git && { git }),
 		};
 	});

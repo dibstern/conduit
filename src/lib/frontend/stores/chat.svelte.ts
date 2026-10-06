@@ -24,8 +24,6 @@ import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
 	phase: ChatPhase;
-	/** Wall-clock start of the active turn, retained across view remounts. */
-	turnStartedAt: number | null;
 	turnGeneration: number;
 	endedGeneration: number;
 	terminalTurnIds: ReadonlySet<string>;
@@ -84,7 +82,6 @@ export type SessionChatState = SessionActivity & SessionMessages;
 export function createEmptySessionActivity(): SessionActivity {
 	return {
 		phase: "idle",
-		turnStartedAt: null,
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),
@@ -402,7 +399,6 @@ export function isLoading(): boolean {
 /** Session is idle — no LLM activity, no streaming. */
 export function phaseToIdle(activity: SessionActivity): void {
 	activity.phase = "idle";
-	activity.turnStartedAt = null;
 }
 
 /** LLM is active, awaiting first delta. */
@@ -410,7 +406,6 @@ export function phaseToProcessing(activity: SessionActivity): void {
 	if (activity.phase === "idle") {
 		activity.turnGeneration++;
 	}
-	activity.turnStartedAt ??= Date.now();
 	activity.phase = "processing";
 }
 
@@ -419,7 +414,6 @@ export function phaseToStreaming(activity: SessionActivity): void {
 	if (activity.phase === "idle") {
 		activity.turnGeneration++;
 	}
-	activity.turnStartedAt ??= Date.now();
 	activity.phase = "streaming";
 }
 
@@ -499,21 +493,6 @@ function _applyToolCreate(
 	tool: ToolMessage,
 ): void {
 	setMessages(_messages, [...getMessages(_messages), tool]);
-}
-
-/** Replace a tool message in the session's message list by UUID. */
-function applyToolUpdate(
-	_activity: SessionActivity,
-	_messages: SessionMessages,
-	uuid: string,
-	tool: ToolMessage,
-): void {
-	const messages = [...getMessages(_messages)];
-	const found = findMessage(messages, "tool", (m) => m.uuid === uuid);
-	if (found) {
-		messages[found.index] = tool;
-		setMessages(_messages, messages);
-	}
 }
 
 // doneMessageIds: per-session only (activity.doneMessageIds). Module-level set removed in Task 6.
@@ -637,41 +616,6 @@ export function advanceTurnIfNewMessage(
 	activity.currentMessageId = messageId;
 }
 
-export function handleThinkingStop(
-	_activity: SessionActivity,
-	messages: SessionMessages,
-	_msg: Extract<RelayMessage, { type: "thinking_stop" }>,
-): void {
-	const startTime = _activity.thinkingStartTime;
-	const duration = startTime > 0 ? Date.now() - startTime : 0;
-	_activity.thinkingStartTime = 0;
-
-	const { messages: updated, found } = updateLastMessage(
-		getMessages(messages),
-		"thinking",
-		(m) => !m.done,
-		(m) => ({ ...m, done: true, duration }),
-	);
-	if (found) setMessages(messages, updated);
-}
-
-export function handleToolExecuting(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "tool_executing" }>,
-): void {
-	let result = messages.toolRegistry.executing(msg.id, msg.input, msg.metadata);
-	// If executing() rejected because the tool is already running,
-	// fall back to updateMetadata() for metadata-only updates
-	// (e.g. subagent sessionId arriving after initial running event).
-	if (result.action === "reject" && msg.metadata) {
-		result = messages.toolRegistry.updateMetadata(msg.id, msg.metadata);
-	}
-	if (result.action === "update") {
-		applyToolUpdate(activity, messages, result.uuid, result.tool);
-	}
-}
-
 /** Compute context usage from token counts and the turn's effective window,
  *  falling back to the current model limit for legacy result messages. */
 function updateContextFromTokens(
@@ -786,6 +730,19 @@ export function handleDone(
  * Legacy push events lack that identity; their fallback identifies the
  * current monotone generation, not an old envelope.
  * The turn projection currently has no per-turn revision. */
+/** Whether the current turn (since the last user message) already shows this
+ *  error, e.g. from the projected turn error that landed first. */
+function turnShowsError(messages: SessionMessages, text: string): boolean {
+	const msgs = getMessages(messages);
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (m?.type === "user") return false;
+		if (m?.type === "system" && m.variant === "error" && m.text === text)
+			return true;
+	}
+	return false;
+}
+
 export function applyTerminalTurn(
 	activity: SessionActivity,
 	messages: SessionMessages,
@@ -843,7 +800,7 @@ export function applyTerminalTurn(
 		if (mutated) setMessages(messages, patched);
 	}
 
-	if (terminal?.error) {
+	if (terminal?.error && !turnShowsError(messages, terminal.error.message)) {
 		const { code, message, statusCode, details } = terminal.error;
 		addSystemMessage(activity, messages, message, "error", {
 			code,
@@ -939,38 +896,28 @@ export function handleCompaction(
 	msg: Extract<RelayMessage, { type: "compaction" }>,
 ): void {
 	requestScrollOnNextContent();
-	const notice: SystemMessage = {
-		type: "system",
-		uuid: generateUuid(),
-		text: msg.detail,
-		variant: msg.state === "failed" ? "error" : "info",
-		compaction: msg.state,
-		...(msg.preTokens !== undefined ? { preTokens: msg.preTokens } : {}),
-		...(msg.postTokens !== undefined ? { postTokens: msg.postTokens } : {}),
-		createdAt: Date.now(),
-	};
-	// The outcome supersedes the "Compacting…" notice rather than stacking under it.
-	const kept =
-		msg.state === "started"
-			? getMessages(messages)
-			: getMessages(messages).filter(
-					(m) => m.type !== "system" || m.compaction !== "started",
-				);
-	setMessages(messages, [...kept, notice]);
-
-	if (
-		msg.state === "completed" &&
-		typeof msg.postTokens === "number" &&
-		msg.postTokens > 0
-	) {
-		const limit = currentContextLimit();
-		if (limit !== undefined) {
-			messages.contextPercent = Math.min(
-				100,
-				Math.round((msg.postTokens / limit) * 100),
-			);
-		}
+	// Only the start is transient; the transcript projects the outcome (and
+	// the context size it leaves), which supersedes the "Compacting…" notice.
+	if (msg.state !== "started") {
+		setMessages(
+			messages,
+			getMessages(messages).filter(
+				(m) => m.type !== "system" || m.compaction !== "started",
+			),
+		);
+		return;
 	}
+	setMessages(messages, [
+		...getMessages(messages),
+		{
+			type: "system",
+			uuid: generateUuid(),
+			text: msg.detail,
+			variant: "info",
+			compaction: msg.state,
+			createdAt: Date.now(),
+		},
+	]);
 }
 
 /** Prepend older messages (from history) before existing messages.
@@ -1046,7 +993,6 @@ export function clearMessages(): void {
 		const activity = sessionActivity.get(currentId);
 		if (activity) {
 			activity.phase = "idle";
-			activity.turnStartedAt = null;
 			activity.turnGeneration = 0;
 			activity.endedGeneration = -1;
 			activity.terminalTurnIds = new Set();

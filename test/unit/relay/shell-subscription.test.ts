@@ -15,7 +15,12 @@ import {
 	Stream,
 } from "effect";
 import { expect, vi } from "vitest";
+import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -36,6 +41,7 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { setForkEntry } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
@@ -1207,5 +1213,72 @@ describe("subscribeShell", () => {
 			expect(yield* Ref.get(requeries)).toBe(2);
 			expect(yield* Queue.size(q)).toBe(0);
 		}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+	// ni8.12 group 2: the session's approval mode rides the shell row, so every
+	// open subscriber (every tab) follows a switch with no refetch.
+	it.scoped(
+		"a permission-mode switch reaches two open subscribers as the row's permissionMode",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const tabA = yield* openShell();
+				const tabB = yield* openShell();
+				const [snapshotA] = yield* takeN(tabA.q, 2);
+				yield* takeN(tabB.q, 2);
+				if (snapshotA?._tag !== "snapshot")
+					throw new Error("expected snapshot");
+				expect(snapshotA.rows[0]?.permissionMode).toBeUndefined();
+
+				yield* persistSessionPermissionMode(SID, "plan");
+
+				for (const { q } of [tabA, tabB]) {
+					const delta = yield* Queue.take(q);
+					if (delta._tag !== "upsert") throw new Error("expected upsert");
+					expect(delta.item).toMatchObject({ id: SID, permissionMode: "plan" });
+				}
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"a provider-reported permission mode reaches an open subscription",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					decodeProviderRuntimeEvent({
+						eventId: "rt-permission-mode",
+						type: "session.permission_mode_changed",
+						providerId: "claude",
+						sessionId: SID,
+						createdAt: "2026-10-06T00:00:00.000Z",
+						rawSource: {
+							kind: "claude.sdk.message",
+							providerMessageType: "system",
+						},
+						providerRefs: { providerSessionId: "provider-shell" },
+						data: { sessionId: SID, mode: "acceptEdits" },
+					}),
+				);
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item).toMatchObject({
+					id: SID,
+					permissionMode: "acceptEdits",
+				});
+			}).pipe(
+				Effect.provide(
+					Layer.provideMerge(
+						ProviderRuntimeIngestionLive,
+						makeShellTestLayer(),
+					),
+				),
+			),
 	);
 });

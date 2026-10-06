@@ -7,9 +7,14 @@ import { SqlClient } from "@effect/sql";
 import { Cause, Deferred, Effect, Exit, FiberSet } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../persistence/effect/read-query-effect.js";
+import { messageRowsToHistory } from "../../persistence/session-history-adapter.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
-import type { HistoryMessage, TurnResult } from "../types.js";
+import type { TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import { connectClaudeRunner } from "./claude-runner-connection.js";
 import {
@@ -261,6 +266,15 @@ export const makeProcessClaudeSessionRunner = (
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readQuery =
+			readQueryOption._tag === "Some"
+				? readQueryOption.value
+				: sql
+					? yield* makeReadQueryEffect.pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+						)
+					: undefined;
 		const receipts = sql
 			? yield* makeClaudeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
@@ -270,7 +284,6 @@ export const makeProcessClaudeSessionRunner = (
 			string,
 			{
 				sessionId: string;
-				history: readonly HistoryMessage[];
 				inputId?: string;
 				messageId: string;
 				terminal: boolean;
@@ -280,6 +293,44 @@ export const makeProcessClaudeSessionRunner = (
 				completed: Deferred.Deferred<void> | undefined;
 			}
 		>();
+		const loadClaudeHistory = (binding: {
+			readonly sessionId: string;
+			readonly inputId?: string;
+		}) =>
+			Effect.gen(function* () {
+				if (!readQuery || !binding.inputId)
+					return yield* Effect.fail(new Error("Missing Claude history cutoff"));
+				const rows = yield* readQuery.getSessionMessagesWithParts(
+					binding.sessionId,
+				);
+				const cutoff = rows.find(
+					(row) => row.id === binding.inputId && row.role === "user",
+				);
+				if (!cutoff)
+					return yield* Effect.fail(
+						new Error("Missing Claude history user message"),
+					);
+				const priorRows = rows.filter(
+					(row) => row.created_at < cutoff.created_at,
+				);
+				return yield* Effect.try(() => ({
+					history: messageRowsToHistory(priorRows, {
+						pageSize: Number.MAX_SAFE_INTEGER,
+					}).messages,
+				}));
+			}).pipe(
+				Effect.catchAll((cause) => {
+					log.warn(
+						`Failed to load prior Claude history for ${binding.sessionId}: ${cause instanceof Error ? cause.message : cause}`,
+					);
+					return Effect.fail(
+						claudeRunnerFailure(
+							"read-turn-history",
+							"Claude turn history is no longer available",
+						),
+					);
+				}),
+			);
 		let closing = false;
 		const upgradeMark = (
 			sessionId: string,
@@ -476,7 +527,7 @@ export const makeProcessClaudeSessionRunner = (
 								: received;
 						if (output.type === "read-turn-history")
 							return binding
-								? Effect.succeed({ history: binding.history })
+								? loadClaudeHistory(binding)
 								: Effect.fail(
 										claudeRunnerFailure(
 											output.type,
@@ -538,20 +589,19 @@ export const makeProcessClaudeSessionRunner = (
 						for (const binding of entry.candidate
 							? []
 							: (hello.bindings ?? [])) {
-							let history: readonly HistoryMessage[] = [];
 							let inputId: string | undefined;
 							let messageId = "";
 							let terminal = false;
 							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
-									payload_json: string;
 									input_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
 									state: string | null;
-								}>`SELECT outbox.payload_json, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id, outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
+								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
@@ -563,10 +613,6 @@ export const makeProcessClaudeSessionRunner = (
 								yield* ensureAttached();
 								const row = rows[0];
 								if (row) {
-									const payload = JSON.parse(row.payload_json) as {
-										history?: readonly HistoryMessage[];
-									};
-									history = payload.history ?? [];
 									inputId = row.input_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
@@ -592,7 +638,6 @@ export const makeProcessClaudeSessionRunner = (
 							yield* ensureAttached();
 							sinks.set(binding.sinkId, {
 								sessionId,
-								history,
 								...(inputId ? { inputId } : {}),
 								messageId,
 								terminal,
@@ -1105,7 +1150,6 @@ export const makeProcessClaudeSessionRunner = (
 									if (!binding) {
 										binding = {
 											sessionId: registration.sessionId,
-											history: command.input.history,
 											inputId: command.input.inputId,
 											messageId: command.messageId,
 											terminal: command.terminal,
@@ -1208,7 +1252,6 @@ export const makeProcessClaudeSessionRunner = (
 					command.type === "send-turn"
 						? {
 								sessionId: command.input.sessionId,
-								history: command.input.history,
 								inputId: command.input.inputId,
 								messageId: "",
 								terminal: false,

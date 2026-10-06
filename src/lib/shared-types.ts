@@ -1,7 +1,6 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
-import { ClaudeSettingsOverridesSchema } from "./contracts/claude-settings.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
@@ -290,6 +289,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** The approval mode this session was last switched to; absent until one is. */
+	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
@@ -331,6 +332,9 @@ export interface DaemonSessionQueryOptions {
 	/** Read one project only. Filtering the merged page instead would leave a
 	 *  scoped list with a handful of rows per page, and paging would stall. */
 	readonly scope?: string;
+	/** Skip one project. The browser already holds its own project's roots
+	 *  from the shell feed, so those rows would only be fetched and dropped. */
+	readonly exclude?: string;
 }
 
 export interface DaemonSessionCursor {
@@ -404,7 +408,7 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking";
+	type: PartType | "thinking" | "error";
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -417,6 +421,9 @@ export interface HistoryMessagePart {
 		status?: ToolStatus;
 		input?: unknown;
 		output?: string;
+		/** `output` is a preview; GetToolContent serves the full text. */
+		isTruncated?: boolean;
+		fullContentLength?: number;
 		error?: string;
 		[key: string]: unknown;
 	};
@@ -428,6 +435,10 @@ export interface HistoryMessagePart {
 	 *  parts so the divider and context-% bar can be reconstructed on reload. */
 	preTokens?: number;
 	postTokens?: number;
+	/** A `compaction` part whose compaction failed. */
+	failed?: boolean;
+	/** Provider error code on an `error` part (a turn that ended in error). */
+	code?: string;
 	[key: string]: unknown;
 }
 
@@ -470,6 +481,11 @@ export interface HistoryMessage {
 	finish?: string;
 	error?: unknown;
 	modelExecution?: ModelExecution;
+	turnTiming?: {
+		startedAt: number;
+		endedAt?: number;
+		waits: { id: string; from: number; to?: number }[];
+	};
 	[key: string]: unknown;
 }
 
@@ -477,24 +493,12 @@ export interface HistoryMessage {
 export interface ProjectInfo {
 	slug: string;
 	title: string;
-	directory: string;
-	folders?: readonly string[];
+	/** folders[0] is the main folder, where sessions run. */
+	folders: readonly [string, ...string[]];
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;
 	instanceId?: string;
-}
-
-/** A file version from file history */
-export interface FileVersion {
-	id: string;
-	path: string;
-	content: string;
-	timestamp: number;
-	source: "edit" | "write" | "external";
-	toolName?: string;
-	description?: string;
-	[key: string]: unknown;
 }
 
 // Schema definitions for each RelayMessage variant. Built with @effect/schema
@@ -527,127 +531,6 @@ const ContextWindowOptionSchema = Schema.Struct({
 	value: Schema.String,
 	label: Schema.String,
 	isDefault: Schema.optional(Schema.Boolean),
-});
-
-const ProviderInfoSchema = Schema.Struct({
-	id: Schema.String,
-	instanceId: Schema.optional(Schema.String),
-	name: Schema.String,
-	configured: Schema.Boolean,
-	models: Schema.Array(
-		Schema.Struct({
-			id: Schema.String,
-			name: Schema.String,
-			provider: Schema.String,
-			cost: Schema.optional(
-				Schema.Struct({
-					input: Schema.optional(Schema.Number),
-					output: Schema.optional(Schema.Number),
-				}),
-			),
-			limit: Schema.optional(
-				Schema.Struct({
-					context: Schema.optional(Schema.Number),
-					output: Schema.optional(Schema.Number),
-				}),
-			),
-			variants: Schema.optional(Schema.Array(Schema.String)),
-			contextWindowOptions: Schema.optional(
-				Schema.Array(ContextWindowOptionSchema),
-			),
-			routingOptions: Schema.optional(Schema.Array(ContextWindowOptionSchema)),
-		}),
-	),
-});
-
-const AgentInfoSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	model: Schema.optional(Schema.String),
-});
-
-const AgentProviderScopeSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-});
-
-const CommandInfoSchema = Schema.Struct({
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	args: Schema.optional(Schema.String),
-	builtin: Schema.optional(Schema.Boolean),
-});
-
-const ProjectInfoSchema = Schema.Struct({
-	slug: Schema.String,
-	title: Schema.String,
-	directory: Schema.String,
-	folders: Schema.optional(Schema.Array(Schema.String)),
-	missing: Schema.optional(Schema.Boolean),
-	git: Schema.optional(SessionGitSchema),
-	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
-});
-
-const FileEntrySchema = Schema.Struct({
-	name: Schema.String,
-	type: Schema.Literal("file", "directory"),
-	size: Schema.optional(Schema.Number),
-	modified: Schema.optional(Schema.Number),
-});
-
-const PtyInfoSchema = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-	command: Schema.String,
-	cwd: Schema.String,
-	status: Schema.Literal("running", "exited"),
-	pid: Schema.Number,
-});
-
-const TodoItemSchema = Schema.Struct({
-	id: Schema.String,
-	subject: Schema.String,
-	description: Schema.optional(Schema.String),
-	status: Schema.Literal("pending", "in_progress", "completed", "cancelled"),
-});
-
-const FileVersionSchema = Schema.Struct({
-	id: Schema.String,
-	path: Schema.String,
-	content: Schema.String,
-	timestamp: Schema.Number,
-	source: Schema.Literal("edit", "write", "external"),
-	toolName: Schema.optional(Schema.String),
-	description: Schema.optional(Schema.String),
-});
-
-const InstanceStatusSchema = Schema.Literal(
-	"starting",
-	"healthy",
-	"unhealthy",
-	"stopped",
-);
-
-const OpenCodeInstanceSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	port: Schema.Number,
-	managed: Schema.Boolean,
-	driver: Schema.optional(Schema.String),
-	configDir: Schema.optional(Schema.String),
-	url: Schema.optional(Schema.String),
-	status: InstanceStatusSchema,
-	pid: Schema.optional(Schema.Number),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	needsRestart: Schema.optional(Schema.Boolean),
-	exitCode: Schema.optional(Schema.Number),
-	lastHealthCheck: Schema.optional(Schema.Number),
-	restartCount: Schema.Number,
-	createdAt: Schema.Number,
 });
 
 // -- Individual message variant schemas --
@@ -720,8 +603,10 @@ const ToolContentSchema = Schema.Struct({
 	content: Schema.String,
 });
 
-const PermissionRequestSchema = Schema.Struct({
-	type: Schema.Literal("permission_request"),
+// What the approvals subscription serves (ni8.9): the pending permission
+// requests and questions of every session in the project, each keyed by the id
+// its answer is sent back with.
+export const PermissionApprovalSchema = Schema.TaggedStruct("permission", {
 	sessionId: Schema.String,
 	requestId: PermissionId,
 	toolName: Schema.String,
@@ -737,15 +622,7 @@ const PermissionRequestSchema = Schema.Struct({
 	permissionReason: Schema.optional(Schema.String),
 });
 
-const PermissionResolvedSchema = Schema.Struct({
-	type: Schema.Literal("permission_resolved"),
-	sessionId: Schema.String,
-	requestId: PermissionId,
-	decision: Schema.String,
-});
-
-const AskUserSchema = Schema.Struct({
-	type: Schema.Literal("ask_user"),
+export const QuestionApprovalSchema = Schema.TaggedStruct("question", {
 	sessionId: Schema.String,
 	toolId: Schema.String,
 	questions: Schema.Array(AskUserQuestionSchema),
@@ -753,18 +630,11 @@ const AskUserSchema = Schema.Struct({
 	providerId: Schema.optional(Schema.String),
 });
 
-const AskUserResolvedSchema = Schema.Struct({
-	type: Schema.Literal("ask_user_resolved"),
-	toolId: Schema.String,
-	sessionId: Schema.String,
-});
-
-const AskUserErrorSchema = Schema.Struct({
-	type: Schema.Literal("ask_user_error"),
-	sessionId: Schema.String,
-	toolId: Schema.String,
-	message: Schema.String,
-});
+export const ApprovalSchema = Schema.Union(
+	PermissionApprovalSchema,
+	QuestionApprovalSchema,
+);
+export type Approval = typeof ApprovalSchema.Type;
 
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
@@ -832,54 +702,6 @@ const ModelInfoMsgSchema = Schema.Struct({
 	provider: Schema.String,
 });
 
-const DefaultModelInfoSchema = Schema.Struct({
-	type: Schema.Literal("default_model_info"),
-	model: Schema.String,
-	provider: Schema.String,
-	variant: Schema.String,
-});
-
-const DefaultPermissionModeInfoSchema = Schema.Struct({
-	type: Schema.Literal("default_permission_mode_info"),
-	mode: SessionPermissionModeSchema,
-});
-
-const ModelListSchema = Schema.Struct({
-	type: Schema.Literal("model_list"),
-	instanceId: Schema.optional(Schema.String),
-	providers: Schema.Array(ProviderInfoSchema),
-});
-
-const AgentListSchema = Schema.Struct({
-	type: Schema.Literal("agent_list"),
-	instanceId: Schema.optional(Schema.String),
-	providerScope: AgentProviderScopeSchema,
-	agents: Schema.Array(AgentInfoSchema),
-	activeAgentId: Schema.optional(Schema.String),
-});
-
-const VisibilityInfoSchema = Schema.Struct({
-	type: Schema.Literal("visibility_info"),
-	hiddenModels: Schema.Array(Schema.String),
-	hiddenAgents: Schema.Array(Schema.String),
-});
-
-const ClaudeSettingsInfoSchema = Schema.Struct({
-	type: Schema.Literal("claude_settings_info"),
-	overrides: ClaudeSettingsOverridesSchema,
-});
-
-const CommandListSchema = Schema.Struct({
-	type: Schema.Literal("command_list"),
-	commands: Schema.Array(CommandInfoSchema),
-});
-
-const ProjectListSchema = Schema.Struct({
-	type: Schema.Literal("project_list"),
-	projects: Schema.Array(ProjectInfoSchema),
-	current: Schema.optional(Schema.String),
-	addedSlug: Schema.optional(Schema.String),
-});
 const DaemonSessionsChangedSchema = Schema.Struct({
 	type: Schema.Literal("daemon_sessions_changed"),
 });
@@ -887,30 +709,6 @@ const DaemonSessionsChangedSchema = Schema.Struct({
 const ProjectAttachedSchema = Schema.Struct({
 	type: Schema.Literal("project_attached"),
 	slug: Schema.String,
-});
-
-const FileListSchema = Schema.Struct({
-	type: Schema.Literal("file_list"),
-	path: Schema.String,
-	entries: Schema.Array(FileEntrySchema),
-});
-
-const FileContentSchema = Schema.Struct({
-	type: Schema.Literal("file_content"),
-	path: Schema.String,
-	content: Schema.String,
-	binary: Schema.optional(Schema.Boolean),
-});
-
-const FileTreeSchema = Schema.Struct({
-	type: Schema.Literal("file_tree"),
-	entries: Schema.Array(Schema.String),
-});
-
-const FileChangedSchema = Schema.Struct({
-	type: Schema.Literal("file_changed"),
-	path: Schema.String,
-	changeType: Schema.Literal("edited", "external"),
 });
 
 const PartRemovedSchema = Schema.Struct({
@@ -924,83 +722,6 @@ const MessageRemovedSchema = Schema.Struct({
 	type: Schema.Literal("message_removed"),
 	sessionId: Schema.String,
 	messageId: Schema.String,
-});
-
-const PtyCreatedSchema = Schema.Struct({
-	type: Schema.Literal("pty_created"),
-	pty: PtyInfoSchema,
-});
-
-const PtyOutputSchema = Schema.Struct({
-	type: Schema.Literal("pty_output"),
-	ptyId: Schema.String,
-	data: Schema.String,
-	replace: Schema.optional(Schema.Boolean),
-	restored: Schema.optional(Schema.Boolean),
-});
-
-const PtyExitedSchema = Schema.Struct({
-	type: Schema.Literal("pty_exited"),
-	ptyId: Schema.String,
-	exitCode: Schema.Number,
-});
-
-const PtyDeletedSchema = Schema.Struct({
-	type: Schema.Literal("pty_deleted"),
-	ptyId: Schema.String,
-});
-
-const PtyListSchema = Schema.Struct({
-	type: Schema.Literal("pty_list"),
-	ptys: Schema.Array(PtyInfoSchema),
-});
-
-const TodoStateSchema = Schema.Struct({
-	type: Schema.Literal("todo_state"),
-	items: Schema.Array(TodoItemSchema),
-});
-
-const ConnectionStatusSchema = Schema.Struct({
-	type: Schema.Literal("connection_status"),
-	status: Schema.Literal("disconnected", "reconnecting", "connected"),
-});
-
-const PlanEnterSchema = Schema.Struct({
-	type: Schema.Literal("plan_enter"),
-});
-
-const PlanExitSchema = Schema.Struct({
-	type: Schema.Literal("plan_exit"),
-});
-
-const PlanContentSchema = Schema.Struct({
-	type: Schema.Literal("plan_content"),
-	content: Schema.String,
-});
-
-const PlanApprovalSchema = Schema.Struct({
-	type: Schema.Literal("plan_approval"),
-});
-
-const SkipPermissionsSchema = Schema.Struct({
-	type: Schema.Literal("skip_permissions"),
-});
-
-const BannerSchema = Schema.Struct({
-	type: Schema.Literal("banner"),
-	config: Schema.Struct({
-		id: Schema.optional(Schema.String),
-		variant: Schema.optional(Schema.String),
-		icon: Schema.optional(Schema.String),
-		text: Schema.optional(Schema.String),
-		dismissible: Schema.optional(Schema.Boolean),
-	}),
-});
-
-const FileHistoryResultSchema = Schema.Struct({
-	type: Schema.Literal("file_history_result"),
-	path: Schema.String,
-	versions: Schema.Array(FileVersionSchema),
 });
 
 const UserMessageSchema = Schema.Struct({
@@ -1028,21 +749,6 @@ const ErrorSchema = Schema.Struct({
 	),
 });
 
-const SystemErrorSchema = Schema.Struct({
-	type: Schema.Literal("system_error"),
-	code: Schema.String,
-	message: Schema.String,
-	statusCode: Schema.optional(Schema.Number),
-	details: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
-});
-
-const ClientCountSchema = Schema.Struct({
-	type: Schema.Literal("client_count"),
-	count: Schema.Number,
-});
-
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
 export const WS_PROTOCOL_VERSION = 3;
@@ -1062,22 +768,6 @@ const InputSyncSchema = Schema.Struct({
 	type: Schema.Literal("input_sync"),
 	text: Schema.String,
 	from: Schema.optional(Schema.String),
-});
-
-const UpdateAvailableSchema = Schema.Struct({
-	type: Schema.Literal("update_available"),
-	version: Schema.optional(Schema.String),
-});
-
-const InstanceListSchema = Schema.Struct({
-	type: Schema.Literal("instance_list"),
-	instances: Schema.Array(OpenCodeInstanceSchema),
-});
-
-const InstanceStatusMsgSchema = Schema.Struct({
-	type: Schema.Literal("instance_status"),
-	instanceId: Schema.String,
-	status: InstanceStatusSchema,
 });
 
 const InstanceUpdateSchema = Schema.Struct({
@@ -1107,27 +797,9 @@ const ContextWindowInfoSchema = Schema.Struct({
 	options: Schema.Array(ContextWindowOptionSchema),
 });
 
-const PermissionModeInfoSchema = Schema.Struct({
-	type: Schema.Literal("permission_mode_info"),
-	mode: SessionPermissionModeSchema,
-});
-
 const SessionGoalChangedSchema = Schema.Struct({
 	type: Schema.Literal("session.goal_changed"),
 	...SessionGoalChangedPayloadSchema.fields,
-});
-
-const ProxyDetectedSchema = Schema.Struct({
-	type: Schema.Literal("proxy_detected"),
-	found: Schema.Boolean,
-	port: Schema.Number,
-});
-
-const ScanResultSchema = Schema.Struct({
-	type: Schema.Literal("scan_result"),
-	discovered: Schema.Array(Schema.Number),
-	lost: Schema.Array(Schema.Number),
-	active: Schema.Array(Schema.Number),
 });
 
 const NotificationEventSchema = Schema.Struct({
@@ -1152,11 +824,6 @@ export const RelayMessageSchema = Schema.Union(
 	ToolResultSchema,
 	ToolContentSchema,
 	// Permissions / Questions
-	PermissionRequestSchema,
-	PermissionResolvedSchema,
-	AskUserSchema,
-	AskUserResolvedSchema,
-	AskUserErrorSchema,
 	// Session lifecycle
 	ResultSchema,
 	StatusSchema,
@@ -1167,70 +834,29 @@ export const RelayMessageSchema = Schema.Union(
 	SessionForkedSchema,
 	// Model / Agent / Commands
 	ModelInfoMsgSchema,
-	DefaultModelInfoSchema,
-	DefaultPermissionModeInfoSchema,
-	ModelListSchema,
-	AgentListSchema,
-	VisibilityInfoSchema,
-	ClaudeSettingsInfoSchema,
-	CommandListSchema,
 	// Projects
-	ProjectListSchema,
 	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
-	// File browser
-	FileListSchema,
-	FileContentSchema,
-	FileTreeSchema,
-	FileChangedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
-	// PTY / Terminal
-	PtyCreatedSchema,
-	PtyOutputSchema,
-	PtyExitedSchema,
-	PtyDeletedSchema,
-	PtyListSchema,
-	// Todo
-	TodoStateSchema,
-	// Connection status
-	ConnectionStatusSchema,
-	// Plan mode
-	PlanEnterSchema,
-	PlanExitSchema,
-	PlanContentSchema,
-	PlanApprovalSchema,
-	// Banners
-	SkipPermissionsSchema,
-	BannerSchema,
-	// File history
-	FileHistoryResultSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
 	SessionDeletedSchema,
 	// Misc
 	ErrorSchema,
-	SystemErrorSchema,
-	ClientCountSchema,
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
 	InputSyncSchema,
-	UpdateAvailableSchema,
 	// Instance Management
-	InstanceListSchema,
-	InstanceStatusMsgSchema,
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,
 	// Variant / thinking level
 	VariantInfoSchema,
 	ContextWindowInfoSchema,
-	PermissionModeInfoSchema,
 	SessionGoalChangedSchema,
-	ProxyDetectedSchema,
-	ScanResultSchema,
 	// Cross-session notifications
 	NotificationEventSchema,
 );
@@ -1265,11 +891,6 @@ export type PerSessionEventType =
 	| "user_message"
 	| "part_removed"
 	| "message_removed"
-	| "ask_user"
-	| "ask_user_resolved"
-	| "ask_user_error"
-	| "permission_request"
-	| "permission_resolved"
 	| "session_forked"
 	| "provider_session_reloaded"
 	| "session_deleted";
@@ -1383,6 +1004,7 @@ export interface SetupInfoResponse {
 	httpUrl: string;
 	hasCert: boolean;
 	lanMode: boolean;
+	publicUrl: string | null;
 }
 
 export interface HealthResponse {

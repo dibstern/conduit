@@ -48,7 +48,7 @@ import { getVersion } from "../version.js";
 /** Project data provider — returns the current project list. */
 export interface RouterProjectInfo {
 	slug: string;
-	directory: string;
+	folders: readonly [string, ...string[]];
 	title: string;
 	status?: "registering" | "ready" | "error";
 	error?: string;
@@ -93,6 +93,8 @@ export class SetupInfoProvider extends Context.Tag("SetupInfoProvider")<
 	{
 		readonly getPort: () => Effect.Effect<number>;
 		readonly getIsTls: () => Effect.Effect<boolean>;
+		/** The Tailscale Serve URL, or null when serve mode is off. */
+		readonly getPublicUrl: () => Effect.Effect<string | null>;
 	}
 >() {}
 
@@ -113,7 +115,7 @@ export class ProjectApiDelegateProvider extends Context.Tag(
 function serializeProject(p: RouterProjectInfo): DashboardProjectResponse {
 	return {
 		slug: p.slug,
-		path: p.directory,
+		path: p.folders[0],
 		title: p.title || "",
 		status: p.status ?? "ready",
 		...(p.error != null && { error: p.error }),
@@ -300,6 +302,7 @@ const setupInfoHandler = Effect.gen(function* () {
 	const setup = yield* SetupInfoProvider;
 	const port = yield* setup.getPort();
 	const isTls = yield* setup.getIsTls();
+	const publicUrl = yield* setup.getPublicUrl();
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const hostHeader = request.headers["host"] ?? `localhost:${port}`;
 	const hostBase = hostHeader.replace(/:\d+$/, "");
@@ -315,6 +318,7 @@ const setupInfoHandler = Effect.gen(function* () {
 		httpUrl,
 		hasCert: isTls,
 		lanMode,
+		publicUrl,
 	} satisfies SetupInfoResponse);
 });
 

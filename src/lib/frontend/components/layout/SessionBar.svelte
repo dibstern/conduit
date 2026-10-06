@@ -197,7 +197,7 @@
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
 	// The project list can arrive after the bar; the git pill waits for its directory.
-	const directory = $derived(project?.directory);
+	const directory = $derived(project?.folders[0]);
 	const git = $derived(session?.git ?? project?.git);
 
 	const attentionCount = $derived(

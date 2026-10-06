@@ -10,6 +10,7 @@ import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js"
 import {
 	setDefaultContextWindow,
 	setDefaultVariant,
+	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -49,18 +50,24 @@ const makeReadQuery = (
 	getSession: () => Effect.succeed(undefined),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: () => Effect.succeed({}),
+	getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
+	readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
+	getSessionHistoryMetadata: vi.fn(() =>
+		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+	),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
+	readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 	readSessionList: () => Effect.succeed({ rows: [], version: 0 }),
 	getLatestTurnModelExecution,
 });
@@ -441,16 +448,9 @@ describe("WsRpcServerLayer GetModels", () => {
 					},
 				],
 			})) as typeof api.provider.list;
-			api.session.get = vi.fn(async () => ({
-				id: "session-1",
-				projectID: "project-1",
-				directory: "/tmp/project",
-				title: "Session 1",
-				version: "1.0.0",
-				time: { created: 0, updated: 0 },
-				modelID: "claude-sonnet",
-				providerID: "claude",
-			}));
+			api.session.get = vi.fn(async () => {
+				throw new Error("GetModels must not query OpenCode session models");
+			});
 			const orchestrationEngine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -467,6 +467,10 @@ describe("WsRpcServerLayer GetModels", () => {
 			});
 
 			return Effect.gen(function* () {
+				yield* setModel("session-1", {
+					providerID: "claude",
+					modelID: "claude-sonnet",
+				});
 				yield* setDefaultVariant("careful");
 				yield* setDefaultContextWindow("200k");
 				const client = yield* rpcClient;
@@ -512,6 +516,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					model: "claude-sonnet",
 					provider: "claude",
 				});
+				expect(api.session.get).not.toHaveBeenCalled();
 				expect(result.variant).toEqual({
 					variant: "careful",
 					variants: ["fast", "careful"],

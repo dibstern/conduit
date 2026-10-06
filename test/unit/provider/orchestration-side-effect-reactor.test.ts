@@ -217,7 +217,9 @@ describe("ProviderSideEffectReactor", () => {
 				resolvePermission: vi.fn(() => Effect.void),
 				resolveQuestion: vi.fn(() => Effect.void),
 				noteActivity: vi.fn(),
-			} satisfies EventSink & { noteActivity: () => void };
+			} satisfies EventSink & {
+				noteActivity: (event: ProviderRuntimeEvent) => void;
+			};
 			const sendTurn = vi.fn(
 				(
 					input: SendTurnInput,
@@ -244,7 +246,7 @@ describe("ProviderSideEffectReactor", () => {
 
 			yield* reactor.runCommand("cmd-1", interactions);
 
-			expect(interactions.noteActivity).toHaveBeenCalled();
+			expect(interactions.noteActivity).toHaveBeenCalledWith(runtimeEvent);
 			// Output still streams only through the durable ingestion seam.
 			expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 			expect(interactions.push).not.toHaveBeenCalled();

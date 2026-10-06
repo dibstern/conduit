@@ -7,8 +7,8 @@ import { Cause, Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { OpenCodeInstanceClientsLive } from "../../../src/lib/domain/relay/Services/opencode-instance-clients.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -41,6 +41,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 type OperationsOutsideReadModelParity = keyof Pick<
@@ -321,8 +322,9 @@ describe("SessionManager read-your-writes parity", () => {
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
-						OpenCodeInstanceClientsLive.pipe(
-							Layer.provide(Layer.merge(configLayer, loggerLayer)),
+						Layer.succeed(
+							OpenCodeInstancesTag,
+							makeOpenCodeInstancesStub({ opencode: api }),
 						),
 						DaemonEventBusLive,
 						persistenceLayer,

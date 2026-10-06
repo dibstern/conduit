@@ -148,6 +148,8 @@ describe("cross-project browse paging", () => {
 			projectSlug: "project-a",
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor: { updatedAt: 999, id: "s1" },
+			roots: true,
+			exclude: "project-a",
 		});
 	});
 
@@ -331,6 +333,8 @@ describe("project scope", () => {
 		expect(rpc).toHaveBeenCalledWith({
 			projectSlug: "project-a",
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			roots: true,
+			exclude: "project-a",
 			scope: "project-b",
 		});
 		// The local root belongs to project-a, so the scope hides it too.

@@ -26,13 +26,16 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
+	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
@@ -111,6 +114,9 @@ describe("RelayFactoryTag", () => {
 	// It requires DaemonConfigRefTag from the caller.
 	const factoryLayer = RelayFactoryLive("/tmp/test-conduit").pipe(
 		Layer.provideMerge(configLayer),
+		Layer.provide(
+			Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+		),
 	);
 
 	it.effect("resolves from the Layer", () =>
@@ -135,8 +141,7 @@ describe("RelayFactoryTag", () => {
 			const factory = yield* RelayFactoryTag;
 			const project = {
 				slug: "test-project",
-				directory: "/tmp/test-project",
-				folders: ["/tmp/test-project"],
+				folders: ["/tmp/test-project"] as const,
 				title: "Test Project",
 			};
 
@@ -170,7 +175,6 @@ describe("RelayFactoryTag", () => {
 						{
 							slug: "missing",
 							title: "Missing",
-							directory: missingDirectory,
 							folders: [missingDirectory],
 						},
 						"http://localhost:4096",
@@ -193,7 +197,7 @@ describe("RelayFactoryTag", () => {
 		},
 	);
 
-	it.effect("broadcasts project_list only when refreshed git changes", () => {
+	it.effect("publishes ProjectsChanged only when refreshed git changes", () => {
 		const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
 		const server = createServer();
 		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
@@ -206,8 +210,7 @@ describe("RelayFactoryTag", () => {
 			const project = {
 				slug: "git-project",
 				title: "Git Project",
-				directory,
-				folders: [directory],
+				folders: [directory] as const,
 			};
 			yield* addWithoutRelay(project);
 			const subscription = yield* subscribeToDaemonEvents;
@@ -222,18 +225,10 @@ describe("RelayFactoryTag", () => {
 
 			yield* Effect.promise(config.refreshSessionGit);
 			const first = yield* Queue.take(subscription);
-			expect(first).toMatchObject({
-				_tag: "RelayBroadcast",
-				message: {
-					type: "project_list",
-					projects: [
-						{
-							slug: "git-project",
-							git: { branch: "main", dirty: false },
-						},
-					],
-				},
-			});
+			expect(first).toMatchObject({ _tag: "ProjectsChanged" });
+			expect(yield* projectInfos).toMatchObject([
+				{ slug: "git-project", git: { branch: "main", dirty: false } },
+			]);
 			yield* Queue.take(subscription); // daemon_sessions_changed
 			yield* Effect.promise(config.refreshSessionGit);
 			expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
@@ -241,13 +236,10 @@ describe("RelayFactoryTag", () => {
 			writeFileSync(join(directory, "untracked"), "changed");
 			yield* Effect.promise(config.refreshSessionGit);
 			const changed = yield* Queue.take(subscription);
-			expect(changed).toMatchObject({
-				_tag: "RelayBroadcast",
-				message: {
-					type: "project_list",
-					projects: [{ slug: "git-project", git: { dirty: true } }],
-				},
-			});
+			expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
+			expect(yield* projectInfos).toMatchObject([
+				{ slug: "git-project", git: { dirty: true } },
+			]);
 			yield* Queue.take(subscription);
 		}).pipe(
 			Effect.scoped,

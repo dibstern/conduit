@@ -489,7 +489,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const sink = createMockEventSink();
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: sink,
-				lastAssistantUuid: "asst-uuid",
+				turnInFlight: true,
+				activeAssistantMessageId: "asst-uuid",
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 			const deferred = await Effect.runPromise(

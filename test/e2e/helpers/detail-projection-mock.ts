@@ -257,7 +257,12 @@ export function projectLegacyRelayMessage(
 		upsert(page, sessionId, {
 			id,
 			role: "user",
-			time: { created: Date.now() + state.sequence },
+			time: {
+				created:
+					typeof event["createdAt"] === "number"
+						? event["createdAt"]
+						: Date.now() + state.sequence,
+			},
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
 			...(event["steered"] === true ? { steered: true } : {}),
 		});
@@ -377,7 +382,13 @@ export function projectLegacyRelayMessage(
 		if (message)
 			upsert(page, sessionId, {
 				...message,
-				time: { ...message.time, completed: Date.now() },
+				time: {
+					...message.time,
+					completed:
+						typeof event["createdAt"] === "number"
+							? event["createdAt"]
+							: Date.now(),
+				},
 				...(typeof event["cost"] === "number" ? { cost: event["cost"] } : {}),
 			});
 		if (event.type === "done") {
@@ -385,6 +396,36 @@ export function projectLegacyRelayMessage(
 			state.textPartId = null;
 			state.thinkingPartId = null;
 		}
+		return;
+	}
+	// Like the message projector: a compaction's outcome is its own synthetic
+	// message; the "started" notice stays transient.
+	if (
+		event.type === "compaction" &&
+		(event["state"] === "completed" || event["state"] === "failed")
+	) {
+		const id = `compaction-${state.sequence + 1}`;
+		upsert(page, sessionId, {
+			id,
+			role: "assistant",
+			time: { created: Date.now() + state.sequence },
+			parts: [
+				{
+					id: `compaction-part-${state.sequence + 1}`,
+					type: "compaction",
+					...(typeof event["detail"] === "string"
+						? { text: event["detail"] }
+						: {}),
+					...(typeof event["preTokens"] === "number"
+						? { preTokens: event["preTokens"] }
+						: {}),
+					...(typeof event["postTokens"] === "number"
+						? { postTokens: event["postTokens"] }
+						: {}),
+					...(event["state"] === "failed" ? { failed: true } : {}),
+				},
+			],
+		});
 		return;
 	}
 	if (

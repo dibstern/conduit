@@ -1,5 +1,6 @@
 // Global UI state: sidebar, modals, toasts, scroll, rewind, plan mode, banners.
 
+import type { ProjectSetting } from "../transport/ws-rpc.js";
 import type { BannerConfig, PanelId, Toast, ToastVariant } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 
@@ -45,6 +46,9 @@ export const uiState = $state({
 
 	// Banners
 	banners: [] as BannerConfig[],
+	opencodeConnectionStatus: null as
+		| Extract<ProjectSetting, { _tag: "opencodeConnection" }>["status"]
+		| null,
 
 	// Rewind mode
 	rewindActive: false,
@@ -290,4 +294,5 @@ export function resetProjectUI(): void {
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
+	uiState.opencodeConnectionStatus = null;
 }

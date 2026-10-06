@@ -61,11 +61,16 @@ describe("frontend runtime WebSocket validation", () => {
 		const errors: WsProtocolError[] = [];
 		const messages = await collectAfter((ws) => {
 			ws.emitMessage("not json{");
-			ws.emitMessage(JSON.stringify({ type: "client_count", count: 1 }));
+			ws.emitMessage(
+				JSON.stringify({ type: "server_update", restartAvailable: false }),
+			);
 		}, errors.push.bind(errors));
 
 		expect(messages).toEqual([
-			expect.objectContaining({ type: "client_count", count: 1 }),
+			expect.objectContaining({
+				type: "server_update",
+				restartAvailable: false,
+			}),
 		]);
 		expect(errors).toEqual([expect.objectContaining({ kind: "invalid_json" })]);
 	});

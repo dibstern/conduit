@@ -178,14 +178,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			// Attempt persistence before WS send; failures are logged and delivery continues.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
-			// Compaction notices are UI-only EXCEPT the terminal "completed"
-			// boundary, which persists as a synthetic marker so the "Context
-			// compacted" divider survives a page reload. All states still go on
-			// the wire below (the send loop iterates the unfiltered result.events).
+			// A compaction's "started" notice is UI-only. Its outcome, completed or
+			// failed, persists so the divider or the failure notice survives a reload.
+			// All states still go on the wire below (the send loop iterates the
+			// unfiltered result.events).
 			const persistentEvents = result.events.filter(
 				(domainEvent) =>
 					domainEvent.type !== "session.compaction" ||
-					domainEvent.data.state === "completed",
+					domainEvent.data.state !== "started",
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
@@ -269,7 +269,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		);
 
 	const sink: RelayEventSink = {
-		noteActivity: reset,
+		// Without the finish, a client connecting before the status poller
+		// sees idle is told the finished turn is still processing.
+		noteActivity: (event) =>
+			isTerminalRuntimeEvent(event) ? finish() : reset(),
 		detachInteractions: () =>
 			Effect.sync(() => {
 				detachingInteractions = true;
@@ -301,14 +304,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Attempt persistence before WS send; failures are logged and delivery continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				// Compaction notices are UI-only EXCEPT the terminal "completed"
-				// boundary, which persists as a synthetic marker so the "Context
-				// compacted" divider survives a page reload. All states still go on
-				// the wire below (the send loop iterates the unfiltered result.events).
+				// A compaction's "started" notice is UI-only. Its outcome, completed or
+				// failed, persists so the divider or the failure notice survives a reload.
+				// All states still go on the wire below (the send loop iterates the
+				// unfiltered result.events).
 				const persistentEvents = result.events.filter(
 					(domainEvent) =>
 						domainEvent.type !== "session.compaction" ||
-						domainEvent.data.state === "completed",
+						domainEvent.data.state !== "started",
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
@@ -407,36 +410,29 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						: {}),
 				});
 				const ask = Effect.gen(function* () {
+					// Browsers see the card through the approvals subscription, so
+					// the record carries everything the card shows.
 					yield* recordInteraction("permission.asked", {
 						id: request.requestId,
 						sessionId,
 						toolName: request.toolName,
 						input: request.toolInput,
-					});
-					yield* Effect.sync(() => {
-						send({
-							type: "permission_request",
-							sessionId,
-							requestId: request.requestId as PermissionId,
-							toolName: request.toolName,
-							toolInput: request.toolInput,
-							always: request.always ?? [],
-							...(request.permissionSuggestions != null
-								? { permissionSuggestions: [...request.permissionSuggestions] }
-								: {}),
-							...(request.permissionTitle != null
-								? { permissionTitle: request.permissionTitle }
-								: {}),
-							...(request.permissionDisplayName != null
-								? { permissionDisplayName: request.permissionDisplayName }
-								: {}),
-							...(request.permissionDescription != null
-								? { permissionDescription: request.permissionDescription }
-								: {}),
-							...(request.permissionReason != null
-								? { permissionReason: request.permissionReason }
-								: {}),
-						});
+						always: request.always ?? [],
+						...(request.permissionSuggestions != null
+							? { permissionSuggestions: request.permissionSuggestions }
+							: {}),
+						...(request.permissionTitle != null
+							? { permissionTitle: request.permissionTitle }
+							: {}),
+						...(request.permissionDisplayName != null
+							? { permissionDisplayName: request.permissionDisplayName }
+							: {}),
+						...(request.permissionDescription != null
+							? { permissionDescription: request.permissionDescription }
+							: {}),
+						...(request.permissionReason != null
+							? { permissionReason: request.permissionReason }
+							: {}),
 					});
 					return yield* pending.awaitResponse;
 				});
@@ -517,20 +513,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						id: request.requestId,
 						sessionId,
 						questions: askedQuestions,
-					});
-					yield* Effect.sync(() => {
-						send({
-							type: "ask_user",
-							sessionId,
-							toolId: request.requestId,
-							questions: askedQuestions,
-							...(request.toolUseId != null
-								? { toolUseId: request.toolUseId }
-								: {}),
-							...(deps.providerId != null
-								? { providerId: deps.providerId }
-								: {}),
-						});
+						...(request.toolUseId != null
+							? { toolUseId: request.toolUseId }
+							: {}),
+						...(deps.providerId != null ? { providerId: deps.providerId } : {}),
 					});
 					return yield* pending.awaitAnswers;
 				});

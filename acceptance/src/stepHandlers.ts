@@ -14,6 +14,7 @@ import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
+import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
 import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
@@ -33,6 +34,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionSkillsHandlers,
 	...mockAppHandlers,
 	...modelDriftHandlers,
+	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".
 	...transcriptFeedHandlers,

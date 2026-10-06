@@ -1,13 +1,15 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 //
 // Questions use a bridge-less design: the frontend receives the question's
-// `que_` ID via the `ask_user` WebSocket message and sends it back with the
+// `que_` ID from the approvals subscription and sends it back with the
 // answer. The handler calls the OpenCode REST API directly — no in-memory
 // bridge state is needed, so questions survive relay restarts.
 
 import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
+import { WsRpcError } from "../contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -25,7 +27,11 @@ import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
-import { canonicalEvent, createCommandId } from "../persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	createCommandId,
+} from "../persistence/events.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
@@ -44,7 +50,6 @@ export const setDefaultPermissionModeForRelay = (input: {
 }) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
 		yield* Effect.try({
@@ -56,8 +61,8 @@ export const setDefaultPermissionModeForRelay = (input: {
 			catch: (cause) => new RelaySettingsSaveError({ cause }),
 		});
 		yield* setDefaultPermissionMode(input.mode);
-		wsHandler.broadcast({
-			type: "default_permission_mode_info",
+		yield* publishProjectSetting({
+			_tag: "defaultPermissionMode",
 			mode: input.mode,
 		});
 		log.info(
@@ -137,7 +142,7 @@ const restartProcessingTimeout = (sessionId: string) =>
 	});
 
 /**
- * Persist that a question stopped being pending, and say so out loud if it
+ * Persist that an approval stopped being pending, and say so out loud if it
  * cannot be.
  *
  * The badge counts unresolved questions out of the read model, so a resolution
@@ -148,26 +153,29 @@ const restartProcessingTimeout = (sessionId: string) =>
  * with the version it projected at, and the seam publishes that advance after
  * COMMIT, which is how a subscriber learns the badge moved.
  *
- * The OpenCode REST paths come through here, and so does a recovered question
- * skipped with no turn left to record it. A live question owned by the
- * provider runtime is resolved through its event sink, which emits
- * `question.resolved` itself; appending a second one would be a duplicate
- * event, not a second fact.
+ * The OpenCode REST paths come through here, so does a recovered question
+ * skipped with no turn left to record it, and so does an OpenCode permission
+ * the relay timed out. A live approval owned by the provider runtime is
+ * resolved through its event sink, which records the resolution itself;
+ * appending a second one would be a duplicate event, not a second fact.
  *
  * The services are options because handler tests and the CLI's degenerate
  * stacks run without persistence. An unwired store is reported, never skipped
  * in silence.
  */
-const recordQuestionResolved = (
-	sessionId: string,
-	questionId: string,
-	answers: Record<string, unknown>,
+export const recordApprovalResolved = (
+	resolution: Extract<
+		CanonicalEvent,
+		{ type: "question.resolved" | "permission.resolved" }
+	>,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
+		const { sessionId } = resolution;
+		const what = `${resolution.type.split(".")[0]} ${resolution.data.id}`;
 		if (!sessionId) {
 			log.warn(
-				`question ${questionId} resolved without a session id — nothing to clear the badge on`,
+				`${what} resolved without a session id — nothing to clear the badge on`,
 			);
 			return;
 		}
@@ -183,19 +191,14 @@ const recordQuestionResolved = (
 			Option.isNone(projectionRunner)
 		) {
 			log.warn(
-				`question ${questionId} resolution not recorded: no read model is wired to write it to`,
+				`${what} resolution not recorded: no read model is wired to write it to`,
 			);
 			return;
 		}
 
 		const written = yield* Effect.gen(function* () {
 			const commitAndSignal = yield* makeCommitAndSignal;
-			yield* commitAndSignal([
-				canonicalEvent("question.resolved", sessionId, {
-					id: questionId,
-					answers,
-				}),
-			]);
+			yield* commitAndSignal([resolution]);
 		}).pipe(
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
@@ -204,18 +207,19 @@ const recordQuestionResolved = (
 		);
 		if (written._tag === "Left") {
 			log.error(
-				`question ${questionId} resolution not recorded for session=${sessionId}`,
+				`${what} resolution not recorded for session=${sessionId}`,
 				written.left,
 			);
 		}
 	});
 
 /**
- * Tell everyone a question is answered: the browsers watching it, the read
- * model that counts it, and the inactivity timer that stopped while it waited.
+ * Tell everyone a question is answered: the read model that counts it (and
+ * whose approvals subscription takes the card off every browser), and the
+ * inactivity timer that stopped while it waited.
  *
- * One helper because the three have to happen together. Every exit that skipped
- * the middle one is how the badge came to outlive the question.
+ * One helper because the two have to happen together. Every exit that skipped
+ * the record is how the badge came to outlive the question.
  */
 const announceQuestionResolved = (
 	sessionId: string,
@@ -223,15 +227,29 @@ const announceQuestionResolved = (
 	answers: Record<string, unknown>,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		wsHandler.broadcast({
-			type: "ask_user_resolved",
-			toolId: questionId,
-			sessionId,
-		});
-		yield* recordQuestionResolved(sessionId, questionId, answers);
+		yield* recordApprovalResolved(
+			canonicalEvent("question.resolved", sessionId, {
+				id: questionId,
+				answers,
+			}),
+		);
 		yield* restartProcessingTimeout(sessionId);
 	});
+
+/**
+ * An OpenCode permission the relay timed out with no turn awaiting it: recorded
+ * as rejected, which takes its card down. OpenCode itself is not told.
+ */
+export const recordPermissionTimedOut = (entry: {
+	readonly id: string;
+	readonly sessionId: string;
+}) =>
+	recordApprovalResolved(
+		canonicalEvent("permission.resolved", entry.sessionId, {
+			id: entry.id,
+			decision: "reject",
+		}),
+	);
 
 /** Persist permission rule to opencode.jsonc. */
 const persistPermissionRule = (
@@ -336,13 +354,6 @@ export const handlePermissionResponse = (
 				);
 			}
 
-			wsHandler.broadcast({
-				type: "permission_resolved",
-				sessionId,
-				requestId,
-				decision: result.mapped,
-			});
-
 			// Persist to opencode.jsonc when the user chose "Always Allow"
 			if (decision === "allow_always" && persistScope && !isClaudeSession) {
 				yield* persistPermissionRule(
@@ -439,11 +450,6 @@ export const handleAskUserResponse = (
 				}
 				// Not announceQuestionResolved: the event sink or the recovered turn
 				// records this resolution, not the handler.
-				wsHandler.broadcast({
-					type: "ask_user_resolved",
-					toolId,
-					sessionId: questionSessionId,
-				});
 				yield* restartProcessingTimeout(questionSessionId);
 				return;
 			}
@@ -502,10 +508,7 @@ export const handleAskUserResponse = (
 			`client=${clientId} session=${sessionId} answer DROPPED (no pending question found): ${toolId}`,
 		);
 
-		wsHandler.sendTo(clientId, {
-			type: "ask_user_error",
-			sessionId,
-			toolId,
+		return yield* new WsRpcError({
 			message:
 				"This question was asked in a terminal session and can't be answered from the browser. Answer it in the terminal, or send a follow-up message to continue.",
 		});
@@ -551,14 +554,10 @@ export const handleQuestionReject = (
 					log.warn(
 						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
 					);
-					wsHandler.sendTo(clientId, {
-						type: "ask_user_error",
-						sessionId: questionSessionId,
-						toolId,
+					return yield* new WsRpcError({
 						message:
 							"Claude questions require an answer before the turn can continue.",
 					});
-					return;
 				}
 			}
 
@@ -589,11 +588,6 @@ export const handleQuestionReject = (
 				if (resolved.question.recovered) {
 					yield* announceQuestionResolved(questionSessionId, toolId, {});
 				} else {
-					wsHandler.broadcast({
-						type: "ask_user_resolved",
-						toolId,
-						sessionId: questionSessionId,
-					});
 					yield* restartProcessingTimeout(questionSessionId);
 				}
 				return;
@@ -642,11 +636,8 @@ export const handleQuestionReject = (
 			);
 		}
 
-		// Notify the frontend so the QuestionCard can show an error
-		wsHandler.sendTo(clientId, {
-			type: "ask_user_error",
-			sessionId,
-			toolId,
+		// Fail the RPC so the QuestionCard can show why.
+		return yield* new WsRpcError({
 			message:
 				"This question was asked in a terminal session and can't be skipped from the browser. Answer it in the terminal, or send a follow-up message to continue.",
 		});

@@ -145,6 +145,7 @@ describe("MessageProjector", () => {
 			"file.attached",
 			"turn.completed",
 			"turn.error",
+			"turn.interrupted",
 			"session.compaction",
 		]);
 	});
@@ -981,8 +982,7 @@ describe("MessageProjector", () => {
 			expect(parts[0]?.duration).toBe(150);
 		});
 
-		// Effect projector diverges: tool.running leaves the original input unchanged.
-		it.fails("refreshes input when tool.running carries one, keeps it otherwise", async () => {
+		it("refreshes input when tool.running carries one, keeps it otherwise", async () => {
 			await project(
 				makeStored("tool.started", "s1", {
 					messageId: "m1",
@@ -1039,8 +1039,7 @@ describe("MessageProjector", () => {
 			});
 		});
 
-		// Effect projector diverges: tool.completed leaves the original input unchanged.
-		it.fails("refreshes input when tool.completed carries one, keeps it otherwise", async () => {
+		it("refreshes input when tool.completed carries one, keeps it otherwise", async () => {
 			await project(
 				makeStored("tool.started", "s1", {
 					messageId: "m1",
@@ -1935,18 +1934,30 @@ describe("MessageProjector", () => {
 			expect(parts).toHaveLength(1);
 		});
 
-		it.each([
-			"started",
-			"failed",
-		] as const)("does NOT persist a %s boundary (transient notice)", async (state) => {
+		it("persists a failed outcome as a failed compaction part", async () => {
+			await project(
+				makeStored(
+					"session.compaction",
+					"s1",
+					{ sessionId: "s1", state: "failed", detail: "Compaction failed" },
+					4,
+				),
+			);
+
+			const parts = await harness.query<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE type = 'compaction'",
+				[],
+			);
+			expect(parts.map((part) => [part.text, part.status])).toEqual([
+				["Compaction failed", "failed"],
+			]);
+		});
+
+		it("does NOT persist a started notice (transient)", async () => {
 			const event = makeStored(
 				"session.compaction",
 				"s1",
-				{
-					sessionId: "s1",
-					state,
-					detail: state === "started" ? "Compacting…" : "Compaction failed",
-				},
+				{ sessionId: "s1", state: "started", detail: "Compacting…" },
 				4,
 			);
 

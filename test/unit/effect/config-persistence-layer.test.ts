@@ -186,7 +186,6 @@ describe("ConfigPersistenceLive", () => {
 					yield* addWithoutRelay(
 						{
 							slug: "alpha",
-							directory: "/tmp/alpha",
 							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,
@@ -217,7 +216,6 @@ describe("ConfigPersistenceLive", () => {
 					projects: [
 						{
 							path: "/tmp/alpha",
-							directory: "/tmp/alpha",
 							folders: ["/tmp/alpha"],
 							slug: "alpha",
 							title: "Alpha",

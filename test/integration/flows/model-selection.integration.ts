@@ -1,6 +1,6 @@
 // Tests model/provider behavior against a mock OpenCode server.
 // Verifies:
-//   - Only configured providers appear in model_list
+//   - Only configured providers appear in GetModels
 //   - Model switch works and messages succeed
 //   - New session resets model selection
 
@@ -33,21 +33,11 @@ describe("Integration: Model Selection", () => {
 		harness.mock.resetQueues();
 	});
 
-	it("model_list only contains configured providers", async () => {
+	it("GetModels only returns configured providers", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		await client.waitFor("model_list");
-		const modelList = client.getReceivedOfType("model_list");
-		expect(modelList.length).toBeGreaterThan(0);
-		const modelListMessage = modelList[0];
-		assert.exists(modelListMessage, "expected a model list message");
-		const providers = modelListMessage["providers"] as Array<{
-			id: string;
-			name: string;
-			configured: boolean;
-			models: Array<{ id: string }>;
-		}>;
+		const { providers } = await client.getModels();
 
 		// Every provider in the list must be configured
 		for (const provider of providers) {
@@ -81,18 +71,13 @@ describe("Integration: Model Selection", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		// Get available models from model_list
-		await client.waitFor("model_list");
-		const modelList = client.getReceivedOfType("model_list");
-		const modelListMessage = modelList[0];
-		assert.exists(modelListMessage, "expected a model list message");
-		const providers = modelListMessage["providers"] as Array<{
-			id: string;
-			models: Array<{ id: string }>;
-		}>;
+		// Get available models from GetModels
+		const { providers } = await client.getModels();
 
 		// Find a provider with at least one model
-		const provider = providers.find((p) => p.models.length > 0);
+		const provider = providers.find(
+			(p) => p.id !== "claude" && p.models.length > 0,
+		);
 		expect(provider).toBeDefined();
 		assert.exists(provider, "expected a provider with models");
 		const target = provider.models[0];
@@ -117,15 +102,10 @@ describe("Integration: Model Selection", () => {
 		await client.waitForInitialState();
 
 		// Pick first model from first provider
-		await client.waitFor("model_list");
-		const modelList = client.getReceivedOfType("model_list");
-		const modelListMessage = modelList[0];
-		assert.exists(modelListMessage, "expected a model list message");
-		const providers = modelListMessage["providers"] as Array<{
-			id: string;
-			models: Array<{ id: string }>;
-		}>;
-		const provider = providers.find((p) => p.models.length > 0);
+		const { providers } = await client.getModels();
+		const provider = providers.find(
+			(p) => p.id !== "claude" && p.models.length > 0,
+		);
 		expect(provider).toBeDefined();
 		assert.exists(provider, "expected a provider with models");
 		const target = provider.models[0];
@@ -155,15 +135,10 @@ describe("Integration: Model Selection", () => {
 		await client.waitForInitialState();
 
 		// Switch model explicitly — pick first from model list
-		await client.waitFor("model_list");
-		const modelList = client.getReceivedOfType("model_list");
-		const modelListMessage = modelList[0];
-		assert.exists(modelListMessage, "expected a model list message");
-		const providers = modelListMessage["providers"] as Array<{
-			id: string;
-			models: Array<{ id: string }>;
-		}>;
-		const provider = providers.find((p) => p.models.length > 0);
+		const { providers } = await client.getModels();
+		const provider = providers.find(
+			(p) => p.id !== "claude" && p.models.length > 0,
+		);
 		expect(provider).toBeDefined();
 		assert.exists(provider, "expected a provider with models");
 		const target = provider.models[0];

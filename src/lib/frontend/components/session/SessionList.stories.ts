@@ -57,8 +57,8 @@ function resetSessionState() {
 	routerState.search = "";
 	attachedProjectState.slug = "conduit";
 	projectState.projects = [
-		{ slug: "conduit", title: "conduit", directory: "/src/conduit" },
-		{ slug: "acme", title: "Acme", directory: "/src/acme" },
+		{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
+		{ slug: "acme", title: "Acme", folders: ["/src/acme"] },
 	];
 }
 

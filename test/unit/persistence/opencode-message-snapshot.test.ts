@@ -133,6 +133,9 @@ describe("OpenCode message snapshots", () => {
 				...normalized,
 				role: normalized.role === "user" ? "user" : "assistant",
 				isBackfilled: true,
+				...(normalized.role === "user"
+					? { turnTiming: { startedAt: 10, endedAt: 60, waits: [] } }
+					: {}),
 				parts: normalized.parts.map((part) => ({
 					...part,
 					type: part.type as HistoryMessagePart["type"],

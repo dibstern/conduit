@@ -217,7 +217,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		},
 	);
 
-	it.effect("loads prior Claude history from Effect persistence", () => {
+	it.effect("loads Claude history metadata from Effect persistence", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-history-effect-"));
 		const filename = join(dir, "events.db");
 		const ws = mockWsHandler("session-history-effect");
@@ -277,13 +277,17 @@ describe("handleMessage with Effect provider state persistence", () => {
 					'Earlier question', NULL, NULL, NULL, NULL, NULL, 0, 2, 2
 				)`;
 			yield* sql`
-				INSERT INTO message_parts (
-					id, message_id, type, text, tool_name, call_id, input, result,
-					duration, status, sort_order, created_at, updated_at
-				) VALUES (
-					'part-prior-user', 'message-prior-user', 'text', 'Earlier question',
-					NULL, NULL, NULL, NULL, NULL, NULL, 0, 2, 2
-				)`;
+					INSERT INTO messages (
+						id, session_id, turn_id, role, text, cost, tokens_in, tokens_out,
+						tokens_cache_read, tokens_cache_write, is_streaming, created_at, updated_at
+					) VALUES (
+						'message-prior-assistant', 'session-history-effect', NULL, 'assistant',
+						'Earlier reply', NULL, 3, 4, 5, 6, 0, 3, 3
+					)`;
+			const readQuery = yield* ReadQueryEffectTag;
+			expect(
+				yield* readQuery.getSessionHistoryMetadata("session-history-effect"),
+			).toEqual({ messageCount: 2, cumulativeTokens: 18 });
 
 			yield* handleMessage("client-1", {
 				text: "continue from there",
@@ -298,20 +302,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 					type: "send_turn",
 					providerId: "claude",
 					input: expect.objectContaining({
-						history: [
-							expect.objectContaining({
-								id: "message-prior-user",
-								role: "user",
-								text: "Earlier question",
-								parts: [
-									expect.objectContaining({
-										id: "part-prior-user",
-										type: "text",
-										text: "Earlier question",
-									}),
-								],
-							}),
-						],
+						history: [],
+						cumulativeTokens: 18,
 					}),
 				}),
 			);
@@ -396,7 +388,11 @@ describe("handleMessage with Effect provider state persistence", () => {
 					"session-claude-user-effect",
 				);
 
-				expect(messages).toHaveLength(1);
+				// The user message, then the failed turn's projected error.
+				expect(messages).toHaveLength(2);
+				expect(messages[1]?.parts).toEqual([
+					expect.objectContaining({ type: "error" }),
+				]);
 				expect(messages[0]).toMatchObject({
 					id: "cmd-provider-state-persist-effect",
 					input_id: "cmd-provider-state-persist-effect",

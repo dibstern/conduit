@@ -11,7 +11,6 @@ describe("UserMessage model drift marker", () => {
 	beforeEach(() => {
 		clearDiscoveryState();
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "claude",

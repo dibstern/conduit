@@ -8,18 +8,11 @@ import {
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeFileServiceTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	getFileTreeEntries,
-	handleGetFileTree,
-} from "../../../src/lib/handlers/files.js";
+import { getFileTreeEntries } from "../../../src/lib/handlers/files.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
-import {
-	makeMockLogger,
-	makeMockWebSocketHandler,
-} from "../../helpers/mock-factories.js";
+import { makeMockLogger } from "../../helpers/mock-factories.js";
 
 describe("file tree time limits", () => {
 	it.effect("preserves breadth-first order and gitignore filtering", () =>
@@ -175,24 +168,18 @@ describe("file tree time limits", () => {
 		},
 	);
 
-	it.effect("returns an empty legacy response when the root stalls", () => {
-		const ws = makeMockWebSocketHandler();
+	it.effect("returns no entries when the root stalls", () => {
 		const log = makeMockLogger();
 		return Effect.gen(function* () {
-			const fiber = yield* Effect.forkScoped(handleGetFileTree("client", {}));
+			const fiber = yield* Effect.forkScoped(getFileTreeEntries());
 			yield* TestClock.adjust("5 seconds");
 			expect(Option.isSome(yield* Fiber.poll(fiber))).toBe(true);
-			yield* Fiber.join(fiber);
-			expect(ws.sendTo).toHaveBeenCalledWith("client", {
-				type: "file_tree",
-				entries: [],
-			});
+			expect(yield* Fiber.join(fiber)).toEqual([]);
 			expect(log.warn).toHaveBeenCalledWith(
 				'File tree folder timed out: "." after 5000 ms',
 			);
 		}).pipe(
 			Effect.scoped,
-			Effect.provideService(WebSocketHandlerTag, ws),
 			Effect.provideService(LoggerTag, log),
 			Effect.provideService(OpenCodeFileServiceTag, {
 				list: () => Effect.tryPromise(() => new Promise<never>(() => {})),

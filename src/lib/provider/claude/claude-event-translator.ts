@@ -21,7 +21,7 @@
  * All payloads match the EventPayloadMap interfaces.
  */
 import { randomUUID } from "node:crypto";
-import { Effect } from "effect";
+import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
@@ -275,6 +275,8 @@ export class ClaudeEventTranslator {
 	private readonly ledger = new AssistantTextLedger();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
+	// The runner outlives server restarts, and the SDK provides no start time.
+	private backgroundTaskFirstSeenAt = new Map<string, number>();
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
 	// reads re-count the whole prompt per tool round), so it wildly overstates
@@ -311,6 +313,7 @@ export class ClaudeEventTranslator {
 				return Effect.void;
 			}
 			this.announcedMessageIds.add(messageId);
+			ctx.activeAssistantMessageId = messageId;
 			return this.push(
 				ctx,
 				makeProviderRuntimeEvent("message.created", ctx.sessionId, {
@@ -402,6 +405,7 @@ export class ClaudeEventTranslator {
 				}),
 			);
 			ctx.turnInFlight = false;
+			ctx.activeAssistantMessageId = "";
 			this.resetInFlightState();
 		});
 	}
@@ -695,21 +699,28 @@ export class ClaudeEventTranslator {
 				// The full live set, replacing the previous one. Ambient tasks
 				// (watchers, housekeeping) are not activity, per the SDK.
 				case "background_tasks_changed": {
+					const now = yield* Clock.currentTimeMillis;
+					const tasks = message.tasks
+						.filter(
+							(task) =>
+								!task.ambient &&
+								task.task_type !== "plan" &&
+								task.task_type !== "plan_mode",
+						)
+						.map((task) => ({
+							id: task.task_id,
+							type: task.task_type,
+							description: task.description,
+							firstSeenAt:
+								this.backgroundTaskFirstSeenAt.get(task.task_id) ?? now,
+						}));
+					this.backgroundTaskFirstSeenAt = new Map(
+						tasks.map((task) => [task.id, task.firstSeenAt]),
+					);
 					const transition = this.deps.onBackgroundTask?.({
 						sessionId: ctx.sessionId,
 						kind: "snapshot",
-						tasks: message.tasks
-							.filter(
-								(task) =>
-									!task.ambient &&
-									task.task_type !== "plan" &&
-									task.task_type !== "plan_mode",
-							)
-							.map((task) => ({
-								id: task.task_id,
-								type: task.task_type,
-								description: task.description,
-							})),
+						tasks,
 					});
 					if (transition) yield* transition;
 					return;
@@ -1532,6 +1543,13 @@ export class ClaudeEventTranslator {
 		result: SDKResultMessage,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
+			if (
+				result.subtype === "success" &&
+				!result.is_error &&
+				!isInterruptedResult(result)
+			) {
+				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
+			}
 			yield* this.settleGoal(ctx);
 			if (
 				isInterruptedResult(result) ||
@@ -1541,8 +1559,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty means "the running one".
+						messageId: this.currentAssistantMessageId || "",
 					}),
 				);
 				yield* this.endTurn(ctx);
@@ -1555,8 +1573,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty ends the running one.
+						messageId: this.currentAssistantMessageId || "",
 						error: errors,
 					}),
 				);
@@ -1579,8 +1597,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty ends the running one.
+						messageId: this.currentAssistantMessageId || "",
 						error: errorText,
 						code: "provider_error",
 					}),

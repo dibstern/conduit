@@ -15,7 +15,6 @@ import {
 	getVariant,
 	isModelUserSelected,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { RelayError } from "../errors.js";
 
 // Stores the last input_sync text per session so that newly connecting clients
 // (e.g. opening on a different device) receive the current draft.
@@ -44,7 +43,6 @@ export interface SendMessageToSessionInput {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly commandId: string;
-	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
 	/** A steer joins the running turn of a busy session, or is refused. */
 	readonly delivery?: InputDelivery;
@@ -58,7 +56,6 @@ export interface SendMessageToSessionResult {
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -68,15 +65,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		let activeId = input.sessionId;
 		if (!text) return { sessionId: activeId } as SendMessageToSessionResult;
 		if (!activeId) {
-			if (input.missingSessionClientId) {
-				wsHandler.sendTo(
-					input.missingSessionClientId,
-					new RelayError(
-						"No active session. Create or switch to a session first.",
-						{ code: "NO_SESSION" },
-					).toSystemError(),
-				);
-			}
+			log.warn(`client=${clientId} send_turn dropped: no active session`);
 			return { sessionId: activeId } as SendMessageToSessionResult;
 		}
 		const originalActiveId = activeId;
@@ -165,15 +154,10 @@ export const handleMessage = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
 		if (!payload.text) return;
 		if (!payload.commandId) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError(
-					"Missing commandId for mutating provider command: send_turn",
-					{ code: "MISSING_COMMAND_ID" },
-				).toSystemError(),
-			);
+			log.warn(`client=${clientId} send_turn dropped: missing commandId`);
 			return;
 		}
 		yield* sendMessageToSession({
@@ -182,7 +166,6 @@ export const handleMessage = (
 			text: payload.text,
 			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
-			missingSessionClientId: clientId,
 		});
 	});
 

@@ -1,44 +1,26 @@
 <script lang="ts">
 	import type { GoalView } from "../../stores/goal.svelte.js";
+	import { fmtClock } from "../../utils/turns.js";
 	import Icon from "../ui/Icon.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
 	let {
-		startedAt,
+		elapsed,
+		missingPrompt = false,
 		activity = "",
 		following = true,
 		onlive,
 		goal,
 		class: className = "",
 	}: {
-		startedAt: number | null;
+		elapsed: number | undefined;
+		missingPrompt?: boolean | undefined;
 		activity?: string | undefined;
 		following?: boolean | undefined;
 		onlive?: (() => void) | undefined;
 		goal?: GoalView | undefined;
 		class?: string | undefined;
 	} = $props();
-
-	let now = $state(Date.now());
-	$effect(() => {
-		// Restart the tick when a different session or turn is displayed.
-		const start = startedAt;
-		now = Date.now();
-		if (start === null || goal?.phase === "checking") return;
-		const timer = setInterval(() => {
-			now = Date.now();
-		}, 1000);
-		return () => clearInterval(timer);
-	});
-
-	const elapsed = $derived.by(() => {
-		const seconds = Math.max(0, Math.floor((now - (startedAt ?? now)) / 1000));
-		const minutes = Math.floor(seconds / 60);
-		const ss = String(seconds % 60).padStart(2, "0");
-		return minutes < 60
-			? `${minutes}:${ss}`
-			: `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${ss}`;
-	});
 </script>
 
 <div
@@ -56,7 +38,7 @@
 			class="size-[7px] shrink-0 rounded-full bg-accent motion-safe:animate-pulse"
 		></span>
 		<b data-testid="composer-status-elapsed" class="shrink-0 font-semibold tabular-nums">
-			Working {elapsed}
+			Working{#if missingPrompt}{" (no prompt to time from)"}{:else if elapsed !== undefined}{` ${fmtClock(elapsed)}`}{/if}
 		</b>
 		{#if activity}
 			<span

@@ -16,6 +16,7 @@ import {
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	MESSAGES_INPUT_ID_MIGRATION,
 	MESSAGES_STEERED_MIGRATION,
+	PENDING_APPROVALS_VERSION_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
@@ -35,6 +36,8 @@ import {
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	STARTUP_RESTORE_INDEXES_MIGRATION,
+	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
 
@@ -363,7 +366,7 @@ const postBaselineTableNames = new Set<string>([
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
-	"pending_inputs", // 0032
+	"pending_inputs", // 0035
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -999,21 +1002,30 @@ export const effectMigrationEntries = {
 		if (columns.some((column) => column.name === "goal_state")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
 	}),
-	"0031_messages_input_id": Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
-		if (columns.some((column) => column.name === "input_id")) return;
-		yield* executeSqlStatements(readMigrationSql(MESSAGES_INPUT_ID_MIGRATION));
-	}),
-	"0032_pending_inputs": executeSqlStatements(
+	"0031_startup_restore_indexes": executeSqlStatements(
+		readMigrationSql(STARTUP_RESTORE_INDEXES_MIGRATION),
+	),
+	"0032_tool_call_index": executeSqlStatements(
+		readMigrationSql(TOOL_CALL_INDEX_MIGRATION),
+	),
+	"0033_pending_approvals_version": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"version",
+		readMigrationSql(PENDING_APPROVALS_VERSION_MIGRATION),
+	),
+	"0034_messages_input_id": runAddColumnMigrationIfMissing(
+		"messages",
+		"input_id",
+		readMigrationSql(MESSAGES_INPUT_ID_MIGRATION),
+	),
+	"0035_pending_inputs": executeSqlStatements(
 		readMigrationSql(PENDING_INPUTS_MIGRATION),
 	),
-	"0033_messages_steered": Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
-		if (columns.some((column) => column.name === "steered")) return;
-		yield* executeSqlStatements(readMigrationSql(MESSAGES_STEERED_MIGRATION));
-	}),
+	"0036_messages_steered": runAddColumnMigrationIfMissing(
+		"messages",
+		"steered",
+		readMigrationSql(MESSAGES_STEERED_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

@@ -3,18 +3,18 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
-	import ProjectManagerPanel from "../project/ProjectManagerPanel.svelte";
-	import { dismiss } from "../../actions/use-dismiss.svelte.js";
+	import ProjectDialog from "../project/ProjectDialog.svelte";
 	import {
 		uiState,
 		collapseSidebar,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
+	import { applyProjectList, projectState } from "../../stores/project.svelte.js";
+	import { setSessionScope } from "../../stores/session-scope.js";
+	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
@@ -28,12 +28,17 @@
 	// True while this sidebar is the phone's full-screen session list.
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
-	let projectsOpen = $state(false);
+	let addProjectOpen = $state(false);
 	let listMenuOpen = $state(false);
-	let projectContextMenuOpen = $state(false);
 
 	function handleCloseSidebar() {
 		collapseSidebar();
+	}
+
+	function handleProjectAdded(response: SaveProjectResponse) {
+		applyProjectList(response);
+		setSessionScope(response.savedSlug);
+		addProjectOpen = false;
 	}
 
 	// Settled sessions are never counted: that set only grows.
@@ -84,15 +89,7 @@
 	     phone bar 40px under 2px, desktop 34px under 10px. -->
 	<div
 		id="sidebar-header"
-		class="relative box-content flex shrink-0 items-center {sessionViewState.compact ? 'h-[40px] gap-[10px] px-[12px] pt-[2px]' : 'h-[34px] gap-[2px] px-[10px] pt-[10px]'}"
-		use:dismiss={{
-			enabled: projectsOpen && !projectContextMenuOpen,
-			escape: false,
-			onDismiss: () => {
-				if (document.getElementById("confirm-modal")) return;
-				projectsOpen = false;
-			},
-		}}
+		class="box-content flex shrink-0 items-center {sessionViewState.compact ? 'h-[40px] gap-[10px] px-[12px] pt-[2px]' : 'h-[34px] gap-[2px] px-[10px] pt-[10px]'}"
 	>
 		{#if sessionViewState.compact}
 			<!--
@@ -133,14 +130,6 @@
 					onselect={() => { uiState.selectMode = true; }}
 				>
 					Select
-				</MenuItem>
-				<MenuItem
-					title="Projects"
-					data-testid="list-overflow-projects"
-					class="min-h-[44px] md:min-h-0"
-					onselect={() => { projectsOpen = true; }}
-				>
-					Projects…
 				</MenuItem>
 				<MenuItem
 					title="Resume a session by ID"
@@ -223,25 +212,6 @@
 				onclick={handleCloseSidebar}
 			/>
 		{/if}
-
-		<!-- Keep this surface inside #sidebar so it follows the list route. -->
-		{#if projectsOpen}
-			<Surface
-				variant="card"
-				radius="panel"
-				elevation="dropdown"
-				id="sidebar-projects-panel"
-				data-testid="sidebar-projects-panel"
-				class="absolute top-full left-1 right-1 z-[var(--z-dropdown)] mt-0.5 min-w-[240px] p-1 overflow-hidden font-brand"
-			>
-				<ProjectManagerPanel
-					projects={projectState.projects}
-					currentSlug={getCurrentSlug() ?? undefined}
-					onclose={() => { projectsOpen = false; }}
-					oncontextmenuopenchange={(nextOpen) => { projectContextMenuOpen = nextOpen; }}
-				/>
-			</Surface>
-		{/if}
 	</div>
 
 	{#if listScreen}<Banners />{/if}
@@ -255,7 +225,7 @@
 		>
 			<!-- Session list -->
 			<div id="session-list-container" class="flex-1 flex flex-col overflow-hidden">
-				<SessionList onaddproject={() => { projectsOpen = true; }} />
+				<SessionList onaddproject={() => { addProjectOpen = true; }} />
 			</div>
 		</div>
 
@@ -278,3 +248,13 @@
 	</nav>
 
 </div>
+
+{#if addProjectOpen}
+	<ProjectDialog
+		open
+		projects={projectState.projects}
+		onclose={() => { addProjectOpen = false; }}
+		onsaved={handleProjectAdded}
+		returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
+	/>
+{/if}

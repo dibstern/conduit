@@ -467,13 +467,21 @@ export function countsPhrase(s: TurnStats): string {
 	return s.skills > 0 || s.compactions > 0 ? "" : "no tools";
 }
 
+export function fmtClock(ms: number): string {
+	const seconds = Math.max(0, Math.floor(ms / 1000));
+	const minutes = Math.floor(seconds / 60);
+	const sec = String(seconds % 60).padStart(2, "0");
+	if (minutes < 60) return `${minutes}:${sec}`;
+	return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${sec}`;
+}
+
 export function fmtDuration(ms: number): string {
 	// Fast tools really do finish in single-digit milliseconds. Rendering those
 	// as "0.0s" reads like a broken clock, so sub-second spans keep their unit.
 	if (ms < 1000) return `${Math.round(ms)}ms`;
-	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+	if (ms < 60_000) return `${Math.floor(ms / 1000)}s`;
 	const minutes = Math.floor(ms / 60_000);
-	const sec = Math.round((ms % 60_000) / 1000);
+	const sec = Math.floor((ms % 60_000) / 1000);
 	return `${minutes}m ${sec}s`;
 }
 
@@ -490,29 +498,60 @@ function turnStart(turn: Turn): number | undefined {
 	return undefined;
 }
 
-export function turnDuration(turn: Turn, now: number): number | undefined {
-	const result = turn.segments.at(-1)?.end;
-	// `!== undefined`, not truthiness: a provider-reported 0 is a measurement.
-	if (result?.type === "result" && result.duration !== undefined)
-		return result.duration;
-	const start = turnStart(turn);
+/** Observed stamps keep settled turns independent of the render clock. */
+export function latestStamp(segment: Segment): number | undefined {
+	let end = segment.end?.createdAt;
+	for (const part of segment.activity) {
+		for (const stamp of [
+			part.createdAt,
+			part.type === "system" ? undefined : part.endedAt,
+		]) {
+			if (stamp !== undefined) end = Math.max(end ?? stamp, stamp);
+		}
+	}
+	for (const reply of segment.reply) {
+		if (reply.createdAt !== undefined)
+			end = Math.max(end ?? reply.createdAt, reply.createdAt);
+	}
+	return end;
+}
+
+/** Explicit waits keep time waiting for the user out of the prompt's clock. */
+export function workingTime(
+	turn: Turn,
+	now: number,
+	until?: number,
+): number | undefined {
+	const timing = turn.user?.turnTiming;
+	const start = timing?.startedAt ?? turn.user?.createdAt;
 	if (start === undefined) return undefined;
-	let end = turn.live ? now : result?.createdAt;
+	let end = timing?.endedAt ?? (turn.live ? now : undefined);
 	if (end === undefined) {
-		for (let i = turn.segments.length - 1; i >= 0; i--) {
-			const segment = turn.segments[i];
-			if (segment === undefined) continue;
-			end =
-				segment.handBack?.createdAt ??
-				segment.reply.at(-1)?.createdAt ??
-				segment.activity.at(-1)?.createdAt;
-			if (end !== undefined) break;
+		for (const segment of turn.segments) {
+			const stamp = latestStamp(segment);
+			if (stamp !== undefined) end = Math.max(end ?? stamp, stamp);
 		}
 	}
 	if (end === undefined) return undefined;
-	// Stamps can arrive out of order across a provider boundary. A negative span
-	// is not a measurement, so show nothing rather than "-1.0s".
-	return end < start ? undefined : end - start;
+	if (until !== undefined) end = Math.min(end, until);
+	let duration = Math.max(0, end - start);
+	// Parallel prompts can overlap; time already subtracted is skipped.
+	let waitedUntil = start;
+	const waits = [...(timing?.waits ?? [])].sort((a, b) => a.from - b.from);
+	for (const wait of waits) {
+		const to = Math.min(wait.to ?? end, end);
+		duration -= Math.max(0, to - Math.max(wait.from, waitedUntil));
+		waitedUntil = Math.max(waitedUntil, to);
+	}
+	return duration;
+}
+
+export function isPaused(turn: Turn): boolean {
+	const timing = turn.user?.turnTiming;
+	return (
+		timing?.endedAt === undefined &&
+		(timing?.waits ?? []).some((wait) => wait.to === undefined)
+	);
 }
 
 /**
@@ -539,21 +578,6 @@ function segmentEnd(
 			? now
 			: Math.max(segment.end?.createdAt ?? 0, lastStamp))
 	);
-}
-
-/**
- * Wall-clock ms for the whole segment. Steps can overlap, so this is the span
- * from the first step to the end of the work — never the sum of the steps.
- */
-export function segmentDuration(
-	segment: Segment,
-	turn: Turn,
-	final: boolean,
-	now: number,
-): number | undefined {
-	const start = segment.activity[0]?.createdAt;
-	if (start === undefined) return undefined;
-	return Math.max(0, segmentEnd(segment, turn, final, now) - start);
 }
 
 /**
@@ -706,7 +730,7 @@ export interface TurnEconomics {
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
 	const result = lastResult(turn);
-	const duration = turnDuration(turn, now);
+	const duration = workingTime(turn, now);
 	const window = result?.context_window;
 	const used =
 		result &&
