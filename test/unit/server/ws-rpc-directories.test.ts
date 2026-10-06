@@ -91,7 +91,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 	);
 
 	it.effect(
-		"includes the exact folder with a trailing slash and caps visible children",
+		"includes the exact folder with a trailing slash and every visible child",
 		() =>
 			Effect.gen(function* () {
 				const root = yield* tempDirectory;
@@ -103,7 +103,7 @@ describe("WsRpcServerLayer FindFolders", () => {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const { entries } = yield* client.FindFolders({ query: `${root}/` });
 
-				expect(entries).toHaveLength(20);
+				expect(entries).toHaveLength(26);
 				expect(entries[0]).toEqual({
 					path: root,
 					isGitRepo: false,
