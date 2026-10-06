@@ -110,16 +110,6 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.close();
 	});
 
-	it("GetTodo RPC returns todo state", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		const result = await client.getTodo();
-		expect(Array.isArray(result.items)).toBe(true);
-		await client.close();
-	});
-
 	it("input_sync broadcasts to clients", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();

@@ -23,7 +23,6 @@ import {
 	GetProjects,
 	GetSessionSkills,
 	GetSkillContent,
-	GetTodo,
 	GetToolContent,
 	InstanceListResponseSchema,
 	ListDaemonSessions,
@@ -451,11 +450,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						mode: request.mode,
 					}),
-				GetTodo: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						items: [],
-					}),
 				GetFileTree: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -796,7 +790,6 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("RespondPermission")).toBe(true);
 		expect(WsRpcGroup.requests.has("AnswerQuestion")).toBe(true);
 		expect(WsRpcGroup.requests.has("RejectQuestion")).toBe(true);
-		expect(WsRpcGroup.requests.has("GetTodo")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchAgent")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchContextWindow")).toBe(true);
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
@@ -1051,12 +1044,6 @@ describe("browser WebSocket RPC contract", () => {
 							"Terminal is unavailable; reconnect or create a new terminal",
 					}),
 				);
-
-				const todo = yield* client.GetTodo({ projectSlug: "demo" });
-				expect(todo).toEqual({
-					projectSlug: "demo",
-					items: [],
-				});
 
 				expect(
 					yield* client.SwitchAgent({
@@ -1496,7 +1483,6 @@ describe("browser WebSocket RPC contract", () => {
 				toolId: "que-1",
 			})._tag,
 		).toBe("RejectQuestion");
-		expect(new GetTodo({ projectSlug: "demo" })._tag).toBe("GetTodo");
 		expect(
 			new SwitchAgent({
 				projectSlug: "demo",

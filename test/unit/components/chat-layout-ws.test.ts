@@ -89,10 +89,6 @@ vi.mock(
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/chat/PlanMode.svelte",
-	emptyComponent,
-);
-vi.mock(
 	"../../../src/lib/frontend/components/file/FileViewer.svelte",
 	emptyComponent,
 );

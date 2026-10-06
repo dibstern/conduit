@@ -8,7 +8,6 @@ import {
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../../handlers/files.js";
-import { getTodoState } from "../../handlers/settings.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { getToolContentValue } from "../../handlers/tool-content.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
@@ -24,20 +23,6 @@ export const filesHandlers = {
 					new WsRpcError({
 						message: `FindFolders failed: ${formatErrorDetail(error)}`,
 					}),
-			),
-		),
-	GetTodo: (request) =>
-		getTodoState().pipe(
-			Effect.map((items) => ({
-				projectSlug: request.projectSlug,
-				items: [...items],
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `GetTodo failed: ${String(error)}`,
-					}),
-				),
 			),
 		),
 	GetFileTree: (request) =>
@@ -131,7 +116,6 @@ export const filesHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "FindFolders"
-	| "GetTodo"
 	| "GetFileTree"
 	| "GetFileList"
 	| "GetFileContent"
