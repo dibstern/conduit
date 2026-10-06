@@ -109,12 +109,14 @@ export const composerHandlers: StepHandler[] = [
 			);
 			// Echo the sender's originId like the real relay: the sending tab
 			// ignores its own broadcast and keeps its local echo (no duplicate).
+			// Then finish the turn the send started, as the relay's done does.
 			await relayControl.sendMessages([
 				{
 					type: "user_message",
 					text: message,
 					originId: sendRequest.payload["originId"],
 				},
+				{ type: "done", code: 0 },
 			]);
 		},
 	},

@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import { Effect, Fiber, Stream } from "effect";
 import WebSocket from "ws";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -21,9 +21,6 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-
-const makeWsClient = () => RpcClient.make(WsRpcGroup);
-type WsClient = Effect.Effect.Success<ReturnType<typeof makeWsClient>>;
 
 export interface ReceivedMessage {
 	type: string;
@@ -43,9 +40,11 @@ export class TestWsClient {
 		timer: ReturnType<typeof setTimeout>;
 	}> = [];
 	private openPromise: Promise<void>;
-	private ptySubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private shellSubscription: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private feeds: Fiber.RuntimeFiber<void, unknown>[] = [];
+	private readonly projectSlug: string;
+	private subscriptions: Array<{
+		type: string;
+		fiber: Fiber.RuntimeFiber<void, unknown>;
+	}> = [];
 
 	constructor(url: string, initialSessionId?: string) {
 		const wsUrl = new URL(url);
@@ -53,6 +52,7 @@ export class TestWsClient {
 			wsUrl.searchParams.get("session") ?? initialSessionId;
 		wsUrl.searchParams.set("client", this.clientId);
 		this.rpcUrl = `${wsUrl.protocol}//${wsUrl.host}/rpc`;
+		this.projectSlug = wsUrl.searchParams.get("p") ?? "integration-test";
 		this.ws = new WebSocket(wsUrl);
 
 		this.openPromise = new Promise<void>((resolve, reject) => {
@@ -696,58 +696,84 @@ export class TestWsClient {
 	 * resolves once the opening snapshot is synchronized.
 	 */
 	async subscribePtys(projectSlug = "integration-test"): Promise<void> {
-		const previousWebSocket = globalThis.WebSocket;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-		const receive = (msg: ReceivedMessage) => this.receive(msg);
-		try {
-			this.ptySubscription = Effect.runFork(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup);
-						yield* client
-							.SubscribePtys({ projectSlug })
-							.pipe(
-								Stream.runForEach((envelope) =>
-									Effect.sync(() => receive({ type: "pty", ...envelope })),
-								),
-							);
-					}),
-				).pipe(
-					Effect.provide(RpcClient.layerProtocolSocket()),
-					Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
-					Effect.provide(Socket.layerWebSocketConstructorGlobal),
-					Effect.provide(RpcSerialization.layerJson),
-				),
+		await this.follow("pty", (client) => client.SubscribePtys({ projectSlug }));
+	}
+
+	/** Follow the project's root shell rows over SubscribeShell, as the
+	 *  browser does. Each envelope lands in `received` as
+	 *  `{ type: "shell", ...envelope }`. Idempotent. */
+	async subscribeShell(): Promise<void> {
+		if (!this.subscriptions.some(({ type }) => type === "shell"))
+			await this.follow("shell", (client) =>
+				client.SubscribeShell({ projectSlug: this.projectSlug }),
 			);
-			await this.waitFor("pty", {
-				predicate: (msg) => msg["_tag"] === "synchronized",
-			});
-		} finally {
-			globalThis.WebSocket = previousWebSocket;
-		}
 	}
 
 	/**
-	 * Follow the project's session shell over SubscribeShell, as the browser
-	 * does. Each envelope lands in `received` as `{ type: "shell", ...envelope }`;
-	 * resolves once the opening snapshot is synchronized.
+	 * Wait until the session's shell row shows a new turn: busy or retry, or a
+	 * newer turn end. The row is read when it is published, so a turn shorter
+	 * than that read (a fast replay) reaches the client already idle, with only
+	 * its turn end to show it ran (conduit-test-ni8.35). Call subscribeShell()
+	 * before acting when the turn may end before this wait.
 	 */
-	async subscribeShell(projectSlug = "integration-test"): Promise<void> {
+	async waitForTurnStart(
+		sessionId = this.getActiveSessionId(),
+		timeout = 5000,
+	): Promise<void> {
+		type Row = { id?: string; status?: string; lastTurnEndVersion?: number };
+		const rowsOf = (msg: ReceivedMessage): Row[] =>
+			msg["_tag"] === "upsert"
+				? [msg["item"] as Row]
+				: msg["_tag"] === "snapshot" && Array.isArray(msg["rows"])
+					? (msg["rows"] as Row[])
+					: [];
+		const endedBefore = Math.max(
+			-1,
+			...this.received
+				.filter((msg) => msg.type === "shell")
+				.flatMap(rowsOf)
+				.filter((row) => row.id === sessionId)
+				.map((row) => row.lastTurnEndVersion ?? -1),
+		);
+		const started = this.waitFor("shell", {
+			timeout,
+			predicate: (msg) =>
+				rowsOf(msg).some(
+					(row) =>
+						row.id === sessionId &&
+						(row.status === "busy" ||
+							row.status === "retry" ||
+							(row.lastTurnEndVersion ?? -1) > endedBefore),
+				),
+		});
+		await this.subscribeShell();
+		await started;
+	}
+
+	/** Resolves once the opening snapshot is synchronized; the WebSocket
+	 *  global stays swapped until then, while the socket is being opened. */
+	private async follow(
+		type: string,
+		open: (
+			client: RpcClient.FromGroup<
+				typeof WsRpcGroup,
+				RpcClientError.RpcClientError
+			>,
+		) => Stream.Stream<object, unknown>,
+	): Promise<void> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 		const receive = (msg: ReceivedMessage) => this.receive(msg);
 		try {
-			this.shellSubscription = Effect.runFork(
+			const fiber = Effect.runFork(
 				Effect.scoped(
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
-						yield* client
-							.SubscribeShell({ projectSlug })
-							.pipe(
-								Stream.runForEach((envelope) =>
-									Effect.sync(() => receive({ type: "shell", ...envelope })),
-								),
-							);
+						yield* open(client).pipe(
+							Stream.runForEach((envelope) =>
+								Effect.sync(() => receive({ type, ...envelope })),
+							),
+						);
 					}),
 				).pipe(
 					Effect.provide(RpcClient.layerProtocolSocket()),
@@ -756,7 +782,8 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			await this.waitFor("shell", {
+			this.subscriptions.push({ type, fiber });
+			await this.waitFor(type, {
 				predicate: (msg) => msg["_tag"] === "synchronized",
 			});
 		} finally {
@@ -785,44 +812,6 @@ export class TestWsClient {
 		return this.follow("input_draft", (client) =>
 			client.SubscribeInputDraft({ projectSlug, sessionId }),
 		);
-	}
-
-	/** Run a live-only feed until close(); resolves once it is synchronized. */
-	private async follow(
-		type: string,
-		open: (
-			client: WsClient,
-		) => Stream.Stream<{ readonly _tag: string }, unknown>,
-	): Promise<void> {
-		const previousWebSocket = globalThis.WebSocket;
-		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-		const receive = (msg: ReceivedMessage) => this.receive(msg);
-		try {
-			this.feeds.push(
-				Effect.runFork(
-					Effect.scoped(
-						Effect.gen(function* () {
-							const client = yield* RpcClient.make(WsRpcGroup);
-							yield* open(client).pipe(
-								Stream.runForEach((envelope) =>
-									Effect.sync(() => receive({ type, ...envelope })),
-								),
-							);
-						}),
-					).pipe(
-						Effect.provide(RpcClient.layerProtocolSocket()),
-						Effect.provide(Socket.layerWebSocket(this.rpcUrl)),
-						Effect.provide(Socket.layerWebSocketConstructorGlobal),
-						Effect.provide(RpcSerialization.layerJson),
-					),
-				),
-			);
-			await this.waitFor(type, {
-				predicate: (msg) => msg["_tag"] === "synchronized",
-			});
-		} finally {
-			globalThis.WebSocket = previousWebSocket;
-		}
 	}
 
 	async ptyInput(ptyId: string, data: string): Promise<void> {
@@ -1012,10 +1001,7 @@ export class TestWsClient {
 
 	/** Wait for the initial connect handshake to settle. */
 	async waitForInitialState(timeout = 5000): Promise<void> {
-		await Promise.all([
-			this.waitFor("status", { timeout }),
-			this.waitFor("session_family", { timeout }),
-		]);
+		await this.waitFor("session_family", { timeout });
 		const sessionId = this.getActiveSessionId();
 		if (sessionId) await this.viewSession(sessionId);
 	}
@@ -1079,11 +1065,8 @@ export class TestWsClient {
 			waiter.reject(new Error("Client closed"));
 		}
 		this.waiters = [];
-		if (this.ptySubscription)
-			await Effect.runPromise(Fiber.interrupt(this.ptySubscription));
-		if (this.shellSubscription)
-			await Effect.runPromise(Fiber.interrupt(this.shellSubscription));
-		await Effect.runPromise(Fiber.interruptAll(this.feeds));
+		for (const { fiber } of this.subscriptions)
+			await Effect.runPromise(Fiber.interrupt(fiber));
 
 		if (
 			this.ws.readyState === WebSocket.OPEN ||

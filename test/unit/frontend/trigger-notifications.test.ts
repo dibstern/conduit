@@ -301,10 +301,6 @@ describe("triggerNotifications", () => {
 			text: "hello",
 		} as RelayMessage);
 		await mod.triggerNotifications({
-			type: "status",
-			status: "processing",
-		} as RelayMessage);
-		await mod.triggerNotifications({
 			type: "tool_start",
 			id: "t1",
 			name: "bash",

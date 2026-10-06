@@ -123,6 +123,7 @@ describe("Integration: Model Selection", () => {
 	it("CreateSession RPC resets model selection without breaking messages", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 
 		// Switch model explicitly — pick first from model list
 		const { providers } = await client.getModels();
@@ -153,10 +154,7 @@ describe("Integration: Model Selection", () => {
 		await client.sendMessage("Reply with just 'ok'.");
 
 		// The key assertion: the new session accepts messages (enters processing).
-		const status = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		await client.waitForTurnStart();
 
 		// Wait for either done (fast) or result (model is working, just slow to finalize)
 		const evidence = await Promise.race([

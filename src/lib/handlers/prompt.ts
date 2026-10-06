@@ -134,11 +134,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
-		wsHandler.sendToSession(activeId, {
-			type: "status",
-			sessionId: activeId,
-			status: "processing",
-		});
 		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
 			Effect.sync(() => {
 				ownership.remove(activeId, input.commandId);

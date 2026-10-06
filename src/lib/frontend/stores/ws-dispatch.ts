@@ -31,7 +31,6 @@ import {
 	handleCompaction,
 	handleDone,
 	handleError,
-	handleStatus,
 	inputSyncState,
 	persistInputDraft,
 	type SessionActivity,
@@ -96,7 +95,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"result",
 		"done",
 		"error",
-		"status",
 		"compaction",
 		"user_message",
 		"part_removed",
@@ -178,9 +176,6 @@ function routePerSession(event: PerSessionEvent): void {
 			}
 			break;
 		}
-		case "status":
-			handleStatus(activity, messages, event);
-			break;
 		case "compaction":
 			handleCompaction(activity, messages, event);
 			break;

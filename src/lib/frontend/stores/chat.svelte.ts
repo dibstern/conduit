@@ -19,7 +19,7 @@ import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { discoveryState } from "./discovery.svelte.js";
-import { sessionState } from "./session.svelte.js";
+import { isSessionBusy, sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
@@ -195,6 +195,8 @@ export function getOrCreateSessionActivity(id: string): SessionActivity {
 	const existing = sessionActivity.get(id);
 	if (existing) return existing;
 	const activity: SessionActivity = $state(createEmptySessionActivity());
+	// A slot opened mid-turn starts processing; the row then ends it.
+	if (isSessionBusy(id)) phaseToProcessing(activity);
 	sessionActivity.set(id, activity);
 	return activity;
 }
@@ -408,18 +410,6 @@ export function phaseToStreaming(activity: SessionActivity): void {
 		activity.turnGeneration++;
 	}
 	activity.phase = "streaming";
-}
-
-/** End the visible turn on socket close through the same idempotent reducer.
- * Background sessions retain their phase until server reconciliation. */
-export function phaseCurrentSessionToIdle(): void {
-	const id = sessionState.currentId;
-	if (id === null) return;
-	const activity = sessionActivity.get(id);
-	const messages = sessionMessages.get(id);
-	if (!activity || !messages) return;
-	if (activity.phase === "idle") return;
-	applyTerminalTurn(activity, messages);
 }
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
@@ -826,28 +816,26 @@ export function applyTerminalTurn(
 	return true;
 }
 
-export function handleStatus(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "status" }>,
-): void {
-	if (msg.status === "processing") {
-		// Don't downgrade from "streaming" — it's a more specific phase.
-		// A queued send can report processing while a projected row streams.
-		if (activity.phase !== "streaming") {
-			phaseToProcessing(activity);
-		}
-	} else if (msg.status === "idle") {
-		if (activity.phase !== "idle") {
-			applyTerminalTurn(activity, messages);
-		}
-
-		activity.currentMessageId = null;
-		messages.currentAssistantText = "";
-		activity.thinkingStartTime = 0;
-
-		// seenMessageIds / doneMessageIds remain (cross-turn dedup)
+/** Follow the session's shell row, the server's only word on whether a turn
+ *  is running (ni8.35). Busy starts the turn; idle ends it through the
+ *  idempotent terminal reducer. Callers pass row transitions, so an idle
+ *  write while the sender's optimistic turn waits for busy never lands here. */
+export function followSessionBusy(id: string, busy: boolean): void {
+	const activity = sessionActivity.get(id);
+	if (!activity) return;
+	if (busy) {
+		if (activity.phase === "idle") phaseToProcessing(activity);
+		return;
 	}
+	const messages = sessionMessages.get(id);
+	if (activity.phase !== "idle") {
+		if (messages) applyTerminalTurn(activity, messages);
+		else phaseToIdle(activity);
+	}
+	activity.currentMessageId = null;
+	activity.thinkingStartTime = 0;
+	if (messages) messages.currentAssistantText = "";
+	// seenMessageIds / doneMessageIds remain (cross-turn dedup)
 }
 
 // One-shot flag consumed by the MessageList content-change $effect.

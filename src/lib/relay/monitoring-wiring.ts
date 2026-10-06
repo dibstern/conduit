@@ -370,16 +370,6 @@ const executeMonitoringEffectsEffect = (
 					yield* clearProcessingTimeout(effect.sessionId);
 					break;
 
-				case "notify-busy":
-					yield* Effect.sync(() =>
-						deps.wsHandler.sendToSession(effect.sessionId, {
-							type: "status",
-							sessionId: effect.sessionId,
-							status: "processing",
-						}),
-					);
-					break;
-
 				case "clear-processing":
 				case "notify-idle":
 					if (effect.effect === "notify-idle") {
@@ -462,8 +452,6 @@ export function wireMonitoring(
 				);
 		},
 		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
-		sendStatusToSession: (sessionId, msg) =>
-			wsHandler.sendToSession(sessionId, msg),
 		processAndApplyDone: (sessionId, isSubagent, busySince) => {
 			// Dedup: if SSE or message poller already delivered a "done" for
 			// this session in the current busy cycle, skip the synthetic

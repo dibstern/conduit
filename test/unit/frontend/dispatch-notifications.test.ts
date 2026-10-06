@@ -186,15 +186,6 @@ describe("handleMessage does NOT call triggerNotifications for other types", () 
 		expect(triggerNotificationsMock).not.toHaveBeenCalled();
 	});
 
-	it("does not call triggerNotifications for 'status'", () => {
-		handleMessage({
-			type: "status",
-			sessionId: "test-session",
-			status: "processing",
-		} as RelayMessage);
-		expect(triggerNotificationsMock).not.toHaveBeenCalled();
-	});
-
 	it("does not call triggerNotifications for 'tool_start'", () => {
 		handleMessage({
 			type: "tool_start",

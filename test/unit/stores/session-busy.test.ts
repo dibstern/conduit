@@ -325,27 +325,3 @@ it("retires activity on shell authority and cannot resurrect it after removal or
 	clearSessionState();
 	expect(isSessionBusy("s")).toBe(false);
 });
-
-it("does not flicker when a legacy poller status hint precedes the authoritative row", () => {
-	vi.useFakeTimers();
-	sessionState.currentId = "s";
-	handleMessage({ type: "delta", sessionId: "s", text: "hello" });
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "processing" });
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "idle" });
-	expect(isSessionBusy("s")).toBe(true);
-	applySessionChange({
-		_tag: "upsert",
-		item: { id: "s", title: "s", status: "busy" },
-	});
-	vi.advanceTimersByTime(20_000);
-	expect(isSessionBusy("s")).toBe(true);
-	handleMessage({ type: "status", sessionId: "s", status: "idle" });
-	expect(isSessionBusy("s")).toBe(true);
-	applySessionChange({
-		_tag: "upsert",
-		item: { id: "s", title: "s", status: "idle" },
-	});
-	expect(isSessionBusy("s")).toBe(false);
-});

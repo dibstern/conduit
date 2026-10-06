@@ -25,16 +25,14 @@ describe("Integration: Send Message", () => {
 	it("sends a message and receives processing status", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// Send a simple message
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// Should immediately get processing status
-		const status = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		// The session's shell row shows the turn started
+		await client.waitForTurnStart();
 		await client.waitFor("done");
 
 		await client.close();

@@ -40,6 +40,27 @@ export function requireRpcControl(page: Page): RpcMockControl {
 	return control;
 }
 
+/** Move a session's shell row to `status`, the way the server reports a turn
+ *  starting (busy) or ending (idle). The row is the client's only busy signal. */
+export function setSessionRowStatus(
+	page: Page,
+	sessionId: string,
+	status: "busy" | "idle",
+	fields: Record<string, unknown> = {},
+): void {
+	const rpc = requireRpcControl(page);
+	const row = rpc.shellRows?.find(
+		(candidate) => (candidate as { id?: string }).id === sessionId,
+	);
+	rpc.upsertShellRow({
+		title: sessionId,
+		...(row as object | undefined),
+		...fields,
+		id: sessionId,
+		status,
+	});
+}
+
 /** Make the app refetch GetModels the way a reconnect does: every shell
  *  `synchronized` marker refetches the catalogs. */
 export async function refetchModelCatalog(page: Page): Promise<void> {

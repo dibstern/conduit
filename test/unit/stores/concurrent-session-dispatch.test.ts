@@ -94,8 +94,7 @@ describe("Missing sessionId — dev throws, prod drops", () => {
 		// Events with per-session types but no sessionId should throw in dev
 		expect(() => {
 			handleMessage({
-				type: "status",
-				status: "processing",
+				type: "thinking_stop",
 			} as RelayMessage);
 		}).toThrow(/routePerSession: missing sessionId/);
 	});
@@ -103,9 +102,8 @@ describe("Missing sessionId — dev throws, prod drops", () => {
 	it("throws in dev mode when sessionId is empty string", () => {
 		expect(() => {
 			handleMessage({
-				type: "status",
+				type: "thinking_stop",
 				sessionId: "",
-				status: "processing",
 			} as RelayMessage);
 		}).toThrow(/routePerSession: missing sessionId/);
 	});
@@ -119,15 +117,14 @@ describe("Unknown-session guard — drops events silently", () => {
 		const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
 		try {
 			handleMessage({
-				type: "status",
+				type: "thinking_stop",
 				sessionId: "background",
-				status: "processing",
 			});
 			expect(debug).toHaveBeenCalledWith(
 				"[ws]",
 				"routePerSession: unknown sessionId %s for event %s",
 				"background",
-				"status",
+				"thinking_stop",
 			);
 			expect(sessionMessages.has("background")).toBe(false);
 
@@ -144,9 +141,8 @@ describe("Unknown-session guard — drops events silently", () => {
 		// "unknown-session" is not in sessionState.sessions
 		expect(() => {
 			handleMessage({
-				type: "status",
+				type: "thinking_stop",
 				sessionId: "unknown-session",
-				status: "processing",
 			} as RelayMessage);
 		}).not.toThrow();
 
@@ -166,12 +162,11 @@ describe("Unknown-session guard — drops events silently", () => {
 		]);
 
 		handleMessage({
-			type: "status",
+			type: "thinking_stop",
 			sessionId: "new-session",
-			status: "processing",
 		} as RelayMessage);
 
-		expect(sessionActivity.get("new-session")?.phase).toBe("processing");
+		expect(sessionActivity.has("new-session")).toBe(true);
 	});
 });
 
@@ -189,7 +184,6 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"result",
 			"done",
 			"error",
-			"status",
 			"user_message",
 			"part_removed",
 			"message_removed",

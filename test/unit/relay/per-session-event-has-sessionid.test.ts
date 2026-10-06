@@ -41,7 +41,6 @@ describe("PerSessionEvent type discriminator", () => {
 			"result",
 			"done",
 			"error",
-			"status",
 			"user_message",
 			"part_removed",
 			"message_removed",

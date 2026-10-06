@@ -643,12 +643,6 @@ const ResultSchema = Schema.Struct({
 	midTurn: Schema.optional(Schema.Literal(true)),
 });
 
-const StatusSchema = Schema.Struct({
-	type: Schema.Literal("status"),
-	sessionId: Schema.String,
-	status: Schema.String,
-});
-
 const CompactionSchema = Schema.Struct({
 	type: Schema.Literal("compaction"),
 	sessionId: Schema.String,
@@ -782,7 +776,6 @@ export const RelayMessageSchema = Schema.Union(
 	// Permissions / Questions
 	// Session lifecycle
 	ResultSchema,
-	StatusSchema,
 	CompactionSchema,
 	DoneSchema,
 	SessionListSchema,
@@ -833,7 +826,6 @@ export type PerSessionEventType =
 	| "result"
 	| "done"
 	| "error"
-	| "status"
 	| "compaction"
 	| "user_message"
 	| "part_removed"

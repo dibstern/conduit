@@ -99,12 +99,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat event types", () => {
-		const nonCacheable = [
-			"session_list",
-			// status events are sent directly via wsHandler, never through the
-			// pipeline — so they should NOT be cacheable.
-			"status",
-		] as const;
+		const nonCacheable = ["session_list"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}

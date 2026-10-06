@@ -1,6 +1,6 @@
 // Full end-to-end lifecycle test against a mock OpenCode server.
 // Verifies the complete message flow:
-//   send → status:processing → delta(s) → done(code:0) → idle
+//   send → busy shell row → delta(s) → done(code:0) → idle
 
 import {
 	afterAll,
@@ -34,16 +34,14 @@ describe("Integration: Message Lifecycle", () => {
 	it("complete lifecycle: send → processing → delta → done", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// Send a minimal prompt
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// 1. Should receive processing status
-		const status = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status["status"]).toBe("processing");
+		// 1. The session's shell row shows the turn started
+		await client.waitForTurnStart();
 
 		// 2. Should receive at least one delta (streamed text)
 		const delta = await client.waitFor("delta");
@@ -60,14 +58,13 @@ describe("Integration: Message Lifecycle", () => {
 	it("sequential messages: second message works after first completes", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		// --- First message ---
 		await client.sendMessage("Reply with just 'one'.");
 
-		await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
+		await client.waitForTurnStart();
 		const done1 = await client.waitFor("done");
 		expect(done1["code"]).toBe(0);
 
@@ -80,10 +77,7 @@ describe("Integration: Message Lifecycle", () => {
 		await client.sendMessage("Reply with just 'two'.");
 
 		// Should enter processing again (not stuck from first turn)
-		const status2 = await client.waitFor("status", {
-			predicate: (m) => m["status"] === "processing",
-		});
-		expect(status2["status"]).toBe("processing");
+		await client.waitForTurnStart();
 
 		// Should receive delta for second message
 		const delta2 = await client.waitFor("delta");

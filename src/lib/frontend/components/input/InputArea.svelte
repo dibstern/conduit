@@ -27,7 +27,7 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { addUserMessage, currentChat, getOrCreateSessionSlot, inputSyncState, isProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
+	import { addUserMessage, currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -47,7 +47,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
@@ -628,6 +628,9 @@
 		}
 		const { activity, messages } = getOrCreateSessionSlot(sid);
 		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
+		// The turn starts now for the sender; its row reports busy once the
+		// provider picks the prompt up, and ends the turn when it goes idle.
+		phaseToProcessing(activity);
 		const sentToSessionId = sid;
 		rateLimitChatSend(() => {
 			void sendMessageRpc({
@@ -641,6 +644,7 @@
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 			}).catch(() => {
+				if (!isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
 				showToast("Failed to send message", { variant: "error" });
 			});
 		});

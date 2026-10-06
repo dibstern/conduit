@@ -28,6 +28,7 @@ import type {
 import {
 	activateSessionChatState,
 	clearSessionChatState,
+	followSessionBusy,
 	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
@@ -496,6 +497,14 @@ export function handleSessionFamily(
 			familySessions.find((row) => row.id === viewed.id),
 		);
 	familySessions = msg.sessions;
+	// A child has no shell row, so its family row is the only status it has.
+	for (const row of msg.sessions) {
+		if (
+			!serverSessions.has(row.id) &&
+			(row.status === "busy" || row.status === "retry")
+		)
+			followSessionBusy(row.id, true);
+	}
 }
 
 /** How many cross-project rows one page asks for. Exported so the caller that

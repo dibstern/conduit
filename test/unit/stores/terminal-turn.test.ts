@@ -15,7 +15,6 @@ import {
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 afterEach(() => {
 	vi.clearAllMocks();
@@ -73,26 +72,27 @@ function projectedTurn() {
 }
 
 it.each([
-	["status", "done", "error"],
-	["status", "error", "done"],
-	["done", "status", "error"],
-	["done", "error", "status"],
-	["error", "done", "status"],
-	["error", "status", "done"],
-] as const)("one terminal transition through dispatch: %s, %s, %s", (...order) => {
+	["idle row", "done", "error"],
+	["idle row", "error", "done"],
+	["done", "idle row", "error"],
+	["done", "error", "idle row"],
+	["error", "done", "idle row"],
+	["error", "idle row", "done"],
+] as const)("one terminal transition: %s, %s, %s", (...order) => {
 	const { activity, messages } = projectedTurn();
-	const events: Record<(typeof order)[number], RelayMessage> = {
-		status: { type: "status", sessionId: "s", status: "idle" },
-		done: { type: "done", sessionId: "s", code: 0 },
-		error: {
-			type: "error",
-			sessionId: "s",
-			code: "TURN_FAILED",
-			message: "failed",
-		},
+	const events: Record<(typeof order)[number], () => void> = {
+		"idle row": () => chat.followSessionBusy("s", false),
+		done: () => handleMessage({ type: "done", sessionId: "s", code: 0 }),
+		error: () =>
+			handleMessage({
+				type: "error",
+				sessionId: "s",
+				code: "TURN_FAILED",
+				message: "failed",
+			}),
 	};
 	const before = activity.turnEpoch;
-	handleMessage(events[order[0]]);
+	events[order[0]]();
 	expect(activity.turnEpoch).toBe(before + 1);
 	expect(messages.messages).toEqual(
 		expect.arrayContaining([
@@ -102,18 +102,18 @@ it.each([
 		]),
 	);
 	const finalized = messages.messages;
-	handleMessage(events[order[1]]);
-	handleMessage(events[order[2]]);
+	events[order[1]]();
+	events[order[2]]();
 	expect(activity.turnEpoch).toBe(before + 1);
 	expect(messages.messages).toBe(finalized);
 });
 
 it("durable terminal replay does not repeat the transition or alert", () => {
 	const { activity, messages } = projectedTurn();
-	chat.phaseCurrentSessionToIdle();
+	chat.followSessionBusy("s", false);
 	const finalized = messages.messages;
 	const epoch = activity.turnEpoch;
-	handleMessage({ type: "status", sessionId: "s", status: "idle" });
+	chat.followSessionBusy("s", false);
 	expect(chat.applyTerminalTurn(activity, messages)).toBe(false);
 	expect(activity.turnEpoch).toBe(epoch);
 	expect(messages.messages).toBe(finalized);

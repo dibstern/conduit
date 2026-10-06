@@ -96,7 +96,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat types", async () => {
-		const nonCacheable = ["status"] as const;
+		const nonCacheable = ["session_list"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}

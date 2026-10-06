@@ -111,15 +111,6 @@ describe("WsRpcServerLayer SendMessage", () => {
 				}),
 			);
 			expect(calls).toContainEqual({
-				channel: "sendToSession",
-				sessionId: "session-1",
-				message: {
-					type: "status",
-					sessionId: "session-1",
-					status: "processing",
-				},
-			});
-			expect(calls).toContainEqual({
 				channel: "sendTo",
 				clientId: "tab-a",
 				message: {

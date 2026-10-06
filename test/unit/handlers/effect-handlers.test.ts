@@ -2303,11 +2303,6 @@ describe("handleNewSession", () => {
 						"client-1",
 						expect.objectContaining({ type: "session_family" }),
 					);
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "status",
-						sessionId: "new-session-1",
-						status: "idle",
-					});
 					expect(pushViewerFamilies).toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(ws.broadcast).not.toHaveBeenCalled();
@@ -2620,11 +2615,6 @@ describe("handleNewSession", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(dispatchEffect).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "status",
-						sessionId: "session-in-flight",
-						status: "processing",
-					});
 				}),
 			);
 		},

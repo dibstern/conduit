@@ -14,7 +14,7 @@ vi.mock("dompurify", () => ({
 import {
 	advanceTurnIfNewMessage,
 	clearMessages,
-	handleStatus,
+	followSessionBusy,
 	phaseToIdle,
 	phaseToProcessing,
 	phaseToStreaming,
@@ -72,33 +72,21 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("handleStatus — tier contract", () => {
+describe("followSessionBusy — tier contract", () => {
 	it("should modify activity tier (phase → processing)", () => {
-		handleStatus(ta, tm, {
-			type: "status",
-			sessionId: "s1",
-			status: "processing",
-		});
+		followSessionBusy("test-session", true);
 		expect(ta.phase).toBe("processing");
 	});
 
 	it("should NOT modify messages tier fields on processing", () => {
 		const before = snapMessages(tm);
-		handleStatus(ta, tm, {
-			type: "status",
-			sessionId: "s1",
-			status: "processing",
-		});
+		followSessionBusy("test-session", true);
 		const after = snapMessages(tm);
 		expect(after).toEqual(before);
 	});
 
-	it("status idle clears activity in-flight state", () => {
-		handleStatus(ta, tm, {
-			type: "status",
-			sessionId: "s1",
-			status: "idle",
-		});
+	it("an idle row clears activity in-flight state", () => {
+		followSessionBusy("test-session", false);
 		expect(ta.phase).toBe("idle");
 		expect(ta.currentMessageId).toBeNull();
 	});

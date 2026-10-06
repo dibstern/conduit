@@ -488,6 +488,28 @@ export function sendMockShellSnapshot(
 	else pendingShellRows.set(page, rows);
 }
 
+/** Set an existing session row's status the way a live write does (ni8.35:
+ *  the shell row is the only server signal for a running turn). */
+export function sendMockShellRowStatus(
+	page: Page,
+	sessionId: string,
+	status: "busy" | "idle",
+): void {
+	const control = controls.get(page);
+	const rows = control?.shellRows ?? pendingShellRows.get(page) ?? [];
+	const existing = rows.find(
+		(row) => (row as { id?: string }).id === sessionId,
+	);
+	if (!existing) return;
+	const row = { ...(existing as object), id: sessionId, status };
+	if (control) control.upsertShellRow(row);
+	else
+		pendingShellRows.set(
+			page,
+			rows.map((candidate) => (candidate === existing ? row : candidate)),
+		);
+}
+
 async function handleMessage(
 	ws: WebSocketRoute,
 	handlers: Record<string, RpcHandler>,

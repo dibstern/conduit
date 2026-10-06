@@ -21,7 +21,6 @@ import {
 import {
 	makeOverridesStateLive,
 	setDefaultModel,
-	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	handleViewSession,
@@ -296,28 +295,6 @@ describe("session handler metadata", () => {
 					);
 				}),
 			);
-		},
-	);
-
-	it.effect(
-		"reports processing when the Effect timeout state has an active turn",
-		() => {
-			const { wsHandler, layer } = makeSessionMetadataLayer({});
-
-			return Effect.gen(function* () {
-				yield* startProcessingTimeout(
-					"session-1",
-					"2 minutes",
-					() => Effect.void,
-				);
-				yield* handleViewSession("client-1", { sessionId: "session-1" });
-
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "status",
-					sessionId: "session-1",
-					status: "processing",
-				});
-			}).pipe(Effect.provide(layer));
 		},
 	);
 

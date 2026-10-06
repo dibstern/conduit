@@ -20,7 +20,6 @@ import {
 	setDefaultVariant,
 	setModel,
 	setVariant,
-	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import {
@@ -253,11 +252,6 @@ describe("handleClientConnectedEffect — session selection", () => {
 				rootId: "requested-session",
 			}),
 		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "status",
-			sessionId: "requested-session",
-			status: "idle",
-		});
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
 			expect.objectContaining({ type: "session_switched" }),
@@ -648,76 +642,5 @@ describe("handleClientConnectedEffect — no OpenCode requests", () => {
 
 		expect(deps.client.permission.list).not.toHaveBeenCalled();
 		expect(deps.client.question.list).not.toHaveBeenCalled();
-	});
-});
-
-describe("handleClientConnectedEffect — processing status on connect", () => {
-	it("sends status 'processing' from a busy family with a cold poller", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.sessionService.getSessionFamily).mockReturnValue(
-			Effect.succeed({
-				type: "session_family",
-				rootId: "session-1",
-				sessions: [
-					{
-						id: "session-1",
-						title: "Session 1",
-						status: "busy",
-						updatedAt: 0,
-						messageCount: 0,
-					},
-				],
-			}),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "status",
-			sessionId: expect.any(String),
-			status: "processing",
-		});
-	});
-
-	it("sends status 'idle' when active session is not busy", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
-			Effect.succeed(false),
-		);
-		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
-			Effect.succeed({}),
-		);
-
-		await runClientInit(deps, "client-1");
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "status",
-			sessionId: expect.any(String),
-			status: "idle",
-		});
-	});
-
-	it("sends status 'processing' when Effect timeout state is active", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.statusPoller.isProcessing).mockReturnValue(
-			Effect.succeed(false),
-		);
-		vi.mocked(deps.statusPoller.getCurrentStatuses).mockReturnValue(
-			Effect.succeed({}),
-		);
-
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			startProcessingTimeout("session-1", "2 minutes", () => Effect.void),
-		);
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "status",
-			sessionId: expect.any(String),
-			status: "processing",
-		});
 	});
 });

@@ -5,9 +5,9 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 import {
 	chatState,
 	clearMessages,
+	followSessionBusy,
 	getOrCreateSessionSlot,
 	handleDone,
-	handleStatus,
 	isLoading,
 	isProcessing,
 	isReplaying,
@@ -43,15 +43,11 @@ describe("chat phase and transcript lifecycle", () => {
 		expect(chatState.phase).toBe("streaming");
 	});
 
-	it("status idle ends the visible turn", () => {
+	it("the row going idle ends the visible turn", () => {
 		const { activity, messages } = getOrCreateSessionSlot("phase-test");
 		messages.loadLifecycle = "ready";
 		phaseToProcessing(activity);
-		handleStatus(activity, messages, {
-			type: "status",
-			sessionId: "phase-test",
-			status: "idle",
-		});
+		followSessionBusy("phase-test", false);
 		expect(activity.phase).toBe("idle");
 		expect(activity.turnEpoch).toBe(1);
 	});

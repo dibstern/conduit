@@ -1,4 +1,4 @@
-// Verifies the F2 fix in handleStatus: when the server sends status:idle,
+// Verifies the F2 fix, now in followSessionBusy: when the session's row goes idle,
 // all streaming/processing state is cleaned up:
 // 1. In-flight message finalized via flushAndFinalizeAssistant
 // 2. Phase set to idle
@@ -16,7 +16,7 @@ vi.mock("dompurify", () => ({
 import {
 	chatState,
 	clearMessages,
-	handleStatus,
+	followSessionBusy,
 	isProcessing,
 	phaseToProcessing,
 	type SessionActivity,
@@ -40,17 +40,12 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-// Helper to create typed status messages
-function statusMsg(status: string) {
-	return { type: "status" as const, sessionId: "s1", status };
-}
-
-describe("F2 fix: status:idle full cleanup", () => {
+describe("F2 fix: idle row full cleanup", () => {
 	it("clears processing phase when idle arrives", () => {
 		phaseToProcessing(ta);
 		expect(isProcessing()).toBe(true);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 		expect(chatState.phase).toBe("idle");
 		expect(isProcessing()).toBe(false);
 	});
@@ -59,7 +54,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		ta.currentMessageId = "msg-123";
 		phaseToProcessing(ta);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(ta.currentMessageId).toBeNull();
 	});
@@ -68,7 +63,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		tm.currentAssistantText = "partial text";
 		phaseToProcessing(ta);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(chatState.currentAssistantText).toBe("");
 	});
@@ -77,7 +72,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		ta.thinkingStartTime = Date.now();
 		phaseToProcessing(ta);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(ta.thinkingStartTime).toBe(0);
 	});
@@ -87,7 +82,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		ta.seenMessageIds.add("msg-2");
 		phaseToProcessing(ta);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(ta.seenMessageIds.has("msg-1")).toBe(true);
 		expect(ta.seenMessageIds.has("msg-2")).toBe(true);
@@ -97,7 +92,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		ta.doneMessageIds.add("msg-1");
 		phaseToProcessing(ta);
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(ta.doneMessageIds.has("msg-1")).toBe(true);
 	});
@@ -106,7 +101,7 @@ describe("F2 fix: status:idle full cleanup", () => {
 		expect(chatState.phase).toBe("idle");
 		tm.currentAssistantText = "";
 
-		handleStatus(ta, tm, statusMsg("idle"));
+		followSessionBusy("test-session", false);
 
 		expect(chatState.phase).toBe("idle");
 	});

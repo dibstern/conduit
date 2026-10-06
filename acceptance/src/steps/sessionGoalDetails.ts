@@ -65,18 +65,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				{
 					id: sessionId,
 					title: "Stabilise visual suite",
-					status: "idle",
+					status: phase === "working" ? "busy" : "idle",
 					updatedAt: now,
 					messageCount: 6,
 					goalState: facts,
 				},
 			]);
 			const relay = requireRelayControl(world.page);
-			relay.sendMessage({
-				type: "status",
-				sessionId,
-				status: phase === "working" ? "processing" : "idle",
-			});
 			relay.sendMessage({ type: "session.goal_changed", ...facts });
 			await expect(
 				world.page.getByTestId("session-goal-subtitle"),

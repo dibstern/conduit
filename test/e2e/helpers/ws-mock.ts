@@ -12,6 +12,7 @@ import {
 	sendMockDaemonList,
 	sendMockModelState,
 	sendMockProjectSetting,
+	sendMockShellRowStatus,
 	sendMockShellSnapshot,
 	setMockRpcCatalog,
 	setMockRpcProjectSlug,
@@ -363,6 +364,21 @@ export class WsMockControl {
 		if (!this._ws) throw new Error("WebSocket not connected yet");
 		this._context.activeSessionId =
 			new URL(this.page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;
+		// Legacy fixture vocabulary for session status, which now rides the
+		// shell row (conduit-test-ni8.35).
+		if (msg.type === "status") {
+			const sessionId =
+				typeof msg["sessionId"] === "string"
+					? msg["sessionId"]
+					: this._context.activeSessionId;
+			if (sessionId)
+				sendMockShellRowStatus(
+					this.page,
+					sessionId,
+					msg["status"] === "processing" ? "busy" : "idle",
+				);
+			return;
+		}
 		const normalized = normalizeMockRelayMessage(msg, this._context);
 		projectLegacyRelayMessage(this.page, normalized);
 		this._ws.send(JSON.stringify(normalized));

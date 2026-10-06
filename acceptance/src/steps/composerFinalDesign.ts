@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import { requireRpcControl, setSessionRowStatus } from "./shared.js";
 
 // Literal values from docs/plans/2026-10-02-composer-final-designs.html.
 const BUTTON = 32;
@@ -151,11 +151,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		name: "start open session working",
 		match: /^the open session starts working$/,
 		run: async ({ world }) => {
-			requireRelayControl(world.page).sendMessage({
-				type: "status",
-				status: "processing",
-				sessionId: sessionIdOf(world.page),
-			});
+			setSessionRowStatus(world.page, sessionIdOf(world.page), "busy");
 			await world.page.locator("#stop").waitFor({ state: "visible" });
 		},
 	},
