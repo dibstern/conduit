@@ -137,6 +137,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_pending_approvals_version",
+					table: "pending_approvals",
+					unique: false,
+				},
+				{
 					name: "idx_provider_command_outbox_status",
 					table: "provider_command_outbox",
 					unique: false,

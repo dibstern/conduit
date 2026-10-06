@@ -1,10 +1,10 @@
 <!-- File browser shared by the desktop pane and phone session view. -->
-<!-- Owns WS subscriptions for file_list/file_content. -->
+<!-- Owns the GetFileList/GetFileContent reply subscriptions. -->
 
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import { untrack } from "svelte";
-	import type { BreadcrumbSegment, FileEntry, RelayMessage } from "../../types.js";
+	import type { BreadcrumbSegment, FileEntry } from "../../types.js";
 	import { onFileBrowser } from "../../stores/ws.svelte.js";
 	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 	import { setFilesOpen } from "../../stores/session-view.svelte.js";
@@ -123,9 +123,9 @@
 	}
 
 	$effect(() => {
-		const unsub = onFileBrowser((msg: RelayMessage) => {
-			if (msg.type === "file_list") {
-				handleFileList(msg.path, msg.entries);
+		const unsub = onFileBrowser((reply) => {
+			if (reply.kind === "list") {
+				handleFileList(reply.response.path, reply.response.entries);
 			}
 		});
 		return unsub;

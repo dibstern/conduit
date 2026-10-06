@@ -2,12 +2,24 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit, Layer, Option } from "effect";
+import {
+	Cause,
+	Chunk,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+} from "effect";
 import { expect } from "vitest";
+import {
+	ProjectSettingsLive,
+	ProjectSettingsTag,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getHiddenEntries,
@@ -21,27 +33,34 @@ import {
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 
 function makeLayer(configDir: string) {
-	const ws = makeMockWebSocketHandler();
-	const layer = Layer.mergeAll(
-		Layer.succeed(WebSocketHandlerTag, ws),
+	return Layer.mergeAll(
+		ProjectSettingsLive,
 		Layer.succeed(LoggerTag, makeMockLogger() as Logger),
 		Layer.succeed(ConfigTag, makeMockConfig({ configDir })),
 	);
-	return { ws, layer };
 }
 
+/** What open project-settings subscribers would hear from here on. */
+const published = Effect.flatMap(ProjectSettingsTag, ({ changes }) =>
+	Effect.map(PubSub.subscribe(changes), (dequeue) =>
+		Effect.map(Queue.takeAll(dequeue), (taken) =>
+			Chunk.toArray(taken).map((change) => change.item),
+		),
+	),
+);
+
 describe("setHiddenEntriesForRelay", () => {
-	it.effect(
-		"persists provided lists to relay settings and broadcasts visibility_info",
+	it.scoped(
+		"persists provided lists to relay settings and publishes the visibility setting",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
-			const { ws, layer } = makeLayer(configDir);
+			const layer = makeLayer(configDir);
 
 			return Effect.gen(function* () {
+				const takePublished = yield* published;
 				const result = yield* setHiddenEntriesForRelay({
 					clientId: "c1",
 					hiddenModels: ["a/b"],
@@ -51,11 +70,13 @@ describe("setHiddenEntriesForRelay", () => {
 				const persisted = loadRelaySettings(configDir);
 				expect(persisted.hiddenModels).toEqual(["a/b"]);
 				expect(persisted.hiddenAgents).toEqual(["opencode/plan"]);
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "visibility_info",
-					hiddenModels: ["a/b"],
-					hiddenAgents: ["opencode/plan"],
-				});
+				expect(yield* takePublished).toEqual([
+					{
+						_tag: "visibility",
+						hiddenModels: ["a/b"],
+						hiddenAgents: ["opencode/plan"],
+					},
+				]);
 				expect(result).toEqual({
 					hiddenModels: ["a/b"],
 					hiddenAgents: ["opencode/plan"],
@@ -64,12 +85,13 @@ describe("setHiddenEntriesForRelay", () => {
 		},
 	);
 
-	it.effect("leaves the omitted list untouched", () => {
+	it.scoped("leaves the omitted list untouched", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
 		saveRelaySettings({ hiddenAgents: ["claude/researcher"] }, configDir);
-		const { ws, layer } = makeLayer(configDir);
+		const layer = makeLayer(configDir);
 
 		return Effect.gen(function* () {
+			const takePublished = yield* published;
 			const result = yield* setHiddenEntriesForRelay({
 				clientId: "c1",
 				hiddenModels: ["x/y"],
@@ -78,11 +100,13 @@ describe("setHiddenEntriesForRelay", () => {
 			const persisted = loadRelaySettings(configDir);
 			expect(persisted.hiddenModels).toEqual(["x/y"]);
 			expect(persisted.hiddenAgents).toEqual(["claude/researcher"]);
-			expect(ws.broadcast).toHaveBeenCalledWith({
-				type: "visibility_info",
-				hiddenModels: ["x/y"],
-				hiddenAgents: ["claude/researcher"],
-			});
+			expect(yield* takePublished).toEqual([
+				{
+					_tag: "visibility",
+					hiddenModels: ["x/y"],
+					hiddenAgents: ["claude/researcher"],
+				},
+			]);
 			expect(result).toEqual({
 				hiddenModels: ["x/y"],
 				hiddenAgents: ["claude/researcher"],
@@ -90,16 +114,17 @@ describe("setHiddenEntriesForRelay", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
-	it.effect(
+	it.scoped(
 		"surfaces fs failures as a catchable typed failure, not a defect",
 		() => {
 			// configDir points at a FILE, so saveRelaySettings' mkdirSync throws.
 			const base = mkdtempSync(join(tmpdir(), "conduit-visibility-fail-"));
 			const notADir = join(base, "not-a-dir");
 			writeFileSync(notADir, "occupied", "utf-8");
-			const { ws, layer } = makeLayer(notADir);
+			const layer = makeLayer(notADir);
 
 			return Effect.gen(function* () {
+				const takePublished = yield* published;
 				const exit = yield* Effect.exit(
 					setHiddenEntriesForRelay({ clientId: "c1", hiddenModels: ["a/b"] }),
 				);
@@ -112,7 +137,7 @@ describe("setHiddenEntriesForRelay", () => {
 				if (Option.isSome(failure)) {
 					expect(failure.value._tag).toBe("RelaySettingsSaveError");
 				}
-				expect(ws.broadcast).not.toHaveBeenCalled();
+				expect(yield* takePublished).toEqual([]);
 			}).pipe(Effect.provide(layer));
 		},
 	);

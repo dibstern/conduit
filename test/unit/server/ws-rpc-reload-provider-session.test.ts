@@ -53,12 +53,8 @@ describe("WsRpcServerLayer ReloadProviderSession", () => {
 				});
 				expect(wsHandler.sendTo).toHaveBeenCalledWith(
 					"browser-1",
-					expect.objectContaining({ type: "model_list" }),
+					expect.objectContaining({ type: "variant_info" }),
 				);
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("browser-1", {
-					type: "command_list",
-					commands: [],
-				});
 				expect(wsHandler.sendTo).toHaveBeenCalledWith("browser-1", {
 					type: "provider_session_reloaded",
 					sessionId: "session-1",

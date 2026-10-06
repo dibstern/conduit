@@ -3,10 +3,8 @@ import {
 	type ClientInitEffectOptions,
 	handleClientConnectedEffect,
 } from "../bridges/client-init.js";
-import { ClientMessageSerializationTag } from "../domain/relay/Services/client-message-serialization.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import { handleRelayWsMessageThroughGate } from "./ws-message-dispatch-effect.js";
 
 export interface RelayWebSocketCallbackWiringDeps {
 	readonly wsHandler: WebSocketHandlerShape;
@@ -31,7 +29,6 @@ export const wireRelayWebSocketCallbacksEffect = ({
 		const runtime = yield* Effect.runtime<any>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
-			let relayCommandSequence = 0;
 
 			wsHandler.on(
 				"client_connected",
@@ -57,28 +54,7 @@ export const wireRelayWebSocketCallbacksEffect = ({
 			);
 
 			wsHandler.on("client_disconnected", ({ clientId }) => {
-				runFork(
-					Effect.gen(function* () {
-						const serialization = yield* ClientMessageSerializationTag;
-						yield* serialization.removeClient(clientId);
-					}),
-				);
 				log.info(`Client disconnected: ${clientId}`);
-			});
-
-			wsHandler.on("message", ({ clientId, handler, payload }) => {
-				const commandId = `${clientId}:${++relayCommandSequence}`;
-				runFork(
-					handleRelayWsMessageThroughGate({
-						commandId,
-						clientId,
-						handler,
-						payload,
-						sendTo: (targetClientId, message) =>
-							wsHandler.sendTo(targetClientId, message),
-						log,
-					}),
-				);
 			});
 		});
 	});

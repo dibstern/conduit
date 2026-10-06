@@ -158,14 +158,6 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			"opencode",
 		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				sessionId: "s1",
-				requestId: "perm_1",
-				toolName: "Bash(ls)",
-			}),
-		);
 	});
 
 	it("continues relay handling when runtime ingress reports an internal persistence error", async () => {

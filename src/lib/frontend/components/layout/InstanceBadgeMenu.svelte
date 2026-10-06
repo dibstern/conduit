@@ -19,7 +19,7 @@
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
 	import {
-		applyProjectMutationResponse,
+		applyProjectList,
 		projectState,
 	} from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -51,7 +51,7 @@
 		const slug = getCurrentSlug();
 		if (!slug) return;
 		void setProjectInstanceRpc({ projectSlug: slug, slug, instanceId })
-			.then(applyProjectMutationResponse)
+			.then(applyProjectList)
 			.catch(() => undefined);
 	}
 </script>

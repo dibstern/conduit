@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { GetAgents } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
@@ -16,12 +17,12 @@ import {
 	setAgent,
 	setDefaultModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { handleGetAgents } from "../../../src/lib/handlers/agent.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { OrchestrationEngine as OrchestrationEngineLive } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
 import {
 	makeHandlerLogger,
 	makeHandlerOpenCodeAPI,
@@ -82,11 +83,25 @@ function agentHandlerLayer({
 	return Layer.provideMerge(AgentServiceLive, deps);
 }
 
-describe("handleGetAgents active provider", () => {
+/** The GetAgents RPC reply, minus the fields this suite does not cover. */
+const listAgents = (sessionId: string | undefined, instanceId?: string) =>
+	modelsHandlers
+		.GetAgents(
+			new GetAgents({
+				projectSlug: "demo",
+				...(sessionId === undefined ? {} : { sessionId }),
+				...(instanceId === undefined ? {} : { instanceId }),
+			}),
+		)
+		.pipe(
+			Effect.map(
+				({ projectSlug: _slug, hiddenAgents: _hidden, ...reply }) => reply,
+			),
+		);
+
+describe("GetAgents active provider", () => {
 	it.effect("returns Claude agents for a Claude-bound active session", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
+		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		});
@@ -118,10 +133,9 @@ describe("handleGetAgents active provider", () => {
 
 		return Effect.gen(function* () {
 			yield* setAgent("session-1", "Explore");
-			yield* handleGetAgents("client-1", {});
+			const reply = yield* listAgents("session-1");
 			expect(client.app.agents).not.toHaveBeenCalled();
-			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-				type: "agent_list",
+			expect(reply).toEqual({
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [
 					{ id: "Explore", name: "Explore", description: "Explorer" },
@@ -140,9 +154,7 @@ describe("handleGetAgents active provider", () => {
 	it.effect(
 		"returns all Claude agents regardless of active Claude model",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
+			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 			});
@@ -169,11 +181,10 @@ describe("handleGetAgents active provider", () => {
 				),
 			});
 
-			return handleGetAgents("client-1", {}).pipe(
+			return listAgents("session-1").pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
+				Effect.tap((reply) => {
+					expect(reply).toEqual({
 						providerScope: { id: "claude", name: "Claude" },
 						agents: [
 							{ id: "Any", name: "Any" },
@@ -190,9 +201,7 @@ describe("handleGetAgents active provider", () => {
 	it.effect(
 		"returns OpenCode agents for an OpenCode-bound active session",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
+			const ws = mockWsHandler();
 			const rawAgents = [
 				{ id: "build", name: "build", mode: "primary" as const },
 				{ id: "title", name: "title", mode: "subagent" as const, hidden: true },
@@ -205,12 +214,11 @@ describe("handleGetAgents active provider", () => {
 				dispatchEffect: vi.fn(),
 			});
 
-			return handleGetAgents("client-1", {}).pipe(
+			return listAgents("session-1").pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap(() => {
+				Effect.tap((reply) => {
 					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
+					expect(reply).toEqual({
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "build" }],
 					});
@@ -222,9 +230,7 @@ describe("handleGetAgents active provider", () => {
 	it.effect(
 		"uses the requested instance instead of the active session provider",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
+			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => [
@@ -237,12 +243,11 @@ describe("handleGetAgents active provider", () => {
 				dispatchEffect: vi.fn(),
 			});
 
-			return handleGetAgents("client-1", { instanceId: "opencode" }).pipe(
+			return listAgents("session-1", "opencode").pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap(() => {
+				Effect.tap((reply) => {
 					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
+					expect(reply).toEqual({
 						instanceId: "opencode",
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "build" }],
@@ -253,9 +258,7 @@ describe("handleGetAgents active provider", () => {
 	);
 
 	it.effect("preserves OpenCode behavior when no active session exists", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => undefined),
-		});
+		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: {
 				agents: vi.fn(async () => [
@@ -264,12 +267,11 @@ describe("handleGetAgents active provider", () => {
 			},
 		});
 
-		return handleGetAgents("client-1", {}).pipe(
+		return listAgents(undefined).pipe(
 			Effect.provide(agentHandlerLayer({ client, ws })),
-			Effect.tap(() => {
+			Effect.tap((reply) => {
 				expect(client.app.agents).toHaveBeenCalledOnce();
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
+				expect(reply).toEqual({
 					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [{ id: "build", name: "build" }],
 				});
@@ -280,9 +282,7 @@ describe("handleGetAgents active provider", () => {
 	it.effect(
 		"falls back to Claude agents when startup has no active session and OpenCode is unavailable",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => undefined),
-			});
+			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
@@ -307,16 +307,15 @@ describe("handleGetAgents active provider", () => {
 				),
 			});
 
-			return handleGetAgents("client-1", {}).pipe(
+			return listAgents(undefined).pipe(
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
-				Effect.tap(() => {
+				Effect.tap((reply) => {
 					expect(client.app.agents).toHaveBeenCalledOnce();
 					expect(engine.dispatchEffect).toHaveBeenCalledWith({
 						type: "discover",
 						providerId: "claude",
 					});
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "agent_list",
+					expect(reply).toEqual({
 						providerScope: { id: "claude", name: "Claude" },
 						agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 					});
@@ -328,9 +327,7 @@ describe("handleGetAgents active provider", () => {
 	it.effect(
 		"uses Claude agents immediately when the default provider is Claude",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => undefined),
-			});
+			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
@@ -360,14 +357,13 @@ describe("handleGetAgents active provider", () => {
 					providerID: "claude",
 					modelID: "default",
 				});
-				yield* handleGetAgents("client-1", {});
+				const reply = yield* listAgents(undefined);
 				expect(client.app.agents).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
 				});
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "agent_list",
+				expect(reply).toEqual({
 					providerScope: { id: "claude", name: "Claude" },
 					agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 				});
@@ -376,9 +372,7 @@ describe("handleGetAgents active provider", () => {
 	);
 
 	it.effect("clears stale stored agent not present in active list", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
+		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		});
@@ -402,10 +396,9 @@ describe("handleGetAgents active provider", () => {
 
 		return Effect.gen(function* () {
 			yield* setAgent("session-1", "Missing");
-			yield* handleGetAgents("client-1", {});
+			const reply = yield* listAgents("session-1");
 			expect(yield* getAgent("session-1")).toBeUndefined();
-			expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-				type: "agent_list",
+			expect(reply).toEqual({
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "Explore", name: "Explore" }],
 			});

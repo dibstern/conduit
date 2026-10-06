@@ -10,7 +10,7 @@ export interface AtQuery {
 	end: number;
 }
 
-// This store has no client half: entries come from `file_list`, and the two
+// This store has no client half: entries come from `GetFileTree`, and the two
 // flags track the request that is fetching them. The @-mention query the user
 // is typing lives in the component, not here.
 
@@ -101,19 +101,10 @@ export function filterFiles(entries: string[], query: string): string[] {
 	return matches.slice(0, 20).map((m) => m.entry);
 }
 
-export function handleFileTree(msg: {
-	type: "file_tree";
-	entries: unknown;
-}): void {
-	if (Array.isArray(msg.entries)) {
-		fileTreeState.entries = msg.entries;
-		fileTreeState.loaded = true;
-		fileTreeState.loading = false;
-	}
-}
-
 export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
-	handleFileTree({ type: "file_tree", entries: response.entries });
+	fileTreeState.entries = [...response.entries];
+	fileTreeState.loaded = true;
+	fileTreeState.loading = false;
 }
 
 export function requestFileTree(): void {

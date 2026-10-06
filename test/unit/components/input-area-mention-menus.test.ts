@@ -10,8 +10,8 @@ import {
 import { applyGetCommandsResponse } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
 import {
-	handleAskUserResolved,
-	permissionsState,
+	applyApprovalEnvelope,
+	clearAll,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -37,7 +37,7 @@ describe("InputArea detached listboxes", () => {
 	beforeEach(() => {
 		sessionState.currentId = testSessionId;
 		phaseToIdle(getOrCreateSessionActivity(testSessionId));
-		permissionsState.pendingQuestions = [];
+		clearAll();
 		getOrCreateSessionActivity(testSessionId).phase = "idle";
 		getOrCreateSessionMessages(testSessionId).contextPercent = 0;
 		applyGetCommandsResponse({
@@ -63,7 +63,7 @@ describe("InputArea detached listboxes", () => {
 		phaseToIdle(getOrCreateSessionActivity(testSessionId));
 		sessionState.currentId = null;
 		applyGetCommandsResponse({ projectSlug: "test", commands: [] });
-		permissionsState.pendingQuestions = [];
+		clearAll();
 		fileTreeState.entries = [];
 		fileTreeState.loading = false;
 		fileTreeState.loaded = false;
@@ -72,9 +72,16 @@ describe("InputArea detached listboxes", () => {
 
 	it("labels the send button Reply only for a question in the current session", async () => {
 		phaseToProcessing(getOrCreateSessionActivity(testSessionId));
-		permissionsState.pendingQuestions = [
-			{ toolId: "other-question", sessionId: "other-session", questions: [] },
-		];
+		applyApprovalEnvelope({
+			_tag: "upsert",
+			sequence: 1,
+			item: {
+				_tag: "question",
+				toolId: "other-question",
+				sessionId: "other-session",
+				questions: [],
+			},
+		});
 		const { getByRole } = render(InputArea);
 		// While working, send only appears once there is text to steer with.
 		await enterText(
@@ -84,18 +91,24 @@ describe("InputArea detached listboxes", () => {
 		const queuedButton = getByRole("button", { name: "Queue message" });
 		expect(queuedButton.getAttribute("title")).toBe("Queue message");
 
-		permissionsState.pendingQuestions = [
-			...permissionsState.pendingQuestions,
-			{ toolId: "current-question", sessionId: testSessionId, questions: [] },
-		];
+		applyApprovalEnvelope({
+			_tag: "upsert",
+			sequence: 2,
+			item: {
+				_tag: "question",
+				toolId: "current-question",
+				sessionId: testSessionId,
+				questions: [],
+			},
+		});
 		await waitFor(() => {
 			const replyButton = getByRole("button", { name: "Reply" });
 			expect(replyButton.getAttribute("title")).toBe("Reply");
 		});
-		handleAskUserResolved({
-			type: "ask_user_resolved",
-			sessionId: testSessionId,
-			toolId: "current-question",
+		applyApprovalEnvelope({
+			_tag: "remove",
+			sequence: 3,
+			id: "current-question",
 		});
 		await waitFor(() => {
 			expect(getByRole("button", { name: "Queue message" })).toBeTruthy();

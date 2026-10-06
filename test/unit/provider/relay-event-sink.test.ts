@@ -552,7 +552,7 @@ describe("createRelayEventSink — permission/question", () => {
 		expect(send).not.toHaveBeenCalled();
 	});
 
-	it("emits permission_request and resolves when resolvePermission is called", async () => {
+	it("resolves when resolvePermission is called", async () => {
 		const send = vi.fn();
 		let resolvePermission:
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
@@ -596,15 +596,6 @@ describe("createRelayEventSink — permission/question", () => {
 				sessionId: "ses-1",
 				turnId: "turn_1",
 				providerItemId: "item_1",
-			}),
-		);
-
-		// The UI-facing message is queued
-		expect(send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				requestId: "req_1",
-				toolName: "Bash",
 			}),
 		);
 
@@ -770,7 +761,9 @@ describe("createRelayEventSink — permission/question", () => {
 				],
 			}),
 		);
-		await vi.waitFor(() => expect(send).toHaveBeenCalled());
+		await vi.waitFor(() =>
+			expect(pendingInteractions.beginQuestionRequest).toHaveBeenCalled(),
+		);
 
 		expect(clearTimeout).toHaveBeenCalled();
 		expect(resetTimeout).not.toHaveBeenCalled();
@@ -839,9 +832,6 @@ describe("createRelayEventSink — permission delegation", () => {
 		).resolves.toEqual({ decision: "once" });
 
 		expect(beginPermissionRequest).toHaveBeenCalledOnce();
-		expect(send).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request", toolName }),
-		);
 	});
 
 	// The ask and however it ends are canonical events, as for OpenCode: they
@@ -881,6 +871,7 @@ describe("createRelayEventSink — permission delegation", () => {
 					sessionId: "ses-1",
 					toolName: "Edit",
 					input: { file_path: "/tmp/example.ts" },
+					always: [],
 				},
 			},
 			{

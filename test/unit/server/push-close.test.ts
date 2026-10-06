@@ -96,7 +96,7 @@ it("releases a claim after the endpoint closes without response or error", async
 				const send = sendPushForEventEffect(
 					manager,
 					{
-						type: "ask_user",
+						_tag: "question",
 						sessionId: "s1",
 						toolId: "question",
 						questions: [],

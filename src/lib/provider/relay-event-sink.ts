@@ -410,36 +410,29 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						: {}),
 				});
 				const ask = Effect.gen(function* () {
+					// Browsers see the card through the approvals subscription, so
+					// the record carries everything the card shows.
 					yield* recordInteraction("permission.asked", {
 						id: request.requestId,
 						sessionId,
 						toolName: request.toolName,
 						input: request.toolInput,
-					});
-					yield* Effect.sync(() => {
-						send({
-							type: "permission_request",
-							sessionId,
-							requestId: request.requestId as PermissionId,
-							toolName: request.toolName,
-							toolInput: request.toolInput,
-							always: request.always ?? [],
-							...(request.permissionSuggestions != null
-								? { permissionSuggestions: [...request.permissionSuggestions] }
-								: {}),
-							...(request.permissionTitle != null
-								? { permissionTitle: request.permissionTitle }
-								: {}),
-							...(request.permissionDisplayName != null
-								? { permissionDisplayName: request.permissionDisplayName }
-								: {}),
-							...(request.permissionDescription != null
-								? { permissionDescription: request.permissionDescription }
-								: {}),
-							...(request.permissionReason != null
-								? { permissionReason: request.permissionReason }
-								: {}),
-						});
+						always: request.always ?? [],
+						...(request.permissionSuggestions != null
+							? { permissionSuggestions: request.permissionSuggestions }
+							: {}),
+						...(request.permissionTitle != null
+							? { permissionTitle: request.permissionTitle }
+							: {}),
+						...(request.permissionDisplayName != null
+							? { permissionDisplayName: request.permissionDisplayName }
+							: {}),
+						...(request.permissionDescription != null
+							? { permissionDescription: request.permissionDescription }
+							: {}),
+						...(request.permissionReason != null
+							? { permissionReason: request.permissionReason }
+							: {}),
 					});
 					return yield* pending.awaitResponse;
 				});
@@ -520,20 +513,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						id: request.requestId,
 						sessionId,
 						questions: askedQuestions,
-					});
-					yield* Effect.sync(() => {
-						send({
-							type: "ask_user",
-							sessionId,
-							toolId: request.requestId,
-							questions: askedQuestions,
-							...(request.toolUseId != null
-								? { toolUseId: request.toolUseId }
-								: {}),
-							...(deps.providerId != null
-								? { providerId: deps.providerId }
-								: {}),
-						});
+						...(request.toolUseId != null
+							? { toolUseId: request.toolUseId }
+							: {}),
+						...(deps.providerId != null ? { providerId: deps.providerId } : {}),
 					});
 					return yield* pending.awaitAnswers;
 				});

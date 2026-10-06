@@ -132,7 +132,7 @@ it("releases a timed-out delivery claim so a later observation reaches the devic
 				const send = sendPushForEventEffect(
 					manager,
 					{
-						type: "ask_user",
+						_tag: "question",
 						sessionId: "s1",
 						toolId: "question",
 						questions: [],

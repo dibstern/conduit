@@ -7,6 +7,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -23,6 +24,7 @@ import {
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
+	getModelsResponse,
 	sendModelsStateToClient,
 	setDefaultModelForRelay,
 	switchModelForSession,
@@ -165,12 +167,13 @@ describe("model handlers with Effect-native model service", () => {
 					providerID: "claude",
 					modelID: "sonnet",
 				});
-				yield* sendModelsStateToClient("client-1");
+				const response = yield* getModelsResponse({
+					clientId: "client-1",
+					sessionId: "session-1",
+				});
 
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "model_list",
-					providers: [
+				expect(response.providers).toEqual([
 						{
 							id: "openai",
 							name: "OpenAI",
@@ -195,8 +198,7 @@ describe("model handlers with Effect-native model service", () => {
 								},
 							],
 						},
-					],
-				});
+				]);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -243,6 +245,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -374,6 +377,7 @@ describe("model handlers with Effect-native model service", () => {
 					}),
 				),
 				makeOverridesStateLive(),
+				ProjectSettingsLive,
 			);
 
 			return Effect.gen(function* () {
@@ -392,12 +396,6 @@ describe("model handlers with Effect-native model service", () => {
 					"gpt-4",
 				);
 				expect(modelService.listProviders).toHaveBeenCalledOnce();
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "default_model_info",
-					model: "gpt-4",
-					provider: "openai",
-					variant: "",
-				});
 				expect(wsHandler.broadcast).toHaveBeenCalledWith({
 					type: "variant_info",
 					variant: "",

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -6,7 +7,7 @@ export const terminalsHandlers = {
 	ListPtys: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
-			const ptys = yield* terminal.list(request.originId);
+			const ptys = yield* terminal.list();
 			return {
 				projectSlug: request.projectSlug,
 				ptys,
@@ -35,7 +36,21 @@ export const terminalsHandlers = {
 			yield* terminal.close(request.ptyId);
 			return { ok: true as const };
 		}).pipe(Effect.catchAll(mapRpcFailure("ClosePty"))),
+	PtyInput: (request) =>
+		Effect.gen(function* () {
+			const terminal = yield* OpenCodeTerminalServiceTag;
+			yield* terminal.sendInput(request.ptyId, request.data);
+			return { ok: true as const };
+		}).pipe(
+			Effect.mapError(
+				() =>
+					new WsRpcError({
+						message:
+							"Terminal is unavailable; reconnect or create a new terminal",
+					}),
+			),
+		),
 } satisfies Pick<
 	WsRpcHandlerMap,
-	"ListPtys" | "CreatePty" | "ResizePty" | "ClosePty"
+	"ListPtys" | "CreatePty" | "ResizePty" | "ClosePty" | "PtyInput"
 >;

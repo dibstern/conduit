@@ -11,7 +11,7 @@ import {
 	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
-import { handleInstanceList } from "../../stores/instance.svelte.js";
+import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
@@ -19,7 +19,7 @@ function resetState() {
 	setComposerPreferences({ controls: "icons", contextWarning: 80 });
 	routerState.path = "/";
 	clearDiscoveryState();
-	handleInstanceList({ type: "instance_list", instances: [] });
+	applyInstanceListResponse({ instances: [] });
 	featureFlags.debug = false;
 	localStorage.setItem(
 		"notif-settings",
@@ -28,8 +28,7 @@ function resetState() {
 }
 
 function populateInstances() {
-	handleInstanceList({
-		type: "instance_list",
+	applyInstanceListResponse({
 		instances: [
 			{
 				id: "instance-local",
@@ -160,7 +159,6 @@ export const VisibilityPopulated: Story = {
 	args: { initialTab: "visibility" },
 	beforeEach: () => {
 		handleModelList({
-			type: "model_list",
 			providers: [
 				{
 					id: "anthropic",
@@ -182,12 +180,10 @@ export const VisibilityPopulated: Story = {
 			],
 		});
 		handleVisibilityInfo({
-			type: "visibility_info",
 			hiddenModels: ["anthropic/claude-haiku-3-5"],
 			hiddenAgents: ["anthropic/review"],
 		});
 		handleAgentList({
-			type: "agent_list",
 			providerScope: { id: "anthropic", name: "Anthropic" },
 			agents: [
 				{

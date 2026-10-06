@@ -4,15 +4,10 @@ import {
 	clearInstanceState,
 	getHealthyInstances,
 	getInstanceById,
-	handleInstanceList,
-	handleInstanceStatus,
 	instanceState,
 	instanceStatusColor,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import type {
-	OpenCodeInstance,
-	RelayMessage,
-} from "../../../src/lib/frontend/types.js";
+import type { OpenCodeInstance } from "../../../src/lib/frontend/types.js";
 
 function makeInstance(
 	overrides: Partial<OpenCodeInstance> & { id: string },
@@ -37,14 +32,13 @@ describe("Instance Store", () => {
 		expect(instanceState.instances).toEqual([]);
 	});
 
-	it("handleInstanceList populates instances", () => {
+	it("applyInstanceListResponse populates instances", () => {
 		const instances = [
 			makeInstance({ id: "default", port: 4096 }),
 			makeInstance({ id: "work", port: 4097, status: "stopped" }),
 		];
 
-		handleInstanceList({
-			type: "instance_list",
+		applyInstanceListResponse({
 			instances,
 		});
 
@@ -57,27 +51,8 @@ describe("Instance Store", () => {
 		expect(secondInstance.id).toBe("work");
 	});
 
-	it("handleInstanceList ignores non-array instances", () => {
-		// Populate first
-		handleInstanceList({
-			type: "instance_list",
-			instances: [makeInstance({ id: "a" })],
-		});
-		expect(instanceState.instances).toHaveLength(1);
-
-		// Send a malformed message (cast to bypass type check)
-		handleInstanceList({
-			type: "instance_list",
-			instances: "not-an-array",
-		} as unknown as Extract<RelayMessage, { type: "instance_list" }>);
-
-		// Should remain unchanged
-		expect(instanceState.instances).toHaveLength(1);
-	});
-
 	it("carries driver and configDir through an RPC instance list", () => {
 		applyInstanceListResponse({
-			projectSlug: "demo",
 			instances: [
 				{
 					id: "work-claude",
@@ -114,51 +89,8 @@ describe("Instance Store", () => {
 		});
 	});
 
-	it("handleInstanceStatus updates a single instance status", () => {
-		handleInstanceList({
-			type: "instance_list",
-			instances: [
-				makeInstance({ id: "default", status: "healthy" }),
-				makeInstance({ id: "work", status: "healthy" }),
-			],
-		});
-
-		handleInstanceStatus({
-			type: "instance_status",
-			instanceId: "work",
-			status: "unhealthy",
-		});
-
-		const firstInstance = instanceState.instances[0];
-		const secondInstance = instanceState.instances[1];
-		assert.exists(firstInstance, "expected healthy instance");
-		assert.exists(secondInstance, "expected unhealthy instance");
-		expect(firstInstance.status).toBe("healthy");
-		expect(secondInstance.status).toBe("unhealthy");
-	});
-
-	it("handleInstanceStatus is a no-op for unknown instanceId", () => {
-		handleInstanceList({
-			type: "instance_list",
-			instances: [makeInstance({ id: "default", status: "healthy" })],
-		});
-
-		handleInstanceStatus({
-			type: "instance_status",
-			instanceId: "nonexistent",
-			status: "stopped",
-		});
-
-		// Should remain unchanged
-		expect(instanceState.instances).toHaveLength(1);
-		const firstInstance = instanceState.instances[0];
-		assert.exists(firstInstance, "expected healthy instance");
-		expect(firstInstance.status).toBe("healthy");
-	});
-
 	it("getInstanceById returns matching instance", () => {
-		handleInstanceList({
-			type: "instance_list",
+		applyInstanceListResponse({
 			instances: [
 				makeInstance({ id: "a", name: "Alpha" }),
 				makeInstance({ id: "b", name: "Beta" }),
@@ -172,8 +104,7 @@ describe("Instance Store", () => {
 	});
 
 	it("getInstanceById returns undefined for nonexistent", () => {
-		handleInstanceList({
-			type: "instance_list",
+		applyInstanceListResponse({
 			instances: [makeInstance({ id: "a" })],
 		});
 
@@ -181,8 +112,7 @@ describe("Instance Store", () => {
 	});
 
 	it("getHealthyInstances filters by status", () => {
-		handleInstanceList({
-			type: "instance_list",
+		applyInstanceListResponse({
 			instances: [
 				makeInstance({ id: "a", status: "healthy" }),
 				makeInstance({ id: "b", status: "unhealthy" }),
@@ -197,8 +127,7 @@ describe("Instance Store", () => {
 	});
 
 	it("clearInstanceState resets everything", () => {
-		handleInstanceList({
-			type: "instance_list",
+		applyInstanceListResponse({
 			instances: [makeInstance({ id: "x" })],
 		});
 

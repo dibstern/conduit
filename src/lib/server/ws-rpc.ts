@@ -1,9 +1,18 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
-import { type Context, Effect, type Layer, Stream } from "effect";
-import { WsRpcError, WsRpcGroup } from "../contracts/ws-rpc.js";
+import { type Context, Effect, type Layer, Stream, Struct } from "effect";
+import {
+	type OpenCodeInstance,
+	type ProjectInfo,
+	WsRpcError,
+	WsRpcGroup,
+} from "../contracts/ws-rpc.js";
+import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
+import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
+import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
+import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
@@ -74,7 +83,9 @@ export {
 	type ModelInfo,
 	type ProjectMutationResponse,
 	type ProviderInfo,
+	type PtyEnvelope,
 	type PtyInfo,
+	PtyInput,
 	type PtyListResponse,
 	RejectQuestion,
 	ReloadProviderSession,
@@ -115,7 +126,9 @@ export {
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
+	SubscribePtys,
 	SubscribeSessionDetail,
+	SubscribeSessionTodos,
 	SubscribeShell,
 	SwitchAgent,
 	SwitchContextWindow,
@@ -163,6 +176,21 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				),
 			),
 		),
+	SubscribeApprovals: (request) =>
+		Rpc.fork(
+			subscribeApprovals(
+				request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence },
+			).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeApprovals failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
 	SubscribeSessionDetail: (request) =>
 		Rpc.fork(
 			subscribeSessionDetail({
@@ -180,6 +208,42 @@ export const wsRpcHandlers = WsRpcGroup.of({
 						}),
 				),
 			),
+		),
+	SubscribeSessionTodos: (request) =>
+		Rpc.fork(
+			subscribeSessionTodos({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}).pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribeSessionTodos failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribePtys: () =>
+		Rpc.fork(
+			subscribePtys().pipe(
+				Stream.mapError(
+					(error) =>
+						new WsRpcError({
+							message: `SubscribePtys failed: ${String(error)}`,
+						}),
+				),
+			),
+		),
+	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeInstances: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeInstances requires daemon mode" }),
+		),
+	SubscribeProjects: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
 		),
 	...unaryHandlers,
 });
@@ -229,6 +293,15 @@ export type DaemonRpcHandlers = {
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>
 	>;
+} & {
+	readonly SubscribeInstances: () => Stream.Stream<
+		{ readonly instances: readonly OpenCodeInstance[] },
+		WsRpcError
+	>;
+	readonly SubscribeProjects: () => Stream.Stream<
+		{ readonly projects: readonly ProjectInfo[] },
+		WsRpcError
+	>;
 };
 
 export const makeRoutedWsRpcServerLayer = (
@@ -252,13 +325,16 @@ export const makeRoutedWsRpcServerLayer = (
 				return yield* Effect.provide(handler(payload), context);
 			});
 
+	const daemonUnaryHandlers =
+		daemonHandlers &&
+		Struct.omit(daemonHandlers, "SubscribeInstances", "SubscribeProjects");
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
 	const handlers = Object.fromEntries(
-		Object.entries({ ...unaryHandlers, ...daemonHandlers }).map(
+		Object.entries({ ...unaryHandlers, ...daemonUnaryHandlers }).map(
 			([name, handler]) => [
 				name,
-				(daemonHandlers && Object.hasOwn(daemonHandlers, name)) ||
+				(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
 				Object.hasOwn(daemonOnlyHandlers, name)
 					? handler
 					: routeHandler<never, unknown, unknown, unknown>(handler),
@@ -324,6 +400,14 @@ export const makeRoutedWsRpcServerLayer = (
 						: { resumeFromSequence: request.resumeFromSequence },
 				),
 			),
+		SubscribeApprovals: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeApprovals(
+					request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence },
+				),
+			),
 		SubscribeSessionDetail: (request) =>
 			routeStream(request.projectSlug, () => {
 				const source = subscribeSessionDetail({
@@ -336,5 +420,25 @@ export const makeRoutedWsRpcServerLayer = (
 					? encodeSessionDetail(source)
 					: source;
 			}),
+		SubscribeSessionTodos: (request) =>
+			routeStream(request.projectSlug, () =>
+				subscribeSessionTodos({
+					sessionId: request.sessionId,
+					...(request.resumeFromSequence === undefined
+						? {}
+						: { resumeFromSequence: request.resumeFromSequence }),
+				}),
+			),
+		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
+		SubscribeProjectSettings: (request) =>
+			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeInstances: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeInstances())
+				: wsRpcHandlers.SubscribeInstances(),
+		SubscribeProjects: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeProjects())
+				: wsRpcHandlers.SubscribeProjects(),
 	});
 };

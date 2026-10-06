@@ -100,13 +100,7 @@ describe("shouldCache", () => {
 
 	it("returns false for non-chat event types", () => {
 		const nonCacheable = [
-			"permission_request",
-			"permission_resolved",
-			"file_changed",
 			"session_list",
-			"todo_state",
-			"pty_created",
-			"pty_output",
 			// status events are sent directly via wsHandler, never through the
 			// pipeline — so they should NOT be cacheable.
 			"status",
@@ -120,10 +114,6 @@ describe("shouldCache", () => {
 describe("resolveTimeout", () => {
 	it("returns clear for done events with sessionId", () => {
 		expect(resolveTimeout("done", "ses_abc")).toBe("clear");
-	});
-
-	it("returns clear for ask_user events with sessionId", () => {
-		expect(resolveTimeout("ask_user", "ses_abc")).toBe("clear");
 	});
 
 	it("returns reset for non-done events with sessionId", () => {
@@ -183,9 +173,10 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("does not cache non-cacheable types", () => {
 		const msg: RelayMessage = {
-			type: "file_changed",
-			path: "/foo.ts",
-			changeType: "edited",
+			type: "compaction",
+			sessionId: "ses_abc",
+			state: "started",
+			detail: "",
 		};
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.cache).toBe(false);

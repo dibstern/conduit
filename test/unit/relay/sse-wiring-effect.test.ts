@@ -58,35 +58,6 @@ const makeEffectDeps = (
 };
 
 describe("handleSSEEventEffect", () => {
-	it("preserves question identity in the lightweight broadcast", async () => {
-		const { deps, effectDeps } = makeEffectDeps();
-		const question: RelayMessage = {
-			type: "ask_user",
-			sessionId: "session-1",
-			toolId: "q1",
-			questions: [],
-		};
-		vi.mocked(effectDeps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [question],
-		});
-		await Effect.runPromise(
-			handleSSEEventEffect(effectDeps, {
-				type: "question.asked",
-				properties: { id: "q1", sessionID: "session-1", questions: [] },
-			}).pipe(Effect.provide(makeEffectLayer())),
-		);
-		expect(deps.wsHandler.sendToSession).toHaveBeenCalledWith(
-			"session-1",
-			question,
-		);
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "notification_event",
-			eventType: "ask_user",
-			sessionId: "session-1",
-			alertId: "session-1:question:q1",
-		});
-	});
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const effectDeps = deps;
@@ -138,28 +109,6 @@ describe("handleSSEEventEffect", () => {
 		);
 	});
 
-	it("broadcasts question resolutions so family viewers drop replayed questions", async () => {
-		const { deps, effectDeps } = makeEffectDeps();
-		const translated: RelayMessage = {
-			type: "ask_user_resolved",
-			sessionId: "child-session",
-			toolId: "que_q1",
-		};
-		vi.mocked(effectDeps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		await Effect.runPromise(
-			handleSSEEventEffect(effectDeps, {
-				type: "question.replied",
-				properties: { sessionID: "child-session", requestID: "que_q1" },
-			}).pipe(Effect.provide(makeEffectLayer())),
-		);
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(translated);
-	});
-
 	it("records message activity through SessionManagerServiceTag", async () => {
 		const deps = createMockSSEWiringDeps();
 		const effectDeps = deps;
@@ -201,9 +150,9 @@ describe("handleSSEEventEffect", () => {
 		);
 	});
 
-	it("full mode replies once without broadcasting or recording a pending permission", async () => {
+	it("full mode replies once without recording a pending permission", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -217,14 +166,11 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).toHaveBeenCalledWith("session-1", "perm-1", "once");
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
 	});
 
 	it("acceptEdits mode auto-replies to edit permissions", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -234,14 +180,11 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).toHaveBeenCalledWith("session-1", "perm-1", "once");
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
 	});
 
 	it("acceptEdits mode falls back to a card for bash permissions", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -255,17 +198,11 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				toolName: "bash",
-			}),
-		);
 	});
 
 	it("auto mode falls back to a card for OpenCode permissions", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -279,14 +216,11 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
 	});
 
 	it("defaults to ask mode and preserves the card path", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -299,16 +233,13 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
-		);
 	});
 
 	it("falls back to a card when the auto-reply rejects", async () => {
 		const replyPermission = vi.fn(async () => {
 			throw new Error("reply failed");
 		});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -319,15 +250,11 @@ describe("handleSSEEventEffect", () => {
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
 			}).pipe(Effect.provide(makeEffectLayer())),
-		);
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
 		);
 	});
 
 	it("falls back to a card when replyPermission is absent", async () => {
-		const { deps, effectDeps } = makeEffectDeps();
+		const { effectDeps } = makeEffectDeps();
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -338,16 +265,12 @@ describe("handleSSEEventEffect", () => {
 					yield* pendingInteractions.listPendingPermissions("session-1"),
 				).toHaveLength(1);
 			}).pipe(Effect.provide(makeEffectLayer())),
-		);
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "permission_request" }),
 		);
 	});
 
 	it("falls back to a card when the permission has no resolvable session", async () => {
 		const replyPermission = vi.fn(async () => {});
-		const { deps, effectDeps } = makeEffectDeps(replyPermission);
+		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -363,11 +286,5 @@ describe("handleSSEEventEffect", () => {
 		);
 
 		expect(replyPermission).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "permission_request",
-				sessionId: "",
-			}),
-		);
 	});
 });

@@ -1,7 +1,4 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
-import { runSSEEvent } from "../../helpers/sse-effect-harness.js";
-import { seedSessions } from "../stores/session-fixtures.js";
 
 const { emit, settings } = vi.hoisted(() => ({
 	emit: vi.fn(),
@@ -19,7 +16,7 @@ vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	navigate: vi.fn(),
 }));
 const question = {
-	type: "ask_user" as const,
+	_tag: "question" as const,
 	sessionId: "s1",
 	toolId: "q1",
 	questions: [],
@@ -177,47 +174,6 @@ it("retains a page receipt when storage cannot persist delivery", async () => {
 	await page.triggerNotifications(question);
 	await page.triggerNotifications(question);
 	expect(emit).toHaveBeenCalledOnce();
-});
-
-it("deduplicates full and lightweight questions without suppressing later questions", async () => {
-	const { handleMessage } = await import(
-		"../../../src/lib/frontend/stores/ws-dispatch.js"
-	);
-	const { sessionState } = await import(
-		"../../../src/lib/frontend/stores/session.svelte.js"
-	);
-	seedSessions([
-		...sessionState.sessions.values(),
-		{ id: "s1", title: "", status: "idle" },
-	]);
-	sessionState.currentId = "s1";
-	const deps = createMockSSEWiringDeps();
-	const page = await import(
-		"../../../src/lib/frontend/stores/ws-notifications.js"
-	);
-	for (const [index, toolId] of ["q1", "q2", "q3"].entries()) {
-		const fullQuestion = { ...question, toolId };
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [fullQuestion],
-		});
-		await runSSEEvent(deps, {
-			type: "question.asked",
-			properties: { id: toolId, sessionID: "s1", questions: [] },
-		});
-		const lightweight = vi
-			.mocked(deps.wsHandler.broadcast)
-			.mock.calls.at(-1)?.[0];
-		expect(lightweight?.type).toBe("notification_event");
-		if (!lightweight) throw new Error("Missing question broadcast");
-		if (toolId === "q1") await page.triggerNotifications(fullQuestion);
-		else sessionState.currentId = "other-session";
-		handleMessage(lightweight);
-		await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(index + 1));
-		// Drain the asynchronous subscription check and tab ownership lock.
-		await page.triggerNotifications(fullQuestion);
-		expect(emit).toHaveBeenCalledTimes(index + 1);
-	}
 });
 
 it("ignores anonymous idle hints without claiming completion receipts", async () => {

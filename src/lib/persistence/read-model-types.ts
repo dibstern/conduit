@@ -41,6 +41,20 @@ export interface PendingApprovalCountRow {
 	pending_count: number;
 }
 
+/** A pending_approvals row as the approvals subscription reads it (ni8.9). */
+export interface PendingApprovalRow {
+	id: string;
+	session_id: string;
+	type: "permission" | "question";
+	status: "pending" | "resolved";
+	tool_name: string | null;
+	/** JSON: the tool input, or a question's questions. */
+	input: string | null;
+	/** JSON: the rest of the asked payload; NULL on rows from before 0030. */
+	details: string | null;
+	version: number;
+}
+
 export interface PendingClaudeQuestionToolRow {
 	id: string;
 	call_id: string | null;

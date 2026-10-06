@@ -5,8 +5,6 @@
 //   - RemoveClient (WS disconnect)
 //   - DuplicateAdd (re-add existing client — idempotent)
 //   - GetBroadcastTargets (with and without exclusion)
-//   - RouteValidMessage (parse + route a known message type)
-//   - RouteInvalidMessage (parse + route an unknown type)
 //
 // Model: Set<string> for connected client IDs
 // Invariants verified after each command:
@@ -20,10 +18,6 @@ import {
 	type ClientTracker,
 	createClientCountMessage,
 	createClientTracker,
-	type IncomingMessageType,
-	isRouteError,
-	parseIncomingMessage,
-	routeMessage,
 } from "../../../src/lib/server/ws-router.js";
 
 const SEED = 42;
@@ -297,108 +291,12 @@ class ClientCountMessageCommand implements fc.Command<ModelState, RealState> {
 	}
 }
 
-class RouteValidCommand implements fc.Command<ModelState, RealState> {
-	constructor(
-		readonly msgType: IncomingMessageType,
-		readonly payload: Record<string, unknown>,
-	) {}
-
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(_model: ModelState, _real: RealState): void {
-		const raw = JSON.stringify({ type: this.msgType, ...this.payload });
-		const parsed = parseIncomingMessage(raw);
-
-		if (parsed === null) {
-			throw new Error(
-				`parseIncomingMessage returned null for valid message type "${this.msgType}"`,
-			);
-		}
-
-		const result = routeMessage(parsed);
-
-		if (isRouteError(result)) {
-			throw new Error(
-				`routeMessage returned error for valid type "${this.msgType}": ${result.message}`,
-			);
-		}
-
-		if (result.handler !== this.msgType) {
-			throw new Error(
-				`Route handler mismatch: expected "${this.msgType}", got "${result.handler}"`,
-			);
-		}
-
-		// Payload should not contain 'type'
-		if ("type" in result.payload) {
-			throw new Error(
-				`Route payload contains "type" field — should be stripped`,
-			);
-		}
-	}
-
-	toString(): string {
-		return `RouteValid(${this.msgType})`;
-	}
-}
-
-class RouteInvalidCommand implements fc.Command<ModelState, RealState> {
-	constructor(readonly msgType: string) {}
-
-	check(_model: Readonly<ModelState>): boolean {
-		return true;
-	}
-
-	run(_model: ModelState, _real: RealState): void {
-		const raw = JSON.stringify({ type: this.msgType });
-		const parsed = parseIncomingMessage(raw);
-
-		if (parsed === null) {
-			throw new Error(
-				`parseIncomingMessage returned null for raw JSON with type "${this.msgType}"`,
-			);
-		}
-
-		const result = routeMessage(parsed);
-
-		if (!isRouteError(result)) {
-			throw new Error(
-				`routeMessage did NOT return error for invalid type "${this.msgType}"`,
-			);
-		}
-
-		if (result.code !== "UNKNOWN_MESSAGE_TYPE") {
-			throw new Error(
-				`Expected error code "UNKNOWN_MESSAGE_TYPE", got "${result.code}"`,
-			);
-		}
-	}
-
-	toString(): string {
-		return `RouteInvalid(${this.msgType})`;
-	}
-}
-
 const arbClientId = fc.oneof(
 	{ weight: 5, arbitrary: fc.uuid() },
 	{ weight: 3, arbitrary: fc.stringMatching(/^client-[0-9]{1,5}$/) },
 	{ weight: 1, arbitrary: fc.constant("admin") },
 	{ weight: 1, arbitrary: fc.constant("viewer") },
 );
-
-const validMessageTypes: IncomingMessageType[] = ["pty_input"];
-
-const arbInvalidType = fc
-	.oneof(
-		{
-			weight: 3,
-			arbitrary: fc.constantFrom("unknown", "INVALID", "connect", "disconnect"),
-		},
-		{ weight: 2, arbitrary: fc.string({ minLength: 1, maxLength: 20 }) },
-	)
-	.filter((t) => !validMessageTypes.includes(t as IncomingMessageType));
 
 const allCommands = fc.commands(
 	[
@@ -425,20 +323,6 @@ const allCommands = fc.commands(
 
 		// Client count message factory
 		fc.constant(new ClientCountMessageCommand()),
-
-		// Route valid message
-		fc
-			.tuple(
-				fc.constantFrom(...validMessageTypes),
-				fc.dictionary(
-					fc.string({ minLength: 1, maxLength: 10 }),
-					fc.jsonValue(),
-				),
-			)
-			.map(([type, payload]) => new RouteValidCommand(type, payload)),
-
-		// Route invalid message
-		arbInvalidType.map((type) => new RouteInvalidCommand(type)),
 	],
 	{ maxCommands: 50 },
 );

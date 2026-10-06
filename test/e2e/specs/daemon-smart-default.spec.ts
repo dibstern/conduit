@@ -137,7 +137,7 @@ test.describe("Smart Default Detection", () => {
 		expect(defaultInst.status).toBe("healthy");
 	});
 
-	test("browser connects to smart-default daemon and receives instance_list", async ({
+	test("browser connects to smart-default daemon and receives the instance list", async ({
 		page,
 		smartDaemonProjectUrl,
 		isNarrow,

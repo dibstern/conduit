@@ -12,7 +12,6 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
-import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -45,10 +44,6 @@ const NoopAuxiliaryDaemonServices = Layer.mergeAll(
 	Layer.succeed(PortScannerTag, {
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
 		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
-	}),
-	Layer.succeed(VersionCheckerTag, {
-		getLatestKnown: () => Effect.succeed(null),
-		getCurrentVersion: () => Effect.succeed("unknown"),
 	}),
 	Layer.succeed(PushManagerTag, {
 		subscribe: () => Effect.void,
@@ -419,10 +414,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
 					}),
-					Layer.succeed(VersionCheckerTag, {
-						getLatestKnown: () => Effect.succeed("9.9.9"),
-						getCurrentVersion: () => Effect.succeed("1.0.0"),
-					}),
 					Layer.succeed(PushManagerTag, {
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
@@ -455,11 +446,9 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
 			expect(config?.triggerScan).toBeTypeOf("function");
-			expect(config?.getCachedUpdate).toBeTypeOf("function");
 			expect(config?.pushManager).toBe(pushManager);
 			const triggerScan = config?.triggerScan;
-			const getCachedUpdate = config?.getCachedUpdate;
-			if (triggerScan == null || getCachedUpdate == null) {
+			if (triggerScan == null) {
 				expect.fail("expected relay auxiliary callbacks");
 			}
 
@@ -468,12 +457,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				catch: (cause) => cause,
 			});
 			expect(scan).toEqual(scanResult);
-
-			const cachedUpdate = yield* Effect.tryPromise({
-				try: () => Promise.resolve(getCachedUpdate()),
-				catch: (cause) => cause,
-			});
-			expect(cachedUpdate).toBe("9.9.9");
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
 			Effect.ensuring(

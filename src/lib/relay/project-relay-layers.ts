@@ -308,11 +308,7 @@ export function createProjectRelayLayers({
 	);
 	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 		Layer.provide(
-			Layer.mergeAll(
-				openCodeInstancesLayer,
-				webSocketHandlerLayer,
-				loggerLayer,
-			),
+			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(

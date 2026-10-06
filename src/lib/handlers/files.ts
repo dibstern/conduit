@@ -3,7 +3,6 @@ import ignore from "ignore";
 import {
 	LoggerTag,
 	OpenCodeFileServiceTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 
 /** Directories we always skip (even if .gitignore is unavailable). */
@@ -34,21 +33,6 @@ const isIgnored = (
 		? ig.ignores(path) || ig.ignores(`${path}/`)
 		: ig.ignores(path);
 
-export const handleGetFileList = (
-	clientId: string,
-	payload: { path?: string },
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const result = yield* getFileListResponse(payload.path ?? ".");
-
-		wsHandler.sendTo(clientId, {
-			type: "file_list",
-			path: result.path,
-			entries: result.entries,
-		});
-	});
-
 export const getFileListResponse = (dirPath = ".") =>
 	Effect.gen(function* () {
 		const fileService = yield* OpenCodeFileServiceTag;
@@ -71,25 +55,6 @@ export const getFileListResponse = (dirPath = ".") =>
 				...(entry.size != null ? { size: entry.size } : {}),
 			})),
 		};
-	});
-
-export const handleGetFileContent = (
-	clientId: string,
-	payload: { path: string },
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-
-		const { path: filePath } = payload;
-		if (filePath) {
-			const result = yield* getFileContentResponse(filePath);
-			wsHandler.sendTo(clientId, {
-				type: "file_content",
-				path: result.path,
-				content: result.content,
-				...(result.binary != null && { binary: result.binary }),
-			});
-		}
 	});
 
 export const getFileContentResponse = (filePath: string) =>
@@ -165,14 +130,4 @@ export const getFileTreeEntries = () =>
 		}
 
 		return entries;
-	});
-
-export const handleGetFileTree = (
-	clientId: string,
-	_payload: Record<string, never>,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const entries = yield* getFileTreeEntries();
-		wsHandler.sendTo(clientId, { type: "file_tree", entries });
 	});

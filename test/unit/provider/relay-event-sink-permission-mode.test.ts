@@ -26,7 +26,7 @@ const modeChanged = (mode: SessionPermissionMode): ProviderRuntimeEvent => ({
 });
 
 describe("createRelayEventSink — SDK-reported permission mode", () => {
-	it("persists the change, updates the live override, and tells clients", async () => {
+	it("persists the change and updates the live override", async () => {
 		const send = vi.fn<(msg: RelayMessage) => void>();
 		const persisted: CanonicalEvent[] = [];
 		const applied: SessionPermissionMode[] = [];
@@ -54,11 +54,8 @@ describe("createRelayEventSink — SDK-reported permission mode", () => {
 			],
 		]);
 		expect(applied).toEqual(["acceptEdits"]);
-		expect(send).toHaveBeenCalledWith({
-			type: "permission_mode_info",
-			sessionId: "ses-1",
-			mode: "acceptEdits",
-		});
+		// Tabs hear it through the session's shell row, not a relay frame.
+		expect(send).not.toHaveBeenCalled();
 	});
 
 	// The override drives the next turn's query options; a persist failure that

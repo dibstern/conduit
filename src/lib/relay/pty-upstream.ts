@@ -1,8 +1,10 @@
 // Connects a PTY session to the upstream OpenCode WebSocket endpoint.
 // Extracted from relay-stack.ts so it can be tested and understood independently.
 
+import type { PtyEvent } from "../contracts/ws-rpc.js";
 import type { Logger } from "../logger.js";
-import type { RelayMessage } from "../types.js";
+import type { PtyInfo } from "../shared-types.js";
+import { trackedPtyInfo } from "./pty-manager.js";
 
 export interface PtyUpstreamDeps {
 	ptyManager: {
@@ -11,14 +13,14 @@ export interface PtyUpstreamDeps {
 		appendScrollback(ptyId: string, text: string): void;
 		markExited(ptyId: string, exitCode: number): void;
 		hasSession(ptyId: string): boolean;
-	};
-	wsHandler: {
-		broadcast(msg: RelayMessage): void;
+		getSession(ptyId: string): { readonly info?: PtyInfo } | undefined;
+		publish(event: PtyEvent): void;
 	};
 	client: {
 		getAuthHeaders(): Record<string, string>;
 	};
 	opencodeUrl: string;
+	projectDir: string;
 	log: Logger;
 	WebSocketClass: typeof import("ws").WebSocket;
 	/** Runs once the upstream socket has closed, however it closed. */
@@ -29,7 +31,7 @@ type RawData = import("ws").RawData;
 
 /**
  * Open an upstream WebSocket to OpenCode's `/pty/:id/connect` endpoint and wire
- * it to the relay's PTY manager + browser broadcast.
+ * it to the relay's PTY manager, whose feed every PTY subscriber reads.
  *
  * @param deps   - Explicit dependencies (ptyManager, wsHandler, client, etc.)
  * @param ptyId  - The PTY session identifier
@@ -43,9 +45,9 @@ export async function connectPtyUpstream(
 ): Promise<void> {
 	const {
 		ptyManager,
-		wsHandler,
 		client,
 		opencodeUrl,
+		projectDir,
 		log,
 		WebSocketClass,
 		onClose,
@@ -106,21 +108,23 @@ export async function connectPtyUpstream(
 			// Buffer scrollback via PtyManager (FIFO, 50 KB cap)
 			ptyManager.appendScrollback(ptyId, text);
 
-			// Broadcast to all browser clients
-			wsHandler.broadcast({ type: "pty_output", ptyId, data: text });
+			ptyManager.publish({ _tag: "output", ptyId, data: text });
 		});
 
 		upstream.on("close", () => {
 			ptyManager.markExited(ptyId, 0);
-			// Only broadcast pty_exited if the session is still tracked.
-			// closeSession deletes + broadcasts pty_deleted, so we must
-			// not also broadcast pty_exited for the same PTY.  Similarly,
-			// if connectPtyUpstream failed the session was never stored.
-			if (ptyManager.hasSession(ptyId)) {
-				wsHandler.broadcast({
-					type: "pty_exited",
-					ptyId,
-					exitCode: 0,
+			// Only announce the exit if the session is still tracked: a closed
+			// PTY was already announced removed, and a failed connect was never
+			// stored.
+			const session = ptyManager.getSession(ptyId);
+			if (session) {
+				ptyManager.publish({
+					_tag: "upsert",
+					item: trackedPtyInfo(
+						{ id: ptyId, status: "exited" },
+						projectDir,
+						session.info,
+					),
 				});
 			}
 			log.info(`Upstream closed: ${ptyId}`);

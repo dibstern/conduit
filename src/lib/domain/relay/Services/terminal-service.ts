@@ -1,8 +1,12 @@
 import { Context, Data, Effect, Layer, Option } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
-import type { PtyUpstream } from "../../../relay/pty-manager.js";
+import {
+	type PtyUpstream,
+	trackedPtyInfo,
+} from "../../../relay/pty-manager.js";
 import type { PtyInfo, PtyStatus } from "../../../shared-types.js";
 import {
 	isPtyHostUnavailable,
@@ -40,13 +44,16 @@ export class TerminalServiceError extends Data.TaggedError(
 
 export interface OpenCodeTerminalService {
 	create(clientId: string): Effect.Effect<void>;
-	list(clientId: string): Effect.Effect<PtyInfo[], TerminalServiceError>;
-	replay(clientId: string): Effect.Effect<void, TerminalServiceError>;
+	/** Restore hosted PTYs, discover OpenCode's, and re-attach running ones. */
+	list(): Effect.Effect<PtyInfo[], TerminalServiceError>;
+	/** Every tracked PTY with its scrollback. Synchronous, so a subscriber can
+	 *  read it in the same turn it subscribes and miss nothing in between. */
+	snapshot(): PtyRow[];
+	subscribe(listener: (event: PtyEvent) => void): () => void;
 	sendInput(
 		ptyId: string,
 		data: string,
-		clientId?: string,
-	): Effect.Effect<void>;
+	): Effect.Effect<void, TerminalServiceError>;
 	close(ptyId: string): Effect.Effect<void, TerminalServiceError>;
 	resize(
 		clientId: string,
@@ -203,20 +210,6 @@ const toPtyInfo = (
 	};
 };
 
-const toTrackedPtyInfo = (
-	pty: { readonly id: string; readonly status: PtyStatus },
-	projectDir: string,
-	info?: PtyInfo,
-): PtyInfo => ({
-	id: pty.id,
-	title: "Terminal",
-	command: "bash",
-	cwd: projectDir,
-	pid: 0,
-	...info,
-	status: pty.status,
-});
-
 export const OpenCodeTerminalServiceLive: Layer.Layer<
 	OpenCodeTerminalServiceTag,
 	never,
@@ -256,27 +249,11 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		const connectPtyUpstream = yield* ConnectPtyUpstreamTag;
 		const localPty = yield* LocalPtyServiceTag;
 		const terminalLock = yield* Effect.makeSemaphore(1);
-		const readyTerminals = new Map<string, Set<string>>();
-		const clientTerminals = (clientId: string): Set<string> => {
-			let ready = readyTerminals.get(clientId);
-			if (!ready) {
-				ready = new Set();
-				readyTerminals.set(clientId, ready);
-			}
-			return ready;
-		};
-		wsHandler.on("client_connected", ({ clientId }) => {
-			// A reconnect can reuse the same client ID but needs a fresh replay.
-			readyTerminals.set(clientId, new Set());
-		});
-		wsHandler.on("client_disconnected", ({ clientId }) => {
-			readyTerminals.delete(clientId);
-		});
 		const trackedPtys = () =>
 			ptyManager
 				.listSessions()
 				.map((pty) =>
-					toTrackedPtyInfo(
+					trackedPtyInfo(
 						pty,
 						config.projectDir,
 						ptyManager.getSession(pty.id)?.info,
@@ -287,87 +264,51 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			restoring: boolean,
 		): void => {
 			const { pty, upstream } = session;
-			const affectedClients: string[] = [];
-			if (restoring) {
-				for (const [clientId, ready] of readyTerminals) {
-					if (ready.delete(pty.id)) affectedClients.push(clientId);
-				}
-			}
+			const current = () =>
+				ptyManager.getSession(pty.id)?.upstream === upstream;
 			ptyManager.registerSession(pty.id, upstream, "local", pty);
-			if (!restoring) {
-				wsHandler.broadcast({ type: "pty_created", pty });
-				for (const clientId of wsHandler.getClientIds())
-					clientTerminals(clientId).add(pty.id);
-			}
+			if (!restoring) ptyManager.publish({ _tag: "upsert", item: pty });
+			// A re-attached host replays its scrollback synchronously on `onData`;
+			// that replay rebuilds the ring and is announced once, below.
 			let replaying = restoring;
 			session.onData((data) => {
-				if (ptyManager.getSession(pty.id)?.upstream !== upstream) return;
+				if (!current()) return;
 				ptyManager.appendScrollback(pty.id, data);
-				if (replaying) return;
-				for (const [clientId, ready] of readyTerminals) {
-					if (ready.has(pty.id))
-						wsHandler.sendTo(clientId, {
-							type: "pty_output",
-							ptyId: pty.id,
-							data,
-						});
-				}
+				if (!replaying)
+					ptyManager.publish({ _tag: "output", ptyId: pty.id, data });
 			});
 			session.onExit((exitCode) => {
-				if (ptyManager.getSession(pty.id)?.upstream !== upstream) return;
+				if (!current()) return;
 				ptyManager.markExited(pty.id, exitCode);
-				if (replaying || !ptyManager.hasSession(pty.id)) return;
-				for (const [clientId, ready] of readyTerminals) {
-					if (ready.has(pty.id))
-						wsHandler.sendTo(clientId, {
-							type: "pty_exited",
-							ptyId: pty.id,
-							exitCode,
-						});
-				}
+				if (!replaying)
+					ptyManager.publish({
+						_tag: "upsert",
+						item: { ...pty, status: "exited" },
+					});
 			});
 			session.onDisconnect?.(() => {
-				if (ptyManager.getSession(pty.id)?.upstream !== upstream) return;
+				if (!current()) return;
 				// The connection is unavailable; only host discovery can establish
 				// whether this shell survived. Keep the proxy attachable (state 0).
 				ptyManager.markExited(pty.id, -1);
-				wsHandler.broadcast({
-					type: "pty_exited",
-					ptyId: pty.id,
-					exitCode: -1,
+				ptyManager.publish({
+					_tag: "upsert",
+					item: { ...pty, status: "exited" },
 				});
 			});
 			replaying = false;
-			for (const clientId of affectedClients) {
-				wsHandler.sendTo(clientId, { type: "pty_list", ptys: trackedPtys() });
-				replayScrollback(clientId, [pty]);
-			}
-		};
-		const replayScrollback = (clientId: string, ptys: PtyInfo[]): void => {
-			const ready = clientTerminals(clientId);
-			for (const { id: ptyId } of ptys) {
-				const session = ptyManager.getSession(ptyId);
-				if (session?.source === "local" && ready.has(ptyId)) continue;
-				const data = ptyManager.getScrollback(ptyId);
-				wsHandler.sendTo(clientId, {
-					type: "pty_output",
-					ptyId,
-					data,
-					replace: true,
-					...(session?.source === "local" &&
-						!session.exited &&
-						session.upstream.readyState === 1 && { restored: true }),
-				});
-				if (session?.exited) {
-					wsHandler.sendTo(clientId, {
-						type: "pty_exited",
-						ptyId,
-						exitCode: session.exitCode ?? 0,
-					});
-				}
-				// Snapshot delivery and live subscription share the same synchronous turn.
-				if (session?.source === "local") ready.add(ptyId);
-			}
+			if (!restoring) return;
+			const exited = ptyManager.getSession(pty.id)?.exited === true;
+			ptyManager.publish({
+				_tag: "upsert",
+				item: { ...pty, status: exited ? "exited" : "running" },
+			});
+			ptyManager.publish({
+				_tag: "output",
+				ptyId: pty.id,
+				data: ptyManager.getScrollback(pty.id),
+				replace: true,
+			});
 		};
 		const restoreLocalSessions = Effect.gen(function* () {
 			const hosted = yield* localPty.list(config.projectDir);
@@ -376,8 +317,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				if (ptyManager.getSession(id)?.source !== "local" || hostedIds.has(id))
 					continue;
 				ptyManager.closeSession(id);
-				for (const ready of readyTerminals.values()) ready.delete(id);
-				wsHandler.broadcast({ type: "pty_deleted", ptyId: id });
+				ptyManager.publish({ _tag: "remove", id });
 			}
 			for (const { id } of hosted) {
 				const existing = ptyManager.getSession(id);
@@ -415,10 +355,8 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					);
 					registerLocalSession(createResult.right, false);
 				}).pipe(terminalLock.withPermits(1)),
-			list: (clientId: string) =>
+			list: () =>
 				Effect.gen(function* () {
-					const ready = clientTerminals(clientId);
-					const session = wsHandler.getClientSession(clientId) ?? "?";
 					yield* restoreLocalSessions;
 					// Discovery never forces OpenCode: no running instance, no PTYs.
 					const rawPtysResult = yield* Effect.either(
@@ -440,7 +378,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					const ptys: PtyInfo[] = trackedPtys();
 					if (rawPtysResult._tag === "Left") {
 						log.debug(
-							`client=${clientId} session=${session} OpenCode PTY list unavailable: ${formatErrorDetail(rawPtysResult.left.cause)}`,
+							`OpenCode PTY list unavailable: ${formatErrorDetail(rawPtysResult.left.cause)}`,
 						);
 					} else {
 						const rawPtys = rawPtysResult.right;
@@ -452,22 +390,11 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 								}
 							} else {
 								log.warn(
-									`client=${clientId} session=${session} List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
+									`List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
 								);
 							}
 						}
 					}
-					if (readyTerminals.get(clientId) !== ready) return ptys;
-					wsHandler.sendTo(clientId, {
-						type: "pty_list",
-						ptys,
-					});
-					replayScrollback(
-						clientId,
-						ptys.filter(
-							(pty) => ptyManager.getSession(pty.id)?.source === "local",
-						),
-					);
 					for (const pty of ptys) {
 						const ptyId = pty.id;
 						if (!ptyManager.hasSession(ptyId) && pty.status === "running") {
@@ -484,35 +411,23 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 								),
 							);
 							if (reconnectResult._tag === "Right") {
-								log.info(
-									`client=${clientId} session=${session} Reconnected upstream WS: ${ptyId}`,
-								);
+								log.info(`Reconnected upstream WS: ${ptyId}`);
 							} else {
 								log.warn(
-									`client=${clientId} session=${session} Failed to reconnect upstream: ${ptyId}: ${formatErrorDetail(reconnectResult.left.cause)}`,
+									`Failed to reconnect upstream: ${ptyId}: ${formatErrorDetail(reconnectResult.left.cause)}`,
 								);
 							}
 						}
 					}
 					return ptys;
 				}),
-			replay: (clientId: string) =>
-				Effect.gen(function* () {
-					const ready = clientTerminals(clientId);
-					yield* restoreLocalSessions;
-					if (
-						ptyManager.sessionCount === 0 ||
-						readyTerminals.get(clientId) !== ready
-					)
-						return;
-					const ptys = trackedPtys();
-					wsHandler.sendTo(clientId, {
-						type: "pty_list",
-						ptys,
-					});
-					replayScrollback(clientId, ptys);
-				}),
-			sendInput: (ptyId: string, data: string, clientId?: string) =>
+			snapshot: () =>
+				trackedPtys().map((pty) => ({
+					pty,
+					scrollback: ptyManager.getScrollback(pty.id),
+				})),
+			subscribe: (listener) => ptyManager.subscribe(listener),
+			sendInput: (ptyId: string, data: string) =>
 				Effect.try({
 					try: () => {
 						const session = ptyManager.getSession(ptyId);
@@ -525,21 +440,12 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					catch: (cause) =>
 						new TerminalServiceError({ operation: "input", ptyId, cause }),
 				}).pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() => {
+					Effect.tapError((error) =>
+						Effect.sync(() =>
 							log.warn(
 								`PTY input failed ${ptyId}: ${formatErrorDetail(error.cause)}`,
-							);
-							if (clientId)
-								wsHandler.sendTo(
-									clientId,
-									RelayError.fromCaught(
-										error.cause,
-										"PTY_INPUT_FAILED",
-										"Terminal is unavailable; reconnect or create a new terminal",
-									).toSystemError(),
-								);
-						}),
+							),
+						),
 					),
 				),
 			close: (ptyId: string) =>
@@ -555,11 +461,10 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						}
 					}
 					ptyManager.closeSession(ptyId);
-					for (const ready of readyTerminals.values()) ready.delete(ptyId);
 					if (!local) {
 						yield* callOpenCodePty("delete", ptyId, (pty) => pty.delete(ptyId));
 					}
-					wsHandler.broadcast({ type: "pty_deleted", ptyId });
+					ptyManager.publish({ _tag: "remove", id: ptyId });
 				}).pipe(terminalLock.withPermits(1)),
 			resize: (clientId: string, ptyId: string, rows: number, cols: number) =>
 				Effect.gen(function* () {

@@ -38,7 +38,6 @@ import type {
 	PermissionPersistScope,
 	PermissionUpdateDestination,
 	ProjectMutationResponse,
-	PtyListResponse,
 	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
 	RewindSessionResponse,
@@ -137,9 +136,10 @@ export interface DetectProxyRpcInput {
 	readonly projectSlug: string;
 }
 
-export interface ListPtysRpcInput {
+export interface PtyInputRpcInput {
 	readonly projectSlug: string;
-	readonly originId: string;
+	readonly ptyId: string;
+	readonly data: string;
 }
 
 export interface CreatePtyRpcInput {
@@ -167,6 +167,13 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	/** The draft composer's model and effort, so the first turn runs what the
+	 *  user picked. */
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string;
+	};
 }
 
 export interface ViewSessionRpcInput {
@@ -499,8 +506,10 @@ const callScanNow = (input: ScanNowRpcInput) =>
 const callDetectProxy = (input: DetectProxyRpcInput) =>
 	callControl(input.projectSlug, (client) => client.DetectProxy(input));
 
-const callListPtys = (input: ListPtysRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ListPtys(input));
+const callPtyInput = (input: PtyInputRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.PtyInput(input).pipe(Effect.asVoid),
+	);
 
 const callCreatePty = (input: CreatePtyRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -535,6 +544,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
+			...(input.model != null ? { model: input.model } : {}),
 		}),
 	);
 
@@ -951,10 +961,8 @@ export async function detectProxyRpc(
 	return await runTransportEffect(callDetectProxy(input));
 }
 
-export async function listPtysRpc(
-	input: ListPtysRpcInput,
-): Promise<PtyListResponse> {
-	return await runTransportEffect(callListPtys(input));
+export async function ptyInputRpc(input: PtyInputRpcInput): Promise<void> {
+	await runTransportEffect(callPtyInput(input));
 }
 
 export async function createPtyRpc(input: CreatePtyRpcInput): Promise<void> {

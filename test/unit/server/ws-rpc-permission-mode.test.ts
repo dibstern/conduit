@@ -45,10 +45,9 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 			expect(result).toEqual({ projectSlug: "project-a", mode: "auto" });
 			expect(yield* getDefaultPermissionMode()).toBe("auto");
 			expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "default_permission_mode_info",
-				mode: "auto",
-			});
+			// A tab with no session shows the mode a new session would start in.
+			const models = yield* client.GetModels({ projectSlug: "project-a" });
+			expect(models.permissionMode).toBe("auto");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -70,7 +69,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 });
 
 describe("WsRpcServerLayer SwitchPermissionMode", () => {
-	it.effect("sets, broadcasts, and hydrates the permission mode", () => {
+	it.effect("sets and hydrates the permission mode", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const claudeInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp/ws",
@@ -91,10 +90,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 
 			expect(result).toEqual({ projectSlug: "project-a", mode: "full" });
 			expect(yield* getPermissionMode("session-1")).toBe("full");
-			expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-				type: "permission_mode_info",
-				mode: "full",
-			});
 
 			const models = yield* client.GetModels({
 				projectSlug: "project-a",

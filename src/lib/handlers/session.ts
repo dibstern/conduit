@@ -1,8 +1,5 @@
 import { Effect } from "effect";
-import { mapQuestionFields } from "../bridges/question-bridge.js";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -14,6 +11,8 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
+	setModel,
+	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	ReadQueryEffectTag,
@@ -21,10 +20,8 @@ import {
 } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { busySessionIds } from "../session-busy.js";
-import type { PermissionId } from "../shared-types.js";
+import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
-
-const SESSION_METADATA_FANOUT = 4;
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
@@ -46,21 +43,15 @@ interface ForkSessionPayload {
 }
 
 /**
- * Send metadata (permissions, questions, viewed family) to a client.
- * These are supplementary data to the transcript and selection RPCs.
+ * Send metadata (goal, viewed family) to a client. These are supplementary
+ * data to the transcript and selection RPCs; pending permissions and questions
+ * come from the approvals subscription (ni8.9).
  */
 const sendSessionMetadata = (clientId: string, id: string) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const family = yield* sessionManagerService.getSessionFamily(id);
-		const familyIds = new Set([
-			id,
-			...family.sessions.map((session) => session.id),
-		]);
 		const readQuery = yield* ReadQueryEffectTag;
 		const row = yield* readQuery.getSession(id);
 		wsHandler.sendTo(clientId, {
@@ -68,135 +59,17 @@ const sendSessionMetadata = (clientId: string, id: string) =>
 			...(row ? sessionGoalState(row) : { sessionId: id, goal: null }),
 		});
 
-		// Run all metadata sends concurrently, catching errors individually
-		yield* Effect.all(
-			[
-				// Pending permissions (service + API)
-				Effect.gen(function* () {
-					const bridgePending =
-						yield* pendingInteractions.listPendingPermissions();
-					const sentPermissionIds = new Set<string>();
-					for (const { timestamp: _, ...perm } of bridgePending) {
-						if (!familyIds.has(perm.sessionId)) continue;
-						// Spread, not a field list: a reload must rebuild the same card
-						// the live prompt showed (title, description, reason).
-						wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
-						sentPermissionIds.add(perm.requestId);
-					}
-					const apiPermissions = yield* Effect.tryPromise(() =>
-						client.permission.list(),
-					);
-					for (const p of apiPermissions) {
-						const pSessionId = (p as { sessionID?: string }).sessionID ?? "";
-						if (pSessionId && !familyIds.has(pSessionId)) continue;
-						if (sentPermissionIds.has(p.id)) continue;
-						wsHandler.sendTo(clientId, {
-							type: "permission_request",
-							sessionId: pSessionId,
-							requestId: p.id as PermissionId,
-							toolName: p.permission,
-							toolInput: {
-								patterns: (p as { patterns?: string[] }).patterns ?? [],
-								metadata:
-									(p as { metadata?: Record<string, unknown> }).metadata ?? {},
-							},
-						});
-					}
-				}).pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to replay pending permissions for ${id}: ${err instanceof Error ? err.message : err}`,
-							),
+		yield* sessionManagerService
+			.pushViewerFamilies()
+			.pipe(
+				Effect.catchAll((err) =>
+					Effect.sync(() =>
+						log.warn(
+							`Failed to push viewed family to ${clientId}: ${err instanceof Error ? err.message : err}`,
 						),
 					),
 				),
-
-				// Pending questions (bridge + API)
-				Effect.gen(function* () {
-					const sentQuestionIds = new Set<string>();
-
-					const servicePendingQuestions =
-						yield* pendingInteractions.listPendingQuestions();
-					for (const pq of servicePendingQuestions) {
-						if (pq.sessionId && !familyIds.has(pq.sessionId)) continue;
-						wsHandler.sendTo(clientId, {
-							type: "ask_user",
-							sessionId: pq.sessionId || id,
-							toolId: pq.requestId,
-							questions: pq.questions.map((q) => ({
-								question: q.question,
-								header: q.header ?? "",
-								options: (q.options ?? []) as Array<{
-									label: string;
-									description?: string;
-								}>,
-								multiSelect: q.multiSelect ?? false,
-							})),
-							...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
-							...(pq.providerId ? { providerId: pq.providerId } : {}),
-						});
-						sentQuestionIds.add(pq.requestId);
-					}
-
-					const pendingQuestions = yield* Effect.tryPromise(() =>
-						client.question.list(),
-					);
-					for (const pq of pendingQuestions) {
-						const qSessionId = pq["sessionID"] as string | undefined;
-						if (qSessionId && !familyIds.has(qSessionId)) continue;
-						if (sentQuestionIds.has(pq.id)) continue;
-
-						const rawQuestions = pq["questions"] as
-							| Array<{
-									question?: string;
-									header?: string;
-									options?: Array<{
-										label?: string;
-										description?: string;
-									}>;
-									multiple?: boolean;
-									custom?: boolean;
-							  }>
-							| undefined;
-						if (!Array.isArray(rawQuestions)) continue;
-						const questions = mapQuestionFields(rawQuestions);
-						const tool = pq["tool"] as { callID?: string } | undefined;
-						const toolCallId = tool?.callID;
-						wsHandler.sendTo(clientId, {
-							type: "ask_user",
-							sessionId: qSessionId || id,
-							toolId: pq.id,
-							questions,
-							providerId: "opencode",
-							...(toolCallId ? { toolUseId: toolCallId } : {}),
-						});
-					}
-				}).pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() =>
-							log.warn(
-								`Failed to replay pending questions for ${id}: ${err instanceof Error ? err.message : err}`,
-							),
-						),
-					),
-				),
-
-				// Viewed family
-				sessionManagerService
-					.pushViewerFamilies()
-					.pipe(
-						Effect.catchAll((err) =>
-							Effect.sync(() =>
-								log.warn(
-									`Failed to push viewed family to ${clientId}: ${err instanceof Error ? err.message : err}`,
-								),
-							),
-						),
-					),
-			],
-			{ concurrency: SESSION_METADATA_FANOUT, discard: true },
-		);
+			);
 	});
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
@@ -291,11 +164,17 @@ export const createSessionForClient = ({
 	title,
 	instanceId,
 	providerId,
+	model,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string | undefined;
+	};
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
@@ -308,6 +187,21 @@ export const createSessionForClient = ({
 						...(providerId != null ? { providerId } : {}),
 					})
 				: yield* sessionManagerService.createSession(title);
+		if (model) {
+			const override = { providerID: model.providerId, modelID: model.modelId };
+			yield* setModel(session.id, override);
+			// The draft lists the default model's efforts, so keep a picked
+			// effort only if this model offers it. Without one, use the model's
+			// saved effort: the first turn would otherwise inherit the default's.
+			const { variant: saved, variants } = yield* savedVariantFor(override);
+			const picked = model.variant;
+			yield* setVariant(
+				session.id,
+				picked === "" || (picked !== undefined && variants.includes(picked))
+					? picked
+					: saved,
+			);
+		}
 
 		yield* switchClientToSession(clientId, session.id, {
 			skipPollerSeed: true,

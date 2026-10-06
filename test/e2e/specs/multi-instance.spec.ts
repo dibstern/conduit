@@ -7,13 +7,10 @@
 
 import { expect, test } from "@playwright/test";
 import {
+	instancesWith,
 	multiInstanceInitMessages,
 	noInstanceInitMessages,
-	personalInstanceUnhealthy,
 	singleInstanceInitMessages,
-	workInstanceHealthy,
-	workInstanceStarting,
-	workInstanceStopped,
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -21,6 +18,15 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
+
+/** Health changes reach the browser as a fresh SubscribeInstances list. */
+const pushInstances = (
+	rpc: RpcMockControl,
+	statuses: Record<string, string>,
+): void =>
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: instancesWith(statuses),
+	});
 
 /** The project URL for multi-instance tests (must match fixture's current slug). */
 const PROJECT_URL = "/?p=myapp";
@@ -108,22 +114,28 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 			}),
 			StartInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy, workInstanceStarting],
+				instances: instancesWith({ personal: "unhealthy", work: "starting" }),
 			}),
 			StopInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy, workInstanceStopped],
+				instances: instancesWith({ personal: "unhealthy", work: "stopped" }),
 			}),
 			RemoveInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [personalInstanceUnhealthy],
+				instances: instancesWith({ personal: "unhealthy" }).filter(
+					(instance) => instance.id === "personal",
+				),
 			}),
 			RenameInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: [
-					personalInstanceUnhealthy,
-					{ ...workInstanceHealthy, name: String(params["name"] ?? "Work") },
-				],
+				instances: instancesWith({
+					personal: "unhealthy",
+					work: "healthy",
+				}).map((instance) =>
+					instance.id === "work"
+						? { ...instance, name: String(params["name"] ?? "Work") }
+						: instance,
+				),
 			}),
 			ScanNow: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
@@ -221,7 +233,7 @@ test.describe("Header: Instance Badge", () => {
 		await expect(dot).toHaveClass(/bg-green-500/);
 	});
 
-	test("badge updates on instance_status message", async ({
+	test("badge updates on an instance list update", async ({
 		page,
 		baseURL,
 	}) => {
@@ -232,7 +244,7 @@ test.describe("Header: Instance Badge", () => {
 		await expect(dot).toHaveClass(/bg-green-500/);
 
 		// Send: Personal becomes unhealthy
-		control.sendMessage(personalInstanceUnhealthy);
+		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(dot).toHaveClass(/bg-red-500/);
 	});
 });
@@ -243,7 +255,7 @@ test.describe("Header: Instance Badge", () => {
 // the generic reconnecting copy is displayed.
 //
 // Current behavior: instanceName resolves from the instance store, but the store
-// is empty during initial connect (instance_list arrives after WS connects),
+// is empty during initial connect (the instance list arrives after connecting),
 // so the overlay always shows "Connecting to OpenCode..." on first load.
 //
 // The instance-aware disconnect message (e.g., "OpenCode instance 'work' is not
@@ -276,7 +288,7 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 // Group 4: Instance Store Reactivity (IMPLEMENTED)
 
 test.describe("Instance Store: Reactivity", () => {
-	test("instance_list message populates UI", async ({ page, baseURL }) => {
+	test("instance list populates UI", async ({ page, baseURL }) => {
 		await setupMultiInstance(page, baseURL);
 
 		// The header badge and its dropdown both read the instance store.
@@ -287,7 +299,7 @@ test.describe("Instance Store: Reactivity", () => {
 		await expect(dropdown.getByRole("menuitemradio")).toHaveCount(2);
 	});
 
-	test("instance_status updates single instance without affecting others", async ({
+	test("instance list status change updates only that instance", async ({
 		page,
 		baseURL,
 	}) => {
@@ -301,7 +313,7 @@ test.describe("Instance Store: Reactivity", () => {
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Update only Work to healthy
-		control.sendMessage(workInstanceHealthy);
+		pushInstances(control.rpc, { work: "healthy" });
 		await expect(workDot).toHaveClass(/bg-green-500/);
 
 		// Personal should STILL be green, in the dropdown and on the badge
@@ -313,17 +325,19 @@ test.describe("Instance Store: Reactivity", () => {
 		).toHaveClass(/bg-green-500/);
 	});
 
-	test("store clears on WS disconnect", async ({ page, baseURL }) => {
+	test("store survives a /ws disconnect", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
 
-		// Close WS — store should clear
+		// The list rides the RPC subscription, so closing /ws must not empty it:
+		// nothing on /ws would re-populate it after the reconnect.
 		control.close();
-
-		// Badge should disappear (instances cleared → length ≤ 1)
-		await expect(badge).toBeHidden({ timeout: 5_000 });
+		await expect(page.locator(".connect-overlay")).toBeVisible({
+			timeout: 5_000,
+		});
+		await expect(badge).toContainText("Personal");
 	});
 });
 
@@ -339,15 +353,15 @@ test.describe("Status Color Mapping", () => {
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// starting = yellow
-		control.sendMessage(workInstanceStarting);
+		pushInstances(control.rpc, { work: "starting" });
 		await expect(workDot).toHaveClass(/bg-yellow-500/);
 
 		// healthy = green
-		control.sendMessage(workInstanceHealthy);
+		pushInstances(control.rpc, { work: "healthy" });
 		await expect(workDot).toHaveClass(/bg-green-500/);
 
 		// stopped = zinc/gray
-		control.sendMessage(workInstanceStopped);
+		pushInstances(control.rpc, { work: "stopped" });
 		await expect(workDot).toHaveClass(/bg-zinc-500/);
 	});
 });
@@ -489,7 +503,7 @@ test.describe("Instance Management Settings", () => {
 		});
 	});
 
-	test("new instance appears after server sends updated instance_list", async ({
+	test("new instance appears after the daemon publishes an updated list", async ({
 		page,
 		baseURL,
 	}) => {
@@ -503,8 +517,7 @@ test.describe("Instance Management Settings", () => {
 		await expect(instanceList).toContainText("Work");
 
 		// Simulate server auto-discovering a new instance (scanner finds it)
-		control.sendMessage({
-			type: "instance_list",
+		control.rpc.setDaemonList("SubscribeInstances", {
 			instances: [
 				{
 					id: "personal",
@@ -588,7 +601,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		control.sendMessage(personalInstanceUnhealthy);
+		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
@@ -604,7 +617,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		control.sendMessage(personalInstanceUnhealthy);
+		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
@@ -728,8 +741,8 @@ test.describe("Session List: Instance Status Banner", () => {
 			}
 			return m;
 		});
-		await mockInstanceRpc(page);
-		const control = await mockRelayWebSocket(page, {
+		const rpc = await mockInstanceRpc(page);
+		await mockRelayWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -741,12 +754,8 @@ test.describe("Session List: Instance Status Banner", () => {
 		const banner = page.getByText("No healthy OpenCode instances");
 		await expect(banner).toBeVisible({ timeout: 10_000 });
 
-		// Send instance_status to make it healthy (simulates health poll succeeding)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "personal",
-			status: "healthy",
-		});
+		// A healthy list clears the banner (simulates health poll succeeding)
+		pushInstances(rpc, { personal: "healthy" });
 
 		// Banner should disappear
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
@@ -780,9 +789,8 @@ test.describe("Instance Selector: Rebind Project", () => {
 			instanceId: "work",
 		});
 
-		// Simulate server responding with updated project_list
-		control.sendMessage({
-			type: "project_list",
+		// The daemon publishes the rebound project list to every subscriber.
+		control.rpc.setDaemonList("SubscribeProjects", {
 			projects: [
 				{
 					slug: "myapp",
@@ -812,7 +820,7 @@ test.describe("Instance Selector: Rebind Project", () => {
 });
 
 test.describe("Settings: Instance Status Updates", () => {
-	test("instance_status message updates status color in settings panel", async ({
+	test("instance list update changes status color in settings panel", async ({
 		page,
 		baseURL,
 	}) => {
@@ -831,22 +839,14 @@ test.describe("Settings: Instance Status Updates", () => {
 		const workDot = workRow.locator(".w-2.h-2.rounded-full");
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
-		// Send instance_status to make Work "starting" (yellow)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "work",
-			status: "starting",
-		});
+		// Work becomes "starting" (yellow)
+		pushInstances(control.rpc, { work: "starting" });
 
 		// Dot should turn yellow
 		await expect(workDot).toHaveClass(/bg-yellow-500/, { timeout: 3_000 });
 
-		// Send instance_status to make Work "healthy" (green)
-		control.sendMessage({
-			type: "instance_status",
-			instanceId: "work",
-			status: "healthy",
-		});
+		// Work becomes "healthy" (green)
+		pushInstances(control.rpc, { work: "healthy" });
 
 		// Dot should turn green
 		await expect(workDot).toHaveClass(/bg-green-500/, { timeout: 3_000 });
@@ -907,9 +907,8 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 			page.getByText("No OpenCode instances detected"),
 		).toBeVisible();
 
-		// Simulate auto-discovery: server sends instance_list with a discovered instance
-		control.sendMessage({
-			type: "instance_list",
+		// Simulate auto-discovery: the daemon publishes a list with a discovered instance
+		control.rpc.setDaemonList("SubscribeInstances", {
 			instances: [
 				{
 					id: "discovered-4098",
@@ -958,9 +957,8 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await openSettingsPanel(page);
 		await page.locator("#settings-panel").getByText("Instances").click();
 
-		// Send an instance_list with a discovered (unmanaged) instance
-		control.sendMessage({
-			type: "instance_list",
+		// Publish a list with a discovered (unmanaged) instance
+		control.rpc.setDaemonList("SubscribeInstances", {
 			instances: [
 				{
 					id: "personal",

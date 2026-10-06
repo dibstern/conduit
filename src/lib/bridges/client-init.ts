@@ -6,8 +6,7 @@
 // independently testable and relay-stack stays slim.
 
 import { Effect, Option } from "effect";
-import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import type { OpenCodeProviderList } from "../domain/relay/Services/services.js";
 import {
 	LoggerTag,
@@ -20,20 +19,17 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
-	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
-	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail, RelayError } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
 import { findCatalogModel } from "../shared-types.js";
-import type { OpenCodeInstance, ProviderInfo } from "../types.js";
+import type { ProviderInfo } from "../types.js";
 
 function toConfiguredOpenCodeProviders(
 	providerResult: OpenCodeProviderList,
@@ -61,8 +57,8 @@ function toConfiguredOpenCodeProviders(
 function addClaudeProvider(
 	providers: ProviderInfo[],
 	capabilities: ProviderCapabilities,
-): boolean {
-	if (capabilities.models.length === 0) return false;
+): void {
+	if (capabilities.models.length === 0) return;
 	for (const p of providers) {
 		if (p.id === "anthropic") {
 			p.name = "Anthropic - opencode";
@@ -93,15 +89,10 @@ function addClaudeProvider(
 				: {}),
 		})),
 	});
-	return true;
 }
 
 export interface ClientInitEffectOptions {
 	readonly skipDefaultSession?: boolean;
-	readonly getInstances?: () =>
-		| ReadonlyArray<Readonly<OpenCodeInstance>>
-		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
-	readonly getCachedUpdate?: () => string | null | PromiseLike<string | null>;
 }
 
 const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
@@ -194,13 +185,8 @@ const resolveAndReplaySessionEffect = (
 			);
 		}
 
-		const familyIds = new Set<string>(activeId ? [activeId] : []);
 		if (activeId) {
-			const family = yield* switchClientToSessionForInitEffect(
-				clientId,
-				activeId,
-			);
-			for (const session of family?.sessions ?? []) familyIds.add(session.id);
+			yield* switchClientToSessionForInitEffect(clientId, activeId);
 
 			const sessionModel = yield* getModel(activeId);
 			if (sessionModel) {
@@ -216,7 +202,6 @@ const resolveAndReplaySessionEffect = (
 		return {
 			activeId,
 			validatedRequestedSessionId,
-			familyIds,
 		};
 	});
 
@@ -234,86 +219,6 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 		);
 	});
 
-const replayPendingPermissionsEffect = (clientId: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-
-		const servicePending = yield* pendingInteractions.listPendingPermissions();
-		for (const { timestamp: _, ...perm } of servicePending) {
-			// Spread, not a field list: a reload must rebuild the same card the
-			// live prompt showed (title, description, reason).
-			wsHandler.sendTo(clientId, { type: "permission_request", ...perm });
-		}
-	});
-
-const replayPendingQuestionsEffect = (
-	clientId: string,
-	activeId: string | undefined,
-	familyIds: ReadonlySet<string>,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const log = yield* LoggerTag;
-
-		const questionReplayResult = yield* Effect.either(
-			Effect.gen(function* () {
-				const servicePendingQuestions =
-					yield* pendingInteractions.listPendingQuestions();
-				for (const pq of servicePendingQuestions) {
-					if (pq.sessionId && activeId && !familyIds.has(pq.sessionId))
-						continue;
-					wsHandler.sendTo(clientId, {
-						type: "ask_user",
-						sessionId: pq.sessionId || activeId || "",
-						toolId: pq.requestId,
-						questions: pq.questions.map((q) => ({
-							question: q.question,
-							header: q.header ?? "",
-							options: (q.options ?? []) as Array<{
-								label: string;
-								description?: string;
-							}>,
-							multiSelect: q.multiSelect ?? false,
-						})),
-						...(pq.toolCallId ? { toolUseId: pq.toolCallId } : {}),
-						...(pq.providerId ? { providerId: pq.providerId } : {}),
-					});
-				}
-			}),
-		);
-		if (questionReplayResult._tag === "Left") {
-			log.warn(
-				`Failed to replay pending questions: ${formatErrorDetail(questionReplayResult.left)}`,
-			);
-		}
-	});
-
-const sendAgentListEffect = (clientId: string, activeId: string | undefined) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const agentService = yield* AgentServiceTag;
-
-		const agentResult = yield* Effect.either(agentService.listAgents(activeId));
-		if (agentResult._tag === "Right") {
-			wsHandler.sendTo(clientId, {
-				type: "agent_list",
-				providerScope: agentResult.right.providerScope,
-				agents: [...agentResult.right.agents],
-				...(agentResult.right.activeAgentId
-					? { activeAgentId: agentResult.right.activeAgentId }
-					: {}),
-			});
-		} else {
-			yield* sendInitErrorEffect(
-				clientId,
-				agentResult.left,
-				"Failed to list agents",
-			);
-		}
-	});
-
 const sendProvidersAndSettingsEffect = (
 	clientId: string,
 	activeId: string | undefined,
@@ -326,16 +231,13 @@ const sendProvidersAndSettingsEffect = (
 
 		const providerResult = yield* Effect.either(
 			Effect.gen(function* () {
-				// Attach never contacts OpenCode: send the cached catalog, if any.
+				// Attach never contacts OpenCode: use the cached catalog, if any.
 				// The model picker refreshes it through GetModels.
 				const openCodeCatalog = yield* modelService.cachedProviders();
 				const providers = Option.match(openCodeCatalog, {
 					onNone: () => [],
 					onSome: toConfiguredOpenCodeProviders,
 				});
-				if (Option.isSome(openCodeCatalog)) {
-					wsHandler.sendTo(clientId, { type: "model_list", providers });
-				}
 
 				const claudeCapsResult = yield* Effect.either(
 					engine.dispatchEffect({
@@ -343,11 +245,8 @@ const sendProvidersAndSettingsEffect = (
 						providerId: "claude",
 					}),
 				);
-				if (
-					claudeCapsResult._tag === "Right" &&
-					addClaudeProvider(providers, claudeCapsResult.right)
-				) {
-					wsHandler.sendTo(clientId, { type: "model_list", providers });
+				if (claudeCapsResult._tag === "Right") {
+					addClaudeProvider(providers, claudeCapsResult.right);
 				}
 				if (claudeCapsResult._tag === "Left" && providers.length === 0) {
 					return yield* Effect.fail(claudeCapsResult.left);
@@ -374,29 +273,9 @@ const sendProvidersAndSettingsEffect = (
 						: yield* getDefaultContextWindow(),
 					options: catalogModel?.contextWindowOptions ?? [],
 				});
-				wsHandler.sendTo(clientId, {
-					type: "permission_mode_info",
-					// No session yet: report the mode one would start in, not "ask".
-					// getPermissionMode already falls back to the default itself.
-					mode: activeId
-						? yield* getPermissionMode(activeId)
-						: yield* getDefaultPermissionMode(),
-				});
-
+				// The approval mode reaches the tab on the session's shell row and
+				// the GetModels response; defaults ride SubscribeProjectSettings.
 				const defaultModel = yield* getDefaultModel();
-				if (defaultModel) {
-					wsHandler.sendTo(clientId, {
-						type: "default_model_info",
-						model: defaultModel.modelID,
-						provider: defaultModel.providerID,
-						variant: yield* getDefaultVariant(),
-					});
-				}
-				wsHandler.sendTo(clientId, {
-					type: "default_permission_mode_info",
-					mode: yield* getDefaultPermissionMode(),
-				});
-
 				if (!defaultModel && Option.isSome(openCodeCatalog)) {
 					for (const providerId of openCodeCatalog.value.connected) {
 						const defaultModelId = openCodeCatalog.value.defaults[providerId];
@@ -404,6 +283,12 @@ const sendProvidersAndSettingsEffect = (
 							yield* setDefaultModel({
 								providerID: providerId,
 								modelID: defaultModelId,
+							});
+							yield* publishProjectSetting({
+								_tag: "defaultModel",
+								model: defaultModelId,
+								provider: providerId,
+								variant: yield* getDefaultVariant(),
 							});
 							wsHandler.broadcast({
 								type: "model_info",
@@ -427,6 +312,12 @@ const sendProvidersAndSettingsEffect = (
 						yield* setDefaultModel({
 							providerID: "claude",
 							modelID: defaultClaudeModel.id,
+						});
+						yield* publishProjectSetting({
+							_tag: "defaultModel",
+							model: defaultClaudeModel.id,
+							provider: "claude",
+							variant: yield* getDefaultVariant(),
 						});
 						wsHandler.broadcast({
 							type: "model_info",
@@ -461,53 +352,6 @@ const sendProvidersAndSettingsEffect = (
 		}
 	});
 
-const replayTerminalsInstancesAndUpdateEffect = (
-	clientId: string,
-	options: ClientInitEffectOptions,
-) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const terminal = yield* OpenCodeTerminalServiceTag;
-
-		yield* terminal
-			.replay(clientId)
-			.pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to replay terminals"),
-				),
-			);
-
-		if (options.getInstances) {
-			const instances = yield* Effect.tryPromise({
-				try: () => Promise.resolve(options.getInstances?.() ?? []),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to list instances").pipe(
-						Effect.as([] as ReadonlyArray<Readonly<OpenCodeInstance>>),
-					),
-				),
-			);
-			wsHandler.sendTo(clientId, { type: "instance_list", instances });
-		}
-
-		if (options.getCachedUpdate) {
-			const version = yield* Effect.tryPromise({
-				try: () => Promise.resolve(options.getCachedUpdate?.() ?? null),
-				catch: (cause) => cause,
-			}).pipe(
-				Effect.catchAll((err) =>
-					sendInitErrorEffect(clientId, err, "Failed to replay update").pipe(
-						Effect.as(null),
-					),
-				),
-			);
-			if (version) {
-				wsHandler.sendTo(clientId, { type: "update_available", version });
-			}
-		}
-	});
-
 /**
  * Effect-owned production client bootstrap. This is the canonical relay path.
  */
@@ -517,17 +361,11 @@ export const handleClientConnectedEffect = (
 	options: ClientInitEffectOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const { activeId, familyIds } = yield* resolveAndReplaySessionEffect(
+		const { activeId } = yield* resolveAndReplaySessionEffect(
 			clientId,
 			requestedSessionId,
 			options,
 		);
 		yield* pushViewedFamiliesForInitEffect(clientId);
-		yield* replayPendingPermissionsEffect(clientId);
-		yield* replayPendingQuestionsEffect(clientId, activeId, familyIds);
-		// Providers first: with no default yet, this picks one, which scopes the
-		// agent list to its provider.
 		yield* sendProvidersAndSettingsEffect(clientId, activeId);
-		yield* sendAgentListEffect(clientId, activeId);
-		yield* replayTerminalsInstancesAndUpdateEffect(clientId, options);
 	});

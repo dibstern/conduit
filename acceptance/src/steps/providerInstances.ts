@@ -82,7 +82,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				...(driverName === "claude" ? { configDir: "/profiles/seed" } : {}),
 			};
 			// Seed BOTH the mock RPC store (so edit/remove RPCs stay consistent)
-			// and the live frontend state (via a pushed instance_list).
+			// and the live frontend state (via the mocked SubscribeInstances list).
 			const list = [...(mockInstances.get(world.page) ?? []), inst];
 			mockInstances.set(world.page, list);
 			await requireRelayControl(world.page).sendMessages([

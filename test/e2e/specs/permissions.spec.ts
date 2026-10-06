@@ -10,6 +10,8 @@ test.use({ recording: "advanced-diff" });
 
 test.describe("Permissions", () => {
 	test.describe.configure({ timeout: 60_000 });
+	// The recording answers each permission itself; wait for the browser's.
+	test.beforeEach(({ mockServer }) => mockServer.holdRepliesUntilAnswered());
 
 	test("permission card appears when agent uses a tool", async ({
 		page,

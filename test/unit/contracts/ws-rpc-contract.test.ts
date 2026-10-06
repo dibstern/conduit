@@ -32,6 +32,7 @@ import {
 	LoadMoreHistoryResponseSchema,
 	MarkSessionUnread,
 	ModelExecutionSchema,
+	PtyInput,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -84,6 +85,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				...daemonOnlyHandlers,
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
+				SubscribeSessionTodos: () => Stream.empty,
+				SubscribePtys: () => Stream.empty,
+				SubscribeApprovals: () => Stream.empty,
+				SubscribeProjectSettings: () => Stream.empty,
+				SubscribeInstances: () => Stream.empty,
+				SubscribeProjects: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ ok: true as const }),
 				ResolveSession: () => Effect.succeed({ projectSlug: null }),
 				GetGoalDetails: () =>
@@ -312,6 +319,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				CreatePty: () => Effect.succeed({ ok: true as const }),
 				ResizePty: () => Effect.succeed({ ok: true as const }),
 				ClosePty: () => Effect.succeed({ ok: true as const }),
+				PtyInput: (request) =>
+					request.ptyId === "pty-gone"
+						? Effect.fail(
+								new WsRpcError({
+									message:
+										"Terminal is unavailable; reconnect or create a new terminal",
+								}),
+							)
+						: Effect.succeed({ ok: true as const }),
 				PreWarmSession: () => Effect.void,
 				CreateSession: (request) =>
 					Effect.succeed({
@@ -771,6 +787,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("CreatePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResizePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("ClosePty")).toBe(true);
+		expect(WsRpcGroup.requests.has("PtyInput")).toBe(true);
+		expect(WsRpcGroup.requests.has("SubscribePtys")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("DeleteSession")).toBe(true);
@@ -1011,6 +1029,28 @@ describe("browser WebSocket RPC contract", () => {
 						ptyId: "pty-1",
 					}),
 				).toEqual({ ok: true });
+
+				expect(
+					yield* client.PtyInput({
+						projectSlug: "demo",
+						ptyId: "pty-1",
+						data: "ls\r",
+					}),
+				).toEqual({ ok: true });
+				expect(
+					yield* Effect.flip(
+						client.PtyInput({
+							projectSlug: "demo",
+							ptyId: "pty-gone",
+							data: "ls\r",
+						}),
+					),
+				).toEqual(
+					new WsRpcError({
+						message:
+							"Terminal is unavailable; reconnect or create a new terminal",
+					}),
+				);
 
 				const todo = yield* client.GetTodo({ projectSlug: "demo" });
 				expect(todo).toEqual({
@@ -1392,6 +1432,17 @@ describe("browser WebSocket RPC contract", () => {
 				ptyId: "pty-1",
 			})._tag,
 		).toBe("ClosePty");
+		expect(
+			new PtyInput({ projectSlug: "demo", ptyId: "pty-1", data: "x" })._tag,
+		).toBe("PtyInput");
+		expect(
+			Schema.decodeUnknownEither(PtyInput)({
+				_tag: "PtyInput",
+				projectSlug: "demo",
+				ptyId: "",
+				data: "x",
+			})._tag,
+		).toBe("Left");
 		expect(
 			new CreateSession({
 				projectSlug: "demo",

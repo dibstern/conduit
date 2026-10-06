@@ -39,7 +39,6 @@ const isTaggedInstanceLimitExceeded = (cause: unknown): boolean =>
 	(cause as { _tag: string })._tag === "InstanceLimitExceeded";
 
 const expectedInstanceManagerErrorTags = new Set([
-	"CannotStartExternalInstance",
 	"InstanceAlreadyExists",
 	"InstanceLimitExceeded",
 	"InstanceNotFound",

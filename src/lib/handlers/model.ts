@@ -11,6 +11,7 @@ import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
 } from "../daemon/config-persistence.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -22,6 +23,7 @@ import {
 	getContextWindow,
 	getDefaultContextWindow,
 	getDefaultModel,
+	getDefaultPermissionMode,
 	getDefaultVariant,
 	getModel,
 	getPermissionMode,
@@ -153,6 +155,18 @@ const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 		return [] as string[];
 	});
 
+/** The efforts `model` offers, and the one last saved for it if still offered. */
+export const savedVariantFor = (model: ModelOverride) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const variants = yield* loadVariantsForModel(model);
+		const saved =
+			loadRelaySettings(config.configDir).defaultVariants?.[
+				`${model.providerID}/${model.modelID}`
+			] ?? "";
+		return { variant: variants.includes(saved) ? saved : "", variants };
+	});
+
 const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
@@ -235,58 +249,6 @@ export function groupGeoRoutingModels<T extends { id: string; name: string }>(
 	}
 	return result;
 }
-
-const toSharedProviders = (
-	providers: GetModelsResponse["providers"],
-): ProviderInfo[] =>
-	providers.map((provider) => ({
-		id: provider.id,
-		...(provider.instanceId === undefined
-			? {}
-			: { instanceId: provider.instanceId }),
-		name: provider.name,
-		configured: provider.configured,
-		models: provider.models.map((model) => ({
-			id: model.id,
-			name: model.name,
-			provider: model.provider,
-			...(model.cost
-				? {
-						cost: {
-							...(model.cost.input != null ? { input: model.cost.input } : {}),
-							...(model.cost.output != null
-								? { output: model.cost.output }
-								: {}),
-						},
-					}
-				: {}),
-			...(model.limit
-				? {
-						limit: {
-							...(model.limit.context != null
-								? { context: model.limit.context }
-								: {}),
-							...(model.limit.output != null
-								? { output: model.limit.output }
-								: {}),
-						},
-					}
-				: {}),
-			...(model.variants ? { variants: [...model.variants] } : {}),
-			...(model.contextWindowOptions
-				? {
-						contextWindowOptions:
-							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
-					}
-				: {}),
-			...(model.routingOptions
-				? {
-						routingOptions:
-							cloneContextWindowOptions(model.routingOptions) ?? [],
-					}
-				: {}),
-		})),
-	}));
 
 export const getModelsResponse = (
 	input: {
@@ -517,9 +479,10 @@ export const getModelsResponse = (
 				contextWindow: currentContextWindow,
 				options: catalogModel?.contextWindowOptions ?? [],
 			},
+			// No session yet: the mode a new session would start in.
 			permissionMode: activeId
 				? yield* getPermissionMode(activeId)
-				: ("ask" as const),
+				: yield* getDefaultPermissionMode(),
 			...(modelExecution === undefined ? {} : { modelExecution }),
 		};
 	});
@@ -548,13 +511,6 @@ export const sendModelsStateToClient = (
 		});
 		const wsHandler = yield* WebSocketHandlerTag;
 
-		wsHandler.sendTo(clientId, {
-			type: "model_list",
-			...(response.instanceId === undefined
-				? {}
-				: { instanceId: response.instanceId }),
-			providers: toSharedProviders(response.providers),
-		});
 		if (response.active) {
 			wsHandler.sendTo(clientId, {
 				type: "model_info",
@@ -627,7 +583,6 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const config = yield* ConfigTag;
 
 		const { modelId, providerId } = input;
 		const sessionId = input.sessionId;
@@ -670,17 +625,8 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched to: ${modelId} (${providerId})`,
 		);
 
-		const availableVariants = yield* loadVariantsForModel({
-			providerID: providerId,
-			modelID: modelId,
-		});
-		const modelKey = `${providerId}/${modelId}`;
-		const settings = loadRelaySettings(config.configDir);
-		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-		const validVariant =
-			persistedVariant && availableVariants.includes(persistedVariant)
-				? persistedVariant
-				: "";
+		const { variant: validVariant, variants: availableVariants } =
+			yield* savedVariantFor({ providerID: providerId, modelID: modelId });
 
 		if (sessionId) {
 			yield* setVariant(sessionId, validVariant);
@@ -724,36 +670,30 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			config.configDir,
 		);
 
-		// Also persist to OpenCode's project config
-		const updateResult = yield* Effect.either(
-			modelService.persistDefaultModel(provider, model),
-		);
-		if (updateResult._tag === "Left") {
-			log.warn("Failed to persist default model to OpenCode config");
+		// Mirror the default into OpenCode's project config, except Claude-harness
+		// ids: OpenCode can't resolve them, so every prompt sent without a model
+		// would fail with "Model not found".
+		if (!isClaudeProvider(provider)) {
+			const updateResult = yield* Effect.either(
+				modelService.persistDefaultModel(provider, model),
+			);
+			if (updateResult._tag === "Left") {
+				log.warn("Failed to persist default model to OpenCode config");
+			}
 		}
 
-		const availableVariants = yield* loadVariantsForModel({
-			providerID: provider,
-			modelID: model,
-		});
-		const settings = loadRelaySettings(config.configDir);
-		const modelKey = `${provider}/${model}`;
-		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-		const validVariant =
-			persistedVariant && availableVariants.includes(persistedVariant)
-				? persistedVariant
-				: "";
+		const { variant: validVariant, variants: availableVariants } =
+			yield* savedVariantFor(override);
 		yield* setDefaultVariant(validVariant);
 
 		const modelMessage = { type: "model_info" as const, model, provider };
-		const defaultModelMessage = {
-			type: "default_model_info" as const,
+		wsHandler.broadcast(modelMessage);
+		yield* publishProjectSetting({
+			_tag: "defaultModel",
 			model,
 			provider,
 			variant: validVariant,
-		};
-		wsHandler.broadcast(modelMessage);
-		wsHandler.broadcast(defaultModelMessage);
+		});
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
 		const variantMessage = {
@@ -763,11 +703,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		} as const;
 		wsHandler.broadcast(variantMessage);
 
-		return {
-			model: modelMessage,
-			defaultModel: defaultModelMessage,
-			variant: variantMessage,
-		};
+		return { model: modelMessage, variant: variantMessage };
 	});
 
 export interface SwitchVariantInput {
@@ -815,6 +751,13 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 			wsHandler.sendToSession(sessionId, message);
 		} else {
 			wsHandler.sendTo(input.clientId, message);
+			yield* publishProjectSetting({
+				_tag: "defaultModel",
+				...(activeModel
+					? { model: activeModel.modelID, provider: activeModel.providerID }
+					: {}),
+				variant,
+			});
 		}
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,

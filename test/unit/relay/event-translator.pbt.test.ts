@@ -15,18 +15,16 @@
 //     → Source: AC13
 // P7: Session status mapping: busy/retry→processing, idle→done
 //     → Source: AC8
-// P8: Permission event translation preserves all field mappings
-//     → Source: AC4
-// P9: Question event translation maps 'multiple'→'multiSelect'
-//     → Source: AC5
+// P8, P9: retired with the permission/question pushes (ni8.9); approvals are
+//     read from pending_approvals.
 // P10: Stateful translator tracks part IDs — no duplicate starts after rebuild
 //      → Source: AC14, AC15
 // P11: message.updated only emits result for assistant messages
 //      → Source: AC7
 // P12: Part removal clears tracking state
 //      → Source: AC10
-// P13: translatePtyEvent handles pty.created, pty.exited, pty.deleted, unknown
-// P14: translateFileEvent handles file.edited, file.watcher.updated, unknown, missing path
+// P13: pty.* events are not translated (terminals stream through SubscribePtys)
+// P14: upstream file.* and installation.update-available events are dropped
 // P15: translateMessageRemoved handles valid messageID and missing messageID
 
 import fc from "fast-check";
@@ -34,13 +32,9 @@ import { assert, describe, expect, it } from "vitest";
 import {
 	createTranslator,
 	mapToolName,
-	translateFileEvent,
 	translateMessageRemoved,
 	translateMessageUpdated,
 	translatePartDelta,
-	translatePermission,
-	translatePtyEvent,
-	translateQuestion,
 	translateReasoningPartUpdated,
 	translateSessionStatus,
 	translateToolPartUpdated,
@@ -57,8 +51,6 @@ import {
 	knownToolName,
 	messageUpdatedEvent,
 	partDeltaEvent,
-	permissionAskedEvent,
-	questionAskedEvent,
 	sessionStatusEvent,
 	timestamp,
 	unknownEvent,
@@ -464,93 +456,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	describe("P8: Permission event translation preserves fields (AC4)", () => {
-		it("property: permission_request has requestId, toolName, toolInput, sessionId", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, idString, (event, sessionId) => {
-					const result = translatePermission(event, sessionId);
-					const props = event.properties as {
-						id?: string;
-						permission?: string;
-					};
-
-					if (props.id && props.permission && sessionId) {
-						expect(result).not.toBeNull();
-						if (result && result.type === "permission_request") {
-							expect(result.requestId).toBe(props.id);
-							expect(result.toolName).toBe(props.permission);
-							expect(result.toolInput).toHaveProperty("patterns");
-							expect(result.toolInput).toHaveProperty("metadata");
-							expect(result.sessionId).toBe(sessionId);
-							expect(result.always).toEqual(
-								(event.properties as Record<string, unknown>)["always"] ?? [],
-							);
-						}
-					}
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: permission.asked without sessionId context returns ok: false", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, (event) => {
-					const translator = createTranslator();
-					const result = translator.translate(event); // no context
-					expect(result.ok).toBe(false);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: permission.asked with empty sessionId returns null", () => {
-			fc.assert(
-				fc.property(permissionAskedEvent, (event) => {
-					const result = translatePermission(event, "");
-					expect(result).toBeNull();
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	describe("P9: Question event maps 'multiple' → 'multiSelect' (AC5)", () => {
-		it("property: question.asked → ask_user with multiSelect field", () => {
-			fc.assert(
-				fc.property(questionAskedEvent, (event) => {
-					const result = translateQuestion(event);
-					const props = event.properties as {
-						id?: string;
-						questions?: Array<{ multiple?: boolean; custom?: boolean }>;
-					};
-
-					if (props.id && props.questions) {
-						expect(result).not.toBeNull();
-						if (result && result.type === "ask_user") {
-							expect(result.toolId).toBe(props.id);
-							expect(result.questions).toHaveLength(props.questions.length);
-
-							// Verify field mapping: multiple → multiSelect
-							for (const [
-								i,
-								translatedQuestion,
-							] of result.questions.entries()) {
-								const question = props.questions.at(i);
-								assert.exists(question, "expected source question");
-								expect(translatedQuestion.multiSelect).toBe(
-									question.multiple ?? false,
-								);
-								// custom defaults to true when undefined
-								expect(translatedQuestion.custom).toBe(question.custom ?? true);
-							}
-						}
-					}
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
 	describe("P10: Stateful translator tracks parts, no duplicate starts (AC14, AC15)", () => {
 		it("property: same part ID seen twice never emits tool_start twice", () => {
 			fc.assert(
@@ -762,247 +667,38 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	describe("P13: translatePtyEvent handles all pty event types", () => {
-		it("pty.created returns pty_created message with correct fields (info nested)", () => {
-			// OpenCode wraps PTY info under an `info` key in SSE events
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {
-					info: {
-						id: "pty-1",
-						title: "bash",
-						command: "/bin/bash",
-						cwd: "/home/user",
-						status: "running",
-						pid: 12345,
-					},
-				},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_created");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("pty-1");
-				expect(result.pty.title).toBe("bash");
-				expect(result.pty.command).toBe("/bin/bash");
-				expect(result.pty.cwd).toBe("/home/user");
-				expect(result.pty.status).toBe("running");
-				expect(result.pty.pid).toBe(12345);
+	describe("P13: pty.* events are left to the PTY subscription", () => {
+		it("translates none of them; terminals stream through SubscribePtys", () => {
+			const translator = createTranslator();
+			for (const type of [
+				"pty.created",
+				"pty.exited",
+				"pty.deleted",
+			] as const) {
+				expect(
+					translator.translate({
+						type,
+						properties: { id: "pty-1" },
+					} as OpenCodeEvent),
+				).toEqual({ ok: false, reason: `${type} served by SubscribePtys` });
 			}
-		});
-
-		it("pty.created falls back to top-level properties when info key absent", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {
-					id: "pty-1b",
-					title: "zsh",
-					command: "/bin/zsh",
-					cwd: "/tmp",
-					status: "running",
-					pid: 999,
-				},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("pty-1b");
-				expect(result.pty.title).toBe("zsh");
-				expect(result.pty.command).toBe("/bin/zsh");
-			}
-		});
-
-		it("pty.created defaults missing fields to empty/0", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.created",
-				properties: {},
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_created") {
-				expect(result.pty.id).toBe("");
-				expect(result.pty.title).toBe("");
-				expect(result.pty.command).toBe("");
-				expect(result.pty.cwd).toBe("");
-				expect(result.pty.status).toBe("running");
-				expect(result.pty.pid).toBe(0);
-			}
-		});
-
-		it("pty.exited returns pty_exited message", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.exited",
-				properties: { id: "pty-2", exitCode: 1 },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_exited");
-			if (result.type === "pty_exited") {
-				expect(result.ptyId).toBe("pty-2");
-				expect(result.exitCode).toBe(1);
-			}
-		});
-
-		it("pty.exited defaults exitCode to 0", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.exited",
-				properties: { id: "pty-3" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			if (result.type === "pty_exited") {
-				expect(result.exitCode).toBe(0);
-			}
-		});
-
-		it("pty.deleted returns pty_deleted message", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.deleted",
-				properties: { id: "pty-4" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated PTY event");
-			expect(result.type).toBe("pty_deleted");
-			if (result.type === "pty_deleted") {
-				expect(result.ptyId).toBe("pty-4");
-			}
-		});
-
-		it("unknown pty event returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.resized",
-				properties: { id: "pty-5", cols: 80, rows: 24 },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("pty.data returns null (not a recognized subtype)", () => {
-			const event: OpenCodeEvent = {
-				type: "pty.data",
-				properties: { id: "pty-6", data: "hello" },
-			};
-			const result = translatePtyEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("property: pty events with arbitrary properties never throw", () => {
-			fc.assert(
-				fc.property(
-					fc.constantFrom(
-						"pty.created",
-						"pty.exited",
-						"pty.deleted",
-						"pty.unknown",
-						"pty.data",
-					),
-					fc.dictionary(
-						fc.string({ minLength: 1, maxLength: 10 }),
-						fc.jsonValue(),
-					),
-					(eventType, props) => {
-						const event: OpenCodeEvent = { type: eventType, properties: props };
-						const result = translatePtyEvent(event);
-						// Should never throw; result is either a message or null
-						if (result !== null) {
-							expect(["pty_created", "pty_exited", "pty_deleted"]).toContain(
-								result.type,
-							);
-						}
-					},
-				),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
 		});
 	});
 
-	describe("P14: translateFileEvent handles file event types", () => {
-		it("file.edited returns file_changed with changeType 'edited'", () => {
+	describe("P14: upstream file and installation-update events are dropped", () => {
+		it.each([
+			"file.edited",
+			"file.watcher.updated",
+			"installation.update-available",
+		])("%s translates to nothing", (type) => {
 			const event: OpenCodeEvent = {
-				type: "file.edited",
-				properties: { file: "/src/main.ts" },
+				type,
+				properties: { file: "/src/main.ts", version: "1.2.3" },
 			};
-			const result = translateFileEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated file event");
-			expect(result.type).toBe("file_changed");
-			if (result.type === "file_changed") {
-				expect(result.path).toBe("/src/main.ts");
-				expect(result.changeType).toBe("edited");
-			}
-		});
-
-		it("file.watcher.updated returns file_changed with changeType 'external'", () => {
-			const event: OpenCodeEvent = {
-				type: "file.watcher.updated",
-				properties: { file: "/src/index.ts" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).not.toBeNull();
-			assert.exists(result, "expected translated file event");
-			expect(result.type).toBe("file_changed");
-			if (result.type === "file_changed") {
-				expect(result.path).toBe("/src/index.ts");
-				expect(result.changeType).toBe("external");
-			}
-		});
-
-		it("unknown file event returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.created",
-				properties: { file: "/src/new.ts" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("file.edited with missing path returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.edited",
-				properties: {},
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("file.watcher.updated with missing path returns null", () => {
-			const event: OpenCodeEvent = {
-				type: "file.watcher.updated",
-				properties: { content: "data but no path" },
-			};
-			const result = translateFileEvent(event);
-			expect(result).toBeNull();
-		});
-
-		it("property: file events with arbitrary properties never throw", () => {
-			fc.assert(
-				fc.property(
-					fc.constantFrom(
-						"file.edited",
-						"file.watcher.updated",
-						"file.created",
-						"file.deleted",
-					),
-					fc.dictionary(
-						fc.string({ minLength: 1, maxLength: 10 }),
-						fc.jsonValue(),
-					),
-					(eventType, props) => {
-						const event: OpenCodeEvent = { type: eventType, properties: props };
-						const result = translateFileEvent(event);
-						if (result !== null) {
-							expect(result.type).toBe("file_changed");
-						}
-					},
-				),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
+			expect(createTranslator().translate(event)).toEqual({
+				ok: false,
+				reason: `${type} deliberately ignored`,
+			});
 		});
 	});
 

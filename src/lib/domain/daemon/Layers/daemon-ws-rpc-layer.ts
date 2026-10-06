@@ -1,4 +1,13 @@
-import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+	Ref,
+	Stream,
+} from "effect";
 import { hashPin } from "../../../auth.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
@@ -24,7 +33,7 @@ import {
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
-import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listDaemonSessions,
 	resolveDaemonSession,
@@ -47,7 +56,6 @@ import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js"
 import {
 	allProjects,
 	broadcastProjectList,
-	broadcastToAll,
 	type ProjectRegistryTag,
 	type ProjectSaveLockTag,
 	projectInfos,
@@ -89,10 +97,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
+		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// connections and projects (conduit-test-ni8.14). A change wakes each
+		// one following that list; it re-reads the list itself.
+		const listSubscribers = new Set<{
+			readonly list: "instances" | "projects";
+			readonly changed: Queue.Queue<void>;
+		}>();
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
-			Stream.runForEach((event) =>
-				event._tag === "RelayBroadcast"
+			Stream.runForEach((event) => {
+				const list =
+					event._tag === "ProjectsChanged"
+						? "projects"
+						: event._tag === "InstancesChanged" ||
+								event._tag === "InstanceStatusChanged"
+							? "instances"
+							: undefined;
+				if (list !== undefined)
+					return Effect.sync(() => {
+						for (const subscriber of listSubscribers)
+							if (subscriber.list === list)
+								Queue.unsafeOffer(subscriber.changed, undefined);
+					});
+				return event._tag === "RelayBroadcast"
 					? Effect.gen(function* () {
 							yield* daemonWsClients.broadcastUnattached(
 								event.message as RelayMessage,
@@ -106,8 +134,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								}
 							}
 						}).pipe(Effect.provide(context))
-					: Effect.void,
-			),
+					: Effect.void;
+			}),
 			Effect.forkScoped,
 		);
 		const run = <A, E>(
@@ -143,12 +171,43 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 
 		const projectList = broadcastProjectList;
 		const instanceList = Effect.gen(function* () {
-			const instances = Array.from(yield* getInstances);
-			yield* broadcastToAll({ type: "instance_list", instances });
-			return instances;
+			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+			return Array.from(yield* getInstances);
 		});
+		// Join the subscriber set BEFORE the first read, so a change landing
+		// between the two still wakes this stream: snapshot, then a fresh list
+		// per change.
+		const followList = <A, E>(
+			list: "instances" | "projects",
+			read: Effect.Effect<A, E, InstanceManagerStateTag | ProjectRegistryTag>,
+		) =>
+			Stream.unwrapScoped(
+				Effect.gen(function* () {
+					const subscriber = { list, changed: yield* Queue.sliding<void>(1) };
+					yield* Effect.acquireRelease(
+						Effect.sync(() => listSubscribers.add(subscriber)),
+						() => Effect.sync(() => listSubscribers.delete(subscriber)),
+					);
+					return Stream.concat(
+						Stream.succeed(undefined),
+						Stream.fromQueue(subscriber.changed),
+					).pipe(Stream.mapEffect(() => run(read)));
+				}),
+			);
 
 		return {
+			SubscribeInstances: () =>
+				followList(
+					"instances",
+					Effect.map(getInstances, (instances) => ({
+						instances: Array.from(instances),
+					})),
+				),
+			SubscribeProjects: () =>
+				followList(
+					"projects",
+					Effect.map(projectInfos, (projects) => ({ projects })),
+				),
 			GetStatus: () =>
 				run(
 					Effect.gen(function* () {

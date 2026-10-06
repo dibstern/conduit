@@ -1,6 +1,6 @@
 <!--
   TerminalTab — Single terminal instance.
-  Creates an XtermAdapter on mount, wires input→pty_input, subscribes to PTY output
+  Creates an XtermAdapter on mount, wires input→PtyInput, subscribes to PTY output
   via the non-reactive callback pattern, replays scrollback on mount, and handles
   its own resize via ResizeObserver on the container element.
 -->
@@ -12,8 +12,8 @@
 	} from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { wsSend } from "../../stores/ws.svelte.js";
-	import { resizePtyRpc } from "../../transport/ws-rpc-client.js";
+	import { showToast } from "../../stores/ui.svelte.js";
+	import { ptyInputRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import { XtermAdapter } from "../../utils/xterm-adapter.js";
 	import { XTERM_THEMES } from "../../utils/xterm-themes.js";
 	import { themeState } from "../../stores/theme.svelte.js";
@@ -45,6 +45,31 @@
 		}).catch(() => undefined);
 	}
 
+	// Keystrokes must reach the shell in order, but the server runs each call on
+	// its own fiber. So one PtyInput is in flight at a time and whatever is typed
+	// meanwhile rides the next one. No timer: the first key goes out at once.
+	let unsentInput = "";
+	let sendingInput = false;
+
+	async function sendInput(data: string) {
+		unsentInput += data;
+		if (sendingInput) return;
+		sendingInput = true;
+		while (unsentInput) {
+			const projectSlug = getCurrentSlug();
+			const chunk = unsentInput;
+			unsentInput = "";
+			if (!projectSlug) break;
+			try {
+				await ptyInputRpc({ projectSlug, ptyId, data: chunk });
+			} catch {
+				showToast("Terminal input was not delivered", { variant: "warn" });
+				unsentInput = "";
+			}
+		}
+		sendingInput = false;
+	}
+
 	function initializeTerminal(): () => void {
 		const xterm = new XtermAdapter(fontSize ? { fontSize } : undefined);
 		adapter = xterm;
@@ -55,7 +80,7 @@
 
 		// Wire user input → server
 		xterm.onData((data: string) => {
-			wsSend({ type: "pty_input", ptyId, data });
+			void sendInput(data);
 		});
 
 		// Wire resize → server

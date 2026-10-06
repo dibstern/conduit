@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -158,11 +158,10 @@ describe("daemon RPC handlers", () => {
 	);
 
 	it.scoped(
-		"broadcasts project and instance changes to every existing relay without starting others",
+		"publishes project and instance changes to list subscribers without starting relays",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-project-broadcast-");
 			fixtureDirs.push(directory);
-			const broadcasts = [vi.fn(), vi.fn()] as const;
 			const projects = ["a", "b", "cold"].map((slug) => {
 				const projectDir = join(directory, slug);
 				mkdirSync(projectDir);
@@ -176,9 +175,7 @@ describe("daemon RPC handlers", () => {
 				Effect.succeed({
 					slug,
 					attach: () => () => {},
-					wsHandler: {
-						broadcast: broadcasts[slug === "a" ? 0 : 1],
-					},
+					wsHandler: { broadcast: vi.fn() },
 					rpcWsHandler: {},
 					stop: vi.fn(),
 				}),
@@ -197,6 +194,18 @@ describe("daemon RPC handlers", () => {
 						),
 					),
 				);
+				const projectLists: (readonly { slug: string; title: string }[])[] = [];
+				const instanceLists: (readonly { id: string }[])[] = [];
+				yield* Effect.forkScoped(
+					Stream.runForEach(client.SubscribeProjects({}), ({ projects }) =>
+						Effect.sync(() => projectLists.push(projects)),
+					),
+				);
+				yield* Effect.forkScoped(
+					Stream.runForEach(client.SubscribeInstances({}), ({ instances }) =>
+						Effect.sync(() => instanceLists.push(instances)),
+					),
+				);
 				yield* client.SaveProject({
 					projectSlug: "missing",
 					slug: "a",
@@ -206,16 +215,15 @@ describe("daemon RPC handlers", () => {
 				yield* client.AddInstance({ name: "Claude", driver: "claude" });
 				yield* Effect.tryPromise(() =>
 					vi.waitFor(() => {
-						for (const broadcast of broadcasts) {
-							expect(broadcast).toHaveBeenCalledWith(
-								expect.objectContaining({ type: "project_list" }),
-							);
-							expect(broadcast).toHaveBeenCalledWith(
-								expect.objectContaining({ type: "instance_list" }),
-							);
-						}
+						expect(projectLists.at(-1)).toContainEqual(
+							expect.objectContaining({ slug: "a", title: "Renamed" }),
+						);
+						expect(instanceLists.at(-1)).toContainEqual(
+							expect.objectContaining({ id: "claude" }),
+						);
 					}),
 				);
+				expect(factory).not.toHaveBeenCalled();
 				yield* client.SetProjectInstance({ slug: "a", instanceId: "claude" });
 				expect(firstRelay.stop).toHaveBeenCalledTimes(1);
 				// Rebinding replaces the project's engine, as the relay-side handler did.

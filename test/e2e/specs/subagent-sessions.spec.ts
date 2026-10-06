@@ -78,7 +78,7 @@ const familyMsg: MockMessage = {
 };
 
 const modelListMsg: MockMessage = {
-	type: "model_list",
+	type: "mock_model_catalog",
 	providers: [
 		{
 			id: "anthropic",
@@ -96,7 +96,7 @@ const modelListMsg: MockMessage = {
 };
 
 const agentListMsg: MockMessage = {
-	type: "agent_list",
+	type: "mock_agent_catalog",
 	providerScope: { id: "opencode", name: "OpenCode" },
 	agents: [
 		{ id: "code", name: "Code", description: "General coding assistant" },
@@ -257,19 +257,6 @@ test.describe("Subagent navigation", () => {
 			for (const msg of msgs) {
 				sendMockRelayMessage(msg);
 			}
-
-			ws.onMessage((data) => {
-				try {
-					const parsed = JSON.parse(String(data));
-
-					if (parsed.type === "get_agents") {
-						const al = initMessages.find((m) => m.type === "agent_list");
-						if (al) sendMockRelayMessage?.(al);
-					}
-				} catch {
-					// ignore
-				}
-			});
 		});
 
 		await page.goto(`${baseURL}/s/${snapshot.parentSession.id}`);

@@ -256,7 +256,7 @@ function wireStartupCallbacks(
 	inputs: StartupInputs,
 	services: AcquiredStartupServices,
 ) {
-	const { config, wsLog } = inputs;
+	const { wsLog } = inputs;
 	const { orchestration, sseStream, wsHandler } = services;
 	return Effect.gen(function* () {
 		yield* Effect.sync(() => {
@@ -267,14 +267,6 @@ function wireStartupCallbacks(
 		yield* wireRelayWebSocketCallbacksEffect({
 			wsHandler,
 			log: wsLog,
-			clientInitOptions: {
-				...(config.getInstances != null && {
-					getInstances: config.getInstances,
-				}),
-				...(config.getCachedUpdate != null && {
-					getCachedUpdate: config.getCachedUpdate,
-				}),
-			},
 		});
 	});
 }

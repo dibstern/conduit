@@ -190,6 +190,7 @@ function makeReadQueryEffect(
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
 		),
+		readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
 				rows: rows.map(({ id, parent_id, unread }) => ({
@@ -204,7 +205,11 @@ function makeReadQueryEffect(
 		countPendingApprovalsBySession: vi.fn(() =>
 			Effect.succeed(pendingApprovalCounts),
 		),
+		readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+		getSessionHistoryMetadata: vi.fn(() =>
+			Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+		),
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readSessionTranscriptPage: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),

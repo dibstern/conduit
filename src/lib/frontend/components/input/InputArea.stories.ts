@@ -94,7 +94,6 @@ function setHighVariant() {
 
 function setupDiscovery() {
 	handleModelList({
-		type: "model_list",
 		providers: [
 			{
 				id: "anthropic",
@@ -118,13 +117,11 @@ function setupDiscovery() {
 	});
 	setHighVariant();
 	handleAgentList({
-		type: "agent_list",
 		providerScope: { id: "anthropic", name: "Anthropic" },
 		agents: [{ id: "code", name: "code", description: "Write and edit code" }],
 		activeAgentId: "code",
 	});
 	handleCommandList({
-		type: "command_list",
 		commands: [
 			{ name: "review", description: "Review a pull request" },
 			{ name: "compact", description: "Compact conversation history" },
@@ -213,7 +210,6 @@ function setupWords(phone: boolean) {
 		{ value: "1m", label: "1M" },
 	];
 	handleModelList({
-		type: "model_list",
 		providers: [
 			{
 				id: "claude",
@@ -236,7 +232,6 @@ function setupWords(phone: boolean) {
 		provider: "claude",
 	});
 	handleDefaultModelInfo({
-		type: "default_model_info",
 		model: "claude-sonnet-5",
 		provider: "claude",
 		variant: "",

@@ -149,6 +149,14 @@ export class MockOpenCodeServer {
 	 */
 	private recordedPromptSessionIds: string[] = [];
 
+	/**
+	 * The client's replies by request id, once holdRepliesUntilAnswered is on.
+	 * Undefined means recorded replies replay as recorded.
+	 */
+	private answers:
+		| Map<string, { promise: Promise<void>; resolve: () => void }>
+		| undefined;
+
 	constructor(recording: OpenCodeRecording) {
 		this.recording = recording;
 		this.buildQueues();
@@ -233,7 +241,30 @@ export class MockOpenCodeServer {
 		this.sseMessages.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
+		this.answers?.clear();
 		this.buildQueues();
+	}
+
+	/**
+	 * Hold each recorded permission or question reply event until the client
+	 * posts its own reply to that request, as real OpenCode does. Without it
+	 * the recording resolves the request by itself, and the card leaves the
+	 * browser before a test can look at it or answer it.
+	 */
+	holdRepliesUntilAnswered(): void {
+		this.answers ??= new Map();
+	}
+
+	private answer(requestId: string, answers: NonNullable<typeof this.answers>) {
+		const existing = answers.get(requestId);
+		if (existing) return existing;
+		let resolve = () => {};
+		const promise = new Promise<void>((done) => {
+			resolve = done;
+		});
+		const entry = { promise, resolve };
+		answers.set(requestId, entry);
+		return entry;
 	}
 
 	/**
@@ -510,6 +541,14 @@ export class MockOpenCodeServer {
 		const normalized = normalizedKey(method, path);
 
 		const basePath = path.split("?")[0] ?? path;
+
+		const answered =
+			/^\/(?:permission|question)\/([^/]+)\/(?:reply|reject)$/.exec(
+				basePath,
+			)?.[1];
+		if (method === "POST" && answered && this.answers) {
+			this.answer(answered, this.answers).resolve();
+		}
 
 		if (method === "POST" && basePath === "/pty") {
 			const id = `pty_mock${String(++this.ptyCounter).padStart(3, "0")}`;
@@ -1082,6 +1121,15 @@ export class MockOpenCodeServer {
 				// No artificial delay — integration tests care about ordering,
 				// not timing fidelity. Delays cause relay pipeline accumulation
 				// that exceeds waitFor timeouts.
+
+				const heldFor = event.properties["requestID"];
+				if (
+					this.answers &&
+					/^(permission|question)\.(replied|rejected)$/.test(event.type) &&
+					typeof heldFor === "string"
+				) {
+					await this.answer(heldFor, this.answers).promise;
+				}
 
 				const properties = sessionIdMap
 					? this.rewriteSessionIds(event.properties, sessionIdMap)

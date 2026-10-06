@@ -1,30 +1,26 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	handleGetCommands,
-	handleGetProjects,
-} from "../../../src/lib/handlers/settings.js";
+import { getCommandsForSession } from "../../../src/lib/handlers/settings.js";
+import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
-describe("settings handlers with Effect-native settings service", () => {
+describe("settings reads with Effect-native settings service", () => {
 	it.effect(
 		"loads OpenCode commands without requiring the Promise OpenCode API tag",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const settingsService = {
 				listCommands: vi.fn(() =>
 					Effect.succeed([{ name: "build", description: "Run build" }]),
@@ -34,19 +30,17 @@ describe("settings handlers with Effect-native settings service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 			);
 
-			return handleGetCommands("client-1", {}).pipe(
+			return getCommandsForSession(undefined).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.tap((commands) => {
 					expect(settingsService.listCommands).toHaveBeenCalledOnce();
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "command_list",
-						commands: [{ name: "build", description: "Run build" }],
-					});
+					expect(commands).toEqual([
+						{ name: "build", description: "Run build" },
+					]);
 				}),
 			);
 		},
@@ -55,7 +49,6 @@ describe("settings handlers with Effect-native settings service", () => {
 	it.effect(
 		"returns no projects without a registry getter and does not query OpenCode",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const settingsService = {
 				listCommands: vi.fn(() => Effect.succeed([])),
 				listProjects: vi.fn(() =>
@@ -77,21 +70,22 @@ describe("settings handlers with Effect-native settings service", () => {
 			const layer = Layer.mergeAll(
 				settingsLayer,
 				projectServiceLayer,
-				Layer.succeed(WebSocketHandlerTag, wsHandler),
 				configLayer,
 			);
 
-			return handleGetProjects("client-1", {}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(settingsService.listProjects).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "project_list",
-						projects: [],
-						current: "test-project",
-					});
-				}),
-			);
+			return projectsHandlers
+				.GetProjects(new GetProjects({ projectSlug: "test-project" }))
+				.pipe(
+					Effect.provide(layer),
+					Effect.tap((reply) => {
+						expect(settingsService.listProjects).not.toHaveBeenCalled();
+						expect(reply).toEqual({
+							projectSlug: "test-project",
+							projects: [],
+							current: "test-project",
+						});
+					}),
+				);
 		},
 	);
 });

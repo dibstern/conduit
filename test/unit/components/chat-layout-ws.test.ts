@@ -127,7 +127,6 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		clearNavigateToSession: vi.fn(),
 		initSWMessageListener: vi.fn(),
 		reconcilePushActive: vi.fn(async () => {}),
-		onPlanMode: vi.fn(() => () => {}),
 		wsSend: vi.fn(),
 		wsState: { status: "connected", statusText: "" },
 	};
@@ -141,6 +140,10 @@ vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 
 vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
 	viewTranscript: vi.fn(),
+}));
+
+vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({
+	viewProjectSettings: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
@@ -168,6 +171,11 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	refreshSessionList: vi.fn(async () => {}),
 }));
 
+vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
+	attachApprovals: vi.fn(),
+	detachApprovals: vi.fn(),
+}));
+
 vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 	clearAllPermissions: vi.fn(),
 }));
@@ -175,7 +183,7 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 	terminalState: { panelOpen: false, unreadPtyIds: new Set() },
 	destroyAll: vi.fn(),
-	applyPtyListResponse: vi.fn(),
+	viewPtys: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
@@ -189,6 +197,7 @@ vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
 	todoState: { items: [] },
 	clearTodoState: vi.fn(),
+	viewTodos: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/file-tree.svelte.js", () => ({
@@ -213,7 +222,8 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
-	applyGetProjectsResponse: vi.fn(),
+	applyProjectList: vi.fn(),
+	followDaemonLists: vi.fn(),
 	projectState: { projects: [] },
 }));
 
@@ -264,10 +274,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getFileTreeRpc: vi.fn(async () => ({
 		projectSlug: "test-project",
 		files: [],
-	})),
-	listPtysRpc: vi.fn(async () => ({
-		projectSlug: "test-project",
-		ptys: [],
 	})),
 }));
 

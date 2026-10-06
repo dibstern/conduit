@@ -55,7 +55,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "model_list",
+		type: "mock_model_catalog",
 		providers: [
 			{
 				id: "anthropic",
@@ -72,7 +72,7 @@ const twoSessionInit: MockMessage[] = [
 		],
 	},
 	{
-		type: "agent_list",
+		type: "mock_agent_catalog",
 		providerScope: { id: "opencode", name: "OpenCode" },
 		agents: [
 			{ id: "code", name: "Code", description: "General coding assistant" },

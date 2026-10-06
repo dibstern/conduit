@@ -510,9 +510,9 @@ export const ViewsSheetOpen: Story = {
 };
 
 function emitOutputFromTwoTerminals() {
-	handlePtyOutput({ type: "pty_output", ptyId: "pty-1", data: "one" });
-	handlePtyOutput({ type: "pty_output", ptyId: "pty-1", data: "two" });
-	handlePtyOutput({ type: "pty_output", ptyId: "pty-2", data: "three" });
+	handlePtyOutput({ _tag: "output", ptyId: "pty-1", data: "one" });
+	handlePtyOutput({ _tag: "output", ptyId: "pty-1", data: "two" });
+	handlePtyOutput({ _tag: "output", ptyId: "pty-2", data: "three" });
 }
 
 export const WithViewBadge: Story = {

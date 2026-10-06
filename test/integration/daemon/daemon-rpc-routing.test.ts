@@ -103,7 +103,6 @@ describe("daemon shared RPC routing", () => {
 					string,
 					Effect.Effect.Success<ReturnType<typeof makeEffectWsHandler>>
 				>();
-				const ptyMessages = new Map<string, ReturnType<typeof vi.fn>>();
 				const factory = (slug: string) =>
 					Effect.gen(function* () {
 						const runtime = ManagedRuntime.make(
@@ -121,10 +120,7 @@ describe("daemon shared RPC routing", () => {
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
 						}).pipe(Effect.provide(runtime));
-						const ptyMessage = vi.fn();
-						ptyMessages.set(slug, ptyMessage);
 						handlers.set(slug, wsHandler);
-						wsHandler.on("message", ptyMessage);
 						wsHandler.on(
 							"client_connected",
 							({ clientId, requestedSessionId }) => {
@@ -326,18 +322,20 @@ describe("daemon shared RPC routing", () => {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
 				handlerA.broadcast({
-					type: "banner",
-					config: { id: "from-a", text: "from-a" },
+					type: "system_error",
+					code: "from-a",
+					message: "from-a",
 				});
 				handlerB.broadcast({
-					type: "banner",
-					config: { id: "from-b", text: "from-b" },
+					type: "system_error",
+					code: "from-b",
+					message: "from-b",
 				});
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "banner" &&
+								message["type"] === "system_error" &&
 								JSON.stringify(message).includes("from-b"),
 						),
 					).toBe(true);
@@ -345,7 +343,7 @@ describe("daemon shared RPC routing", () => {
 				expect(
 					eventMessages.some(
 						(message) =>
-							message["type"] === "banner" &&
+							message["type"] === "system_error" &&
 							JSON.stringify(message).includes("from-a"),
 					),
 				).toBe(false);
@@ -357,15 +355,15 @@ describe("daemon shared RPC routing", () => {
 						data: "x",
 					}),
 				);
+				// Terminal input is an RPC now (conduit-test-ni8.11); the raw socket
+				// only answers that it no longer routes anything.
 				yield* waitFor(() => {
-					expect(ptyMessages.get("project-b")).toHaveBeenCalledWith(
-						expect.objectContaining({
-							clientId: "daemon-client",
-							handler: "pty_input",
-						}),
-					);
+					expect(eventMessages).toContainEqual({
+						type: "system_error",
+						code: "UNKNOWN_MESSAGE_TYPE",
+						message: "Unknown message type: pty_input",
+					});
 				});
-				expect(ptyMessages.get("project-a")).not.toHaveBeenCalled();
 			}),
 	);
 

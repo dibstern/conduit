@@ -32,8 +32,7 @@ describe("DaemonWsClientRegistry", () => {
 				expect(detach).toHaveBeenCalledTimes(1);
 				expect(first.socket.close).toHaveBeenCalledTimes(1);
 				yield* registry.broadcastUnattached({
-					type: "project_list",
-					projects: [],
+					type: "daemon_sessions_changed",
 				});
 				expect(second.socket.send).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(DaemonWsClientRegistryLive)),
@@ -47,14 +46,11 @@ describe("DaemonWsClientRegistry", () => {
 			yield* registry.register("second", second.ws);
 			yield* registry.setAttachment("second", second.ws, "project-a", () => {});
 
-			yield* registry.broadcastUnattached({
-				type: "project_list",
-				projects: [],
-			});
+			yield* registry.broadcastUnattached({ type: "daemon_sessions_changed" });
 
 			expect(first.socket.send).toHaveBeenCalledTimes(1);
 			expect(first.socket.send).toHaveBeenCalledWith(
-				JSON.stringify({ type: "project_list", projects: [] }),
+				JSON.stringify({ type: "daemon_sessions_changed" }),
 			);
 			expect(second.socket.send).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(DaemonWsClientRegistryLive)),

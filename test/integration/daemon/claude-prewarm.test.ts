@@ -203,7 +203,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			browser.frames
 				.slice(cursor)
 				.some(({ message }) =>
-					["delta", "done", "permission_request"].includes(
+					["delta", "done", "permission_pending"].includes(
 						String(message["type"]),
 					),
 				),
@@ -214,7 +214,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const sendCursor = browser.frames.length;
 		const pending = browser.send(sessionId, "approval-prewarmed-first-send");
 		const request = await browser.waitFor(
-			(message) => message["type"] === "permission_request",
+			(message) => message["type"] === "permission_pending",
 			sendCursor,
 		);
 		await browser.answerApproval(request, "allow");
@@ -1030,7 +1030,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				}),
 			);
 			await browser.waitFor(
-				(message) => message["type"] === "permission_request",
+				(message) => message["type"] === "permission_pending",
 				cursor,
 			);
 		} else if (state === "used") {
