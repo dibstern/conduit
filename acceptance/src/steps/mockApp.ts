@@ -132,6 +132,12 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
+			const sessionInstance = (payload: Record<string, unknown>) =>
+				payload["sessionId"] === "sess-first-send"
+					? createdSessionInstance
+					: payload["sessionId"] === "sess-bound-claude"
+						? "claude"
+						: undefined;
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
@@ -287,14 +293,18 @@ export const mockAppHandlers: StepHandler[] = [
 								: undefined;
 						return { projectSlug: "myapp", sessionId: "sess-first-send" };
 					},
-					GetModels: async () => ({
+					// Like the server, answer for the session's own harness: opening a
+					// session fetches models, and a late reply must not rebind it.
+					GetModels: async (payload) => ({
 						projectSlug: "myapp",
 						providers: modelExecutionMockup
 							? modelExecutionProviders
 							: dualDriverProviders,
 						active: modelExecutionMockup
 							? { model: "opus[1m]", provider: "claude" }
-							: { model: "claude-sonnet-4", provider: "anthropic" },
+							: sessionInstance(payload) === "claude"
+								? { model: "claude-sonnet-4-5", provider: "claude" }
+								: { model: "claude-sonnet-4", provider: "anthropic" },
 						...(modelExecutionMockup
 							? { modelExecution: modelExecutionMockup.modelExecution }
 							: {}),
@@ -303,11 +313,7 @@ export const mockAppHandlers: StepHandler[] = [
 						const instanceId =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
-								: payload["sessionId"] === "sess-first-send"
-									? createdSessionInstance
-									: payload["sessionId"] === "sess-bound-claude"
-										? "claude"
-										: undefined;
+								: sessionInstance(payload);
 						const claude = instanceId === "claude";
 						return {
 							projectSlug: "myapp",
