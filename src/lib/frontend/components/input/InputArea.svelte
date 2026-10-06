@@ -27,6 +27,7 @@
 		discoveryState,
 		extractCommandQuery,
 		filterCommands,
+		getChosenModel,
 		getEffectiveInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
@@ -506,10 +507,14 @@
 			if (creatingSession) return false;
 			creatingSession = true;
 			try {
+				// The draft's model pick is client-local until the session exists.
+				const instanceId = getEffectiveInstanceId();
+				const model = getChosenModel(instanceId);
 				const created = await createSessionRpc({
 					projectSlug,
 					originId: getBrowserClientId(),
-					instanceId: getEffectiveInstanceId(),
+					instanceId,
+					...(model ? { model } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");

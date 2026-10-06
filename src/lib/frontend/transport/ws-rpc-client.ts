@@ -167,6 +167,13 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	/** The draft composer's model and effort, so the first turn runs what the
+	 *  user picked. */
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string;
+	};
 }
 
 export interface ViewSessionRpcInput {
@@ -534,6 +541,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
+			...(input.model != null ? { model: input.model } : {}),
 		}),
 	);
 
