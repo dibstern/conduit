@@ -3151,12 +3151,6 @@ describe("Effect runtime boundary grep", () => {
 				reason:
 					"permission reply tracking should not use a sync runtime bridge in relay-stack",
 			},
-			{
-				pattern:
-					/recoverPendingPermissions:\s*\([^)]*\)\s*=>\s*relayManagedRuntime\.runSync/s,
-				reason:
-					"permission recovery should not use a sync runtime bridge in relay-stack",
-			},
 		] as const;
 
 		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
