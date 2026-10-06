@@ -186,6 +186,7 @@ export class ProcessHarness {
 			readonly delayMs?: number;
 		},
 		private readonly claudeCaptureDir?: string,
+		realOpenCode?: string,
 	) {
 		this.root = mkdtempSync(rootPrefix);
 		this.projectDir = join(this.root, "process-test");
@@ -232,10 +233,19 @@ export class ProcessHarness {
 			mkdirSync(join(this.root, "bin"));
 			const executable = join(this.root, "bin", "opencode");
 			copyFileSync(
-				fileURLToPath(new URL("./fake-opencode-process.mjs", import.meta.url)),
+				fileURLToPath(
+					new URL(
+						realOpenCode
+							? "./real-opencode-proxy.mjs"
+							: "./fake-opencode-process.mjs",
+						import.meta.url,
+					),
+				),
 				executable,
 			);
 			chmodSync(executable, 0o755);
+			if (realOpenCode)
+				symlinkSync(realOpenCode, join(this.root, "bin", "opencode-real"));
 			const config: DaemonConfig = {
 				pid: 0,
 				port: 0,
@@ -415,6 +425,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			opencodeRecording?: string;
 			claudeReplay?: ProcessHarness["claudeReplay"];
 			claudeCaptureDir?: string;
+			/** Real OpenCode binary to run, behind a logging proxy, instead of the fake. */
+			realOpenCode?: string;
 		} = {},
 	): ProcessHarness {
 		return new ProcessHarness(
@@ -444,6 +456,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.opencodeRecording,
 			options.claudeReplay,
 			options.claudeCaptureDir,
+			options.realOpenCode,
 		);
 	}
 
@@ -1574,6 +1587,7 @@ export class ProcessBrowser {
 	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private sessions: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private constructor(
 		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
@@ -1711,6 +1725,38 @@ export class ProcessBrowser {
 							this.record({ ...row, type: "project_setting" });
 					}),
 			).pipe(Effect.ignore),
+		);
+	}
+
+	/**
+	 * Follow the project's session list as the sidebar does. Each row is
+	 * recorded as a `session_row` frame and each removal as `session_removed`.
+	 */
+	async followSessions(): Promise<void> {
+		const cursor = this.frames.length;
+		this.sessions = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							this.record({ type: "session_snapshot" });
+						const rows =
+							envelope._tag === "snapshot"
+								? envelope.rows
+								: envelope._tag === "upsert"
+									? [envelope.item]
+									: [];
+						for (const row of rows)
+							this.record({ ...row, type: "session_row" });
+						if (envelope._tag === "remove")
+							this.record({ type: "session_removed", id: envelope.id });
+					}),
+			).pipe(Effect.ignore),
+		);
+		await this.waitFor(
+			(message) => message["type"] === "session_snapshot",
+			cursor,
 		);
 	}
 
@@ -1997,6 +2043,7 @@ export class ProcessBrowser {
 			await Effect.runPromise(Fiber.interrupt(this.approvals));
 		if (this.projectSettings)
 			await Effect.runPromise(Fiber.interrupt(this.projectSettings));
+		if (this.sessions) await Effect.runPromise(Fiber.interrupt(this.sessions));
 		await this.runtime.dispose();
 		this.closed = true;
 	}
