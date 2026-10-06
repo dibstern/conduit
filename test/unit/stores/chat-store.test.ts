@@ -23,7 +23,6 @@ import {
 	clearMessages,
 	handleCompaction,
 	handleError,
-	handleToolExecuting,
 	historyState,
 	isProcessing,
 	isStreaming,
@@ -36,7 +35,6 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type {
-	RelayMessage,
 	ResultMessage,
 	UserMessage as UserMsg,
 } from "../../../src/lib/frontend/types.js";
@@ -45,14 +43,6 @@ import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 let ta: SessionActivity;
 let tm: SessionMessages;
-
-// Tests deliberately pass incomplete objects to verify defensive handling.
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
 
 beforeEach(() => {
 	sessionState.currentId = "test-session";
@@ -64,17 +54,6 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-});
-
-describe("tool lifecycle", () => {
-	it("silently ignores executing for unknown tool id (expected overlap)", () => {
-		handleToolExecuting(
-			ta,
-			tm,
-			msg({ type: "tool_executing", sessionId: "s1", id: "unknown" }),
-		);
-		expect(chatState.messages).toHaveLength(0);
-	});
 });
 
 describe("projected context usage", () => {
@@ -224,43 +203,34 @@ describe("handleCompaction", () => {
 			...tokens,
 		});
 
-	it("replaces the in-flight notice with the completed boundary", () => {
+	it("shows a transient notice while compacting", () => {
 		compaction("started", "Compacting conversation…");
-		compaction("completed", "Context compacted", {
-			preTokens: 180_000,
-			postTokens: 42_000,
-		});
 		expect(chatState.messages).toEqual([
 			expect.objectContaining({
+				compaction: "started",
+				text: "Compacting conversation…",
+			}),
+		]);
+	});
+
+	it.each([
+		"completed",
+		"failed",
+	] as const)("a %s outcome retires the notice and leaves the outcome to the transcript", (state) => {
+		tm.messages = [
+			{
 				type: "system",
+				uuid: "compaction-1/compaction-part-1",
+				text: "Context compacted",
+				variant: "info",
 				compaction: "completed",
-				preTokens: 180_000,
-				postTokens: 42_000,
-			}),
-		]);
-	});
-
-	it("replaces the in-flight notice with a failure notice", () => {
+			},
+		];
 		compaction("started", "Compacting conversation…");
-		compaction("failed", "Compaction failed: too large");
-		expect(chatState.messages).toEqual([
-			expect.objectContaining({
-				compaction: "failed",
-				variant: "error",
-				text: "Compaction failed: too large",
-			}),
-		]);
-	});
-
-	it("keeps earlier completed compactions", () => {
-		compaction("completed", "Context compacted");
-		compaction("started", "Compacting conversation…");
-		compaction("completed", "Context compacted");
+		compaction(state, "outcome");
 		expect(
-			chatState.messages.map((m) =>
-				m.type === "system" ? m.compaction : m.type,
-			),
-		).toEqual(["completed", "completed"]);
+			chatState.messages.map((m) => (m.type === "system" ? m.uuid : m.type)),
+		).toEqual(["compaction-1/compaction-part-1"]);
 	});
 });
 

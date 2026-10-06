@@ -108,6 +108,21 @@ function partRowToHistoryPart(
 			...(typeof metadata?.["postTokens"] === "number"
 				? { postTokens: metadata["postTokens"] }
 				: {}),
+			...(row.status === "failed" ? { failed: true } : {}),
+		};
+	}
+
+	if (row.type === "error") {
+		const metadata =
+			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
+		return {
+			id: row.id,
+			type: "error",
+			text: row.text,
+			...(typeof metadata?.["code"] === "string"
+				? { code: metadata["code"] }
+				: {}),
+			time: { start: row.created_at },
 		};
 	}
 

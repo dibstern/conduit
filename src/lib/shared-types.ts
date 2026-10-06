@@ -408,7 +408,7 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking";
+	type: PartType | "thinking" | "error";
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -435,6 +435,10 @@ export interface HistoryMessagePart {
 	 *  parts so the divider and context-% bar can be reconstructed on reload. */
 	preTokens?: number;
 	postTokens?: number;
+	/** A `compaction` part whose compaction failed. */
+	failed?: boolean;
+	/** Provider error code on an `error` part (a turn that ended in error). */
+	code?: string;
 	[key: string]: unknown;
 }
 

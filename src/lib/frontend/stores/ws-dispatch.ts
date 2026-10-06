@@ -34,8 +34,6 @@ import {
 	handleError,
 	handleInputSyncReceived,
 	handleStatus,
-	handleThinkingStop,
-	handleToolExecuting,
 	inputSyncState,
 	persistInputDraft,
 	type SessionActivity,
@@ -175,16 +173,6 @@ function routePerSession(event: PerSessionEvent): void {
 	const { activity, messages } = getOrCreateSessionSlot(event.sessionId);
 
 	switch (event.type) {
-		case "thinking_stop":
-			handleThinkingStop(activity, messages, event);
-			break;
-		case "tool_executing":
-			handleToolExecuting(activity, messages, event);
-			// Not tool_start: the server names the skill from the input, which
-			// arrives here.
-			if (event.name.toLowerCase() === "skill")
-				refreshSessionSkills(event.sessionId);
-			break;
 		case "user_message":
 			refreshSessionSkills(event.sessionId);
 			break;

@@ -209,12 +209,12 @@ describe("Thinking lifecycle — full pipeline", () => {
 		assert.exists(thinking, "expected thinking message");
 		expect(thinking.done).toBe(true);
 		expect(thinking.text).toBe("Deep reasoning about the problem...");
-		// Part rows carry their own created_at/updated_at, so the thinking block's
-		// span survives the round-trip instead of collapsing to nothing.
-		expect(thinking.duration).toBe(100);
+		// thinking.end stamps the part, so the span runs from start to end
+		// rather than to the last delta.
+		expect(thinking.duration).toBe(400);
 	});
 
-	it("documents divergence: SQLite has partial thinking, frontend marks done via safety net", async () => {
+	it("thinking with no end stays in progress on reload", async () => {
 		// Project thinking START + DELTA but NO thinking.end
 		await project(
 			makeStored(
@@ -268,8 +268,8 @@ describe("Thinking lifecycle — full pipeline", () => {
 		assert.exists(thinking, "expected thinking message");
 		expect(thinking.text).toBe("Partial reasoning that never completed...");
 
-		// historyToChatMessages always marks history thinking blocks as done=true
-		// (history is static — if it's persisted, it's "done" by definition)
-		expect(thinking.done).toBe(true);
+		// The part is still running: only thinking.end or the turn's end
+		// (completed, error, interrupted) settles it.
+		expect(thinking.done).toBe(false);
 	});
 });

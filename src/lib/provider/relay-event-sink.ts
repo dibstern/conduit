@@ -178,14 +178,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			// Attempt persistence before WS send; failures are logged and delivery continues.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
-			// Compaction notices are UI-only EXCEPT the terminal "completed"
-			// boundary, which persists as a synthetic marker so the "Context
-			// compacted" divider survives a page reload. All states still go on
-			// the wire below (the send loop iterates the unfiltered result.events).
+			// A compaction's "started" notice is UI-only. Its outcome, completed or
+			// failed, persists so the divider or the failure notice survives a reload.
+			// All states still go on the wire below (the send loop iterates the
+			// unfiltered result.events).
 			const persistentEvents = result.events.filter(
 				(domainEvent) =>
 					domainEvent.type !== "session.compaction" ||
-					domainEvent.data.state === "completed",
+					domainEvent.data.state !== "started",
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
@@ -304,14 +304,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// Attempt persistence before WS send; failures are logged and delivery continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				// Compaction notices are UI-only EXCEPT the terminal "completed"
-				// boundary, which persists as a synthetic marker so the "Context
-				// compacted" divider survives a page reload. All states still go on
-				// the wire below (the send loop iterates the unfiltered result.events).
+				// A compaction's "started" notice is UI-only. Its outcome, completed or
+				// failed, persists so the divider or the failure notice survives a reload.
+				// All states still go on the wire below (the send loop iterates the
+				// unfiltered result.events).
 				const persistentEvents = result.events.filter(
 					(domainEvent) =>
 						domainEvent.type !== "session.compaction" ||
-						domainEvent.data.state === "completed",
+						domainEvent.data.state !== "started",
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
