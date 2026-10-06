@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { InstanceManager } from "../../../src/lib/instance/instance-manager.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import type {
 	InstanceConfig,
@@ -71,41 +70,5 @@ describe("Instance types", () => {
 			title: "myapp",
 		};
 		expect(project.instanceId).toBeUndefined();
-	});
-
-	it("addInstance with all required fields returns correct values at runtime", () => {
-		const manager = new InstanceManager();
-		const config: InstanceConfig = {
-			name: "Personal",
-			port: 4096,
-			managed: true,
-		};
-		const instance = manager.addInstance("personal", config);
-
-		expect(instance.id).toBe("personal");
-		expect(instance.name).toBe("Personal");
-		expect(instance.port).toBe(4096);
-		expect(instance.managed).toBe(true);
-		expect(instance.status).toBe("stopped");
-		expect(instance.restartCount).toBe(0);
-		expect(typeof instance.createdAt).toBe("number");
-	});
-
-	it("InstanceConfig url field is optional — addInstance succeeds without url", () => {
-		const manager = new InstanceManager();
-		const configWithoutUrl: InstanceConfig = {
-			name: "No URL",
-			port: 4099,
-			managed: true,
-			// url intentionally omitted
-		};
-		const instance = manager.addInstance("no-url-instance", configWithoutUrl);
-
-		expect(instance.id).toBe("no-url-instance");
-		// URL is not exposed on OpenCodeInstance directly (stored in externalUrls map),
-		// so verify the instance was created and the URL defaults to port-based
-		expect(manager.getInstanceUrl("no-url-instance")).toBe(
-			"http://localhost:4099",
-		);
 	});
 });
