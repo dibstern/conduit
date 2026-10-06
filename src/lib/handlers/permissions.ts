@@ -32,6 +32,7 @@ import {
 	canonicalEvent,
 	createCommandId,
 } from "../persistence/events.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type {
 	PermissionId,
@@ -346,11 +347,13 @@ export const handlePermissionResponse = (
 			const isClaudeSession =
 				(yield* engine.getProviderForSessionEffect(sessionId)) === "claude";
 
-			if (!isClaudeSession) {
+			// The adapter owns the reply: it scopes "always" to the session.
+			const opencode = isClaudeSession
+				? undefined
+				: (yield* ProviderRegistryTag).getInstance("opencode");
+			if (opencode) {
 				yield* Effect.either(
-					Effect.tryPromise(() =>
-						client.permission.reply(sessionId, requestId, result.mapped),
-					),
+					opencode.resolvePermissionEffect(sessionId, requestId, result.mapped),
 				);
 			}
 

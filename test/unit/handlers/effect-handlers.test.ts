@@ -1649,6 +1649,16 @@ describe("setDefaultPermissionModeForRelay", () => {
 });
 
 describe("handlePermissionResponse", () => {
+	const openCodeRegistry = () => {
+		const resolvePermissionEffect = vi.fn(() => Effect.void);
+		const registry = new ProviderRegistry();
+		registry.registerInstance({
+			providerId: "opencode",
+			resolvePermissionEffect,
+		} as unknown as ProviderInstance);
+		return { registry, resolvePermissionEffect };
+	};
+
 	it.effect(
 		"processes permission response through PendingInteractionService",
 		() => {
@@ -1661,12 +1671,14 @@ describe("handlePermissionResponse", () => {
 				config: { get: vi.fn(async () => makeSessionDetail()) },
 			});
 			const config = mockConfig();
+			const { registry, resolvePermissionEffect } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
+				Layer.succeed(ProviderRegistryTag, registry),
 				PendingInteractionServiceLive,
 				PendingSendOwnershipLive,
 			);
@@ -1688,7 +1700,7 @@ describe("handlePermissionResponse", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(client.permission.reply).toHaveBeenCalledWith(
+					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"session-1",
 						"perm-1",
 						"once",
@@ -1710,12 +1722,14 @@ describe("handlePermissionResponse", () => {
 				config: { get: vi.fn(async () => makeSessionDetail()) },
 			});
 			const config = mockConfig();
+			const { registry, resolvePermissionEffect } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(ConfigTag, config),
+				Layer.succeed(ProviderRegistryTag, registry),
 				PendingInteractionServiceLive,
 				PendingSendOwnershipLive,
 			);
@@ -1737,7 +1751,7 @@ describe("handlePermissionResponse", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(client.permission.reply).toHaveBeenCalledWith(
+					expect(resolvePermissionEffect).toHaveBeenCalledWith(
 						"permission-session",
 						"perm-cross-session",
 						"once",
