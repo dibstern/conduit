@@ -269,7 +269,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		);
 
 	const sink: RelayEventSink = {
-		noteActivity: reset,
+		// Without the finish, a client connecting before the status poller
+		// sees idle is told the finished turn is still processing.
+		noteActivity: (event) =>
+			isTerminalRuntimeEvent(event) ? finish() : reset(),
 		detachInteractions: () =>
 			Effect.sync(() => {
 				detachingInteractions = true;

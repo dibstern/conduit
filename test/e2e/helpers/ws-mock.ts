@@ -248,6 +248,13 @@ export class WsMockControl {
 	/** @internal */
 	_setWs(ws: WebSocketRoute): void {
 		this._ws = ws;
+		this._connections++;
+	}
+
+	private _connections = 0;
+	/** Relay sockets opened so far; each page load opens a new one. */
+	get connections(): number {
+		return this._connections;
 	}
 
 	/** @internal */

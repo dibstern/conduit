@@ -538,7 +538,7 @@ export class ProviderSideEffectReactor {
 		// or the relay's processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
-				interactions?.noteActivity?.();
+				interactions?.noteActivity?.(event);
 				return this.options.ingestion
 					.ingest(event)
 					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));

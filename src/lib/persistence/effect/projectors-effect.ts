@@ -988,10 +988,15 @@ export const makeTurnProjector = (): EffectProjector => ({
 							RETURNING id, session_id`;
 					return { sessions: owners(written), messages: ids(written) };
 				}
+				// An error before the reply is named carries no id a turn owns, so
+				// it ends the running turn. Queued prompts stay pending: after an
+				// error result the SDK goes on to send them.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'error', completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE session_id = ${event.sessionId}
+						AND (assistant_message_id = ${event.data.messageId}
+							OR state = 'running')
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}
@@ -999,13 +1004,14 @@ export const makeTurnProjector = (): EffectProjector => ({
 			if (isEventType(event, "turn.interrupted")) {
 				// Stop ends the session's work, so whatever is still running stops
 				// with the named turn. That also covers an empty id (stopped before
-				// naming its reply) and an id no turn owns.
+				// naming its reply) and an id no turn owns. Prompts queued behind it
+				// stop too: Stop closes the Claude query, which drops them unsent.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
 						WHERE session_id = ${event.sessionId}
 						AND (assistant_message_id = ${event.data.messageId}
-							OR state = 'running')
+							OR state IN ('running', 'pending'))
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}

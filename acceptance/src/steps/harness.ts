@@ -56,16 +56,12 @@ export const harnessHandlers: StepHandler[] = [
 				claude ? claudeBoundSessionMessages : openCodeBoundSessionMessages,
 			);
 			// Wait until the binding reached the UI (trigger reflects the harness).
-			await world.page.waitForFunction(
-				(expected) => {
-					const trigger = document.querySelector(
-						'[data-testid="model-picker-trigger"]',
-					);
-					return trigger?.getAttribute("data-instance-id") === expected;
-				},
-				instanceIdForLabel(harness),
-				{ timeout: 5_000 },
-			);
+			await world.page.waitForFunction((expected) => {
+				const trigger = document.querySelector(
+					'[data-testid="model-picker-trigger"]',
+				);
+				return trigger?.getAttribute("data-instance-id") === expected;
+			}, instanceIdForLabel(harness));
 		},
 	},
 	{

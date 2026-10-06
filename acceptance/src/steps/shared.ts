@@ -79,9 +79,14 @@ export function exampleValue(
 }
 
 export const openSessionRoute = async (page: Page, sessionId: string) => {
+	const relay = requireRelayControl(page);
+	const connections = relay.connections;
 	await page.goto(
 		new URL(`/s/${encodeURIComponent(sessionId)}`, page.url()).toString(),
 	);
+	// The relay and RPC sockets reconnect independently. Until the new relay
+	// socket opens, injected messages go to the old page's closed one.
+	await expect.poll(() => relay.connections).toBeGreaterThan(connections);
 	await requireRpcControl(page).waitForRequest(
 		(request) =>
 			request.tag === "ViewSession" &&
