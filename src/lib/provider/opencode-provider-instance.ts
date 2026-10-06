@@ -424,7 +424,28 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return this.resolveClientEffect(sessionId).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
-					try: () => client.permission.reply(sessionId, requestId, decision),
+					try: async () => {
+						if (decision === "always") {
+							// OpenCode's "always" approvals override rules in other sessions.
+							const request = (
+								await client.permission.list(this.workspaceRoot)
+							).find((pending) => pending.id === requestId);
+							if (request?.always?.length) {
+								await client.session.update(sessionId, {
+									permission: request.always.map((pattern) => ({
+										permission: request.permission,
+										pattern,
+										action: "allow",
+									})),
+								});
+							}
+						}
+						await client.permission.reply(
+							sessionId,
+							requestId,
+							decision === "always" ? "once" : decision,
+						);
+					},
 					catch: (cause) => cause,
 				}),
 			),

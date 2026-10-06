@@ -24,6 +24,8 @@ import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/prov
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
@@ -786,6 +788,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("responds to a permission request for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const resolvePermissionEffect = vi.fn(() => Effect.void);
+		const providerRegistry = new ProviderRegistry();
+		providerRegistry.registerInstance({
+			providerId: "opencode",
+			resolvePermissionEffect,
+		} as unknown as ProviderInstance);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -809,7 +817,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.permission.reply).toHaveBeenCalledWith(
+			expect(resolvePermissionEffect).toHaveBeenCalledWith(
 				"session-1",
 				"per-1",
 				"once",
@@ -818,7 +826,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({ api, wsHandler, providerRegistry }),
+					),
 				),
 			),
 		);
