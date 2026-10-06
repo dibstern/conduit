@@ -1,5 +1,5 @@
 import { Data, Effect } from "effect";
-import type { InputDelivery } from "../contracts/stored-event.js";
+import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -46,8 +46,14 @@ export interface SendMessageToSessionInput {
 	readonly commandId: string;
 	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
-	/** Only `queue` is honoured for now; a steer is queued like any input. */
+	/** A steer joins the running turn of a busy session, or is refused. */
 	readonly delivery?: InputDelivery;
+}
+
+export interface SendMessageToSessionResult {
+	readonly sessionId: string | undefined;
+	/** Why the steer was refused; nothing was admitted. */
+	readonly refused?: SteerBlocker;
 }
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
@@ -60,7 +66,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text) return activeId;
+		if (!text) return { sessionId: activeId } as SendMessageToSessionResult;
 		if (!activeId) {
 			if (input.missingSessionClientId) {
 				wsHandler.sendTo(
@@ -71,7 +77,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 					).toSystemError(),
 				);
 			}
-			return activeId;
+			return { sessionId: activeId } as SendMessageToSessionResult;
 		}
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
@@ -115,10 +121,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
 
-		// Clear the input draft
-		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
-		clearSessionInputDraft(activeId);
-
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
@@ -130,7 +132,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const contextWindow = yield* getContextWindow(activeId);
 
 		const inbox = yield* SessionInboxTag;
-		yield* inbox.submit({
+		const submitted = yield* inbox.submit({
 			clientId,
 			sessionId: activeId,
 			inputId: input.commandId,
@@ -146,7 +148,15 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			},
 			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 		});
-		return activeId;
+		// A refused steer admitted nothing: the text stays in the input box.
+		if ("refused" in submitted)
+			return {
+				sessionId: activeId,
+				refused: submitted.refused,
+			} as SendMessageToSessionResult;
+		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
+		clearSessionInputDraft(activeId);
+		return { sessionId: activeId } as SendMessageToSessionResult;
 	});
 
 export const handleMessage = (

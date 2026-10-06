@@ -237,7 +237,9 @@ export function sdkResultToTurnResult(
 	// Treat those as errors so the caller sees failure, not success.
 	const isErrorFlag = result.is_error;
 	const isSuccess = result.subtype === "success" && !isErrorFlag;
-	const isInterrupted = !isSuccess && isInterruptedResult(result);
+	const isInterrupted =
+		!isSuccess &&
+		(isInterruptedResult(result) || ctx.interruptRequested === true);
 	// Error text source depends on result shape:
 	//  - error_during_execution (and other non-success subtypes): `errors` array
 	//  - success + is_error=true: `result` field contains the provider error text

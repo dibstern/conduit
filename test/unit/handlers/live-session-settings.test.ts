@@ -28,6 +28,7 @@ function makeClaudeInstance(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
+		steering: false,
 		applyLiveSettingsEffect,
 		discoverEffect: () => Effect.die("not used"),
 		sendTurnEffect: () => Effect.die("not used"),

@@ -2046,18 +2046,33 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			}
 			const deferred = yield* turnAdmissionSemaphore.withPermits(1)(
 				Effect.gen(this, function* () {
-					// Wait for the prior turn to finish, but never inherit its
-					// failure: a rejected turn A must not reject turn B. The
-					// liveness checks below decide whether B may still proceed.
+					// A send that needs no settings change joins the live query at
+					// once: mid-turn it is a steer, which the SDK reads at its next
+					// tool boundary. One that changes the model or effort waits for
+					// the turns ahead to finish, so it never retunes them mid-flight,
+					// and never inherits their failure: the liveness checks below
+					// decide whether it may still proceed.
 					const priorTurns = yield* pendingTurnWaiters(
 						this.stateRef,
 						ctx.sessionId,
 					);
-					yield* Effect.forEach(
-						priorTurns.values(),
-						(prior) => Deferred.await(prior.deferred).pipe(Effect.ignore),
-						{ discard: true },
+					const apiModelId = claudeApiModelId(
+						input.model?.modelId ?? ctx.currentModel,
+						input.contextWindow,
 					);
+					const retunes =
+						ctx.settingsOutOfSync ||
+						(apiModelId !== undefined &&
+							apiModelId !== ctx.currentApiModelId) ||
+						input.variant !== ctx.currentVariant;
+					if (priorTurns.size > 0 && retunes)
+						yield* Effect.forEach(
+							priorTurns.values(),
+							(prior) => Deferred.await(prior.deferred).pipe(Effect.ignore),
+							{ discard: true },
+						);
+					const joinsRunningTurn =
+						(yield* pendingTurnWaiters(this.stateRef, ctx.sessionId)).size > 0;
 
 					if (
 						ctx.stopped ||
@@ -2105,16 +2120,19 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 									unplaced: input,
 								},
 							);
-							ctx.currentTurnId = input.inputId;
+							// A steer becomes current when the SDK starts it.
+							if (!joinsRunningTurn) {
+								ctx.currentTurnId = input.inputId;
+								const priorSink = ctx.eventSink;
+								this.retainSink(input.eventSink);
+								ctx.eventSink = input.eventSink;
+								ctx.cumulativeTokens =
+									input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
+								yield* this.releaseSinkEffect(priorSink);
+							}
 							// Marks the turn as started so a system/init arriving before
 							// the first assistant chunk cannot report the session idle.
 							ctx.turnInFlight = true;
-							const priorSink = ctx.eventSink;
-							this.retainSink(input.eventSink);
-							ctx.eventSink = input.eventSink;
-							ctx.cumulativeTokens =
-								input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
-							yield* this.releaseSinkEffect(priorSink);
 							yield* ctx.promptQueue.enqueue(userMessage).pipe(
 								Effect.catchAll((cause) =>
 									Effect.gen(this, function* () {
@@ -2302,6 +2320,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						decodedMessage,
 					);
 					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
+					ctx.interruptRequested = false;
 				}
 			}
 		});
@@ -2332,6 +2351,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				message.command_uuid,
 			);
 			if (!unplaced) return;
+			// A steer becomes the current turn when it starts, on its own sink,
+			// and is in flight even when the turn before it already ended.
+			ctx.currentTurnId = message.command_uuid;
+			ctx.turnInFlight = true;
+			if (unplaced.eventSink !== ctx.eventSink) {
+				const priorSink = ctx.eventSink;
+				this.retainSink(unplaced.eventSink);
+				ctx.eventSink = unplaced.eventSink;
+				yield* this.releaseSinkEffect(priorSink);
+			}
 			// The stream outlives one input: a failed placement must not end it.
 			yield* this.placeUserMessageEffect(unplaced).pipe(
 				Effect.catchAll((error) =>
@@ -2499,6 +2528,28 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return;
 
+			// Stop with a steer pending stops only the running turn: the SDK
+			// reports the steer still queued and runs it as its own turn, so the
+			// query stays live and the stream settles both by id.
+			const waiters = [
+				...(yield* pendingTurnWaiters(this.stateRef, sessionId)).values(),
+			];
+			if (
+				!ctx.stopped &&
+				waiters.some((waiter) => waiter.started) &&
+				waiters.some((waiter) => !waiter.started)
+			) {
+				log.info(`Interrupting running turn for session ${sessionId}`);
+				ctx.interruptRequested = true;
+				yield* this.cancelInteractionsEffect(ctx, "Turn interrupted", false);
+				yield* Effect.tryPromise({
+					try: () => ctx.query.interrupt(),
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+				}).pipe(Effect.ignore);
+				return;
+			}
+
 			log.info(`Interrupting turn for session ${sessionId}`);
 			yield* this.cleanupSessionEffect(ctx, "Turn interrupted", false);
 			// Stop means the whole session. interrupt() alone leaves the CLI alive
@@ -2524,6 +2575,39 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				)
 			)
 				yield* this.scheduleShutdownAfterTurnEffect(sessionId);
+		});
+	}
+
+	/** Denies open approvals and rejects open questions. */
+	private cancelInteractionsEffect(
+		ctx: ClaudeSessionContext,
+		reason: string,
+		recoverQuestions: boolean,
+	): Effect.Effect<void> {
+		return Effect.gen(function* () {
+			for (const pending of ctx.pendingApprovals.values()) {
+				yield* pending.resolve("reject").pipe(Effect.ignore);
+			}
+			ctx.pendingApprovals.clear();
+
+			for (const pending of ctx.pendingQuestions.values()) {
+				yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
+			}
+			ctx.pendingQuestions.clear();
+
+			if (ctx.eventSink?.cancelSessionInteractions) {
+				yield* Effect.try({
+					try: () =>
+						ctx.eventSink?.cancelSessionInteractions?.(reason, {
+							recoverQuestions,
+						}),
+					catch: (cause) =>
+						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+				}).pipe(
+					Effect.flatMap((cancelEffect) => cancelEffect ?? Effect.void),
+					Effect.ignore,
+				);
+			}
 		});
 	}
 
@@ -2559,29 +2643,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			}
 			ctx.inFlightTools.clear();
 
-			for (const pending of ctx.pendingApprovals.values()) {
-				yield* pending.resolve("reject").pipe(Effect.ignore);
-			}
-			ctx.pendingApprovals.clear();
-
-			for (const pending of ctx.pendingQuestions.values()) {
-				yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
-			}
-			ctx.pendingQuestions.clear();
-
-			if (ctx.eventSink?.cancelSessionInteractions) {
-				yield* Effect.try({
-					try: () =>
-						ctx.eventSink?.cancelSessionInteractions?.(reason, {
-							recoverQuestions,
-						}),
-					catch: (cause) =>
-						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				}).pipe(
-					Effect.flatMap((cancelEffect) => cancelEffect ?? Effect.void),
-					Effect.ignore,
-				);
-			}
+			yield* this.cancelInteractionsEffect(ctx, reason, recoverQuestions);
 
 			// Persist terminal turn state. The SDK's post-interrupt `result`
 			// message is never translated (stream finalizers bail once

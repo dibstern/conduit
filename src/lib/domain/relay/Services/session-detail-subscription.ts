@@ -25,6 +25,7 @@ import {
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
@@ -68,6 +69,7 @@ export const subscribeSessionDetail = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
+			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 			const sessionRow = yield* Effect.either(
 				readQuery.getSession(options.sessionId),
 			);
@@ -141,7 +143,18 @@ export const subscribeSessionDetail = (options: {
 											{
 												item: {
 													_tag: "inbox" as const,
-													inbox: { paused: inbox.paused },
+													inbox: {
+														paused: inbox.paused,
+														// Only the reasons that do not depend on the draft.
+														steer:
+															registry._tag === "Some" &&
+															registry.value.getInstance(inbox.provider)
+																?.steering === true
+																? inbox.promptOpen
+																	? "prompt_open"
+																	: null
+																: "no_steering",
+													},
 												} satisfies SessionDetailItem,
 												version: Math.min(inbox.version, through),
 											},

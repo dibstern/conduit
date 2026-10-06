@@ -240,6 +240,17 @@ export interface TurnInterruptedPayload {
 export const INPUT_DELIVERIES = ["queue", "steer"] as const;
 export type InputDelivery = (typeof INPUT_DELIVERIES)[number];
 
+/** Why an input cannot be steered into the running turn. */
+export const STEER_BLOCKERS = [
+	"no_steering",
+	"prompt_open",
+	"model_differs",
+	"agent_differs",
+	"variant_differs",
+	"slash_command",
+] as const;
+export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
+
 /** The send request captured when an input is admitted; its handoff uses it. */
 export interface InputRequest {
 	readonly text: string;

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import type { InputDelivery } from "../../contracts/stored-event.js";
 import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
@@ -421,6 +422,8 @@ export interface SendMessageRpcInput {
 	readonly sessionId: string;
 	readonly text: string;
 	readonly commandId: string;
+	/** "steer" hands the input into the running turn; refused, nothing is admitted. */
+	readonly delivery?: InputDelivery;
 	readonly images?: readonly string[];
 	readonly originId?: string;
 }
@@ -820,7 +823,7 @@ const callSendMessage = (input: SendMessageRpcInput) =>
 			sessionId: input.sessionId,
 			inputId: input.commandId,
 			text: input.text,
-			delivery: "queue",
+			delivery: input.delivery ?? "queue",
 			...(input.images ? { images: [...input.images] } : {}),
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
@@ -1276,7 +1279,8 @@ export async function cancelInputRpc(
 	);
 }
 
-/** Send a queued input now: on an idle session this resumes the queue. */
+/** Send a queued input now: a steer on a busy session (refused, it stays
+ *  queued); on an idle session this resumes the queue. */
 export async function sendInputNowRpc(
 	input: InboxCommandRpcInput,
 ): Promise<InboxCommandResponse> {

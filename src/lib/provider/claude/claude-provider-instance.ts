@@ -21,6 +21,7 @@ export type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 
 export class ClaudeProviderInstance implements ProviderInstance {
 	readonly providerId = "claude";
+	readonly steering = true;
 	private readonly runtime: ClaudeProviderRuntime;
 
 	constructor(runtime: ClaudeProviderRuntime) {

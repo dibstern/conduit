@@ -1533,7 +1533,10 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			yield* this.settleGoal(ctx);
-			if (isInterruptedResult(result)) {
+			if (
+				isInterruptedResult(result) ||
+				(ctx.interruptRequested && result.subtype !== "success")
+			) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.push(
 					ctx,

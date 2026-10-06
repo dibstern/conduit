@@ -46,6 +46,8 @@ export interface ProviderTurnServiceSendInput {
 	readonly variant?: string;
 	readonly contextWindow?: string;
 	readonly errorDelivery?: "client" | "session";
+	/** A steer joins the running turn, whose status and timeout already run. */
+	readonly steer?: boolean;
 	/** Committed with the handoff's outbox row, in one transaction. */
 	readonly events?: readonly CanonicalEvent[];
 }

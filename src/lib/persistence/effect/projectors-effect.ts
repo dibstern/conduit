@@ -434,11 +434,18 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const isBackfilled = event.data.backfilled ? 1 : 0;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
+				// A live user message placed while another turn is open was read
+				// mid-turn: a steer. The turn projector closes that turn.
+				const steers = event.data.role === "user" && !isBackfilled;
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null})
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+							${steers ? 1 : 0} AND EXISTS (SELECT 1 FROM turns
+								WHERE session_id = ${event.data.sessionId}
+								AND state IN ('pending', 'running')
+								AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
@@ -864,6 +871,14 @@ export const makeTurnProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "message.created")) {
 				if (event.data.role === "user") {
+					// A steer closes the turn it joined at its own start time, so a
+					// folded result splits into two turns; the result completes this one.
+					if (!event.data.backfilled)
+						yield* sql`UPDATE turns SET state = 'completed',
+							completed_at = ${event.createdAt}
+							WHERE session_id = ${event.data.sessionId}
+							AND state IN ('pending', 'running')
+							AND id != ${event.data.messageId}`;
 					return owners(
 						yield* sql<OwnedRow>`
 							INSERT OR REPLACE INTO turns

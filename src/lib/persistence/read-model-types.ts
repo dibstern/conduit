@@ -64,6 +64,7 @@ export interface MessageRow {
 	is_streaming: number;
 	is_backfilled: number;
 	input_id?: string | null;
+	steered?: number;
 	rest_digest?: string | null;
 	rest_event_id?: string | null;
 	rest_payload?: string | null;

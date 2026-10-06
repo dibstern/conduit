@@ -532,7 +532,7 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
-				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
+				if (response.ok && response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 			}).catch(() => {
 				showToast("Failed to send message", { variant: "error" });

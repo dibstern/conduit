@@ -1854,6 +1854,7 @@ describe("SessionManagerService", () => {
 			}> = [];
 			const providerInstance: ProviderInstance = {
 				providerId: "opencode",
+				steering: false,
 				discoverEffect: () =>
 					Effect.succeed({
 						models: [],

@@ -15,6 +15,7 @@ import {
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	MESSAGES_INPUT_ID_MIGRATION,
+	MESSAGES_STEERED_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
@@ -1007,6 +1008,12 @@ export const effectMigrationEntries = {
 	"0032_pending_inputs": executeSqlStatements(
 		readMigrationSql(PENDING_INPUTS_MIGRATION),
 	),
+	"0033_messages_steered": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(messages)`;
+		if (columns.some((column) => column.name === "steered")) return;
+		yield* executeSqlStatements(readMigrationSql(MESSAGES_STEERED_MIGRATION));
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

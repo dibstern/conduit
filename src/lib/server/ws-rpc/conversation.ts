@@ -154,7 +154,7 @@ export const conversationHandlers = {
 					}),
 				);
 			}
-			const sessionId = yield* sendMessageToSession({
+			const sent = yield* sendMessageToSession({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
@@ -163,7 +163,9 @@ export const conversationHandlers = {
 				...(request.images ? { images: request.images } : {}),
 				errorDelivery: "session",
 			});
-			return { ok: true as const, sessionId: sessionId ?? request.sessionId };
+			return sent.refused
+				? { ok: false as const, reason: sent.refused }
+				: { ok: true as const, sessionId: sent.sessionId ?? request.sessionId };
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(

@@ -50,6 +50,7 @@ function snapshotRowToHistory(
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 		...(row.input_id ? { inputId: row.input_id } : {}),
+		...(row.steered === 1 ? { steered: true } : {}),
 	};
 }
 
@@ -192,6 +193,7 @@ export function messageRowsToHistory(
 			role: row.role as "user" | "assistant",
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 			...(row.input_id ? { inputId: row.input_id } : {}),
+			...(row.steered === 1 ? { steered: true } : {}),
 			time: {
 				created: row.created_at,
 				completed: row.updated_at,

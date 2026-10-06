@@ -2,8 +2,13 @@
 // the runtime's injected queryFactory (see helpers/claude-trace-replayer.ts).
 // The replay fixture fails the test unless exactly the planned turns are sent.
 
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { Socket } from "@effect/platform";
+import { RpcClient, RpcSerialization } from "@effect/rpc";
 import type { Page } from "@playwright/test";
+import { Effect } from "effect";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -65,6 +70,40 @@ function recordSends(page: Page): Send[] {
 	});
 	return sends;
 }
+
+/** Records every `done` the page receives for the session, in arrival order.
+ *  Register before navigation. */
+// The status poller can repeat a turn's done under the same alertId, which the
+// browser treats as one; count each alertId once.
+function recordDones(page: Page, sessionId: string): unknown[] {
+	const dones: unknown[] = [];
+	const seen = new Set<unknown>();
+	const visit = (value: unknown): void => {
+		if (Array.isArray(value)) {
+			value.forEach(visit);
+			return;
+		}
+		if (value === null || typeof value !== "object") return;
+		const record = value as Record<string, unknown>;
+		if (record["type"] === "done" && record["sessionId"] === sessionId) {
+			const alertId = record["alertId"];
+			if (alertId === undefined || !seen.has(alertId)) dones.push(record);
+			seen.add(alertId);
+			return;
+		}
+		Object.values(record).forEach(visit);
+	};
+	page.on("websocket", (ws) => {
+		ws.on("framereceived", ({ payload }) => {
+			if (typeof payload === "string" && payload.includes('"done"'))
+				visit(JSON.parse(payload));
+		});
+	});
+	return dones;
+}
+
+const makeWsRpcClient = RpcClient.make(WsRpcGroup);
+type WsRpcClient = Effect.Effect.Success<typeof makeWsRpcClient>;
 
 test.describe("Claude replay lane", () => {
 	test.beforeEach(({ page }) => {
@@ -578,7 +617,8 @@ test.describe("Claude replay lane", () => {
 				const completedWhenCharlieLeft = turnsCompleted();
 				expect(completedWhenCharlieLeft).toBeGreaterThanOrEqual(2);
 
-				await expect.poll(turnsCompleted).toBe(3);
+				// Charlie's own ~10s turn runs from here.
+				await expect.poll(turnsCompleted, { timeout: 20_000 }).toBe(3);
 				for (const p of [page, other]) {
 					const view = new ChatPage(p);
 					await view.waitForStreamingComplete();
@@ -1085,6 +1125,554 @@ test.describe("Claude replay lane", () => {
 					),
 					contentType: "application/json",
 				});
+			});
+		});
+	});
+
+	test.describe("steering a running turn", () => {
+		const turnsOf = ["turn.completed", "turn.interrupted", "turn.error"];
+		/** Everything the steer scenarios assert on, in store order. */
+		const ledger = (dbPath: string, sessionId: string) => ({
+			events: queryDb<{
+				sequence: number;
+				type: string;
+				input_id: string | null;
+				message_id: string | null;
+				role: string | null;
+			}>(
+				dbPath,
+				`SELECT sequence, type, json_extract(data, '$.inputId') AS input_id,
+					json_extract(data, '$.messageId') AS message_id,
+					json_extract(data, '$.role') AS role
+				FROM events WHERE session_id = ? AND type IN ('input.admitted',
+					'input.sent', 'input.cancelled', 'message.created', 'tool.completed',
+					'turn.completed', 'turn.interrupted', 'turn.error')
+				ORDER BY sequence`,
+				sessionId,
+			),
+			outbox: queryDb<{ command_id: string }>(
+				dbPath,
+				`SELECT command_id FROM provider_command_outbox
+				WHERE session_id = ? AND effect_type = 'send_turn'
+				ORDER BY request_sequence`,
+				sessionId,
+			).map((r) => r.command_id),
+			turns: queryDb<{ id: string; state: string; completed_at: number }>(
+				dbPath,
+				`SELECT id, state, completed_at FROM turns WHERE session_id = ?
+				ORDER BY requested_at, rowid`,
+				sessionId,
+			),
+			userMessages: queryDb<{
+				id: string;
+				steered: number;
+				created_at: number;
+			}>(
+				dbPath,
+				`SELECT id, steered, created_at FROM messages
+				WHERE session_id = ? AND role = 'user' ORDER BY rowid`,
+				sessionId,
+			),
+			pending: queryDb<{ input_id: string; state: string }>(
+				dbPath,
+				"SELECT input_id, state FROM pending_inputs WHERE session_id = ? ORDER BY admitted_at",
+				sessionId,
+			),
+		});
+		const pendingState = (dbPath: string, inputId: string) =>
+			queryDb<{ state: string }>(
+				dbPath,
+				"SELECT state FROM pending_inputs WHERE input_id = ?",
+				inputId,
+			)[0]?.state;
+
+		/** A browser on the replayed session, plus a second client that steers
+		 *  over the typed RPC (the composer's steer UI is not built yet). */
+		async function open(
+			page: Page,
+			relayUrl: string,
+			harness: { projectUrl: string; relayPort: number; eventsDbPath: string },
+		) {
+			const sessionId = decodeURIComponent(
+				harness.projectUrl.slice("/s/".length),
+			);
+			const target = { projectSlug: "e2e-replay", sessionId };
+			const rpc = <A, E>(call: (client: WsRpcClient) => Effect.Effect<A, E>) =>
+				Effect.runPromise(
+					Effect.scoped(Effect.flatMap(makeWsRpcClient, call)).pipe(
+						Effect.provide(RpcClient.layerProtocolSocket()),
+						Effect.provide(
+							Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+						),
+						Effect.provide(Socket.layerWebSocketConstructorGlobal),
+						Effect.provide(RpcSerialization.layerJson),
+					),
+				);
+			const sends = recordSends(page);
+			const dones = recordDones(page, sessionId);
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			return {
+				sessionId,
+				dbPath: harness.eventsDbPath,
+				sends,
+				dones,
+				app,
+				chat,
+				submit: (text: string, delivery: "queue" | "steer") => {
+					const inputId = randomUUID();
+					return rpc((client) =>
+						client.input.submit({ ...target, inputId, text, delivery }),
+					).then((response) => ({ inputId, response }));
+				},
+				sendNow: (inputId: string) =>
+					rpc((client) => client.input.sendNow({ ...target, inputId })),
+				switchModel: (modelId: string) =>
+					rpc((client) =>
+						client.SwitchModel({ ...target, providerId: "claude", modelId }),
+					),
+				/** Each provider result ends one turn; Stop adds no turn end. */
+				turnEnds: () =>
+					turnsOf.reduce(
+						(n, type) => n + countEvents(harness.eventsDbPath, type),
+						0,
+					),
+			};
+		}
+
+		const sequenceOf = (
+			events: ReturnType<typeof ledger>["events"],
+			match: (event: ReturnType<typeof ledger>["events"][number]) => boolean,
+		) => events.find(match)?.sequence ?? Number.NaN;
+
+		test.describe("a steer during a tool", () => {
+			test.use({
+				claudeReplay: { turns: ["steer-during-tool-folds"], delayMs: 100 },
+			});
+
+			test("joins at the tool boundary: one result, two turns, one done", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				const { inputId: b, response } = await s.submit("Bravo", "steer");
+				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				const steering = pendingState(s.dbPath, b);
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("steer-during-tool-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, steering, dones: s.dones, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(steering).toBe("steering");
+				expect(proof.pending).toEqual([
+					{ input_id: a, state: "removed" },
+					{ input_id: b, state: "removed" },
+				]);
+				expect(proof.outbox).toEqual([a, b]);
+				// The steer's message lands after the tool's result and before the
+				// reply that answers both inputs.
+				const bPlaced = sequenceOf(
+					proof.events,
+					(e) => e.type === "message.created" && e.message_id === b,
+				);
+				expect(
+					sequenceOf(proof.events, (e) => e.type === "tool.completed"),
+				).toBeLessThan(bPlaced);
+				expect(
+					proof.events.filter(
+						(e) =>
+							e.type === "message.created" &&
+							e.role === "assistant" &&
+							e.sequence > bPlaced,
+					),
+				).toHaveLength(1);
+				// One result: one turn end and one done, yet two turns — Alpha's
+				// closed by the steer's message, which is marked steered.
+				expect(
+					proof.events
+						.filter((e) => turnsOf.includes(e.type))
+						.map((e) => e.type),
+				).toEqual(["turn.completed"]);
+				expect(s.dones).toHaveLength(1);
+				const bMessage = proof.userMessages.find((m) => m.id === b);
+				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
+					[a, 0],
+					[b, 1],
+				]);
+				expect(proof.turns).toEqual([
+					{ id: a, state: "completed", completed_at: bMessage?.created_at },
+					{ id: b, state: "completed", completed_at: expect.any(Number) },
+				]);
+			});
+		});
+
+		test.describe("a steer that misses the boundary", () => {
+			test.use({
+				claudeReplay: { turns: ["steer-misses-boundary"], delayMs: 30 },
+			});
+
+			test("runs as its own turn after the first: two results, two dones", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				// Alpha is replying (no tool, so no boundary to read the steer at).
+				await expect(s.chat.assistantMessages).toHaveCount(1);
+				const { inputId: b, response } = await s.submit("Bravo", "steer");
+				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				const steering = pendingState(s.dbPath, b);
+
+				await expect.poll(s.turnEnds, { timeout: 30_000 }).toBe(2);
+				await s.chat.waitForStreamingComplete();
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("steer-misses-boundary-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, steering, dones: s.dones, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(steering).toBe("steering");
+				expect(proof.pending).toEqual([
+					{ input_id: a, state: "removed" },
+					{ input_id: b, state: "removed" },
+				]);
+				expect(proof.outbox).toEqual([a, b]);
+				expect(
+					proof.events
+						.filter((e) => turnsOf.includes(e.type))
+						.map((e) => e.type),
+				).toEqual(["turn.completed", "turn.completed"]);
+				expect(s.dones).toHaveLength(2);
+				// Alpha had ended when Bravo started, so Bravo closed no turn.
+				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
+					[a, 0],
+					[b, 0],
+				]);
+				expect(proof.turns.map((t) => [t.id, t.state])).toEqual([
+					[a, "completed"],
+					[b, "completed"],
+				]);
+			});
+		});
+
+		test.describe("two steers at one boundary", () => {
+			test.use({
+				claudeReplay: { turns: ["two-steers-one-boundary"], delayMs: 100 },
+			});
+
+			test("both join: one result answers all three inputs", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				const bravo = await s.submit("Bravo", "steer");
+				const charlie = await s.submit("Charlie", "steer");
+				const [b, c] = [bravo.inputId, charlie.inputId];
+				expect([bravo.response, charlie.response]).toEqual([
+					{ ok: true, sessionId: s.sessionId },
+					{ ok: true, sessionId: s.sessionId },
+				]);
+				const steering = [pendingState(s.dbPath, b), pendingState(s.dbPath, c)];
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+					/\bCharlie\b/,
+				]);
+				await expect(s.chat.assistantMessages.last()).toContainText("CHERRY");
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("two-steers-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b, c }, steering, dones: s.dones, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(steering).toEqual(["steering", "steering"]);
+				expect(proof.pending).toEqual([
+					{ input_id: a, state: "removed" },
+					{ input_id: b, state: "removed" },
+					{ input_id: c, state: "removed" },
+				]);
+				expect(proof.outbox).toEqual([a, b, c]);
+				const toolDone = sequenceOf(
+					proof.events,
+					(e) => e.type === "tool.completed",
+				);
+				for (const id of [b, c])
+					expect(toolDone).toBeLessThan(
+						sequenceOf(
+							proof.events,
+							(e) => e.type === "message.created" && e.message_id === id,
+						),
+					);
+				expect(
+					proof.events
+						.filter((e) => turnsOf.includes(e.type))
+						.map((e) => e.type),
+				).toEqual(["turn.completed"]);
+				expect(s.dones).toHaveLength(1);
+				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
+					[a, 0],
+					[b, 1],
+					[c, 1],
+				]);
+				const placedAt = (id: string) =>
+					proof.userMessages.find((m) => m.id === id)?.created_at;
+				expect(proof.turns).toEqual([
+					{ id: a, state: "completed", completed_at: placedAt(b) },
+					{ id: b, state: "completed", completed_at: placedAt(c) },
+					{ id: c, state: "completed", completed_at: expect.any(Number) },
+				]);
+			});
+		});
+
+		test.describe("Stop with a steer pending", () => {
+			test.use({
+				claudeReplay: { turns: ["stop-with-steer-pending"], delayMs: 100 },
+			});
+
+			test("interrupts the running turn, still answers the steer and pauses the queue", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				const { inputId: b, response } = await s.submit("Bravo", "steer");
+				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				const steering = pendingState(s.dbPath, b);
+				const charlie = await s.submit("Charlie", "queue");
+				const c = charlie.inputId;
+				await expect(
+					page
+						.getByTestId("pending-input-row")
+						.getByTestId("pending-input-text"),
+				).toHaveText([/^Bravo$/, /^Charlie$/]);
+
+				await s.chat.stopBtn.click();
+				await expect
+					.poll(() => countEvents(s.dbPath, "turn.interrupted"))
+					.toBe(1);
+				await expect.poll(s.turnEnds).toBe(2);
+				await s.chat.waitForStreamingComplete();
+				await expect(page.getByTestId("pending-input-paused")).toContainText(
+					"Paused",
+				);
+				// Nothing drains on its own while paused.
+				await page.waitForTimeout(1_500);
+				await expect(
+					page
+						.getByTestId("pending-input-row")
+						.getByTestId("pending-input-text"),
+				).toHaveText([/^Charlie$/]);
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("stop-with-steer-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b, c }, steering, dones: s.dones, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(steering).toBe("steering");
+				expect(proof.pending).toEqual([
+					{ input_id: a, state: "removed" },
+					{ input_id: b, state: "removed" },
+					{ input_id: c, state: "queued" },
+				]);
+				expect(proof.outbox).toEqual([a, b]);
+				expect(
+					proof.events
+						.filter((e) => turnsOf.includes(e.type))
+						.map((e) => e.type),
+				).toEqual(["turn.interrupted", "turn.completed"]);
+				// One done per result, plus the one Stop sends itself.
+				expect(s.dones).toHaveLength(3);
+				// Alpha was interrupted before Bravo started: Bravo closed no turn.
+				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
+					[a, 0],
+					[b, 0],
+				]);
+				expect(proof.turns.map((t) => [t.id, t.state])).toEqual([
+					[a, "interrupted"],
+					[b, "completed"],
+				]);
+			});
+		});
+
+		test.describe("Send now on a queued input", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["queued-input-promoted-to-steer"],
+					delayMs: 100,
+				},
+			});
+
+			test("promotes the queued row to a steer", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				const { inputId: b, response } = await s.submit("Bravo", "queue");
+				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				const queued = pendingState(s.dbPath, b);
+				expect(await s.sendNow(b)).toEqual({ ok: true });
+				const steering = pendingState(s.dbPath, b);
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("send-now-steer-proof.json", {
+					body: JSON.stringify(
+						{ inputs: { a, b }, queued, steering, dones: s.dones, ...proof },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect([queued, steering]).toEqual(["queued", "steering"]);
+				expect(proof.pending).toEqual([
+					{ input_id: a, state: "removed" },
+					{ input_id: b, state: "removed" },
+				]);
+				expect(proof.outbox).toEqual([a, b]);
+				expect(
+					proof.events
+						.filter((e) => turnsOf.includes(e.type))
+						.map((e) => e.type),
+				).toEqual(["turn.completed"]);
+				expect(s.dones).toHaveLength(1);
+				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
+					[a, 0],
+					[b, 1],
+				]);
+				expect(proof.turns.map((t) => [t.id, t.state])).toEqual([
+					[a, "completed"],
+					[b, "completed"],
+				]);
+			});
+		});
+
+		test.describe("a steer that cannot join", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn"],
+					delayMs: 300,
+					models: [
+						{
+							id: "claude-fable-5",
+							name: "Claude Fable 5",
+							providerId: "claude",
+						},
+						{
+							id: "claude-sonnet-5",
+							name: "Claude Sonnet 5",
+							providerId: "claude",
+						},
+					],
+				},
+			});
+
+			test("is refused with its reason and admits nothing", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await expect(s.chat.stopBtn).toBeVisible();
+				const slash = await s.submit("/compact", "steer");
+				await s.switchModel("claude-sonnet-5");
+				const otherModel = await s.submit("Bravo", "steer");
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				const a = s.sends[0]?.commandId ?? "";
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("steer-refused-proof.json", {
+					body: JSON.stringify({ a, slash, otherModel, ...proof }, null, 2),
+					contentType: "application/json",
+				});
+
+				expect(slash.response).toEqual({ ok: false, reason: "slash_command" });
+				expect(otherModel.response).toEqual({
+					ok: false,
+					reason: "model_differs",
+				});
+				// Only Alpha's own row (sent on idle): the refused steers left none.
+				expect(proof.pending).toEqual([{ input_id: a, state: "removed" }]);
+				expect(proof.outbox).toEqual([a]);
+				expect(
+					proof.events
+						.filter((e) => e.type.startsWith("input."))
+						.map((e) => [e.type, e.input_id]),
+				).toEqual([
+					["input.admitted", a],
+					["input.sent", a],
+				]);
+				await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
 			});
 		});
 	});

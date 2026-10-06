@@ -5,8 +5,9 @@
  * RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-replay-trace-capture.test.ts
  * Each capture is copied over its fixture only after every turn finished and the
- * trace shows the SDK echoing each sent input id, in send order. Review the
- * traces before committing them.
+ * trace shows the SDK echoing each sent input id, in send order: each one
+ * started once and answered by exactly one result.
+ * Review the traces before committing them.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -18,7 +19,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { setTimeout as sleep } from "node:timers/promises";
+import { Effect, Schedule } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type ClaudeSDKCommandLifecycleMessage,
@@ -46,11 +48,21 @@ const redact = (raw: Raw): Raw =>
 async function capture(options: {
 	fixture: string;
 	modelId: string;
-	/** Later prompts are sent once the first turn reports a tool running. */
+	/** Later prompts are sent once the first turn reports `sendLaterOn`. */
 	prompts: readonly [string, ...string[]];
+	/** The browser frame that sends later prompts (default: a tool running). */
+	sendLaterOn?: "tool_executing" | "delta";
+	/** How later prompts are sent: queued, steered, or queued then promoted to
+	 *  a steer with sendNow (default: queue). */
+	later?: "queue" | "steer" | "sendNow";
+	/** Stop the session this long after the later prompts were sent. */
+	stopAfterMs?: number;
+	/** Provider results the capture ends with (default: one per prompt). */
+	results?: number;
 	expectReply: string;
 	setup?: (projectDir: string) => void;
 }): Promise<void> {
+	const results = options.results ?? options.prompts.length;
 	const captureDir = mkdtempSync(join(tmpdir(), "conduit-replay-capture-"));
 	const harness = ProcessHarness.create({
 		dist: "dist",
@@ -73,20 +85,52 @@ async function capture(options: {
 		const cursor = browser.frames.length;
 		const [firstPrompt, ...laterPrompts] = options.prompts;
 		const commandIds = options.prompts.map(() => randomUUID());
-		const send = (text: string, commandId: string) =>
-			Effect.runPromise(
-				browser.rpc.input
-					.submit({
-						projectSlug: "process-test",
-						sessionId,
-						originId: browser.originId,
-						inputId: commandId,
-						delivery: "queue",
-						text,
-					})
-					.pipe(Effect.timeout(240_000)),
+		const target = { projectSlug: "process-test", sessionId };
+		const submit = (
+			text: string,
+			commandId: string,
+			delivery: "queue" | "steer",
+		) =>
+			browser.rpc.input
+				.submit({
+					...target,
+					originId: browser.originId,
+					inputId: commandId,
+					delivery,
+					text,
+				})
+				.pipe(Effect.timeout(240_000));
+		// A steer is refused while a tool approval is still open, so retry until
+		// the approval has landed and the provider takes it.
+		const steer = <A extends { readonly ok: boolean }, E>(
+			attempt: Effect.Effect<A, E>,
+		) =>
+			attempt.pipe(
+				Effect.filterOrFail(
+					(result) => result.ok,
+					(result) => new Error(`steer refused: ${JSON.stringify(result)}`),
+				),
+				Effect.retry({ times: 50, schedule: Schedule.spaced("200 millis") }),
 			);
-		await send(firstPrompt, commandIds[0] ?? "");
+		const sendLater = (text: string, commandId: string) =>
+			Effect.runPromise(
+				options.later === "steer"
+					? steer(submit(text, commandId, "steer"))
+					: options.later === "sendNow"
+						? submit(text, commandId, "queue").pipe(
+								Effect.zipRight(
+									steer(
+										browser.rpc.input.sendNow({
+											...target,
+											originId: browser.originId,
+											inputId: commandId,
+										}),
+									),
+								),
+							)
+						: submit(text, commandId, "queue"),
+			);
+		await Effect.runPromise(submit(firstPrompt, commandIds[0] ?? "", "queue"));
 		const laterSends: Promise<unknown>[] = [];
 		const answered = new Set<unknown>();
 		await vi.waitFor(
@@ -103,18 +147,36 @@ async function capture(options: {
 				}
 				if (
 					laterSends.length < laterPrompts.length &&
-					frames.some(({ message }) => message["type"] === "tool_executing")
+					frames.some(
+						({ message }) =>
+							message["type"] === (options.sendLaterOn ?? "tool_executing"),
+					)
 				) {
-					// Mid-turn: the first turn is running its tool.
+					// Mid-turn: the first turn is running its tool, or replying.
 					for (const [index, text] of laterPrompts.entries())
-						laterSends.push(send(text, commandIds[index + 1] ?? ""));
+						laterSends.push(sendLater(text, commandIds[index + 1] ?? ""));
+					const { stopAfterMs } = options;
+					if (stopAfterMs !== undefined)
+						laterSends.push(
+							Promise.all(laterSends)
+								.then(() => sleep(stopAfterMs))
+								.then(() =>
+									Effect.runPromise(
+										browser.rpc.CancelSession({
+											...target,
+											commandId: randomUUID(),
+										}),
+									),
+								),
+						);
 				}
+				// One done per provider result, and Stop sends one of its own.
 				expect(
 					frames.filter(
 						({ message }) =>
 							message["type"] === "done" && message["sessionId"] === sessionId,
 					),
-				).toHaveLength(options.prompts.length);
+				).toHaveLength(results + (options.stopAfterMs === undefined ? 0 : 1));
 			},
 			{ timeout: 240_000, interval: 100 },
 		);
@@ -145,18 +207,19 @@ async function capture(options: {
 		);
 		for (const commandId of commandIds) {
 			expect(
-				lifecycle
-					.filter((message) => message.command_uuid === commandId)
-					.map((message) => message.state),
-			).toEqual(expect.arrayContaining(["started", "completed"]));
+				lifecycle.filter(
+					(message) =>
+						message.command_uuid === commandId && message.state === "started",
+				),
+			).toHaveLength(1);
 		}
 		expect([
 			...new Set(lifecycle.map((message) => message.command_uuid)),
 		]).toEqual(commandIds);
+		const resultFrames = trace.filter((message) => message.type === "result");
+		expect(resultFrames).toHaveLength(results);
 		expect(
-			trace.flatMap((message) =>
-				message.type === "result" ? (message.user_message_uuids ?? []) : [],
-			),
+			resultFrames.flatMap((message) => message.user_message_uuids ?? []),
 		).toEqual(commandIds);
 		writeFileSync(
 			join(TRACES, `${options.fixture}.jsonl`),
@@ -187,8 +250,8 @@ describe.skipIf(!RUN_EXPENSIVE)(
 			{ timeout: 300_000 },
 		);
 
-		// Conduit's turn admission gate holds the mid-turn send until the first
-		// turn ends, so the SDK sees the second input only then: two results.
+		// The inbox queues the mid-turn send until the first turn ends, so the
+		// SDK sees the second input only then: two results.
 		it(
 			"captures second-input-held-to-turn-end",
 			() =>
@@ -200,6 +263,94 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						"Now reply with just the word pong",
 					],
 					expectReply: "pong",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		const toolTurn = (seconds: number) =>
+			`Use the Bash tool to run exactly \`sleep ${seconds}; echo A-DONE\`. After it finishes, reply with one short sentence that includes A-DONE.`;
+
+		// The steer lands at the tool boundary: one result answers both inputs.
+		it(
+			"captures steer-during-tool-folds",
+			() =>
+				capture({
+					fixture: "steer-during-tool-folds",
+					modelId: "claude-fable-5",
+					prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
+					later: "steer",
+					results: 1,
+					expectReply: "BANANA",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		// A reply with no tool has no boundary to read the steer at, so the SDK
+		// runs it as its own turn after the first: two results.
+		it(
+			"captures steer-misses-boundary",
+			() =>
+				capture({
+					fixture: "steer-misses-boundary",
+					modelId: "claude-fable-5",
+					prompts: [
+						"Without using any tools, write a 200-word story about a lighthouse keeper.",
+						"Also: end your next reply with the word BANANA.",
+					],
+					sendLaterOn: "delta",
+					later: "steer",
+					expectReply: "BANANA",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		it(
+			"captures two-steers-one-boundary",
+			() =>
+				capture({
+					fixture: "two-steers-one-boundary",
+					modelId: "claude-fable-5",
+					prompts: [
+						toolTurn(8),
+						"Also: include the word BANANA in your reply.",
+						"Also: include the word CHERRY in your reply.",
+					],
+					later: "steer",
+					results: 1,
+					expectReply: "CHERRY",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		// Stop interrupts the running turn; the SDK reports the steer still
+		// queued and runs it as its own turn.
+		it(
+			"captures stop-with-steer-pending",
+			() =>
+				capture({
+					fixture: "stop-with-steer-pending",
+					modelId: "claude-fable-5",
+					prompts: [
+						toolTurn(15),
+						"Also: end your next reply with the word BANANA.",
+					],
+					later: "steer",
+					stopAfterMs: 1_000,
+					expectReply: "BANANA",
+				}),
+			{ timeout: 300_000 },
+		);
+
+		it(
+			"captures queued-input-promoted-to-steer",
+			() =>
+				capture({
+					fixture: "queued-input-promoted-to-steer",
+					modelId: "claude-fable-5",
+					prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
+					later: "sendNow",
+					results: 1,
+					expectReply: "BANANA",
 				}),
 			{ timeout: 300_000 },
 		);

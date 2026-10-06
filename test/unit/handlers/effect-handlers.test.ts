@@ -2134,6 +2134,7 @@ describe("handlePermissionResponse", () => {
 				const releaseSend = yield* Deferred.make<void>();
 				const instance: ProviderInstance = {
 					providerId: "claude",
+					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
@@ -4240,7 +4241,7 @@ describe("handleMessage", () => {
 					modelID: "big-pickle",
 				});
 
-				const dispatchedSessionId = yield* sendMessageToSession({
+				const { sessionId: dispatchedSessionId } = yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "ses-local-placeholder",
 					text: "Test query",

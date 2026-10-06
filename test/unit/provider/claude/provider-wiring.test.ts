@@ -46,6 +46,7 @@ describe("Provider wiring with Claude provider instance", () => {
 		// Create a minimal mock for opencode instance
 		const opencode = {
 			providerId: "opencode",
+			steering: false,
 			discoverEffect: () =>
 				Effect.succeed({
 					models: [],

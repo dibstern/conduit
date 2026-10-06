@@ -275,6 +275,10 @@ export interface ProviderInstance {
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 
+	/** The provider reads an input handed off mid-turn at its next tool
+	 *  boundary and reports when it starts (a steer). */
+	readonly steering: boolean;
+
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(): Effect.Effect<
 		ProviderCapabilities,

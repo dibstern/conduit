@@ -658,7 +658,7 @@ const startProcessing = (input: ProviderTurnServiceSendInput) =>
 
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
-		yield* startProcessing(input);
+		if (!input.steer) yield* startProcessing(input);
 		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;
 		const providerId =

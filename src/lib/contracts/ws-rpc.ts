@@ -24,6 +24,7 @@ import { ProviderDriverKindSchema } from "./provider-instance.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
+	STEER_BLOCKERS,
 	StoredEventSchema,
 } from "./stored-event.js";
 
@@ -226,6 +227,7 @@ export const HistoryMessageSchema = Schema.Struct({
 	role: Schema.Literal("user", "assistant"),
 	isBackfilled: Schema.optional(Schema.Boolean),
 	inputId: Schema.optional(Schema.String),
+	steered: Schema.optional(Schema.Boolean),
 	text: Schema.optional(Schema.String),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(
@@ -265,10 +267,14 @@ export const SessionDetailItemSchema = Schema.Union(
 		}),
 	}),
 	// The session's inbox state, computed on read. Paused: inputs wait behind
-	// a turn that was stopped or failed, until Resume or a normal turn.
+	// a turn that was stopped or failed, until Resume or a normal turn. Steer:
+	// why no draft could be steered now (capability or open prompt), or null.
 	Schema.Struct({
 		_tag: Schema.Literal("inbox"),
-		inbox: Schema.Struct({ paused: Schema.Boolean }),
+		inbox: Schema.Struct({
+			paused: Schema.Boolean,
+			steer: Schema.NullOr(Schema.Literal("no_steering", "prompt_open")),
+		}),
 	}),
 );
 
@@ -420,18 +426,26 @@ export const ViewSessionResponseSchema = Schema.Struct({
 	draft: Schema.optional(Schema.String),
 });
 
-export const SubmitInputResponseSchema = Schema.Struct({
-	ok: Schema.Literal(true),
-	sessionId: Schema.String,
+const SteerRefusedSchema = Schema.Struct({
+	ok: Schema.Literal(false),
+	reason: Schema.Literal(...STEER_BLOCKERS),
 });
 
-/** Ok, or the input already started (or never existed): it cannot be changed. */
+/** Ok, or a refused steer: nothing was admitted, so the browser keeps the text. */
+export const SubmitInputResponseSchema = Schema.Union(
+	Schema.Struct({ ok: Schema.Literal(true), sessionId: Schema.String }),
+	SteerRefusedSchema,
+);
+
+/** Ok; or the input already started (or never existed) and cannot be changed;
+ *  or Send now could not steer it, so it stays queued. */
 export const InboxCommandResponseSchema = Schema.Union(
 	Schema.Struct({ ok: Schema.Literal(true) }),
 	Schema.Struct({
 		ok: Schema.Literal(false),
 		reason: Schema.Literal("already_started"),
 	}),
+	SteerRefusedSchema,
 );
 
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
@@ -1637,7 +1651,9 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 ) {}
 
 /** The composer's only send. The inbox hands it off when the session is idle
- *  and queues it otherwise; a retry with the same input id is a no-op. */
+ *  and queues it otherwise, or with delivery "steer" hands it into the running
+ *  turn; a refused steer admits nothing. A retry with the same input id is a
+ *  no-op. */
 export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
 	"input.submit",
 	{

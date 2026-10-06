@@ -127,6 +127,11 @@ export class TestWsClient {
 							...(opts.images ? { images: [...opts.images] } : {}),
 							...(opts.originId ? { originId: opts.originId } : {}),
 						});
+						// A queued submit is never refused; only a steer can be.
+						if (!result.ok)
+							return yield* Effect.dieMessage(
+								`submit refused: ${result.reason}`,
+							);
 						return result.sessionId;
 					}),
 				).pipe(

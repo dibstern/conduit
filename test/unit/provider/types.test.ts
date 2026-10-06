@@ -38,6 +38,7 @@ describe("ProviderInstance types", () => {
 		// Compile-time check: if the interface changes shape, this won't compile.
 		const instance: ProviderInstance = {
 			providerId: "test",
+			steering: false,
 			discoverEffect: () =>
 				Effect.succeed({
 					models: [],

@@ -35,8 +35,13 @@ export type ClaudeTraceName =
 	| "extra-folder-read-turn"
 	| "pong-thinking-text-turn"
 	| "second-input-held-to-turn-end"
+	| "queued-input-promoted-to-steer"
 	| "skill-loads-turn"
-	| "subagent-task-turn";
+	| "steer-during-tool-folds"
+	| "steer-misses-boundary"
+	| "stop-with-steer-pending"
+	| "subagent-task-turn"
+	| "two-steers-one-boundary";
 
 export interface ClaudeReplayPlan {
 	/** Committed traces in send order; each answers as many prompts as it

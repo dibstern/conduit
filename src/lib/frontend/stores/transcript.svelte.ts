@@ -123,6 +123,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 		tokens: sourceTokens,
 		isBackfilled,
 		inputId,
+		steered,
 		time,
 		cost,
 		modelExecution,
@@ -134,6 +135,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 		...base,
 		...(isBackfilled === undefined ? {} : { isBackfilled }),
 		...(inputId === undefined ? {} : { inputId }),
+		...(steered === undefined ? {} : { steered }),
 		...(parts === undefined ? {} : { parts }),
 		...(time === undefined
 			? {}
