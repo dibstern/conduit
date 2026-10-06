@@ -1,0 +1,1278 @@
+{
+	"name": "side-thread-question",
+	"model": "opencode/big-pickle",
+	"recordedAt": "2026-10-05T09:26:45.245Z",
+	"initMessages": [
+		{
+			"type": "project_attached",
+			"slug": "side-thread-status-recording"
+		},
+		{
+			"type": "protocol_version",
+			"version": 3,
+			"buildId": "dev"
+		},
+		{
+			"type": "server_update",
+			"restartAvailable": false
+		},
+		{
+			"type": "client_count",
+			"count": 1
+		},
+		{
+			"type": "session_family",
+			"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+			"sessions": [
+				{
+					"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"title": "New session - 2026-10-05T09:26:25.291Z",
+					"status": "idle",
+					"createdAt": 1791192385297,
+					"updatedAt": 1791192385297,
+					"messageCount": 0,
+					"attention": "idle"
+				}
+			]
+		},
+		{
+			"type": "status",
+			"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+			"status": "idle"
+		},
+		{
+			"type": "connection_status",
+			"status": "connected"
+		},
+		{
+			"type": "model_info",
+			"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+			"model": "big-pickle",
+			"provider": "opencode"
+		},
+		{
+			"type": "system_error",
+			"code": "INIT_FAILED",
+			"message": "Failed to list agents: An unknown error occurred in Effect.tryPromise"
+		}
+	],
+	"turns": [
+		{
+			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"events": [
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"text": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+					"originId": "record-2b4b48da-8ead-48fc-8e9f-b76720941dcb"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "New session - 2026-10-05T09:26:25.291Z",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192387382,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "New session - 2026-10-05T09:26:25.291Z",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192387390,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "New session - 2026-10-05T09:26:25.291Z",
+							"status": "busy",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192387421,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "New session - 2026-10-05T09:26:25.291Z",
+							"status": "busy",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192388209,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "model_list",
+					"providers": [
+						{
+							"id": "claude",
+							"name": "Anthropic - claude",
+							"configured": true,
+							"models": [
+								{
+									"id": "default",
+									"name": "Default (recommended)",
+									"provider": "claude",
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "opus",
+									"name": "Opus 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "fable",
+									"name": "Fable 5.1",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "sonnet",
+									"name": "Sonnet 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "haiku",
+									"name": "Haiku 4.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 8192
+									}
+								},
+								{
+									"id": "claude-sonnet-5",
+									"name": "Sonnet 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "claude-opus-5",
+									"name": "Opus 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-fable-5",
+									"name": "Fable 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-opus-4-8",
+									"name": "Opus 4.8",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-7",
+									"name": "Opus 4.7",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-6",
+									"name": "Opus 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-sonnet-4-6",
+									"name": "Sonnet 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								}
+							]
+						}
+					]
+				},
+				{
+					"type": "variant_info",
+					"variant": "",
+					"variants": []
+				},
+				{
+					"type": "context_window_info",
+					"contextWindow": "",
+					"options": []
+				},
+				{
+					"type": "permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "default_model_info",
+					"model": "big-pickle",
+					"provider": "opencode",
+					"variant": ""
+				},
+				{
+					"type": "default_permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "busy",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192391875,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "thinking_start",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"status": "processing"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " user asked",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " me to remember a word and",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " reply with a",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " specific phrase. But",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " there's",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " a caveat: the system reminder says messages",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " generated",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " while",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " running local",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " commands shouldn't",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " be responded",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " to. However,",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " this message has",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " no command output",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " — it's a",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " genuine",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " user message. So I should respond.\n\n",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "Simple",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " reply",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_delta",
+					"text": ": \"ok, remembered.\"",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "thinking_stop",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "delta",
+					"text": "ok",
+					"partId": "prt_10b62e593001SRsKklyiNveslL",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "delta",
+					"text": ", remembered.",
+					"partId": "prt_10b62e593001SRsKklyiNveslL",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15873,
+						"output": 7,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 5763,
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15873,
+						"output": 7,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 5763,
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"messageId": "msg_10b62cf2a001I4ko3BK8BlFe8p"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef49d38f4ffeVyFjiQWGm99k3r"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393144,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		},
+		{
+			"prompt": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we use? Wait for my answer before continuing.",
+			"events": [
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393701,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"attention": "idle"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15873,
+						"output": 7,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 5763,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"messageId": "msg_10b62e7d4001whUi08ibWCHMdw"
+				},
+				{
+					"type": "thinking_start",
+					"messageId": "msg_10b62e7d4001whUi08ibWCHMdw",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393735,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393736,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"text": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we use? Wait for my answer before continuing.",
+					"originId": "record-2b4b48da-8ead-48fc-8e9f-b76720941dcb"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393778,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393781,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "busy",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393785,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "busy",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393788,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "tool_start",
+					"id": "call_01a10b62fb75763cb81cc523",
+					"name": "AskUserQuestion",
+					"messageId": "msg_10b62e82a002CI7EluIPGw7cDo",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_01a10b62fb75763cb81cc523",
+					"name": "AskUserQuestion",
+					"input": {
+						"questions": [
+							{
+								"question": "Which word should we use?",
+								"header": "Choice",
+								"options": [
+									{
+										"label": "Alpha",
+										"description": "Use the word 'Alpha'"
+									},
+									{
+										"label": "Beta",
+										"description": "Use the word 'Beta'"
+									}
+								]
+							}
+						]
+					},
+					"messageId": "msg_10b62e82a002CI7EluIPGw7cDo",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "busy",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192393788,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"processing": true,
+							"pendingQuestionCount": 1,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "needs-reply"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"pendingQuestionCount": 1,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "needs-reply"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"status": "processing"
+				},
+				{
+					"type": "ask_user",
+					"toolId": "que_10b62fbb6001zkxzvMtr3z5nw3",
+					"questions": [
+						{
+							"question": "Which word should we use?",
+							"header": "Choice",
+							"options": [
+								{
+									"label": "Alpha",
+									"description": "Use the word 'Alpha'"
+								},
+								{
+									"label": "Beta",
+									"description": "Use the word 'Beta'"
+								}
+							],
+							"multiSelect": false,
+							"custom": true
+						}
+					],
+					"providerId": "opencode",
+					"toolUseId": "call_01a10b62fb75763cb81cc523",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "notification_event",
+					"eventType": "ask_user",
+					"alertId": "ses_ef49d182effenkHixYKQEkB79c:question:que_10b62fbb6001zkxzvMtr3z5nw3",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "tool_result",
+					"id": "call_01a10b62fb75763cb81cc523",
+					"content": "User has answered your questions: \"Which word should we use?\"=\"Alpha\". You can now continue with the user's answers in mind.",
+					"is_error": false,
+					"messageId": "msg_10b62e82a002CI7EluIPGw7cDo",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3533,
+						"output": 127,
+						"cache_read": 13133,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 6585,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"messageId": "msg_10b62e82a002CI7EluIPGw7cDo",
+					"midTurn": true
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3533,
+						"output": 127,
+						"cache_read": 13133,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 6585,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"messageId": "msg_10b62e82a002CI7EluIPGw7cDo",
+					"midTurn": true
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "busy",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192400378,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 25,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "busy",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192400382,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 25,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "Alpha",
+					"partId": "prt_10b63123f001QZA6ofCQfCx4Jt",
+					"messageId": "msg_10b6301e5002Fz5Abqj0CBgWs4",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "delta",
+					"text": " it",
+					"partId": "prt_10b63123f001QZA6ofCQfCx4Jt",
+					"messageId": "msg_10b6301e5002Fz5Abqj0CBgWs4",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "delta",
+					"text": " is.",
+					"partId": "prt_10b63123f001QZA6ofCQfCx4Jt",
+					"messageId": "msg_10b6301e5002Fz5Abqj0CBgWs4",
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 168,
+						"output": 6,
+						"cache_read": 16666,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 10922,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"messageId": "msg_10b6301e5002Fz5Abqj0CBgWs4"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 168,
+						"output": 6,
+						"cache_read": 16666,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 10922,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c",
+					"messageId": "msg_10b6301e5002Fz5Abqj0CBgWs4"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef49d182effenkHixYKQEkB79c"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192404701,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 34,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+					"sessions": [
+						{
+							"id": "ses_ef49d182effenkHixYKQEkB79c",
+							"title": "Use the question tool to ask me to choose between Alpha and Beta, with header Choice and question Which word should we u",
+							"status": "idle",
+							"createdAt": 1791192393701,
+							"updatedAt": 1791192404703,
+							"messageCount": 0,
+							"parentID": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"sideThread": true,
+							"forkMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"forkPointTimestamp": 1791192387411,
+							"forkPointMessageId": "msg_10b62cf2a001I4ko3BK8BlFe8p",
+							"unread": true,
+							"lastTurnEndVersion": 34,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49d38f4ffeVyFjiQWGm99k3r",
+							"title": "Remembering alpha word",
+							"status": "idle",
+							"createdAt": 1791192385297,
+							"updatedAt": 1791192393171,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 37,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		}
+	]
+}

@@ -154,8 +154,8 @@ export const sessionHandlers: {
 		// other code paths.
 		return [
 			{
-				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, fork_point_event, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?)
+				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, fork_point_event, side_thread, permission_mode, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?)
 					 ON CONFLICT (id) DO UPDATE SET
 					     provider = CASE
 					       WHEN EXISTS (
@@ -180,6 +180,8 @@ export const sessionHandlers: {
 				     END,
 				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
 				     fork_point_event = COALESCE(excluded.fork_point_event, sessions.fork_point_event),
+				     side_thread = MAX(sessions.side_thread, excluded.side_thread),
+				     permission_mode = COALESCE(sessions.permission_mode, excluded.permission_mode),
 				     updated_at = excluded.updated_at`,
 				params: [
 					event.data.sessionId,
@@ -188,6 +190,8 @@ export const sessionHandlers: {
 					event.data.title,
 					event.data.parentId ?? null,
 					event.data.forkPointEvent ?? null,
+					event.data.sideThread ? 1 : 0,
+					event.data.permissionMode ?? null,
 					event.createdAt,
 					event.createdAt,
 				],

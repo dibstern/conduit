@@ -92,3 +92,40 @@ export function copyForkHistory(
 			: lastMessageId;
 	return { events, ...(forkMessageId !== undefined && { forkMessageId }) };
 }
+
+/**
+ * Where a Side Thread forks off a parent that is mid-turn, read from the
+ * parent's events. Undefined while the parent is idle: the fork then copies
+ * everything, as before.
+ *
+ * A turn ends at `session.status` idle on both providers; OpenCode also emits
+ * turn.completed for each intermediate step, so that alone is not a turn end.
+ * `lastCompleted` is the final message of the last turn that completed before
+ * that idle: the fork keeps messages up to and including it.
+ */
+export function midTurnForkBoundary(
+	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
+): { lastCompleted?: string } | undefined {
+	let busy = false;
+	let idle = -1;
+	parentEvents.forEach((event, index) => {
+		if (event.type !== "session.status") return;
+		busy = event.data.status !== "idle";
+		if (!busy) idle = index;
+	});
+	// A prompt is persisted before the provider reports busy.
+	if (
+		!busy &&
+		(idle < 0 ||
+			!parentEvents
+				.slice(idle + 1)
+				.some((event) => event.type === "message.created"))
+	)
+		return undefined;
+	let completed = idle - 1;
+	while (completed >= 0 && parentEvents[completed]?.type !== "turn.completed")
+		completed--;
+	const completedEvent = parentEvents[completed];
+	const lastCompleted = completedEvent && messageIdOf(completedEvent);
+	return lastCompleted ? { lastCompleted } : {};
+}

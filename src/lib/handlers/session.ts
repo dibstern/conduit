@@ -522,7 +522,10 @@ export const forkSessionForClient = ({
 
 		// Through the seam: forking upstream and forgetting to record the forked
 		// session locally is the same parity gap as creating one and forgetting.
-		const forked = yield* forkSession(sessionId, messageId);
+		const forked = yield* forkSession(
+			sessionId,
+			messageId === undefined ? undefined : { messageId },
+		);
 
 		yield* clearEffectOverrideSession(sessionId);
 

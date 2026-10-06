@@ -168,7 +168,7 @@ export async function forkClaudeTranscript(
 		readonly messageId?: string;
 		readonly fallbackMessageIds?: readonly string[];
 	},
-	sdk: ClaudeSessionForkSdk = defaultClaudeSessionForkSdk,
+	sdk: ClaudeSessionForkSdk,
 ): Promise<{ sdkSessionId: string }> {
 	const options = {
 		dir: input.projectDir,

@@ -94,7 +94,9 @@ export interface SessionManagerShape {
 	}>;
 	getDefaultSessionId(title?: string): Promise<string>;
 	getLastKnownSessionCount(): number;
-	getSessionParentMap(): Map<string, string>;
+	getSessionParentMap(options?: {
+		readonly activityOnly?: boolean;
+	}): Map<string, string>;
 	getLastMessageAtMap(): ReadonlyMap<string, number>;
 
 	createSession(

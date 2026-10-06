@@ -1598,6 +1598,19 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	},
 ) {}
 
+export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
+	"StartSideThread",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ sessionId: Schema.String }),
+		payload: {
+			projectSlug: NonEmptyString,
+			parentSessionId: NonEmptyString,
+			title: NonEmptyString,
+		},
+	},
+) {}
+
 export class RespondPermission extends Schema.TaggedRequest<RespondPermission>()(
 	"RespondPermission",
 	{
@@ -1873,6 +1886,7 @@ export const WsRpcRequest = Schema.Union(
 	PreWarmSession,
 	DeleteSession,
 	ForkSession,
+	StartSideThread,
 	RespondPermission,
 	AnswerQuestion,
 	RejectQuestion,
@@ -2133,6 +2147,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(PreWarmSession),
 	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(ForkSession),
+	Rpc.fromTaggedRequest(StartSideThread),
 	Rpc.fromTaggedRequest(RespondPermission),
 	Rpc.fromTaggedRequest(AnswerQuestion),
 	Rpc.fromTaggedRequest(RejectQuestion),

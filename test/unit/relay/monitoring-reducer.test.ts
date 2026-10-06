@@ -71,6 +71,23 @@ const DEFAULT_CONFIG: PollerGatingConfig = {
 	maxPollers: 50,
 };
 
+it("stops busy and retry at a Side Thread edge while preserving subagent ancestry", () => {
+	for (const status of ["busy", "retry"]) {
+		const rows = new Map<
+			string,
+			{ status: string; parentID?: string; sideThread?: boolean }
+		>([
+			["root", { status: "idle" }],
+			["side", { status: "idle", parentID: "root", sideThread: true }],
+			["agent", { status, parentID: "side" }],
+		]);
+		expect([...busySessionIds(rows)]).toEqual(["agent", "side"]);
+		expect([...busySessionIds(rows, ["side"])]).not.toContain("root");
+		rows.set("ordinary", { status, parentID: "root" });
+		expect(busySessionIds(rows).has("root")).toBe(true);
+	}
+});
+
 describe("selectMonitoringCandidates", () => {
 	it("keeps grace, SSE deadlines, capped sessions and deletions on the worklist", () => {
 		const state = {

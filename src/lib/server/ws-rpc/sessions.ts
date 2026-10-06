@@ -6,6 +6,7 @@ import {
 } from "../../daemon/config-persistence.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
 import { rewindSessionToMessage } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
@@ -293,6 +294,22 @@ export const sessionsHandlers = {
 				}),
 			),
 		),
+	StartSideThread: (request) =>
+		Effect.gen(function* () {
+			const session = yield* forkSession(request.parentSessionId, {
+				side: { title: request.title },
+			});
+			const sessionManager = yield* SessionManagerServiceTag;
+			yield* sessionManager.pushViewerFamilies();
+			return { sessionId: session.id };
+		}).pipe(
+			Effect.catchTag("SessionCommandError", (error) =>
+				Effect.fail(
+					new WsRpcError({ message: error.message ?? String(error.cause) }),
+				),
+			),
+			Effect.catchAll(mapRpcFailure("StartSideThread")),
+		),
 	LoadMoreHistory: (request) =>
 		loadMoreHistoryForSession({
 			sessionId: request.sessionId,
@@ -351,6 +368,7 @@ export const sessionsHandlers = {
 	| "ViewSession"
 	| "DeleteSession"
 	| "ForkSession"
+	| "StartSideThread"
 	| "LoadMoreHistory"
 	| "RewindSession"
 >;

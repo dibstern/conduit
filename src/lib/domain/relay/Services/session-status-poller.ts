@@ -102,12 +102,17 @@ export const isBusyIn = (
 	statuses: Readonly<Record<string, SessionStatus>>,
 	sessionId: string,
 	parents: ReadonlyMap<string, string> = new Map(),
+	sideThreadIds: ReadonlySet<string> = new Set(),
 ): boolean =>
 	busySessionIds(
 		new Map(
 			Object.entries(statuses).map(([id, status]) => [
 				id,
-				{ status: status.type, parentID: parents.get(id) },
+				{
+					status: status.type,
+					parentID: parents.get(id),
+					sideThread: sideThreadIds.has(id),
+				},
 			]),
 		),
 	).has(sessionId);
@@ -116,11 +121,12 @@ export const isBusyIn = (
 export const isProcessing = (
 	sessionId: string,
 	parents: ReadonlyMap<string, string> = new Map(),
+	sideThreadIds: ReadonlySet<string> = new Set(),
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* PollerStateTag;
 		const state = yield* Ref.get(ref);
-		return isBusyIn(state.previousStatuses, sessionId, parents);
+		return isBusyIn(state.previousStatuses, sessionId, parents, sideThreadIds);
 	}).pipe(Effect.withSpan("statusPoller.isProcessing"));
 
 /** Check if any session's status type changed or sessions were added/removed. */

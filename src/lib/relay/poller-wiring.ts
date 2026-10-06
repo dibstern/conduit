@@ -39,7 +39,9 @@ interface PollerManagerLike {
 
 /** Narrowed Effect session service capabilities needed by poller wiring. */
 interface SessionServiceLike {
-	getSessionParentMap(): Map<string, string>;
+	getSessionParentMap(options?: {
+		readonly activityOnly?: boolean;
+	}): Map<string, string>;
 }
 
 interface LegacyStatusPollerPort {
@@ -86,7 +88,9 @@ const handlePollerEventsEffect = (
 			}
 		}
 
-		const parentMap = yield* sessionService.getSessionParentMap();
+		const parentMap = yield* sessionService.getSessionParentMap({
+			activityOnly: true,
+		});
 		for (const msg of events) {
 			const pollerViewers = polledSessionId
 				? wsHandler.getClientsForSession(polledSessionId)
@@ -190,7 +194,9 @@ export function wirePollers(deps: PollerWiringDeps): void {
 			// Notification routing: push + cross-session broadcast
 			const isSubagentPoller =
 				polledSessionId != null &&
-				sessionService.getSessionParentMap().has(polledSessionId);
+				sessionService
+					.getSessionParentMap({ activityOnly: true })
+					.has(polledSessionId);
 			const pollerNotification = resolveNotifications(
 				msg,
 				pollerResult.route,

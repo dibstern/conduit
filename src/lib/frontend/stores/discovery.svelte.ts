@@ -25,6 +25,15 @@ import type {
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
 
+export const conduitCommands = [
+	{
+		name: "btw",
+		aliases: ["side"],
+		description: "Ask in a saved Side Thread",
+		handler: "startSideThread",
+	},
+] as const;
+
 const cloneContextWindowOptions = (
 	options:
 		| readonly {

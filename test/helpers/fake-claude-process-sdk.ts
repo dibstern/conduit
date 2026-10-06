@@ -1002,6 +1002,14 @@ function query(params: {
 
 export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
+	fork: {
+		readTranscript: async () => {
+			throw new Error("Process harness does not replay Claude forks");
+		},
+		forkSession: async () => {
+			throw new Error("Process harness does not replay Claude forks");
+		},
+	},
 	titleQuery: async function* () {
 		yield {
 			type: "result",

@@ -128,6 +128,7 @@ export class ProcessHarness {
 	private environment: NodeJS.ProcessEnv = {};
 	private defaultOpenCode: Server | undefined;
 	private defaultOpenCodeUrl = "http://127.0.0.1:0";
+	private opencodeIdleTimeoutMs: number | undefined;
 	private recordedOpenCode: MockOpenCodeServer | undefined;
 	private readonly ownedOpenCode = new Map<string, ManagedOpenCodeRecord>();
 	private readonly ownedOpenCodeProcesses = new Map<string, Set<number>>();
@@ -476,6 +477,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			>;
 			/** An already-running OpenCode the default instance should point at. */
 			opencodeUrl?: string;
+			/** OpenCode idle grace, kept for later restarts. */
+			opencodeIdleTimeoutMs?: number;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -484,6 +487,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.buildId = options.buildId ?? this.buildId;
 		this.logs = "";
 		if (options.opencodeUrl) this.defaultOpenCodeUrl = options.opencodeUrl;
+		this.opencodeIdleTimeoutMs =
+			options.opencodeIdleTimeoutMs ?? this.opencodeIdleTimeoutMs;
 		if (this.opencodeRecording && !this.recordedOpenCode) {
 			this.recordedOpenCode = new MockOpenCodeServer(
 				loadOpenCodeRecording(this.opencodeRecording),
@@ -697,6 +702,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 						? {
 								CONDUIT_TEST_RUNNER_HELLO_VERSION: String(
 									this.runnerLifecycle.runnerHelloProtocolVersion,
+								),
+							}
+						: {}),
+					...(this.opencodeIdleTimeoutMs !== undefined
+						? {
+								CONDUIT_OPENCODE_IDLE_TIMEOUT_MS: String(
+									this.opencodeIdleTimeoutMs,
 								),
 							}
 						: {}),
@@ -1885,6 +1897,17 @@ export class ProcessBrowser {
 				...(decision === "allow_always"
 					? { permissionDestination: "session" as const }
 					: {}),
+			}),
+		);
+	}
+
+	async rejectQuestion(request: Record<string, unknown>): Promise<void> {
+		await this.run(
+			this.rpc.RejectQuestion({
+				projectSlug: this.projectSlug,
+				originId: this.originId,
+				commandId: randomUUID(),
+				toolId: String(request["toolId"]),
 			}),
 		);
 	}

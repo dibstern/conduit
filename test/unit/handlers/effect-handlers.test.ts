@@ -1217,7 +1217,10 @@ function makeForkSessionLayer(options?: {
 					title: "Forked Session",
 					time: { created: 200, updated: 201 },
 				})),
-				message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
+				messages: vi.fn(async () => [
+					makeMessage({ id: "msg-1", time: { created: 123 } }),
+					makeMessage({ id: "msg-2" }),
+				]),
 				messagesPage: vi.fn(async () => [makeMessage({ id: "msg-last" })]),
 				get: vi.fn(async () => makeSessionDetail()),
 			},
@@ -1331,7 +1334,10 @@ describe("handleForkSession", () => {
 						title: "Forked Session",
 						time: { created: 200, updated: 201 },
 					})),
-					message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
+					messages: vi.fn(async () => [
+						makeMessage({ id: "msg-1", time: { created: 123 } }),
+						makeMessage({ id: "msg-2" }),
+					]),
 					messagesPage: vi.fn(async () => [makeMessage({ id: "msg-last" })]),
 					get: vi.fn(async () => makeSessionDetail()),
 				},
@@ -1353,8 +1359,9 @@ describe("handleForkSession", () => {
 					messageId: "msg-1",
 				}).pipe(Effect.provide(layer));
 
+				// OpenCode cuts before messageID, so the fork keeps msg-1.
 				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
-					messageID: "msg-1",
+					messageID: "msg-2",
 				});
 				expect(establishOpenCodeSession).not.toHaveBeenCalled();
 				expect(setForkEntry).not.toHaveBeenCalled();
@@ -1378,7 +1385,10 @@ describe("handleForkSession", () => {
 					fork: vi.fn(async () => {
 						throw new Error("fork unavailable");
 					}),
-					message: vi.fn(async () => makeMessage({ time: { created: 123 } })),
+					messages: vi.fn(async () => [
+						makeMessage({ id: "msg-1", time: { created: 123 } }),
+						makeMessage({ id: "msg-2" }),
+					]),
 					messagesPage: vi.fn(async () => []),
 					get: vi.fn(async () => makeSessionDetail()),
 				},

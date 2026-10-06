@@ -258,10 +258,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 			title: "Forked Session",
 			time: { created: 10, updated: 20 },
 		} as unknown as SessionDetail);
-		vi.mocked(api.session.message).mockResolvedValue({
-			id: "message-1",
-			time: { created: 9 },
-		} as unknown as Awaited<ReturnType<typeof api.session.message>>);
+		vi.mocked(api.session.messages).mockResolvedValue([
+			{ id: "message-1", time: { created: 9 } },
+			{ id: "message-2", time: { created: 11 } },
+		] as unknown as Awaited<ReturnType<typeof api.session.messages>>);
 		const setForkEntry = vi.fn(() => Effect.void);
 		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
@@ -299,8 +299,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				projectSlug: "project-a",
 				sessionId: "session-forked",
 			});
+			// OpenCode cuts before messageID, so the fork keeps message-1.
 			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
-				messageID: "message-1",
+				messageID: "message-2",
 			});
 			// The fork command commits its boundary with creation. The handler
 			// must not recompute it and append a second lineage event.
@@ -445,6 +446,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",
+								claudeSdk: {
+									query: () => {
+										throw new Error("Unexpected Claude query");
+									},
+									titleQuery: async function* () {},
+									fork: defaultClaudeSessionForkSdk,
+								},
 								shellEnv: () => ({
 									CLAUDE_CONFIG_DIR: "/current-project-config",
 								}),

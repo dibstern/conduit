@@ -14,6 +14,17 @@
 //    Only envelope ids change — content is byte-identical.
 // 5. Unreplayed SDK surface: a Query method the replayer does not model
 //    rejects instead of resolving to a plausible fake.
+// 6. Fork identity: each fork must have a fresh resumable SDK id; resuming it
+//    must not emit its parent's id or accept an unknown session.
+// 7. Fork cut drift: readTranscript must list what was actually replayed in
+//    that session (each prompt, then its main-chain SDK messages with their
+//    fresh ids), or conduit's fork-point lookup misses and falls back. A fork
+//    with upToMessageId must copy through exactly that entry (inclusive, as
+//    the SDK does) and reject a uuid the parent never had.
+// 8. Mid-turn hold: holdTurnBeforeToolResult must stop exactly that sent turn
+//    after its tool_use and before its first tool_result, keep other
+//    sessions' turns playing, and let the held turn finish only after
+//    release().
 //
 //
 // A trace may record several inputs (command_uuid, user_message_uuid(s)): each
@@ -266,6 +277,240 @@ describe("createClaudeTraceReplayer", () => {
 		};
 		expect(withoutIds(turns[1] ?? [])).toBe(withoutIds(turns[0] ?? []));
 		expect(withoutIds(turns[2] ?? [])).toBe(withoutIds(turns[0] ?? []));
+	});
+
+	// Failure 6.
+	it("replays captured fork operations and resumes the fork with its own id", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: [
+				"pong-thinking-text-turn",
+				"pong-thinking-text-turn",
+				"pong-thinking-text-turn",
+			],
+		});
+		const prompts = promptQueue();
+		const parent = replayer.sdk.query({
+			prompt: prompts.iterable,
+			options: { resume: "restored-parent" },
+		});
+		prompts.push("parent");
+		const first = await readTurn(parent);
+		const parentId = first.at(-1)?.session_id;
+		if (!parentId) throw new Error("Replay returned no SDK session id");
+		const captured = JSON.parse(
+			readFileSync(join(TRACES_DIR, "fork-session.json"), "utf8"),
+		) as { parentSessionId: string; forkSession: { sessionId: string } };
+		const transcript = await replayer.sdk.fork.readTranscript(parentId, {
+			dir: "/replay",
+		});
+		expect(transcript.some((entry) => entry.type === "user")).toBe(true);
+		expect(transcript.some((entry) => entry.type === "assistant")).toBe(true);
+		expect(JSON.stringify(transcript)).toContain(parentId);
+		expect(JSON.stringify(transcript)).not.toContain(captured.parentSessionId);
+
+		const fork = await replayer.sdk.fork.forkSession(parentId, {
+			dir: "/replay",
+			title: "Fork",
+		});
+		const sibling = await replayer.sdk.fork.forkSession(parentId, {
+			dir: "/replay",
+			title: "Another fork",
+		});
+		expect(new Set([parentId, fork.sessionId, sibling.sessionId]).size).toBe(3);
+		expect(fork.sessionId).not.toBe(captured.forkSession.sessionId);
+		const forkPrompts = promptQueue();
+		const resumed = replayer.sdk.query({
+			prompt: forkPrompts.iterable,
+			options: { resume: fork.sessionId },
+		});
+		forkPrompts.push("fork turn");
+		const forkTurn = await readTurn(resumed);
+		expect(forkTurn.find((message) => message.type === "result")).toMatchObject(
+			{
+				type: "result",
+				result: "pong",
+				session_id: fork.sessionId,
+			},
+		);
+		expect(
+			forkTurn.every((message) => message.session_id === fork.sessionId),
+		).toBe(true);
+		prompts.push("parent again");
+		expect((await readTurn(parent)).at(-1)?.session_id).toBe(parentId);
+		prompts.close();
+		forkPrompts.close();
+		parent.close();
+		resumed.close();
+		replayer.assertComplete();
+	});
+
+	it("rejects forks, transcript reads and resumes of unknown sessions", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: ["pong-thinking-text-turn"],
+		});
+		const prompts = promptQueue();
+		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		prompts.push("parent");
+		await readTurn(query);
+		prompts.close();
+		query.close();
+		await expect(
+			replayer.sdk.fork.readTranscript("unknown", { dir: "/replay" }),
+		).rejects.toThrow(/unknown session/);
+		await expect(
+			replayer.sdk.fork.forkSession("unknown", {
+				dir: "/replay",
+				title: "Fork",
+			}),
+		).rejects.toThrow(/unknown session/);
+		expect(() =>
+			replayer.sdk.query({
+				prompt: promptQueue().iterable,
+				options: { resume: "unknown" },
+			}),
+		).toThrow(/unknown session/);
+		replayer.assertComplete();
+	});
+
+	// Failure 7.
+	it("lists the replayed transcript and forks through upToMessageId inclusive", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+		});
+		const prompts = promptQueue();
+		const parent = replayer.sdk.query({ prompt: prompts.iterable });
+		prompts.push("first");
+		const first = await readTurn(parent);
+		prompts.push("second");
+		const second = await readTurn(parent);
+		const parentId = first.at(-1)?.session_id;
+		if (!parentId) throw new Error("Replay returned no SDK session id");
+		const transcript = await replayer.sdk.fork.readTranscript(parentId, {
+			dir: "/replay",
+		});
+		const promptAt = (text: string) =>
+			transcript.findIndex(
+				(entry) =>
+					entry.type === "user" &&
+					JSON.stringify(entry.message) ===
+						JSON.stringify({ role: "user", content: text }),
+			);
+		expect(promptAt("first")).toBe(0);
+		expect(
+			transcript.flatMap((entry) =>
+				entry.type === "assistant" ? [entry.message] : [],
+			),
+		).toEqual(
+			[...first, ...second].flatMap((message) =>
+				message.type === "assistant" ? [message.message] : [],
+			),
+		);
+		const cut = transcript[promptAt("second") - 1]?.uuid;
+		if (!cut) throw new Error("First turn left no transcript entry");
+
+		const fork = await replayer.sdk.fork.forkSession(parentId, {
+			dir: "/replay",
+			title: "Fork",
+			upToMessageId: cut,
+		});
+		expect(
+			await replayer.sdk.fork.readTranscript(fork.sessionId, {
+				dir: "/replay",
+			}),
+		).toEqual(
+			transcript
+				.slice(0, promptAt("second"))
+				.map((entry) => ({ ...entry, session_id: fork.sessionId })),
+		);
+		expect(replayer.forks).toEqual([
+			{
+				parentSessionId: parentId,
+				sessionId: fork.sessionId,
+				upToMessageId: cut,
+			},
+		]);
+		await expect(
+			replayer.sdk.fork.forkSession(parentId, {
+				dir: "/replay",
+				title: "Fork",
+				upToMessageId: "never-replayed",
+			}),
+		).rejects.toThrow(/never-replayed is not in session/);
+		expect(replayer.forks).toHaveLength(1);
+		prompts.close();
+		parent.close();
+		replayer.assertComplete();
+	});
+
+	// Failure 8.
+	it("holds the planned turn before its first tool_result until release()", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: ["extra-folder-read-turn", "pong-thinking-text-turn"],
+			holdTurnBeforeToolResult: 1,
+		});
+		const prompts = promptQueue();
+		const parent = replayer.sdk.query({ prompt: prompts.iterable });
+		const parentTurn = parent[Symbol.asyncIterator]();
+		prompts.push("read");
+		const beforeHold: SDKMessage[] = [];
+		let resumed = parentTurn.next();
+		while (true) {
+			const next = await Promise.race([
+				resumed,
+				new Promise<undefined>((resolve) => setTimeout(resolve, 50)),
+			]);
+			if (next === undefined) break;
+			if (next.done) throw new Error("Turn ended without a hold");
+			beforeHold.push(next.value);
+			resumed = parentTurn.next();
+		}
+		expect(
+			beforeHold.some(
+				(message) =>
+					message.type === "assistant" &&
+					message.message.content.some((block) => block.type === "tool_use"),
+			),
+		).toBe(true);
+		expect(beforeHold.some((message) => message.type === "user")).toBe(false);
+
+		const parentId = beforeHold[0]?.session_id;
+		if (!parentId) throw new Error("Replay returned no SDK session id");
+		const fork = await replayer.sdk.fork.forkSession(parentId, {
+			dir: "/replay",
+			title: "Fork",
+		});
+		const forkPrompts = promptQueue();
+		const side = replayer.sdk.query({
+			prompt: forkPrompts.iterable,
+			options: { resume: fork.sessionId },
+		});
+		forkPrompts.push("side");
+		expect(
+			(await readTurn(side)).find((message) => message.type === "result"),
+		).toMatchObject({
+			type: "result",
+			result: "pong",
+		});
+
+		replayer.release();
+		const next = await resumed;
+		if (next.done) throw new Error("Held turn ended without its messages");
+		expect(next.value.type).toBe("user");
+		const rest = [next.value];
+		while (rest.at(-1)?.type !== "result") {
+			const more = await parentTurn.next();
+			if (more.done) break;
+			rest.push(more.value);
+		}
+		expect(rest.at(-1)?.type).toBe("result");
+		expect(beforeHold.length + rest.length).toBe(
+			traceLineCount("extra-folder-read-turn"),
+		);
+		prompts.close();
+		forkPrompts.close();
+		parent.close();
+		side.close();
+		replayer.assertComplete();
 	});
 
 	// Failure 1.

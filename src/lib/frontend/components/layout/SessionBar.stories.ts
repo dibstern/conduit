@@ -45,6 +45,7 @@ import type {
 	OpenCodeInstance,
 	SessionInfo,
 } from "../../types.js";
+import { sideThreadsPanel } from "../session/side-threads.svelte.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
 let sequence = 0;
@@ -1270,5 +1271,157 @@ export const BackgroundTasks: Story = {
 		expect(
 			box("background-task-chip").top - box("session-bar-title").bottom,
 		).toBeGreaterThanOrEqual(6);
+	},
+};
+
+// Side Threads: the segment control and the list it opens (conduit-test-8sq4.7).
+const sideThreadsNow = Date.parse("2026-02-24T12:00:00Z");
+const sideThreadRows: Row[] = [
+	{
+		id: "sess_side_reply",
+		title: "Why does the gate skip the Linux baselines on this branch?",
+		parentID: mockSession.id,
+		sideThread: true,
+		attention: "needs-reply",
+		pendingQuestionCount: 1,
+		updatedAt: sideThreadsNow - 2 * 60_000,
+	},
+	{
+		id: "sess_side_unread",
+		title: "Which story owns the composer focus ring?",
+		parentID: mockSession.id,
+		sideThread: true,
+		attention: "done-unread",
+		unread: true,
+		updatedAt: sideThreadsNow - 14 * 60_000,
+	},
+	{
+		id: "sess_side_idle",
+		title: "Is the island chevron still 44px?",
+		parentID: mockSession.id,
+		sideThread: true,
+		updatedAt: sideThreadsNow - 3 * 60 * 60_000,
+	},
+];
+
+function setupSideThreads(rows: readonly Row[]) {
+	seedSessions([mockSession, ...rows]);
+	sessionState.now = sideThreadsNow;
+	sideThreadsPanel.open = true;
+	return () => {
+		sideThreadsPanel.open = false;
+	};
+}
+
+/** The list must hang under the bar, wholly on screen. */
+async function assertSideThreadsPanel(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const panel = await canvas.findByTestId("side-threads-panel");
+	await expect(panel).toBeVisible();
+	const box = panel.getBoundingClientRect();
+	const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
+	expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
+	expect(box.left).toBeGreaterThanOrEqual(bar.left);
+	expect(box.right).toBeLessThanOrEqual(bar.right);
+	return within(panel);
+}
+
+async function assertSideThreadRows(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const control = canvas.getByTestId("side-threads-control");
+	await expect(control).toHaveAccessibleName("3 Side Threads");
+	await expect(control).toHaveAttribute("aria-expanded", "true");
+	expect(within(control).getByTestId("side-threads-waiting")).toBeVisible();
+	expect(within(control).getByTestId("side-threads-unread-dot")).toBeVisible();
+	const panel = await assertSideThreadsPanel(canvasElement);
+	await expect(panel.getAllByTestId("side-thread-title")).toHaveLength(3);
+	expect(
+		panel.getAllByTestId("side-thread-title").map((row) => row.textContent),
+	).toEqual(sideThreadRows.map((row) => row.title));
+	expect(
+		panel.getAllByTestId("side-thread-time").map((row) => row.textContent),
+	).toEqual(["2m ago", "14m ago", "3h ago"]);
+	const [reply, unread, idle] = panel.getAllByTestId("side-thread");
+	expect(
+		reply && within(reply).queryByTestId("side-thread-waiting"),
+	).not.toBeNull();
+	expect(
+		unread && within(unread).queryByTestId("side-thread-unread-dot"),
+	).not.toBeNull();
+	expect(idle && within(idle).queryByTestId("side-thread-waiting")).toBeNull();
+	expect(
+		idle && within(idle).queryByTestId("side-thread-unread-dot"),
+	).toBeNull();
+}
+
+export const SideThreadsOpen: Story = {
+	tags: ["viewport-capture"],
+	parameters: { docs: { story: { inline: false } } },
+	beforeEach: () => setupSideThreads(sideThreadRows),
+	play: async ({ canvasElement }) => {
+		await assertSideThreadRows(canvasElement);
+		const panel = within(canvasElement).getByTestId("side-threads-panel");
+		const bar = within(canvasElement).getByTestId("session-bar");
+		// The phone sheet spans the bar.
+		expect(panel.getBoundingClientRect().width).toBe(
+			bar.getBoundingClientRect().width,
+		);
+	},
+};
+
+export const DesktopSideThreadsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: { width: 900 },
+	parameters: { docs: { story: { inline: false } } },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupSideThreads(sideThreadRows);
+	},
+	play: async ({ canvasElement }) => {
+		await assertSideThreadRows(canvasElement);
+		// The popover hangs from the control's side of the bar.
+		const panel = within(canvasElement)
+			.getByTestId("side-threads-panel")
+			.getBoundingClientRect();
+		const bar = within(canvasElement)
+			.getByTestId("session-bar")
+			.getBoundingClientRect();
+		expect(panel.width).toBeLessThanOrEqual(440);
+		expect(bar.right - panel.right).toBeLessThan(panel.left - bar.left);
+	},
+};
+
+export const SideThreadsEmpty: Story = {
+	tags: ["viewport-capture"],
+	parameters: { docs: { story: { inline: false } } },
+	beforeEach: () => setupSideThreads([]),
+	play: async ({ canvasElement }) => {
+		const panel = await assertSideThreadsPanel(canvasElement);
+		await expect(panel.getByTestId("side-threads-empty")).toHaveTextContent(
+			"No Side Threads yet. Type $btw and a question to ask one.",
+		);
+		expect(
+			within(canvasElement).queryByTestId("side-threads-control"),
+		).toBeNull();
+	},
+};
+
+export const SideThreadsClosed: Story = {
+	beforeEach: () => {
+		const cleanup = setupSideThreads(sideThreadRows);
+		sideThreadsPanel.open = false;
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const control = canvas.getByTestId("side-threads-control");
+		await expect(control).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(control);
+		await assertSideThreadsPanel(canvasElement);
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(canvas.queryByTestId("side-threads-panel")).toBeNull(),
+		);
+		expect(document.activeElement).toBe(control);
 	},
 };

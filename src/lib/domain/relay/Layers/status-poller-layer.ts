@@ -243,11 +243,18 @@ export const StatusPollerLive: Layer.Layer<
 			getSessionProviders: () => Ref.get(sessionProviders),
 			isProcessing: (sessionId) =>
 				Effect.gen(function* () {
+					const sessionSnapshot = yield* Ref.get(sessionState);
 					const parents = new Map(
-						HashMap.toEntries((yield* Ref.get(sessionState)).cachedParentMap),
+						HashMap.toEntries(sessionSnapshot.cachedParentMap),
 					);
 					if ((yield* Ref.get(stateRef)).initialized) {
-						return yield* pollerState(isProcessing(sessionId, parents));
+						return yield* pollerState(
+							isProcessing(
+								sessionId,
+								parents,
+								sessionSnapshot.cachedSideThreadIds,
+							),
+						);
 					}
 					// The poller only runs alongside OpenCode and is empty until its
 					// first poll. A Claude turn that outlived a restart would read as
@@ -256,7 +263,12 @@ export const StatusPollerLive: Layer.Layer<
 					const statuses = yield* readProjectedStatuses().pipe(
 						Effect.orElseSucceed(() => ({})),
 					);
-					return isBusyIn(statuses, sessionId, parents);
+					return isBusyIn(
+						statuses,
+						sessionId,
+						parents,
+						sessionSnapshot.cachedSideThreadIds,
+					);
 				}),
 			// Pre-status rendering activity belongs to the client session view.
 			markMessageActivity: () => Effect.void,

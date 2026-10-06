@@ -259,8 +259,8 @@ describe("daemon shared OpenCode global stream", () => {
 			throw new Error("Expected two OpenCode instances");
 		const defaultId = defaultInstance.id;
 		// Managed OpenCode spawns on first use; the replacement must be running.
-		// That use opens its stream, which the default relay's subscription
-		// keeps open, so count connections after it.
+		// That use opens its stream, which stays open through the idle grace,
+		// so count connections after it.
 		await sendRpcRequest(
 			socket,
 			new StartInstance({ instanceId: namedInstance.id }),
@@ -328,7 +328,7 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 	}, 90_000);
 
-	it("keeps the stream until the last relay closes and reopens for a new scope", async () => {
+	it("keeps the stream through relay removal and reuses it for a new scope", async () => {
 		const fixture = await start("scopes");
 		const a = await fixture.connect();
 		await a.createSession("Scoped A", "opencode", "opencode");
@@ -368,25 +368,19 @@ describe("daemon shared OpenCode global stream", () => {
 		);
 		await b.close();
 		await removeProject(fixture, slugB);
-		await vi.waitFor(() => {
-			const connections = fixture.opencodeStreamConnections();
-			expect(
-				connections.filter(({ action }) => action === "open"),
-			).toHaveLength(2);
-			expect(
-				connections.filter(({ action }) => action === "close"),
-			).toHaveLength(2);
-		});
+		// Relays never hold the stream: it follows the instance's demand and
+		// idle grace, so a new project reuses it.
 		const reopenedSlug = await addProject(fixture, directoryB);
 		const reopened = await fixture.connect(undefined, undefined, reopenedSlug);
 		await reopened.createSession("Reopened", "opencode", "opencode");
-		await vi.waitFor(() => {
-			expect(
-				fixture
-					.opencodeStreamConnections()
-					.filter(({ action }) => action === "open"),
-			).toHaveLength(3);
-		});
+		const connections = fixture.opencodeStreamConnections();
+		// The only close is the forced one; it reconnected once.
+		expect(connections.filter(({ action }) => action === "open")).toHaveLength(
+			2,
+		);
+		expect(connections.filter(({ action }) => action === "close")).toHaveLength(
+			1,
+		);
 		evidence["connectionStates"] = b.frames
 			.map(({ message }) => message)
 			.filter((message) => message["_tag"] === "opencodeConnection");

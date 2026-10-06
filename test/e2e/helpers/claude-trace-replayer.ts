@@ -16,7 +16,7 @@
 //
 // Per replayed trace, envelope ids (uuid, assistant message.id, message_start
 // message.id) are fresh so the translator's dedupe never swallows a repeated
-// turn; session_id is one fresh id per replayer, stable like the SDK's.
+// turn; session_id stays stable within each session, including resumed forks.
 // Content, including tool_use/task ids, is untouched — plan a trace that
 // carries tools at most once per session.
 
@@ -24,9 +24,16 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
+import type {
+	SDKControlInterruptResponse,
+	SessionMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
-import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
+import type { ClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import type {
+	PermissionMode,
+	SDKMessage,
+} from "../../../src/lib/provider/claude/types.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
@@ -36,6 +43,7 @@ export type ClaudeTraceName =
 	| "pong-thinking-text-turn"
 	| "second-input-held-to-turn-end"
 	| "queued-input-promoted-to-steer"
+	| "side-thread-plan-turn"
 	| "skill-loads-turn"
 	| "steer-during-tool-folds"
 	| "steer-misses-boundary"
@@ -61,6 +69,11 @@ export interface ClaudeReplayPlan {
 	 */
 	readonly holdAfterResult?: boolean;
 	/**
+	 * Hold this played trace (1-based, counted across sessions) before its
+	 * first tool_result until release(), leaving the tool call running.
+	 */
+	readonly holdTurnBeforeToolResult?: number;
+	/**
 	 * Plan indexes (0-based) of turns whose result reports an upstream failure:
 	 * a success result with is_error, the shape the SDK gives an API error that
 	 * outlasted its retries.
@@ -75,7 +88,17 @@ export interface ClaudeReplayPlan {
 export interface ClaudeTraceReplayer {
 	/** Pass as `claudeSdk` to createRelayStack. */
 	readonly sdk: NonNullable<ProjectRelayConfig["claudeSdk"]>;
-	/** Lets a holdAfterResult replay continue past its result. */
+	/** The permission mode the runtime requested for each sent prompt, in order. */
+	readonly sentPermissionModes: readonly (PermissionMode | undefined)[];
+	/** Every fork, in call order; upToMessageId is the inclusive cut uuid. */
+	readonly forks: readonly {
+		readonly parentSessionId: string;
+		readonly sessionId: string;
+		readonly upToMessageId?: string;
+	}[];
+	/** The session's transcript as replayed: prompts and main-chain messages. */
+	transcript(sessionId: string): readonly SessionMessage[];
+	/** Lets a holdAfterResult or holdTurnBeforeToolResult replay continue. */
 	release(): void;
 	/** Throws unless every recorded input was sent and nothing failed. */
 	assertComplete(): void;
@@ -231,7 +254,16 @@ export function createClaudeTraceReplayer(
 		),
 	);
 	const sessionId = randomUUID();
+	const sessionIds = new Set<string>([sessionId]);
+	const transcripts = new Map<string, SessionMessage[]>();
+	const forks: ClaudeTraceReplayer["forks"][number][] = [];
+	const knownSession = (sessionId: string) => {
+		if (!sessionIds.has(sessionId))
+			throw new Error(`Claude trace replay: unknown session ${sessionId}`);
+		return transcripts.get(sessionId) ?? [];
+	};
 	let sent = 0;
+	const sentPermissionModes: (PermissionMode | undefined)[] = [];
 	let played = 0;
 	let failure: Error | undefined;
 	const fail = (message: string): Error => {
@@ -245,6 +277,11 @@ export function createClaudeTraceReplayer(
 	});
 
 	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
+		const querySessionId = options?.resume ?? sessionId;
+		// A replacement process can begin by resuming its persisted parent.
+		if (sent === 0 && options?.resume) sessionIds.add(querySessionId);
+		if (!sessionIds.has(querySessionId))
+			throw new Error(`Claude trace replay: unknown session ${querySessionId}`);
 		const prompts = prompt[Symbol.asyncIterator]();
 		const closed = new AbortController();
 		const whenClosed = new Promise<"closed">((resolve) =>
@@ -254,6 +291,40 @@ export function createClaudeTraceReplayer(
 		);
 		let interrupted = false;
 		let aborted = new AbortController();
+		let permissionMode = options?.permissionMode;
+
+		const waitForRelease = async () => {
+			// Only this query's own stop may cut a hold short: the runtime also
+			// opens and closes spare (pre-warmed) queries.
+			const { signal } = aborted;
+			if (!signal.aborted)
+				await Promise.race([
+					held,
+					new Promise((resolve) =>
+						signal.addEventListener("abort", resolve, { once: true }),
+					),
+				]);
+		};
+
+		const transcript = transcripts.get(querySessionId) ?? [];
+		transcripts.set(querySessionId, transcript);
+		const entry = (
+			type: "user" | "assistant",
+			message: unknown,
+			uuid = randomUUID(),
+		): SessionMessage => ({
+			type,
+			uuid,
+			session_id: querySessionId,
+			message,
+			parent_tool_use_id: null,
+			parent_agent_id: null,
+		});
+		const promptSent = (userPrompt: { readonly message: unknown }) => {
+			sent += 1;
+			sentPermissionModes.push(permissionMode);
+			transcript.push(entry("user", userPrompt.message));
+		};
 		let playing:
 			| {
 					readonly trace: Trace;
@@ -271,7 +342,7 @@ export function createClaudeTraceReplayer(
 			while (true) {
 				const first = await prompts.next();
 				if (first.done) return;
-				sent += 1;
+				promptSent(first.value);
 				const trace = traces[played];
 				if (!trace) {
 					throw fail(
@@ -279,6 +350,8 @@ export function createClaudeTraceReplayer(
 					);
 				}
 				played += 1;
+				const turn = played;
+				let heldBeforeToolResult = false;
 				interrupted = false;
 				aborted = new AbortController();
 				const current: NonNullable<typeof playing> = {
@@ -288,7 +361,7 @@ export function createClaudeTraceReplayer(
 					asked: 0,
 				};
 				playing = current;
-				const fresh = freshIds(trace, sessionId);
+				const fresh = freshIds(trace, querySessionId);
 				for (const [index, line] of trace.lines.entries()) {
 					const hold = trace.holds.get(index);
 					if (hold?.kind === "input") {
@@ -299,7 +372,7 @@ export function createClaudeTraceReplayer(
 							);
 							return;
 						}
-						sent += 1;
+						promptSent(next.value);
 						current.sentIds[hold.input] = next.value.uuid ?? randomUUID();
 					}
 					if (hold?.kind === "interrupt") {
@@ -335,7 +408,20 @@ export function createClaudeTraceReplayer(
 							),
 						),
 					);
-					yield plan.failTurns?.includes(played - 1) &&
+					if (
+						turn === plan.holdTurnBeforeToolResult &&
+						!heldBeforeToolResult &&
+						message.type === "user" &&
+						Array.isArray(message.message.content) &&
+						message.message.content.some(
+							(block) => block.type === "tool_result",
+						)
+					) {
+						heldBeforeToolResult = true;
+						await waitForRelease();
+						if (interrupted) break;
+					}
+					yield plan.failTurns?.includes(turn - 1) &&
 					message.type === "result" &&
 					message.subtype === "success"
 						? {
@@ -345,20 +431,16 @@ export function createClaudeTraceReplayer(
 							}
 						: message;
 					if (
+						(message.type === "user" || message.type === "assistant") &&
+						message.parent_tool_use_id === null
+					)
+						transcript.push(entry(message.type, message.message, message.uuid));
+					if (
 						plan.holdAfterResult &&
 						message.type === "result" &&
 						index < trace.lines.length - 1
 					) {
-						// Only this query's own stop may cut the hold short: the runtime
-						// also opens and closes spare (pre-warmed) queries.
-						const { signal } = aborted;
-						if (!signal.aborted)
-							await Promise.race([
-								held,
-								new Promise((resolve) =>
-									signal.addEventListener("abort", resolve, { once: true }),
-								),
-							]);
+						await waitForRelease();
 						if (interrupted) break;
 					}
 					const tool =
@@ -416,7 +498,9 @@ export function createClaudeTraceReplayer(
 			},
 			// Settings the runtime syncs before each turn; traces are fixed.
 			setModel: async () => {},
-			setPermissionMode: async () => {},
+			setPermissionMode: async (mode: PermissionMode) => {
+				permissionMode = mode;
+			},
 			applyFlagSettings: async () => {},
 			setMcpPermissionModeOverride: unsupported("setMcpPermissionModeOverride"),
 			setMaxThinkingTokens: unsupported("setMaxThinkingTokens"),
@@ -451,11 +535,57 @@ export function createClaudeTraceReplayer(
 	return {
 		sdk: {
 			query,
+			fork: {
+				readTranscript: async (parentSessionId) => [
+					...knownSession(parentSessionId),
+				],
+				// Like the SDK: copy through upToMessageId inclusive, or everything.
+				forkSession: async (parentSessionId, { upToMessageId }) => {
+					const transcript = knownSession(parentSessionId);
+					const end =
+						upToMessageId === undefined
+							? transcript.length
+							: transcript.findIndex((entry) => entry.uuid === upToMessageId) +
+								1;
+					if (end === 0)
+						throw new Error(
+							`Claude trace replay: ${upToMessageId} is not in session ${parentSessionId}`,
+						);
+					// Read on first fork, so a plan's tracesDir need not carry it.
+					const forkTrace = JSON.parse(
+						readFileSync(
+							join(plan.tracesDir ?? TRACES_DIR, "fork-session.json"),
+							"utf8",
+						),
+					) as {
+						forkSession: Awaited<
+							ReturnType<ClaudeSessionForkSdk["forkSession"]>
+						>;
+					};
+					const fork = { ...forkTrace.forkSession, sessionId: randomUUID() };
+					sessionIds.add(fork.sessionId);
+					transcripts.set(
+						fork.sessionId,
+						transcript
+							.slice(0, end)
+							.map((entry) => ({ ...entry, session_id: fork.sessionId })),
+					);
+					forks.push({
+						parentSessionId,
+						sessionId: fork.sessionId,
+						...(upToMessageId !== undefined && { upToMessageId }),
+					});
+					return fork;
+				},
+			},
 			// Session-title generation: a fixed title, never a model call.
 			titleQuery: async function* () {
 				yield { type: "result", result: "Claude trace replay" };
 			},
 		},
+		sentPermissionModes,
+		forks,
+		transcript: (sessionId) => transcripts.get(sessionId) ?? [],
 		release,
 		assertComplete() {
 			if (failure) throw failure;

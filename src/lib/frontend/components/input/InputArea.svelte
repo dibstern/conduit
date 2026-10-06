@@ -7,7 +7,7 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Textarea from "../ui/Textarea.svelte";
@@ -27,10 +27,12 @@
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
+	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { currentChat, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
+		conduitCommands,
 		discoveryState,
 		extractCommandQuery,
 		filterCommands,
@@ -57,7 +59,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -272,10 +274,27 @@
 	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
 	const commandMenuVisible = $derived(commandMatch !== null);
 	const commandQuery = $derived(commandMatch?.query ?? "");
-	/** `$` lists the provider's built-ins; `/` lists everything else. */
+	const conduitCommandNames = new Set<string>(
+		conduitCommands.flatMap((command) => [command.name, ...command.aliases]),
+	);
+	const availableCommands = $derived([
+		...(!currentSession?.sideThread
+			? conduitCommands.flatMap((command) =>
+				[command.name, ...command.aliases].map((name) => ({
+					name,
+					description: command.description,
+					builtin: true,
+				})),
+			)
+			: []),
+		...discoveryState.commands.filter((command) =>
+			!command.builtin || !conduitCommandNames.has(command.name),
+		),
+	]);
+	/** `$` lists Conduit commands and provider built-ins; `/` lists skills. */
 	const menuCommands = $derived(
 		commandMatch
-			? discoveryState.commands.filter(
+			? availableCommands.filter(
 					(c) => (c.builtin ?? false) === (commandMatch.trigger === "$"),
 				)
 			: [],
@@ -288,7 +307,10 @@
 		new Set(discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name)),
 	);
 	const builtinNameSet = $derived(
-		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+		new Set(availableCommands.filter((c) => c.builtin).map((c) => c.name)),
+	);
+	const providerBuiltinNameSet = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin && !conduitCommandNames.has(c.name)).map((c) => c.name)),
 	);
 
 	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
@@ -492,10 +514,62 @@
 	}
 
 	let creatingSession = false;
+	let startingSideThread = false;
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		const text = textOverride ?? toProviderCommands(inputText.trim(), builtinNameSet);
+		let text = textOverride ?? inputText.trim();
+		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
+		const builtins = providerBuiltinNameSet;
 		if (!text) return false;
+		if (textOverride === undefined) {
+			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
+			const command = conduitCommands.find((command) =>
+				[command.name, ...command.aliases].some((name) => name === match?.[1]),
+			);
+			if (command?.handler === "startSideThread") {
+				const question = match?.[2]?.trim();
+				if (startingSideThread) return false;
+				const parentSessionId = sessionState.currentId;
+				const projectSlug = getCurrentSlug();
+				if (!parentSessionId || !projectSlug) {
+					showToast("Open a session to start a Side Thread", { variant: "error" });
+					return false;
+				}
+				// A bare command asks for the list rather than a new Side Thread.
+				if (!question) {
+					openSideThreads();
+					clearComposer();
+					return false;
+				}
+				const draftText = inputText;
+				const draftImages = pendingImages;
+				const images = pendingImages.map((image) => image.dataUrl);
+				startingSideThread = true;
+				try {
+					const { sessionId } = await startSideThreadRpc({ projectSlug, parentSessionId, title: question });
+					sideThread = { sessionId, projectSlug, images };
+					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
+						inputText = "";
+						pendingImages = [];
+						inputDrafts.delete(parentSessionId);
+						if (inputSyncTimer) {
+							clearTimeout(inputSyncTimer);
+							inputSyncTimer = null;
+						}
+						void syncInputDraftRpc({ projectSlug, sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
+						switchToSession(sessionId, projectSlug);
+						await tick();
+					}
+					text = question;
+				} catch (error) {
+					showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+					return false;
+				} finally {
+					startingSideThread = false;
+				}
+			}
+			text = toProviderCommands(text, builtins);
+		}
 
 		// Parse @references and fetch file contents
 		const refs = textOverride === undefined ? parseAtReferences(text) : [];
@@ -508,11 +582,11 @@
 				try {
 					if (ref.endsWith("/")) {
 						// Directory: fetch listing
-						const content = await fetchDirectoryListing(ref);
+						const content = await fetchDirectoryListing(ref, sideThread?.projectSlug ?? getCurrentSlug());
 						attachments.push({ path: ref, type: "directory", content });
 					} else {
 						// File: fetch content
-						const result = await fetchFileContent(ref);
+						const result = await fetchFileContent(ref, sideThread?.projectSlug ?? getCurrentSlug());
 						if (result.binary) {
 							attachments.push({ path: ref, type: "binary" });
 						} else {
@@ -532,16 +606,18 @@
 		}
 
 		// Collect image data URLs from pending images
-		const imageUrls = textOverride === undefined && pendingImages.length > 0
+		const imageUrls = sideThread
+			? (sideThread.images.length > 0 ? sideThread.images : undefined)
+			: textOverride === undefined && pendingImages.length > 0
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
 		// Always send immediately: conduit queues a busy send in the session's
 		// tray, and the transcript shows the message once the adapter places it.
-		let sid = sessionState.currentId;
+		let sid = sideThread?.sessionId ?? sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
-		const projectSlug = sid ? getCurrentSlug() : getDraftProject();
+		const projectSlug = sideThread?.projectSlug ?? (sid ? getCurrentSlug() : getDraftProject());
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return false;
@@ -608,10 +684,13 @@
 			}
 		}
 		if (textOverride !== undefined) return true;
+		if (sideThread && (sessionState.currentId !== sideThread.sessionId || inputText !== "" || pendingImages.length > 0)) return true;
+		clearComposer();
+		return true;
+	}
 
-		// Clear pending images
+	function clearComposer() {
 		pendingImages = [];
-
 		inputText = "";
 		cursorPos = 0;
 		if (sessionState.currentId) {
@@ -625,7 +704,6 @@
 			inputSyncTimer = null;
 		}
 		void syncInputDraft("").catch(() => undefined);
-		return true;
 	}
 
 	async function undoGoalClear() {

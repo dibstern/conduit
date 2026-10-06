@@ -72,7 +72,9 @@ interface MonitoringWsHandlerLike {
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
 	pushViewerFamilies(): Promise<void>;
-	getSessionParentMap(): Map<string, string>;
+	getSessionParentMap(options?: {
+		readonly activityOnly?: boolean;
+	}): Map<string, string>;
 }
 
 interface LegacyStatusPollerPort {
@@ -533,7 +535,9 @@ export function wireMonitoring(
 		if (!monitoringActive) return;
 
 		// Keep present idle candidates explicit; only missing statuses are deletions.
-		const parentMap = sessionService.getSessionParentMap();
+		const parentMap = sessionService.getSessionParentMap({
+			activityOnly: true,
+		});
 		const providers = statusPoller.getSessionProviders?.();
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const now = Date.now();
@@ -667,7 +671,9 @@ export const wireMonitoringEffect = (
 
 					if (!monitoringActive) return;
 
-					const parentMap = yield* sessionService.getSessionParentMap();
+					const parentMap = yield* sessionService.getSessionParentMap({
+						activityOnly: true,
+					});
 					const reduced = yield* tickSemaphore.withPermits(1)(
 						Effect.sync(() => {
 							if (tick < lastReducedTick) return undefined;

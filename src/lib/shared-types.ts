@@ -299,6 +299,7 @@ export const SessionInfoSchema = Schema.Struct({
 	contextWindow: Schema.optional(Schema.String),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
+	sideThread: Schema.optional(Schema.Boolean),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId: Schema.optional(Schema.String),
 	/** Inclusive boundary in transcript (created_at, id) order. */

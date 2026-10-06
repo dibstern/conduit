@@ -107,7 +107,8 @@ export const sessionRowsToSessionInfoList = (
 		readonly now?: number;
 		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
-		/** Unread sessions anywhere in the lineage; a root's dot rolls up its forks. */
+		readonly sideThreadIds?: ReadonlySet<string>;
+		/** Unread descendants, stopping at each Side Thread's edge to its parent. */
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
@@ -126,6 +127,21 @@ export const sessionRowsToSessionInfoList = (
 			permissions: number;
 		}
 	>();
+	const sideThreadIds = new Set([
+		...(opts.sideThreadIds ?? []),
+		...rows.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
+	]);
+	const stateFor = (id: string) => {
+		const state = subtree.get(id) ?? {
+			processing: false,
+			monitoring: false,
+			unread: false,
+			questions: 0,
+			permissions: 0,
+		};
+		subtree.set(id, state);
+		return state;
+	};
 	if (opts.parentMap) {
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
 		for (const id of new Set([
@@ -133,32 +149,37 @@ export const sessionRowsToSessionInfoList = (
 			...opts.parentMap.keys(),
 		])) {
 			let root = id;
+			let activityRoot: string | undefined;
 			const seen = new Set<string>();
+			const promptRoots = new Set<string>();
 			while (opts.parentMap.has(root) && !seen.has(root)) {
 				seen.add(root);
+				if (sideThreadIds.has(root)) {
+					activityRoot ??= root;
+					promptRoots.add(root);
+				}
 				root = opts.parentMap.get(root) ?? root;
 			}
-			const state = subtree.get(root) ?? {
-				processing: false,
-				monitoring: false,
-				unread: false,
-				questions: 0,
-				permissions: 0,
-			};
+			// Prompts reach each Side Thread ancestor and the family root.
+			promptRoots.add(root);
+			for (const promptRoot of promptRoots) {
+				const state = stateFor(promptRoot);
+				state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
+				state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
+			}
+			const activity = stateFor(activityRoot ?? root);
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
 			const work = opts.backgroundOf?.(id)?.work;
-			state.processing ||=
+			activity.processing ||=
 				status === "busy" || status === "retry" || work === "working";
-			state.monitoring ||= work === "monitoring";
-			state.unread ||= opts.unreadSessionIds?.has(id) === true;
-			state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
-			state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
-			subtree.set(root, state);
+			activity.monitoring ||= work === "monitoring";
+			activity.unread ||= opts.unreadSessionIds?.has(id) === true;
 		}
 	}
 	return rows.map((row) => {
 		const parentID = row.parent_id ?? undefined;
-		const state = parentID ? undefined : subtree.get(row.id);
+		const state =
+			parentID && row.side_thread !== 1 ? undefined : subtree.get(row.id);
 		const pendingQuestionCount =
 			state?.questions ?? opts.pendingQuestionCounts?.get(row.id);
 		const pendingPermissionCount =
@@ -202,6 +223,7 @@ export const sessionRowsToSessionInfoList = (
 				? { contextWindow: row.context_window }
 				: {}),
 			...(parentID ? { parentID } : {}),
+			...(row.side_thread === 1 ? { sideThread: true } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null
 				? { forkPointTimestamp: row.fork_point_timestamp }
@@ -307,6 +329,7 @@ export interface ReadQueryEffect {
 				id: string;
 				parent_id: string | null;
 				unread: number;
+				side_thread: number;
 			}[];
 			count: number;
 		},
@@ -829,8 +852,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				id: string;
 				parent_id: string | null;
 				unread: number;
+				side_thread: number;
 			}>`
-				SELECT id, parent_id, unread FROM sessions`;
+				SELECT id, parent_id, unread, side_thread FROM sessions`;
 			const counts = yield* sql<{ count: number }>`
 				SELECT COUNT(*) AS count FROM sessions`;
 			return { rows, count: counts[0]?.count ?? 0 };
@@ -884,13 +908,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					parent_id: string | null;
 					status: string;
 					unread: number;
+					side_thread: number;
 				}>`
 					WITH RECURSIVE family(id) AS (
 						SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.id))})
 						UNION
 						SELECT child.id FROM sessions child JOIN family ON child.parent_id = family.id
 					)
-					SELECT id, parent_id, status, unread FROM sessions JOIN family USING (id)`,
+					SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`,
 				countPendingApprovalsBySession(),
 			]).pipe(
 				Effect.mapError((cause) =>
@@ -904,6 +929,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			);
 			const pending = pendingApprovalCountsByType(approvals);
 			return sessionRowsToSessionInfoList(rows, {
+				sideThreadIds: new Set(
+					family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
+				),
 				parentMap: new Map(
 					family.flatMap((row) =>
 						row.parent_id === null ? [] : [[row.id, row.parent_id] as const],
@@ -1249,6 +1277,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					]);
 					const pending = pendingApprovalCountsByType(approvals);
 					const items = sessionRowsToSessionInfoList(rows, {
+						sideThreadIds: new Set(
+							lineage.rows.flatMap((row) =>
+								row.side_thread === 1 ? [row.id] : [],
+							),
+						),
 						parentMap: new Map(
 							lineage.rows.flatMap((row) =>
 								row.parent_id === null

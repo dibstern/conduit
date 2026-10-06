@@ -48,6 +48,7 @@ describe("decodeClaudeSDKMessage", () => {
 			"system_background_tasks_changed",
 			"system_thinking_tokens",
 			"system_session_state_changed",
+			"system_session_title_changed",
 			"system_worker_shutting_down",
 			"system_commands_changed",
 			"system_notification",
@@ -153,6 +154,11 @@ describe("decodeClaudeSDKMessage", () => {
 				new_conversation_id: UUID,
 				uuid: UUID,
 				session_id: SESSION_ID,
+			},
+			{
+				...systemEnvelope,
+				subtype: "session_title_changed",
+				title: "What word did I ask you to remember?",
 			},
 		];
 

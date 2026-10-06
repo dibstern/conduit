@@ -1,0 +1,1047 @@
+{
+	"name": "side-thread-permission",
+	"model": "opencode/big-pickle",
+	"recordedAt": "2026-10-05T09:26:18.745Z",
+	"initMessages": [
+		{
+			"type": "project_attached",
+			"slug": "side-thread-status-recording"
+		},
+		{
+			"type": "protocol_version",
+			"version": 3,
+			"buildId": "dev"
+		},
+		{
+			"type": "server_update",
+			"restartAvailable": false
+		},
+		{
+			"type": "client_count",
+			"count": 1
+		},
+		{
+			"type": "session_family",
+			"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+			"sessions": [
+				{
+					"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"title": "New session - 2026-10-05T09:25:52.977Z",
+					"status": "idle",
+					"createdAt": 1791192352982,
+					"updatedAt": 1791192352982,
+					"messageCount": 0,
+					"attention": "idle"
+				}
+			]
+		},
+		{
+			"type": "status",
+			"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+			"status": "idle"
+		},
+		{
+			"type": "connection_status",
+			"status": "connected"
+		},
+		{
+			"type": "model_info",
+			"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+			"model": "big-pickle",
+			"provider": "opencode"
+		},
+		{
+			"type": "system_error",
+			"code": "INIT_FAILED",
+			"message": "Failed to list agents: An unknown error occurred in Effect.tryPromise"
+		}
+	],
+	"turns": [
+		{
+			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"events": [
+				{
+					"type": "status",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"text": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+					"originId": "record-a3bb71a3-a3ba-44e3-b086-d577f76d3f7d"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "New session - 2026-10-05T09:25:52.977Z",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192355060,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "New session - 2026-10-05T09:25:52.977Z",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192355068,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "New session - 2026-10-05T09:25:52.977Z",
+							"status": "busy",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192355099,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "New session - 2026-10-05T09:25:52.977Z",
+							"status": "busy",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192355809,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192356914,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "model_list",
+					"providers": [
+						{
+							"id": "claude",
+							"name": "Anthropic - claude",
+							"configured": true,
+							"models": [
+								{
+									"id": "default",
+									"name": "Default (recommended)",
+									"provider": "claude",
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "opus",
+									"name": "Opus 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "fable",
+									"name": "Fable 5.1",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "sonnet",
+									"name": "Sonnet 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "haiku",
+									"name": "Haiku 4.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 8192
+									}
+								},
+								{
+									"id": "claude-sonnet-5",
+									"name": "Sonnet 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "claude-opus-5",
+									"name": "Opus 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-fable-5",
+									"name": "Fable 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-opus-4-8",
+									"name": "Opus 4.8",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-7",
+									"name": "Opus 4.7",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-6",
+									"name": "Opus 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-sonnet-4-6",
+									"name": "Sonnet 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								}
+							]
+						}
+					]
+				},
+				{
+					"type": "variant_info",
+					"variant": "",
+					"variants": []
+				},
+				{
+					"type": "context_window_info",
+					"contextWindow": "",
+					"options": []
+				},
+				{
+					"type": "permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "default_model_info",
+					"model": "big-pickle",
+					"provider": "opencode",
+					"variant": ""
+				},
+				{
+					"type": "default_permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "delta",
+					"text": "ok",
+					"partId": "prt_10b625b57001J6fZBBNF8eiCl8",
+					"messageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX"
+				},
+				{
+					"type": "delta",
+					"text": ", remembered.",
+					"partId": "prt_10b625b57001J6fZBBNF8eiCl8",
+					"messageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15858,
+						"output": 6,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2739,
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"messageId": "msg_10b6250e8001a1LlbyaZEZ1a6w"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15858,
+						"output": 6,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2739,
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"messageId": "msg_10b6250e8001a1LlbyaZEZ1a6w"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef49db72effeT10Hzjlpv6bnfX"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		},
+		{
+			"prompt": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+			"events": [
+				{
+					"type": "result",
+					"usage": {
+						"input": 15858,
+						"output": 6,
+						"cache_read": 1941,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2739,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"messageId": "msg_10b625df00016CFhouT92i92ua"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "idle",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358407,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "idle",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358408,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"text": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+					"originId": "record-a3bb71a3-a3ba-44e3-b086-d577f76d3f7d"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "idle",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358442,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "idle",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358446,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "busy",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358450,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "busy",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358451,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"status": "processing"
+				},
+				{
+					"type": "tool_start",
+					"id": "call_01a10b628b5f73d8bb2beef8",
+					"name": "Bash",
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_01a10b628b5f73d8bb2beef8",
+					"name": "Bash",
+					"input": {
+						"command": "printf 'side-thread-approval'"
+					},
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "permission_request",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"requestId": "per_10b628bc2001FYuALhgaSrGFwZ",
+					"toolName": "bash",
+					"toolInput": {
+						"patterns": [
+							"printf 'side-thread-approval'"
+						],
+						"metadata": {
+							"command": "printf 'side-thread-approval'"
+						}
+					},
+					"always": [
+						"printf *"
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "busy",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192358451,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"processing": true,
+							"pendingPermissionCount": 1,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "needs-approval"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"pendingPermissionCount": 1,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "needs-approval"
+						}
+					]
+				},
+				{
+					"type": "permission_resolved",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"requestId": "per_10b628bc2001FYuALhgaSrGFwZ",
+					"decision": "once"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_01a10b628b5f73d8bb2beef8",
+					"name": "Bash",
+					"input": {
+						"command": "printf 'side-thread-approval'"
+					},
+					"metadata": {
+						"output": ""
+					},
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_01a10b628b5f73d8bb2beef8",
+					"name": "Bash",
+					"input": {
+						"command": "printf 'side-thread-approval'"
+					},
+					"metadata": {
+						"output": "side-thread-approval"
+					},
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "tool_result",
+					"id": "call_01a10b628b5f73d8bb2beef8",
+					"content": "side-thread-approval",
+					"is_error": false,
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3458,
+						"output": 33,
+						"cache_read": 13118,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 13310,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"midTurn": true
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3458,
+						"output": 33,
+						"cache_read": 13118,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 13310,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"messageId": "msg_10b625e22002gr5BmcpLxSlv5G",
+					"midTurn": true
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "busy",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192371761,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 24,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "busy",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192371762,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 24,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "side",
+					"partId": "prt_10b62aa9a001MyQNhQ35Mv2gPL",
+					"messageId": "msg_10b629221002FMdvnZgPjWfY3P",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "delta",
+					"text": "-thread-approval",
+					"partId": "prt_10b62aa9a001MyQNhQ35Mv2gPL",
+					"messageId": "msg_10b629221002FMdvnZgPjWfY3P",
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 52,
+						"output": 6,
+						"cache_read": 16576,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 19699,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"messageId": "msg_10b629221002FMdvnZgPjWfY3P"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 52,
+						"output": 6,
+						"cache_read": 16576,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 19699,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp",
+					"messageId": "msg_10b629221002FMdvnZgPjWfY3P"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef49da212ffeG7eE1cexk88gFp"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef49db72effeT10Hzjlpv6bnfX",
+					"sessions": [
+						{
+							"id": "ses_ef49da212ffeG7eE1cexk88gFp",
+							"title": "Use the bash tool to run printf 'side-thread-approval'. Do not answer without running this command.",
+							"status": "idle",
+							"createdAt": 1791192358399,
+							"updatedAt": 1791192378144,
+							"messageCount": 0,
+							"parentID": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"sideThread": true,
+							"forkMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"forkPointTimestamp": 1791192355081,
+							"forkPointMessageId": "msg_10b6250e8001a1LlbyaZEZ1a6w",
+							"unread": true,
+							"lastTurnEndVersion": 32,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef49db72effeT10Hzjlpv6bnfX",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791192352982,
+							"updatedAt": 1791192357811,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 14,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		}
+	]
+}

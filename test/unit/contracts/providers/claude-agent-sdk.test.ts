@@ -83,6 +83,7 @@ describe("Claude Agent SDK provider contract schemas", () => {
 			"system_background_tasks_changed",
 			"system_thinking_tokens",
 			"system_session_state_changed",
+			"system_session_title_changed",
 			"system_worker_shutting_down",
 			"system_commands_changed",
 			"system_notification",

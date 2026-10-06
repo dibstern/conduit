@@ -12,6 +12,7 @@ import path from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -146,16 +147,24 @@ export interface ReplayHarness {
 // `model`), so the runtime sees no model drift during replay.
 const CLAUDE_TRACE_MODEL = "claude-fable-5";
 
-/** Create a relay-owned Claude session over the typed WS RPC. */
-async function createClaudeSession(relayPort: number): Promise<string> {
+/** Create a relay-owned replay session over the typed WS RPC. */
+async function createSession(
+	relayPort: number,
+	providerId: "claude" | "opencode",
+): Promise<string> {
 	const { sessionId } = await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
 				return yield* client.CreateSession({
 					projectSlug: "e2e-replay",
-					originId: "e2e-claude-replay",
-					providerId: "claude",
+					originId: `e2e-${providerId}-replay`,
+					providerId,
+					// Naming the instance routes creation through OpenCode Instances
+					// `use`, which opens the event stream replayed turns arrive on.
+					...(providerId === "opencode"
+						? { instanceId: defaultInstanceIdForDriver("opencode") }
+						: {}),
 				});
 			}),
 		).pipe(
@@ -247,46 +256,17 @@ export async function createReplayHarness(
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
-	const sessionId = claudeReplayer
-		? await createClaudeSession(relayPort)
-		: stack.initialSessionId;
+	// Relay startup makes no OpenCode requests, so create the replay session
+	// explicitly. For OpenCode this replays the recording's POST /session.
+	const sessionId = await createSession(
+		relayPort,
+		claudeReplayer ? "claude" : "opencode",
+	);
 	if (!claudeReplayer) {
-		// Standalone startup creates the provider session before a turn exists in
-		// the event store. The replay URL must name a session ResolveSession can find.
 		const connectedBy = Date.now() + 5_000;
 		while (!mock.diagnostics.some((entry) => entry.event === "sse_connect")) {
 			if (Date.now() >= connectedBy)
 				throw new Error("Replay provider SSE did not connect");
-			await new Promise((resolve) => setTimeout(resolve, 20));
-		}
-		const now = Date.now();
-		mock.emitTestEvent("session.created", {
-			info: {
-				id: sessionId,
-				title: "E2E Replay Session",
-				time: { created: now, updated: now },
-			},
-		});
-		const projectedBy = Date.now() + 5_000;
-		while (true) {
-			const resolved = await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup);
-						return yield* client.ResolveSession({ sessionId });
-					}),
-				).pipe(
-					Effect.provide(RpcClient.layerProtocolSocket()),
-					Effect.provide(
-						Socket.layerWebSocket(`ws://127.0.0.1:${relayPort}/rpc`),
-					),
-					Effect.provide(Socket.layerWebSocketConstructorGlobal),
-					Effect.provide(RpcSerialization.layerJson),
-				),
-			);
-			if (resolved.projectSlug === "e2e-replay") break;
-			if (Date.now() >= projectedBy)
-				throw new Error("Replay session was not resolvable");
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		}
 	}

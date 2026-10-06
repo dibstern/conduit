@@ -2,7 +2,11 @@
 export function busySessionIds(
 	rows: ReadonlyMap<
 		string,
-		{ readonly status: string; readonly parentID?: string | undefined }
+		{
+			readonly status: string;
+			readonly parentID?: string | undefined;
+			readonly sideThread?: boolean | undefined;
+		}
 	>,
 	activity: Iterable<string> = [],
 ): ReadonlySet<string> {
@@ -12,7 +16,9 @@ export function busySessionIds(
 	}
 	// Set iteration visits newly added ancestors once, including cyclic lineage.
 	for (const id of busy) {
-		const parent = rows.get(id)?.parentID;
+		const row = rows.get(id);
+		if (row?.sideThread) continue;
+		const parent = row?.parentID;
 		if (parent && rows.has(parent)) busy.add(parent);
 	}
 	return busy;

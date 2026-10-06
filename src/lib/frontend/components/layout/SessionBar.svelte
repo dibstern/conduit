@@ -31,11 +31,12 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, getAttentionSessions, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
 	import { cancelSessionRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import type { Immutable, SessionInfo } from "../../types.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -56,9 +57,11 @@
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
 	import BackgroundTasksRow from "../session/BackgroundTasksRow.svelte";
+	import SideThreadsPanel, { waitingMarker } from "../session/SideThreadsPanel.svelte";
 	import { appBanners } from "../overlays/Banners.svelte";
 	import BannersRow from "../overlays/BannersRow.svelte";
 	import { tasksPanel } from "../session/background-tasks.svelte.js";
+	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { wsState } from "../../stores/ws.svelte.js";
@@ -85,11 +88,25 @@
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
+	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
+	const sideThreads = $derived.by(() => {
+		const rows = new Map(sessionState.familySessions.map((row) => [row.id, row]));
+		for (const row of sessionState.sessions.values()) rows.set(row.id, row);
+		const lastActive = (row: Immutable<SessionInfo>) => new Date(row.updatedAt ?? row.createdAt ?? 0).getTime();
+		return [...rows.values()]
+			.filter((row) => row.sideThread && row.parentID === sessionState.currentId)
+			.sort((a, b) => lastActive(b) - lastActive(a));
+	});
+	const sideThreadsLabel = $derived(sideThreads.length === 1 ? "1 Side Thread" : `${sideThreads.length} Side Threads`);
+	const sideThreadsWaiting = $derived(waitingMarker(sideThreads));
 
-	// Close the pull-down when the session changes or its tasks end.
+	// Close the pull-downs when the session changes or its tasks end.
 	$effect(() => {
 		void sessionState.currentId;
-		return () => { tasksPanel.open = false; };
+		return () => {
+			tasksPanel.open = false;
+			sideThreadsPanel.open = false;
+		};
 	});
 	$effect(() => {
 		if (backgroundTasks.length === 0) tasksPanel.open = false;
@@ -166,10 +183,13 @@
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
-		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open)) return;
+		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
 		event.preventDefault();
 		event.stopPropagation();
-		if (tasksPanel.open) {
+		if (sideThreadsPanel.open) {
+			sideThreadsPanel.open = false;
+			document.getElementById("side-threads-control")?.focus();
+		} else if (tasksPanel.open) {
 			tasksPanel.open = false;
 			document.querySelector<HTMLElement>("[data-testid='background-tasks-row']")?.focus();
 		} else closeGoalDetails(true);
@@ -205,7 +225,7 @@
 	);
 
 	const activeView = $derived(activeSessionView());
-	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open);
+	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open);
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
@@ -266,6 +286,8 @@
 	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => closeGoalDetails(true)} />
 {:else if tasksPanel.open && backgroundTasks.length > 0}
 	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { tasksPanel.open = false; }} />
+{:else if sideThreadsPanel.open}
+	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
 {#snippet viewItems(testIdPrefix: string)}
@@ -370,6 +392,13 @@
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
 		<div class="session-bar-segments inline-flex h-[24px] min-w-0 items-stretch rounded-lg border border-border">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
+			{#if sideThreads.length > 0 && !session?.sideThread}
+				<Button id="side-threads-control" variant="ghost" size="segment" icon="messages-square" touchTarget class="shrink-0 tabular-nums" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
+					{sideThreads.length}
+					{#if sideThreadsWaiting}<span data-testid="side-threads-waiting" class="inline-flex {sideThreadsWaiting.colour}"><Icon name={sideThreadsWaiting.icon} size={11} /></span>{/if}
+					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
+				</Button>
+			{/if}
 			{#if directory}<GitIdentity {directory} {git} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
@@ -404,7 +433,7 @@
 	aria-label="Session controls"
 	tabindex="-1"
 	bind:this={barEl}
-	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open || tasksPanel.open ? 'z-[var(--z-sheet)]' : ''}"
+	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
 >
 	<!--
 		Leaving. `size="content"` because this button owns its own box: a 44px
@@ -475,7 +504,7 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		{#if goalShown}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full mt-[2px] gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; goalDetails.open = !goalDetails.open; }}>
+			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full mt-[2px] gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }}>
 				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
 				<span class="min-w-0 truncate">{goal.subtitle}</span>
 				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
@@ -669,6 +698,10 @@
 
 	{#if tasksPanel.open && backgroundTasks.length > 0}
 		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstopall={stopAllBackgroundTasks} />
+	{/if}
+
+	{#if sideThreadsPanel.open}
+		<SideThreadsPanel threads={sideThreads} compact={sessionViewState.compact} />
 	{/if}
 
 </div>

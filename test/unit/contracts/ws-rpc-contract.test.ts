@@ -340,6 +340,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						sessionId: "session-forked",
 					}),
+				StartSideThread: () =>
+					Effect.succeed({ sessionId: "session-side-thread" }),
 				RespondPermission: () => Effect.succeed({ ok: true as const }),
 				AnswerQuestion: () => Effect.succeed({ ok: true as const }),
 				RejectQuestion: () => Effect.succeed({ ok: true as const }),

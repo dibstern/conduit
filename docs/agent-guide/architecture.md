@@ -110,6 +110,35 @@ must remain stable across protocol versions: explicit forced control may retry
 once with the reported host version, without exposing an incompatible terminal
 connection or signaling a PID. Incompatible control framing fails safely.
 
+## OpenCode lifecycle
+
+The daemon-level OpenCode Instances module
+(`src/lib/domain/daemon/Layers/opencode-instances-layer.ts`) owns each
+instance's lifetime. Managed OpenCode starts lazily on the first `use` (a user
+action such as creating a session, sending, or answering a prompt) through one
+shared start. Background paths (pollers, startup) use the non-starting
+`ifRunning` client and never start it. Start Instance is a `use` with an empty
+scope.
+
+An instance has demand while a `use` scope is open, or while OpenCode reports a
+busy or retrying session, or a pending permission or question, in any
+subscribed directory. The module derives this from its shared event stream and
+reconcile results; nothing registers holds and no Conduit projection is read.
+The stream is open exactly while there is demand or a grace timer runs.
+
+When demand reaches zero a grace timer arms (10 minutes;
+`CONDUIT_OPENCODE_IDLE_TIMEOUT_MS` overrides it). New demand cancels it. On
+expiry the connect-time reconcile runs again, so a missed busy event is caught,
+and the instance stops only if demand is still zero. While a session is busy
+the reconciler polls `/session/status`, so a missed idle event only delays the
+stop. An idle stop closes the stream, then terminates a managed instance's
+process group; external instances only lose their stream. A `use` during a stop
+waits for it, then starts again. Stop Instance stops regardless of demand.
+
+`SIGINT`, `SIGTERM` and restart RPC leave managed OpenCode running. The next
+server re-adopts it and reconciles; with no demand its grace timer arms.
+`conduit stop` terminates it.
+
 ## Communication Flow
 
 | Flow | Path |

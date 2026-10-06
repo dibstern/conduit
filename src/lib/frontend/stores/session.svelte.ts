@@ -1,6 +1,7 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
+import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
 import {
 	resetSessionSubscription,
 	sessionSubscription,
@@ -60,7 +61,9 @@ import { updateContextPercent } from "./ui.svelte.js";
 
 const serverSessions = $derived(sessionSubscription.rows);
 const rootSessions = $derived(
-	[...serverSessions.values()].filter((row) => !row.parentID),
+	[...serverSessions.values()].filter(
+		(row) => !row.parentID && !row.sideThread,
+	),
 );
 let familySessions = $state.raw<readonly SessionInfo[]>([]);
 
@@ -85,19 +88,19 @@ export function parentOf(id: string): string | null {
 }
 
 const busySessionIds = $derived.by(() => {
-	const busy = new Set(sessionActivityBridge.pending.keys());
-	for (const row of serverSessions.values()) {
-		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
+	const rows = new Map(familySessions.map((row) => [row.id, row]));
+	for (const row of serverSessions.values()) rows.set(row.id, row);
+	// Activity can arrive before the current session's first family row.
+	const currentId = clientSession.currentId;
+	if (currentId && !rows.has(currentId)) {
+		rows.set(currentId, {
+			id: currentId,
+			title: "",
+			status: "idle",
+			parentID: parentOf(currentId) ?? undefined,
+		});
 	}
-	for (const family of familySessions) {
-		const row = serverSessions.get(family.id) ?? family;
-		if (row.status === "busy" || row.status === "retry") busy.add(row.id);
-	}
-	for (const id of busy) {
-		const parent = parentOf(id);
-		if (parent && isRoutable(parent)) busy.add(parent);
-	}
-	return busy;
+	return calculateBusySessionIds(rows, sessionActivityBridge.pending.keys());
 });
 
 /** The session view's single busy decision, shared by every sidebar row. */
@@ -797,7 +800,8 @@ export function getFilteredSessions(): SessionInfo[] {
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		return sessionState.searchResults.flatMap((session) => {
-			if (session.parentID || !inScope(session)) return [];
+			if (session.parentID || session.sideThread || !inScope(session))
+				return [];
 			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
 				return [session];
 			}
@@ -815,7 +819,8 @@ export function getFilteredSessions(): SessionInfo[] {
 		(session) =>
 			session.projectSlug != null &&
 			session.projectSlug !== currentSlug &&
-			!session.parentID,
+			!session.parentID &&
+			!session.sideThread,
 	);
 	const sessions = [...localSessions, ...foreignSessions]
 		.filter(inScope)

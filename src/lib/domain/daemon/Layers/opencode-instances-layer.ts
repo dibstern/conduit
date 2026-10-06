@@ -5,9 +5,11 @@ import {
 	Effect,
 	Either,
 	Exit,
+	Fiber,
 	FiberId,
 	Layer,
 	Option,
+	Queue,
 	Schema,
 	Stream,
 } from "effect";
@@ -95,6 +97,17 @@ type InstanceStream = {
 
 const CONNECT_TIMEOUT = "4 seconds";
 
+/** Grace before an instance without demand stops, like the PTY host's idle timeout. */
+const idleTimeoutFromEnv = Effect.sync(() => {
+	const configured = process.env["CONDUIT_OPENCODE_IDLE_TIMEOUT_MS"];
+	return configured === undefined ? 600_000 : Number(configured);
+}).pipe(
+	Effect.filterOrDieMessage(
+		(ms) => Number.isInteger(ms) && ms > 0 && ms <= 2_147_483_647,
+		"CONDUIT_OPENCODE_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+	),
+);
+
 export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 	resolveEndpoint: (
 		instanceId: string,
@@ -102,6 +115,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 	options: {
 		readonly log?: Logger;
 		readonly control?: OpenCodeProcessControl<Start, Stop>;
+		/** Defaults to CONDUIT_OPENCODE_IDLE_TIMEOUT_MS, else 10 minutes. */
+		readonly idleTimeoutMs?: number;
 	} = {},
 ) =>
 	Layer.scoped(
@@ -109,6 +124,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 		Effect.gen(function* () {
 			const { log = createLogger("daemon").child("opencode"), control } =
 				options;
+			const idleTimeoutMs =
+				options.idleTimeoutMs ?? (yield* idleTimeoutFromEnv);
 			const context = yield* Effect.context<R | Start | Stop>();
 			const scope = yield* Effect.scope;
 			const gate = yield* Effect.makeSemaphore(1);
@@ -121,10 +138,21 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				directories: ReadonlySet<string>;
 				send: (event: OpenCodeInstanceEvent) => void;
 			}>();
-			// One /global/event stream per instance. Streams stay open while
-			// anything holds the module: an events subscriber or a `use` scope.
+			// One /global/event stream per instance, open exactly while the
+			// instance has demand or its grace timer runs. Demand is the open
+			// `use` scopes counted here plus the busy sessions and pending
+			// prompts the stream's reconciler sees. Guarded by `gate`.
 			const streams = new Map<string, InstanceStream>();
-			let uses = 0;
+			const holds = new Map<string, number>();
+			const graces = new Map<
+				string,
+				{ readonly token: number; readonly fiber: Fiber.RuntimeFiber<void> }
+			>();
+			let graceTokens = 0;
+			// Completes when an instance's stop finishes; `use` waits on it.
+			const stopping = new Map<string, Deferred.Deferred<void>>();
+			// Reconcilers report demand changes from callbacks; settled in order.
+			const demandChanged = yield* Queue.unbounded<string>();
 			const paths = new Map<string, string>();
 			const normalize = (directory: string) => {
 				const cached = paths.get(directory);
@@ -142,6 +170,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				paths.set(directory, canonical);
 				return canonical;
 			};
+			const subscribedDirectories = () =>
+				[...subscribers].flatMap(({ directories }) => [...directories]);
 			const broadcast = (event: OpenCodeInstanceEvent) => {
 				for (const subscriber of subscribers) subscriber.send(event);
 			};
@@ -207,6 +237,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								emitToDirectory(instanceId, source, directory, payload);
 							},
 							log,
+							onChange: () => {
+								Queue.unsafeOffer(demandChanged, instanceId);
+							},
 						}),
 						reconcileClient:
 							endpoint && sdk
@@ -242,7 +275,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						if (stream.reconcileClient)
 							void stream.reconciler.reconcile(
 								stream.reconcileClient,
-								[...subscribers].flatMap(({ directories }) => [...directories]),
+								subscribedDirectories(),
 							);
 					});
 					source.on("disconnected", (error) =>
@@ -318,16 +351,144 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					return true;
 				});
 
-			const releaseHold = (drop: () => void) =>
-				gate.withPermits(1)(
-					Effect.gen(function* () {
-						drop();
-						if (subscribers.size + uses > 0) return;
-						yield* Effect.forEach([...streams.keys()], closeStream, {
-							discard: true,
-						});
-					}),
+			const cancelGrace = (instanceId: string) => {
+				const grace = graces.get(instanceId);
+				if (!grace) return Effect.void;
+				graces.delete(instanceId);
+				return Fiber.interruptFork(grace.fiber);
+			};
+
+			/**
+			 * Arms the grace timer when an open stream has no demand, and cancels
+			 * it when demand returns. Call under the gate.
+			 */
+			const settle = (instanceId: string): Effect.Effect<void> =>
+				Effect.suspend(() => {
+					const stream = streams.get(instanceId);
+					const idle =
+						stream !== undefined &&
+						!stopping.has(instanceId) &&
+						!holds.has(instanceId) &&
+						!stream.reconciler.active();
+					if (!idle) return cancelGrace(instanceId);
+					if (graces.has(instanceId)) return Effect.void;
+					const token = ++graceTokens;
+					log.debug("OpenCode instance idle; grace timer armed", {
+						instanceId,
+						idleTimeoutMs,
+					});
+					// `use` settles from acquire/release, which are uninterruptible;
+					// the timer must stay cancellable.
+					return Effect.sleep(idleTimeoutMs).pipe(
+						Effect.zipRight(expire(instanceId, token)),
+						Effect.interruptible,
+						Effect.forkIn(scope),
+						Effect.flatMap((fiber) =>
+							Effect.sync(() => {
+								graces.set(instanceId, { token, fiber });
+							}),
+						),
+					);
+				});
+
+			/**
+			 * Marks the instance stopping and closes its stream (and any stream on
+			 * the same endpoint). Call under the gate.
+			 */
+			const beginStop = (instanceId: string, key?: string) =>
+				Effect.gen(function* () {
+					const done = yield* Deferred.make<void>();
+					stopping.set(instanceId, done);
+					yield* cancelGrace(instanceId);
+					yield* Effect.forEach(
+						[...streams].filter(
+							([id, stream]) => id === instanceId || stream.key === key,
+						),
+						([id]) => closeStream(id),
+						{ discard: true },
+					);
+					return done;
+				});
+
+			/** Stops the process, if asked, then releases waiting `use` calls. */
+			const finishStop = (
+				instanceId: string,
+				done: Deferred.Deferred<void>,
+				stopProcess: boolean,
+			) =>
+				(control && stopProcess
+					? control.stop(instanceId).pipe(Effect.provide(context))
+					: Effect.void
+				).pipe(
+					Effect.ensuring(
+						gate
+							.withPermits(1)(
+								Effect.sync(() => {
+									stopping.delete(instanceId);
+								}),
+							)
+							.pipe(Effect.zipRight(Deferred.done(done, Exit.void))),
+					),
 				);
+
+			/**
+			 * Grace expiry: verify with the connect-time reconcile, then stop only
+			 * if the instance still has no demand. External instances only lose
+			 * their stream.
+			 */
+			const expire = (instanceId: string, token: number) =>
+				Effect.gen(function* () {
+					const stream = streams.get(instanceId);
+					const client = stream?.reconcileClient;
+					const verified =
+						stream && client
+							? yield* Effect.promise(() =>
+									stream.reconciler.reconcile(client, subscribedDirectories()),
+								)
+							: true;
+					const endpoint = yield* resolveIn(instanceId);
+					yield* gate
+						.withPermits(1)(
+							Effect.suspend(() => {
+								if (graces.get(instanceId)?.token !== token)
+									return Effect.succeed(undefined);
+								graces.delete(instanceId);
+								if (
+									!verified ||
+									streams.get(instanceId) !== stream ||
+									holds.has(instanceId) ||
+									stream?.reconciler.active()
+								) {
+									log.info("OpenCode instance kept running at grace expiry", {
+										instanceId,
+										reason: verified ? "in use" : "reconcile failed",
+									});
+									return Effect.as(settle(instanceId), undefined);
+								}
+								log.info(
+									endpoint?.managed
+										? "Stopping idle OpenCode instance"
+										: "Closing idle OpenCode instance stream",
+									{ instanceId, idleTimeoutMs },
+								);
+								return beginStop(instanceId);
+							}),
+						)
+						.pipe(
+							Effect.flatMap((done) =>
+								done
+									? finishStop(instanceId, done, endpoint?.managed === true)
+									: Effect.void,
+							),
+							Effect.uninterruptible,
+						);
+				});
+
+			yield* Queue.take(demandChanged).pipe(
+				Effect.flatMap((instanceId) => gate.withPermits(1)(settle(instanceId))),
+				Effect.forever,
+				Effect.forkIn(scope),
+			);
 
 			yield* Effect.addFinalizer(() =>
 				Effect.forEach([...streams.keys()], closeStream, { discard: true }),
@@ -392,8 +553,40 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					);
 				});
 
+			/** Counts a `use` scope as demand, first waiting out a stop in progress. */
+			const hold = (instanceId: string): Effect.Effect<void> =>
+				gate
+					.withPermits(1)(
+						Effect.suspend(() => {
+							const stop = stopping.get(instanceId);
+							if (stop) return Effect.succeed(stop);
+							holds.set(instanceId, (holds.get(instanceId) ?? 0) + 1);
+							return Effect.as(settle(instanceId), undefined);
+						}),
+					)
+					.pipe(
+						Effect.flatMap((stop) =>
+							stop
+								? Deferred.await(stop).pipe(Effect.zipRight(hold(instanceId)))
+								: Effect.void,
+						),
+					);
+
+			const release = (instanceId: string) =>
+				gate.withPermits(1)(
+					Effect.suspend(() => {
+						const remaining = (holds.get(instanceId) ?? 1) - 1;
+						if (remaining > 0) holds.set(instanceId, remaining);
+						else holds.delete(instanceId);
+						return settle(instanceId);
+					}),
+				);
+
 			const use = (instanceId: string, directory?: string) =>
 				Effect.gen(function* () {
+					yield* Effect.acquireRelease(hold(instanceId), () =>
+						release(instanceId),
+					);
 					let endpoint = yield* resolveIn(instanceId);
 					// Not running yet: never started, stopped, or a managed instance
 					// that failed or crashed. External instances are only checked.
@@ -412,18 +605,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							reason: "not-configured",
 							message: `OpenCode instance "${instanceId}" is not configured with a server URL`,
 						});
-					const resolved = endpoint;
-					const opened = yield* Effect.acquireRelease(
-						gate.withPermits(1)(
-							Effect.suspend(() => {
-								uses++;
-								return ensureStream(instanceId, resolved);
-							}),
-						),
-						() =>
-							releaseHold(() => {
-								uses--;
-							}),
+					const opened = yield* gate.withPermits(1)(
+						ensureStream(instanceId, endpoint),
 					);
 					const client = clientFor(endpoint, directory);
 					const stream = streams.get(instanceId);
@@ -463,9 +646,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					return client;
 				});
 
-			// A survivor re-adopted at startup is running before any use. Hold its
-			// stream open so reconcile-on-connect recovers busy sessions and
-			// pending prompts for every subscribed directory.
+			// A survivor re-adopted at startup is running before any use. Open its
+			// stream so reconcile-on-connect recovers busy sessions and pending
+			// prompts; without demand its grace timer arms.
 			if (control)
 				yield* Effect.forEach(
 					yield* control.adopted.pipe(Effect.provide(context)),
@@ -473,19 +656,38 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Effect.flatMap(resolveIn(instanceId), (endpoint) =>
 							endpoint
 								? gate.withPermits(1)(
-										Effect.suspend(() => {
-											uses++;
-											return ensureStream(instanceId, endpoint);
-										}),
+										ensureStream(instanceId, endpoint).pipe(
+											Effect.zipRight(settle(instanceId)),
+										),
 									)
 								: Effect.void,
 						),
 					{ discard: true },
 				);
 
+			// Admin stop, regardless of demand. Waits out an idle stop first.
+			const stop = (instanceId: string): Effect.Effect<void> =>
+				Effect.gen(function* () {
+					const key = endpointKey(yield* resolveIn(instanceId));
+					const { started, done } = yield* gate.withPermits(1)(
+						Effect.suspend(() => {
+							const running = stopping.get(instanceId);
+							return running
+								? Effect.succeed({ started: false, done: running })
+								: Effect.map(beginStop(instanceId, key), (done) => ({
+										started: true,
+										done,
+									}));
+						}),
+					);
+					if (started) return yield* finishStop(instanceId, done, true);
+					yield* Deferred.await(done);
+					yield* stop(instanceId);
+				}).pipe(Effect.uninterruptible);
+
 			return {
-				// Subscribe path: registers a directory subscriber. Passive: only
-				// `use` opens a stream; subscribers keep open streams alive.
+				// Subscribe path: registers a directory subscriber. Passive: it
+				// neither opens a stream nor keeps one open.
 				events: (
 					directories: readonly string[],
 					instanceId: string = defaultInstanceIdForDriver("opencode"),
@@ -507,9 +709,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												return member;
 											}),
 											(member) =>
-												releaseHold(() => {
-													subscribers.delete(member);
-												}),
+												gate.withPermits(1)(
+													Effect.sync(() => {
+														subscribers.delete(member);
+													}),
+												),
 										);
 										const stream = streams.get(instanceId);
 										if (stream) {
@@ -544,25 +748,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				// Reads process state only: no request, no stream, never a start.
 				ifRunning: (instanceId: string, directory?: string) =>
 					Effect.map(resolveIn(instanceId), (endpoint) =>
-						endpoint && endpoint.status !== "stopped"
+						endpoint &&
+						endpoint.status !== "stopped" &&
+						!stopping.has(instanceId)
 							? Option.some(clientFor(endpoint, directory))
 							: Option.none(),
 					),
-				stop: (instanceId: string) =>
-					Effect.gen(function* () {
-						const key = endpointKey(yield* resolveIn(instanceId));
-						if (control)
-							yield* control.stop(instanceId).pipe(Effect.provide(context));
-						yield* gate.withPermits(1)(
-							Effect.forEach(
-								[...streams].filter(
-									([id, stream]) => id === instanceId || stream.key === key,
-								),
-								([id]) => closeStream(id),
-								{ discard: true },
-							),
-						);
-					}),
+				stop,
 			};
 		}),
 	);

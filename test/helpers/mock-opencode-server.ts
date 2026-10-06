@@ -25,6 +25,8 @@ interface SseEvent {
 interface QueuedRestResponse {
 	status: number;
 	responseBody: unknown;
+	/** Mutation events that must wait for the corresponding HTTP operation. */
+	sseEvents?: SseEvent[];
 }
 
 /** PTY interaction for replay. */
@@ -127,6 +129,16 @@ export class MockOpenCodeServer {
 	 * delivered "done".
 	 */
 	private sseIdleSessions = new Set<string>();
+	private sseBusySessions = new Set<string>();
+
+	/** Test-only gate; recorded payloads and ordering are left unchanged. */
+	private nextPromptHold:
+		| {
+				type: "session.status" | "permission.asked" | "question.asked";
+				untilReleased: Promise<void>;
+		  }
+		| undefined;
+	private heldPromptReleases = new Set<() => void>();
 
 	/** Counter for generating unique session IDs. */
 	private sessionCounter = 0;
@@ -176,6 +188,27 @@ export class MockOpenCodeServer {
 		return this.receivedBodies.slice();
 	}
 
+	/** Pause the next recorded turn after its busy or pending-request event. */
+	holdNextPrompt(
+		type:
+			| "session.status"
+			| "permission.asked"
+			| "question.asked" = "session.status",
+	): () => void {
+		if (this.nextPromptHold) throw new Error("The next prompt is already held");
+		let resume!: () => void;
+		const untilReleased = new Promise<void>((resolve) => {
+			resume = resolve;
+		});
+		const release = () => {
+			this.heldPromptReleases.delete(release);
+			resume();
+		};
+		this.heldPromptReleases.add(release);
+		this.nextPromptHold = { type, untilReleased };
+		return release;
+	}
+
 	/** Start the mock HTTP + WS server on a random port. */
 	async start(): Promise<void> {
 		const server = createServer((req, res) => {
@@ -204,6 +237,8 @@ export class MockOpenCodeServer {
 	/** Stop the mock server and clean up all resources. */
 	async stop(): Promise<void> {
 		this.cleanupSseClients();
+		for (const release of this.heldPromptReleases) release();
+		this.nextPromptHold = undefined;
 
 		if (this.wss) {
 			for (const client of this.wss.clients) {
@@ -225,6 +260,8 @@ export class MockOpenCodeServer {
 	/** Re-initialize all replay state from the original recording. */
 	reset(): void {
 		this.cleanupSseClients();
+		for (const release of this.heldPromptReleases) release();
+		this.nextPromptHold = undefined;
 		this.receivedBodies.length = 0;
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
@@ -238,6 +275,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
+		this.sseBusySessions.clear();
 		this.sseMessages.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
@@ -404,6 +442,8 @@ export class MockOpenCodeServer {
 	 * For multi-test reuse within a shared relay.
 	 */
 	resetQueues(): void {
+		for (const release of this.heldPromptReleases) release();
+		this.nextPromptHold = undefined;
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
@@ -414,6 +454,7 @@ export class MockOpenCodeServer {
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
+		this.sseBusySessions.clear();
 		this.sseMessages.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
@@ -422,12 +463,63 @@ export class MockOpenCodeServer {
 
 	private buildQueues(): void {
 		const { interactions } = this.recording;
+		const titledForks = new Map<
+			string,
+			{
+				forkIndex: number;
+				updateIndex: number;
+				promptIndex: number;
+			}
+		>();
+		const mutationEvents = new Map<number, SseEvent[]>();
+		// A fork's clone/title events belong to its creation, not the previous
+		// parent prompt. Older fork recordings without a title PATCH keep their
+		// existing prompt grouping.
+		for (const [forkIndex, interaction] of interactions.entries()) {
+			if (
+				interaction.kind !== "rest" ||
+				interaction.method !== "POST" ||
+				!/^\/session\/[^/]+\/fork$/.test(interaction.path.split("?")[0] ?? "")
+			)
+				continue;
+			const body = interaction.responseBody;
+			if (
+				!body ||
+				typeof body !== "object" ||
+				!("id" in body) ||
+				typeof body.id !== "string"
+			)
+				continue;
+			const sessionPath = `/session/${body.id}`;
+			const updateIndex = interactions.findIndex(
+				(following, index) =>
+					index > forkIndex &&
+					following.kind === "rest" &&
+					following.method === "PATCH" &&
+					following.path.split("?")[0] === sessionPath &&
+					!!following.requestBody &&
+					typeof following.requestBody === "object" &&
+					"title" in following.requestBody &&
+					typeof following.requestBody.title === "string",
+			);
+			const promptIndex = interactions.findIndex(
+				(following, index) =>
+					index > forkIndex &&
+					following.kind === "rest" &&
+					following.method === "POST" &&
+					following.path.split("?")[0] === `${sessionPath}/prompt_async`,
+			);
+			if (updateIndex < 0 || promptIndex <= updateIndex) continue;
+			titledForks.set(body.id, { forkIndex, updateIndex, promptIndex });
+			mutationEvents.set(forkIndex, []);
+			mutationEvents.set(updateIndex, []);
+		}
 
 		this.sseSegments = [[]];
 		this.recordedPromptSessionIds = [];
 		let currentSegment = 0;
 
-		for (const ix of interactions) {
+		for (const [index, ix] of interactions.entries()) {
 			if (ix.kind === "rest") {
 				if (ix.method === "POST" && ix.path.includes("/prompt_async")) {
 					currentSegment++;
@@ -439,9 +531,11 @@ export class MockOpenCodeServer {
 					}
 				}
 
+				const sseEvents = mutationEvents.get(index);
 				const queued: QueuedRestResponse = {
 					status: ix.status,
 					responseBody: ix.responseBody,
+					...(sseEvents ? { sseEvents } : {}),
 				};
 
 				const ek = exactKey(ix.method, ix.path);
@@ -452,7 +546,32 @@ export class MockOpenCodeServer {
 					this.pushQueue(this.normalizedQueues, nk, { ...queued });
 				}
 			} else if (ix.kind === "sse") {
-				this.sseSegments[currentSegment]?.push({
+				const info = ix.properties["info"] as
+					| Record<string, unknown>
+					| undefined;
+				const part = ix.properties["part"] as
+					| Record<string, unknown>
+					| undefined;
+				const sessionId =
+					ix.properties["sessionID"] ??
+					info?.["sessionID"] ??
+					part?.["sessionID"] ??
+					(ix.type.startsWith("session.") ? info?.["id"] : undefined);
+				const fork =
+					typeof sessionId === "string"
+						? titledForks.get(sessionId)
+						: undefined;
+				const ownerIndex =
+					fork && index < fork.promptIndex
+						? index < fork.updateIndex
+							? fork.forkIndex
+							: fork.updateIndex
+						: undefined;
+				const events =
+					ownerIndex === undefined
+						? this.sseSegments[currentSegment]
+						: mutationEvents.get(ownerIndex);
+				events?.push({
 					type: ix.type,
 					properties: ix.properties,
 					delayMs: ix.delayMs,
@@ -784,6 +903,18 @@ export class MockOpenCodeServer {
 			}
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(session));
+			const updateQueue =
+				this.getActiveQueue(this.exactQueues, exact) ??
+				this.getActiveQueue(this.normalizedQueues, normalized);
+			const recordedUpdate = updateQueue?.[0];
+			if (recordedUpdate?.sseEvents) {
+				if (updateQueue && updateQueue.length > 1) updateQueue.shift();
+				this.diag(
+					"session_update_sse",
+					`${exact} count=${recordedUpdate.sseEvents.length}`,
+				);
+				this.emitEvents(recordedUpdate.sseEvents);
+			}
 			return;
 		}
 
@@ -842,7 +973,10 @@ export class MockOpenCodeServer {
 				const shifted =
 					statusQueue.length > 1 ? statusQueue.shift() : undefined;
 				const statusEntry = shifted ?? statusQueue[0];
-				if (statusEntry && this.sseIdleSessions.size > 0) {
+				if (
+					statusEntry &&
+					(this.sseIdleSessions.size > 0 || this.sseBusySessions.size > 0)
+				) {
 					const body =
 						typeof statusEntry.responseBody === "object" &&
 						statusEntry.responseBody !== null
@@ -852,6 +986,9 @@ export class MockOpenCodeServer {
 					if (typeof body === "object" && body !== null) {
 						for (const sid of this.sseIdleSessions) {
 							delete (body as Record<string, unknown>)[sid];
+						}
+						for (const sid of this.sseBusySessions) {
+							(body as Record<string, unknown>)[sid] = { type: "busy" };
 						}
 					}
 					res.writeHead(statusEntry.status, {
@@ -870,7 +1007,13 @@ export class MockOpenCodeServer {
 			}
 			// No queue — return empty status
 			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({}));
+			res.end(
+				JSON.stringify(
+					Object.fromEntries(
+						[...this.sseBusySessions].map((sid) => [sid, { type: "busy" }]),
+					),
+				),
+			);
 			return;
 		}
 
@@ -934,6 +1077,10 @@ export class MockOpenCodeServer {
 			res.end(JSON.stringify({ error: "empty queue", exact, normalized }));
 			return;
 		}
+		if (entry.sseEvents) {
+			this.diag("rest_sse", `${exact} count=${entry.sseEvents.length}`);
+			this.emitEvents(entry.sseEvents);
+		}
 
 		// Detect prompt_async — emit the corresponding SSE segment.
 		// Rewrite session IDs in SSE events so that the relay routes them
@@ -941,6 +1088,8 @@ export class MockOpenCodeServer {
 		if (method === "POST" && path.includes("/prompt_async")) {
 			this.promptsFired++;
 			const sseClientCount = this.sseClients.size;
+			const hold = this.nextPromptHold;
+			this.nextPromptHold = undefined;
 
 			// Extract the actual session ID the test is prompting
 			const promptMatch = /\/session\/([^/]+)\/prompt_async/.exec(path);
@@ -968,14 +1117,14 @@ export class MockOpenCodeServer {
 					"prompt_async",
 					`#${this.promptsFired} seg0=${this.sseSegments[0]?.length ?? 0} seg1=${this.sseSegments[1]?.length ?? 0} combined=${combined.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(combined, sessionIdMap);
+				this.emitEvents(combined, sessionIdMap, hold);
 			} else {
 				const segment = this.sseSegments[this.promptsFired] ?? [];
 				this.diag(
 					"prompt_async",
 					`#${this.promptsFired} segment=${segment.length} sseClients=${sseClientCount}${sessionIdMap ? ` rewrite=${sessionIdMap.from.slice(0, 12)}→${sessionIdMap.to.slice(0, 12)}` : ""}`,
 				);
-				this.emitEvents(segment, sessionIdMap);
+				this.emitEvents(segment, sessionIdMap, hold);
 			}
 		}
 
@@ -1108,6 +1257,7 @@ export class MockOpenCodeServer {
 	private emitEvents(
 		events: SseEvent[],
 		sessionIdMap?: { from: string; to: string },
+		hold?: { type: string; untilReleased: Promise<void> },
 	): void {
 		if (events.length === 0) return;
 		this.diag(
@@ -1154,8 +1304,10 @@ export class MockOpenCodeServer {
 					const sid = properties["sessionID"] as string | undefined;
 					if (status?.type === "idle" && sid) {
 						this.sseIdleSessions.add(sid);
+						this.sseBusySessions.delete(sid);
 					} else if (status?.type === "busy" && sid) {
 						this.sseIdleSessions.delete(sid);
+						this.sseBusySessions.add(sid);
 					}
 				}
 
@@ -1164,6 +1316,17 @@ export class MockOpenCodeServer {
 				this.trackSseMessage(event.type, properties);
 
 				emitCount++;
+				if (
+					hold &&
+					event.type === hold.type &&
+					(event.type !== "session.status" ||
+						(properties["status"] as { type?: string } | undefined)?.type ===
+							"busy")
+				) {
+					this.diag("prompt_held", event.type);
+					await hold.untilReleased;
+					hold = undefined;
+				}
 			}
 			this.diag("emit_done", `emitted=${emitCount}/${events.length}`);
 		})();
