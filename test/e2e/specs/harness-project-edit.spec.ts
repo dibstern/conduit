@@ -227,7 +227,7 @@ for (const provider of providers) {
 			// 6. A session runs in main and reads the marker; the provider was
 			// told about both extra folders.
 			await page.locator("#new-session-btn:visible").click();
-			await expect(page).toHaveURL(/\/new\?/);
+			await app.chooseDraftProject("edit-app");
 			expect(new URL(page.url()).searchParams.get("project")).toBe(slug);
 			const picker = page.locator(
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',

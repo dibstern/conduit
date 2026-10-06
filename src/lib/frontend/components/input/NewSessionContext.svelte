@@ -3,8 +3,8 @@
      current checkout exists today; worktrees and other branches come later. -->
 
 <script lang="ts">
-	import { projectState } from "../../stores/project.svelte.js";
-	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, getDraftProject, replaceRoute } from "../../stores/router.svelte.js";
+	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";

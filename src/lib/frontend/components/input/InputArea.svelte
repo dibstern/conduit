@@ -50,7 +50,8 @@
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getDraftProject, rememberNewSessionProject } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
@@ -617,6 +618,7 @@
 					...(model ? { model } : {}),
 				});
 				sid = created.sessionId;
+				rememberNewSessionProject(projectSlug);
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);

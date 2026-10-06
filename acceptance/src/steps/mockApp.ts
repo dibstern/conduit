@@ -167,6 +167,11 @@ export const mockAppHandlers: StepHandler[] = [
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
+					// A real daemon always lists its projects; a draft prefills from them.
+					GetProjects: async () => ({
+						projects: [{ slug: "myapp", title: "myapp", folders: ["/myapp"] }],
+						current: "myapp",
+					}),
 					ViewSession: async () => ({ ok: true }),
 					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
 						projectSlug: String(projectSlug ?? "myapp"),

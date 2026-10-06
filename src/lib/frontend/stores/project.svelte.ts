@@ -14,6 +14,8 @@ import type { ProjectInfo } from "../types.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import {
 	attachedProjectState,
+	DRAFT_PROJECT_PARAM,
+	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
@@ -27,6 +29,25 @@ export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
 });
+
+const LAST_NEW_SESSION_PROJECT_KEY = "conduit-last-new-session-project";
+
+/** The project a draft will be created in: its own pick, else the one this
+ *  device last created a session in, else the first available. A draft never
+ *  inherits the project of whatever session happened to be open. */
+export function getDraftProject(): string | null {
+	const picked = getCurrentSearchParams().get(DRAFT_PROJECT_PARAM);
+	if (picked) return picked;
+	const available = projectState.projects.filter((p) => !p.missing);
+	const last = localStorage.getItem(LAST_NEW_SESSION_PROJECT_KEY);
+	return (
+		available.find((p) => p.slug === last)?.slug ?? available[0]?.slug ?? null
+	);
+}
+
+export function rememberNewSessionProject(slug: string): void {
+	localStorage.setItem(LAST_NEW_SESSION_PROJECT_KEY, slug);
+}
 
 /** Apply a full project list: the subscription's, or an RPC's reply. */
 export function applyProjectList(
