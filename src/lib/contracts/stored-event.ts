@@ -66,6 +66,9 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.provider_changed",
 	"session.provider_cleanup_failed",
 	"session.permission_mode_changed",
+	"session.model_changed",
+	"session.variant_changed",
+	"session.context_window_changed",
 	"session.goal_changed",
 	"permission.asked",
 	"permission.resolved",
@@ -359,6 +362,25 @@ export interface SessionPermissionModeChangedPayload {
 	readonly mode: SessionPermissionModeValue;
 }
 
+/** The session's model, whether the user picked it or the relay inferred it. */
+export interface SessionModelChangedPayload {
+	readonly sessionId: string;
+	readonly modelId: string;
+	readonly providerId: string;
+}
+
+/** The session's effort variant; "" means the session follows the default. */
+export interface SessionVariantChangedPayload {
+	readonly sessionId: string;
+	readonly variant: string;
+}
+
+/** The session's context window; "" means the session follows the default. */
+export interface SessionContextWindowChangedPayload {
+	readonly sessionId: string;
+	readonly contextWindow: string;
+}
+
 const SessionGoalSchema = Schema.Struct({
 	condition: Schema.String,
 	iterations: Schema.NonNegativeInt,
@@ -460,6 +482,9 @@ export interface EventPayloadMap {
 	"session.provider_changed": SessionProviderChangedPayload;
 	"session.provider_cleanup_failed": SessionProviderCleanupFailedPayload;
 	"session.permission_mode_changed": SessionPermissionModeChangedPayload;
+	"session.model_changed": SessionModelChangedPayload;
+	"session.variant_changed": SessionVariantChangedPayload;
+	"session.context_window_changed": SessionContextWindowChangedPayload;
 	"session.goal_changed": SessionGoalChangedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
@@ -873,6 +898,22 @@ const SessionPermissionModeChangedPayloadSchema = Schema.Struct({
 	mode: Schema.Literal(...SESSION_PERMISSION_MODES),
 });
 
+const SessionModelChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	modelId: Schema.String,
+	providerId: Schema.String,
+});
+
+const SessionVariantChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	variant: Schema.String,
+});
+
+const SessionContextWindowChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	contextWindow: Schema.String,
+});
+
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
@@ -1075,6 +1116,18 @@ const SessionPermissionModeChangedEventSchema = eventEnvelope(
 	"session.permission_mode_changed",
 	SessionPermissionModeChangedPayloadSchema,
 );
+const SessionModelChangedEventSchema = eventEnvelope(
+	"session.model_changed",
+	SessionModelChangedPayloadSchema,
+);
+const SessionVariantChangedEventSchema = eventEnvelope(
+	"session.variant_changed",
+	SessionVariantChangedPayloadSchema,
+);
+const SessionContextWindowChangedEventSchema = eventEnvelope(
+	"session.context_window_changed",
+	SessionContextWindowChangedPayloadSchema,
+);
 const SessionGoalChangedEventSchema = eventEnvelope(
 	"session.goal_changed",
 	SessionGoalChangedPayloadSchema,
@@ -1134,6 +1187,9 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionProviderChangedEventSchema,
 	SessionProviderCleanupFailedEventSchema,
 	SessionPermissionModeChangedEventSchema,
+	SessionModelChangedEventSchema,
+	SessionVariantChangedEventSchema,
+	SessionContextWindowChangedEventSchema,
 	SessionGoalChangedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,

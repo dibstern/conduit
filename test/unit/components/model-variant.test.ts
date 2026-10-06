@@ -38,7 +38,6 @@ describe("ModelVariant", () => {
 		switchVariantRpcSpy.mockClear();
 		clearDiscoveryState();
 		handleVariantInfo({
-			type: "variant_info",
 			variant: "",
 			variants: ["low", "medium", "high", "max"],
 		});

@@ -51,6 +51,8 @@ export const STARTUP_RESTORE_INDEXES_MIGRATION =
 export const TOOL_CALL_INDEX_MIGRATION = "0031_tool_call_index.sql";
 export const PENDING_APPROVALS_VERSION_MIGRATION =
 	"0032_pending_approvals_version.sql";
+export const SESSIONS_MODEL_SETTINGS_MIGRATION =
+	"0033_sessions_model_settings.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

@@ -27,6 +27,7 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "./services.js";
+import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
@@ -34,7 +35,6 @@ import {
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
-	setModelDefault,
 	setPermissionMode,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
@@ -390,7 +390,16 @@ const resolveClaudeModel = (
 				providerID: inferred.providerId,
 				modelID: inferred.id,
 			};
-			yield* setModelDefault(input.sessionId, inferredModel);
+			// Recording the pick is not what this turn waits on.
+			yield* inferSessionModel(input.sessionId, inferredModel).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`session=${input.sessionId} Could not record inferred model: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
+			);
 			log.info(
 				`session=${input.sessionId} inferred provider=${inferred.providerId} model=${inferred.id} reason=no server-side session or default model; inferred from Claude catalog`,
 			);

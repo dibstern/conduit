@@ -74,16 +74,8 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 					modelID: "gpt-4",
 				});
 				expect(yield* getDefaultVariant()).toBe("fast");
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "model_info",
-					model: "gpt-4",
-					provider: "openai",
-				});
-				expect(wsHandler.broadcast).toHaveBeenCalledWith({
-					type: "variant_info",
-					variant: "fast",
-					variants: ["standard", "fast"],
-				});
+				// Tabs follow the default through SubscribeProjectSettings.
+				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

@@ -1,14 +1,9 @@
 import { expect, type Page } from "@playwright/test";
-import {
-	claudeBoundSessionMessages,
-	openCodeBoundSessionMessages,
-} from "../../../test/e2e/fixtures/mockup-state.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	exampleValue,
 	openModelPicker,
 	openSessionRoute,
-	requireRelayControl,
 	requireRpcControl,
 } from "./shared.js";
 
@@ -46,14 +41,12 @@ export const harnessHandlers: StepHandler[] = [
 		match: /^a session already exists on the (Claude|OpenCode) harness$/,
 		run: async ({ world, match }) => {
 			const harness = match[1] ?? "";
-			const relayControl = requireRelayControl(world.page);
 			const claude = instanceIdForLabel(harness) === "claude";
 			const sessionId = claude ? "sess-bound-claude" : "sess-bound-opencode";
 			const rpc = requireRpcControl(world.page);
 			const previousRequests = rpc.getRequests().length;
 			await openSessionRoute(world.page, sessionId);
-			// The session's GetModels reply rebinds the trigger, so send the bound
-			// frames after it, and resend in case they still overtook it.
+			// The session's GetModels reply binds the trigger to its harness.
 			await expect
 				.poll(() =>
 					rpc
@@ -66,16 +59,9 @@ export const harnessHandlers: StepHandler[] = [
 						),
 				)
 				.toBe(true);
-			await expect(async () => {
-				await relayControl.sendMessages(
-					claude ? claudeBoundSessionMessages : openCodeBoundSessionMessages,
-				);
-				await expect(
-					world.page.getByTestId("model-picker-trigger").first(),
-				).toHaveAttribute("data-instance-id", instanceIdForLabel(harness), {
-					timeout: 1_000,
-				});
-			}).toPass({ timeout: 5_000 });
+			await expect(
+				world.page.getByTestId("model-picker-trigger").first(),
+			).toHaveAttribute("data-instance-id", instanceIdForLabel(harness));
 		},
 	},
 	{

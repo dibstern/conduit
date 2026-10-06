@@ -233,6 +233,10 @@ export function translateDomainEventToRelay(
 		// reach the picker; it does, as the session's shell row (ni8.12).
 		case "session.permission_mode_changed":
 			return silent("delivered as the shell row's permissionMode");
+		case "session.model_changed":
+		case "session.variant_changed":
+		case "session.context_window_changed":
+			return silent("delivered as the shell row's model settings");
 
 		case "permission.asked":
 		case "permission.resolved":

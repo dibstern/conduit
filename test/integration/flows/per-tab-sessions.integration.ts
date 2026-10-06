@@ -207,30 +207,45 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.close();
 	});
 
-	it("model switch broadcasts model_info to clients on the same session", async () => {
+	it("model switch reaches a peer as the session's shell row, version bumped", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		// Create a shared session
-		client1.clearReceived();
 		const created = await client1.createSession("Model-Switch-PerTab");
 		const sharedId = created["id"] as string;
-
-		// Both clients view the same session
-		client2.clearReceived();
 		await client2.viewSession(sharedId);
+		await client2.subscribeShell();
+		const lastSequence = Math.max(
+			...client2
+				.getReceivedOfType("shell")
+				.map((msg) => Number(msg["sequence"] ?? 0)),
+		);
 
-		// Switch model from client1
-		client1.clearReceived();
 		client2.clearReceived();
-		await client1.switchModel("per-tab-test-model", "per-tab-test-provider");
+		await client1.switchModel(
+			"per-tab-test-model",
+			"per-tab-test-provider",
+			sharedId,
+		);
 
-		// Client2 should receive model_info (same session)
-		const modelMsg = await client2.waitFor("model_info");
-		expect(modelMsg["model"]).toBe("per-tab-test-model");
-		expect(modelMsg["provider"]).toBe("per-tab-test-provider");
+		// The peer sees the pick on its shell subscription: no refetch, no reconnect.
+		const upsert = await client2.waitFor("shell", {
+			predicate: (msg) => {
+				const item = msg["item"] as Record<string, unknown> | undefined;
+				return (
+					msg["_tag"] === "upsert" &&
+					item?.["id"] === sharedId &&
+					item["model"] !== undefined
+				);
+			},
+		});
+		expect((upsert["item"] as Record<string, unknown>)["model"]).toEqual({
+			model: "per-tab-test-model",
+			provider: "per-tab-test-provider",
+		});
+		expect(upsert["sequence"]).toBeGreaterThan(lastSequence);
 
 		await client1.close();
 		await client2.close();

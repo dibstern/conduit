@@ -342,27 +342,6 @@ export const modelExecutionMockups = {
 	},
 };
 
-/** Bind an existing session to the Claude harness (locked-rail mode).
- *  Its agents come from GetAgents, which resolves the session's instance. */
-export const claudeBoundSessionMessages: MockMessage[] = [
-	{
-		type: "model_info",
-		sessionId: "sess-bound-claude",
-		model: "claude-sonnet-4-5",
-		provider: "claude",
-	},
-];
-
-/** Bind an existing session to the OpenCode harness (locked-rail mode). */
-export const openCodeBoundSessionMessages: MockMessage[] = [
-	{
-		type: "model_info",
-		sessionId: "sess-bound-opencode",
-		model: "claude-sonnet-4",
-		provider: "anthropic",
-	},
-];
-
 // Turn 1 response (completed)
 // Sent after user message: "Help me implement a WebSocket handler for the relay server"
 

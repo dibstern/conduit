@@ -4,8 +4,6 @@ import { expect, vi } from "vitest";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getContextWindow,
@@ -19,31 +17,11 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import { makeHandlerLogger } from "../../helpers/handler-fakes.js";
+import {
+	makeHandlerLogger,
+	makeSessionSettingsLayer,
+} from "../../helpers/handler-fakes.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
-
-function mockWsHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => "session-1"),
-		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-		...overrides,
-	};
-}
 
 const mockLogger = makeHandlerLogger;
 
@@ -55,7 +33,6 @@ describe("switchContextWindowForSession with Effect override state", () => {
 				{ value: "200k", label: "200k", isDefault: true },
 				{ value: "1m", label: "1M" },
 			];
-			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -69,7 +46,7 @@ describe("switchContextWindowForSession with Effect override state", () => {
 				})),
 			});
 			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
+				makeSessionSettingsLayer(),
 				Layer.succeed(LoggerTag, mockLogger()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -82,15 +59,14 @@ describe("switchContextWindowForSession with Effect override state", () => {
 					modelID: "claude-sonnet-4-7",
 				});
 
-				yield* switchContextWindowForSession({
+				const result = yield* switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
 				});
 
 				expect(yield* getContextWindow("session-42")).toBe("1m");
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-42", {
-					type: "context_window_info",
+				expect(result).toEqual({
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
@@ -105,7 +81,6 @@ describe("switchContextWindowForSession with Effect override state", () => {
 				{ value: "200k", label: "200k", isDefault: true },
 				{ value: "1m", label: "1M" },
 			];
-			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -119,7 +94,7 @@ describe("switchContextWindowForSession with Effect override state", () => {
 				})),
 			});
 			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
+				makeSessionSettingsLayer(),
 				Layer.succeed(LoggerTag, mockLogger()),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -132,18 +107,16 @@ describe("switchContextWindowForSession with Effect override state", () => {
 					modelID: "claude-sonnet-4-7",
 				});
 
-				yield* switchContextWindowForSession({
+				const result = yield* switchContextWindowForSession({
 					clientId: "client-1",
 					contextWindow: "1m",
 				});
 
 				expect(yield* getDefaultContextWindow()).toBe("1m");
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "context_window_info",
+				expect(result).toEqual({
 					contextWindow: "1m",
 					options: contextWindowOptions,
 				});
-				expect(ws.sendToSession).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);

@@ -12,6 +12,7 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	getModel,
 	getVariant,
@@ -66,7 +67,7 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",
@@ -111,7 +112,7 @@ describe("model handlers with Effect override state", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* switchModelForSession({
+				const result = yield* switchModelForSession({
 					clientId: "client-1",
 					sessionId: "session-1",
 					modelId: "gpt-4",
@@ -123,14 +124,9 @@ describe("model handlers with Effect override state", () => {
 					modelID: "gpt-4",
 				});
 				expect(yield* getVariant("session-1")).toBe("fast");
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "model_info",
-					sessionId: "session-1",
+				expect(result).toEqual({
 					model: "gpt-4",
 					provider: "openai",
-				});
-				expect(ws.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "variant_info",
 					variant: "fast",
 					variants: ["standard", "fast"],
 				});

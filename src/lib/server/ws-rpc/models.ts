@@ -97,11 +97,7 @@ export const modelsHandlers = {
 			sessionId: request.sessionId,
 			contextWindow: request.contextWindow,
 		}).pipe(
-			Effect.map((message) => ({
-				projectSlug: request.projectSlug,
-				contextWindow: message.contextWindow,
-				options: message.options,
-			})),
+			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -117,13 +113,7 @@ export const modelsHandlers = {
 			modelId: request.modelId,
 			providerId: request.providerId,
 		}).pipe(
-			Effect.map((messages) => ({
-				projectSlug: request.projectSlug,
-				model: messages.model.model,
-				provider: messages.model.provider,
-				variant: messages.variant.variant,
-				variants: messages.variant.variants,
-			})),
+			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -138,13 +128,7 @@ export const modelsHandlers = {
 			model: request.model,
 			provider: request.provider,
 		}).pipe(
-			Effect.map((messages) => ({
-				projectSlug: request.projectSlug,
-				model: messages.model.model,
-				provider: messages.model.provider,
-				variant: messages.variant.variant,
-				variants: messages.variant.variants,
-			})),
+			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -159,11 +143,7 @@ export const modelsHandlers = {
 			sessionId: request.sessionId,
 			variant: request.variant,
 		}).pipe(
-			Effect.map((message) => ({
-				projectSlug: request.projectSlug,
-				variant: message.variant,
-				variants: message.variants,
-			})),
+			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({

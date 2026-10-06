@@ -14,7 +14,7 @@ const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
 
 function seed(variant = "", variants = fourLevels) {
-	handleVariantInfo({ type: "variant_info", variant, variants });
+	handleVariantInfo({ variant, variants });
 }
 
 function resize(width: number) {

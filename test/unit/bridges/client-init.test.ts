@@ -334,7 +334,7 @@ describe("handleClientConnectedEffect — session selection", () => {
 		);
 	});
 
-	it("a sessionless daemon attach sends settings without selecting or creating a session", async () => {
+	it("a sessionless daemon attach bootstraps without selecting or creating a session", async () => {
 		const getDefaultSessionId = vi.fn(() =>
 			Effect.succeed("unrequested-session"),
 		);
@@ -360,15 +360,11 @@ describe("handleClientConnectedEffect — session selection", () => {
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "variant_info" }),
-		);
 	});
 });
 
 describe("handleClientConnectedEffect — model info", () => {
-	it("loads relay model state and providers without an OpenCode session lookup", async () => {
+	it("loads providers without an OpenCode session lookup", async () => {
 		const deps = applyTestDefaults(makeClientInitEffectLayer());
 		vi.mocked(deps.client.session.get).mockRejectedValue(
 			new Error("legacy session.get should not be used"),
@@ -380,98 +376,38 @@ describe("handleClientConnectedEffect — model info", () => {
 			Effect.succeed(TEST_PROVIDERS),
 		);
 
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			setModel("session-1", { providerID: "openai", modelID: "gpt-4" }),
-		);
+		await runClientInit(deps, "client-1");
 
 		expect(deps.modelService.listProviders).toHaveBeenCalledOnce();
 		expect(deps.client.session.get).not.toHaveBeenCalled();
 		expect(deps.client.provider.list).not.toHaveBeenCalled();
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_info",
-			sessionId: "session-1",
-			model: "gpt-4",
-			provider: "openai",
-		});
 	});
 
-	it("sends model_info from the relay default model", async () => {
-		const deps = makeClientInitEffectLayer();
-
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			setDefaultModel({ providerID: "openai", modelID: "gpt-4" }),
-		);
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_info",
-			sessionId: "session-1",
-			model: "gpt-4",
-			provider: "openai",
-		});
-	});
-
-	it("sends model_info from Effect override state", async () => {
+	it("leaves the session's model, effort and context window to its shell row", async () => {
 		const deps = makeClientInitEffectLayer();
 		await runClientInit(
 			deps,
 			"client-1",
 			undefined,
 			undefined,
-			setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
+			Effect.all([
+				setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
+				setVariant("session-1", "thinking"),
+				setContextWindow("session-1", "1m"),
+			]).pipe(Effect.asVoid),
 		);
 
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_info",
-			sessionId: "session-1",
-			model: "claude-3",
-			provider: "anthropic",
-		});
-	});
-
-	it("sends Effect override model_info when OpenCode session reads are unavailable", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.client.session.get).mockRejectedValue(
-			new Error("OpenCode session reads are unavailable"),
+		const frameTypes = [
+			...vi.mocked(deps.wsHandler.sendTo).mock.calls.map(([, msg]) => msg.type),
+			...vi
+				.mocked(deps.wsHandler.broadcast)
+				.mock.calls.map(([msg]) => msg.type),
+		];
+		expect(frameTypes).not.toEqual(
+			expect.arrayContaining([
+				expect.stringMatching(/^(model|variant|context_window)_info$/),
+			]),
 		);
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			setModel("session-1", { providerID: "anthropic", modelID: "claude-3" }),
-		);
-
-		expect(deps.client.session.get).not.toHaveBeenCalled();
-		expect(deps.log.warn).not.toHaveBeenCalledWith(
-			expect.stringContaining("Failed to load session info"),
-		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_info",
-			sessionId: "session-1",
-			model: "claude-3",
-			provider: "anthropic",
-		});
-	});
-
-	it("does not send model_info when relay model state is unset", async () => {
-		const deps = makeClientInitEffectLayer();
-		// overrides.model is already undefined by default
-
-		await runClientInit(deps, "client-1");
-
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const modelInfoCalls = sendToCalls.filter(
-			(c) => (c[1] as { type: string }).type === "model_info",
-		);
-		expect(modelInfoCalls).toHaveLength(0);
 	});
 });
 
@@ -544,130 +480,13 @@ describe("handleClientConnectedEffect — model list", () => {
 
 		await runClientInit(deps, "client-1");
 
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "model_info",
-			model: "claude-sonnet-4-7",
-			provider: "claude",
+		expect(deps.state.defaultModel).toEqual({
+			providerID: "claude",
+			modelID: "claude-sonnet-4-7",
 		});
 		expect(deps.log.warn).not.toHaveBeenCalledWith(
 			expect.stringContaining("Failed to list providers"),
 		);
-	});
-
-	it("sends context_window_info for active Claude model on connect", async () => {
-		const contextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		];
-		const deps = applyTestDefaults(makeClientInitEffectLayer());
-		deps.discoverClaudeCapabilities.mockReturnValue(
-			Effect.succeed(
-				makeClaudeCapabilities({
-					models: [
-						{
-							id: "claude-sonnet-4-7",
-							name: "Claude Sonnet 4.7",
-							providerId: "claude",
-							contextWindowOptions,
-						},
-					],
-				}),
-			),
-		);
-
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			Effect.all([
-				setModel("session-1", {
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				}),
-				setContextWindow("session-1", "1m"),
-			]).pipe(Effect.asVoid),
-		);
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "context_window_info",
-			contextWindow: "1m",
-			options: contextWindowOptions,
-		});
-	});
-
-	it("bootstraps model, variant, and context window from Effect override state", async () => {
-		const contextWindowOptions = [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		];
-		const deps = makeClientInitEffectLayer();
-		deps.discoverClaudeCapabilities.mockReturnValue(
-			Effect.succeed(
-				makeClaudeCapabilities({
-					models: [
-						{
-							id: "claude-sonnet-4-7",
-							name: "Claude Sonnet 4.7",
-							providerId: "claude",
-							variants: { standard: {}, thinking: {} },
-							contextWindowOptions,
-						},
-					],
-				}),
-			),
-		);
-		vi.mocked(deps.modelService.listProviders).mockReturnValue(
-			Effect.succeed({
-				connected: ["openai"],
-				defaults: {},
-				providers: [
-					{
-						id: "openai",
-						name: "OpenAI",
-						models: [
-							{
-								id: "gpt-4",
-								name: "GPT-4",
-								variants: { standard: {}, fast: {} },
-							},
-						],
-					},
-				],
-			}),
-		);
-
-		await runClientInit(
-			deps,
-			"client-1",
-			undefined,
-			undefined,
-			Effect.all([
-				setModel("session-1", {
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				}),
-				setVariant("session-1", "thinking"),
-				setContextWindow("session-1", "1m"),
-			]).pipe(Effect.asVoid),
-		);
-
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "model_info",
-			sessionId: "session-1",
-			model: "claude-sonnet-4-7",
-			provider: "claude",
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "variant_info",
-			variant: "thinking",
-			variants: ["standard", "thinking"],
-		});
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-			type: "context_window_info",
-			contextWindow: "1m",
-			options: contextWindowOptions,
-		});
 	});
 
 	it("auto-selects default model when defaultModel is not set", async () => {
@@ -678,11 +497,6 @@ describe("handleClientConnectedEffect — model list", () => {
 		expect(deps.state.defaultModel).toEqual({
 			providerID: "openai",
 			modelID: "gpt-4",
-		});
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "model_info",
-			model: "gpt-4",
-			provider: "openai",
 		});
 	});
 
@@ -785,9 +599,8 @@ describe("handleClientConnectedEffect — no active session", () => {
 		expect(deps.wsHandler.setClientSession).not.toHaveBeenCalled();
 
 		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "variant_info" }),
 		);
 	});
 });
@@ -803,9 +616,8 @@ describe("handleClientConnectedEffect — error resilience", () => {
 
 		expect(deps.client.session.get).not.toHaveBeenCalled();
 		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({ type: "variant_info" }),
 		);
 	});
 

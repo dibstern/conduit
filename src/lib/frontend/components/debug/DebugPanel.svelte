@@ -141,13 +141,6 @@
 
 			case "notification_event":
 				return `${properties["eventType"] ?? "?"}${properties["sessionId"] ? ` sess=${id(properties["sessionId"])}` : ""}${properties["message"] ? `: ${properties["message"]}` : ""}`;
-
-			case "variant_info":
-				return properties["variant"] ? String(properties["variant"]) : "";
-			case "context_window_info":
-				return properties["contextWindow"] ? String(properties["contextWindow"]) : "";
-			case "model_info":
-				return properties["provider"] && properties["model"] ? `${properties["provider"]}:${properties["model"]}` : "";
 			default:
 				return "";
 		}

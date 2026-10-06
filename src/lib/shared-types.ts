@@ -291,6 +291,12 @@ export const SessionInfoSchema = Schema.Struct({
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
 	/** The approval mode this session was last switched to; absent until one is. */
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
+	/** The session's model, effort and context window; absent until set. "" follows the default. */
+	model: Schema.optional(
+		Schema.Struct({ model: Schema.String, provider: Schema.String }),
+	),
+	variant: Schema.optional(Schema.String),
+	contextWindow: Schema.optional(Schema.String),
 	/** Parent session ID — set when this session was forked from another. */
 	parentID: Schema.optional(Schema.String),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
@@ -523,12 +529,6 @@ const UsageInfoSchema = Schema.Struct({
 	context_window: Schema.optional(Schema.Number),
 });
 
-const ContextWindowOptionSchema = Schema.Struct({
-	value: Schema.String,
-	label: Schema.String,
-	isDefault: Schema.optional(Schema.Boolean),
-});
-
 // -- Individual message variant schemas --
 
 const DeltaSchema = Schema.Struct({
@@ -688,13 +688,6 @@ const SessionForkedSchema = Schema.Struct({
 	parentTitle: Schema.String,
 });
 
-const ModelInfoMsgSchema = Schema.Struct({
-	type: Schema.Literal("model_info"),
-	sessionId: Schema.optional(Schema.String),
-	model: Schema.String,
-	provider: Schema.String,
-});
-
 const DaemonSessionsChangedSchema = Schema.Struct({
 	type: Schema.Literal("daemon_sessions_changed"),
 });
@@ -778,18 +771,6 @@ const ProviderSessionReloadedSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
 
-const VariantInfoSchema = Schema.Struct({
-	type: Schema.Literal("variant_info"),
-	variant: Schema.optional(Schema.String),
-	variants: Schema.optional(Schema.Array(Schema.String)),
-});
-
-const ContextWindowInfoSchema = Schema.Struct({
-	type: Schema.Literal("context_window_info"),
-	contextWindow: Schema.String,
-	options: Schema.Array(ContextWindowOptionSchema),
-});
-
 const SessionGoalChangedSchema = Schema.Struct({
 	type: Schema.Literal("session.goal_changed"),
 	...SessionGoalChangedPayloadSchema.fields,
@@ -825,8 +806,6 @@ export const RelayMessageSchema = Schema.Union(
 	SessionListSchema,
 	SessionFamilySchema,
 	SessionForkedSchema,
-	// Model / Agent / Commands
-	ModelInfoMsgSchema,
 	// Projects
 	DaemonSessionsChangedSchema,
 	ProjectAttachedSchema,
@@ -846,9 +825,6 @@ export const RelayMessageSchema = Schema.Union(
 	InstanceUpdateSchema,
 	// Provider session reload
 	ProviderSessionReloadedSchema,
-	// Variant / thinking level
-	VariantInfoSchema,
-	ContextWindowInfoSchema,
 	SessionGoalChangedSchema,
 	// Cross-session notifications
 	NotificationEventSchema,

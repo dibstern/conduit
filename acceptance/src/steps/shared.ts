@@ -40,19 +40,27 @@ export function requireRpcControl(page: Page): RpcMockControl {
 	return control;
 }
 
-/** Serve a new GetModels catalog and make the app refetch it the way a
- *  reconnect does: every shell `synchronized` marker refetches the catalogs. */
-export async function serveModelCatalog(
-	page: Page,
-	response: Record<string, unknown>,
-): Promise<void> {
+/** Make the app refetch GetModels the way a reconnect does: every shell
+ *  `synchronized` marker refetches the catalogs. */
+export async function refetchModelCatalog(page: Page): Promise<void> {
 	const rpc = requireRpcControl(page);
 	const fetches = () =>
 		rpc.getRequests().filter((request) => request.tag === "GetModels").length;
 	const before = fetches();
-	rpc.setResponse("GetModels", { projectSlug: "myapp", ...response });
 	rpc.setShellRows(rpc.shellRows ?? []);
 	await expect.poll(fetches).toBeGreaterThan(before);
+}
+
+/** Serve a new GetModels catalog and make the app refetch it. */
+export async function serveModelCatalog(
+	page: Page,
+	response: Record<string, unknown>,
+): Promise<void> {
+	requireRpcControl(page).setResponse("GetModels", {
+		projectSlug: "myapp",
+		...response,
+	});
+	await refetchModelCatalog(page);
 }
 
 /**

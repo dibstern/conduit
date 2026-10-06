@@ -99,6 +99,9 @@ type SessionHandledType =
 	| "session.status"
 	| "session.provider_changed"
 	| "session.permission_mode_changed"
+	| "session.model_changed"
+	| "session.variant_changed"
+	| "session.context_window_changed"
 	| "session.goal_changed"
 	| "turn.completed"
 	| "turn.error"
@@ -351,6 +354,29 @@ export const sessionHandlers: {
 			},
 		];
 	},
+
+	// Model settings are not activity, so they leave updated_at (sidebar
+	// order) alone; the projection still stamps the row version.
+	"session.model_changed": (event) => [
+		{
+			sql: "UPDATE sessions SET model_id = ?, model_provider = ? WHERE id = ?",
+			params: [event.data.modelId, event.data.providerId, event.data.sessionId],
+		},
+	],
+
+	"session.variant_changed": (event) => [
+		{
+			sql: "UPDATE sessions SET variant = ? WHERE id = ?",
+			params: [event.data.variant, event.data.sessionId],
+		},
+	],
+
+	"session.context_window_changed": (event) => [
+		{
+			sql: "UPDATE sessions SET context_window = ? WHERE id = ?",
+			params: [event.data.contextWindow, event.data.sessionId],
+		},
+	],
 
 	"session.goal_changed": (event) => [
 		{
