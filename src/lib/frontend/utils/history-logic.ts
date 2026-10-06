@@ -317,6 +317,7 @@ export function historyToChatMessages(
 				...(msg.modelExecution != null
 					? { modelExecution: msg.modelExecution }
 					: {}),
+				...(msg.steered ? { steered: true } : {}),
 			} satisfies UserMessage);
 		} else if (msg.role === "assistant") {
 			// Assistant messages: convert each part to the appropriate ChatMessage

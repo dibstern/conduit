@@ -6,7 +6,8 @@
      The header carries the send time, rendered from the message's own
      `createdAt` — conduit's timestamps come from the event store, never from
      text a hook prepended to the message body. A queued send never renders
-     here: it waits in the pending-input tray until the adapter places it. -->
+     here: it waits in the pending-input tray until the adapter places it. A
+     steered message carries a "Steered" chip: it joined a running turn. -->
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
@@ -16,6 +17,7 @@
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../../skill-recognition.js";
+	import Badge from "../ui/Badge.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import MessageTime from "./MessageTime.svelte";
 
@@ -34,6 +36,9 @@
 		<div class="flex items-baseline gap-2.5 mb-2">
 			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a">You</span>
 			<MessageTime createdAt={message.createdAt} />
+			{#if message.steered}
+				<Badge variant="quiet" shape="pill" data-testid="user-message-steered" title="Joined the turn that was already running">Steered</Badge>
+			{/if}
 		</div>
 		<div class="text-base leading-[1.7] break-words whitespace-pre-wrap text-text">
 			{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}

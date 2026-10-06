@@ -54,6 +54,7 @@
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
+	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 
 	const inputAreaId = $props.id();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
@@ -329,6 +330,31 @@
 				? "Queue message"
 				: "Send",
 	);
+	/** Whether a send could steer the running turn, from the server's inbox arm:
+	 *  hidden (undefined) when idle or the provider can't steer, disabled while a
+	 *  prompt is open. Draft-dependent refusals only come back from a steer. */
+	const steer = $derived.by(() => {
+		const reason = currentChat().transcript?.steer;
+		if (!isProcessing() || reason === undefined || reason === "no_steering") return undefined;
+		return reason ?? "ready";
+	});
+	const sendButtonTitle = $derived(
+		isGoalCommand ? "Set goal"
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to steer`
+		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
+		: sendButtonLabel,
+	);
+	const steerPending = $derived(currentChat().transcript?.pending.some((input) => input.state === "steering") ?? false);
+	/** The last steer the server refused, shown beside the input box until the draft changes. */
+	let steerRefusal = $state<{ sessionId: string; reason: SteerBlocker } | null>(null);
+	const STEER_REFUSALS: Record<SteerBlocker, string> = {
+		no_steering: "This provider can't steer.",
+		prompt_open: "Answer the open prompt first.",
+		model_differs: "The running turn uses a different model.",
+		agent_differs: "The running turn uses a different agent.",
+		variant_differs: "The running turn uses a different effort.",
+		slash_command: "Commands can't steer; they queue.",
+	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
 	const compacting = $derived.by(() => {
 		const messages = currentChat().messages;
@@ -379,6 +405,7 @@
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
 		lastLocalEditAt = Date.now();
+		steerRefusal = null;
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -427,6 +454,11 @@
 			handleCommandClose();
 			return;
 		}
+		if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+			e.preventDefault();
+			sendMessage(undefined, steer ? "steer" : "queue");
+			return;
+		}
 		if (e.key === "Enter" && !e.shiftKey) {
 			if (isMobile()) {
 				// Mobile: Enter inserts newline (default textarea behavior).
@@ -440,7 +472,7 @@
 
 	let creatingSession = false;
 
-	async function sendMessage(textOverride?: string): Promise<boolean> {
+	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		const text = textOverride ?? toProviderCommands(inputText.trim(), builtinNameSet);
 		if (!text) return false;
 
@@ -523,21 +555,37 @@
 			requestScrollOnNextContent();
 		}
 		const sentToSessionId = sid;
-		rateLimitChatSend(() => {
-			void sendMessageRpc({
+		steerRefusal = null;
+		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
+			sendMessageRpc({
 				projectSlug,
 				sessionId: sentToSessionId,
 				text: messageText,
 				commandId,
+				...(delivery === "steer" ? { delivery } : {}),
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
-				if (response.ok && response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
+				if (!response.ok) {
+					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
+					return resolve(false);
+				}
+				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
+				resolve(true);
 			}).catch(() => {
 				showToast("Failed to send message", { variant: "error" });
+				resolve(false);
 			});
-		});
+		}));
+		if (delivery === "steer") {
+			// A refused steer admits nothing, so its draft stays until the server takes it.
+			if (!(await sent)) return false;
+			if (sessionState.currentId !== sentToSessionId) {
+				inputDrafts.delete(sentToSessionId);
+				return true;
+			}
+		}
 		if (textOverride !== undefined) return true;
 
 		// Clear pending images
@@ -579,8 +627,8 @@
 		});
 	}
 
-	function handleSendClick() {
-		sendMessage();
+	function handleSendClick(e: MouseEvent) {
+		sendMessage(undefined, steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
 	function handleAttachCamera() {
@@ -844,8 +892,18 @@
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
+			{steer}
 			onEdit={takeBackQueuedInput}
+			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
 		/>
+
+		{#if steerRefusal && steerRefusal.sessionId === sessionState.currentId}
+			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[steerRefusal.reason]}</span>
+				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; }} />
+			</div>
+		{/if}
 
 		<div
 			id="input-row"
@@ -994,7 +1052,7 @@
 						type="button"
 						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
 						disabled={!canSend}
-						title={isGoalCommand ? "Set goal" : sendButtonLabel}
+						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
@@ -1008,7 +1066,7 @@
 							id="stop"
 							type="button"
 							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
-							title="Stop generating"
+							title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"}
 							ariaLabel="Stop generating"
 							onclick={handleStop}
 						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>

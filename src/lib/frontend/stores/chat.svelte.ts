@@ -53,6 +53,9 @@ export type SessionMessages = {
 		pending: PendingInput[];
 		/** The queue stopped draining because the last turn did not end normally. */
 		paused?: boolean;
+		/** Why no draft can steer now, or null when one can. Undefined until the
+		 *  session's inbox arm arrives: a session that never held an input. */
+		steer?: InboxState["steer"] | undefined;
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;
@@ -62,9 +65,14 @@ export type SessionMessages = {
 	toolRegistry: ToolRegistry;
 };
 
+type DetailItem = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"];
+
+/** The session-detail stream's inbox arm. */
+type InboxState = Extract<DetailItem, { _tag: "inbox" }>["inbox"];
+
 /** One `pendingInput` row of the session-detail stream. */
 export type PendingInput = Extract<
-	Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"],
+	DetailItem,
 	{ _tag: "pendingInput" }
 >["input"];
 

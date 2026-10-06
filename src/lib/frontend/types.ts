@@ -104,6 +104,8 @@ export interface UserMessage {
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;
 	modelExecution?: ModelExecution;
+	/** Read mid-turn: it joined a turn that was already running. */
+	steered?: boolean;
 }
 
 export interface AssistantMessage {

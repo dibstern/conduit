@@ -14,7 +14,8 @@ type PendingInput = {
 type DetailItem =
 	| { _tag: "transcriptMessage"; message: HistoryMessage }
 	| { _tag: "pendingInput"; input: PendingInput }
-	| { _tag: "inbox"; inbox: { paused: boolean } };
+	| { _tag: "inbox"; inbox: Inbox };
+type Inbox = { paused: boolean; steer: "no_steering" | "prompt_open" | null };
 type DetailEnvelope =
 	| { _tag: "snapshot"; rows: DetailItem[]; sequence: number; hasMore: boolean }
 	| { _tag: "upsert"; item: DetailItem; sequence: number }
@@ -24,7 +25,7 @@ type Listener = (sessionId: string, envelope: DetailEnvelope) => void;
 interface SessionProjection {
 	rows: Map<string, HistoryMessage>;
 	pending: Map<string, PendingInput>;
-	paused: boolean;
+	inbox: Inbox;
 	sequence: number;
 	hasMore: boolean;
 	assistantId: string | null;
@@ -46,7 +47,7 @@ function session(page: Page, sessionId: string): SessionProjection {
 		projection = {
 			rows: new Map(),
 			pending: new Map(),
-			paused: false,
+			inbox: { paused: false, steer: null },
 			sequence: 0,
 			hasMore: false,
 			assistantId: null,
@@ -87,7 +88,7 @@ const snapshot = (state: SessionProjection): DetailEnvelope => {
 			...[...state.pending.values()].map(
 				(input): DetailItem => ({ _tag: "pendingInput", input }),
 			),
-			{ _tag: "inbox", inbox: { paused: state.paused } },
+			{ _tag: "inbox", inbox: state.inbox },
 		],
 		sequence: state.sequence,
 		hasMore: state.hasMore || rows.length > 50,
@@ -214,13 +215,23 @@ export function projectLegacyRelayMessage(
 		});
 		return;
 	}
-	// Mock-only: the server's derived pause, carried on the inbox arm.
-	if (event.type === "mock_inbox" && typeof event["paused"] === "boolean") {
-		state.paused = event["paused"];
+	// Mock-only: the server's derived pause and steer reason, the inbox arm.
+	if (event.type === "mock_inbox") {
+		const steer = event["steer"];
+		state.inbox = {
+			paused:
+				typeof event["paused"] === "boolean"
+					? event["paused"]
+					: state.inbox.paused,
+			steer:
+				steer === "no_steering" || steer === "prompt_open" || steer === null
+					? steer
+					: state.inbox.steer,
+		};
 		const sequence = ++state.sequence;
 		listeners.get(page)?.(sessionId, {
 			_tag: "upsert",
-			item: { _tag: "inbox", inbox: { paused: state.paused } },
+			item: { _tag: "inbox", inbox: state.inbox },
 			sequence,
 		});
 		return;
@@ -248,6 +259,7 @@ export function projectLegacyRelayMessage(
 			role: "user",
 			time: { created: Date.now() + state.sequence },
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
+			...(event["steered"] === true ? { steered: true } : {}),
 		});
 		return;
 	}

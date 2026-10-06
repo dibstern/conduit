@@ -35,7 +35,12 @@ function queryDb<T>(dbPath: string, sql: string, ...params: string[]): T[] {
 	}
 }
 
-type Send = { commandId: string; sessionId: string; text: string };
+type Send = {
+	commandId: string;
+	sessionId: string;
+	text: string;
+	delivery?: string;
+};
 
 /** Records the browser's input.submit requests. Register before navigation so
  *  even the first RPC socket is observed. */
@@ -51,6 +56,7 @@ function recordSends(page: Page): Send[] {
 					inputId?: unknown;
 					sessionId?: unknown;
 					text?: unknown;
+					delivery?: unknown;
 				};
 			} = JSON.parse(payload);
 			if (frame?._tag !== "Request" || frame.tag !== "input.submit") return;
@@ -64,6 +70,9 @@ function recordSends(page: Page): Send[] {
 					commandId: input.inputId,
 					sessionId: input.sessionId,
 					text: input.text,
+					...(typeof input.delivery === "string"
+						? { delivery: input.delivery }
+						: {}),
 				});
 			}
 		});
@@ -1187,7 +1196,7 @@ test.describe("Claude replay lane", () => {
 			)[0]?.state;
 
 		/** A browser on the replayed session, plus a second client that steers
-		 *  over the typed RPC (the composer's steer UI is not built yet). */
+		 *  over the typed RPC. */
 		async function open(
 			page: Page,
 			relayUrl: string,
@@ -1322,6 +1331,67 @@ test.describe("Claude replay lane", () => {
 					{ id: a, state: "completed", completed_at: bMessage?.created_at },
 					{ id: b, state: "completed", completed_at: expect.any(Number) },
 				]);
+			});
+
+			test("⌘/Ctrl+Enter steers from the composer; the transcript labels it after the tool", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				await page.locator("#input").fill("Bravo");
+				await expect(page.locator("#send")).toHaveAttribute("title", /steer/);
+				await page.locator("#input").press("ControlOrMeta+Enter");
+				await expect(page.locator("#input")).toHaveValue("");
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				const steered = s.chat.userMessages.getByTestId("user-message-steered");
+				await expect(steered).toHaveCount(1);
+				await expect(
+					s.chat.userMessages.last().getByTestId("user-message-steered"),
+				).toHaveText("Steered");
+				// The finished turn folds its tool into the activity row.
+				const transcript = await page
+					.locator(".msg-user, .tool-item, .turn-activity-toggle")
+					.evaluateAll((nodes) =>
+						nodes.map((node) =>
+							node.classList.contains("msg-user")
+								? (node.textContent?.match(/Alpha|Bravo/)?.[0] ?? "user")
+								: "tool",
+						),
+					);
+				await testInfo.attach("composer-steer-proof.json", {
+					body: JSON.stringify(
+						{
+							sends: s.sends,
+							transcript,
+							dones: s.dones,
+							...ledger(s.dbPath, s.sessionId),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(s.sends.map((send) => [send.text, send.delivery])).toEqual([
+					["Alpha", "queue"],
+					["Bravo", "steer"],
+				]);
+				expect(transcript.indexOf("tool")).toBeGreaterThan(
+					transcript.indexOf("Alpha"),
+				);
+				expect(transcript.lastIndexOf("tool")).toBeLessThan(
+					transcript.indexOf("Bravo"),
+				);
 			});
 		});
 
@@ -1612,6 +1682,55 @@ test.describe("Claude replay lane", () => {
 					[b, "completed"],
 				]);
 			});
+
+			test("the queued row's Steer promotes it from the tray", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await s.chat.waitForToolBlock();
+				await page.locator("#input").fill("Bravo");
+				await page.locator("#input").press("Enter");
+				const row = page.getByTestId("pending-input-row");
+				await expect(row.getByTestId("pending-input-text")).toHaveText([
+					/^Bravo$/,
+				]);
+				await expect(row.getByTestId("pending-input-state")).toHaveText(
+					"Queued",
+				);
+				await row.getByTestId("pending-input-steer").click();
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+				await expect(s.chat.userMessages).toHaveText([
+					/\bAlpha\b/,
+					/\bBravo\b/,
+				]);
+				await expect(
+					s.chat.userMessages.last().getByTestId("user-message-steered"),
+				).toHaveText("Steered");
+				await testInfo.attach("tray-steer-proof.json", {
+					body: JSON.stringify(
+						{
+							sends: s.sends,
+							dones: s.dones,
+							...ledger(s.dbPath, s.sessionId),
+						},
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(s.sends.map((send) => [send.text, send.delivery])).toEqual([
+					["Alpha", "queue"],
+					["Bravo", "queue"],
+				]);
+			});
 		});
 
 		test.describe("a steer that cannot join", () => {
@@ -1671,6 +1790,81 @@ test.describe("Claude replay lane", () => {
 				).toEqual([
 					["input.admitted", a],
 					["input.sent", a],
+				]);
+				await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
+			});
+
+			/** Steers `text` from the composer and returns the refusal it shows. */
+			async function refusedSteer(page: Page, text: string) {
+				const input = page.locator("#input");
+				await input.fill(text);
+				await input.press("ControlOrMeta+Enter");
+				const notice = page.getByTestId("composer-steer-refused");
+				await expect(notice).toBeVisible();
+				await expect(input).toHaveValue(text);
+				return (await notice.textContent())?.trim();
+			}
+
+			test("a model mismatch leaves the draft in the composer with the reason", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await expect(s.chat.stopBtn).toBeVisible();
+				await s.switchModel("claude-sonnet-5");
+				const notice = await refusedSteer(page, "Bravo");
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await expect(page.locator("#input")).toHaveValue("Bravo");
+				await testInfo.attach("composer-steer-model-refused-proof.json", {
+					body: JSON.stringify(
+						{ notice, sends: s.sends, ...ledger(s.dbPath, s.sessionId) },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(notice).toBe(
+					"Not steered. The running turn uses a different model.",
+				);
+				expect(s.sends.map((send) => [send.text, send.delivery])).toEqual([
+					["Alpha", "queue"],
+					["Bravo", "steer"],
+				]);
+				await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
+			});
+
+			test("a slash command is not steered and stays in the composer", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				await s.app.sendMessage("Alpha");
+				await expect(s.chat.stopBtn).toBeVisible();
+				const notice = await refusedSteer(page, "/compact");
+
+				await expect.poll(s.turnEnds).toBe(1);
+				await s.chat.waitForStreamingComplete();
+				await testInfo.attach("composer-steer-slash-refused-proof.json", {
+					body: JSON.stringify(
+						{ notice, sends: s.sends, ...ledger(s.dbPath, s.sessionId) },
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
+
+				expect(notice).toBe("Not steered. Commands can't steer; they queue.");
+				expect(s.sends.map((send) => [send.text, send.delivery])).toEqual([
+					["Alpha", "queue"],
+					["/compact", "steer"],
 				]);
 				await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
 			});

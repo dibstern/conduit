@@ -205,7 +205,10 @@ export function applyTranscriptEnvelope(
 	envelope: SessionDetailEnvelope,
 ): TranscriptEntry {
 	switch (envelope._tag) {
-		case "snapshot":
+		case "snapshot": {
+			const inbox = envelope.rows.flatMap((item) =>
+				item._tag === "inbox" ? [item.inbox] : [],
+			)[0];
 			return {
 				...entry,
 				rows: envelope.rows
@@ -215,13 +218,13 @@ export function applyTranscriptEnvelope(
 				pending: envelope.rows
 					.flatMap((item) => (item._tag === "pendingInput" ? [item.input] : []))
 					.sort(pendingOrder),
-				paused: envelope.rows.some(
-					(item) => item._tag === "inbox" && item.inbox.paused,
-				),
+				paused: inbox?.paused ?? false,
+				steer: inbox?.steer,
 				hwm: envelope.sequence,
 				hasMore: envelope.hasMore ?? false,
 				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
 			};
+		}
 		case "upsert": {
 			const hwm = Math.max(entry.hwm ?? 0, envelope.sequence);
 			if (envelope.item._tag === "pendingInput") {
@@ -236,7 +239,7 @@ export function applyTranscriptEnvelope(
 				};
 			}
 			if (envelope.item._tag === "inbox")
-				return { ...entry, hwm, paused: envelope.item.inbox.paused };
+				return { ...entry, hwm, ...envelope.item.inbox };
 			if (envelope.item._tag !== "transcriptMessage") return { ...entry, hwm };
 			const row = toHistoryMessage(envelope.item.message);
 			const held = entry.rows.some((old) => old.id === row.id);
