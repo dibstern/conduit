@@ -38,8 +38,8 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 export interface OpenCodeInstances {
 	/**
 	 * Passive, scoped subscription: no process, no connection. Receives events
-	 * for `directories` from every instance stream that `use` has opened, and
-	 * keeps those streams open while subscribed.
+	 * for `directories` from every instance stream that `use` has opened. It
+	 * never keeps a stream open; the instance's demand does.
 	 */
 	readonly events: (
 		directories: readonly string[],
@@ -48,7 +48,10 @@ export interface OpenCodeInstances {
 	/**
 	 * Client for a reachable instance, starting it first when it is not
 	 * running: managed instances spawn, external ones are health-checked.
-	 * Concurrent callers share one start.
+	 * Concurrent callers share one start; a stop in progress finishes first.
+	 * The open scope counts as demand, as do busy sessions and pending
+	 * prompts OpenCode reports. Without demand the instance stops after an
+	 * idle grace period (external ones only lose their stream).
 	 */
 	readonly use: (
 		instanceId: string,
@@ -59,7 +62,7 @@ export interface OpenCodeInstances {
 		instanceId: string,
 		directory?: string,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
-	/** Stops the instance's process and closes its event stream. */
+	/** Admin stop, regardless of demand: stops the process and closes its stream. */
 	readonly stop: (instanceId: string) => Effect.Effect<void>;
 }
 

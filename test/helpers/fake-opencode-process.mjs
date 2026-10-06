@@ -86,6 +86,19 @@ const emit = (envelope) => {
 			client.write(`data: ${JSON.stringify(envelope.payload)}\n\n`);
 	}
 };
+// Removes an answered prompt from whichever directory asked it; returns that
+// directory.
+const answerPrompt = (kind, requestID) => {
+	let owner;
+	updateState((state) => {
+		for (const [directory, items] of Object.entries(state[kind])) {
+			if (!items.some(({ id }) => id === requestID)) continue;
+			owner = directory;
+			state[kind][directory] = items.filter(({ id }) => id !== requestID);
+		}
+	});
+	return owner;
+};
 const emitTyped = (directory, type, properties) =>
 	emit({
 		directory,
@@ -284,11 +297,30 @@ const server = createServer(async (request, response) => {
 		request.method === "POST"
 	) {
 		const requestID = path.split("/")[4];
-		updateState((state) => {
-			state.permissions[directory] = (
-				state.permissions[directory] ?? []
-			).filter(({ id }) => id !== requestID);
-		});
+		const owner = answerPrompt("permissions", requestID);
+		if (owner)
+			emitTyped(owner, "permission.replied", {
+				sessionID: path.split("/")[2],
+				requestID,
+				reply: JSON.parse(body || "{}").response,
+			});
+		response.end("true");
+	} else if (
+		/^\/question\/[^/]+\/(reply|reject)$/.test(path) &&
+		request.method === "POST"
+	) {
+		// Question replies carry no directory: find the asking one.
+		const [, , requestID, action] = path.split("/");
+		const pending = Object.values(readState().questions)
+			.flat()
+			.find(({ id }) => id === requestID);
+		const owner = answerPrompt("questions", requestID);
+		if (owner)
+			emitTyped(
+				owner,
+				action === "reply" ? "question.replied" : "question.rejected",
+				{ sessionID: pending?.sessionID, requestID },
+			);
 		response.end("true");
 	} else if (/^\/session\/[^/]+$/.test(path)) {
 		response.end(

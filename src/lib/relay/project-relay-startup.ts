@@ -3,11 +3,13 @@ import { Cause, Effect, Exit, Runtime } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
+	ConfigTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -288,10 +290,13 @@ function startMonitoringAndPollers(
 ) {
 	const { config, statusLog, sseLog, pipelineLog, pollerLog, layers } = inputs;
 	const { monitoringStateAccess } = layers;
-	const { api, wsHandler, pollerManager, sseStream } = services;
+	const { wsHandler, pollerManager, sseStream } = services;
 	return Effect.gen(function* () {
 		const monitoring = yield* wireMonitoringEffect({
-			client: api,
+			// Poller seeding is background work: it must not restart OpenCode.
+			client: yield* backgroundOpenCodeAPI.pipe(
+				Effect.provideService(ConfigTag, config),
+			),
 			wsHandler,
 			pollerManager,
 			sseStream,

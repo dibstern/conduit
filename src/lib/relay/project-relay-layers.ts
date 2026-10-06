@@ -7,9 +7,11 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
+	backgroundOpenCodeAPI,
 	makeProjectRelayConfigLive,
 	OpenCodeAPILive,
 	ProjectRelayLoggerLive,
@@ -309,10 +311,19 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
+	// Polling must not restart an idle-stopped OpenCode.
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
 		hasViewers: (sid) => getWsHandler().getClientsForSession(sid).length > 0,
 	}).pipe(
-		Layer.provide(Layer.mergeAll(openCodeApiLayer, configLayer, loggerLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				Layer.effect(OpenCodeAPITag, backgroundOpenCodeAPI).pipe(
+					Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+				),
+				configLayer,
+				loggerLayer,
+			),
+		),
 	);
 	const ptyRuntimeLayer = makePtyRuntimeLive().pipe(
 		Layer.provide(
