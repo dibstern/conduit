@@ -503,12 +503,14 @@ export async function createProjectRelay(
 		};
 		if (
 			typeof claudeSdk?.query !== "function" ||
-			typeof claudeSdk.titleQuery !== "function"
+			typeof claudeSdk.titleQuery !== "function" ||
+			typeof claudeSdk.fork?.readTranscript !== "function" ||
+			typeof claudeSdk.fork?.forkSession !== "function"
 		) {
 			throw new RelayTestSdkConfigurationError({
 				module: testQueryModule,
 				message:
-					"Process test module must export Claude query and title factories",
+					"Process test module must export Claude query, title and fork SDK functions",
 			});
 		}
 		config = { ...config, claudeSdk };

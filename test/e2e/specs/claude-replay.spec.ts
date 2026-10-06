@@ -62,6 +62,75 @@ test.describe("Claude replay lane", () => {
 		});
 	});
 
+	test.describe("whole-session fork", () => {
+		test.use({
+			claudeReplay: {
+				turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+			},
+		});
+
+		test("copies history and replays a new turn in the fork", async ({
+			page,
+			relayUrl,
+			harness,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			await app.sendMessage("Parent turn");
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await chat.waitForStreamingComplete();
+			await expect
+				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
+				.toBe(1);
+			const parentPath = new URL(page.url()).pathname;
+			// The SDK resume cursor commits after the completed-turn event.
+			await expect
+				.poll(() => {
+					const db = new DatabaseSync(harness.eventsDbPath ?? "", {
+						readOnly: true,
+					});
+					try {
+						return db
+							.prepare(
+								"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
+							)
+							.get(parentPath.split("/").at(-1) ?? "")?.["value"];
+					} finally {
+						db.close();
+					}
+				})
+				.toBeTruthy();
+			await page.getByTestId("session-bar-title-menu").click();
+			await page.getByTestId("session-ctx-fork").click();
+			await expect(page).not.toHaveURL(new RegExp(`${parentPath}$`));
+			await expect(page.locator(".fork-divider")).toContainText("Forked from");
+			await page.locator(".fork-context-toggle").click();
+			const history = page.locator(".fork-context-messages");
+			await expect(history).toBeVisible();
+			await expect(history.locator(".msg-user")).toContainText("Parent turn");
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await expect(chat.assistantMessages).toBeVisible();
+
+			await app.sendMessage("Fork turn");
+			await expect(chat.userMessages).toHaveCount(2);
+			await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
+			await chat.waitForStreamingComplete();
+			// The fork copies the parent's completed turn before adding its own.
+			await expect
+				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
+				.toBe(3);
+			await expect(history.locator(".msg-user")).toContainText("Parent turn");
+			await expect(history).not.toContainText("Fork turn");
+			await testInfo.attach("claude-fork-replay", {
+				body: await page.screenshot({
+					path: testInfo.outputPath("claude-fork-replay.png"),
+				}),
+				contentType: "image/png",
+			});
+		});
+	});
+
 	test.describe("sub-agent trace", () => {
 		test.use({ claudeReplay: { turns: ["subagent-task-turn"] } });
 

@@ -18,6 +18,7 @@ import { Context, HashMap, Layer, Ref } from "effect";
  */
 export interface SessionManagerState {
 	cachedParentMap: HashMap.HashMap<string, string>;
+	cachedSideThreadIds: ReadonlySet<string>;
 	lastMessageAt: HashMap.HashMap<string, number>;
 	lastKnownSessionCount: number;
 }
@@ -25,6 +26,7 @@ export interface SessionManagerState {
 /** Create an empty SessionManagerState with all empty HashMaps. */
 export const emptySessionManagerState = (): SessionManagerState => ({
 	cachedParentMap: HashMap.empty(),
+	cachedSideThreadIds: new Set(),
 	lastMessageAt: HashMap.empty(),
 	lastKnownSessionCount: 0,
 });

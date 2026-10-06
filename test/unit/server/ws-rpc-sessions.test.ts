@@ -445,6 +445,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",
+								claudeSdk: {
+									query: () => {
+										throw new Error("Unexpected Claude query");
+									},
+									titleQuery: async function* () {},
+									fork: defaultClaudeSessionForkSdk,
+								},
 								shellEnv: () => ({
 									CLAUDE_CONFIG_DIR: "/current-project-config",
 								}),

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type {
@@ -196,6 +196,12 @@ export interface ForkSessionRpcInput {
 	readonly originId: string;
 	readonly sessionId?: string;
 	readonly messageId?: string;
+}
+
+export interface StartSideThreadRpcInput {
+	readonly projectSlug: string;
+	readonly parentSessionId: string;
+	readonly title: string;
 }
 
 export interface RespondPermissionRpcInput {
@@ -568,6 +574,9 @@ const callForkSession = (input: ForkSessionRpcInput) =>
 			...(input.messageId != null ? { messageId: input.messageId } : {}),
 		}),
 	);
+
+const callStartSideThread = (input: StartSideThreadRpcInput) =>
+	callControl(input.projectSlug, (client) => client.StartSideThread(input));
 
 const callRespondPermission = (input: RespondPermissionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -998,6 +1007,16 @@ export async function forkSessionRpc(
 	input: ForkSessionRpcInput,
 ): Promise<ForkSessionResponse> {
 	return await runTransportEffect(callForkSession(input));
+}
+
+export async function startSideThreadRpc(
+	input: StartSideThreadRpcInput,
+): Promise<{ readonly sessionId: string }> {
+	const result = await runTransportEffect(
+		Effect.either(callStartSideThread(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function respondPermissionRpc(

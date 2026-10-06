@@ -106,8 +106,8 @@ export async function resizeImageIfNeeded(
 
 export function fetchFileContent(
 	path: string,
+	slug = getCurrentSlug(),
 ): Promise<{ content: string; binary?: boolean }> {
-	const slug = getCurrentSlug();
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	return getFileContentRpc({ projectSlug: slug, path }).then((response) => ({
 		content: response.content,
@@ -115,9 +115,11 @@ export function fetchFileContent(
 	}));
 }
 
-export function fetchDirectoryListing(path: string): Promise<string> {
+export function fetchDirectoryListing(
+	path: string,
+	slug = getCurrentSlug(),
+): Promise<string> {
 	const requestPath = path.replace(/\/$/, "");
-	const slug = getCurrentSlug();
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	return getFileListRpc({ projectSlug: slug, path: requestPath }).then(
 		(response) =>

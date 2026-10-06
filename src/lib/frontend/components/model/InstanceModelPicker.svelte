@@ -192,6 +192,12 @@
 
 	const visibleAgents = $derived(getVisibleAgents());
 	const activeAgent = $derived(getActiveAgent() ?? visibleAgents[0]);
+	// An OpenCode session in Plan approvals always runs the plan agent.
+	const planLocked = $derived(
+		selectedDriver === "opencode" &&
+			!!sessionState.currentId &&
+			discoveryState.permissionMode === "plan",
+	);
 
 	/** Capitalise all-lowercase agent names ("code" → "Code"). */
 	function agentLabel(agent: AgentInfo): string {
@@ -493,7 +499,13 @@
 						/>
 					</div>
 				{/if}
-				{#if visibleAgents.length > 1}
+				{#if planLocked}
+					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
+						<span class="min-w-0 flex-1 truncate text-[13px] text-text">Plan</span>
+						<span class="shrink-0 text-[11px] text-text-dimmer">Set by approvals</span>
+					</div>
+				{:else if visibleAgents.length > 1}
 					<Button
 						variant="ghost"
 						size="content"

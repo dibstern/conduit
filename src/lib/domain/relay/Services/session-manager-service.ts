@@ -544,6 +544,9 @@ export const deleteSession = (sessionId: string) =>
 
 			return {
 				cachedParentMap,
+				cachedSideThreadIds: new Set(
+					[...s.cachedSideThreadIds].filter((id) => !deleted.has(id)),
+				),
 				lastMessageAt,
 				lastKnownSessionCount: Math.max(0, s.lastKnownSessionCount - 1),
 			};
@@ -671,7 +674,9 @@ export interface SessionManagerService {
 		timestamp?: number,
 	): Effect.Effect<void>;
 	addToParentMap(childId: string, parentId: string): Effect.Effect<void>;
-	getSessionParentMap(): Effect.Effect<Map<string, string>>;
+	getSessionParentMap(options?: {
+		readonly activityOnly?: boolean;
+	}): Effect.Effect<Map<string, string>>;
 	setForkEntry(
 		sessionId: string,
 		entry: ForkEntry,
@@ -1286,8 +1291,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				addToParentMap(childId, parentId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
-			getSessionParentMap: () =>
-				getSessionParentMap().pipe(
+			getSessionParentMap: (options) =>
+				getSessionParentMap(options).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
 				),
 			setForkEntry: (sessionId, entry) =>

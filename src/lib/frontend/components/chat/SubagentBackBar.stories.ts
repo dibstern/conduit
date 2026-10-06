@@ -60,6 +60,30 @@ export const MissingParent: Story = {
 	},
 };
 
+function seedSideThread(parentStatus: SessionInfo["status"] = "idle"): void {
+	const sideThread = {
+		...mockSubagentSession,
+		id: "sess_story_side_thread",
+		title: "Why did you choose this approach?",
+		sideThread: true,
+		forkMessageId: "msg_story_fork_point",
+		forkPointTimestamp: 1,
+	};
+	seedSessions([
+		{ ...mockSession, status: parentStatus },
+		{ ...sideThread, status: "busy" },
+	]);
+	sessionState.currentId = sideThread.id;
+}
+
+export const SideThread: Story = {
+	beforeEach: () => seedSideThread(),
+};
+
+export const SideThreadParentWorking: Story = {
+	beforeEach: () => seedSideThread("busy"),
+};
+
 export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },

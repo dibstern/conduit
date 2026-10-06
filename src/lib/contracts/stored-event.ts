@@ -247,6 +247,8 @@ export interface SessionCreatedPayload {
 	readonly forkPointTimestamp?: number;
 	readonly forkPointMessageId?: string;
 	readonly providerSessionId?: string;
+	readonly sideThread?: boolean;
+	readonly permissionMode?: SessionPermissionModeValue;
 }
 
 export interface SessionReadPayload {
@@ -766,6 +768,13 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
 	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
+	sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	permissionMode: Schema.optionalWith(
+		Schema.Literal(...SESSION_PERMISSION_MODES),
+		{
+			exact: true,
+		},
+	),
 });
 
 const SessionRenamedPayloadSchema = Schema.Struct({

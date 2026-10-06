@@ -184,7 +184,7 @@
 					</span>
 					<span class="flex items-center gap-1.5 text-[12.5px] font-semibold">
 						{option.label}
-						{#if option.claudeOnly}
+						{#if option.claudeOnly && discoveryState.currentProviderId === "claude"}
 							<Badge variant="neutral" size="xs">Claude</Badge>
 						{/if}
 					</span>

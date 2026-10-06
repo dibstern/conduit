@@ -41,6 +41,35 @@ it("routes family-only child activity and propagates busy to its parent", () => 
 	expect(sessionState.currentParentId).toBe("root");
 });
 
+it("rolls a Side Thread's subagents into it without making its parent busy", () => {
+	handleSessionFamily({
+		type: "session_family",
+		rootId: "root",
+		sessions: [
+			{ id: "root", title: "Root", status: "idle" },
+			{
+				id: "side",
+				title: "Side Thread",
+				status: "idle",
+				parentID: "root",
+				sideThread: true,
+			},
+			{ id: "agent", title: "Agent", status: "idle", parentID: "side" },
+		],
+	});
+	sessionState.currentId = "side";
+	handleMessage({ type: "delta", sessionId: "agent", text: "working" });
+	expect(isSessionBusy("agent")).toBe(true);
+	expect(isSessionBusy("side")).toBe(true);
+	expect(isSessionBusy("root")).toBe(false);
+	expect(sessionState.currentParentId).toBe("root");
+	applySessionChange({
+		_tag: "upsert",
+		item: { id: "root", title: "Root", status: "busy" },
+	});
+	expect(isSessionBusy("root")).toBe(true);
+});
+
 it.each([
 	1_000_000, -1_000_000,
 ])("orders activity and idle rows by arrival with server clock offset %i", (offset) => {

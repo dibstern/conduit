@@ -1,0 +1,1636 @@
+{
+	"name": "side-thread-mid-turn",
+	"model": "opencode/big-pickle",
+	"recordedAt": "2026-10-05T11:54:49.327Z",
+	"initMessages": [
+		{
+			"type": "project_attached",
+			"slug": "side-thread-status-recording"
+		},
+		{
+			"type": "protocol_version",
+			"version": 3,
+			"buildId": "dev"
+		},
+		{
+			"type": "server_update",
+			"restartAvailable": false
+		},
+		{
+			"type": "client_count",
+			"count": 1
+		},
+		{
+			"type": "session_family",
+			"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+			"sessions": [
+				{
+					"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"title": "New session - 2026-10-05T11:54:28.614Z",
+					"status": "idle",
+					"createdAt": 1791201268619,
+					"updatedAt": 1791201268619,
+					"messageCount": 0,
+					"attention": "idle"
+				}
+			]
+		},
+		{
+			"type": "status",
+			"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+			"status": "idle"
+		},
+		{
+			"type": "connection_status",
+			"status": "connected"
+		},
+		{
+			"type": "model_info",
+			"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+			"model": "big-pickle",
+			"provider": "opencode"
+		},
+		{
+			"type": "system_error",
+			"code": "INIT_FAILED",
+			"message": "Failed to list agents: An unknown error occurred in Effect.tryPromise"
+		}
+	],
+	"turns": [
+		{
+			"prompt": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+			"events": [
+				{
+					"type": "status",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"text": "Remember the word 'alpha'. Reply with only: ok, remembered.",
+					"originId": "record-62cd59b9-7c8a-4c8b-b3d1-774c7f519ffe"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "New session - 2026-10-05T11:54:28.614Z",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201270702,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "New session - 2026-10-05T11:54:28.614Z",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201270710,
+							"messageCount": 0,
+							"attention": "idle"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "New session - 2026-10-05T11:54:28.614Z",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201270730,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "New session - 2026-10-05T11:54:28.614Z",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201271489,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "model_list",
+					"providers": [
+						{
+							"id": "claude",
+							"name": "Anthropic - claude",
+							"configured": true,
+							"models": [
+								{
+									"id": "default",
+									"name": "Default (recommended)",
+									"provider": "claude",
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "opus",
+									"name": "Opus 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "fable",
+									"name": "Fable 5.1",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "sonnet",
+									"name": "Sonnet 5.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "haiku",
+									"name": "Haiku 4.5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 8192
+									}
+								},
+								{
+									"id": "claude-sonnet-5",
+									"name": "Sonnet 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								},
+								{
+									"id": "claude-opus-5",
+									"name": "Opus 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-fable-5",
+									"name": "Fable 5",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 128000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-opus-4-8",
+									"name": "Opus 4.8",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-7",
+									"name": "Opus 4.7",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"xhigh",
+										"max"
+									]
+								},
+								{
+									"id": "claude-opus-4-6",
+									"name": "Opus 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 32000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k"
+										},
+										{
+											"value": "1m",
+											"label": "1M",
+											"isDefault": true
+										}
+									]
+								},
+								{
+									"id": "claude-sonnet-4-6",
+									"name": "Sonnet 4.6",
+									"provider": "claude",
+									"limit": {
+										"context": 200000,
+										"output": 64000
+									},
+									"variants": [
+										"low",
+										"medium",
+										"high",
+										"max"
+									],
+									"contextWindowOptions": [
+										{
+											"value": "200k",
+											"label": "200k",
+											"isDefault": true
+										},
+										{
+											"value": "1m",
+											"label": "1M"
+										}
+									]
+								}
+							]
+						}
+					]
+				},
+				{
+					"type": "variant_info",
+					"variant": "",
+					"variants": []
+				},
+				{
+					"type": "context_window_info",
+					"contextWindow": "",
+					"options": []
+				},
+				{
+					"type": "permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "default_model_info",
+					"model": "big-pickle",
+					"provider": "opencode",
+					"variant": ""
+				},
+				{
+					"type": "default_permission_mode_info",
+					"mode": "ask"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201274085,
+							"messageCount": 0,
+							"processing": true,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "ok, remembered.",
+					"partId": "prt_10bea6a89001z4mJtDXIdCZaC2",
+					"messageId": "msg_10bea5ba0001LcH4kZJ22yyFft",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15986,
+						"output": 5,
+						"cache_read": 1939,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 3838,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea5ba0001LcH4kZJ22yyFft"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15986,
+						"output": 5,
+						"cache_read": 1939,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 3838,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea5ba0001LcH4kZJ22yyFft"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201274543,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		},
+		{
+			"prompt": "What word did I ask you to remember? Reply with only the word.",
+			"events": [
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276890,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"attention": "idle"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15986,
+						"output": 5,
+						"cache_read": 1939,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 3838,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea73ce0011M7sr4w6puz7L9"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276899,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276900,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"text": "What word did I ask you to remember? Reply with only the word.",
+					"originId": "record-62cd59b9-7c8a-4c8b-b3d1-774c7f519ffe"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276947,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276968,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "busy",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276980,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "busy",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201277000,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "alpha",
+					"partId": "prt_10bea7d58001nUL3FeVa6OuQ5r",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3494,
+						"output": 2,
+						"cache_read": 13187,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2409,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3494,
+						"output": 2,
+						"cache_read": 13187,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2409,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279362,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				}
+			]
+		},
+		{
+			"prompt": "Use the bash tool to run: sleep 10; printf mid-turn-marker. Then reply with only its output.",
+			"events": [
+				{
+					"type": "status",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"text": "Use the bash tool to run: sleep 10; printf mid-turn-marker. Then reply with only its output.",
+					"originId": "record-62cd59b9-7c8a-4c8b-b3d1-774c7f519ffe"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275172,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275175,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"status": "processing"
+				},
+				{
+					"type": "thinking_start",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "thinking_delta",
+					"text": "The",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " user wants me to run a command. This is a benign sleep + printf. Let me run it.\n\nNote: there's a previous instruction to remember \"alpha\" — I should",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "thinking_delta",
+					"text": " keep that. But the reply should be only the output.",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "thinking_stop",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "tool_start",
+					"id": "call_function_0gq5lb22cy08_1",
+					"name": "Bash",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_function_0gq5lb22cy08_1",
+					"name": "Bash",
+					"input": {
+						"command": "sleep 10; printf mid-turn-marker"
+					},
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_function_0gq5lb22cy08_1",
+					"name": "Bash",
+					"input": {
+						"command": "sleep 10; printf mid-turn-marker"
+					},
+					"metadata": {
+						"output": ""
+					},
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276890,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"attention": "idle"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 15986,
+						"output": 5,
+						"cache_read": 1939,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 3838,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea73ce0011M7sr4w6puz7L9"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276899,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276900,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"status": "idle"
+				},
+				{
+					"type": "session.goal_changed",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"goal": null
+				},
+				{
+					"type": "user_message",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"text": "What word did I ask you to remember? Reply with only the word.",
+					"originId": "record-62cd59b9-7c8a-4c8b-b3d1-774c7f519ffe"
+				},
+				{
+					"type": "status",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"status": "processing"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276947,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276968,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "busy",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201276980,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "busy",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201277000,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 4,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "alpha",
+					"partId": "prt_10bea7d58001nUL3FeVa6OuQ5r",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw",
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3494,
+						"output": 2,
+						"cache_read": 13187,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2409,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 3494,
+						"output": 2,
+						"cache_read": 13187,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 2409,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+					"messageId": "msg_10bea7406002Tn54Rg42fy7vjw"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef4158c34ffe3H1obtJUMFXfrC"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279362,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201275179,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 13,
+							"attention": "working"
+						}
+					]
+				},
+				{
+					"type": "tool_executing",
+					"id": "call_function_0gq5lb22cy08_1",
+					"name": "Bash",
+					"input": {
+						"command": "sleep 10; printf mid-turn-marker"
+					},
+					"metadata": {
+						"output": "mid-turn-marker"
+					},
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "tool_result",
+					"id": "call_function_0gq5lb22cy08_1",
+					"content": "mid-turn-marker",
+					"is_error": false,
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 36,
+						"output": 33,
+						"cache_read": 17928,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 11825,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"midTurn": true
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 36,
+						"output": 33,
+						"cache_read": 17928,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 11825,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea6d19001uQmPIP85nP2gWr",
+					"midTurn": true
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201287008,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 35,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "busy",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201287014,
+							"messageCount": 0,
+							"processing": true,
+							"unread": true,
+							"lastTurnEndVersion": 35,
+							"attention": "working"
+						},
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "delta",
+					"text": "mid-turn-marker",
+					"partId": "prt_10beaa2160017UPfis1ELitaPp",
+					"messageId": "msg_10bea9b4d001mI183VYPryCq6W",
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 22,
+						"output": 5,
+						"cache_read": 18045,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 13587,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea9b4d001mI183VYPryCq6W"
+				},
+				{
+					"type": "result",
+					"usage": {
+						"input": 22,
+						"output": 5,
+						"cache_read": 18045,
+						"cache_creation": 0
+					},
+					"cost": 0,
+					"duration": 13587,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"messageId": "msg_10bea9b4d001mI183VYPryCq6W"
+				},
+				{
+					"type": "done",
+					"code": 0,
+					"sessionId": "ses_ef415ac79ffe5BqfJEGMI1uy1s"
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201288763,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 42,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						}
+					]
+				},
+				{
+					"type": "session_family",
+					"rootId": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+					"sessions": [
+						{
+							"id": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"title": "Remembering the word alpha",
+							"status": "idle",
+							"createdAt": 1791201268619,
+							"updatedAt": 1791201288766,
+							"messageCount": 0,
+							"unread": true,
+							"lastTurnEndVersion": 42,
+							"attention": "done-unread"
+						},
+						{
+							"id": "ses_ef4158c34ffe3H1obtJUMFXfrC",
+							"title": "What word did I ask you to remember? Reply with only the word.",
+							"status": "idle",
+							"createdAt": 1791201276890,
+							"updatedAt": 1791201279366,
+							"messageCount": 0,
+							"parentID": "ses_ef415ac79ffe5BqfJEGMI1uy1s",
+							"sideThread": true,
+							"forkMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"forkPointTimestamp": 1791201275158,
+							"forkPointMessageId": "msg_10bea6d16001OAEV7YsQ2ZukJC",
+							"unread": true,
+							"lastTurnEndVersion": 18,
+							"attention": "done-unread"
+						}
+					]
+				}
+			]
+		}
+	]
+}

@@ -306,6 +306,7 @@ function commitTomorrow(session: SessionInfo) {
 
 export const sessionVerbActions = {
 	settle,
+	remove,
 	pin,
 	autoSettle,
 	rename,

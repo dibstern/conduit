@@ -282,6 +282,7 @@ export const ClaudeSDKSystemSubtypeSchema = Schema.Literal(
 	"plugin_install",
 	"permission_denied",
 	"session_state_changed",
+	"session_title_changed",
 	"status",
 	"task_notification",
 	"task_progress",
@@ -319,6 +320,7 @@ export const CLAUDE_SDK_MESSAGE_VARIANTS = [
 	"system_background_tasks_changed",
 	"system_thinking_tokens",
 	"system_session_state_changed",
+	"system_session_title_changed",
 	"system_worker_shutting_down",
 	"system_commands_changed",
 	"system_notification",
@@ -659,6 +661,15 @@ export const ClaudeSDKSessionStateChangedMessageSchema = Schema.Struct({
 	state: Schema.Literal("idle", "running", "requires_action"),
 });
 
+// The CLI emits this for a session with a custom title (such as a fork named at
+// creation), but the installed SDK does not declare it, so there is no SDK type
+// to assert against. Conduit owns session titles and ignores it.
+export const ClaudeSDKSessionTitleChangedMessageSchema = Schema.Struct({
+	...ClaudeSystemFields,
+	subtype: Schema.Literal("session_title_changed"),
+	title: Schema.String,
+});
+
 export const ClaudeSDKBackgroundTasksChangedMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("background_tasks_changed"),
@@ -828,6 +839,7 @@ export const ClaudeSDKSystemLikeMessageSchema = Schema.Union(
 	ClaudeSDKPluginInstallMessageSchema,
 	ClaudeSDKPermissionDeniedMessageSchema,
 	ClaudeSDKSessionStateChangedMessageSchema,
+	ClaudeSDKSessionTitleChangedMessageSchema,
 	ClaudeSDKStatusMessageSchema,
 	ClaudeSDKSystemMessageSchema,
 	ClaudeSDKTaskNotificationMessageSchema,

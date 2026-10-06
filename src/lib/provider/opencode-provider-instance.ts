@@ -12,6 +12,7 @@ import type {
 	PromptOptions,
 } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
+import type { SessionPermissionMode } from "../shared-types.js";
 import { ProviderInstanceFailure } from "./errors.js";
 import type {
 	CommandInfo,
@@ -25,6 +26,21 @@ import type {
 } from "./types.js";
 
 const log = createLogger("opencode-provider-instance");
+
+/**
+ * OpenCode session rules for a Side Thread in the given mode. Session rules
+ * append and the last match wins, so every mode change sends the full set.
+ */
+export function sideThreadPermissionRules(
+	mode: SessionPermissionMode,
+): PermissionRuleset {
+	const plan = mode === "plan";
+	return [
+		{ permission: "edit", pattern: "*", action: plan ? "deny" : "ask" },
+		{ permission: "bash", pattern: "*", action: "ask" },
+		{ permission: "task", pattern: "*", action: plan ? "deny" : "allow" },
+	];
+}
 
 function interruptedTurnResult(): TurnResult {
 	return {
@@ -195,7 +211,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
 			...(images && images.length > 0 ? { images: [...images] } : {}),
-			...(agent ? { agent } : {}),
+			...(input.permissionMode === "plan"
+				? { agent: "plan" }
+				: agent
+					? { agent }
+					: {}),
 			...(variant ? { variant } : {}),
 		};
 
@@ -365,6 +385,28 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				}),
 			),
 			Effect.mapError((cause) => this.providerFailure("interruptTurn", cause)),
+			Effect.asVoid,
+		);
+	}
+
+	/** Appends the Side Thread rules for `mode`; callers gate on Side Threads. */
+	setPermissionModeEffect(
+		sessionId: string,
+		mode: SessionPermissionMode,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.resolveClientEffect(sessionId).pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () =>
+						client.session.update(sessionId, {
+							permission: sideThreadPermissionRules(mode),
+						}),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) =>
+				this.providerFailure("setPermissionMode", cause),
+			),
 			Effect.asVoid,
 		);
 	}

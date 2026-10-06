@@ -270,6 +270,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 	const sink: RelayEventSink = {
 		noteActivity: reset,
+		noteTurnEnd: finish,
 		detachInteractions: () =>
 			Effect.sync(() => {
 				detachingInteractions = true;
@@ -636,7 +637,7 @@ export function toEventSinkError(cause: unknown): EventSinkError {
 	return new EventSinkIngestionError({ cause });
 }
 
-function isTerminalRuntimeEvent(event: ProviderRuntimeEvent): boolean {
+export function isTerminalRuntimeEvent(event: ProviderRuntimeEvent): boolean {
 	return (
 		event.type === "turn.completed" ||
 		event.type === "turn.interrupted" ||

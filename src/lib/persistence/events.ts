@@ -46,6 +46,7 @@ export function canonicalEvent<K extends CanonicalEventType>(
 import { PersistenceError } from "./errors.js";
 
 const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
+	// sideThread and permissionMode are optional so historical creations still decode.
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
 	"session.read": ["sessionId"],

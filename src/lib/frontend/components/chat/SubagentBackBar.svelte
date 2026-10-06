@@ -1,9 +1,10 @@
-<!-- Standalone context bar above the input box when viewing a subagent session. -->
+<!-- Context bar above the input box for subagents and Side Threads. -->
 <!-- Shows parent session title and a "← PARENT" button to navigate back. -->
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import { findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionBusy, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Surface from "../ui/Surface.svelte";
 
 	// Find the active session and check if it has a parent
@@ -12,14 +13,13 @@
 	const parentId = $derived(sessionState.currentParentId);
 
 	const parentSession = $derived(parentId ? findSession(parentId) : null);
+	const parentWorking = $derived(!!parentId && (isSessionBusy(parentId) || parentSession?.processing === true || parentSession?.backgroundWork === "working"));
 
 	const parentTitle = $derived(
 		parentSession?.title ?? "parent session"
 	);
 
-	// Show for subagent sessions (parentID but no forkMessageId).
-	// Hide for user forks (parentID + forkMessageId) — they get the fork divider instead.
-	const visible = $derived(!!parentId && !activeSession?.forkMessageId && !activeSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId && !sessionState.currentFork?.forkPointTimestamp);
+	const visible = $derived(!!parentId && (activeSession?.sideThread || (!activeSession?.forkMessageId && !activeSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId && !sessionState.currentFork?.forkPointTimestamp)));
 
 	function navigateBack() {
 		if (parentId) {
@@ -42,7 +42,11 @@
 		<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:gap-1.5 max-md:py-1 max-md:px-3">
 			<span class="w-1.5 h-1.5 rounded-full bg-brand-b shrink-0"></span>
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
-				Subagent of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
+				{activeSession?.sideThread ? "Side Thread" : "Subagent"} of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
+			</span>
+			<span data-testid="parent-session-status" aria-label="Parent {parentWorking ? 'working' : 'idle'}" class="flex items-center gap-1.5 shrink-0 text-xs font-mono text-text-muted">
+				<DitherGlyph state={parentWorking ? "working" : "idle"} size={12} />
+				{parentWorking ? "Working" : "Idle"}
 			</span>
 			<Button
 				variant="ghost"

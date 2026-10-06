@@ -698,7 +698,9 @@ const handleSSEEventAfterPendingEffect = (
 			let parentMap = new Map<string, string>();
 			if (targetSessionId != null) {
 				const sessionService = yield* SessionManagerServiceTag;
-				parentMap = yield* sessionService.getSessionParentMap();
+				parentMap = yield* sessionService.getSessionParentMap({
+					activityOnly: true,
+				});
 			}
 			const isSubagent =
 				targetSessionId != null && parentMap.has(targetSessionId);

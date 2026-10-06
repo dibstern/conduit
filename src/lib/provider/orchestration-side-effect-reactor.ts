@@ -5,7 +5,10 @@ import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
-import { toEventSinkError } from "./relay-event-sink.js";
+import {
+	isTerminalRuntimeEvent,
+	toEventSinkError,
+} from "./relay-event-sink.js";
 import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
 
 /**
@@ -535,10 +538,13 @@ export class ProviderSideEffectReactor {
 	 */
 	private makeReactorEventSink(interactions?: EventSink): EventSink {
 		// Streamed output bypasses the relay sink, so mark the session alive here
-		// or the relay's processing timeout fires mid-turn on long turns.
+		// or the relay's processing timeout fires mid-turn on long turns. End it
+		// before the terminal event publishes its done, or a client opening the
+		// session in between is told it is still busy.
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
-				interactions?.noteActivity?.();
+				if (isTerminalRuntimeEvent(event)) interactions?.noteTurnEnd?.();
+				else interactions?.noteActivity?.();
 				return this.options.ingestion
 					.ingest(event)
 					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));

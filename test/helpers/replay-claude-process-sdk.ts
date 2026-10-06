@@ -17,6 +17,7 @@ let replayer: ClaudeTraceReplayer | undefined;
 
 export const claudeSdk: typeof fakeSdk = {
 	titleQuery: fakeSdk.titleQuery,
+	fork: fakeSdk.fork,
 	query(params) {
 		const file = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 		if (!file) throw new Error("Claude replay requires an options file");

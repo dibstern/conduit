@@ -105,6 +105,9 @@ export const listSessions = (options?: ListSessionsOptions) =>
 		yield* Ref.update(stateRef, (current) => ({
 			...current,
 			cachedParentMap: sessionRowsParentMap(lineage.rows),
+			cachedSideThreadIds: new Set(
+				lineage.rows.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
+			),
 			lastKnownSessionCount: lineage.count,
 		}));
 		yield* updateRelaySessionCountSnapshot(lineage.count);
@@ -196,7 +199,7 @@ export const makeSessionListOperations = ({
 						new SessionManagerError({ operation: "getSessionFamily", cause }),
 				),
 			);
-			// Poller statuses include ancestor propagation; family rows keep their own state.
+			// Keep source statuses; attention follows the same lineage rule as the sidebar.
 			const familyStatuses: Record<string, SessionStatus> = {};
 			for (const row of rows) {
 				familyStatuses[row.id] =
@@ -212,6 +215,14 @@ export const makeSessionListOperations = ({
 				type: "session_family" as const,
 				rootId: root?.id ?? sessionId,
 				sessions: sessionRowsToSessionInfoList(rows, {
+					parentMap: new Map(
+						rows.flatMap((row) =>
+							row.parent_id ? [[row.id, row.parent_id] as const] : [],
+						),
+					),
+					unreadSessionIds: new Set(
+						rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+					),
 					statuses: familyStatuses,
 					...(backgroundOf && { backgroundOf }),
 					pendingQuestionCounts:
@@ -235,6 +246,11 @@ export const makeSessionListOperations = ({
 			yield* Ref.update(stateRef, (current) => ({
 				...current,
 				cachedParentMap: sessionRowsParentMap(lineage.rows),
+				cachedSideThreadIds: new Set(
+					lineage.rows.flatMap((row) =>
+						row.side_thread === 1 ? [row.id] : [],
+					),
+				),
 				lastKnownSessionCount: lineage.count,
 			}));
 			yield* snapshot.setSessionCount(lineage.count);

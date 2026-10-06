@@ -28,7 +28,7 @@ import {
 	instanceIdForProviderId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
-import { sessionState } from "./session.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 
 export type ComposerSetting<T> = {
@@ -88,11 +88,16 @@ function approvalOptions(
 	order: readonly SessionPermissionMode[],
 ): readonly ApprovalOption[] {
 	const claude = discoveryState.currentProviderId === "claude";
+	// OpenCode enforces Plan only on Side Threads, through session rules.
+	const sideThread =
+		findSession(sessionState.currentId ?? "")?.sideThread === true;
 	return order.flatMap((mode) =>
 		PERMISSION_MODES.filter(
 			(option) =>
 				option.mode === mode &&
-				(claude || (!option.claudeOnly && !option.sessionOnly)),
+				(claude ||
+					(!option.claudeOnly && !option.sessionOnly) ||
+					(sideThread && option.mode === "plan")),
 		),
 	);
 }

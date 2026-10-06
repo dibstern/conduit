@@ -12,6 +12,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import TaskGlyph from "./TaskGlyph.svelte";
 	import { taskAge, taskClock, taskKind, tasksPanel } from "./background-tasks.svelte.js";
+	import { sideThreadsPanel } from "./side-threads.svelte.js";
 
 	let { tasks, underGoal, compact }: { tasks: readonly BackgroundTask[]; underGoal: boolean; compact: boolean } = $props();
 
@@ -20,7 +21,7 @@
 	const more = $derived(tasks.length - shown.length);
 </script>
 
-<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" data-testid="background-tasks-row" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" ariaLabel={tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`} class="flex items-center justify-start whitespace-nowrap select-none {compact ? 'w-full' : 'w-0 min-w-full'} {underGoal ? '' : 'mt-[6px]'} gap-1 text-[11px] leading-[1.5] text-tool" onclick={() => { goalDetails.open = false; tasksPanel.open = !tasksPanel.open; }}>
+<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" data-testid="background-tasks-row" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" ariaLabel={tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`} class="flex items-center justify-start whitespace-nowrap select-none {compact ? 'w-full' : 'w-0 min-w-full'} {underGoal ? '' : 'mt-[6px]'} gap-1 text-[11px] leading-[1.5] text-tool" onclick={() => { goalDetails.open = false; sideThreadsPanel.open = false; tasksPanel.open = !tasksPanel.open; }}>
 	<!-- On phones the one chip may widen the title column. Desktop's four must
 	     not set the title row's minimum width, so there the row takes no
 	     intrinsic width and the chips truncate in whatever space it is given. -->

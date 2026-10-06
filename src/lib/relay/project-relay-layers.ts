@@ -1,3 +1,4 @@
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -30,6 +31,7 @@ import {
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
+	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
@@ -64,6 +66,7 @@ import {
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
@@ -128,14 +131,17 @@ export function createProjectRelayLayers({
 	defaultCommandQueueLayer,
 }: ProjectRelayLayerInputs) {
 	const hasInstanceManagement = hasInstanceManagementConfig(config);
+	const claudeSdk = config.claudeSdk ?? {
+		query: sdkQuery,
+		titleQuery: sdkQuery,
+		fork: defaultClaudeSessionForkSdk,
+	};
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.shellEnv && { shellEnv: config.shellEnv }),
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
-		...(config.claudeSdk != null && {
-			claudeQueryFactory: config.claudeSdk.query,
-		}),
+		claudeQueryFactory: claudeSdk.query,
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		extraFolders: config.extraFolders ?? [],
@@ -147,7 +153,7 @@ export function createProjectRelayLayers({
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
-	const configLayer = makeProjectRelayConfigLive(config);
+	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	const openCodeApiLayer = OpenCodeAPILive.pipe(Layer.provide(configLayer));
 	const persistenceEffectLayer = makePersistenceEffectLayer(
@@ -281,6 +287,7 @@ export function createProjectRelayLayers({
 
 	const coreBridgeLayers = Layer.mergeAll(
 		historyReconcileLayer,
+		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
 		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -321,9 +328,7 @@ export function createProjectRelayLayers({
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
-			...(config.claudeSdk?.titleQuery && {
-				titleQueryFactory: config.claudeSdk.titleQuery,
-			}),
+			titleQueryFactory: claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,

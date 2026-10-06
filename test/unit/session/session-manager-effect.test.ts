@@ -33,7 +33,10 @@ import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
-import { recordMessageActivity } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
+import {
+	getSessionParentMap,
+	recordMessageActivity,
+} from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
 import {
 	getPermissionMode,
 	makeOverridesStateLive,
@@ -155,6 +158,39 @@ describe("SessionManager Effect", () => {
 			expect(result).toBe(12345);
 		}).pipe(Effect.provide(Layer.fresh(makeTestLayer(mockApi))));
 	});
+
+	it.effect(
+		"keeps Side Thread lineage while excluding its edge from activity and notifications",
+		() =>
+			Effect.gen(function* () {
+				const parents = new Map([
+					["side", "root"],
+					["agent", "side"],
+					["ordinary", "root"],
+				]);
+				const full = yield* getSessionParentMap();
+				const activity = yield* getSessionParentMap({ activityOnly: true });
+				expect(full).toEqual(parents);
+				expect(activity).toEqual(
+					new Map([
+						["agent", "side"],
+						["ordinary", "root"],
+					]),
+				);
+				expect(yield* getSessionParentMap()).toEqual(parents);
+			}).pipe(
+				Effect.provide(
+					makeSessionManagerStateLive({
+						cachedParentMap: HashMap.make(
+							["side", "root"],
+							["agent", "side"],
+							["ordinary", "root"],
+						),
+						cachedSideThreadIds: new Set(["side"]),
+					}),
+				),
+			),
+	);
 
 	it.effect("deleteSession clears session activity and parent mappings", () => {
 		const mockApi = makeMockApi();

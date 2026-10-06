@@ -42,12 +42,19 @@ export const addToParentMap = (childId: string, parentId: string) =>
 		Effect.withSpan("session.addToParentMap"),
 	);
 
-/** Snapshot the current child-to-parent session map. */
-export const getSessionParentMap = () =>
+/** Keep full lineage for families; activity and completion alerts stop at Side Threads. */
+export const getSessionParentMap = (options?: {
+	readonly activityOnly?: boolean;
+}) =>
 	Effect.gen(function* () {
 		const ref = yield* SessionManagerStateTag;
 		const state = yield* Ref.get(ref);
-		return new Map(HashMap.toEntries(state.cachedParentMap));
+		return new Map(
+			HashMap.toEntries(state.cachedParentMap).filter(
+				([child]) =>
+					!options?.activityOnly || !state.cachedSideThreadIds.has(child),
+			),
+		);
 	}).pipe(Effect.withSpan("session.getSessionParentMap"));
 
 /** Snapshot the most recently observed unfiltered session count. */

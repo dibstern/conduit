@@ -68,11 +68,16 @@ export class OpenCodeHistoryReconcileTag extends Context.Tag(
 	{ reconcileSession(sessionId: string): Effect.Effect<void> }
 >() {}
 
+export class OpenCodeSessionCreationGateTag extends Context.Tag(
+	"OpenCodeSessionCreationGate",
+)<OpenCodeSessionCreationGateTag, Effect.Semaphore>() {}
+
 export interface EffectOpenCodeRuntimeIngressOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly projectionRunner: ProjectionRunnerEffect;
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly log: OpenCodeRuntimeIngressLog;
+	readonly sessionCreationGate?: Effect.Semaphore;
 	/** The provider's REST record of a session, for the first-sighting history
 	 *  backfill. Without it a session projects only what Conduit observes. */
 	readonly fetchSessionMessages?: (
@@ -135,6 +140,7 @@ export class EffectOpenCodeRuntimeIngress
 	 *  translation state may only advance once the events it produced have
 	 *  committed, so translate → persist → keep runs as one critical section. */
 	private readonly sessionGates = new Map<string, Effect.Semaphore>();
+	private readonly sessionCreationGate: Effect.Semaphore;
 	private readonly backfillFetchPermits =
 		Effect.unsafeMakeSemaphore(BACKFILL_CONCURRENCY);
 	/** Sessions whose history was reconciled with the provider's REST record
@@ -172,6 +178,8 @@ export class EffectOpenCodeRuntimeIngress
 		this.projectionRunner = opts.projectionRunner;
 		this.ingestion = opts.ingestion;
 		this.log = opts.log;
+		this.sessionCreationGate =
+			opts.sessionCreationGate ?? Effect.unsafeMakeSemaphore(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
 	}
 
@@ -542,7 +550,21 @@ export class EffectOpenCodeRuntimeIngress
 			}
 			this.sessionInstanceIds.set(sessionId, providerInstanceId);
 			const result = yield* this.sessionGate(sessionId).withPermits(1)(
-				this.ingestSessionEvent(event, sessionId, providerInstanceId),
+				Effect.gen(this, function* () {
+					const ingest = this.ingestSessionEvent(
+						event,
+						sessionId,
+						providerInstanceId,
+					);
+					if (
+						this.seenSessions.has(sessionId) ||
+						(yield* this.hasProjectedSession(sessionId))
+					)
+						return yield* ingest;
+					// Fork emits events before its HTTP response. Let command-owned
+					// creation persist the complete row before first-sighting seeding.
+					return yield* this.sessionCreationGate.withPermits(1)(ingest);
+				}),
 			);
 			if (event.type === "session.deleted") this.removeSession(sessionId);
 			return result;
@@ -885,11 +907,17 @@ export const makeEffectOpenCodeRuntimeIngress = (
 		const sql = yield* SqlClient.SqlClient;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
+		const creationGate = yield* Effect.serviceOption(
+			OpenCodeSessionCreationGateTag,
+		);
 		const ingress = new EffectOpenCodeRuntimeIngress({
 			sql,
 			projectionRunner,
 			ingestion,
 			log,
+			...(creationGate._tag === "Some"
+				? { sessionCreationGate: creationGate.value }
+				: {}),
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 		});
 		yield* ingress.recoverEffect();

@@ -89,6 +89,8 @@ export interface EventSink {
 	 * alive on the path where provider output goes straight to ingestion.
 	 */
 	noteActivity?(): void;
+	/** Counterpart to noteActivity: the streamed turn reached its terminal event. */
+	noteTurnEnd?(): void;
 }
 
 export type TurnStatus = "completed" | "error" | "interrupted" | "cancelled";

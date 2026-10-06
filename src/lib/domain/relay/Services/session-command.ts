@@ -26,15 +26,27 @@ import {
 	canonicalEvent,
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
-import { copyForkHistory } from "../../../persistence/fork-history.js";
+import {
+	copyForkHistory,
+	midTurnForkBoundary,
+} from "../../../persistence/fork-history.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { markSeen } from "./session-attention.js";
+import { setPermissionMode } from "./session-overrides-state.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
+export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
+
+const sideThreadTitle = (question: string) =>
+	normalizeSessionTitle(question)
+		.slice(0, SIDE_THREAD_TITLE_MAX_LENGTH)
+		.trimEnd();
 
 export class SessionCommandError extends Data.TaggedError(
 	"SessionCommandError",
@@ -315,6 +327,7 @@ export const createOpenCodeSession = (
 export const forkOpenCodeSession = (
 	parentSessionId: string,
 	messageId?: string,
+	side?: { title: string },
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -359,6 +372,28 @@ export const forkOpenCodeSession = (
 					}),
 			),
 		);
+		const title = side
+			? sideThreadTitle(side.title)
+			: normalizeSessionTitle(session.title);
+		if (side) {
+			// OpenCode's later session.updated events must carry the same title.
+			// The read-only rules land before session.created is applied.
+			yield* Effect.tryPromise(() =>
+				api.session.update(session.id, {
+					title,
+					permission: sideThreadPermissionRules("plan"),
+				}),
+			).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionCommandError({
+							operation: "session.forked.title",
+							cause,
+							message: "Could not set the Side Thread title",
+						}),
+				),
+			);
+		}
 
 		// A fork inherits its parent's provider. Forking is an OpenCode
 		// operation, so an unreadable parent can only mean the read model is not
@@ -418,23 +453,32 @@ export const forkOpenCodeSession = (
 			type: "session.created",
 			data: {
 				sessionId: session.id,
-				title: normalizeSessionTitle(session.title),
+				title,
 				provider: parent?.provider ?? "opencode",
 				parentId: parentSessionId,
+				...(side ? { sideThread: true, permissionMode: "plan" as const } : {}),
 				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
 				...(forkPointTimestamp === undefined ? {} : { forkPointTimestamp }),
 				providerSessionId: session.id,
 			},
 		});
 
-		return { ...session, forkMessageId: forkPointEvent, forkPointTimestamp };
+		return {
+			...session,
+			...(side ? { title } : {}),
+			forkMessageId: forkPointEvent,
+			forkPointTimestamp,
+		};
 	}).pipe(
 		Effect.annotateLogs("operation", "forkOpenCodeSession"),
 		Effect.withSpan("session.forkOpenCodeSession"),
 	);
 
 /** Route forks by the persisted parent provider, before contacting a runtime. */
-export const forkSession = (parentSessionId: string, messageId?: string) =>
+export const forkSession = (
+	parentSessionId: string,
+	options?: { messageId?: string; side?: { title: string } },
+) =>
 	Effect.gen(function* () {
 		const readOption = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const config = yield* Effect.serviceOption(ConfigTag);
@@ -442,6 +486,41 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			readOption._tag === "Some"
 				? yield* readOption.value.getSession(parentSessionId)
 				: undefined;
+		if (options?.side) {
+			if (!parent) {
+				return yield* new SessionCommandError({
+					operation: "session.side_thread.parent_not_found",
+					cause: parentSessionId,
+					message: `Parent session ${parentSessionId} was not found`,
+				});
+			}
+			if (parent.side_thread === 1) {
+				return yield* new SessionCommandError({
+					operation: "session.side_thread.nested",
+					cause: parentSessionId,
+					message: "Cannot start a Side Thread from a Side Thread",
+				});
+			}
+		}
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		// A Side Thread of a parent mid-turn forks at its last completed turn,
+		// so it inherits no dangling tool call and no turn that never ends.
+		const midTurn =
+			options?.side &&
+			options.messageId === undefined &&
+			eventStore._tag === "Some"
+				? midTurnForkBoundary(
+						yield* eventStore.value.readAllBySession(parentSessionId),
+					)
+				: undefined;
+		if (midTurn && midTurn.lastCompleted === undefined) {
+			return yield* new SessionCommandError({
+				operation: "session.side_thread.no_completed_turn",
+				cause: parentSessionId,
+				message:
+					"This session has no completed turn yet. Wait for its first reply.",
+			});
+		}
 		if (
 			!parent ||
 			!isClaudeSessionRow(
@@ -456,15 +535,32 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 					cause: "OpenCode API is unavailable",
 				});
 			}
+			// OpenCode copies the messages before the given one.
+			const fork = forkOpenCodeSession(
+				parentSessionId,
+				options?.messageId ?? midTurn?.next,
+				options?.side,
+			).pipe(Effect.provideService(OpenCodeAPITag, api.value));
+			const creationGate = yield* Effect.serviceOption(
+				OpenCodeSessionCreationGateTag,
+			);
+			const initializedFork = options?.side
+				? fork.pipe(
+						Effect.tap((session) => setPermissionMode(session.id, "plan")),
+						Effect.uninterruptible,
+					)
+				: fork;
+			const forked = yield* options?.side && creationGate._tag === "Some"
+				? creationGate.value.withPermits(1)(initializedFork)
+				: initializedFork;
 			return {
-				...(yield* forkOpenCodeSession(parentSessionId, messageId).pipe(
-					Effect.provideService(OpenCodeAPITag, api.value),
-				)),
+				...forked,
 				provider: "opencode" as const,
 			};
 		}
+		// Claude forks through the turn holding the given message.
+		const messageId = options?.messageId ?? midTurn?.lastCompleted;
 		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
-		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (
@@ -480,12 +576,13 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			});
 		}
 		const state = stateOption.value;
-		if (config._tag === "None") {
+		if (config._tag === "None" || config.value.claudeSdk === undefined) {
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
-				cause: "Claude fork requires project configuration",
+				cause: "Claude fork requires project SDK configuration",
 			});
 		}
+		const claudeSdk = config.value.claudeSdk;
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
@@ -504,7 +601,8 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
 				cause: "Claude parent has no SDK resume session",
-				message: `Session ${parentSessionId} has no Claude transcript yet`,
+				message:
+					"This session has no Claude transcript yet. Send a message first.",
 			});
 		}
 		const parentMessages =
@@ -520,7 +618,8 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 				message: `Fork point ${messageId} was not found in the session history`,
 			});
 		}
-		const title = `${parent.title} (fork)`;
+		const side = options?.side;
+		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const parentEvents =
 			yield* eventStore.value.readAllBySession(parentSessionId);
 		if (
@@ -538,21 +637,26 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 		}
 		const forked = yield* Effect.tryPromise({
 			try: () =>
-				forkClaudeTranscript({
-					parentSdkId: providerSessionId,
-					projectDir: config.value.projectDir,
-					...(claudeConfigDir !== undefined && { configDir: claudeConfigDir }),
-					title,
-					...(messageId !== undefined && { messageId }),
-					...(messageId !== undefined && {
-						fallbackMessageIds: parentMessages
-							.slice(0, parentMessages.indexOf(forkPointMessage))
-							.flatMap((message) =>
-								message.role === "assistant" ? [message.id] : [],
-							)
-							.reverse(),
-					}),
-				}),
+				forkClaudeTranscript(
+					{
+						parentSdkId: providerSessionId,
+						projectDir: config.value.projectDir,
+						...(claudeConfigDir !== undefined && {
+							configDir: claudeConfigDir,
+						}),
+						title,
+						...(messageId !== undefined && { messageId }),
+						...(messageId !== undefined && {
+							fallbackMessageIds: parentMessages
+								.slice(0, parentMessages.indexOf(forkPointMessage))
+								.flatMap((message) =>
+									message.role === "assistant" ? [message.id] : [],
+								)
+								.reverse(),
+						}),
+					},
+					claudeSdk.fork,
+				),
 			catch: (cause) =>
 				new SessionCommandError({
 					operation: "session.forked.upstream",
@@ -579,6 +683,9 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 							provider: parent.provider,
 							providerSessionId: forked.sdkSessionId,
 							parentId: parentSessionId,
+							...(side
+								? { sideThread: true, permissionMode: "plan" as const }
+								: {}),
 							forkPointEvent,
 							forkPointTimestamp: forkPointMessage.created_at,
 							forkPointMessageId: forkPointMessage.id,
@@ -598,6 +705,9 @@ export const forkSession = (parentSessionId: string, messageId?: string) =>
 						? [{ key: "claudeConfigDir", value: claudeConfigDir }]
 						: []),
 				]);
+				// Plan applies before the row is announced, so no send can reach the
+				// Side Thread first.
+				if (side) yield* setPermissionMode(forked.sdkSessionId, "plan");
 			}),
 		);
 		// The copied turns were the parent's to read, so the fork starts seen up

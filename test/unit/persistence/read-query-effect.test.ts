@@ -278,6 +278,134 @@ describe("typed session row derivations", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
+	it.effect(
+		"only prompts cross a Side Thread edge, including on root-only lists",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("side", { parentId: "root" });
+				yield* seedSession("agent", { parentId: "side" });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET side_thread = 1 WHERE id = 'side'`;
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+				const parentMap = new Map([
+					["side", "root"],
+					["agent", "side"],
+				]);
+				const options = {
+					parentMap,
+					sideThreadIds: new Set(["side"]),
+					statuses: { agent: { type: "retry" } },
+					unreadSessionIds: new Set(["side", "agent"]),
+					backgroundOf: (id: string) =>
+						id === "agent"
+							? { work: "working" as const, tasks: [] }
+							: undefined,
+				};
+				const rootRows = rows.filter((row) => row.id === "root");
+				for (const selected of [rows, rootRows]) {
+					const root = sessionRowsToSessionInfoList(selected, options).find(
+						(row) => row.id === "root",
+					);
+					expect(root?.attention).toBe("idle");
+					expect(root?.processing).toBeUndefined();
+					expect(root?.unread).toBeUndefined();
+					const prompted = sessionRowsToSessionInfoList(selected, {
+						...options,
+						pendingQuestionCounts: new Map([["side", 1]]),
+						pendingPermissionCounts: new Map([["agent", 2]]),
+					}).find((row) => row.id === "root");
+					expect(prompted).toMatchObject({
+						attention: "needs-approval",
+						pendingQuestionCount: 1,
+						pendingPermissionCount: 2,
+					});
+					expect(prompted?.processing).toBeUndefined();
+				}
+				const side = sessionRowsToSessionInfoList(rows, options).find(
+					(row) => row.id === "side",
+				);
+				expect(side).toMatchObject({ attention: "working", processing: true });
+				const unread = sessionRowsToSessionInfoList(rows, {
+					...options,
+					statuses: {},
+					backgroundOf: () => undefined,
+				}).find((row) => row.id === "side");
+				expect(unread?.attention).toBe("done-unread");
+				const monitoring = sessionRowsToSessionInfoList(rootRows, {
+					...options,
+					statuses: {},
+					backgroundOf: () => ({ work: "monitoring", tasks: [] }),
+				})[0];
+				// The root's own monitoring remains visible; only descendant monitoring is blocked.
+				expect(monitoring?.attention).toBe("monitoring");
+				const readQuery = yield* makeReadQueryEffect;
+				yield* sql`UPDATE sessions SET status = 'busy', last_turn_end_version = 1 WHERE id = 'side'`;
+				expect(
+					(yield* readQuery.listSessionInfos({ roots: true }))[0]?.attention,
+				).toBe("idle");
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"prompts cross every Side Thread ancestor while activity stops at the nearest",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("root");
+				yield* seedSession("outer", { parentId: "root" });
+				yield* seedSession("middle", { parentId: "outer" });
+				yield* seedSession("inner", { parentId: "middle" });
+				yield* seedSession("agent", { parentId: "inner" });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET side_thread = 1 WHERE id IN ('outer', 'inner')`;
+				const rows = yield* sql<SessionRow>`SELECT * FROM sessions ORDER BY id`;
+				const options = {
+					parentMap: new Map([
+						["outer", "root"],
+						["middle", "outer"],
+						["inner", "middle"],
+						["agent", "inner"],
+					]),
+					sideThreadIds: new Set(["outer", "inner"]),
+					statuses: { agent: { type: "busy" } },
+					unreadSessionIds: new Set(["agent"]),
+				};
+				const prompted = sessionRowsToSessionInfoList(rows, {
+					...options,
+					pendingQuestionCounts: new Map([["agent", 1]]),
+					pendingPermissionCounts: new Map([["inner", 2]]),
+				});
+				for (const id of ["root", "outer", "inner"]) {
+					expect(prompted.find((row) => row.id === id)).toMatchObject({
+						attention: "needs-approval",
+						pendingQuestionCount: 1,
+						pendingPermissionCount: 2,
+					});
+				}
+				for (const id of ["root", "outer"]) {
+					expect(
+						prompted.find((row) => row.id === id)?.processing,
+					).toBeUndefined();
+					expect(prompted.find((row) => row.id === id)?.unread).toBeUndefined();
+				}
+				expect(prompted.find((row) => row.id === "inner")?.processing).toBe(
+					true,
+				);
+				const unread = sessionRowsToSessionInfoList(rows, {
+					...options,
+					statuses: {},
+				});
+				expect(unread.find((row) => row.id === "inner")?.attention).toBe(
+					"done-unread",
+				);
+				for (const id of ["root", "outer"]) {
+					expect(unread.find((row) => row.id === id)?.attention).toBe("idle");
+				}
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it("keeps a timed or indefinite snooze until its wake, and the wake until it is unsnoozed", () => {
 		const row = {
 			snoozed_at: 10,
@@ -626,8 +754,8 @@ describe("ReadQueryEffect session families", () => {
 				expect(lineage.rows).toHaveLength(5);
 				expect(lineage.rows).toEqual(
 					expect.arrayContaining([
-						{ id: "root", parent_id: null, unread: 0 },
-						{ id: "grandchild", parent_id: "child", unread: 0 },
+						{ id: "root", parent_id: null, unread: 0, side_thread: 0 },
+						{ id: "grandchild", parent_id: "child", unread: 0, side_thread: 0 },
 					]),
 				);
 			}).pipe(Effect.provide(testLayer)),

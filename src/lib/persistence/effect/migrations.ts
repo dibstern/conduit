@@ -31,6 +31,7 @@ import {
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
+	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -445,6 +446,7 @@ const appendedSessionColumns = [
 	"last_turn_end_version",
 	"seen_version",
 	"goal_state",
+	"side_thread",
 ] as const;
 
 function sameStrings(
@@ -994,6 +996,14 @@ export const effectMigrationEntries = {
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (columns.some((column) => column.name === "goal_state")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_GOALS_MIGRATION));
+	}),
+	"0031_sessions_side_thread": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "side_thread")) return;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSIONS_SIDE_THREAD_MIGRATION),
+		);
 	}),
 } satisfies Record<
 	string,

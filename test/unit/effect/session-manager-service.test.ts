@@ -190,10 +190,11 @@ function makeReadQueryEffect(
 		),
 		getSessionLineage: vi.fn(() =>
 			Effect.succeed({
-				rows: rows.map(({ id, parent_id, unread }) => ({
+				rows: rows.map(({ id, parent_id, unread, side_thread }) => ({
 					id,
 					parent_id,
 					unread: unread ?? 0,
+					side_thread: side_thread ?? 0,
 				})),
 				count: rows.length,
 			}),
@@ -1313,6 +1314,7 @@ describe("SessionManagerService", () => {
 				const service = yield* SessionManagerServiceTag;
 				const stateRef = yield* SessionManagerStateTag;
 				yield* Ref.update(stateRef, (state) => ({
+					...state,
 					cachedParentMap: HashMap.set(
 						HashMap.set(state.cachedParentMap, sessionId, "parent"),
 						"child",
@@ -2791,7 +2793,11 @@ describe("SessionManagerService", () => {
 									parentID: "child",
 									processing: true,
 								}),
-								expect.objectContaining({ id: "root", attention: "idle" }),
+								expect.objectContaining({
+									id: "root",
+									status: "idle",
+									attention: "working",
+								}),
 								expect.objectContaining({ id: "child", attention: "idle" }),
 							]),
 						}),

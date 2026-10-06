@@ -118,7 +118,19 @@ const makeShellTestLayer = (
 			withDispatchEffect({ dispatch: async () => undefined }),
 		),
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
-		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+		Layer.succeed(
+			ConfigTag,
+			makeMockConfig({
+				configDir: dir,
+				claudeSdk: {
+					query: () => {
+						throw new Error("Unexpected Claude query");
+					},
+					titleQuery: async function* () {},
+					fork: defaultClaudeSessionForkSdk,
+				},
+			}),
+		),
 		Layer.succeed(LoggerTag, makeMockLogger()),
 		cleanup,
 	);
@@ -333,7 +345,9 @@ describe("subscribeShell", () => {
 					yield* takeN(q, 2);
 					const child =
 						entry === "command"
-							? yield* forkSession("claude-parent", "ui-boundary")
+							? yield* forkSession("claude-parent", {
+									messageId: "ui-boundary",
+								})
 							: yield* forkSessionForClient({
 									clientId: "client",
 									sessionId: "claude-parent",
@@ -393,7 +407,7 @@ describe("subscribeShell", () => {
 				});
 				vi.mocked(sdkForkSession).mockClear();
 				const result = yield* Effect.either(
-					forkSession("claude-parent", "missing"),
+					forkSession("claude-parent", { messageId: "missing" }),
 				);
 				expect(result._tag).toBe("Left");
 				expect(sdkForkSession).not.toHaveBeenCalled();
@@ -523,7 +537,7 @@ describe("subscribeShell", () => {
 					sessionId: "incorrect-child",
 				});
 				const result = yield* Effect.either(
-					forkSession("claude-parent", "ui-boundary"),
+					forkSession("claude-parent", { messageId: "ui-boundary" }),
 				);
 				expect(result._tag).toBe("Left");
 				expect(sdkForkSession).not.toHaveBeenCalled();
@@ -589,9 +603,10 @@ describe("subscribeShell", () => {
 				]);
 				vi.mocked(getSessionMessages).mockClear();
 				vi.mocked(getSessionMessages).mockResolvedValue([]);
+				const config = yield* ConfigTag;
 				const result = yield* Effect.either(
-					forkSession("claude-parent", "api-tip").pipe(
-						Effect.provideService(ConfigTag, makeMockConfig({ configDir })),
+					forkSession("claude-parent", { messageId: "api-tip" }).pipe(
+						Effect.provideService(ConfigTag, { ...config, configDir }),
 					),
 				);
 				expect(result).toMatchObject({
