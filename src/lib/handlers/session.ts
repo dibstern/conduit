@@ -14,6 +14,8 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import {
 	clearSession as clearEffectOverrideSession,
 	hasActiveProcessingTimeout,
+	setModel,
+	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	ReadQueryEffectTag,
@@ -22,6 +24,7 @@ import {
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { busySessionIds } from "../session-busy.js";
 import type { PermissionId } from "../shared-types.js";
+import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 const SESSION_METADATA_FANOUT = 4;
@@ -291,11 +294,17 @@ export const createSessionForClient = ({
 	title,
 	instanceId,
 	providerId,
+	model,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string | undefined;
+	};
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
@@ -308,6 +317,21 @@ export const createSessionForClient = ({
 						...(providerId != null ? { providerId } : {}),
 					})
 				: yield* sessionManagerService.createSession(title);
+		if (model) {
+			const override = { providerID: model.providerId, modelID: model.modelId };
+			yield* setModel(session.id, override);
+			// The draft lists the default model's efforts, so keep a picked
+			// effort only if this model offers it. Without one, use the model's
+			// saved effort: the first turn would otherwise inherit the default's.
+			const { variant: saved, variants } = yield* savedVariantFor(override);
+			const picked = model.variant;
+			yield* setVariant(
+				session.id,
+				picked === "" || (picked !== undefined && variants.includes(picked))
+					? picked
+					: saved,
+			);
+		}
 
 		yield* switchClientToSession(clientId, session.id, {
 			skipPollerSeed: true,

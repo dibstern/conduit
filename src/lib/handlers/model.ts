@@ -153,6 +153,18 @@ const loadVariantsForModel = (activeModel: ModelOverride | undefined) =>
 		return [] as string[];
 	});
 
+/** The efforts `model` offers, and the one last saved for it if still offered. */
+export const savedVariantFor = (model: ModelOverride) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const variants = yield* loadVariantsForModel(model);
+		const saved =
+			loadRelaySettings(config.configDir).defaultVariants?.[
+				`${model.providerID}/${model.modelID}`
+			] ?? "";
+		return { variant: variants.includes(saved) ? saved : "", variants };
+	});
+
 const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
@@ -627,7 +639,6 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		const config = yield* ConfigTag;
 
 		const { modelId, providerId } = input;
 		const sessionId = input.sessionId;
@@ -670,17 +681,8 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched to: ${modelId} (${providerId})`,
 		);
 
-		const availableVariants = yield* loadVariantsForModel({
-			providerID: providerId,
-			modelID: modelId,
-		});
-		const modelKey = `${providerId}/${modelId}`;
-		const settings = loadRelaySettings(config.configDir);
-		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-		const validVariant =
-			persistedVariant && availableVariants.includes(persistedVariant)
-				? persistedVariant
-				: "";
+		const { variant: validVariant, variants: availableVariants } =
+			yield* savedVariantFor({ providerID: providerId, modelID: modelId });
 
 		if (sessionId) {
 			yield* setVariant(sessionId, validVariant);
@@ -724,25 +726,20 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			config.configDir,
 		);
 
-		// Also persist to OpenCode's project config
-		const updateResult = yield* Effect.either(
-			modelService.persistDefaultModel(provider, model),
-		);
-		if (updateResult._tag === "Left") {
-			log.warn("Failed to persist default model to OpenCode config");
+		// Mirror the default into OpenCode's project config, except Claude-harness
+		// ids: OpenCode can't resolve them, so every prompt sent without a model
+		// would fail with "Model not found".
+		if (!isClaudeProvider(provider)) {
+			const updateResult = yield* Effect.either(
+				modelService.persistDefaultModel(provider, model),
+			);
+			if (updateResult._tag === "Left") {
+				log.warn("Failed to persist default model to OpenCode config");
+			}
 		}
 
-		const availableVariants = yield* loadVariantsForModel({
-			providerID: provider,
-			modelID: model,
-		});
-		const settings = loadRelaySettings(config.configDir);
-		const modelKey = `${provider}/${model}`;
-		const persistedVariant = settings.defaultVariants?.[modelKey] ?? "";
-		const validVariant =
-			persistedVariant && availableVariants.includes(persistedVariant)
-				? persistedVariant
-				: "";
+		const { variant: validVariant, variants: availableVariants } =
+			yield* savedVariantFor(override);
 		yield* setDefaultVariant(validVariant);
 
 		const modelMessage = { type: "model_info" as const, model, provider };

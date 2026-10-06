@@ -440,8 +440,12 @@ export function selectInstance(instanceId: string): void {
 	}
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
-	const currentInScope = models.some((m) =>
-		modelMatchesId(m, discoveryState.currentModelId),
+	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
+	// and the other harness's provider id would reach this one on first send.
+	const currentInScope = models.some(
+		(m) =>
+			m.provider === discoveryState.currentProviderId &&
+			modelMatchesId(m, discoveryState.currentModelId),
 	);
 	if (currentInScope) return;
 	const preferred =
@@ -803,6 +807,35 @@ export function chooseModel(model: {
 		propose("modelId", model.modelId),
 		propose("providerId", model.providerId),
 	]);
+}
+
+/** This tab's model and effort picks, if `instanceId` lists the model.
+ *  Nothing without a pick: the server's default applies then. An effort pick
+ *  commits the model it was picked for, which may be the one the server
+ *  reported. Drops a model carried over from another harness, which
+ *  `selectInstance` keeps when the new harness has no models yet. */
+export function getChosenModel(instanceId: string):
+	| {
+			readonly modelId: string;
+			readonly providerId: string;
+			readonly variant?: string;
+	  }
+	| undefined {
+	if (choice.modelId == null && choice.variant == null) return undefined;
+	const { currentModelId: modelId, currentProviderId: providerId } =
+		discoveryState;
+	const listed = getProviderGroupsForInstance(instanceId).some((group) =>
+		group.models.some(
+			(model) =>
+				model.provider === providerId && modelMatchesId(model, modelId),
+		),
+	);
+	if (!listed) return undefined;
+	return {
+		modelId,
+		providerId,
+		...(choice.variant == null ? {} : { variant: choice.variant }),
+	};
 }
 
 export function chooseVariant(variant: string): UndoChoice {

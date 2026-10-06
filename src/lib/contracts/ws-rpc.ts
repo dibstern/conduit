@@ -1474,6 +1474,16 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
 			),
 			providerId: Schema.optional(Schema.String),
+			// The draft composer's model, and its effort if one was picked.
+			// Recorded as the session's own choice so the first turn runs them
+			// instead of the relay default.
+			model: Schema.optional(
+				Schema.Struct({
+					modelId: NonEmptyString,
+					providerId: NonEmptyString,
+					variant: Schema.optional(Schema.String),
+				}),
+			),
 		},
 	},
 ) {}
