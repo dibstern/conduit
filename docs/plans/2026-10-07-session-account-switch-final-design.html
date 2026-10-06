@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session account switch · final design</title>
+<style>
+:root{
+  --bg:#0d0e11;--bg-alt:#1b1e24;--surface:#141619;--text:#eceef2;--t2:#a8afbb;--muted:#838b98;--dim:#676e79;
+  --border:#2d323b;--bsub:#20242b;--chip:#3a414c;--pink:#fe3781;--cyan:#00e5ff;
+  --amber:#f4b740;--blue:#5aa9f5;--green:#3fd69a;--red:#f4607a;--violet:#c0a8ff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;overflow-x:clip}
+header.page{padding:28px 20px 8px;max-width:1500px;margin:0 auto}
+header.page h1{font-size:20px;margin:0 0 6px}
+header.page p{color:var(--t2);margin:0 0 8px;max-width:980px}
+nav.jump{position:sticky;top:0;z-index:5;background:rgba(13,14,17,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--bsub);display:flex;gap:6px;padding:8px 20px;overflow-x:auto;align-items:center}
+nav.jump a,nav.jump button{color:var(--t2);text-decoration:none;font:12px inherit;font-family:inherit;min-height:44px;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid var(--border);white-space:nowrap;background:none;cursor:pointer;flex:none}
+nav.jump button[aria-pressed=true]{background:var(--bg-alt);color:var(--text);border-color:var(--chip)}
+nav.jump .sep{width:1px;height:28px;background:var(--border);flex:none;margin:0 4px}
+nav.jump .lbl{color:var(--dim);font-size:11px;flex:none}
+section.tier{max-width:1500px;margin:0 auto;padding:20px}
+section.tier>h2{font-size:15px;margin:10px 0 2px}
+section.tier>p{color:var(--muted);margin:0 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(560px,1fr));gap:16px}
+@media (max-width:620px){.grid{grid-template-columns:1fr}section.tier{padding:12px}}
+.design{background:var(--surface);border:1px solid var(--bsub);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.design .meta{padding:12px 14px 10px;border-bottom:1px solid var(--bsub)}
+.design .meta h3{margin:0;font-size:13px;display:flex;gap:8px;align-items:baseline}
+.design .meta h3 b{font:600 11px var(--mono);color:var(--cyan)}
+.design .meta p{margin:4px 0 0;color:var(--t2);font-size:12px}
+.frame{background:var(--bg);padding:14px;overflow:hidden}
+.stage{transform-origin:top left}
+.pframe{display:flex;flex-wrap:wrap;gap:14px;padding:0 14px 14px;background:var(--bg)}
+.pframe .note{flex:1 1 180px;min-width:0;color:var(--t2);font-size:12px}
+.note dt{color:var(--dim);font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.04em;margin-top:10px}
+.note dd{margin:2px 0 0}
+.tag{font:10px var(--mono);color:var(--dim);margin:0 0 6px}
+
+/* shared app chrome */
+.flex{flex:1}
+.ico{color:var(--muted);font-size:13px;padding:0 3px;flex:none}
+.cnt{color:var(--dim);font-size:11px;font-weight:400}
+.mono{font-family:var(--mono)}
+.amb{color:var(--amber)!important}.cR{color:var(--red)!important}.dimt{color:var(--dim)}
+.app{width:760px;height:400px;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg);font-size:12px;position:relative}
+.appbody{flex:1;display:flex;min-height:0}
+.sb{width:196px;background:var(--surface);border-right:1px solid var(--bsub);display:flex;flex-direction:column;flex:none}
+.sbh{display:flex;align-items:center;gap:5px;padding:10px 8px 6px 12px;font-size:14px;font-weight:600}
+.sbl{flex:1;overflow:hidden;padding:2px 6px}
+.srow{display:flex;align-items:center;gap:7px;padding:6px;border-radius:7px;color:var(--t2);font-size:11.5px}
+.srow.on{background:var(--bg-alt);color:var(--text)}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--chip);flex:none}
+.srow.on .sdot,.prow.on .sdot{background:var(--cyan)}
+.sn{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mn{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.sbar{display:flex;align-items:center;gap:8px;height:46px;padding:0 12px;border-bottom:1px solid var(--bsub);flex:none}
+.stitle{display:flex;flex-direction:column;min-width:0}
+.stitle b{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ssub{font-size:10.5px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:5px}
+.chat{flex:1;overflow:hidden;padding:12px 16px;position:relative}
+.ubub{margin:0 0 10px auto;max-width:75%;background:var(--bg-alt);border-radius:12px 12px 3px 12px;padding:7px 10px;font-size:12px;width:fit-content}
+.atext{color:var(--text);font-size:12px;line-height:1.5;margin:0 2px 8px}
+.turnf{font:10.5px var(--mono);color:var(--dim);margin:0 2px 12px;display:flex;gap:8px;align-items:center}
+.cwrap{padding:0 14px 12px;flex:none}
+.comp{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:9px 10px 7px;position:relative}
+.phd{color:var(--dim);font-size:12px;padding:0 2px 9px}
+.crow{display:flex;align-items:center;gap:6px}
+.chip{font-size:10.5px;color:var(--t2);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap;flex:none}
+.chip.on{background:var(--bg-alt);border-color:var(--chip);color:var(--text)}
+.send{width:26px;height:26px;border-radius:50%;background:var(--text);color:var(--bg);display:grid;place-items:center;font-size:13px;font-weight:700;flex:none;position:relative}
+.rail{width:38px;border-left:1px solid var(--bsub);background:var(--surface);display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px 0 10px;color:var(--dim);flex:none;position:relative}
+.pop{position:absolute;background:var(--bg-alt);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.55);padding:6px 10px;font-size:11.5px;z-index:3}
+.prow2{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--bsub);min-height:34px}
+.prow2:last-child{border-bottom:0}
+.prow2 .k{width:52px;color:var(--muted);font-size:11px;flex:none}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:10.5px}
+.seg span{padding:2px 7px;color:var(--muted)}.seg span.on{background:var(--chip);color:var(--text)}
+.mbar{display:inline-block;background:var(--chip);border-radius:9px;overflow:hidden;vertical-align:middle;flex:none}
+.mbar i{display:block;height:100%;background:var(--t2)}
+.mbar.amb i{background:var(--amber)}.mbar.red i{background:var(--red)}
+.v{font:10.5px var(--mono);color:var(--t2);white-space:nowrap}
+.strip{display:flex;align-items:center;gap:7px;margin-bottom:8px;border-radius:16px;border:1px solid;padding:7px 10px;font-size:11.5px;color:var(--t2);line-height:1.35}
+.strip.amb{border-color:rgba(244,183,64,.35);background:rgba(244,183,64,.06);color:var(--t2)!important}
+.strip.red{border-color:rgba(244,96,122,.4);background:rgba(244,96,122,.07)}
+.strip b.amb,.strip .tb.amb{color:var(--amber)}
+.tb{font-weight:600;flex:none}
+.banner{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid;font-size:11.5px;color:var(--t2);flex:none}
+.banner.amb{border-color:rgba(244,183,64,.3);background:rgba(244,183,64,.07)}
+.banner.red{border-color:rgba(244,96,122,.35);background:rgba(244,96,122,.08)}
+.qchip{display:inline-flex;align-items:center;gap:5px;font:10.5px var(--mono);border:1px solid var(--border);border-radius:999px;padding:3px 9px;color:var(--t2);white-space:nowrap;flex:none}
+.qchip.amb{border-color:rgba(244,183,64,.45);background:rgba(244,183,64,.07)}
+.qchip.red{border-color:rgba(244,96,122,.5);background:rgba(244,96,122,.08);color:var(--red)}
+.over{position:absolute;inset:0;z-index:4}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+/* phone */
+.pf{width:280px;height:540px;border:1px solid var(--border);border-radius:30px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;position:relative;font-size:12px;flex:none}
+.pstat{display:flex;justify-content:space-between;padding:10px 22px 4px;font-size:11px;font-weight:600;flex:none}
+.plb{display:flex;align-items:center;gap:6px;padding:6px 8px 8px 14px;font-size:19px;font-weight:600;flex:none;min-height:48px}
+.pl{flex:1;overflow:hidden}
+.prow{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--bsub);font-size:13px;color:var(--t2)}
+.tm{color:var(--dim);font-size:11px;flex:none}
+.fab{position:absolute;right:14px;bottom:26px;width:44px;height:44px;border-radius:50%;background:var(--pink);display:grid;place-items:center;font-size:22px;color:#fff;z-index:2}
+.home{position:absolute;bottom:6px;left:50%;width:100px;height:4px;margin-left:-50px;border-radius:9px;background:var(--chip);z-index:6}
+.psb{display:flex;align-items:center;gap:6px;min-height:50px;padding:0 8px;border-bottom:1px solid var(--bsub);flex:none}
+.pf .chat{padding:12px}
+.pf .cwrap{padding:0 10px 22px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg-alt);border-radius:18px 18px 0 0;padding:8px 14px 26px;z-index:5;box-shadow:0 -12px 30px rgba(0,0,0,.5)}
+.sheet:before{content:"";display:block;width:36px;height:4px;border-radius:9px;background:var(--chip);margin:0 auto 8px}
+/* design-specific */
+.sbf{border-top:1px solid var(--bsub);padding:10px;display:flex;gap:10px;font-size:10.5px;white-space:nowrap}
+.w{display:flex;align-items:center;gap:5px}.w .k{color:var(--muted)}
+.rim{position:absolute;left:14px;right:14px;top:-1px;height:2px;background:transparent;border-radius:2px;overflow:hidden}
+.rim i{display:block;height:100%;background:var(--t2)}
+.rim.wk{top:2px;height:1px;opacity:.6}
+.rimlbl{position:absolute;top:-8px;right:18px;font:10px var(--mono);background:var(--bg);padding:0 5px}
+.pace{font:10.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.share{display:flex;align-items:center;gap:4px;flex:none}
+.hg{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--t2);position:relative;overflow:hidden;flex:none;display:grid;place-items:center}
+.hg i{position:absolute;left:0;right:0;bottom:0;background:var(--text)}
+.hg span{position:relative;font-weight:700;font-size:13px;color:var(--text);mix-blend-mode:difference}
+.osbar{display:flex;align-items:center;gap:12px;height:22px;padding:0 10px;background:#08090b;border-bottom:1px solid var(--bsub);font-size:10.5px;color:var(--muted);flex:none}
+.batt{display:inline-flex;align-items:center;gap:4px;font:10px var(--mono)}
+.batt b{display:inline-block;width:22px;height:10px;border:1.2px solid currentColor;border-radius:2.5px;position:relative;padding:1px}
+.batt b:after{content:"";position:absolute;right:-3.5px;top:2.5px;width:2px;height:3.5px;background:currentColor;border-radius:0 1px 1px 0}
+.batt b i{display:block;height:100%;background:currentColor;border-radius:1px}
+.river{flex:none;border-top:1px solid var(--bsub);background:#0a0b0d;padding:5px 10px 6px;display:flex;flex-direction:column;gap:3px}
+.rdays{display:flex;gap:4px}
+.rday{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.rday .bl{display:flex;gap:2px;height:14px;border-radius:3px;padding:1px}
+.rday.fut .bl{border:1px dashed var(--border)}
+.rday .bl i{flex:1;border-radius:2px;background:var(--t2)}
+.rday .dl{font:9px var(--mono);color:var(--dim);text-align:center}
+.rwk{height:3px;border-radius:2px;background:var(--chip);overflow:hidden}
+.rwk i{display:block;height:100%}
+.tint-amb{box-shadow:inset 0 0 0 2px rgba(244,183,64,.55),inset 0 -60px 80px -40px rgba(244,183,64,.18)}
+.tint-red{box-shadow:inset 0 0 0 2px rgba(244,96,122,.65);filter:saturate(.55)}
+.pet{width:30px;height:30px;border-radius:50% 50% 44% 44%;background:var(--bg-alt);border:1.5px solid var(--t2);display:grid;place-items:center;font:10px var(--mono);color:var(--text);position:relative;flex:none}
+.pet.amb{border-color:var(--amber)}.pet.red{border-color:var(--red);opacity:.85}
+.bub{position:absolute;background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:5px 8px;font-size:10.5px;color:var(--t2);white-space:nowrap;z-index:3}
+.wx{border:1px solid var(--border);border-radius:16px;padding:14px 16px;display:flex;gap:14px;align-items:center;background:var(--surface);max-width:420px;margin:18px auto 0}
+.wx .ic{font-size:34px;line-height:1}
+.wx b{display:block;font-size:14px}
+.wx span{color:var(--t2);font-size:11.5px}
+.sendq{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;border:1px solid rgba(244,96,122,.5);color:var(--red);font:10.5px var(--mono);white-space:nowrap;flex:none}
+.qbtn{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;background:var(--text);color:var(--bg);font-size:11px;font-weight:600;flex:none}
+.empty{color:var(--dim);font-size:11px;text-align:center;padding:30px 10px}
+
+.btn{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px;border-radius:8px;border:1px solid var(--border);color:var(--text);font-size:11px;white-space:nowrap;flex:none;background:var(--bg-alt)}
+.btn.pri{background:var(--text);color:var(--bg);border-color:var(--text);font-weight:600}
+.btn.ghost{background:none;color:var(--t2)}
+.btn.full{flex:1;justify-content:center;height:34px;font-size:12px;border-radius:10px}
+.lim{border-color:rgba(244,96,122,.45);background:rgba(244,96,122,.07)}
+.wait{border-color:rgba(244,183,64,.4);background:rgba(244,183,64,.06)}
+.pf .strip{flex-wrap:wrap}.pf .wait .btn.full{font-size:11px;padding:0 8px}
+.lim .ttl,.wait .ttl{color:var(--text);font-weight:600}
+.gi{font-size:13px;flex:none}
+.hand{display:flex;align-items:center;gap:8px;margin:12px 0;font:10.5px var(--mono);color:var(--muted);white-space:nowrap}
+.hand:before,.hand:after{content:"";flex:1;height:1px;background:var(--border)}
+.hand+.hand:before,.hand+.hand:after{display:none}
+.hand b{color:var(--cyan);font-weight:600}.hand u{color:var(--t2);cursor:pointer}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.arow{display:flex;align-items:center;gap:8px;padding:6px;border-radius:7px;font-size:11.5px;color:var(--t2);min-height:30px}
+.arow.sel{background:var(--chip);color:var(--text)}
+.arow.off{opacity:.5}
+.pfoot{border-top:1px solid var(--bsub);margin:4px -10px -6px;padding:8px 10px;font-size:10.5px;color:var(--muted)}
+.heldtag{text-align:right;font:10px var(--mono);color:var(--amber);margin:-6px 2px 12px}
+.modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:560px;background:var(--bg-alt);border:1px solid var(--border);border-radius:14px;padding:16px 18px;z-index:5;font-size:11.5px;color:var(--t2)}
+.modal h4{margin:0 0 3px;font-size:14px;color:var(--text)}
+.cols{display:flex;gap:14px;margin:12px 0 4px}
+.cols>div{flex:1;min-width:0}
+.cols h5{margin:0 0 4px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:600}
+.yes,.no{display:block;position:relative;padding:3px 0 3px 18px;font-size:11px;line-height:1.35}
+.sheet .swap{flex-wrap:wrap}.sheet .swap .mbar{display:none}
+.yes:before{content:"✓";color:var(--green);position:absolute;left:0}
+.no:before{content:"✕";color:var(--red);position:absolute;left:0}
+.yes i,.no i{font-style:normal;color:var(--dim)}
+.swap{display:flex;align-items:center;gap:10px;margin:10px 0;padding:8px 10px;border:1px solid var(--bsub);border-radius:10px;background:var(--surface)}
+.toast{position:absolute;right:14px;bottom:14px;width:300px;background:var(--bg-alt);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.55);padding:12px;font-size:11.5px;color:var(--t2);z-index:4}
+.set{position:absolute;inset:0;background:var(--bg);z-index:4;display:flex}
+.set nav{width:150px;border-right:1px solid var(--bsub);padding:12px 8px;display:flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--t2)}
+.set nav span{padding:6px 8px;border-radius:7px}.set nav span.on{background:var(--bg-alt);color:var(--text)}
+.set main{flex:1;padding:14px 18px;display:flex;flex-direction:column;gap:7px;font-size:11.5px;color:var(--t2);min-width:0}
+.srowx{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bsub)}
+.srowx b{color:var(--text);display:block;font-weight:600;margin-bottom:2px}
+.tog{width:30px;height:17px;border-radius:999px;background:var(--chip);position:relative;flex:none;margin-top:2px}
+.tog:after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--t2)}
+.tog.on{background:var(--cyan)}.tog.on:after{left:auto;right:2px;background:#fff}
+.drag{color:var(--dim)}
+.flow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+.flow a{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--border);border-radius:10px;color:var(--t2);text-decoration:none;font-size:12.5px}
+.flow a b{color:var(--cyan);font-family:var(--mono)}
+.rules{max-width:980px;margin:0 auto;padding:0 20px 30px;color:var(--t2);font-size:13.5px;line-height:1.55}
+.rules h2{color:var(--text);font-size:17px;margin:26px 0 8px}
+.rules table{border-collapse:collapse;width:100%;font-size:12.5px}
+.rules td,.rules th{border-bottom:1px solid var(--bsub);padding:7px 8px;text-align:left;vertical-align:top}
+.rules th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.rules code{font:12px var(--mono);color:var(--text);background:var(--bg-alt);padding:1px 5px;border-radius:5px}
+.rules li{margin:4px 0}
+.grid.one{grid-template-columns:1fr}
+@media (max-width:620px){.rules{padding:0 16px 30px}.rules table{font-size:11.5px}}
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>Session account switch · final design</h1>
+  <p>Reference for the epic. A Claude session hits its usage limit on <b>work2claude</b>. A <b>limit strip</b> above the composer replaces the in-chat error. You can switch the session to another Claude account, after a confirm that spells out what carries over, or resume on the same account at reset, by hand or automatically. The strip disappears once the session moves on, leaving a one-line divider in the transcript.</p>
+  <div class="flow" id="flow"></div>
+</header>
+<div id="frames"></div>
+<section class="rules" id="rules">
+  <h2>Which recovery runs</h2>
+  <table>
+    <tr><th>Settings</th><th>When the limit hits</th></tr>
+    <tr><td>Both off (default)</td><td>Frame A: the limit strip with <b>Switch account</b> and <b>Resume at reset</b>.</td></tr>
+    <tr><td>Auto-resume on</td><td>Frame E: the strip opens already scheduled, with <b>Cancel auto-resume</b>.</td></tr>
+    <tr><td>Auto-switch on, an account in the order has quota</td><td>Frame G: no strip, no dialog. The session moves; a divider and a toast say so.</td></tr>
+    <tr><td>Auto-switch on, every account limited</td><td>Falls through to auto-resume if on (frame E), otherwise frame A. Resume targets the original account's reset.</td></tr>
+  </table>
+  <h2>Rules</h2>
+  <ul>
+    <li><b>The strip replaces the in-chat error.</b> The synthetic "you've hit your limit" reply is not rendered as a message. The unanswered user message gets a small <code>held</code> tag and is re-sent by whichever recovery runs.</li>
+    <li><b>The strip is the only limit UI in the chat.</b> It has no dismiss button and leaves when the session is unblocked: switched, resumed, or the reset time passes.</li>
+    <li><b>A manual switch always confirms</b> with the handoff dialog (frame C), because it costs a cold prompt cache and drops reasoning. The divider's <u>What carried over?</u> reopens the same summary read-only, including after an auto-switch.</li>
+    <li><b>Auto-switch guardrails:</b> at most one switch per limited turn; skip accounts known to be limited until their reset; always leave a divider; never switch in the middle of a turn.</li>
+    <li><b>Resume at reset</b> is per session and survives daemon restarts. It is re-checked when it fires (account still limited means stay waiting, session already moved means cancel).</li>
+    <li><b>Phone:</b> the strip keeps both full labels on full-width buttons; the dropdown and dialog become bottom sheets.</li>
+  </ul>
+  <h2>Copy (aligned with t3code)</h2>
+  <table>
+    <tr><th>Where</th><th>Text</th></tr>
+    <tr><td>Strip title</td><td>Usage limit reached · work2claude</td></tr>
+    <tr><td>Strip detail</td><td>Weekly limit · resets Mon 9:00 &nbsp;/&nbsp; 5-hour limit · resets 14:30 &nbsp;/&nbsp; Reset time unavailable</td></tr>
+    <tr><td>Buttons</td><td>Switch account · Resume at reset · Cancel auto-resume</td></tr>
+    <tr><td>Waiting strip</td><td>Resumes on work2claude at Mon 9:00 · in 2d 13h</td></tr>
+    <tr><td>Dialog</td><td>Continue on personal? · Switch and resend · Cancel</td></tr>
+    <tr><td>Dividers</td><td>Continued on personal · switched by you / auto-switch &nbsp;·&nbsp; Resumed on work2claude after reset</td></tr>
+    <tr><td>Settings</td><td>Auto-resume limited sessions · Auto-switch account when limited</td></tr>
+  </table>
+</section>
+<script>
+const SESS = ['Fix subagent config dir','Refactor event store','Composer redesign','Tailscale port check','Jev surfacing','Settings panel','Release notes'];
+const RAIL = '<span>☰</span><span>⌕</span><span>⎇</span><span>▤</span>';
+const SEND = '<span class="send">↑</span>';
+const AC = {
+  work2claude:{u:100, at:'Mon 9:00', c:'var(--violet)'},
+  personal:{u:23, c:'var(--cyan)'},
+  extra:{u:61, c:'var(--green)'},
+  work:{u:100, at:'today 14:30', c:'var(--blue)'},
+};
+const NAMES = Object.keys(AC);
+const left = n => 100 - AC[n].u;
+const lim = n => AC[n].u >= 100;
+const bar = (u, w = 56) => `<span class="mbar ${u>=100?'red':u>=80?'amb':''}" style="width:${w}px;height:4px"><i style="width:${Math.min(u,100)}%"></i></span>`;
+const q = n => lim(n) ? `<span class="v cR">limited · ${AC[n].at}</span>` : `<span class="v">${left(n)}% left</span>`;
+const dot = (n, s = 8) => `<span class="dot" style="background:${AC[n].c};width:${s}px;height:${s}px"></span>`;
+const arows = (w = 56) => NAMES.map(n => `<div class="arow ${n==='personal'?'sel':''} ${lim(n)?'off':''}">${dot(n)}<span>${n}</span>${n==='work2claude'?'<span class="cnt">current</span>':''}<span class="flex"></span>${bar(AC[n].u, w)}${q(n)}</div>`).join('');
+const sub = n => `${dot(n,6)}${n} · opus 5`;
+
+const U1 = `<div class="ubub">Thread configDir through the subagent materializer</div><div class="atext">Done. Both read paths now pass the session's config dir through the SDK worker; typecheck is clean.</div><div class="turnf">opus 5 · 2m 14s · work2claude</div>`;
+const U2 = `<div class="ubub">Now run the provider tests and fix anything that fails</div>`;
+const HELD = U1 + U2 + `<div class="heldtag">⏸ held · re-sent when the session resumes</div>`;
+const HELDp = U2 + `<div class="heldtag">⏸ held</div>`;
+const REPLY = acc => `<div class="atext">Running <span class="mono">vitest run test/unit/provider/claude</span>: 649 passed, 0 failed.</div><div class="turnf">opus 5 · 48s · ${acc}</div>`;
+const div = (txt, link = true) => `<div class="hand">${txt}${link?' · <u>What carried over?</u>':''}</div>`;
+const divp = txt => `<div class="hand" style="margin-bottom:2px">${txt}</div><div class="hand" style="margin-top:0;justify-content:center"><u>What carried over?</u></div>`;
+
+const LIMIT = (cls = '') => `<div class="strip lim ${cls}"><span class="gi">⛽</span><span><span class="ttl">Usage limit reached · work2claude</span><br><span class="dimt">Weekly limit · resets Mon 9:00</span></span><span class="flex"></span><span class="btn pri">Switch account ▾</span><span class="btn">Resume at reset</span></div>`;
+const LIMITp = `<div class="strip lim"><span class="gi">⛽</span><span style="flex:1"><span class="ttl">Usage limit reached</span><br><span class="dimt">work2claude · resets Mon 9:00</span></span><div style="display:flex;gap:6px;width:100%;margin-top:6px"><span class="btn pri full">Switch account</span><span class="btn full">Resume at reset</span></div></div>`;
+const WAIT = auto => `<div class="strip wait"><span class="gi">⏱</span><span><span class="ttl">Resumes on work2claude at Mon 9:00</span><br><span class="dimt">in 2d 13h${auto?' · auto-resume is on':''}</span></span><span class="flex"></span><span class="btn">Switch account ▾</span><span class="btn ghost">Cancel auto-resume</span></div>`;
+const WAITp = `<div class="strip wait"><span class="gi">⏱</span><span style="flex:1"><span class="ttl">Resumes Mon 9:00</span><br><span class="dimt">work2claude · in 2d 13h</span></span><div style="display:flex;gap:6px;width:100%;margin-top:6px"><span class="btn full">Switch account</span><span class="btn ghost full">Cancel auto-resume</span></div></div>`;
+
+const CARRY = `<div class="cols"><div><h5>Carries over</h5>
+  <div class="yes">Last 46 messages, word for word</div>
+  <div class="yes">Tool calls and results <i>(long output trimmed)</i></div>
+  <div class="yes">Files touched and the working directory</div>
+  <div class="yes">Model, mode and session settings</div>
+  <div class="yes">Older messages <i>(Claude can read them on request)</i></div></div>
+  <div><h5>Doesn't carry over</h5>
+  <div class="no">Thinking / reasoning blocks</div>
+  <div class="no">Prompt cache <i>(first reply is slower and uses more quota)</i></div>
+  <div class="no">Running subagents and background tasks</div></div></div>`;
+const SWAP = `<div class="swap">${dot('work2claude')}<span>work2claude</span><span class="v cR">limited</span><span class="dimt">→</span>${dot('personal')}<b style="color:var(--text)">personal</b><span class="flex"></span>${bar(23,80)}<span class="v">77% left</span></div>`;
+
+function desk(o = {}){
+  return `<div class="app"><div class="appbody">
+  <aside class="sb"><div class="sbh">Sessions <span class="cnt">7</span><span class="flex"></span><span class="ico">＋</span></div>
+  <div class="sbl">${SESS.map((n,i)=>`<div class="srow ${i?'':'on'}"><span class="sdot"></span><span class="sn">${n}</span></div>`).join('')}</div></aside>
+  <main class="mn"><div class="sbar"><span class="stitle"><b>${SESS[0]}</b><span class="ssub">${o.sub||sub('work2claude')}</span></span><span class="flex"></span><span class="ico">⋯</span></div>
+  <div class="chat">${o.chat ?? HELD}</div>
+  <div class="cwrap">${o.ctop||''}<div class="comp"><div class="phd">Message Claude…</div>
+  <div class="crow"><span class="chip">Opus 5 · high</span><span class="flex"></span>${SEND}</div></div></div>${o.overlay||''}</main>
+  <div class="rail">${RAIL}</div></div>${o.over||''}</div>`;
+}
+function phone(o = {}){
+  return `<div class="pf"><div class="pstat"><span>9:41</span><span>●●● ▮</span></div><div class="psb"><span class="ico" style="font-size:20px">‹</span><span class="stitle" style="flex:1"><b>${SESS[0]}</b><span class="ssub">${o.sub||sub('work2claude')}</span></span><span class="ico" style="font-size:16px">⋯</span></div>
+  <div class="chat">${o.chat ?? HELDp}</div><div class="cwrap">${o.ctop||''}<div class="comp"><div class="phd">Message Claude…</div>
+  <div class="crow"><span class="chip">Opus 5</span><span class="flex"></span>${SEND}</div></div></div>${o.overlay||''}<div class="home"></div></div>`;
+}
+const sheet = (title, body) => `<div class="scrim" style="z-index:4"></div><div class="sheet" style="max-height:78%;overflow:hidden"><div style="font-weight:600;color:var(--text);margin:4px 0 6px;font-size:13px">${title}</div>${body}</div>`;
+
+const F = [
+{k:'A', name:'Limit reached', why:'The strip replaces the in-chat error message. The unanswered message is tagged held. Both recovery paths are one tap away.',
+ desk:()=>desk({ctop:LIMIT()}), phone:()=>phone({ctop:LIMITp}),
+ notes:['Shown when auto-resume and auto-switch are both off (the default).','No ✕: the strip leaves on its own once the session is unblocked.','Phone keeps both full labels on full-width buttons.']},
+{k:'B', name:'Pick an account', why:'Switch account opens the session’s Claude accounts with quota left, with limited accounts greyed out until their reset.',
+ desk:()=>desk({ctop:LIMIT(), overlay:`<div class="pop" style="right:118px;bottom:132px;width:300px"><div class="tag" style="margin:4px 0">Continue this session on</div>${arows()}<div class="pfoot">You’ll see what carries over before anything changes.</div></div>`}),
+ phone:()=>phone({ctop:LIMITp, overlay:sheet('Continue this session on', arows(40))}),
+ notes:['Pre-selects the account with the most quota left.','Quota comes from the probe, so accounts show numbers before you pick.','Only Claude accounts are listed; cross-provider is out of scope.']},
+{k:'C', name:'Confirm the handoff', why:'Design 04’s dialog: before anything changes it states exactly what the new account gets and what is lost.',
+ desk:()=>desk({ctop:LIMIT(), over:`<div class="scrim" style="z-index:4"></div><div class="modal"><h4>Continue on personal?</h4><div>The conversation is handed to a fresh session on this account, then your held message is re-sent.</div>${SWAP}${CARRY}<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><span class="btn ghost">Cancel</span><span class="btn pri">Switch and resend</span></div></div>`}),
+ phone:()=>phone({ctop:LIMITp, overlay:sheet('Continue on personal?', `${SWAP}<div class="yes">Last 46 messages, tool results, files</div><div class="yes">Older messages on request</div><div class="no">Reasoning blocks</div><div class="no">Prompt cache (slower first reply)</div><div style="display:flex;gap:6px;margin-top:10px"><span class="btn ghost full">Cancel</span><span class="btn pri full">Switch and resend</span></div>`)}),
+ notes:['Always shown for a manual switch.','The same summary opens read-only from “What carried over?” on the divider.','“46 messages” is the real handoff budget result, not an estimate.']},
+{k:'D', name:'Switched', why:'The strip is gone; one divider records the move, and the held message runs on the new account.',
+ desk:()=>desk({sub:sub('personal'), chat:U1+U2+div('↪ Continued on <b>personal</b> · switched by you')+REPLY('personal')}),
+ phone:()=>phone({sub:sub('personal'), chat:U2+divp('↪ <b>personal</b> · switched by you')+REPLY('personal')}),
+ notes:['The header subtitle shows the session’s account.','Switching back later uses native resume plus a catch-up of what happened since.','Nothing blocks the chat after this point.']},
+{k:'E', name:'Waiting for reset', why:'Resume at reset, or auto-resume, turns the strip amber with a countdown; you can still switch, or cancel.',
+ desk:()=>desk({ctop:WAIT(false)}), phone:()=>phone({ctop:WAITp}),
+ notes:['With auto-resume on, this is the first strip you see, with an “auto-resume is on” note.','Cancel auto-resume returns to frame A.','Survives restarts; re-checked against live quota when it fires.']},
+{k:'F', name:'Resumed at reset', why:'At reset the held message is re-sent on the same account and the strip disappears.',
+ desk:()=>desk({chat:U1+U2+div('↻ Resumed on <b>work2claude</b> after reset · Mon 9:00', false)+REPLY('work2claude')}),
+ phone:()=>phone({chat:U2+div('↻ Resumed after reset', false)+REPLY('work2claude')}),
+ notes:['Same account, so the native resume keeps the warm history.','No handoff, so no “What carried over?” link.']},
+{k:'G', name:'Auto-switched', why:'With auto-switch on, the session moves to the next account in your order without asking; a divider and a design-05 toast make it visible.',
+ desk:()=>desk({sub:sub('personal'), chat:U1+U2+div('↪ Continued on <b>personal</b> · auto-switch')+REPLY('personal'),
+   overlay:`<div class="toast"><div style="color:var(--text);font-weight:600;margin-bottom:3px">Switched to personal</div><div>work2claude reached its weekly limit.</div><div style="display:flex;gap:6px;margin-top:10px"><span class="btn pri">What carried over?</span><span class="flex"></span><span class="btn ghost">Settings</span></div></div>`}),
+ phone:()=>phone({sub:sub('personal'), chat:U2+divp('↪ <b>personal</b> · auto-switch')+REPLY('personal')}),
+ notes:['Uses the new toast style (conduit-test-9xas).','At most one switch per limited turn; never into a limited account.','If every account is limited, falls back to E or A.']},
+{k:'H', name:'Settings › Claude accounts', why:'Two independent toggles, both off by default, and a drag order for auto-switch.',
+ desk:()=>desk({over:`<div class="set"><nav><span>General</span><span class="on">Instances</span><span>Notifications</span><span>Display</span></nav><main><div style="font-size:13px;color:var(--text);font-weight:600">When a Claude account reaches its usage limit</div>
+   <div class="srowx"><span class="tog on"></span><span><b>Auto-resume limited sessions</b>Re-send the held message on the same account when its limit resets.</span></div>
+   <div class="srowx"><span class="tog"></span><span><b>Auto-switch account when limited</b>Move the session to the first account below that has quota. Runs before auto-resume.</span></div>
+   ${NAMES.map((n,i)=>`<div class="arow" style="border:1px solid var(--bsub)"><span class="drag">⋮⋮</span><span class="v">${i+1}</span>${dot(n)}<span>${n}</span><span class="flex"></span>${bar(AC[n].u,70)}${q(n)}</div>`).join('')}</main></div>`}),
+ phone:()=>phone({overlay:`<div class="set" style="flex-direction:column;padding:48px 14px 14px;gap:6px;font-size:11.5px;color:var(--t2)"><b style="color:var(--text);font-size:14px">Usage limits</b>
+   <div class="srowx"><span class="tog on"></span><span><b>Auto-resume limited sessions</b>Same account, at reset.</span></div>
+   <div class="srowx"><span class="tog"></span><span><b>Auto-switch account</b>First account with quota.</span></div>
+   ${NAMES.map(n=>`<div class="arow" style="border:1px solid var(--bsub)"><span class="drag">⋮⋮</span>${dot(n)}${n}<span class="flex"></span>${q(n)}</div>`).join('')}</div>`}),
+ notes:['Lives in the existing Instances tab, beside the account list.','The order only matters when auto-switch is on.','Copy follows t3code’s “Auto-resume limited threads”.']},
+];
+
+document.getElementById('flow').innerHTML = F.map(f => `<a href="#f${f.k}"><b>${f.k}</b>${f.name}</a>`).join('');
+document.getElementById('frames').innerHTML = `<section class="tier"><div class="grid">${F.map(f => `<article class="design" id="f${f.k}"><div class="meta"><h3><b>${f.k}</b>${f.name}</h3><p>${f.why}</p></div>
+  <div class="frame"><div class="tag">desktop</div><div class="stage" data-w="760">${f.desk()}</div></div>
+  <div class="pframe"><div><div class="tag">phone</div>${f.phone()}</div><dl class="note"><dt>Notes</dt>${f.notes.map(t=>`<dd>${t}</dd>`).join('')}</dl></div></article>`).join('')}</div></section>`;
+function fit(){
+  document.querySelectorAll('.stage').forEach(st => {
+    const w = +st.dataset.w, k = Math.min(1, (st.parentElement.clientWidth - 28) / w);
+    st.style.width = w + 'px';
+    st.style.transform = `scale(${k})`;
+    st.style.marginBottom = (st.offsetHeight * (k - 1)) + 'px';
+  });
+}
+new ResizeObserver(fit).observe(document.body);
+fit();
+</script>
+</body>
+</html>
