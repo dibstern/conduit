@@ -75,10 +75,8 @@ import { handlePtyError } from "./terminal.svelte.js";
 import { clearTodoState } from "./todo.svelte.js";
 import {
 	removeBanner,
-	setClientCount,
 	showBanner,
 	showToast,
-	uiState,
 	updateContextPercent,
 } from "./ui.svelte.js";
 
@@ -303,9 +301,6 @@ export function handleMessage(msg: RelayMessage): void {
 
 		// Now routed through routePerSession (per-session events).
 
-		case "client_count":
-			setClientCount(msg.count ?? 0);
-			break;
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
 			handleBuildId(msg.buildId);
@@ -313,9 +308,6 @@ export function handleMessage(msg: RelayMessage): void {
 		case "server_update":
 			if (!msg.restartAvailable) serverRestartAccepted = false;
 			handleServerUpdate(msg.restartAvailable);
-			break;
-		case "connection_status":
-			uiState.opencodeConnectionStatus = msg.status;
 			break;
 		case "input_sync":
 			if (isOwnBrowserClientId(msg.from)) break;
@@ -327,11 +319,6 @@ export function handleMessage(msg: RelayMessage): void {
 			break;
 
 		// Now routed through routePerSession (per-session events).
-
-		case "system_error":
-			log.warn("System error:", msg.code, msg.message, msg.details ?? {});
-			if (msg.code === "INSTANCE_ERROR") clearScanInFlight();
-			break;
 
 		// Broadcast by the server when a notification-worthy event (done,
 		// error) is dropped because the user is viewing a different session.

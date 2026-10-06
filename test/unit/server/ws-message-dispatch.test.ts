@@ -1,9 +1,8 @@
 import { seedSessions } from "../stores/session-fixtures.js";
 // Gap 1: handleToolContentResponse — tool_content message updates chat state
-// Gap 2: connection_status → stored OpenCode connection status
 //
-// Tests the handleMessage() dispatch for two message types that previously
-// had zero test coverage.
+// Tests the handleMessage() dispatch for message types that previously had
+// zero test coverage.
 
 import {
 	afterEach,
@@ -288,74 +287,5 @@ describe("input_sync dispatch", () => {
 		expect(inputSyncState.text).toBe("other tab draft");
 		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
 		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
-	});
-});
-
-// Gap 2: connection_status → stored status (AC1/AC2)
-
-describe("connection_status via handleMessage (AC1/AC2)", () => {
-	it("stores disconnected status without showing an ungated banner", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "disconnected",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("stores reconnecting status without showing an ungated banner", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("stores connected status without directly changing banners", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "connected",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-		expect(removeBannerMock).not.toHaveBeenCalled();
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("replaces disconnected status with reconnecting", () => {
-		handleMessage({
-			type: "connection_status",
-			status: "disconnected",
-		});
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-	});
-
-	it("handles full lifecycle: connected → disconnected → reconnecting → connected", () => {
-		handleMessage({ type: "connection_status", status: "connected" });
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-
-		handleMessage({ type: "connection_status", status: "disconnected" });
-		expect(uiState.opencodeConnectionStatus).toBe("disconnected");
-
-		handleMessage({
-			type: "connection_status",
-			status: "reconnecting",
-		});
-		expect(uiState.opencodeConnectionStatus).toBe("reconnecting");
-
-		handleMessage({ type: "connection_status", status: "connected" });
-		expect(uiState.opencodeConnectionStatus).toBe("connected");
-		expect(removeBannerMock).not.toHaveBeenCalled();
-		expect(showBannerMock).not.toHaveBeenCalled();
 	});
 });

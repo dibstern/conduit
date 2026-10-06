@@ -450,13 +450,8 @@ describe("handleClientConnectedEffect — model info", () => {
 		);
 
 		expect(deps.client.session.get).not.toHaveBeenCalled();
-		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "system_error",
-				code: "INIT_FAILED",
-				message: expect.stringContaining("Failed to load session info"),
-			}),
+		expect(deps.log.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("Failed to load session info"),
 		);
 		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
 			type: "model_info",
@@ -498,7 +493,7 @@ describe("handleClientConnectedEffect — viewed families", () => {
 		expect(pushOrder).toBeLessThan(bootstrapOrder);
 	});
 
-	it("sends INIT_FAILED when pushViewerFamilies throws", async () => {
+	it("logs, without a browser error, when pushViewerFamilies throws", async () => {
 		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.sessionService.pushViewerFamilies).mockReturnValue(
 			Effect.fail(
@@ -509,24 +504,18 @@ describe("handleClientConnectedEffect — viewed families", () => {
 			),
 		);
 		await runClientInit(deps, "client-1");
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
+		// Init failures are background-task errors (fork 3.2): log only.
+		expect(deps.log.warn).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to push viewed families"),
 		);
-		const errorOrder = vi
-			.mocked(deps.wsHandler.sendTo)
-			.mock.invocationCallOrder.find(
-				(_, index) =>
-					vi.mocked(deps.wsHandler.sendTo).mock.calls[index]?.[1].type ===
-					"system_error",
-			);
+		const errorOrder = vi.mocked(deps.log.warn).mock.invocationCallOrder[0];
 		const bootstrapOrder = vi.mocked(deps.wsHandler.markClientBootstrapped).mock
 			.invocationCallOrder[0];
 		expect(errorOrder).toBeDefined();
 		expect(bootstrapOrder).toBeDefined();
 		if (errorOrder === undefined || bootstrapOrder === undefined) {
 			throw new Error(
-				"INIT_FAILED and bootstrap calls should both be recorded",
+				"init-failure log and bootstrap calls should both be recorded",
 			);
 		}
 		expect(errorOrder).toBeLessThan(bootstrapOrder);
@@ -560,13 +549,8 @@ describe("handleClientConnectedEffect — model list", () => {
 			model: "claude-sonnet-4-7",
 			provider: "claude",
 		});
-		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({
-				type: "system_error",
-				code: "INIT_FAILED",
-				message: expect.stringContaining("Failed to list providers"),
-			}),
+		expect(deps.log.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("Failed to list providers"),
 		);
 	});
 
@@ -718,7 +702,7 @@ describe("handleClientConnectedEffect — model list", () => {
 		});
 	});
 
-	it("sends INIT_FAILED when no catalog is cached and Claude discovery fails", async () => {
+	it("logs, without a browser error, when no catalog is cached and Claude discovery fails", async () => {
 		const deps = makeClientInitEffectLayer();
 		vi.mocked(deps.modelService.cachedProviders).mockReturnValue(
 			Effect.succeedNone,
@@ -729,9 +713,8 @@ describe("handleClientConnectedEffect — model list", () => {
 
 		await runClientInit(deps, "client-1");
 
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
-			"client-1",
-			expect.objectContaining({ type: "system_error", code: "INIT_FAILED" }),
+		expect(deps.log.warn).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to list providers"),
 		);
 	});
 });
@@ -844,14 +827,10 @@ describe("handleClientConnectedEffect — error resilience", () => {
 		// Should NOT throw
 		await expect(runClientInit(deps, "client-1")).resolves.toBeUndefined();
 
-		// Should have sent INIT_FAILED errors for genuinely unavailable init data.
-		const sendToCalls = vi.mocked(deps.wsHandler.sendTo).mock.calls;
-		const errorCalls = sendToCalls.filter(
-			(c) =>
-				(c[1] as { type: string }).type === "system_error" &&
-				(c[1] as { code: string }).code === "INIT_FAILED",
+		// Genuinely unavailable init data is logged, never sent to the browser.
+		expect(vi.mocked(deps.log.warn).mock.calls.length).toBeGreaterThanOrEqual(
+			2,
 		);
-		expect(errorCalls.length).toBeGreaterThanOrEqual(2);
 	});
 });
 

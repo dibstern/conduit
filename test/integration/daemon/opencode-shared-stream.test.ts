@@ -335,19 +335,22 @@ describe("daemon shared OpenCode global stream", () => {
 		await fixture.closeOpenCodeStreams();
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "disconnected",
 			cursor,
 		);
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "reconnecting",
 			cursor,
 		);
 		await b.waitFor(
 			(message) =>
-				message["type"] === "connection_status" &&
+				message["type"] === "project_setting" &&
+				message["_tag"] === "opencodeConnection" &&
 				message["status"] === "connected",
 			cursor,
 		);
@@ -374,6 +377,6 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 		evidence["connectionStates"] = b.frames
 			.map(({ message }) => message)
-			.filter((message) => message["type"] === "connection_status");
+			.filter((message) => message["_tag"] === "opencodeConnection");
 	}, 90_000);
 });

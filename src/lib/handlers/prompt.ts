@@ -47,7 +47,6 @@ export interface SendMessageToSessionInput {
 	readonly originId?: string;
 	readonly commandId: string;
 	readonly excludeClientId?: string;
-	readonly missingSessionClientId?: string;
 	readonly errorDelivery?: "client" | "session";
 }
 
@@ -64,15 +63,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		let activeId = input.sessionId;
 		if (!text) return activeId;
 		if (!activeId) {
-			if (input.missingSessionClientId) {
-				wsHandler.sendTo(
-					input.missingSessionClientId,
-					new RelayError(
-						"No active session. Create or switch to a session first.",
-						{ code: "NO_SESSION" },
-					).toSystemError(),
-				);
-			}
+			log.warn(`client=${clientId} send_turn dropped: no active session`);
 			return activeId;
 		}
 		const originalActiveId = activeId;
@@ -203,15 +194,10 @@ export const handleMessage = (
 ) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
+		const log = yield* LoggerTag;
 		if (!payload.text) return;
 		if (!payload.commandId) {
-			wsHandler.sendTo(
-				clientId,
-				new RelayError(
-					"Missing commandId for mutating provider command: send_turn",
-					{ code: "MISSING_COMMAND_ID" },
-				).toSystemError(),
-			);
+			log.warn(`client=${clientId} send_turn dropped: missing commandId`);
 			return;
 		}
 		yield* sendMessageToSession({
@@ -221,7 +207,6 @@ export const handleMessage = (
 			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
 			excludeClientId: clientId,
-			missingSessionClientId: clientId,
 		});
 	});
 

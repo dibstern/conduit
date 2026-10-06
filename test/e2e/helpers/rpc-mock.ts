@@ -335,6 +335,7 @@ const pendingDaemonLists = new WeakMap<
 const pendingShellRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
+const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
@@ -361,6 +362,20 @@ export function sendMockDaemonList(
 			page,
 			new Map(pendingDaemonLists.get(page)).set(tag, value),
 		);
+}
+
+/** Mock-only input: publish one project setting through its subscription. */
+export function sendMockProjectSetting(
+	page: Page,
+	setting: ProjectSetting,
+): void {
+	const control = controls.get(page);
+	if (control) control.setProjectSetting(setting);
+	else
+		pendingProjectSettings.set(page, [
+			...(pendingProjectSettings.get(page) ?? []),
+			setting,
+		]);
 }
 
 export function sendMockShellSnapshot(
@@ -520,6 +535,9 @@ export async function mockWsRpc(
 	if (rows) control.setShellRows(rows);
 	for (const [tag, value] of pendingDaemonLists.get(page) ?? [])
 		control.setDaemonList(tag, value);
+	for (const setting of pendingProjectSettings.get(page) ?? [])
+		control.setProjectSetting(setting);
+	pendingProjectSettings.delete(page);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		ws.onMessage((data) => {
 			if (typeof data !== "string") return;

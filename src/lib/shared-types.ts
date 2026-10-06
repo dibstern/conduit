@@ -717,11 +717,6 @@ const MessageRemovedSchema = Schema.Struct({
 	messageId: Schema.String,
 });
 
-const ConnectionStatusSchema = Schema.Struct({
-	type: Schema.Literal("connection_status"),
-	status: Schema.Literal("disconnected", "reconnecting", "connected"),
-});
-
 const UserMessageSchema = Schema.Struct({
 	type: Schema.Literal("user_message"),
 	sessionId: Schema.String,
@@ -745,21 +740,6 @@ const ErrorSchema = Schema.Struct({
 	details: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
-});
-
-const SystemErrorSchema = Schema.Struct({
-	type: Schema.Literal("system_error"),
-	code: Schema.String,
-	message: Schema.String,
-	statusCode: Schema.optional(Schema.Number),
-	details: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
-});
-
-const ClientCountSchema = Schema.Struct({
-	type: Schema.Literal("client_count"),
-	count: Schema.Number,
 });
 
 /** Bump on wire-contract changes. The build ID covers behavioural changes
@@ -853,16 +833,12 @@ export const RelayMessageSchema = Schema.Union(
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
-	// Connection status
-	ConnectionStatusSchema,
 	// Cache / Replay
 	UserMessageSchema,
 	// Session deletion
 	SessionDeletedSchema,
 	// Misc
 	ErrorSchema,
-	SystemErrorSchema,
-	ClientCountSchema,
 	ProtocolVersionSchema,
 	ServerUpdateSchema,
 	InputSyncSchema,

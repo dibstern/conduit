@@ -385,6 +385,8 @@ const projectSettingsEnvelopes = [
 				_tag: "claudeSettings",
 				overrides: { model: "opus", env: { FOO: 'b"ar' } },
 			},
+			{ _tag: "clientCount", count: 2 },
+			{ _tag: "opencodeConnection", status: "reconnecting" },
 		],
 		sequence: 1,
 	},

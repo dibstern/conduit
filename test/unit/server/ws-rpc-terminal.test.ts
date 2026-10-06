@@ -3,9 +3,10 @@ import { describe, it } from "@effect/vitest";
 import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import type {
-	LocalPtyService,
-	LocalPtySession,
+import {
+	type LocalPtyService,
+	type LocalPtySession,
+	TerminalServiceError,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -192,6 +193,41 @@ describe("WsRpcServerLayer terminal controls", () => {
 								connectPtyUpstream,
 							}),
 						),
+					),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"CreatePty fails typed when the terminal cannot spawn, with no raw system_error",
+		() => {
+			const wsHandler = makeMockWebSocketHandler();
+			const localPty: LocalPtyService = {
+				list: () => Effect.succeed([]),
+				attach: () => Effect.die("Unexpected attach in RPC test"),
+				create: () =>
+					Effect.fail(
+						new TerminalServiceError({
+							operation: "create",
+							cause: new Error("spawn failed"),
+						}),
+					),
+			};
+
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				const error = yield* Effect.flip(
+					client.CreatePty({ projectSlug: "proj-1", originId: "tab-a" }),
+				);
+				expect(error).toBeInstanceOf(WsRpcError);
+				expect(error.message).toContain("spawn failed");
+				expect(wsHandler.sendTo).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					WsRpcServerLayer.pipe(
+						Layer.provideMerge(makeTestHandlerLayer({ wsHandler, localPty })),
 					),
 				),
 			);

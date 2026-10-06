@@ -17,7 +17,7 @@ import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projectio
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { makeClaudeSdkEnv } from "../../../provider/claude/claude-sdk-env.js";
-import { ConfigTag, LoggerTag, WebSocketHandlerTag } from "./services.js";
+import { ConfigTag, LoggerTag } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 
 const TITLE_GENERATION_TIMEOUT = Duration.seconds(30);
@@ -212,7 +212,6 @@ export const makeSessionTitleServiceLive = (
 	never,
 	| LoggerTag
 	| ConfigTag
-	| WebSocketHandlerTag
 	| SessionManagerServiceTag
 	| ReadQueryEffectTag
 	| EventStoreEffectTag
@@ -224,7 +223,6 @@ export const makeSessionTitleServiceLive = (
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
-			const wsHandler = yield* WebSocketHandlerTag;
 			const sessionManagerService = yield* SessionManagerServiceTag;
 			const config = yield* ConfigTag;
 			const readQuery = yield* ReadQueryEffectTag;
@@ -309,28 +307,6 @@ export const makeSessionTitleServiceLive = (
 					return title;
 				});
 
-			const broadcastGenerationFailure = (
-				sessionId: string,
-				reason: string,
-				fallbackTitle: string,
-			) =>
-				Effect.sync(() => {
-					log.warn(
-						`SESSION_TITLE_GENERATION_FAILED sessionId=${sessionId} reason=${reason}`,
-					);
-					wsHandler.broadcast({
-						type: "system_error",
-						code: "SESSION_TITLE_GENERATION_FAILED",
-						message:
-							"Claude session title generation failed; using fallback title.",
-						details: {
-							sessionId,
-							reason,
-							fallbackTitle,
-						},
-					});
-				});
-
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
 				Effect.gen(function* () {
 					const currentResult = yield* Effect.either(
@@ -404,11 +380,11 @@ export const makeSessionTitleServiceLive = (
 						input.sessionId,
 						fallbackTitle,
 					);
+					// A background-task failure (fork 3.2): the fallback title is the
+					// user-visible outcome, so the failure itself is log only.
 					if (applied) {
-						yield* broadcastGenerationFailure(
-							input.sessionId,
-							reason,
-							fallbackTitle,
+						log.warn(
+							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} reason=${reason}`,
 						);
 					}
 				});

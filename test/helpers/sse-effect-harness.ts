@@ -7,6 +7,10 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import {
+	ProjectSettingsLive,
+	ProjectSettingsTag,
+} from "../../src/lib/domain/relay/Services/project-settings.js";
 import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -22,6 +26,9 @@ export function makeSSETestServices() {
 			Effect.provide(PendingInteractionServiceLive),
 		),
 	);
+	const projectSettings = Effect.runSync(
+		ProjectSettingsTag.pipe(Effect.provide(ProjectSettingsLive)),
+	);
 	const sessionService = makeMockSessionManagerService();
 	const alertLedger: AlertLedger = {
 		deliver: (_alert, send) => send.pipe(Effect.as(true)),
@@ -31,8 +38,9 @@ export function makeSSETestServices() {
 		Layer.succeed(PendingInteractionServiceTag, pendingInteractions),
 		makeOverridesStateLive(),
 		Layer.succeed(SessionManagerServiceTag, sessionService),
+		Layer.succeed(ProjectSettingsTag, projectSettings),
 	);
-	return { pendingInteractions, sessionService, layer };
+	return { pendingInteractions, projectSettings, sessionService, layer };
 }
 
 export async function runSSEEvent(

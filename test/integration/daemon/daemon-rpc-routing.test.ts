@@ -322,20 +322,20 @@ describe("daemon shared RPC routing", () => {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
 				handlerA.broadcast({
-					type: "system_error",
-					code: "from-a",
-					message: "from-a",
+					type: "model_info",
+					model: "from-a",
+					provider: "from-a",
 				});
 				handlerB.broadcast({
-					type: "system_error",
-					code: "from-b",
-					message: "from-b",
+					type: "model_info",
+					model: "from-b",
+					provider: "from-b",
 				});
 				yield* waitFor(() => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "system_error" &&
+								message["type"] === "model_info" &&
 								JSON.stringify(message).includes("from-b"),
 						),
 					).toBe(true);
@@ -343,27 +343,10 @@ describe("daemon shared RPC routing", () => {
 				expect(
 					eventMessages.some(
 						(message) =>
-							message["type"] === "system_error" &&
+							message["type"] === "model_info" &&
 							JSON.stringify(message).includes("from-a"),
 					),
 				).toBe(false);
-
-				eventSocket.send(
-					JSON.stringify({
-						type: "pty_input",
-						ptyId: "pty-b",
-						data: "x",
-					}),
-				);
-				// Terminal input is an RPC now (conduit-test-ni8.11); the raw socket
-				// only answers that it no longer routes anything.
-				yield* waitFor(() => {
-					expect(eventMessages).toContainEqual({
-						type: "system_error",
-						code: "UNKNOWN_MESSAGE_TYPE",
-						message: "Unknown message type: pty_input",
-					});
-				});
 			}),
 	);
 

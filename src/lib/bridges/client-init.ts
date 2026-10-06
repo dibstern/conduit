@@ -25,7 +25,7 @@ import {
 	hasActiveProcessingTimeout,
 	setDefaultModel,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { formatErrorDetail, RelayError } from "../errors.js";
+import { formatErrorDetail } from "../errors.js";
 import type { ProviderCapabilities } from "../provider/types.js";
 import { busySessionIds } from "../session-busy.js";
 import { findCatalogModel } from "../shared-types.js";
@@ -95,15 +95,12 @@ export interface ClientInitEffectOptions {
 	readonly skipDefaultSession?: boolean;
 }
 
-const sendInitErrorEffect = (clientId: string, err: unknown, prefix: string) =>
+// Init failures are background-task errors (fork 3.2): log only, the
+// browser renders whatever init did deliver.
+const logInitErrorEffect = (err: unknown, prefix: string) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		log.warn(`${prefix}: ${formatErrorDetail(err)}`);
-		wsHandler.sendTo(
-			clientId,
-			RelayError.fromCaught(err, "INIT_FAILED", prefix).toSystemError(),
-		);
 	});
 
 const switchClientToSessionForInitEffect = (
@@ -178,8 +175,7 @@ const resolveAndReplaySessionEffect = (
 		const activeId =
 			activeIdResult._tag === "Right" ? activeIdResult.right : undefined;
 		if (activeIdResult._tag === "Left") {
-			yield* sendInitErrorEffect(
-				clientId,
+			yield* logInitErrorEffect(
 				activeIdResult.left,
 				"Failed to load default session",
 			);
@@ -211,7 +207,7 @@ const pushViewedFamiliesForInitEffect = (clientId: string) =>
 		const sessionService = yield* SessionManagerServiceTag;
 		yield* sessionService.pushViewerFamilies().pipe(
 			Effect.catchAll((err) =>
-				sendInitErrorEffect(clientId, err, "Failed to push viewed families"),
+				logInitErrorEffect(err, "Failed to push viewed families"),
 			),
 			Effect.ensuring(
 				Effect.sync(() => wsHandler.markClientBootstrapped(clientId)),
@@ -344,8 +340,7 @@ const sendProvidersAndSettingsEffect = (
 			}),
 		);
 		if (providerResult._tag === "Left") {
-			yield* sendInitErrorEffect(
-				clientId,
+			yield* logInitErrorEffect(
 				providerResult.left,
 				"Failed to list providers",
 			);

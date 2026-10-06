@@ -467,11 +467,18 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		await vi.waitFor(() => expect(first?.listenerCount("message")).toBe(0));
 		await vi.waitFor(() => expect(second?.listenerCount("message")).toBe(1));
 
-		first?.emitMessage(JSON.stringify({ type: "client_count", count: 1 }));
-		second?.emitMessage(JSON.stringify({ type: "client_count", count: 2 }));
+		first?.emitMessage(
+			JSON.stringify({ type: "server_update", restartAvailable: false }),
+		);
+		second?.emitMessage(
+			JSON.stringify({ type: "server_update", restartAvailable: true }),
+		);
 		await vi.waitFor(() => expect(handleMessageMock).toHaveBeenCalledTimes(1));
 		expect(handleMessageMock).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "client_count", count: 2 }),
+			expect.objectContaining({
+				type: "server_update",
+				restartAvailable: true,
+			}),
 		);
 	});
 

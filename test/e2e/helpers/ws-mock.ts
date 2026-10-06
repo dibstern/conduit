@@ -9,10 +9,17 @@ import {
 	ensureMockTranscriptRpc,
 	type MockCatalog,
 	sendMockDaemonList,
+	sendMockProjectSetting,
 	sendMockShellSnapshot,
 	setMockRpcCatalog,
 	setMockRpcProjectSlug,
 } from "./rpc-mock.js";
+
+const OPENCODE_CONNECTION_STATES = [
+	"disconnected",
+	"reconnecting",
+	"connected",
+] as const;
 
 /** Mock-only inputs served over GetModels/GetAgents/GetCommands, never over /ws. */
 const CATALOG_MESSAGE_TYPES = new Set([
@@ -338,6 +345,26 @@ export class WsMockControl {
 			return;
 		}
 		if (sendDaemonList(this.page, msg)) return;
+		// Legacy fixture vocabulary for live project facts, which now ride
+		// SubscribeProjectSettings (conduit-test-ni8.15 / ni8.40).
+		if (msg.type === "client_count" && typeof msg["count"] === "number") {
+			sendMockProjectSetting(this.page, {
+				_tag: "clientCount",
+				count: msg["count"],
+			});
+			return;
+		}
+		if (msg.type === "connection_status") {
+			const status = OPENCODE_CONNECTION_STATES.find(
+				(state) => state === msg["status"],
+			);
+			if (status)
+				sendMockProjectSetting(this.page, {
+					_tag: "opencodeConnection",
+					status,
+				});
+			return;
+		}
 		if (!this._ws) throw new Error("WebSocket not connected yet");
 		this._context.activeSessionId =
 			new URL(this.page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null;

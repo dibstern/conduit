@@ -92,22 +92,9 @@ describe("Integration: Error Handling", () => {
 			rawWs.once("error", reject);
 		});
 
-		let parseErrors = 0;
-		rawWs.on("message", (data) => {
-			const message = JSON.parse(data.toString()) as Record<string, unknown>;
-			if (
-				message["type"] === "system_error" &&
-				message["code"] === "PARSE_ERROR"
-			) {
-				parseErrors++;
-			}
-		});
-
-		// Send garbage data
+		// Send garbage data; the raw socket carries no requests, so it is ignored.
 		rawWs.send("this is not valid json {{{");
 		rawWs.send("<<<>>>");
-
-		await vi.waitFor(() => expect(parseErrors).toBe(2));
 
 		// Close the raw socket
 		await new Promise<void>((resolve) => {
@@ -126,17 +113,19 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("unknown message type returns error", async () => {
+	it("raw socket frames are ignored without a reply", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
+		// Every request is an RPC; unknown and removed legacy commands sent over
+		// the raw socket earn no error frame (fork 3.2).
 		client.send({ type: "nonexistent_type" });
+		client.send({ type: "message" });
 
-		// Should receive an error response about unknown message type
-		const errMsg = await client.waitFor("system_error", { timeout: 3000 });
-		expect(errMsg["code"]).toBe("UNKNOWN_MESSAGE_TYPE");
-		expect(typeof errMsg["message"]).toBe("string");
+		const result = await client.getAgents();
+		expect(Array.isArray(result.agents)).toBe(true);
+		expect(client.getReceivedOfType("system_error")).toEqual([]);
 
 		await client.close();
 	});
@@ -162,25 +151,6 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("removed legacy message command is rejected gracefully", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		// Browser sends now use RPC; the old WS command should be treated as
-		// an unknown legacy command, not routed to the prompt handler.
-		client.send({ type: "message" });
-
-		const errMsg = await client.waitFor("system_error", { timeout: 3000 });
-		expect(errMsg["code"]).toBe("UNKNOWN_MESSAGE_TYPE");
-
-		// Verify the client is still connected and functional
-		const result = await client.getAgents();
-		expect(Array.isArray(result.agents)).toBe(true);
-
-		await client.close();
-	});
-
 	it("server remains functional after errors", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -192,13 +162,6 @@ describe("Integration: Error Handling", () => {
 		client.send({ type: "nonexistent_type_3" });
 		client.send({ type: "get_file_content", path: "/does/not/exist.txt" }); // removed legacy WS command
 		client.send({ type: "message" }); // removed legacy WS command
-
-		await vi.waitFor(
-			() => {
-				expect(client.getReceivedOfType("system_error")).toHaveLength(5);
-			},
-			{ timeout: 3_000 },
-		);
 
 		// Now send a valid request and verify the server still works
 		client.clearReceived();

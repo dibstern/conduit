@@ -844,64 +844,36 @@ describe("wireSSEConsumerEffect", () => {
 		);
 	});
 
-	it("broadcasts connection_status 'connected' on connected event", async () => {
+	it("publishes the OpenCode upstream state as a live project fact", async () => {
 		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {
 			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
 				listeners.set(name, fn);
 			}),
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		const latest = () =>
+			Effect.runSync(Ref.get(services.projectSettings.live)).opencodeConnection;
 
-		await wireSSEConsumerForTest(deps, consumer);
-		const connectedListener = listeners.get("connected");
-		assert.exists(connectedListener, "expected connected listener");
-		connectedListener();
+		await wireSSEConsumerForTest(deps, consumer, services);
 
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "connection_status",
-			status: "connected",
-		});
-	});
-
-	it("broadcasts connection_status 'disconnected' on disconnected event", async () => {
-		const deps = createMockSSEWiringDeps();
-		const listeners = new Map<string, (...args: unknown[]) => void>();
-		const consumer = {
-			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
-				listeners.set(name, fn);
-			}),
-		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
-
-		await wireSSEConsumerForTest(deps, consumer);
-		const disconnectedListener = listeners.get("disconnected");
-		assert.exists(disconnectedListener, "expected disconnected listener");
-		disconnectedListener(new Error("connection lost"));
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "connection_status",
-			status: "disconnected",
-		});
-	});
-
-	it("broadcasts connection_status 'reconnecting' on reconnecting event", async () => {
-		const deps = createMockSSEWiringDeps();
-		const listeners = new Map<string, (...args: unknown[]) => void>();
-		const consumer = {
-			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
-				listeners.set(name, fn);
-			}),
-		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
-
-		await wireSSEConsumerForTest(deps, consumer);
-		const reconnectingListener = listeners.get("reconnecting");
-		assert.exists(reconnectingListener, "expected reconnecting listener");
-		reconnectingListener({ attempt: 1, delay: 1000 });
-
-		expect(deps.wsHandler.broadcast).toHaveBeenCalledWith({
-			type: "connection_status",
+		listeners.get("reconnecting")?.({ attempt: 1, delay: 1000 });
+		expect(latest()).toEqual({
+			_tag: "opencodeConnection",
 			status: "reconnecting",
 		});
+		listeners.get("disconnected")?.(new Error("connection lost"));
+		expect(latest()).toEqual({
+			_tag: "opencodeConnection",
+			status: "disconnected",
+		});
+		listeners.get("connected")?.();
+		expect(latest()).toEqual({
+			_tag: "opencodeConnection",
+			status: "connected",
+		});
+		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 });
 

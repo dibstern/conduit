@@ -6,6 +6,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
 import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
+import type { ProjectSetting } from "../contracts/ws-rpc.js";
 import {
 	AlertLedgerTag,
 	type SessionAlert,
@@ -13,6 +14,10 @@ import {
 import type { OpenCodeRuntimeIngressResult } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { PendingPermissionRequestInput } from "../domain/relay/Services/pending-interaction-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import {
+	type ProjectSettingsTag,
+	publishProjectSetting,
+} from "../domain/relay/Services/project-settings.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
@@ -713,6 +718,10 @@ export const handleSSEEventEffect = (deps: SSEWiringDeps, event: SSEEvent) =>
 interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent): void;
 	onReconnect?(): void;
+	/** The relay's upstream stream state, for the banner on every tab. */
+	onConnectionStatus(
+		status: Extract<ProjectSetting, { _tag: "opencodeConnection" }>["status"],
+	): void;
 }
 
 function wireSSEConsumerWithCallbacks(
@@ -728,26 +737,16 @@ function wireSSEConsumerWithCallbacks(
 		log.info("Connected to OpenCode event stream");
 
 		callbacks.onReconnect?.();
-
-		deps.wsHandler.broadcast({
-			type: "connection_status",
-			status: "connected",
-		});
+		callbacks.onConnectionStatus("connected");
 	});
 
 	consumer.on("disconnected", (err) => {
 		log.warn(`Disconnected${err ? `: ${err.message}` : ""}`);
-		deps.wsHandler.broadcast({
-			type: "connection_status",
-			status: "disconnected",
-		});
+		callbacks.onConnectionStatus("disconnected");
 	});
 	consumer.on("reconnecting", ({ attempt, delay }) => {
 		log.info(`Reconnecting (attempt ${attempt}, ${delay}ms delay)…`);
-		deps.wsHandler.broadcast({
-			type: "connection_status",
-			status: "reconnecting",
-		});
+		callbacks.onConnectionStatus("reconnecting");
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
@@ -782,10 +781,16 @@ export const wireSSEConsumerEffect = (
 			| PendingInteractionServiceTag
 			| OverridesStateTag
 			| SessionManagerServiceTag
+			| ProjectSettingsTag
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
 			wireSSEConsumerWithCallbacks(deps, consumer, {
+				onConnectionStatus: (status) => {
+					runFork(
+						publishProjectSetting({ _tag: "opencodeConnection", status }),
+					);
+				},
 				handleEvent: (event) => {
 					runFork(
 						handleSSEEventEffect(deps, event).pipe(

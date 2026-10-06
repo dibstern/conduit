@@ -2,7 +2,7 @@ import { Context, Data, Effect, Layer, Option } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
-import { formatErrorDetail, RelayError } from "../../../errors.js";
+import { formatErrorDetail } from "../../../errors.js";
 import {
 	type PtyUpstream,
 	trackedPtyInfo,
@@ -43,7 +43,7 @@ export class TerminalServiceError extends Data.TaggedError(
 }> {}
 
 export interface OpenCodeTerminalService {
-	create(clientId: string): Effect.Effect<void>;
+	create(clientId: string): Effect.Effect<void, TerminalServiceError>;
 	/** Restore hosted PTYs, discover OpenCode's, and re-attach running ones. */
 	list(): Effect.Effect<PtyInfo[], TerminalServiceError>;
 	/** Every tracked PTY with its scrollback. Synchronous, so a subscriber can
@@ -338,15 +338,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						log.warn(
 							`client=${clientId} session=${session} Failed to create PTY: ${formatErrorDetail(createResult.left.cause)}`,
 						);
-						wsHandler.sendTo(
-							clientId,
-							RelayError.fromCaught(
-								createResult.left.cause,
-								"PTY_CREATE_FAILED",
-								"Failed to create terminal",
-							).toSystemError(),
-						);
-						return;
+						return yield* createResult.left;
 					}
 
 					const { pty } = createResult.right;

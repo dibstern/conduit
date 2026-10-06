@@ -3,6 +3,7 @@ import {
 	type ClientInitEffectOptions,
 	handleClientConnectedEffect,
 } from "../bridges/client-init.js";
+import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
 import type { Logger } from "../logger.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 
@@ -32,9 +33,12 @@ export const wireRelayWebSocketCallbacksEffect = ({
 
 			wsHandler.on(
 				"client_connected",
-				({ clientId, requestedSessionId, skipDefaultSession }) => {
+				({ clientId, clientCount, requestedSessionId, skipDefaultSession }) => {
 					log.info(
 						`Client connected: ${clientId}${requestedSessionId ? ` (requested session: ${requestedSessionId})` : ""}`,
+					);
+					runFork(
+						publishProjectSetting({ _tag: "clientCount", count: clientCount }),
 					);
 					runFork(
 						handleClientConnectedEffect(clientId, requestedSessionId, {
@@ -53,8 +57,11 @@ export const wireRelayWebSocketCallbacksEffect = ({
 				},
 			);
 
-			wsHandler.on("client_disconnected", ({ clientId }) => {
+			wsHandler.on("client_disconnected", ({ clientId, clientCount }) => {
 				log.info(`Client disconnected: ${clientId}`);
+				runFork(
+					publishProjectSetting({ _tag: "clientCount", count: clientCount }),
+				);
 			});
 		});
 	});

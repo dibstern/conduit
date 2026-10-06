@@ -56,16 +56,6 @@ describe("classifyPollerBatch", () => {
 		expect(classifyPollerBatch(events).hasContentActivity).toBe(true);
 	});
 
-	it("returns hasContentActivity false for connection_status", () => {
-		const events = [{ type: "connection_status" }] as RelayMessage[];
-		expect(classifyPollerBatch(events).hasContentActivity).toBe(false);
-	});
-
-	it("returns hasContentActivity false for client_count", () => {
-		const events = [{ type: "client_count" }] as RelayMessage[];
-		expect(classifyPollerBatch(events).hasContentActivity).toBe(false);
-	});
-
 	// file_changed was never metadata, and poller batches (message-poller
 	// output) never carried it; deleting it changes no classification. The
 	// set must only name live frames so a retired type cannot linger here.

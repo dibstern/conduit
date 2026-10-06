@@ -1968,6 +1968,13 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
+	// Live facts the relay publishes as they change, not settings anyone writes.
+	/** Browser sockets attached to this project. */
+	Schema.TaggedStruct("clientCount", { count: Schema.Number }),
+	/** The relay's SSE stream from OpenCode, not the browser's own socket. */
+	Schema.TaggedStruct("opencodeConnection", {
+		status: Schema.Literal("disconnected", "reconnecting", "connected"),
+	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);

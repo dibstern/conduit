@@ -139,12 +139,8 @@
 			case "session_list":
 				return Array.isArray(properties["sessions"]) ? `${properties["sessions"].length} sessions` : "";
 
-			case "connection_status":
-				return String(properties["status"] ?? "");
 			case "notification_event":
 				return `${properties["eventType"] ?? "?"}${properties["sessionId"] ? ` sess=${id(properties["sessionId"])}` : ""}${properties["message"] ? `: ${properties["message"]}` : ""}`;
-			case "client_count":
-				return `${properties["count"] ?? 0} clients`;
 
 			case "variant_info":
 				return properties["variant"] ? String(properties["variant"]) : "";

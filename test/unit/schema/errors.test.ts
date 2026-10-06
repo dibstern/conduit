@@ -94,12 +94,6 @@ describe("Schema.TaggedError errors", () => {
 		expect(msg.type).toBe("error");
 	});
 
-	it("toSystemError returns system_error type", () => {
-		const err = new OpenCodeConnectionError({ message: "test" });
-		const sys = err.toSystemError();
-		expect(sys.type).toBe("system_error");
-	});
-
 	it("fromCaught wraps unknown errors", () => {
 		const err = fromCaught(new TypeError("oops"), "INTERNAL_ERROR");
 		expect(err._tag).toBeDefined();
@@ -178,12 +172,6 @@ describe("Schema.TaggedError errors", () => {
 		const ws = err.toWebSocket();
 		expect(ws.type).toBe("error");
 		expect(ws.code).toBe("INTERNAL_ERROR");
-	});
-
-	it("RelayError toSystemError works", () => {
-		const err = new RelayError("test error", { code: "INTERNAL_ERROR" });
-		const sys = err.toSystemError();
-		expect(sys.type).toBe("system_error");
 	});
 
 	it("RelayError toMessage works", () => {

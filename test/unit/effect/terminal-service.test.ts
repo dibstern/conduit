@@ -246,44 +246,46 @@ describe("OpenCodeTerminalServiceLive", () => {
 		},
 	);
 
-	it.effect("sends an error when local terminal creation fails", () => {
-		const sent: unknown[] = [];
-		const wsHandler = makeMockWebSocketHandler({
-			sendTo: vi.fn((_clientId, message) => sent.push(message)),
-		});
-		const ptyManager = new PtyManager({ log: makeMockLogger() });
-		const events = published(ptyManager);
-		const localPty: LocalPtyService = {
-			list: () => Effect.succeed([]),
-			attach: (ptyId) =>
-				Effect.fail(
-					new TerminalServiceError({
-						operation: "connect",
-						ptyId,
-						cause: "Not found",
-					}),
+	it.effect(
+		"fails typed, sending nothing, when local terminal creation fails",
+		() => {
+			const sent: unknown[] = [];
+			const wsHandler = makeMockWebSocketHandler({
+				sendTo: vi.fn((_clientId, message) => sent.push(message)),
+			});
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const events = published(ptyManager);
+			const localPty: LocalPtyService = {
+				list: () => Effect.succeed([]),
+				attach: (ptyId) =>
+					Effect.fail(
+						new TerminalServiceError({
+							operation: "connect",
+							ptyId,
+							cause: "Not found",
+						}),
+					),
+				create: vi.fn(() =>
+					Effect.fail(
+						new TerminalServiceError({
+							operation: "create",
+							cause: new Error("spawn failed"),
+						}),
+					),
 				),
-			create: vi.fn(() =>
-				Effect.fail(
-					new TerminalServiceError({
-						operation: "create",
-						cause: new Error("spawn failed"),
-					}),
-				),
-			),
-		};
-		const layer = makeLayer({ wsHandler, localPty, ptyManager });
+			};
+			const layer = makeLayer({ wsHandler, localPty, ptyManager });
 
-		return Effect.gen(function* () {
-			const service = yield* OpenCodeTerminalServiceTag;
-			yield* service.create("client-1");
+			return Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				const error = yield* Effect.flip(service.create("client-1"));
 
-			expect(events).toEqual([]);
-			expect(sent).toMatchObject([
-				{ type: "system_error", code: "PTY_CREATE_FAILED" },
-			]);
-		}).pipe(Effect.provide(layer));
-	});
+				expect(error).toMatchObject({ operation: "create" });
+				expect(events).toEqual([]);
+				expect(sent).toEqual([]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"lists PTYs and reconnects missing running upstreams with cursor -1",

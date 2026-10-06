@@ -6,40 +6,15 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import {
 	ToolContentServiceLive,
 	ToolContentServiceNoop,
 	ToolContentServiceTag,
 } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
-import { handleGetToolContent } from "../../../src/lib/handlers/tool-content.js";
+import { getToolContentValue } from "../../../src/lib/handlers/tool-content.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 
-function mockWsHandler(): WebSocketHandlerShape {
-	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => "session-effect-read"),
-		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-	};
-}
-
-describe("handleGetToolContent with Effect read persistence", () => {
+describe("getToolContentValue with Effect read persistence", () => {
 	it.effect("returns tool content from the Effect service boundary", () => {
-		const ws = mockWsHandler();
 		const toolContent = {
 			get: vi.fn((toolId: string) =>
 				toolId === "tool-service-1"
@@ -47,23 +22,11 @@ describe("handleGetToolContent with Effect read persistence", () => {
 					: Effect.succeed(undefined),
 			),
 		};
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(ToolContentServiceTag, toolContent),
-		);
-
-		return handleGetToolContent("client-1", {
-			toolId: "tool-service-1",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
+		return getToolContentValue("tool-service-1").pipe(
+			Effect.provide(Layer.succeed(ToolContentServiceTag, toolContent)),
+			Effect.tap((content) => {
 				expect(toolContent.get).toHaveBeenCalledWith("tool-service-1");
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "tool_content",
-					sessionId: "session-effect-read",
-					toolId: "tool-service-1",
-					content: "full service output",
-				});
+				expect(content).toBe("full service output");
 			}),
 		);
 	});
@@ -73,11 +36,9 @@ describe("handleGetToolContent with Effect read persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-tool-content-effect-"));
 			const filename = join(dir, "events.db");
-			const ws = mockWsHandler();
 			const persistenceLayer = makePersistenceEffectLayer(filename);
-			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag, ws),
-				ToolContentServiceLive.pipe(Layer.provideMerge(persistenceLayer)),
+			const layer = ToolContentServiceLive.pipe(
+				Layer.provideMerge(persistenceLayer),
 			);
 
 			return Effect.gen(function* () {
@@ -89,14 +50,9 @@ describe("handleGetToolContent with Effect read persistence", () => {
 				INSERT INTO tool_content (tool_id, session_id, content, created_at)
 				VALUES ('tool-effect-1', 'session-effect-read', 'full effect output', 2)`;
 
-				yield* handleGetToolContent("client-1", { toolId: "tool-effect-1" });
-
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "tool_content",
-					sessionId: "session-effect-read",
-					toolId: "tool-effect-1",
-					content: "full effect output",
-				});
+				expect(yield* getToolContentValue("tool-effect-1")).toBe(
+					"full effect output",
+				);
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -106,25 +62,12 @@ describe("handleGetToolContent with Effect read persistence", () => {
 		},
 	);
 
-	it.effect("returns NOT_FOUND when Effect persistence is unavailable", () => {
-		const ws = mockWsHandler();
-		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
-			ToolContentServiceNoop,
-		);
-
-		return handleGetToolContent("client-1", {
-			toolId: "tool-legacy-only",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "error",
-					sessionId: "session-effect-read",
-					code: "NOT_FOUND",
-					message: "Full tool content not available",
-				});
+	it.effect("returns nothing when Effect persistence is unavailable", () =>
+		getToolContentValue("tool-legacy-only").pipe(
+			Effect.provide(ToolContentServiceNoop),
+			Effect.tap((content) => {
+				expect(content).toBeUndefined();
 			}),
-		);
-	});
+		),
+	);
 });

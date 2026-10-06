@@ -1,8 +1,6 @@
 // Pure logic for parsing incoming WebSocket messages, client tracking and
 // broadcast targeting. Deliberately IO-free: no actual WebSocket I/O.
 
-import type { RelayMessage } from "../types.js";
-
 export interface IncomingMessage {
 	type: string;
 	[key: string]: unknown;
@@ -74,8 +72,4 @@ export function createClientTracker(): ClientTracker {
 			return [...clients].filter((id) => id !== excludeClientId);
 		},
 	};
-}
-
-export function createClientCountMessage(count: number): RelayMessage {
-	return { type: "client_count", count };
 }
