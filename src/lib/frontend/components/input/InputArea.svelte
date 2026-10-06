@@ -28,7 +28,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -48,7 +48,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
@@ -652,6 +652,13 @@
 		const commandId = crypto.randomUUID();
 		if (!isProcessing()) requestScrollOnNextContent();
 		const sentToSessionId = sid;
+		// An input the inbox hands straight off starts the sender's turn now; the
+		// row reports busy once the provider picks it up and ends the turn when it
+		// goes idle (ni8.35). A queued or paused input starts nothing.
+		const { activity, messages } = getOrCreateSessionSlot(sid);
+		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
+			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
+		if (startsTurn) phaseToProcessing(activity);
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
 			sendMessageRpc({
@@ -671,6 +678,7 @@
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 				resolve(true);
 			}).catch(() => {
+				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
 				showToast("Failed to send message", { variant: "error" });
 				resolve(false);
 			});
