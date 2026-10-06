@@ -141,7 +141,9 @@ test.describe("Turn working clock", () => {
 			.locator(".turn-activity")
 			.last()
 			.locator(".turn-activity-toggle");
-		await expect(header).toContainText("Worked for");
+		// The Stop button may not have rendered when the wait above ran, so
+		// the settled header is what proves the turn ended.
+		await expect(header).toContainText("Worked for", { timeout: 60_000 });
 		const before = workedSeconds(await header.innerText());
 
 		await harness.restart();
@@ -294,6 +296,65 @@ test.describe("Turn working clock", () => {
 					null,
 					2,
 				),
+			);
+		});
+	});
+
+	test.describe("Stop while a prompt waits in the queue", () => {
+		test.use({
+			claudeReplay: {
+				// Stop drops the queued prompt unsent, so only A and C play.
+				turns: ["extra-folder-read-turn", "skill-loads-turn"],
+				delayMs: 1_000,
+				joinOpenTurn: true,
+			},
+		});
+		test.describe.configure({ timeout: 120_000 });
+
+		test("the next prompt still ends idle, even reloaded the moment it finishes", async ({
+			page,
+			relayUrl,
+		}, testInfo) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			const idle = async (label: string) => {
+				await expect(chat.stopBtn).toBeHidden();
+				await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
+				await expect(page.locator(".queued-shimmer")).toHaveCount(0);
+				await page.screenshot({ path: testInfo.outputPath(`${label}.png`) });
+			};
+			await app.goto(relayUrl);
+			await app.sendMessage("Read the extra folder");
+			await expect(page.getByTestId("composer-status-elapsed")).toBeVisible({
+				timeout: 30_000,
+			});
+			await app.sendMessage("Queued prompt");
+			await chat.stopBtn.click();
+			await chat.waitForStreamingComplete();
+			await idle("stopped");
+
+			await app.sendMessage("Load the skill");
+			await expect(page.locator(".turn-activity")).toHaveCount(1, {
+				timeout: 30_000,
+			});
+			// The Stop button can blink off as the stopped query restarts, so
+			// wait for the reply's last words before waiting for the turn to end.
+			await expect(page.getByText("notes ready").last()).toBeVisible({
+				timeout: 60_000,
+			});
+			await chat.waitForStreamingComplete();
+			const finishedAt = Date.now();
+			// Claude stores idle a moment after the turn's done. A client that
+			// connects in between must still end up idle.
+			await gotoRelay(page, page.url());
+			await expect(page.locator("#connect-overlay")).toBeHidden({
+				timeout: 30_000,
+			});
+			const reloadedAfterMs = Date.now() - finishedAt;
+			await idle("reloaded");
+			writeFileSync(
+				testInfo.outputPath("stop-queued-readings.json"),
+				JSON.stringify({ reloadedAfterMs }, null, 2),
 			);
 		});
 	});

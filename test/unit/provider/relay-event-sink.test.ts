@@ -165,16 +165,32 @@ describe("createRelayEventSink — translation", () => {
 
 	// The orchestration reactor streams provider output straight to ingestion,
 	// bypassing this sink's push(); noteActivity is how it keeps the relay's
-	// processing timeout alive so long turns don't emit a false timeout error.
-	it("exposes noteActivity as a timeout reset", () => {
+	// processing timeout alive so long turns don't emit a false timeout error,
+	// and ends it with the turn so a reconnecting client is not told the
+	// finished turn is still processing.
+	it("noteActivity resets the timeout mid-turn and clears it at turn end", () => {
 		const resetTimeout = vi.fn();
+		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			send: vi.fn(),
-			clearTimeout: vi.fn(),
+			clearTimeout,
 			resetTimeout,
 		});
-		sink.noteActivity?.();
+		sink.noteActivity?.(
+			makeEvent("text.delta", { messageId: "msg_1", partId: "p", text: "a" }),
+		);
+		expect(resetTimeout).toHaveBeenCalledTimes(1);
+		expect(clearTimeout).not.toHaveBeenCalled();
+		sink.noteActivity?.(
+			makeEvent("turn.completed", {
+				messageId: "msg_1",
+				tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+				cost: 0,
+				duration: 1,
+			}),
+		);
+		expect(clearTimeout).toHaveBeenCalledTimes(1);
 		expect(resetTimeout).toHaveBeenCalledTimes(1);
 	});
 
@@ -216,7 +232,9 @@ describe("createRelayEventSink — translation", () => {
 				makeEvent("session.status", { sessionId: "ses-1", status: "busy" }),
 			),
 		);
-		expect(send).not.toHaveBeenCalled();
+		expect(send.mock.calls).toEqual([
+			[{ type: "status", sessionId: "ses-1", status: "idle" }],
+		]);
 		expect(clearTimeout).not.toHaveBeenCalled();
 	});
 

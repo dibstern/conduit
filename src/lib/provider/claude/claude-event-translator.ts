@@ -1583,8 +1583,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty ends the running one.
+						messageId: this.currentAssistantMessageId || "",
 						error: errors,
 					}),
 				);
@@ -1607,8 +1607,8 @@ export class ClaudeEventTranslator {
 				yield* this.push(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
-						messageId:
-							this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+						// The SDK uuid names no turn; empty ends the running one.
+						messageId: this.currentAssistantMessageId || "",
 						error: errorText,
 						code: "provider_error",
 					}),
