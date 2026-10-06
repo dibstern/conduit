@@ -153,6 +153,10 @@ registration. Evidence and cleanup results go to
 `test-results/85kb-16-serve.json`. Inspect `ps -axo pid,command` for processes
 started by the tests; never signal processes belonging to the user's live server.
 
+`opencode-real-lifecycle.test.ts` runs the real `opencode` (PATH or `CONDUIT_TEST_REAL_OPENCODE`; skipped unless it
+matches `@opencode-ai/sdk`) behind a logging proxy, never prompting: lazy spawn, one process and `/global/event` stream
+for two projects, per-project routing, idle stop. Evidence: `test-results/pa3r-10-real-lifecycle.json`.
+
 ### Multi-Instance
 
 Run this when changing instance switching, registry behavior, or multi-instance UI and routing.
