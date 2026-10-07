@@ -412,7 +412,6 @@ function query(params: {
 	let livePermissionMode = params.options?.permissionMode;
 	let closed = false;
 	let promptIndex = 0;
-	let rejectedPrompt: string | undefined;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
@@ -622,8 +621,10 @@ function query(params: {
 				rejectedResume &&
 				existsSync(rejectedResume) &&
 				readFileSync(rejectedResume, "utf8") === params.options.resume
-			)
-				rejectedPrompt = prompt;
+			) {
+				mark({ kind: "resume-rejected", prompt, queryId, sessionId });
+				throw new Error(`No conversation found with session ID: ${sessionId}`);
+			}
 			if (request === "fail-before-assistant-restart") {
 				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 				if (!proof) throw new Error("Missing pre-assistant failure gate");
@@ -1327,20 +1328,7 @@ function query(params: {
 	// interface also contains unrelated account/MCP methods that this fake never uses.
 	return Object.assign(messages, {
 		[Symbol.asyncIterator]: () => ({
-			next: () => {
-				if (rejectedPrompt) {
-					mark({
-						kind: "resume-rejected",
-						prompt: rejectedPrompt,
-						queryId,
-						sessionId,
-					});
-					return Promise.reject(
-						new Error(`Claude session not found: ${sessionId}`),
-					);
-				}
-				return messages.next();
-			},
+			next: () => messages.next(),
 			return: () => messages.return(undefined),
 		}),
 		initializationResult: () => initialization,

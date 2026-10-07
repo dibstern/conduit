@@ -23,7 +23,7 @@ import type {
 	ClaudeSessionFailure,
 	ClaudeSessionTurn,
 } from "./claude-session-runner.js";
-import { makePrepareTurn } from "./prepare-turn.js";
+import { sendPreparedClaudeTurn } from "./prepare-turn.js";
 
 const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 	sql<{
@@ -69,12 +69,16 @@ export const recoverClaudeRunnerCommands = (
 					resolveProviderRoutingDriver(config, row.provider_id) === "claude",
 			)
 			.map((row) => {
-				const sinkId = claudeRunnerSinkId(row.command_id, row.attempt_count);
 				const input = {
 					...(JSON.parse(row.payload_json) as ClaudeSessionTurn),
 					commandId: row.command_id,
 					commandAttempt: row.attempt_count,
 				};
+				const sinkId = claudeRunnerSinkId(
+					row.command_id,
+					row.attempt_count,
+					input.nativeResumeFallback,
+				);
 				const instanceId = input.instanceId ?? row.provider_id;
 				return {
 					sinkId,
@@ -89,48 +93,57 @@ export const recoverClaudeRunnerCommands = (
 							Effect.gen(function* () {
 								const state = yield* makeProviderStateEffect;
 								const read = yield* makeReadQueryEffect;
-								const prepareTurn = yield* makePrepareTurn({
-									liveSession: yield* liveSession,
-									configDir: input.configDir,
-									agent: input.agent,
-									userMessageId: input.userMessageId,
-									continuation: input.continuation,
-									modelContextWindow:
-										input.contextWindow === "1m" ? 1000000 : undefined,
+								return yield* sendPreparedClaudeTurn({
+									sessionId,
+									instanceId,
+									commandId: row.command_id,
+									userText: input.prompt,
+									options: {
+										liveSession: yield* liveSession,
+										configDir: input.configDir,
+										agent: input.agent,
+										userMessageId: input.userMessageId,
+										continuation: input.continuation,
+										nativeResumeFallback: input.nativeResumeFallback,
+										modelContextWindow:
+											input.contextWindow === "1m" ? 1000000 : undefined,
+									},
+									send: (prepared, nativeResumeFallback) =>
+										connection.commandEffect(
+											row.command_id,
+											{
+												type: "send-turn",
+												sinkId: claudeRunnerSinkId(
+													row.command_id,
+													row.attempt_count,
+													nativeResumeFallback,
+												),
+												aborted: false,
+												shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
+													...process.env,
+												},
+												claudeSettingsOverrides:
+													deps.claudeSettingsOverrides?.(),
+												input: {
+													...input,
+													instanceId,
+													prompt: prepared.prompt,
+													configDir: prepared.configDir,
+													resumeSessionId: prepared.resumeSessionId,
+													startFreshNativeSession:
+														prepared.resumeSessionId === undefined,
+													nativeResumeFallback,
+													nativeThread: prepared.nativeThread,
+													...(prepared.handoff
+														? { handoff: prepared.handoff }
+														: {}),
+												},
+											},
+											row.attempt_count,
+										),
 								}).pipe(
 									Effect.provideService(ProviderStateEffectTag, state),
 									Effect.provideService(ReadQueryEffectTag, read),
-								);
-								const prepared = yield* prepareTurn(
-									sessionId,
-									instanceId,
-									input.prompt,
-								);
-								return yield* connection.commandEffect(
-									row.command_id,
-									{
-										type: "send-turn",
-										sinkId,
-										aborted: false,
-										shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
-											...process.env,
-										},
-										claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
-										input: {
-											...input,
-											instanceId,
-											prompt: prepared.prompt,
-											configDir: prepared.configDir,
-											resumeSessionId: prepared.resumeSessionId,
-											startFreshNativeSession:
-												prepared.resumeSessionId === undefined,
-											nativeThread: prepared.nativeThread,
-											...(prepared.handoff
-												? { handoff: prepared.handoff }
-												: {}),
-										},
-									},
-									row.attempt_count,
 								);
 							}).pipe(
 								Effect.provideService(SqlClient.SqlClient, sql),
@@ -205,7 +218,12 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 				retryable: false,
 			};
 			yield* failTurn(
-				claudeRunnerSinkId(row.command_id, row.attempt_count),
+				claudeRunnerSinkId(
+					row.command_id,
+					row.attempt_count,
+					(JSON.parse(row.payload_json) as ClaudeSessionTurn)
+						.nativeResumeFallback,
+				),
 				{
 					sessionId: row.session_id,
 					...(row.user_message_id

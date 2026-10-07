@@ -22,8 +22,12 @@ export const claudeRunnerBuildId = (): string =>
 		: BUILD_ID;
 
 /** Cleanup from an old attempt must never release a newer attempt's sink. */
-export const claudeRunnerSinkId = (commandId: string, attempt = 0): string =>
-	`${commandId}:${attempt}`;
+export const claudeRunnerSinkId = (
+	commandId: string,
+	attempt = 0,
+	nativeResumeFallback = false,
+): string =>
+	`${commandId}:${attempt}${nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 
 export interface ClaudeRunnerHello {
 	readonly type: "hello";

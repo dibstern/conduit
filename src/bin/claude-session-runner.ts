@@ -634,7 +634,7 @@ const main = Effect.gen(function* () {
 					}
 					idle?.activity();
 					activeCommands++;
-					const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}`;
+					const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 					if (command.type === "send-turn" || command.type === "pre-warm")
 						shellEnv = command.shellEnv ?? process.env;
 					if (command.type === "send-turn" || command.type === "pre-warm") {

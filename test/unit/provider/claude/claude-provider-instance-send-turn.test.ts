@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeEventPersistEffectError } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
-import type { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
+import type {
+	ClaudeProviderInstance,
+	ClaudeProviderInstanceDeps,
+} from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -3813,7 +3816,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		).toBe("server-resolved-resume");
 	});
 
-	it("clears resumeSessionId when stream error matches 'Invalid session'", async () => {
+	it("keeps resumeSessionId when an unrelated error mentions an expired session", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 		const gen = (async function* () {
 			throw new Error("Invalid session: session has expired or been deleted");
@@ -3869,18 +3872,22 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		expect(result.status).toBe("error");
 
-		// Verify the resume cursor was cleared on the session context
+		// Generic session errors are not the CLI's stale-resume diagnostic.
 		const ctx = getClaudeRuntimeSessionForTest<
 			ClaudeSessionContext & { resumeSessionId: string | undefined }
 		>(instance, "session-stale-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx?.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBe("stale-sdk-session-xyz");
 	});
 
-	it("clears resumeSessionId for 'session not found' variant", async () => {
+	it.each([
+		"Session not found",
+		"Claude Code process exited with code 1\nStderr output:\nTool session not found",
+		"stderr: No conversation found with session ID: dead-sdk-session-abc",
+	])("keeps resumeSessionId for unrelated stderr: %s", async (message) => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 		const gen = (async function* () {
-			throw new Error("Session not found");
+			throw new Error(message);
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -3937,8 +3944,166 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			ClaudeSessionContext & { resumeSessionId: string | undefined }
 		>(instance, "session-not-found-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx?.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBe("dead-sdk-session-abc");
 	});
+
+	// Both SDK result errors and iterator failures must distinguish startup from
+	// a query that has already emitted init. Only startup rejection may retry.
+	it.each([
+		[false, false],
+		[false, true],
+		[true, false],
+		[true, true],
+	])("classifies stale resume only before init, initialized=%s result=%s", async (initialized, asResult) => {
+		const message = "No conversation found with session ID: stale-sdk-session";
+		const gen = (async function* (): AsyncGenerator<SDKMessage> {
+			if (initialized)
+				yield {
+					type: "system",
+					subtype: "init",
+					session_id: "stale-sdk-session",
+					uuid: "00000000-0000-0000-0000-000000000001",
+					cwd: workspace,
+					apiKeySource: "none",
+					claude_code_version: "test",
+					tools: [],
+					mcp_servers: [],
+					model: "claude-sonnet-4-5",
+					permissionMode: "default",
+					slash_commands: [],
+					output_style: "default",
+					skills: [],
+					plugins: [],
+				};
+			if (asResult) yield makeErrorResult({ errors: [message] });
+			else throw new Error(message);
+		})();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () => createQueryFromGenerator(gen),
+		});
+		const sink = createMockEventSink();
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					resumeSessionId: "stale-sdk-session",
+					handoff: {
+						included: 1,
+						omitted: 0,
+						firstMessageIncluded: false,
+						tokens: 10,
+					},
+					eventSink: sink,
+				}),
+			),
+		);
+		expect(result.status).toBe("error");
+		if (initialized) {
+			expect(result).not.toHaveProperty("nativeResumeRejected");
+			expect(sink.push).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "turn.error" }),
+			);
+		} else {
+			expect(result).toHaveProperty("nativeResumeRejected", true);
+			expect(sink.push).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "turn.error" }),
+			);
+		}
+	});
+
+	it("keeps permission and question replies bound during a native-resume fallback", async () => {
+		const permissions: unknown[] = [];
+		const queryFactory = ({
+			options,
+		}: Parameters<
+			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
+		>[0]) =>
+			createQueryFromGenerator(
+				(async function* (): AsyncGenerator<SDKMessage> {
+					if (options?.resume)
+						throw new Error(
+							`No conversation found with session ID: ${options.resume}`,
+						);
+					if (!options?.canUseTool) throw new Error("Missing canUseTool");
+					const signal = new AbortController().signal;
+					permissions.push(
+						await options.canUseTool(
+							"Bash",
+							{ command: "pwd" },
+							{
+								signal,
+								toolUseID: "fallback-tool",
+								requestId: "fallback-permission",
+							},
+						),
+					);
+					permissions.push(
+						await options.canUseTool(
+							"AskUserQuestion",
+							{
+								questions: [
+									{
+										question: "Continue?",
+										header: "Next",
+										options: [{ label: "Yes", description: "Continue" }],
+									},
+								],
+							},
+							{
+								signal,
+								toolUseID: "fallback-question",
+								requestId: "fallback-question",
+							},
+						),
+					);
+					yield makeSuccessResult();
+				})(),
+			);
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory,
+		});
+		const sink = createMockEventSink();
+		sink.requestQuestion = vi.fn(() => Effect.succeed({ "0": "Yes" }));
+		const input = makeBaseSendTurnInput({
+			commandId: "resume-command",
+			commandAttempt: 1,
+			eventSink: sink,
+		});
+		const rejected = await Effect.runPromise(
+			instance.sendTurnEffect({
+				...input,
+				resumeSessionId: "stale-sdk-session",
+				handoff: {
+					included: 1,
+					omitted: 0,
+					firstMessageIncluded: false,
+					tokens: 10,
+				},
+			}),
+		);
+		expect(rejected.status).toBe("error");
+		const fallback = await Effect.runPromise(
+			instance.sendTurnEffect({
+				...input,
+				startFreshNativeSession: true,
+				nativeResumeFallback: true,
+			}),
+		);
+		expect(fallback.status).toBe("completed");
+		expect(sink.requestPermission).toHaveBeenCalledOnce();
+		expect(sink.requestQuestion).toHaveBeenCalledOnce();
+		expect(permissions).toEqual([
+			{ behavior: "allow", updatedInput: { command: "pwd" } },
+			{
+				behavior: "allow",
+				updatedInput: {
+					questions: expect.any(Array),
+					answers: { "Continue?": "Yes" },
+				},
+			},
+		]);
+	}, 5000);
 
 	it("does NOT clear resumeSessionId for unrelated errors", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding

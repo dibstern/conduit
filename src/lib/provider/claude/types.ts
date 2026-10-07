@@ -207,6 +207,10 @@ export interface ClaudeSessionContext {
 	currentTurnId: string | undefined;
 	/** Canonical prompt identity, retained for late rejected background notices. */
 	currentUserMessageId?: string | undefined;
+	/** A returning account's failed resume is retried by the server gate. */
+	resumeFallbackAllowed?: boolean;
+	/** Remains true for this query after its first system/init message. */
+	queryInitialized?: boolean;
 	usageLimit?:
 		| { readonly rateLimitType: string; readonly resetsAt?: number }
 		| undefined;

@@ -1,5 +1,6 @@
 import { Deferred, Effect, HashMap, Ref } from "effect";
 import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
+import { isClaudeResumeFailure } from "../event-sink-errors.js";
 import type { SendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
@@ -124,6 +125,11 @@ export function resolveErrorTurnEffect(
 				tokens: { input: 0, output: 0 },
 				durationMs: 0,
 				error: { code: "provider_error", message: errorMsg },
+				...(ctx.resumeFallbackAllowed &&
+				!ctx.queryInitialized &&
+				isClaudeResumeFailure(err)
+					? { nativeResumeRejected: true }
+					: {}),
 				providerStateUpdates: [],
 			}),
 		);
@@ -173,6 +179,13 @@ export function sdkResultToTurnResult(
 						message: errorMessage,
 					},
 				}
+			: {}),
+		...(!isSuccess &&
+		!isInterrupted &&
+		ctx.resumeFallbackAllowed &&
+		!ctx.queryInitialized &&
+		isClaudeResumeFailure(errorMessage)
+			? { nativeResumeRejected: true }
 			: {}),
 		providerStateUpdates: [
 			...(isSuccess && ctx.resumeSessionId

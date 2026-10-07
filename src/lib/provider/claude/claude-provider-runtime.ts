@@ -58,6 +58,7 @@ import {
 	ClaudeBoundaryError,
 	ClaudeRuntimeError,
 	EventSinkIngestionError,
+	isClaudeResumeFailure,
 } from "../event-sink-errors.js";
 import type {
 	EventSink,
@@ -113,6 +114,7 @@ import {
 	rejectTurnIfPendingEffect,
 	resolveErrorTurnEffect,
 	resolveTurnEffect,
+	sdkResultToTurnResult,
 	settleQueuedTurnDeferredsEffect,
 	shiftTurnDeferred,
 } from "./claude-runtime-turn.js";
@@ -556,6 +558,7 @@ export class ClaudeProviderRuntime {
 			const sinkId = claudeRunnerSinkId(
 				input.commandId ?? randomUUID(),
 				input.commandAttempt,
+				input.nativeResumeFallback,
 			);
 			this.sinks.set(sinkId, eventSink);
 			this.reportSinkForTesting("allocated", sinkId, input.sessionId);
@@ -1718,6 +1721,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
 					currentUserMessageId: input.userMessageId,
+					resumeFallbackAllowed: !!input.resumeSessionId && !!input.handoff,
+					queryInitialized: false,
 					turnInFlight: input.turnId !== undefined,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
@@ -2039,6 +2044,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							);
 							ctx.currentTurnId = input.turnId;
 							ctx.currentUserMessageId = input.userMessageId;
+							ctx.resumeFallbackAllowed =
+								!!input.resumeSessionId && !!input.handoff;
 							ctx.usageLimit = undefined;
 							ctx.usageLimitReported = undefined;
 							ctx.pendingSyntheticMessages = undefined;
@@ -2141,14 +2148,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				resultFinalizationStarted = true;
 			}).pipe(
 				Effect.catchAll((err) =>
-					this.finishStreamOutputEffect(ctx, translator).pipe(
-						Effect.matchEffect({
-							onFailure: (limitError) =>
-								this.handleStreamFailureEffect(ctx, translator, limitError),
-							onSuccess: () =>
-								this.handleStreamFailureEffect(ctx, translator, err),
-						}),
-					),
+					ctx.resumeFallbackAllowed &&
+					!ctx.queryInitialized &&
+					isClaudeResumeFailure(err)
+						? this.handleStreamFailureEffect(ctx, translator, err)
+						: this.finishStreamOutputEffect(ctx, translator).pipe(
+								Effect.matchEffect({
+									onFailure: (limitError) =>
+										this.handleStreamFailureEffect(ctx, translator, limitError),
+									onSuccess: () =>
+										this.handleStreamFailureEffect(ctx, translator, err),
+								}),
+							),
 				),
 				Effect.ensuring(
 					this.finalizeStreamConsumerEffect(
@@ -2203,6 +2214,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					),
 				);
 				if (decodedMessage === undefined) continue;
+				if (
+					decodedMessage.type === "system" &&
+					decodedMessage.subtype === "init"
+				)
+					ctx.queryInitialized = true;
+				if (
+					decodedMessage.type === "result" &&
+					ctx.resumeFallbackAllowed &&
+					!ctx.queryInitialized &&
+					isClaudeResumeFailure(
+						sdkResultToTurnResult(ctx, decodedMessage).error,
+					)
+				) {
+					ctx.resumeSessionId = undefined;
+					ctx.pendingSyntheticMessages = undefined;
+					ctx.turnInFlight = false;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
+					break;
+				}
 				if (yield* pushForwardedSubagentMessageEffect(ctx, decodedMessage)) {
 					continue;
 				}
@@ -2340,12 +2371,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			if (
 				ctx.resumeSessionId &&
-				/invalid.session|session.*not.*found|session.*expired/i.test(errMsg)
+				!ctx.queryInitialized &&
+				isClaudeResumeFailure(err)
 			) {
 				ctx.resumeSessionId = undefined;
 				log.warn(
 					`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
 				);
+				if (ctx.resumeFallbackAllowed) {
+					ctx.turnInFlight = false;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					return yield* resolveErrorTurnEffect(this.stateRef, ctx, err);
+				}
 			}
 
 			yield* translator.translateError(ctx, err).pipe(

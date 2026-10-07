@@ -2,6 +2,9 @@
 // replaying a cut-off twice; a switched account using an uncompleted native ID;
 // discarding a same-account live cursor before its first completion receipt;
 // missing an interrupted handoff when neither account has a completed receipt;
+// catch-up repeats delivered messages/errors or loses whole undelivered messages,
+// loses an open cut-off, counts full history, or advances a receipt before delivery;
+// stale-resume fallback retries twice, reuses the cursor, or clears another account;
 // unfit wrapper, wrong counts, reordered/truncated history, leaked private parts.
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
@@ -29,7 +32,11 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../../src/lib/persistence/events.js";
-import { makePrepareTurn } from "../../../../src/lib/provider/claude/prepare-turn.js";
+import {
+	makePrepareTurn,
+	sendPreparedClaudeTurn,
+} from "../../../../src/lib/provider/claude/prepare-turn.js";
+import type { TurnResult } from "../../../../src/lib/provider/types.js";
 
 // Failure modes: excess budget; lost original constraints; reordered or sliced
 // messages; leaked reasoning/attachments/tool results; wrong omission counts;
@@ -50,6 +57,333 @@ const conversation = fc.array(
 	}),
 	{ maxLength: 110 },
 );
+
+it("catches up whole undelivered messages and turn errors without repeating delivered history", async () => {
+	await fc.assert(
+		fc.asyncProperty(
+			fc.integer({ min: 1, max: 6 }),
+			fc.integer({ min: 0, max: 105 }),
+			fc.boolean(),
+			fc.boolean(),
+			async (deliveredCount, missedCount, continuation, switchedBack) => {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const commit = yield* makeCommitAndSignal;
+						const state = yield* ProviderStateEffectTag;
+						// Transcript order uses creation timestamps, including synthetic errors.
+						let createdAt = 1000;
+						const appendMessage = (id: string, role: "user" | "assistant") =>
+							commit([
+								canonicalEvent(
+									"message.created",
+									"s1",
+									{ sessionId: "s1", messageId: id, role },
+									{ createdAt: ++createdAt },
+								),
+								canonicalEvent("text.delta", "s1", {
+									messageId: id,
+									partId: `${id}:text`,
+									text: `<<<${id}>>>`,
+								}),
+							]);
+						yield* commit([
+							canonicalEvent("session.created", "s1", {
+								sessionId: "s1",
+								title: "Catch-up",
+								provider: "personal",
+							}),
+						]);
+						for (let index = 0; index < deliveredCount; index++)
+							yield* appendMessage(
+								`delivered-${index}`,
+								index === 0 ? "user" : "assistant",
+							);
+						// The error at the delivery boundary must not be repeated.
+						yield* commit([
+							canonicalEvent(
+								"turn.error",
+								"s1",
+								{ messageId: "delivered-0", error: "<<<delivered-error>>>" },
+								{ createdAt: ++createdAt },
+							),
+						]);
+						yield* state.saveUpdates("s1", [
+							{
+								key: "nativeThread:personal",
+								value: JSON.stringify({
+									resumeSessionId: "native-personal",
+									configDir: "/accounts/original-personal",
+									firstSequence: 0,
+									deliveredThrough: 0,
+								}),
+							},
+						]);
+						const receipt = yield* state.nativeThread("s1", "personal");
+						yield* commit([
+							canonicalEvent("session.provider_changed", "s1", {
+								sessionId: "s1",
+								oldProvider: "personal",
+								newProvider: "work",
+							}),
+						]);
+						// Later parts do not cause an already delivered message to repeat.
+						yield* commit([
+							canonicalEvent("text.delta", "s1", {
+								messageId: "delivered-0",
+								partId: "delivered-0:text",
+								text: "<<<late-delta>>>",
+							}),
+						]);
+						for (let index = 0; index < missedCount; index++)
+							yield* appendMessage(
+								`missed-${index}`,
+								index % 2 === 0 ? "user" : "assistant",
+							);
+						// Turn errors have synthetic projected message IDs, even when
+						// their event points to a previously delivered message.
+						yield* commit([
+							canonicalEvent(
+								"turn.error",
+								"s1",
+								{ messageId: "delivered-0", error: "<<<undelivered-error>>>" },
+								{ createdAt: ++createdAt },
+							),
+						]);
+						yield* appendMessage("cut-off", "user");
+						yield* commit([
+							canonicalEvent("session.usage_limited", "s1", {
+								instanceId: "work",
+								rateLimitType: "five_hour",
+								cutOffMessageId: "cut-off",
+							}),
+						]);
+						if (switchedBack)
+							yield* commit([
+								canonicalEvent("session.provider_changed", "s1", {
+									sessionId: "s1",
+									oldProvider: "work",
+									newProvider: "personal",
+								}),
+							]);
+						if (!continuation) yield* appendMessage("current", "user");
+						const options = {
+							tokenCap: 64000,
+							configDir: "/accounts/changed-personal",
+							continuation,
+							...(!continuation ? { userMessageId: "current" } : {}),
+						};
+						const prepare = yield* makePrepareTurn(options);
+						const prepared = yield* prepare(
+							"s1",
+							"personal",
+							continuation ? undefined : "<<<current>>>",
+						);
+						expect(prepared.resumeSessionId).toBe("native-personal");
+						expect(prepared.configDir).toBe("/accounts/original-personal");
+						expect(prepared.nativeThread).toEqual(receipt);
+						for (let index = 0; index < deliveredCount; index++)
+							expect(prepared.prompt).not.toContain(`<<<delivered-${index}>>>`);
+						expect(prepared.prompt).not.toContain("<<<delivered-error>>>");
+						expect(prepared.prompt).not.toContain("<<<late-delta>>>");
+						for (const text of [
+							"<<<undelivered-error>>>",
+							"<<<cut-off>>>",
+							...Array.from(
+								{ length: missedCount },
+								(_, index) => `<<<missed-${index}>>>`,
+							),
+						])
+							expect(prepared.prompt.split(text)).toHaveLength(2);
+						expect(prepared.prompt).toContain("[Conduit still-open note]");
+						expect(
+							prepared.prompt.endsWith(
+								continuation ? "<<<cut-off>>>" : "<<<current>>>",
+							),
+						).toBe(true);
+						expect(prepared.handoff).toMatchObject({
+							included: missedCount + (continuation ? 1 : 2),
+							omitted: 0,
+							firstMessageIncluded: false,
+						});
+						// Preview and preparation must not claim delivery.
+						expect(yield* state.nativeThread("s1", "personal")).toEqual(
+							receipt,
+						);
+					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+				);
+			},
+		),
+		{
+			seed: 20261008,
+			numRuns: 30,
+			examples: [
+				[1, 105, true, false],
+				[3, 0, false, true],
+			],
+		},
+	);
+}, 120000);
+
+it("retries only startup-rejected native conversations once, preserving other receipts", async () => {
+	await fc.assert(
+		fc.asyncProperty(
+			fc.boolean(),
+			fc.boolean(),
+			fc.boolean(),
+			async (fallbackFails, throws, startupRejected) => {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const commit = yield* makeCommitAndSignal;
+						const state = yield* ProviderStateEffectTag;
+						yield* commit([
+							canonicalEvent("session.created", "s1", {
+								sessionId: "s1",
+								title: "Stale",
+								provider: "personal",
+							}),
+							canonicalEvent("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "first",
+								role: "user",
+							}),
+							canonicalEvent("text.delta", "s1", {
+								messageId: "first",
+								partId: "first:text",
+								text: "Delivered original request",
+							}),
+						]);
+						for (const instanceId of ["personal", "work"])
+							yield* state.saveUpdates("s1", [
+								{
+									key: `nativeThread:${instanceId}`,
+									value: JSON.stringify({
+										resumeSessionId: `native-${instanceId}`,
+										configDir: `/accounts/${instanceId}`,
+										firstSequence: 0,
+										deliveredThrough: 0,
+									}),
+								},
+							]);
+						const original = yield* state.nativeThread("s1", "personal");
+						const other = yield* state.nativeThread("s1", "work");
+						yield* commit([
+							canonicalEvent("session.provider_changed", "s1", {
+								sessionId: "s1",
+								oldProvider: "personal",
+								newProvider: "work",
+							}),
+							canonicalEvent("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "elsewhere",
+								role: "assistant",
+							}),
+							canonicalEvent("text.delta", "s1", {
+								messageId: "elsewhere",
+								partId: "elsewhere:text",
+								text: "Undelivered reply",
+							}),
+						]);
+						const calls: {
+							resumeSessionId: string | undefined;
+							prompt: string;
+							fallback: boolean;
+						}[] = [];
+						const failure: TurnResult = {
+							status: "error",
+							...(startupRejected ? { nativeResumeRejected: true } : {}),
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							error: {
+								code: "provider_error",
+								message:
+									"No conversation found with session ID: native-personal",
+							},
+							providerStateUpdates: [],
+						};
+						const success: TurnResult = {
+							status: "completed",
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							providerStateUpdates: [],
+						};
+						const result = yield* Effect.either(
+							sendPreparedClaudeTurn({
+								sessionId: "s1",
+								instanceId: "personal",
+								userText: "Current request",
+								options: {},
+								send: (prepared, fallback) =>
+									Effect.gen(function* () {
+										calls.push({
+											resumeSessionId: prepared.resumeSessionId,
+											prompt: prepared.prompt,
+											fallback,
+										});
+										if (!fallback) {
+											expect(prepared.prompt).not.toContain(
+												"Delivered original request",
+											);
+											if (throws && startupRejected)
+												return yield* Effect.fail(
+													new Error(failure.error?.message),
+												);
+											return failure;
+										}
+										expect(
+											yield* state.nativeThread("s1", "personal"),
+										).toBeUndefined();
+										expect(yield* state.nativeThread("s1", "work")).toEqual(
+											other,
+										);
+										return fallbackFails ? failure : success;
+									}),
+							}),
+						);
+						expect(result).toMatchObject({
+							_tag: "Right",
+							right: {
+								status:
+									!startupRejected || fallbackFails ? "error" : "completed",
+							},
+						});
+						expect(calls).toHaveLength(startupRejected ? 2 : 1);
+						if (!startupRejected) {
+							expect(yield* state.nativeThread("s1", "personal")).toEqual(
+								original,
+							);
+							expect(yield* state.nativeThread("s1", "work")).toEqual(other);
+							return;
+						}
+						expect(calls[1]).toMatchObject({
+							resumeSessionId: undefined,
+							fallback: true,
+						});
+						for (const text of [
+							"Delivered original request",
+							"Undelivered reply",
+							"Current request",
+						])
+							expect(calls[1]?.prompt).toContain(text);
+					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+				);
+			},
+		),
+		{
+			seed: 20261008,
+			numRuns: 8,
+			examples: [
+				[false, false, true],
+				[true, false, true],
+				[false, true, true],
+				[true, true, true],
+				[false, false, false],
+				[true, false, false],
+			],
+		},
+	);
+});
 
 it("prepends a hidden still-open note only until Dismiss or a reply, on fresh and resumed turns", async () => {
 	await fc.assert(

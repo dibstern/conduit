@@ -11,7 +11,10 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
-import { makePrepareTurn } from "./claude/prepare-turn.js";
+import {
+	type PreparedTurn,
+	sendPreparedClaudeTurn,
+} from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
@@ -378,55 +381,67 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				const prepared =
+				const send = (
+					prepared: PreparedTurn | undefined,
+					nativeResumeFallback: boolean,
+				) =>
+					instance.sendTurnEffect({
+						...payload,
+						history: payload.history ?? [],
+						commandId: row.command_id,
+						...(driver === "claude"
+							? {
+									commandAttempt,
+									instanceId: payload.instanceId ?? row.provider_id,
+									prompt: prepared?.prompt ?? payload.prompt,
+									configDir: prepared?.configDir,
+									resumeSessionId: prepared?.resumeSessionId,
+									startFreshNativeSession:
+										prepared?.resumeSessionId === undefined,
+									nativeResumeFallback,
+									nativeThread: prepared?.nativeThread,
+									...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
+								}
+							: {}),
+						eventSink: this.makeReactorEventSink(interactions),
+						abortSignal: new AbortController().signal,
+					});
+				const result =
 					driver === "claude"
 						? yield* Effect.gen(function* () {
 								const state = yield* makeProviderStateEffect;
 								const read = yield* makeReadQueryEffect;
-								const prepareTurn = yield* makePrepareTurn({
-									liveSession: yield* instance.getNativeSessionEffect?.(
-										payload.sessionId,
-									) ?? Effect.succeed(undefined),
-									configDir: payload.configDir,
-									agent: payload.agent,
-									userMessageId: payload.userMessageId,
-									continuation: payload.continuation,
-									modelContextWindow:
-										payload.contextWindow === "1m" ? 1000000 : undefined,
+								return yield* sendPreparedClaudeTurn({
+									sessionId: payload.sessionId,
+									instanceId: payload.instanceId ?? row.provider_id,
+									commandId: row.command_id,
+									userText: payload.prompt,
+									options: {
+										liveSession: yield* instance.getNativeSessionEffect?.(
+											payload.sessionId,
+										) ?? Effect.succeed(undefined),
+										configDir: payload.configDir,
+										agent: payload.agent,
+										userMessageId: payload.userMessageId,
+										continuation: payload.continuation,
+										nativeResumeFallback: payload.nativeResumeFallback,
+										modelContextWindow:
+											payload.contextWindow === "1m" ? 1000000 : undefined,
+									},
+									send,
 								}).pipe(
 									Effect.provideService(ProviderStateEffectTag, state),
 									Effect.provideService(ReadQueryEffectTag, read),
 								);
-								return yield* prepareTurn(
-									payload.sessionId,
-									row.provider_id,
-									payload.prompt,
-								);
 							}).pipe(
 								Effect.provideService(SqlClient.SqlClient, this.options.sql),
-								Effect.mapError(storeFailure("prepareTurn")),
+								Effect.mapError((cause) =>
+									cause instanceof ProviderInstanceFailure
+										? cause
+										: storeFailure("prepareTurn")(cause),
+								),
 							)
-						: undefined;
-				const result = yield* instance.sendTurnEffect({
-					...payload,
-					history: payload.history ?? [],
-					commandId: row.command_id,
-					...(driver === "claude"
-						? {
-								commandAttempt,
-								instanceId: payload.instanceId ?? row.provider_id,
-								prompt: prepared?.prompt ?? payload.prompt,
-								configDir: prepared?.configDir,
-								resumeSessionId: prepared?.resumeSessionId,
-								startFreshNativeSession:
-									prepared?.resumeSessionId === undefined,
-								nativeThread: prepared?.nativeThread,
-								...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
-							}
-						: {}),
-					eventSink: this.makeReactorEventSink(interactions),
-					abortSignal: new AbortController().signal,
-				});
+						: yield* send(undefined, false);
 				if (
 					result.status === "completed" &&
 					result.handoff &&

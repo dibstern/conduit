@@ -8,6 +8,7 @@ import {
 } from "../../contracts/limit-recovery.js";
 import {
 	type NativeThread,
+	nativeThreadKey,
 	ProviderStateEffectTag,
 } from "../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
@@ -16,7 +17,8 @@ import type {
 	MessageWithParts,
 } from "../../persistence/read-model-types.js";
 import { toolOutputText } from "../../persistence/session-history-adapter.js";
-import type { ProviderNativeSession } from "../types.js";
+import { isClaudeResumeFailure } from "../event-sink-errors.js";
+import type { ProviderNativeSession, TurnResult } from "../types.js";
 import { THREAD_READ_QUALIFIED_NAME } from "./types.js";
 
 export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
@@ -35,6 +37,7 @@ interface PrepareTurnOptions {
 	readonly agent?: string | undefined;
 	readonly userMessageId?: string | undefined;
 	readonly continuation?: boolean | undefined;
+	readonly nativeResumeFallback?: boolean | undefined;
 }
 
 export interface PreparedTurn {
@@ -122,7 +125,7 @@ function planTurn(input: {
 	| PreparedTurn
 	| HandoffTooLarge
 	| ContinuationNotReady
-	| { readonly _tag: "ReadHistory" } {
+	| { readonly _tag: "ReadHistory"; readonly deliveredThrough?: number } {
 	const { nativeThread, options, userText } = input;
 	if (options.continuation && !input.limitRecovery?.cutOffMessageId)
 		return new ContinuationNotReady({
@@ -133,7 +136,7 @@ function planTurn(input: {
 		input.limitRecovery?.cutOffMessageId && userText
 			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
 			: "";
-	const live = options.liveSession;
+	const live = options.nativeResumeFallback ? undefined : options.liveSession;
 	const sameLiveAccount =
 		live?.instanceId === input.instanceId &&
 		(options.configDir === undefined || live.configDir === options.configDir);
@@ -169,31 +172,51 @@ function planTurn(input: {
 		? (nativeThread?.resumeSessionId ??
 			(sameLimitAccount && sameLiveAccount ? live?.resumeSessionId : undefined))
 		: (matchingReceipt?.resumeSessionId ?? liveResumeSessionId);
-	if (options.continuation && sameLimitAccount && !resumeSessionId)
+	if (
+		options.continuation &&
+		sameLimitAccount &&
+		!resumeSessionId &&
+		!options.nativeResumeFallback
+	)
 		return new ContinuationNotReady({
 			reason: "The cut-off request has no native session to resume.",
 		});
 	const requiresFreshSession =
 		sameLiveAccount && (!sameLiveAgent || !live?.resumeSessionId);
-	if (resumeSessionId && (options.continuation || !requiresFreshSession)) {
+	const resuming =
+		resumeSessionId &&
+		(options.continuation ||
+			!requiresFreshSession ||
+			(nativeThread && input.hasAccountSwitch && sameLiveAgent))
+			? {
+					...base,
+					prompt: options.continuation
+						? "Continue where you left off."
+						: base.prompt,
+					nativeThread:
+						nativeThread?.resumeSessionId === resumeSessionId
+							? nativeThread
+							: {
+									configDir: base.configDir,
+									resumeSessionId,
+									firstSequence: 0,
+									deliveredThrough: 0,
+								},
+					resumeSessionId,
+				}
+			: undefined;
+	const catchingUp = !!resuming && !!nativeThread && input.hasAccountSwitch;
+	if (resuming && !catchingUp) return resuming;
+	if (input.messages === undefined)
 		return {
-			...base,
-			prompt: options.continuation
-				? "Continue where you left off."
-				: base.prompt,
-			nativeThread:
-				nativeThread?.resumeSessionId === resumeSessionId
-					? nativeThread
-					: {
-							configDir: base.configDir,
-							resumeSessionId,
-							firstSequence: 0,
-							deliveredThrough: 0,
-						},
-			resumeSessionId,
+			_tag: "ReadHistory",
+			...(catchingUp
+				? { deliveredThrough: nativeThread.deliveredThrough }
+				: {}),
 		};
-	}
-	if (input.messages === undefined) return { _tag: "ReadHistory" };
+	const prepared = resuming
+		? { ...resuming, configDir: nativeThread?.configDir ?? base.configDir }
+		: base;
 	const currentIndex = input.messages.findIndex(
 		(message) => message.id === options.userMessageId,
 	);
@@ -210,11 +233,24 @@ function planTurn(input: {
 						.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex)
 						.filter((message) => message.id !== options.userMessageId)
 				: input.messages.slice(0, currentIndex);
-	if (messages.length === 0) return base;
+	if (messages.length === 0)
+		return {
+			...prepared,
+			prompt: base.prompt,
+			...(catchingUp
+				? {
+						handoff: {
+							included: 0,
+							omitted: 0,
+							firstMessageIncluded: false,
+							tokens: 0,
+						},
+					}
+				: {}),
+		};
 	const window = options.modelContextWindow ?? 128000;
 	const cap = Math.max(1024, Math.min(64000, options.tokenCap ?? 16000));
-	// A fresh native session has no context occupancy. Later planner cases can
-	// supply measured native usage when catching up an earlier account.
+	// Fresh handoffs and native catch-ups share the same cap and context reserve.
 	const budget = Math.max(
 		0,
 		Math.min(
@@ -282,12 +318,12 @@ function planTurn(input: {
 			),
 		].join("\n\n") + closing;
 	return {
-		...base,
+		...prepared,
 		prompt: `${note}${hidden}\n\n${userText}`,
 		handoff: {
 			included,
 			omitted,
-			firstMessageIncluded: selected.has(firstUserIndex),
+			firstMessageIncluded: !catchingUp && selected.has(firstUserIndex),
 			tokens: Buffer.byteLength(hidden),
 		},
 	};
@@ -310,17 +346,20 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 		};
 		return (sessionId: string, instanceId: string, userText?: string) =>
 			Effect.gen(function* () {
-				const nativeThread = yield* state.nativeThread(sessionId, instanceId);
+				const nativeThread = options.nativeResumeFallback
+					? undefined
+					: yield* state.nativeThread(sessionId, instanceId);
 				const providerState = nativeThread
 					? yield* state.getState(sessionId)
 					: {};
-				const accountSwitches = nativeThread
-					? []
-					: yield* sql<{ switched: number }>`
+				const accountSwitches = yield* sql<{ switched: number }>`
 						SELECT 1 AS switched FROM events
 						WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
-							AND json_extract(data, '$.newProvider') = ${instanceId}
-							AND json_extract(data, '$.oldProvider') <> ${instanceId}
+							AND json_extract(data, '$.oldProvider') <> json_extract(data, '$.newProvider')
+							AND (${nativeThread?.deliveredThrough ?? null} IS NOT NULL
+								AND sequence > ${nativeThread?.deliveredThrough ?? null}
+								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
+								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
 				const session = yield* read.getSession(sessionId);
 				const input = {
@@ -366,9 +405,22 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 						return yield* new ContinuationNotReady({
 							reason: "The cut-off request is no longer available.",
 						});
+					let history = messages;
+					if (plan.deliveredThrough !== undefined) {
+						const created = yield* sql<{
+							messageId: string;
+						}>`SELECT CASE WHEN type = 'turn.error'
+							THEN 'turn-error-' || sequence
+							ELSE json_extract(data, '$.messageId') END AS messageId
+							FROM events
+							WHERE session_id = ${sessionId} AND sequence > ${plan.deliveredThrough}
+								AND type IN ('message.created', 'turn.error')`;
+						const messageIds = new Set(created.map((row) => row.messageId));
+						history = messages.filter((message) => messageIds.has(message.id));
+					}
 					plan = planTurn({
 						...input,
-						messages,
+						messages: history,
 						...(cutOffMessage
 							? {
 									userText: historicalMessageText(cutOffMessage),
@@ -389,4 +441,67 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 					return yield* Effect.die("prepareTurn did not resolve history");
 				return plan;
 			});
+	});
+
+/** One gate for normal delivery and restart recovery; the fresh send is terminal. */
+export const sendPreparedClaudeTurn = <
+	A extends TurnResult | undefined,
+	E,
+	R,
+>(input: {
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly userText?: string | undefined;
+	readonly commandId?: string | undefined;
+	readonly options: PrepareTurnOptions;
+	readonly send: (
+		prepared: PreparedTurn,
+		nativeResumeFallback: boolean,
+	) => Effect.Effect<A, E, R>;
+}) =>
+	Effect.gen(function* () {
+		const prepare = yield* makePrepareTurn(input.options);
+		const prepared = yield* prepare(
+			input.sessionId,
+			input.instanceId,
+			input.userText,
+		);
+		const result = yield* Effect.either(
+			input.send(prepared, input.options.nativeResumeFallback === true),
+		);
+		const failure = result._tag === "Left" ? result.left : result.right?.error;
+		if (
+			!prepared.resumeSessionId ||
+			!prepared.handoff ||
+			(result._tag === "Right" && !result.right?.nativeResumeRejected) ||
+			!isClaudeResumeFailure(failure)
+		)
+			return result._tag === "Left"
+				? yield* Effect.fail(result.left)
+				: result.right;
+		const sql = yield* SqlClient.SqlClient;
+		// Keep other accounts' receipts intact. The marker also gives this one
+		// fallback its own runner deduplication key, including after a restart.
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* sql`DELETE FROM provider_state WHERE session_id = ${input.sessionId}
+				AND key IN (${nativeThreadKey(input.instanceId)}, 'resumeSessionId', 'claudeConfigDir')`;
+				if (input.commandId)
+					yield* sql`UPDATE provider_command_outbox
+					SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true'))
+					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+						AND status = 'running'`;
+			}),
+		);
+		const prepareFresh = yield* makePrepareTurn({
+			...input.options,
+			configDir: prepared.configDir,
+			nativeResumeFallback: true,
+		});
+		const fresh = yield* prepareFresh(
+			input.sessionId,
+			input.instanceId,
+			input.userText,
+		);
+		return yield* input.send(fresh, true);
 	});

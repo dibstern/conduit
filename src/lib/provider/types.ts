@@ -131,6 +131,8 @@ export interface TurnResult {
 	readonly tokens: TurnTokens;
 	readonly durationMs: number;
 	readonly error?: TurnError;
+	/** Claude rejected the resume at startup, before emitting system/init. */
+	readonly nativeResumeRejected?: boolean;
 	readonly providerStateUpdates: readonly ProviderStateUpdate[];
 	readonly handoff?: SessionHandoffDeliveredPayload;
 }
@@ -196,6 +198,8 @@ export interface SendTurnInput {
 	readonly resumeSessionId?: string | undefined;
 	/** Server preparation requires replacing an idle SDK query. */
 	readonly startFreshNativeSession?: boolean;
+	/** The single fresh retry after a returning account's native resume failed. */
+	readonly nativeResumeFallback?: boolean;
 	/**
 	 * Optional shared model selection. OpenCode may omit the model from its
 	 * provider request. Claude's relay path infers a catalog model, and its

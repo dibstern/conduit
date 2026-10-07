@@ -47,6 +47,231 @@ const readProofMarks = (root: string): ProcessMark[] =>
 				.map((line) => JSON.parse(line) as ProcessMark)
 		: [];
 
+// Failures: returning to an account drops its native cursor, repeats delivered
+// history, loses the cut-off, previews full history, or loops on a stale cursor.
+for (const stale of [false, true]) {
+	test(
+		stale
+			? "scenario 8: switching 1→2→1 with a stale resume ID falls back to a full handoff exactly once"
+			: "returning 1→2→1 resumes account 1 with only its undelivered catch-up",
+		async ({ page, harness }, testInfo) => {
+			test.setTimeout(120_000);
+			const artifacts = resolve(
+				"test-results/account-switch",
+				`${testInfo.project.name}-return-${stale ? "stale" : "valid"}-${testInfo.retry}`,
+			);
+			mkdirSync(artifacts, { recursive: true });
+			const browser = await harness.connect();
+			const accounts: { id: string; configDir: string }[] = [];
+			for (const name of ["Account 1", "Account 2"]) {
+				const configDir = mkdtempSync(join(harness.root, "return-account-"));
+				const { addedInstanceId } = await Effect.runPromise(
+					browser.rpc.AddInstance({ name, driver: "claude", configDir }),
+				);
+				if (!addedInstanceId) throw new Error(`No instance ID for ${name}`);
+				accounts.push({ id: addedInstanceId, configDir });
+			}
+			const [account1, account2] = accounts;
+			if (!account1 || !account2) throw new Error("Two accounts are required");
+			const { savedSlug: projectSlug } = await Effect.runPromise(
+				browser.rpc.SaveProject({
+					folders: [mkdtempSync(join(harness.root, "return-project-"))],
+					instanceId: account1.id,
+				}),
+			);
+			if (!projectSlug) throw new Error("No return project slug");
+			await expect
+				.poll(() => {
+					const file = join(harness.configDir, "daemon.json");
+					if (!existsSync(file)) return false;
+					const config: { instances?: { id: string }[] } = JSON.parse(
+						readFileSync(file, "utf8"),
+					);
+					return accounts.every((account) =>
+						config.instances?.some((instance) => instance.id === account.id),
+					);
+				})
+				.toBe(true);
+			const { sessionId } = await Effect.runPromise(
+				browser.rpc.CreateSession({
+					projectSlug,
+					instanceId: Schema.decodeUnknownSync(
+						Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+					)(account1.id),
+					model: { modelId: "harness", providerId: "claude" },
+					originId: browser.originId,
+				}),
+			);
+			const observed: SessionInfo[] = [];
+			const subscription = Effect.runFork(
+				Stream.runForEach(
+					browser.rpc.SubscribeShell({ projectSlug }),
+					(envelope) =>
+						Effect.sync(() => {
+							if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+							if (envelope._tag === "upsert") observed.push(envelope.item);
+						}),
+				),
+			);
+			const latest = () =>
+				observed.filter((row) => row.id === sessionId).at(-1);
+			const proofMarks = () => readProofMarks(harness.root);
+			const send = (text: string, commandId: string) =>
+				Effect.runPromise(
+					browser.rpc.SendMessage({
+						projectSlug,
+						sessionId,
+						text,
+						commandId,
+						originId: browser.originId,
+					}),
+				);
+			const switchTo = (instanceId: string, expectedInstanceId: string) =>
+				Effect.runPromise(
+					browser.rpc.ContinueSession({
+						projectSlug,
+						sessionId,
+						instanceId,
+						expectedInstanceId,
+						originId: browser.originId,
+					}),
+				);
+			const previewForAccount = (instanceId: string) =>
+				Effect.runPromise(
+					browser.rpc.PreviewContinuation({
+						projectSlug,
+						sessionId,
+						instanceId,
+						originId: browser.originId,
+					}),
+				);
+			const first = "return-account-1-already-delivered";
+			const elsewhere = "return-account-2-undelivered-history";
+			const cutOff =
+				"usage-limit-account-1-no-reset: return to finish this request";
+			const evidence: Record<string, unknown> = {};
+			try {
+				writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+				await send(first, "return-first");
+				await expect
+					.poll(() => JSON.stringify(proofMarks()))
+					.toContain(`done(${first})`);
+				await expect.poll(() => latest()?.status).toBe("idle");
+				// Idle output precedes the completion receipt. Wait through the
+				// public planner before switching away or sending another turn.
+				await expect
+					.poll(() => previewForAccount(account1.id))
+					.toMatchObject({ included: 0, omitted: 0 });
+				const initialEnqueue = proofMarks().find(
+					(mark) => mark.kind === "enqueue" && mark.prompt === first,
+				);
+				if (initialEnqueue?.kind !== "enqueue")
+					throw new Error("No initial enqueue");
+				const native = proofMarks().find(
+					(mark) =>
+						mark.kind === "query" && mark.queryId === initialEnqueue.queryId,
+				);
+				if (native?.kind !== "query")
+					throw new Error("No account 1 native session");
+				const delivered = await Effect.runPromise(
+					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				);
+				await switchTo(account2.id, account1.id);
+				await send(elsewhere, "return-elsewhere");
+				await expect
+					.poll(() => JSON.stringify(proofMarks()))
+					.toContain(`done(${elsewhere})`);
+				await expect.poll(() => latest()?.status).toBe("idle");
+				await send(cutOff, "return-cut-off");
+				await expect
+					.poll(() => latest()?.limitRecovery?.cutOffMessageId)
+					.toBeTruthy();
+				await expect.poll(() => latest()?.status).toBe("idle");
+				const history = await Effect.runPromise(
+					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				);
+				const preview = await previewForAccount(account1.id);
+				expect(preview.included + preview.omitted).toBe(
+					history.messages.length - delivered.messages.length - 1,
+				);
+				expect(preview.included).toBeGreaterThanOrEqual(2);
+				expect(preview.firstMessageIncluded).toBe(false);
+				evidence["preview"] = preview;
+				writeFileSync(
+					join(account1.configDir, "conduit-test-switch-turn"),
+					"hold",
+				);
+				writeFileSync(join(harness.root, "release-switch-turn"), "release");
+				if (stale)
+					writeFileSync(
+						join(harness.root, "rejected-resume-session-id"),
+						native.sessionId,
+					);
+				const beforeReturn = harness.claudeOptions().length;
+				await switchTo(account1.id, account2.id);
+				const returnedCalls = () => harness.claudeOptions().slice(beforeReturn);
+				await expect.poll(returnedCalls).toHaveLength(stale ? 2 : 1);
+				const [resumed, fresh] = returnedCalls();
+				expect(resumed).toMatchObject({
+					configDir: account1.configDir,
+					resumeId: native.sessionId,
+				});
+				expect(resumed?.prompt).toContain(handoffMarker);
+				expect(resumed?.prompt).toContain(elsewhere);
+				expect(resumed?.prompt).not.toContain(first);
+				expect(resumed?.prompt?.endsWith(cutOff)).toBe(true);
+				expect(resumed?.prompt?.split(cutOff)).toHaveLength(2);
+				if (stale) {
+					expect(fresh).toMatchObject({
+						configDir: account1.configDir,
+						resumeId: null,
+					});
+					expect(fresh?.prompt).toContain(first);
+					expect(fresh?.prompt).toContain(elsewhere);
+					expect(fresh?.prompt?.endsWith(cutOff)).toBe(true);
+				}
+				await expect.poll(() => latest()?.limitRecovery).toBeNull();
+				await expect.poll(() => latest()?.status).toBe("idle");
+				expect(
+					proofMarks().filter((mark) => mark.kind === "resume-rejected"),
+				).toHaveLength(stale ? 1 : 0);
+				expect(returnedCalls()).toHaveLength(stale ? 2 : 1);
+				// A later send proves the successful receipt consumed the catch-up.
+				await expect
+					.poll(() => previewForAccount(account1.id))
+					.toMatchObject({ included: 0, omitted: 0 });
+				const next = "return-account-1-after-catch-up";
+				await send(next, "return-next");
+				await expect
+					.poll(() => JSON.stringify(proofMarks()))
+					.toContain(`done(${next})`);
+				expect(harness.claudeOptions().at(-1)?.prompt).toBe(next);
+				const app = new AppPage(page);
+				await app.goto(
+					`${harness.baseUrl}/s/${sessionId}?p=${encodeURIComponent(projectSlug)}`,
+				);
+				await expect(page.locator(".msg-user .whitespace-pre-wrap")).toHaveText(
+					[first, elsewhere, cutOff, next],
+				);
+				await expect(new ChatPage(page).messagesContainer).not.toContainText(
+					handoffMarker,
+				);
+				await page.screenshot({ path: join(artifacts, "returned.png") });
+			} finally {
+				evidence["sdkCalls"] = harness.claudeOptions();
+				evidence["sdkMarks"] = proofMarks();
+				evidence["sessionRows"] = observed;
+				writeFileSync(
+					join(artifacts, "return.json"),
+					JSON.stringify(evidence, null, 2),
+				);
+				await Effect.runPromise(Fiber.interrupt(subscription));
+				await browser.close();
+			}
+		},
+	);
+}
+
 for (const dismiss of [false, true]) {
 	test(
 		dismiss
