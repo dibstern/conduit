@@ -28,7 +28,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** SettingsPanel's five-tab header: an underline pulled over the strip's rule. */
+/** The default look: an underline pulled over the strip's rule. */
 export const Underline: Story = {};
 
 /** DiffView's Unified/Split switch, the only variant that hovers a border colour. */
@@ -133,5 +133,50 @@ export const UnderlineIsDrawnByClasses: Story = {
 		await expect(selected?.getAttribute("style")).toBeNull();
 		await expect(selected?.className).toContain("border-accent");
 		await expect(selected?.className).not.toContain("border-none");
+	},
+};
+
+/**
+ * Settings' left section list (frame H). Vertical orientation: ArrowDown and
+ * ArrowUp move the selection, ArrowLeft/Right do nothing, and the list says
+ * so with `aria-orientation`.
+ */
+export const Vertical: Story = {
+	args: {
+		variant: "sections",
+		orientation: "vertical",
+		class: "w-[150px]",
+		options: [
+			{ value: "notifications", label: "Alerts" },
+			{ value: "appearance", label: "Theme" },
+			{ value: "composer", label: "Composer" },
+			{ value: "visibility", label: "Agents & Models" },
+			{ value: "claude", label: "Claude" },
+			{ value: "instances", label: "Instances" },
+			{ value: "debug", label: "Debug" },
+		],
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByRole("tablist")).toHaveAttribute(
+			"aria-orientation",
+			"vertical",
+		);
+		const tabs = canvas.getAllByRole("tab");
+		tabs[0]?.focus();
+
+		await userEvent.keyboard("{ArrowRight}");
+		await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+		await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+		await expect(tabs[2]).toHaveAttribute("aria-selected", "true");
+		await expect(tabs[2]).toHaveFocus();
+
+		await userEvent.keyboard("{ArrowUp}");
+		await expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+
+		// Back to the first section, so the captured baseline is the default.
+		await userEvent.keyboard("{Home}");
+		await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
 	},
 };

@@ -58,8 +58,9 @@ export const SEGMENTED_VARIANTS = {
 		unselected: "text-text-muted hover:text-text",
 	},
 	/**
-	 * overlays/SettingsPanel's five-tab header. An underline drawn with a
-	 * bottom border that is pulled up over the strip's own rule by `-mb-px`.
+	 * A horizontal tab header: an underline drawn with a bottom border that is
+	 * pulled up over the strip's own rule by `-mb-px`. Tabs' default look; it
+	 * was SettingsPanel's header until frame H moved Settings to `sections`.
 	 *
 	 * The as-found version also carried `border-none`, and that was a live bug:
 	 * `border-none` sets border-style to none, which kills `border-b-2` outright,
@@ -115,6 +116,18 @@ export const SEGMENTED_VARIANTS = {
 		item: "relative flex h-[32px] w-[32px] items-center justify-center rounded-md text-base cursor-pointer transition-colors",
 		selected: "bg-bg-alt text-text",
 		unselected: "text-text-muted hover:text-text disabled:opacity-50",
+	},
+	/**
+	 * overlays/SettingsPanel's left section list (frame H): a vertical Tabs
+	 * whose selected row takes the alt fill. Full-width rows, so the whole
+	 * line is the hit target. On a phone the list is a whole screen you drill
+	 * in from, so rows grow to a 44px thumb target and a step larger type.
+	 */
+	sections: {
+		list: "flex flex-col gap-[2px]",
+		item: "w-full text-left px-[8px] py-[6px] rounded-[7px] text-[11.5px] leading-[15px] max-md:flex max-md:items-center max-md:min-h-[44px] max-md:text-[13px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
+		selected: "bg-bg-alt text-text",
+		unselected: "text-text-secondary hover:text-text",
 	},
 } as const satisfies Record<string, SegmentedRecipe>;
 

@@ -43,6 +43,8 @@
 		value = $bindable(),
 		options,
 		variant = "underline",
+		orientation = "horizontal",
+		activationMode = "automatic",
 		label,
 		class: className,
 		optionContent,
@@ -52,6 +54,17 @@
 		value: T;
 		options: readonly SegmentedOption<T>[];
 		variant?: SegmentedVariant;
+		/**
+		 * `vertical` is a section list: ArrowUp/ArrowDown move (Left/Right do
+		 * not), and the list announces `aria-orientation="vertical"`.
+		 */
+		orientation?: "horizontal" | "vertical";
+		/**
+		 * `manual` makes arrows move focus only, selecting on Enter/Space or a
+		 * click. For lists where selecting navigates away, such as Settings'
+		 * phone section list, which drills into the section.
+		 */
+		activationMode?: "automatic" | "manual";
 		/** Names the strip for screen readers, e.g. "Settings sections". */
 		label: string;
 		/** Additional classes for the strip element. */
@@ -70,6 +83,8 @@
 -->
 <Tabs.Root
 	{value}
+	{orientation}
+	{activationMode}
 	onValueChange={(next) => {
 		value = next as T;
 		onValueChange?.(value);

@@ -75,7 +75,7 @@
 
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
-	let settingsInitialTab = $state("notifications");
+	let settingsInitialTab = $state<string | undefined>();
 	let debugPanelVisible = $state(false);
 
 	const TERMINAL_MIN_HEIGHT = 100;
@@ -595,7 +595,8 @@
 	$effect(() => {
 		function onSettingsOpen(e: Event) {
 			const detail = (e as CustomEvent).detail;
-			if (detail?.tab) settingsInitialTab = detail.tab;
+			// A generic open leaves this undefined: phone then starts on the section list.
+			settingsInitialTab = detail?.tab;
 			settingsVisible = true;
 		}
 		window.addEventListener("settings:open", onSettingsOpen);

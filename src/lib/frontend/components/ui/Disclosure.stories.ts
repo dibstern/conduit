@@ -21,7 +21,7 @@ const meta = {
 	argTypes: {
 		density: {
 			control: "inline-radio",
-			options: ["default", "compact", "tight", "roomy", "split"],
+			options: ["default", "compact", "tight", "list"],
 		},
 		look: {
 			control: "inline-radio",

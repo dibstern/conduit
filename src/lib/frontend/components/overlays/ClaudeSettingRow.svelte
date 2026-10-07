@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import TextButton from "../ui/TextButton.svelte";
 	import type {
 		ClaudeSettingKey,
 		ClaudeSettingProvenance,
@@ -23,27 +24,26 @@
 </script>
 
 <div
-	class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand flex flex-col"
+	class="flex flex-col gap-[6px] py-[8px] border-b border-border-subtle"
 	data-testid="claude-setting-{key}"
 >
 	{@render control(label, description)}
 	{#if provenance}
 		<div
-			class="flex items-center justify-between gap-3 text-xs text-text-dimmer"
+			class="flex items-center justify-between gap-3 text-text-dimmer"
 			data-testid="claude-setting-{key}-provenance"
 		>
 			<span>
 				{provenance.beforeSource ?? ""}{#if provenance.sourceLabel}<span title={provenance.sourcePath}>{provenance.sourceLabel}</span>{/if}{provenance.afterSource ?? (provenance.sourceLabel ? "" : provenance.text)}
 			</span>
 			{#if provenance.canReset}
-				<button
-					type="button"
-					class="shrink-0 border-none bg-transparent text-xs text-text-muted hover:text-text cursor-pointer font-brand"
+				<TextButton
+					class="shrink-0"
 					data-testid="claude-setting-{key}-reset"
 					onclick={() => void onreset?.()}
 				>
 					Reset
-				</button>
+				</TextButton>
 			{/if}
 		</div>
 	{/if}

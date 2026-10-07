@@ -114,12 +114,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the meter query, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/overlays/SettingsPanel.stories.ts",
-		snippetPattern: /Settings panel is missing/,
-		reason:
-			"storybook play() guard that narrows the panel query, not executable production code",
-	},
-	{
 		path: "src/lib/frontend/components/ui/Icon.stories.ts",
 		snippetPattern: /Pause icon is missing/,
 		reason:

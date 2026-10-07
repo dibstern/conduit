@@ -10,12 +10,6 @@
 		"src/lib/frontend/components/chat/TurnActivity.svelte": {
 			"native-control-bypass": 1
 		},
-		"src/lib/frontend/components/overlays/ClaudeSettingRow.svelte": {
-			"native-control-bypass": 1
-		},
-		"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte": {
-			"native-control-bypass": 7
-		},
 		"src/lib/frontend/components/permissions/PermissionCard.svelte": {
 			"native-control-bypass": 2
 		}

@@ -1,20 +1,19 @@
 <!--
-  Toggle — A labeled toggle switch row.
-  Renders: [icon?] [label + description?] .............. [switch]
+  Toggle — a labeled switch row, in Settings' frame H shape:
+  [switch] [bold title / one-line description], separated by a hairline.
   The entire row is a single <button> — no nested interactive elements,
   proper semantics, and the full row is the touch target on mobile.
 
   `disabled` dims the whole row, matching ui/Button's disabled convention.
   There used to be a separate `dimmed` prop that faded only the switch, and
   every call site passed it alongside `disabled` — so a call site that forgot
-  it got a disabled toggle indistinguishable from an enabled one
-.
+  it got a disabled toggle indistinguishable from an enabled one.
+
+  `class` REPLACES the row's padding and hairline, for a toggle that sits
+  inside a row someone else already draws (ClaudeSettingRow).
 -->
 <script lang="ts">
-	import Icon from "./Icon.svelte";
-
 	let {
-		icon,
 		label,
 		description,
 		checked = false,
@@ -23,7 +22,6 @@
 		ariaLabel,
 		class: className,
 	}: {
-		icon?: string;
 		label: string;
 		description?: string;
 		checked?: boolean;
@@ -39,25 +37,21 @@
 	role="switch"
 	aria-checked={checked}
 	aria-label={ariaLabel ?? `Toggle ${label.toLowerCase()}`}
-	class="flex items-center w-full text-left select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {className ?? 'gap-3 px-3.5 py-2.5 border-none bg-transparent'}"
+	class="flex items-start gap-[10px] w-full text-left text-[11.5px] select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {className ?? 'py-[8px] border-b border-border-subtle'}"
 	{disabled}
 	onclick={onchange}
 >
-	{#if icon}
-		<span class="text-text-muted shrink-0">
-			<Icon name={icon} size={16} />
-		</span>
-	{/if}
-	<div class="flex-1 min-w-0">
-		<div class="text-sm text-text {description ? 'font-medium' : ''}">{label}</div>
-		{#if description}
-			<div class="text-xs text-text-muted mt-0.5">{description}</div>
-		{/if}
-	</div>
 	<span
-		class="relative w-9 h-5 rounded-full shrink-0 transition-[background,box-shadow] {checked ? 'bg-brand-a' : 'bg-text-dimmer'}"
-		style={checked ? "box-shadow: 0 0 8px rgb(from var(--color-brand-a) r g b / 0.4);" : ""}
+		class="relative mt-[2px] h-[17px] w-[30px] shrink-0 rounded-full transition-colors {checked ? 'bg-brand-b' : 'bg-border-chip'}"
 	>
-		<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm pointer-events-none transition-transform {checked ? 'translate-x-4' : ''}"></span>
+		<span
+			class="absolute left-[2px] top-[2px] h-[13px] w-[13px] rounded-full pointer-events-none transition-[translate,background-color] {checked ? 'translate-x-[13px] bg-white' : 'bg-text-secondary'}"
+		></span>
+	</span>
+	<span class="min-w-0 flex-1">
+		<span class="block text-text {description ? 'font-semibold mb-[2px]' : ''}">{label}</span>
+		{#if description}
+			<span class="block text-text-secondary">{description}</span>
+		{/if}
 	</span>
 </button>
