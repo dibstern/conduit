@@ -1,4 +1,6 @@
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
+import type { LimitRecovery } from "../../contracts/limit-recovery.js";
+import { LimitRecoverySchema } from "../../contracts/limit-recovery.js";
 import {
 	type NativeThread,
 	ProviderStateEffectTag,
@@ -105,11 +107,17 @@ function planTurn(input: {
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
 	readonly deliveredAgent: string | undefined;
+	readonly limitRecovery: LimitRecovery | null;
 	readonly messages?: readonly MessageWithParts[];
 	readonly userText: string;
 	readonly options: PrepareTurnOptions;
 }): PreparedTurn | HandoffTooLarge | { readonly _tag: "ReadHistory" } {
 	const { nativeThread, options, userText } = input;
+	// A cut-off remains an open request until Dismiss or a real assistant reply.
+	const note =
+		input.limitRecovery?.cutOffMessageId && userText
+			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
+			: "";
 	const live = options.liveSession;
 	const sameLiveAccount =
 		live?.instanceId === input.instanceId &&
@@ -121,7 +129,7 @@ function planTurn(input: {
 			options.configDir ??
 			(sameLiveAccount ? live?.configDir : undefined) ??
 			nativeThread?.configDir,
-		prompt: userText,
+		prompt: `${note}${userText}`,
 	};
 	// No recorded agent means a thread from before agents were recorded: resume it.
 	const matchingReceipt =
@@ -175,7 +183,7 @@ function planTurn(input: {
 			cap,
 			64000,
 			window -
-				Buffer.byteLength(userText) -
+				Buffer.byteLength(base.prompt) -
 				Math.max(16000, Math.ceil(window / 4)),
 		),
 	);
@@ -234,7 +242,7 @@ function planTurn(input: {
 		].join("\n\n") + closing;
 	return {
 		...base,
-		prompt: `${hidden}\n\n${userText}`,
+		prompt: `${note}${hidden}\n\n${userText}`,
 		handoff: { included, omitted, tokens: Buffer.byteLength(hidden) },
 	};
 }
@@ -259,11 +267,18 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 				const providerState = nativeThread
 					? yield* state.getState(sessionId)
 					: {};
+				const session = yield* read.getSession(sessionId);
 				const input = {
 					sessionId,
 					instanceId,
 					nativeThread,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
+					limitRecovery:
+						session?.limit_recovery == null
+							? null
+							: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
+									session.limit_recovery,
+								),
 					userText: userText ?? "",
 					options: budgetOptions,
 				};

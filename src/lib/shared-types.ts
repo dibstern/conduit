@@ -1,6 +1,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import { LimitRecoverySchema } from "./contracts/limit-recovery.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
@@ -289,6 +290,7 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),
 	/** The approval mode this session was last switched to; absent until one is. */
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	/** The session's model, effort and context window; absent until set. "" follows the default. */

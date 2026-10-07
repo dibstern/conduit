@@ -283,6 +283,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 33, name: "pending_approvals_version" },
 				{ migration_id: 34, name: "sessions_model_settings" },
 				{ migration_id: 35, name: "sessions_side_thread" },
+				{ migration_id: 36, name: "sessions_limit_recovery" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

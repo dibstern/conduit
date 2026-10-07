@@ -1325,6 +1325,19 @@ export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
 	},
 ) {}
 
+export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
+	"DismissCutOff",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
 	"UnsnoozeSession",
 	{
@@ -1780,6 +1793,7 @@ export const WsRpcRequest = Schema.Union(
 	SetSessionAutoSettle,
 	SnoozeSession,
 	UnsnoozeSession,
+	DismissCutOff,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -2153,6 +2167,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetSessionAutoSettle),
 	Rpc.fromTaggedRequest(SnoozeSession),
 	Rpc.fromTaggedRequest(UnsnoozeSession),
+	Rpc.fromTaggedRequest(DismissCutOff),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),

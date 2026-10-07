@@ -106,6 +106,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.deleted",
 			"session.provider_cleanup_failed",
 			"session.handoff_delivered",
+			"session.cut_off_dismissed",
+			"session.usage_limited", // Continuation owns canonical intake of the adapter's same-named signal.
 			"session.forked",
 			"session.permission_mode_changed",
 			"session.model_changed",

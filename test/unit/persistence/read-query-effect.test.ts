@@ -1331,6 +1331,7 @@ describe("ReadQueryEffect session list reads", () => {
 			).toEqual([
 				{
 					id: "child",
+					limitRecovery: null,
 					title: "Forked",
 					status: "busy",
 					createdAt: 5,
@@ -1343,6 +1344,7 @@ describe("ReadQueryEffect session list reads", () => {
 				},
 				{
 					id: "root",
+					limitRecovery: null,
 					title: "Test",
 					status: "idle",
 					createdAt: 1,
@@ -1387,6 +1389,7 @@ describe("ReadQueryEffect session list reads", () => {
 					)?.item,
 				).toEqual({
 					id: "noisy",
+					limitRecovery: null,
 					title: "Noisy",
 					status: "idle",
 					createdAt: 1,
@@ -1404,6 +1407,7 @@ describe("ReadQueryEffect session list reads", () => {
 					)?.item,
 				).toEqual({
 					id: "quiet",
+					limitRecovery: null,
 					title: "Quiet",
 					status: "idle",
 					createdAt: 1,

@@ -177,6 +177,8 @@ export function translateDomainEventToRelay(
 		case "session.provider_changed":
 		case "session.provider_cleanup_failed":
 		case "session.handoff_delivered":
+		case "session.usage_limited":
+		case "session.cut_off_dismissed":
 		// Read state reaches the UI as the `unread` field on a broadcast session
 		// list, never as a relay event, so there is nothing to translate here.
 		case "session.read":

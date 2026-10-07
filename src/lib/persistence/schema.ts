@@ -54,6 +54,8 @@ export const PENDING_APPROVALS_VERSION_MIGRATION =
 export const SESSIONS_MODEL_SETTINGS_MIGRATION =
 	"0033_sessions_model_settings.sql";
 export const SESSIONS_SIDE_THREAD_MIGRATION = "0034_sessions_side_thread.sql";
+export const SESSIONS_LIMIT_RECOVERY_MIGRATION =
+	"0035_sessions_limit_recovery.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

@@ -52,6 +52,7 @@ export {
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	DismissCutOff,
 	FindFolders,
 	type FindFoldersResponse,
 	ForkSession,

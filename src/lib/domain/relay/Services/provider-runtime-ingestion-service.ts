@@ -30,6 +30,7 @@ import type { makeSessionCompactions } from "../../../session/session-compaction
 import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
+import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { announceBackgroundWork } from "./session-attention.js";
 
 export type ProviderRuntimeIngestionError =
@@ -73,7 +74,7 @@ export interface ProviderRuntimeIngestionLiveOptions {
 export const makeProviderRuntimeIngestionLive = (
 	options: ProviderRuntimeIngestionLiveOptions = {},
 ): Layer.Layer<
-	ProviderRuntimeIngestionTag,
+	ProviderRuntimeIngestionTag | ContinuationTag,
 	never,
 	EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
 > =>
@@ -83,6 +84,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const eventStore = yield* EventStoreEffectTag;
 			const sql = yield* SqlClient.SqlClient;
+			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
 				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
 			>();
@@ -208,6 +210,8 @@ export const makeProviderRuntimeIngestionLive = (
 							}
 						});
 						let appended = true;
+						const acceptedLimits: string[] = [];
+						let skippedLimits = 0;
 						const beforeCommit = Effect.gen(function* () {
 							yield* ingestOptions.beforeCommit ?? Effect.void;
 							if (permissionReply) {
@@ -218,6 +222,8 @@ export const makeProviderRuntimeIngestionLive = (
 						const afterCommit = Effect.gen(function* () {
 							if (appended) {
 								yield* Ref.set(mapperStateRef, nextState);
+								for (const sessionId of acceptedLimits)
+									yield* continuation.runLimitPolicy(sessionId);
 								yield* ingestOptions.afterCommit ?? Effect.void;
 							}
 							if (receipt) {
@@ -230,31 +236,35 @@ export const makeProviderRuntimeIngestionLive = (
 							publish: ingestOptions.publishToBus ?? true,
 							afterCommit,
 						};
-						if (context && (receipt || context.attachmentId)) {
-							yield* commitAndSignal.write(
-								(project) =>
-									Effect.gen(function* () {
-										// Claim inside the append transaction, before event IDs or
-										// projections are written. Replayed and fenced frames are no-ops.
+						yield* commitAndSignal.write(
+							(project) =>
+								Effect.gen(function* () {
+									// Claim inside the append transaction, before event IDs or
+									// projections are written. Replayed and fenced frames are no-ops.
+									if (context && (receipt || context.attachmentId))
 										appended = receipt
 											? yield* commitClaudeRunnerOutput(sql, receipt)
 											: yield* ownsClaudeRunnerAttachment(sql, context);
-										if (!appended) return;
-										yield* ensureSessions;
-										yield* project(
-											yield* eventStore.appendBatch(persistentEvents),
-										);
-										yield* beforeCommit;
-									}),
-								commitOptions,
-							);
-						} else {
-							yield* ensureSessions;
-							yield* commitAndSignal(persistentEvents, {
-								...commitOptions,
-								beforeCommit,
-							});
-						}
+									if (!appended) return;
+									yield* ensureSessions;
+									let pending: CanonicalEvent[] = [];
+									for (const event of persistentEvents) {
+										if (event.type === "session.usage_limited") {
+											if (pending.length > 0) {
+												yield* project(yield* eventStore.appendBatch(pending));
+												pending = [];
+											}
+											if (yield* continuation.intakeLimit(event, project))
+												acceptedLimits.push(event.sessionId);
+											else skippedLimits++;
+										} else pending.push(event);
+									}
+									if (pending.length > 0)
+										yield* project(yield* eventStore.appendBatch(pending));
+									yield* beforeCommit;
+								}),
+							commitOptions,
+						);
 						if (!appended) return 0;
 
 						// A compaction in progress and a retry live in memory, not the
@@ -280,7 +290,7 @@ export const makeProviderRuntimeIngestionLive = (
 							yield* publishRelayMessages(domainEvents, options.relayPublisher);
 						}
 
-						return domainEvents.length;
+						return domainEvents.length - skippedLimits;
 					}),
 				);
 
@@ -290,7 +300,7 @@ export const makeProviderRuntimeIngestionLive = (
 				drain: () => Effect.void,
 			} satisfies ProviderRuntimeIngestion;
 		}),
-	);
+	).pipe(Layer.provideMerge(ContinuationLive));
 
 export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 

@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { Effect, Fiber, Stream } from "effect";
+import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -25,6 +26,254 @@ test.use({
 		],
 	},
 });
+
+for (const dismiss of [false, true]) {
+	test(
+		dismiss
+			? "scenario 7: DismissCutOff removes the hidden note from the next send"
+			: "scenarios 1 and 6: a mid-turn limit is projected once and typing continues on account 1 with a hidden note",
+		async ({ page, harness }, testInfo) => {
+			test.setTimeout(120_000);
+			const artifacts = resolve(
+				"test-results/account-switch",
+				`${testInfo.project.name}-${dismiss ? "dismiss" : "limited"}-${testInfo.retry}`,
+			);
+			mkdirSync(artifacts, { recursive: true });
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			const browser = await harness.connect();
+			const accounts: { id: string; configDir: string }[] = [];
+			for (const name of ["Account 1", "Account 2"]) {
+				const configDir = mkdtempSync(join(harness.root, "limited-account-"));
+				const added = await Effect.runPromise(
+					browser.rpc.AddInstance({ name, driver: "claude", configDir }),
+				);
+				if (!added.addedInstanceId)
+					throw new Error(`No instance ID for ${name}`);
+				accounts.push({ id: added.addedInstanceId, configDir });
+			}
+			const account = accounts[0];
+			if (!account) throw new Error("Account 1 was not registered");
+			const directory = mkdtempSync(join(harness.root, "limited-project-"));
+			const { savedSlug: slug } = await Effect.runPromise(
+				browser.rpc.SaveProject({
+					folders: [directory],
+					instanceId: account.id,
+				}),
+			);
+			if (!slug) throw new Error("No project slug");
+			const observed: { sequence: number; session: SessionInfo }[] = [];
+			const subscription = Effect.runFork(
+				Stream.runForEach(
+					browser.rpc.SubscribeShell({ projectSlug: slug }),
+					(envelope) =>
+						Effect.sync(() => {
+							if (envelope._tag === "snapshot")
+								for (const session of envelope.rows)
+									observed.push({ sequence: envelope.sequence, session });
+							if (envelope._tag === "upsert")
+								observed.push({
+									sequence: envelope.sequence,
+									session: envelope.item,
+								});
+						}),
+				),
+			);
+			const snapshot = () =>
+				Effect.runPromise(
+					browser.rpc.SubscribeShell({ projectSlug: slug }).pipe(
+						Stream.take(1),
+						Stream.runCollect,
+						Effect.map((envelopes) => Array.from(envelopes)[0]),
+					),
+				);
+			try {
+				await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
+				await page.locator("#new-session-btn:visible").click();
+				const picker = page.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				);
+				await picker.click();
+				await page.getByTestId("picker-row-harness").click();
+				await page.getByTestId(`picker-instance-${account.id}`).click();
+				await page.keyboard.press("Escape");
+				const cutOffText =
+					"usage-limit-account-1: keep working on the original request";
+				await app.sendMessage(cutOffText);
+				await expect(page).toHaveURL(/\/s\/[^/?]+/);
+				const sessionId = new URL(page.url()).pathname.split("/").at(-1);
+				if (!sessionId) throw new Error("No session ID in browser URL");
+				await expect
+					.poll(
+						() =>
+							observed.filter((row) => row.session.id === sessionId).at(-1)
+								?.session.limitRecovery,
+					)
+					.toEqual({
+						instanceId: account.id,
+						rateLimitType: "seven_day",
+						resetsAt: 1791370800,
+						cutOffMessageId: expect.any(String),
+						rearms: 0,
+						continued: false,
+					});
+				await chat.waitForStreamingComplete();
+				await expect
+					.poll(() =>
+						harness.marks.some(
+							(mark) => mark.kind === "usage-limit" && mark.phase === "limited",
+						),
+					)
+					.toBe(true);
+				await chat.expandTurnActivity();
+				await expect(chat.toolBlocks.last()).toHaveAttribute(
+					"data-tool-status",
+					"completed",
+				);
+				await expect(chat.messagesContainer).not.toContainText(
+					"You've hit your limit",
+				);
+				await expect(
+					chat.userMessages.last().locator(".whitespace-pre-wrap"),
+				).toHaveText(cutOffText);
+				// UI follow-up hook: add strip and cut-off-tag assertions in this step.
+				await test.step("limited-session UI follow-up hook", async () => {
+					await page.screenshot({ path: join(artifacts, "01-limited.png") });
+				});
+				const before = await snapshot();
+				writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+				await expect
+					.poll(() =>
+						harness.marks.some(
+							(mark) =>
+								mark.kind === "usage-limit" && mark.phase === "repeated",
+						),
+					)
+					.toBe(true);
+				const after = await snapshot();
+				// These isolated rejected background notices must not advance the
+				// client read-model cursor at all, proving they appended no new limit.
+				expect(before?._tag).toBe("snapshot");
+				expect(after).toEqual(before);
+				writeFileSync(
+					join(artifacts, "duplicate-limit-client-snapshots.json"),
+					JSON.stringify({ before, after }, null, 2),
+				);
+				if (dismiss) {
+					await Effect.runPromise(
+						browser.rpc.DismissCutOff({
+							projectSlug: slug,
+							sessionId,
+							originId: browser.originId,
+						}),
+					);
+					const dismissed = await snapshot();
+					if (dismissed?._tag !== "snapshot")
+						throw new Error("No session snapshot after Dismiss");
+					expect(
+						dismissed.rows.find((row) => row.id === sessionId)?.limitRecovery,
+					).toEqual({
+						instanceId: account.id,
+						rateLimitType: "seven_day",
+						resetsAt: 1791370800,
+						rearms: 0,
+						continued: false,
+					});
+					// Repeated Dismiss is an error-free no-op through the same RPC.
+					await Effect.runPromise(
+						browser.rpc.DismissCutOff({ projectSlug: slug, sessionId }),
+					);
+				}
+				const typedText = dismiss
+					? "Continue after Dismiss."
+					: "Continue while limited.";
+				await app.sendMessage(typedText);
+				await expect
+					.poll(
+						() =>
+							harness
+								.claudeOptions()
+								.find((call) => call.prompt?.endsWith(typedText)),
+						{ timeout: 5000 },
+					)
+					.toBeDefined();
+				const sent = harness
+					.claudeOptions()
+					.find((call) => call.prompt?.endsWith(typedText));
+				expect(sent?.configDir).toBe(account.configDir);
+				expect(sent?.prompt?.startsWith("[Conduit still-open note]")).toBe(
+					!dismiss,
+				);
+				if (dismiss) expect(sent?.prompt).toBe(typedText);
+				await expect(
+					chat.userMessages.last().locator(".whitespace-pre-wrap"),
+				).toHaveText(typedText);
+				await expect(chat.messagesContainer).not.toContainText(
+					"[Conduit still-open note]",
+				);
+				await expect(chat.assistantMessages.last()).toContainText(
+					`done(${typedText})`,
+				);
+				await chat.waitForStreamingComplete();
+				await expect
+					.poll(
+						() =>
+							observed.filter((row) => row.session.id === sessionId).at(-1)
+								?.session.limitRecovery,
+					)
+					.toBeNull();
+				await page.screenshot({ path: join(artifacts, "02-replied.png") });
+				const mark = harness.marks.find(
+					(mark) => mark.kind === "usage-limit" && mark.phase === "limited",
+				);
+				if (mark?.kind !== "usage-limit")
+					throw new Error("No native limit transcript mark");
+				const native: unknown = JSON.parse(
+					readFileSync(
+						join(
+							harness.root,
+							`provisional-limit-native-${mark.sessionId}.json`,
+						),
+						"utf8",
+					),
+				);
+				expect(native).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "user",
+							message: {
+								role: "user",
+								content: [{ type: "text", text: cutOffText }],
+							},
+						}),
+					]),
+				);
+				writeFileSync(
+					join(artifacts, "provisional-native-transcript.json"),
+					JSON.stringify(native, null, 2),
+				);
+				await page.reload();
+				await app.connectOverlay.waitFor({ state: "detached" });
+				await expect(chat.messagesContainer).not.toContainText(
+					"You've hit your limit",
+				);
+				await expect(
+					chat.userMessages.locator(".whitespace-pre-wrap"),
+				).toHaveText([cutOffText, typedText]);
+			} finally {
+				writeFileSync(
+					join(artifacts, "sdk-calls.json"),
+					JSON.stringify(harness.claudeOptions(), null, 2),
+				);
+				writeFileSync(
+					join(artifacts, "client-session-rows.json"),
+					JSON.stringify(observed, null, 2),
+				);
+				await Effect.runPromise(Fiber.interrupt(subscription));
+			}
+		},
+	);
+}
 
 test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh native session", async ({
 	page,

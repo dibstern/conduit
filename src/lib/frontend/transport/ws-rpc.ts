@@ -12,6 +12,7 @@ export {
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	DismissCutOff,
 	EnvelopeSchema,
 	FindFolders,
 	type FindFoldersResponse,

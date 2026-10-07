@@ -205,6 +205,14 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** Canonical prompt identity, retained for late rejected background notices. */
+	currentUserMessageId?: string | undefined;
+	usageLimit?:
+		| { readonly rateLimitType: string; readonly resetsAt?: number }
+		| undefined;
+	usageLimitReported?: boolean | undefined;
+	/** Synthetic SDK rounds wait for their result before translation. */
+	pendingSyntheticMessages?: SDKMessage[] | undefined;
 	/** True from prompt submit or an autonomous SDK turn until its result. The SDK's
 	 *  system/init reports idle to clear a busy status stranded by a crash
 	 *  mid-turn, but it arrives ~1s AFTER the prompt starts — so it needs to

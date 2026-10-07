@@ -2,7 +2,9 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import fc from "fast-check";
 import { expect, it } from "vitest";
+import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
@@ -43,6 +45,110 @@ const conversation = fc.array(
 	}),
 	{ maxLength: 110 },
 );
+
+it("prepends a hidden still-open note only until Dismiss or a reply, on fresh and resumed turns", async () => {
+	await fc.assert(
+		fc.asyncProperty(
+			fc.constantFrom("open", "dismissed", "replied", "dismissed-replied"),
+			fc.boolean(),
+			fc.string({ minLength: 1, maxLength: 80 }),
+			async (cutOff, resume, text) => {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const commit = yield* makeCommitAndSignal;
+						const state = yield* ProviderStateEffectTag;
+						const read = yield* ReadQueryEffectTag;
+						yield* commit([
+							canonicalEvent("session.created", "s1", {
+								sessionId: "s1",
+								title: "Limited",
+								provider: "personal",
+							}),
+							canonicalEvent("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "cut-off",
+								role: "user",
+							}),
+							canonicalEvent("text.delta", "s1", {
+								messageId: "cut-off",
+								partId: "cut-off:text",
+								text: "Earlier request",
+							}),
+							canonicalEvent("session.usage_limited", "s1", {
+								instanceId: "personal",
+								rateLimitType: "five_hour",
+								cutOffMessageId: "cut-off",
+							}),
+						]);
+						if (cutOff.includes("dismissed"))
+							yield* commit([
+								canonicalEvent("session.cut_off_dismissed", "s1", {
+									cutOffMessageId: "cut-off",
+								}),
+							]);
+						if (cutOff.includes("replied"))
+							yield* commit([
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "reply",
+									role: "assistant",
+								}),
+							]);
+						if (resume)
+							yield* state.saveUpdates("s1", [
+								{
+									key: "nativeThread:personal",
+									value: JSON.stringify({
+										configDir: "/accounts/personal",
+										resumeSessionId: "native-personal",
+										firstSequence: 0,
+										deliveredThrough: 0,
+									}),
+								},
+							]);
+						yield* commit([
+							canonicalEvent("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "current",
+								role: "user",
+							}),
+							canonicalEvent("text.delta", "s1", {
+								messageId: "current",
+								partId: "current:text",
+								text,
+							}),
+						]);
+						const prepare = yield* makePrepareTurn({
+							userMessageId: "current",
+						});
+						const plan = yield* prepare("s1", "personal", text);
+						expect(
+							plan.prompt.startsWith(
+								"[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n",
+							),
+						).toBe(cutOff === "open");
+						expect(plan.prompt.endsWith(text)).toBe(true);
+						expect(
+							(yield* read.readSessionTranscriptPage("s1", {
+								limit: 50,
+							})).messages.find((message) => message.id === "current")?.text,
+						).toBe(text);
+					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+				);
+			},
+		),
+		{
+			seed: 20261008,
+			numRuns: 40,
+			examples: [
+				["open", true, "Continue"],
+				["open", false, "Continue"],
+				["dismissed", true, "Continue"],
+				["replied", false, "Continue"],
+			],
+		},
+	);
+});
 
 it("prepares intact, ordered, budgeted context only for a fresh native thread", async () => {
 	await fc.assert(

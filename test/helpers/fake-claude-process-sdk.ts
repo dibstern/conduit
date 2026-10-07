@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type {
 	ResolvedSettings,
@@ -20,6 +26,10 @@ import type {
 	SDKUserMessage,
 } from "../../src/lib/provider/claude/types.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import {
+	provisionalRejectedLimit,
+	provisionalUsageLimitTurn,
+} from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
 
 export type ProcessMark =
 	| {
@@ -35,6 +45,12 @@ export type ProcessMark =
 			toolName: string;
 			arguments: Record<string, unknown>;
 			result: CallToolResult;
+	  }
+	| {
+			kind: "usage-limit";
+			phase: "limited" | "repeated";
+			sessionId: string;
+			prompt: string;
 	  }
 	| {
 			kind:
@@ -162,6 +178,8 @@ export type ProcessMark =
 	| { kind: "runner-spawned"; pid: number; socketPath: string };
 
 function currentRequest(prompt: string): string {
+	if (prompt.startsWith("[Conduit still-open note]"))
+		prompt = prompt.slice(prompt.indexOf("\n\n") + 2);
 	const end = "[End conduit context handoff]\n\n";
 	const boundary = prompt.indexOf(end);
 	return prompt.startsWith("[Conduit context handoff]") && boundary >= 0
@@ -626,6 +644,26 @@ function query(params: {
 				} finally {
 					await client.close();
 				}
+			}
+			if (request.startsWith("usage-limit-account-1")) {
+				const fixture = provisionalUsageLimitTurn(sessionId, input);
+				if (proof)
+					writeFileSync(
+						join(dirname(proof), `provisional-limit-native-${sessionId}.json`),
+						JSON.stringify(fixture.nativeTranscript, null, 2),
+					);
+				yield* fixture.events;
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				if (proof) {
+					const release = join(dirname(proof), "release-limit-repeats");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
+				for (let repeat = 0; repeat < 4; repeat++)
+					yield provisionalRejectedLimit(sessionId);
+				mark({ kind: "usage-limit", phase: "repeated", sessionId, prompt });
+				continue;
 			}
 			const messageId = randomUUID();
 			yield stream(sessionId, {

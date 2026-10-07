@@ -2361,6 +2361,7 @@ describe("SessionManagerService", () => {
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 250,
 					attention: "idle",
+					limitRecovery: null,
 				},
 			]);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));

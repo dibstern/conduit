@@ -146,6 +146,10 @@ import {
 	makeClaudeTranslationService,
 } from "./claude-translation-service.js";
 import {
+	emitClaudeUsageLimit,
+	interceptClaudeUsageLimit,
+} from "./claude-usage-limit.js";
+import {
 	type ClaudeWarmedQueryOwner,
 	makeClaudeWarmedQueryOwner,
 } from "./claude-warmed-query.js";
@@ -1713,6 +1717,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
+					currentUserMessageId: input.userMessageId,
 					turnInFlight: input.turnId !== undefined,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
@@ -2033,6 +2038,10 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 								turnDeferred,
 							);
 							ctx.currentTurnId = input.turnId;
+							ctx.currentUserMessageId = input.userMessageId;
+							ctx.usageLimit = undefined;
+							ctx.usageLimitReported = undefined;
+							ctx.pendingSyntheticMessages = undefined;
 							// Marks the turn as started so a system/init arriving before
 							// the first assistant chunk cannot report the session idle.
 							ctx.turnInFlight = true;
@@ -2132,7 +2141,14 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				resultFinalizationStarted = true;
 			}).pipe(
 				Effect.catchAll((err) =>
-					this.handleStreamFailureEffect(ctx, translator, err),
+					this.finishStreamOutputEffect(ctx, translator).pipe(
+						Effect.matchEffect({
+							onFailure: (limitError) =>
+								this.handleStreamFailureEffect(ctx, translator, limitError),
+							onSuccess: () =>
+								this.handleStreamFailureEffect(ctx, translator, err),
+						}),
+					),
 				),
 				Effect.ensuring(
 					this.finalizeStreamConsumerEffect(
@@ -2202,13 +2218,21 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
 				if (decodedMessage.type === "result") ctx.turnInFlight = false;
-				yield* translator.translate(ctx, decodedMessage);
+				const translatedMessages = yield* interceptClaudeUsageLimit(
+					ctx,
+					decodedMessage,
+				);
+				for (const message of translatedMessages)
+					yield* translator.translate(ctx, message);
 				yield* handleSubagentTaskStartedEffect(
 					(input) => this.ensureSubagentSessionEffect(ctx, input),
 					ctx,
 					decodedMessage,
 				);
 				if (decodedMessage.type === "result") {
+					const translatedResult = translatedMessages.find(
+						(message) => message.type === "result",
+					);
 					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					const finalizationCtx = detachSubagentFinalizationContext(ctx);
 					markResultFinalizationStarted();
@@ -2216,9 +2240,30 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						finalizationCtx,
 						decodedMessage,
 					);
-					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
+					yield* resolveTurnEffect(
+						this.stateRef,
+						ctx,
+						translatedResult ?? decodedMessage,
+					);
 				}
 			}
+			yield* this.finishStreamOutputEffect(ctx, translator);
+		});
+	}
+
+	private finishStreamOutputEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+	): Effect.Effect<void, ClaudeAdapterError> {
+		return Effect.gen(function* () {
+			yield* emitClaudeUsageLimit(ctx);
+			const pending = ctx.pendingSyntheticMessages;
+			ctx.pendingSyntheticMessages = undefined;
+			// Ordinary SDK command output is still history if its stream ends
+			// without a result; only classified limit replies are discarded.
+			if (pending && !ctx.usageLimit)
+				for (const message of pending)
+					yield* translator.translate(ctx, message);
 		});
 	}
 

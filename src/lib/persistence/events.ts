@@ -70,6 +70,8 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.context_window_changed": ["sessionId", "contextWindow"],
 	"session.goal_changed": ["sessionId", "goal"],
 	"session.handoff_delivered": ["included", "omitted", "tokens"],
+	"session.usage_limited": ["instanceId", "rateLimitType", "cutOffMessageId"],
+	"session.cut_off_dismissed": ["cutOffMessageId"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"message.removed": ["messageId"],
 	"message.part.removed": ["messageId", "partId"],

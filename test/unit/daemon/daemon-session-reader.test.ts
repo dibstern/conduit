@@ -500,6 +500,7 @@ describe("listDaemonSessions", () => {
 						messageCount: 0,
 						projectSlug: "project-a",
 						attention: "idle",
+						limitRecovery: null,
 					},
 					{
 						id: "b-mid",
@@ -510,6 +511,7 @@ describe("listDaemonSessions", () => {
 						messageCount: 0,
 						projectSlug: "project-b",
 						attention: "idle",
+						limitRecovery: null,
 					},
 				]);
 				expect(result.availability).toEqual(

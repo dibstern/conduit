@@ -28,6 +28,10 @@ import type {
 	ModelInfo,
 	SendTurnInput,
 } from "../../../../src/lib/provider/types.js";
+import {
+	provisionalLimitReply,
+	provisionalUsageLimitTurn,
+} from "../../../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
@@ -128,6 +132,195 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
+	});
+
+	it.each([
+		"rejected",
+		"assistant",
+		"result",
+		"non-limit",
+		"assistant-first",
+		"late-notice",
+	] as const)("classifies the independent %s signal before persisting synthetic output", async (signal) => {
+		const fixture = provisionalUsageLimitTurn("sdk-limited", {
+			type: "user",
+			message: { role: "user", content: "Finish the original request" },
+			parent_tool_use_id: null,
+		});
+		const messages = fixture.events.flatMap((message): SDKMessage[] => {
+			if (message.type === "rate_limit_event")
+				return signal === "rejected" ||
+					signal === "assistant-first" ||
+					signal === "late-notice"
+					? [message]
+					: [];
+			if (message.type === "assistant" && message.error === "rate_limit") {
+				if (
+					signal === "assistant" ||
+					signal === "assistant-first" ||
+					signal === "late-notice"
+				)
+					return [message];
+				const { error: _error, ...snapshot } = message;
+				return [snapshot];
+			}
+			if (
+				message.type === "result" &&
+				signal !== "result" &&
+				signal !== "assistant-first" &&
+				signal !== "late-notice"
+			) {
+				const { terminal_reason: _reason, ...result } = message;
+				return [{ ...result, is_error: signal !== "non-limit" }];
+			}
+			return [message];
+		});
+		if (signal === "assistant-first" || signal === "late-notice") {
+			const [notice] = messages.splice(
+				messages.findIndex((message) => message.type === "rate_limit_event"),
+				1,
+			);
+			if (!notice) throw new Error("No rejected notice in fixture");
+			messages.splice(
+				signal === "assistant-first" ? messages.length - 1 : messages.length,
+				0,
+				notice,
+			);
+		}
+		const sink = createMockEventSink();
+		let consumed = false;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createQueryFromGenerator(
+					(async function* () {
+						yield* messages;
+						consumed = true;
+					})(),
+				),
+		});
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "limited",
+					userMessageId: "cut-off-user",
+					instanceId: "account-1",
+					eventSink: sink,
+				}),
+			),
+		);
+		await waitForAssertion(() => expect(consumed).toBe(true));
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(result.status).toBe("completed");
+		expect(emitted.some((event) => event.type === "tool.completed")).toBe(true);
+		const limits = emitted.filter(
+			(event) => event.type === "session.usage_limited",
+		);
+		if (signal === "non-limit") {
+			expect(limits).toHaveLength(0);
+			expect(JSON.stringify(emitted)).toContain(provisionalLimitReply);
+		} else {
+			expect(limits).toHaveLength(signal === "late-notice" ? 2 : 1);
+			if (signal === "late-notice")
+				expect(limits[1]?.data).toEqual(limits[0]?.data);
+			expect(limits[0]?.data).toMatchObject({
+				instanceId: "account-1",
+				rateLimitType:
+					signal === "rejected" || signal === "assistant-first"
+						? "seven_day"
+						: "unknown",
+				cutOffMessageId: "cut-off-user",
+			});
+			expect(JSON.stringify(emitted)).not.toContain(provisionalLimitReply);
+		}
+		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it.each([
+		"end",
+		"throw",
+	] as const)("keeps ordinary synthetic output if the SDK %s without a result", async (termination) => {
+		const fixture = provisionalUsageLimitTurn("sdk-synthetic", {
+			type: "user",
+			message: { role: "user", content: "Run the command" },
+			parent_tool_use_id: null,
+		});
+		const messages = fixture.events.flatMap((message): SDKMessage[] => {
+			if (message.type === "result" || message.type === "rate_limit_event")
+				return [];
+			if (message.type === "assistant") {
+				const { error: _error, ...snapshot } = message;
+				return [snapshot];
+			}
+			return [message];
+		});
+		const sink = createMockEventSink();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createQueryFromGenerator(
+					(async function* () {
+						yield* messages;
+						if (termination === "throw")
+							throw new Error("SDK connection lost after synthetic output");
+					})(),
+				),
+		});
+		await Effect.runPromise(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "synthetic",
+						userMessageId: "command-user",
+						instanceId: "account-1",
+						eventSink: sink,
+					}),
+				)
+				.pipe(Effect.exit),
+		);
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(
+			emitted.filter((event) => event.type === "session.usage_limited"),
+		).toHaveLength(0);
+		expect(JSON.stringify(emitted)).toContain(provisionalLimitReply);
+		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it("classifies an assistant limit when the SDK closes before a result", async () => {
+		const fixture = provisionalUsageLimitTurn("sdk-limited", {
+			type: "user",
+			message: { role: "user", content: "Finish the original request" },
+			parent_tool_use_id: null,
+		});
+		const sink = createMockEventSink();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createMockQuery(
+					fixture.events.filter(
+						(message) =>
+							message.type !== "result" && message.type !== "rate_limit_event",
+					),
+				),
+		});
+		await expect(
+			Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "limited",
+						userMessageId: "cut-off-user",
+						instanceId: "account-1",
+						eventSink: sink,
+					}),
+				),
+			),
+		).rejects.toThrow("SDK stream ended without result");
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(
+			emitted.filter((event) => event.type === "session.usage_limited"),
+		).toHaveLength(1);
+		expect(JSON.stringify(emitted)).not.toContain(provisionalLimitReply);
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	it("first turn creates a new session, calls query(), and resolves with TurnResult", async () => {

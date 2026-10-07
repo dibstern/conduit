@@ -17,6 +17,7 @@ import {
 	SessionGoalChangedPayloadSchema,
 	type SessionPermissionModeValue,
 	type SessionStatusValue,
+	SessionUsageLimitedPayloadSchema,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 	type TurnModelResolvedPayload,
@@ -366,6 +367,14 @@ export function translateProviderRuntimeEventToDomain(
 			return singleEvent(event, state, "turn.model_resolved", payload);
 		}
 
+		case "session.usage_limited": {
+			const decoded = Schema.decodeUnknownEither(
+				SessionUsageLimitedPayloadSchema,
+			)(event.data);
+			if (Either.isLeft(decoded))
+				throw new TypeError("Invalid usage limit signal");
+			return singleEvent(event, state, "session.usage_limited", decoded.right);
+		}
 		case "session.goal_changed": {
 			const decoded = Schema.decodeUnknownEither(
 				SessionGoalChangedPayloadSchema,

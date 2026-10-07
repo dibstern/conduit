@@ -71,6 +71,8 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.context_window_changed",
 	"session.goal_changed",
 	"session.handoff_delivered",
+	"session.usage_limited",
+	"session.cut_off_dismissed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -411,6 +413,18 @@ export interface SessionHandoffDeliveredPayload {
 	readonly tokens: number;
 }
 
+export interface SessionUsageLimitedPayload {
+	readonly instanceId: string;
+	readonly rateLimitType: string;
+	/** SDK reset time, in Unix seconds. */
+	readonly resetsAt?: number;
+	readonly cutOffMessageId: string;
+}
+
+export interface SessionCutOffDismissedPayload {
+	readonly cutOffMessageId: string;
+}
+
 /**
  * Everything the approval card shows rides the asked event: the approvals
  * subscription serves the card from the pending_approvals row, which keeps
@@ -498,6 +512,8 @@ export interface EventPayloadMap {
 	"session.context_window_changed": SessionContextWindowChangedPayload;
 	"session.goal_changed": SessionGoalChangedPayload;
 	"session.handoff_delivered": SessionHandoffDeliveredPayload;
+	"session.usage_limited": SessionUsageLimitedPayload;
+	"session.cut_off_dismissed": SessionCutOffDismissedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -940,6 +956,17 @@ const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
 	tokens: Schema.NonNegativeInt,
 });
 
+export const SessionUsageLimitedPayloadSchema = Schema.Struct({
+	instanceId: Schema.String,
+	rateLimitType: Schema.String,
+	resetsAt: Schema.optionalWith(Schema.Number, { exact: true }),
+	cutOffMessageId: Schema.String,
+});
+
+const SessionCutOffDismissedPayloadSchema = Schema.Struct({
+	cutOffMessageId: Schema.String,
+});
+
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
@@ -1162,6 +1189,14 @@ const SessionHandoffDeliveredEventSchema = eventEnvelope(
 	"session.handoff_delivered",
 	SessionHandoffDeliveredPayloadSchema,
 );
+const SessionUsageLimitedEventSchema = eventEnvelope(
+	"session.usage_limited",
+	SessionUsageLimitedPayloadSchema,
+);
+const SessionCutOffDismissedEventSchema = eventEnvelope(
+	"session.cut_off_dismissed",
+	SessionCutOffDismissedPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -1222,6 +1257,8 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionContextWindowChangedEventSchema,
 	SessionGoalChangedEventSchema,
 	SessionHandoffDeliveredEventSchema,
+	SessionUsageLimitedEventSchema,
+	SessionCutOffDismissedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,

@@ -4,6 +4,7 @@ import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
+import { ContinuationTag } from "../../domain/relay/Services/continuation.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
@@ -163,6 +164,13 @@ export const sessionsHandlers = {
 						message: `SnoozeSession failed: ${String(error.cause)}`,
 					}),
 			),
+		),
+	DismissCutOff: (request) =>
+		Effect.flatMap(ContinuationTag, (continuation) =>
+			continuation.dismissCutOff(request.sessionId),
+		).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("DismissCutOff")),
 		),
 	UnsnoozeSession: (request) =>
 		unsnoozeSessionForClient({
@@ -370,6 +378,7 @@ export const sessionsHandlers = {
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
+	| "DismissCutOff"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
 	| "MarkSessionSeen"

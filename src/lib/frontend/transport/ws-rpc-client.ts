@@ -386,6 +386,12 @@ export interface UnsnoozeSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface DismissCutOffRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1225,6 +1231,16 @@ export async function unsnoozeSessionRpc(
 	input: UnsnoozeSessionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callUnsnoozeSession(input));
+}
+
+export async function dismissCutOffRpc(
+	input: DismissCutOffRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.DismissCutOff(input).pipe(Effect.asVoid),
+		),
+	);
 }
 
 export async function switchVariantRpc(
