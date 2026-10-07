@@ -70,6 +70,8 @@ export const LimitRecoverySchema = Schema.Struct({
 	resetsAt: Schema.optional(Schema.Number),
 	cutOffMessageId: Schema.optional(Schema.String),
 	scheduledAt: Schema.optional(Schema.Number),
+	/** The limit policy scheduled the resume, not the user. */
+	auto: Schema.optional(Schema.Boolean),
 	rearms: Schema.NonNegativeInt,
 	continued: Schema.Boolean,
 });
@@ -85,3 +87,19 @@ export const SessionResumeSchema = Schema.Struct({
 });
 
 export type SessionResume = typeof SessionResumeSchema.Type;
+
+/** What the daemon does when a Claude account reaches its usage limit. */
+export const UsageLimitsSettingSchema = Schema.Struct({
+	autoResume: Schema.Boolean,
+	autoSwitch: Schema.Boolean,
+	/** Claude instance IDs, in the order auto-switch tries them. */
+	order: Schema.Array(Schema.String),
+});
+
+export type UsageLimitsSetting = typeof UsageLimitsSettingSchema.Type;
+
+export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
+	autoResume: false,
+	autoSwitch: false,
+	order: [],
+};

@@ -1,12 +1,74 @@
+import { expect } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
 import {
 	instanceSlug,
 	mockInstances,
 	openModelPicker,
 	requireRelayControl,
+	requireRpcControl,
 } from "./shared.js";
 
+const usageLimits = (autoResume: boolean) => ({
+	usageLimits: { autoResume, autoSwitch: false, order: [] },
+});
+
 export const providerInstancesHandlers: StepHandler[] = [
+	{
+		name: "seed the daemon's usage limit setting",
+		match: /^auto-resume limited sessions is (on|off) on the daemon$/,
+		run: ({ world, match }) => {
+			const on = match[1] === "on";
+			const rpc = requireRpcControl(world.page);
+			rpc.setResponse("GetUsageLimitsSetting", usageLimits(on));
+			rpc.setResponse("SetUsageLimitsSetting", usageLimits(!on));
+		},
+	},
+	{
+		name: "assert the usage limit settings heading",
+		match: /^the usage limit settings heading reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.locator("#usage-limit-settings-title"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert the auto-resume toggle",
+		match:
+			/^the Auto-resume limited sessions toggle is (on|off) and reads (.+)$/,
+		run: async ({ world, match }) => {
+			const toggle = world.page
+				.locator("#usage-limit-settings")
+				.getByRole("switch", { name: "Toggle auto-resume limited sessions" });
+			await expect(toggle).toBeEnabled();
+			await expect(toggle).toHaveAttribute(
+				"aria-checked",
+				String(match[1] === "on"),
+			);
+			await expect(toggle).toContainText("Auto-resume limited sessions");
+			await expect(toggle).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "turn on auto-resume",
+		match: /^I turn on Auto-resume limited sessions$/,
+		run: async ({ world }) => {
+			await world.page
+				.locator("#usage-limit-settings")
+				.getByRole("switch", { name: "Toggle auto-resume limited sessions" })
+				.click();
+		},
+	},
+	{
+		name: "assert SetUsageLimitsSetting RPC",
+		match: /^the SetUsageLimitsSetting RPC turns auto-resume on$/,
+		run: async ({ world }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "SetUsageLimitsSetting",
+			);
+			expect(request.payload).toMatchObject(usageLimits(true));
+		},
+	},
 	{
 		name: "open settings to instances tab",
 		match: /^I open settings to the Instances tab$/,
@@ -20,7 +82,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "visible", timeout: 5_000 });
-			await page.getByTestId("settings-tab-instances").click();
+			// A phone opens straight into the section, with the list hidden.
+			const tab = page.getByTestId("settings-tab-instances");
+			if (await tab.isVisible()) await tab.click();
 			await page
 				.locator("#instances-settings")
 				.waitFor({ state: "visible", timeout: 5_000 });

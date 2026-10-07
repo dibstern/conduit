@@ -443,6 +443,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
 				SetAutoSettleSetting: (request) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
+				GetUsageLimitsSetting: () =>
+					Effect.succeed({
+						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+					}),
+				SetUsageLimitsSetting: (request) =>
+					Effect.succeed({ usageLimits: request.usageLimits }),
 				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
 				SnoozeSession: () => Effect.succeed({ ok: true as const }),
 				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),

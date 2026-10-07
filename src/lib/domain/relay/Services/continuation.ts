@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Clock, Context, Effect, Layer, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Queue, Schema } from "effect";
 import {
 	AccountUnavailable,
 	type ContinuationError,
@@ -87,7 +87,13 @@ export interface Continuation {
 		now?: number,
 	) => ReturnType<Continuation["requestContinuation"]>;
 	/** Ingress calls this after its outer commit, for an accepted limit only. */
-	readonly runLimitPolicy: (sessionId: string) => Effect.Effect<void>;
+	readonly queueLimitPolicy: (sessionId: string) => Effect.Effect<void>;
+	/** Applies the usage-limit policy to each queued limit; the relay runs it for its lifetime. */
+	readonly runLimitPolicies: Effect.Effect<
+		never,
+		never,
+		Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
+	>;
 }
 
 export class ContinuationTag extends Context.Tag("Continuation")<
@@ -144,7 +150,14 @@ export const makeContinuation = Effect.gen(function* () {
 	const requestContinuation = (
 		sessionId: string,
 		options: Parameters<Continuation["requestContinuation"]>[1],
-		due?: { readonly recovery: LimitRecovery; readonly now: number },
+		{
+			due,
+			policy = false,
+		}: {
+			readonly due?: { readonly recovery: LimitRecovery; readonly now: number };
+			/** The limit policy schedules while the cut-off turn is still ending. */
+			readonly policy?: boolean;
+		} = {},
 	): ReturnType<Continuation["requestContinuation"]> =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -178,10 +191,11 @@ export const makeContinuation = Effect.gen(function* () {
 							...(session ? { actualInstanceId: session.provider } : {}),
 						});
 					if (
-						session.status === "busy" ||
-						session.status === "retry" ||
 						(!ownRequest && requesting.has(sessionId)) ||
-						(yield* hasActiveProcessingTimeout(sessionId))
+						(!policy &&
+							(session.status === "busy" ||
+								session.status === "retry" ||
+								(yield* hasActiveProcessingTimeout(sessionId))))
 					)
 						return yield* new SessionBusy({ sessionId });
 					return session;
@@ -265,7 +279,12 @@ export const makeContinuation = Effect.gen(function* () {
 														instanceId: options.instanceId,
 														at: options.at,
 													},
-													{ provider: "claude" },
+													{
+														provider: "claude",
+														...(policy && {
+															metadata: { source: "limit-policy" },
+														}),
+													},
 												),
 											]),
 										);
@@ -350,7 +369,7 @@ export const makeContinuation = Effect.gen(function* () {
 						expectedInstanceId: recovery.instanceId,
 						reason: "reset",
 					},
-					{ recovery, now: currentTime },
+					{ due: { recovery, now: currentTime } },
 				).pipe(
 					Effect.catchTags({
 						DriverMismatch: cancel,
@@ -363,13 +382,54 @@ export const makeContinuation = Effect.gen(function* () {
 				);
 			}
 		});
-	// Tickets eon2.12 and eon2.13 supply these policy decisions, in this order.
+	// Ticket eon2.13 supplies auto-switch; it runs before auto-resume.
 	const tryAutoSwitch = (_sessionId: string) => Effect.succeed(false);
-	const tryAutoResume = (_sessionId: string) => Effect.succeed(false);
-	const runLimitPolicy = (sessionId: string) =>
+	const tryAutoResume = (sessionId: string) =>
 		Effect.gen(function* () {
-			if (!(yield* tryAutoSwitch(sessionId))) yield* tryAutoResume(sessionId);
+			const config = yield* ConfigTag;
+			if (!loadDaemonConfig(config.configDir)?.usageLimits?.autoResume)
+				return false;
+			const rows = yield* sql<{
+				limit_recovery: string | null;
+			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+			const value = rows[0]?.limit_recovery;
+			const recovery = value == null ? null : decodeRecovery(value);
+			// No reset time leaves Try again to the user; a schedule already won.
+			if (
+				recovery?.resetsAt === undefined ||
+				recovery.scheduledAt !== undefined
+			)
+				return false;
+			yield* requestContinuation(
+				sessionId,
+				{
+					instanceId: recovery.instanceId,
+					expectedInstanceId: recovery.instanceId,
+					reason: "reset",
+					at: recovery.resetsAt,
+				},
+				{ policy: true },
+			);
+			return true;
 		});
+	const limits = yield* Queue.unbounded<string>();
+	const queueLimitPolicy = (sessionId: string) =>
+		Effect.asVoid(Queue.offer(limits, sessionId));
+	// A refusal leaves the recorded limit as it is: the strip still offers its actions.
+	const runLimitPolicies: Continuation["runLimitPolicies"] = Queue.take(
+		limits,
+	).pipe(
+		Effect.flatMap((sessionId) =>
+			Effect.gen(function* () {
+				if (!(yield* tryAutoSwitch(sessionId))) yield* tryAutoResume(sessionId);
+			}).pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.logWarning("Usage limit policy refused", sessionId, cause),
+				),
+			),
+		),
+		Effect.forever,
+	);
 
 	const intakeLimit: Continuation["intakeLimit"] = (event, withinCommit) => {
 		const append = (project: CommitAndSignalProject) =>
@@ -413,7 +473,7 @@ export const makeContinuation = Effect.gen(function* () {
 					.write(append)
 					.pipe(
 						Effect.tap((appended) =>
-							appended ? runLimitPolicy(event.sessionId) : Effect.void,
+							appended ? queueLimitPolicy(event.sessionId) : Effect.void,
 						),
 					);
 	};
@@ -448,7 +508,8 @@ export const makeContinuation = Effect.gen(function* () {
 		dismissCutOff,
 		cancelContinuation,
 		sweepDueContinuations,
-		runLimitPolicy,
+		queueLimitPolicy,
+		runLimitPolicies,
 		requestContinuation,
 	} satisfies Continuation;
 });

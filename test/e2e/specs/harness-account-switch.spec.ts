@@ -37,6 +37,15 @@ test.use({
 	},
 });
 
+/** A runner that outlived a restart reports to the old server, so read its marks from the proof file. */
+const readProofMarks = (root: string): ProcessMark[] =>
+	existsSync(join(root, "sdk-proof.ndjson"))
+		? readFileSync(join(root, "sdk-proof.ndjson"), "utf8")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as ProcessMark)
+		: [];
+
 for (const dismiss of [false, true]) {
 	test(
 		dismiss
@@ -955,13 +964,7 @@ for (const scenario of [
 				expect(continuations()[0]).toMatchObject({ configDir });
 				// A runner that outlived a restart reports to the old server, so read
 				// every mark from the restart-proof file rather than live IPC.
-				const proofMarks = (): ProcessMark[] =>
-					existsSync(join(harness.root, "sdk-proof.ndjson"))
-						? readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
-								.split("\n")
-								.filter(Boolean)
-								.map((line) => JSON.parse(line) as ProcessMark)
-						: [];
+				const proofMarks = () => readProofMarks(harness.root);
 				const continuationEnqueue = () =>
 					proofMarks().find(
 						(mark) =>
@@ -1045,6 +1048,241 @@ for (const scenario of [
 			writeFileSync(
 				join(artifacts, "client-session-rows.json"),
 				JSON.stringify(observed, null, 2),
+			);
+			await Effect.runPromise(Fiber.interrupt(subscription));
+		}
+	});
+}
+
+// Failures: the setting is on by default or lost on restart; the policy waits for
+// a click, schedules a limit with no reset time, schedules on another account,
+// loses the mark that tells the strip it was automatic, or never fires at reset.
+for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
+	const title = {
+		auto: "auto-resume schedules a limit at its reset with no click, and resumes then",
+		restart: "auto-resume persists across a daemon restart",
+		"no-reset": "auto-resume schedules nothing for a limit with no reset time",
+		off: "auto-resume is off by default",
+	};
+	test(title[scenario], async ({ page, harness }, testInfo) => {
+		test.setTimeout(120_000);
+		const app = new AppPage(page);
+		const strip = page.getByTestId("usage-limit-strip");
+		const detail = page.getByTestId("usage-limit-detail");
+		const mobile = testInfo.project.name === "mobile";
+		const artifacts = resolve(
+			"test-results/account-switch",
+			`${testInfo.project.name}-auto-resume-${scenario}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		let browser = await harness.connect();
+		const daemonJson = () =>
+			existsSync(join(harness.configDir, "daemon.json"))
+				? JSON.parse(
+						readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+					)
+				: undefined;
+		const defaults = { autoResume: false, autoSwitch: false, order: [] };
+		expect(
+			(await Effect.runPromise(browser.rpc.GetUsageLimitsSetting({})))
+				.usageLimits,
+		).toEqual(defaults);
+		const configDir = mkdtempSync(join(harness.root, "auto-resume-account-"));
+		const { addedInstanceId } = await Effect.runPromise(
+			browser.rpc.AddInstance({
+				name: "Reset account",
+				driver: "claude",
+				configDir,
+			}),
+		);
+		if (!addedInstanceId) throw new Error("No auto-resume account ID");
+		const instanceId = Schema.decodeUnknownSync(
+			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+		)(addedInstanceId);
+		const directory = mkdtempSync(join(harness.root, "auto-resume-project-"));
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+		);
+		if (!projectSlug) throw new Error("No auto-resume project slug");
+		const usageLimits = { ...defaults, autoResume: scenario !== "off" };
+		if (scenario !== "off")
+			expect(
+				await Effect.runPromise(
+					browser.rpc.SetUsageLimitsSetting({ usageLimits }),
+				),
+			).toEqual({ usageLimits });
+		// The relay reads the setting and the account from daemon.json, which
+		// reaches disk 500 ms after the last settings or project RPC.
+		await expect
+			.poll(() => {
+				const persisted = daemonJson();
+				return {
+					listed: persisted?.instances?.some(
+						(instance: { id: string }) => instance.id === instanceId,
+					),
+					usageLimits: persisted?.usageLimits ?? defaults,
+				};
+			})
+			.toEqual({ listed: true, usageLimits });
+		if (scenario === "restart") {
+			await harness.terminate();
+			await harness.restart({ continuationSweepIntervalMs: 1000 });
+			browser = await harness.connect(undefined, undefined, projectSlug);
+			expect(
+				(await Effect.runPromise(browser.rpc.GetUsageLimitsSetting({})))
+					.usageLimits,
+			).toEqual(usageLimits);
+		}
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				originId: browser.originId,
+				instanceId,
+				model: { modelId: "harness", providerId: "claude" },
+			}),
+		);
+		const observed: { sequence: number; session: SessionInfo }[] = [];
+		const subscription = Effect.runFork(
+			Stream.runForEach(
+				browser.rpc.SubscribeShell({ projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
+			),
+		);
+		const latest = () =>
+			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
+		const continuations = () =>
+			harness
+				.claudeOptions()
+				.filter((call) => call.prompt === "Continue where you left off.");
+		const evidence: Record<string, unknown> = {};
+		try {
+			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+			writeFileSync(join(harness.root, "hold-continuation"), "hold");
+			// Off schedules nothing, so its reset can be far away.
+			const at =
+				Math.floor(Date.now() / 1000) + (scenario === "off" ? 3600 : 20);
+			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
+			writeFileSync(join(configDir, "conduit-test-quota"), "available");
+			const noReset = scenario === "no-reset";
+			await Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug,
+					sessionId,
+					text: noReset
+						? "usage-limit-account-1-no-reset: finish the original request"
+						: "usage-limit-account-1: finish the original request after reset",
+					commandId: `cut-off-auto-${scenario}`,
+					originId: browser.originId,
+				}),
+			);
+			const limited = {
+				instanceId,
+				rateLimitType: "seven_day",
+				...(noReset ? {} : { resetsAt: at }),
+				cutOffMessageId: expect.any(String),
+				rearms: 0,
+				continued: false,
+			};
+			await expect
+				.poll(() =>
+					observed.some(
+						(row) =>
+							row.session.id === sessionId &&
+							row.session.limitRecovery?.cutOffMessageId !== undefined,
+					),
+				)
+				.toBe(true);
+			await expect.poll(() => latest()?.status).toBe("idle");
+			await app.goto(
+				`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+			);
+			if (scenario === "off" || noReset) {
+				// The policy runs right after the limit commits; give it two sweeps.
+				const settled = Date.now() / 1000 + 2;
+				await expect.poll(() => Date.now() / 1000).toBeGreaterThan(settled);
+				expect(latest()?.limitRecovery).toEqual(limited);
+				await expect(strip).toHaveAttribute("data-state", "limited");
+				await expect(
+					page.getByTestId(
+						noReset ? "usage-limit-try-again" : "usage-limit-resume-at-reset",
+					),
+				).toBeEnabled();
+				await page.screenshot({ path: join(artifacts, "01-limited.png") });
+				expect(continuations()).toHaveLength(0);
+				return;
+			}
+			// Nobody clicks Resume at reset: the policy scheduled it, and says so.
+			await expect
+				.poll(() => latest()?.limitRecovery)
+				.toEqual({ ...limited, scheduledAt: at, auto: true });
+			const resetLabel = formatSnoozeTime(at * 1000);
+			await expect(strip).toHaveAttribute("data-state", "waiting");
+			await expect(page.getByTestId("usage-limit-title")).toHaveText(
+				mobile
+					? `Resumes ${resetLabel}`
+					: `Resumes on Reset account at ${resetLabel}`,
+			);
+			await expect(detail).toHaveText(
+				mobile
+					? /^Reset account · in \d+s · auto-resume is on$/
+					: /^in \d+s · auto-resume is on$/,
+			);
+			await expect(page.getByTestId("usage-limit-resume-at-reset")).toHaveCount(
+				0,
+			);
+			await expect(page.getByTestId("usage-limit-cancel-resume")).toBeVisible();
+			await page.screenshot({ path: join(artifacts, "01-auto-waiting.png") });
+			expect(continuations()).toHaveLength(0);
+			await expect
+				.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
+				.toEqual({ ...limited, continued: true });
+			await expect.poll(continuations).toHaveLength(1);
+			expect(continuations()[0]).toMatchObject({ configDir });
+			await expect
+				.poll(() =>
+					readProofMarks(harness.root).some(
+						(mark) =>
+							mark.kind === "enqueue" &&
+							mark.prompt === "Continue where you left off.",
+					),
+				)
+				.toBe(true);
+			writeFileSync(join(harness.root, "release-continuation"), "release");
+			await expect.poll(() => latest()?.limitRecovery).toBeNull();
+			const resume = latest()?.resumes?.at(-1);
+			expect(resume).toMatchObject({ instanceId, reason: "reset" });
+			if (!resume) throw new Error("No reset resume");
+			await expect(strip).toHaveCount(0);
+			await expect(page.getByTestId("transcript-divider")).toHaveText(
+				`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+			);
+			await expect(
+				page
+					.locator(".msg-assistant")
+					.filter({ hasText: "done(Continue where you left off.)" }),
+			).toBeVisible();
+			await page.screenshot({ path: join(artifacts, "02-reset-divider.png") });
+		} finally {
+			writeFileSync(join(harness.root, "release-continuation"), "release");
+			evidence["rows"] = observed.filter((row) => row.session.id === sessionId);
+			evidence["daemonJson"] = daemonJson();
+			writeFileSync(
+				join(artifacts, "auto-resume.json"),
+				JSON.stringify(evidence, null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "sdk-marks.json"),
+				JSON.stringify(readProofMarks(harness.root), null, 2),
 			);
 			await Effect.runPromise(Fiber.interrupt(subscription));
 		}

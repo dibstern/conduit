@@ -112,7 +112,7 @@
 		<Icon name="timer" size={13} class="shrink-0 text-warning" />
 		<span class="min-w-0 flex-1">
 			<b data-testid="usage-limit-title" class="font-semibold text-text">{sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
-			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}</span>
+			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
 		</span>
 		<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
 			<Button variant="ghost" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class="text-[11px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] px-[8px]' : 'h-[24px] rounded-[8px] px-[10px]'}" onclick={cancelResume}>Cancel auto-resume</Button>

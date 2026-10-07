@@ -21,7 +21,10 @@ import {
 	ClaudeSettingsTrustBoundaryError,
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
-import { ContinuationErrorSchema } from "./limit-recovery.js";
+import {
+	ContinuationErrorSchema,
+	UsageLimitsSettingSchema,
+} from "./limit-recovery.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 import { StoredEventSchema } from "./stored-event.js";
 
@@ -997,6 +1000,28 @@ export class SetAutoSettleSetting extends Schema.TaggedRequest<SetAutoSettleSett
 	},
 ) {}
 
+const UsageLimitsSettingResponseSchema = Schema.Struct({
+	usageLimits: UsageLimitsSettingSchema,
+});
+
+export class GetUsageLimitsSetting extends Schema.TaggedRequest<GetUsageLimitsSetting>()(
+	"GetUsageLimitsSetting",
+	{
+		failure: WsRpcError,
+		success: UsageLimitsSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSetting>()(
+	"SetUsageLimitsSetting",
+	{
+		failure: WsRpcError,
+		success: UsageLimitsSettingResponseSchema,
+		payload: { usageLimits: UsageLimitsSettingSchema },
+	},
+) {}
+
 export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
 	failure: WsRpcError,
 	success: ScanNowResponseSchema,
@@ -1847,6 +1872,8 @@ export const WsRpcRequest = Schema.Union(
 	UpdateInstance,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetUsageLimitsSetting,
+	SetUsageLimitsSetting,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -2223,6 +2250,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(UpdateInstance),
 	Rpc.fromTaggedRequest(GetAutoSettleSetting),
 	Rpc.fromTaggedRequest(SetAutoSettleSetting),
+	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
+	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),

@@ -78,6 +78,9 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			runtime.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: runtime.autoSettleAfterDays,
+		...(runtime.usageLimits !== undefined && {
+			usageLimits: runtime.usageLimits,
+		}),
 		...(runtime.keepAwakeCommand !== undefined && {
 			keepAwakeCommand: runtime.keepAwakeCommand,
 		}),

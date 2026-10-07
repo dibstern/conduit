@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -254,6 +255,8 @@
 		</TextButton>
 	</div>
 {/snippet}
+
+<UsageLimitsSettings />
 
 <div id="instances-settings" class="flex flex-col gap-[7px]">
 <div class="flex items-center justify-between gap-[10px]">

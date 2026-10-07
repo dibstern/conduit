@@ -1,5 +1,6 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
+import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type {
 	GetSessionSkillsResponse,
@@ -1234,6 +1235,24 @@ export async function setAutoSettleSettingRpc(
 		),
 	);
 	return result.autoSettleAfterDays;
+}
+
+export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
+	);
+	return result.usageLimits;
+}
+
+export async function setUsageLimitsSettingRpc(
+	usageLimits: UsageLimitsSetting,
+): Promise<UsageLimitsSetting> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) =>
+			client.SetUsageLimitsSetting({ usageLimits }),
+		),
+	);
+	return result.usageLimits;
 }
 
 export async function snoozeSessionRpc(

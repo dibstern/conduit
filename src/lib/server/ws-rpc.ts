@@ -347,6 +347,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetUsageLimitsSetting"
+	| "SetUsageLimitsSetting"
 	| "ScanNow"
 	| "DetectProxy"
 	| "FindFolders"

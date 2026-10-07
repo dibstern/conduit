@@ -3,6 +3,7 @@ import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
 } from "../../contracts/claude-settings.js";
+import { DEFAULT_USAGE_LIMITS } from "../../contracts/limit-recovery.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -52,6 +53,25 @@ export const settingsHandlers = {
 			);
 			return { autoSettleAfterDays: days };
 		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoSettleSetting"))),
+	GetUsageLimitsSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			return {
+				usageLimits:
+					loadDaemonConfig(config.configDir)?.usageLimits ??
+					DEFAULT_USAGE_LIMITS,
+			};
+		}),
+	SetUsageLimitsSetting: ({ usageLimits }) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const persisted =
+				loadDaemonConfig(config.configDir) ?? defaultDaemonConfig();
+			yield* Effect.tryPromise(() =>
+				saveDaemonConfig({ ...persisted, usageLimits }, config.configDir),
+			);
+			return { usageLimits };
+		}).pipe(Effect.catchAll(mapRpcFailure("SetUsageLimitsSetting"))),
 	SetDefaultPermissionMode: (request) =>
 		setDefaultPermissionModeForRelay({
 			clientId: request.originId ?? "rpc",
@@ -137,6 +157,8 @@ export const settingsHandlers = {
 	WsRpcHandlerMap,
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetUsageLimitsSetting"
+	| "SetUsageLimitsSetting"
 	| "SetDefaultPermissionMode"
 	| "SetHiddenEntries"
 	| "GetClaudeSettings"

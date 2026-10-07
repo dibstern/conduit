@@ -247,3 +247,23 @@ Examples:
   | viewport | baseline                           | threshold |
   | desktop  | usage-limit-reset-resumed-desktop  | 98        |
   | phone    | usage-limit-reset-resumed-phone    | 98        |
+
+Scenario Outline: a resume the limit policy scheduled is waiting and says auto-resume is on
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the limit policy schedules the resume at reset
+  Then the usage limit strip is waiting
+  And the usage limit strip title reads <title>
+  And the usage limit strip detail reads <detail>
+  And the usage limit strip has no Resume at reset
+  And the usage limit strip shows Cancel auto-resume
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | title                              | detail                                      | baseline                         | threshold |
+  | desktop  | Resumes on work2claude at Mon 9:00 | in 3d 23h · auto-resume is on               | usage-limit-auto-waiting-desktop | 98        |
+  | phone    | Resumes Mon 9:00                   | work2claude · in 3d 23h · auto-resume is on | usage-limit-auto-waiting-phone   | 98        |

@@ -36,3 +36,19 @@ Scenario Outline: the instance editor matches the approved layout
 Examples:
   | baseline                         | threshold |
   | provider-instances-settings-dark | 98        |
+
+Scenario Outline: the usage limit setting matches frame H and saves auto-resume
+  Given the viewport is a <viewport>
+  And auto-resume limited sessions is off on the daemon
+  When I open settings to the Instances tab
+  Then the usage limit settings heading reads <heading>
+  And the Auto-resume limited sessions toggle is off and reads <description>
+  When I turn on Auto-resume limited sessions
+  Then the SetUsageLimitsSetting RPC turns auto-resume on
+  And the Auto-resume limited sessions toggle is on and reads <description>
+  And the usage-limit-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | heading                                        | description                                                              | baseline                      | threshold |
+  | desktop  | When a Claude account reaches its usage limit | Continue the cut-off request on the same account when its limit resets. | usage-limit-settings-desktop  | 98        |
+  | phone    | Usage limits                                   | Same account, at reset.                                                  | usage-limit-settings-phone    | 98        |

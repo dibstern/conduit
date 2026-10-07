@@ -591,13 +591,17 @@ export async function createProjectRelay(
 	wsHandler = startup.wsHandler;
 	const continuationSweep = layers.relayManagedRuntime.runFork(
 		Effect.flatMap(ContinuationTag, (continuation) =>
-			continuation.sweepDueContinuations().pipe(
-				Effect.catchAllCause((cause) =>
-					Cause.isInterruptedOnly(cause)
-						? Effect.interrupt
-						: Effect.logError("Continuation sweep failed", cause),
+			Effect.zip(
+				continuation.sweepDueContinuations().pipe(
+					Effect.catchAllCause((cause) =>
+						Cause.isInterruptedOnly(cause)
+							? Effect.interrupt
+							: Effect.logError("Continuation sweep failed", cause),
+					),
+					Effect.repeat(Schedule.fixed(ENV.continuationSweepIntervalMs)),
 				),
-				Effect.repeat(Schedule.fixed(ENV.continuationSweepIntervalMs)),
+				continuation.runLimitPolicies,
+				{ concurrent: true },
 			),
 		),
 	);

@@ -416,7 +416,7 @@ export const sessionHandlers: {
 	],
 	"session.resumed": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
+			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
 			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
 		{
@@ -433,22 +433,33 @@ export const sessionHandlers: {
 			],
 		},
 	],
-	"session.resume_scheduled": (event) => [
-		{
-			// Only the sweep re-arms. A user changing the time is still scheduling.
-			sql: "UPDATE sessions SET limit_recovery = json_set(limit_recovery, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
-			params: [
-				event.data.at,
-				event.metadata.source === "continuation-sweep" ? 1 : 0,
-				event.createdAt,
-				event.sessionId,
-				event.data.instanceId,
-			],
-		},
-	],
+	"session.resume_scheduled": (event) => {
+		const source = event.metadata.source;
+		// The limit policy marks its schedule, a user's schedule clears the mark,
+		// and a sweep re-arm keeps whichever one it re-arms.
+		const marked =
+			source === "limit-policy"
+				? "json_set(limit_recovery, '$.auto', json('true'))"
+				: source === "continuation-sweep"
+					? "limit_recovery"
+					: "json_remove(limit_recovery, '$.auto')";
+		return [
+			{
+				// Only the sweep re-arms. A user changing the time is still scheduling.
+				sql: `UPDATE sessions SET limit_recovery = json_set(${marked}, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?`,
+				params: [
+					event.data.at,
+					source === "continuation-sweep" ? 1 : 0,
+					event.createdAt,
+					event.sessionId,
+					event.data.instanceId,
+				],
+			},
+		];
+	},
 	"session.resume_cancelled": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt'), updated_at = ? WHERE id = ?",
+			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ?",
 			params: [event.createdAt, event.sessionId],
 		},
 	],

@@ -323,6 +323,20 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "the limit policy schedules the resume",
+		match: /^the limit policy schedules the resume at reset$/,
+		run: ({ world }) => {
+			const limited = limits.get(world.page) ?? {};
+			const limitRecovery = {
+				...limited,
+				scheduledAt: limited["resetsAt"],
+				auto: true,
+			};
+			limits.set(world.page, limitRecovery);
+			projectLimit(world.page, limitRecovery);
+		},
+	},
+	{
 		name: "server marks the continuation running",
 		match: /^the server starts the continuation$/,
 		run: ({ world }) => {

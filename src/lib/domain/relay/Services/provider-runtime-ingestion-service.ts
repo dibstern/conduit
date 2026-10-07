@@ -223,7 +223,7 @@ export const makeProviderRuntimeIngestionLive = (
 							if (appended) {
 								yield* Ref.set(mapperStateRef, nextState);
 								for (const sessionId of acceptedLimits)
-									yield* continuation.runLimitPolicy(sessionId);
+									yield* continuation.queueLimitPolicy(sessionId);
 								yield* ingestOptions.afterCommit ?? Effect.void;
 							}
 							if (receipt) {

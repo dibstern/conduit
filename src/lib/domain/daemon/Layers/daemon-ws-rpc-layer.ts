@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
+import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -659,6 +660,27 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}));
 						yield* persistConfig;
 						return { autoSettleAfterDays: days };
+					}),
+				),
+			GetUsageLimitsSetting: () =>
+				run(
+					Effect.gen(function* () {
+						const config = yield* DaemonConfigRefTag;
+						return {
+							usageLimits:
+								(yield* Ref.get(config)).usageLimits ?? DEFAULT_USAGE_LIMITS,
+						};
+					}),
+				),
+			SetUsageLimitsSetting: ({ usageLimits }) =>
+				run(
+					Effect.gen(function* () {
+						yield* commitDaemonRuntimeConfig((config) => ({
+							...config,
+							usageLimits,
+						}));
+						yield* persistConfig;
+						return { usageLimits };
 					}),
 				),
 			ScanNow: (request) =>
