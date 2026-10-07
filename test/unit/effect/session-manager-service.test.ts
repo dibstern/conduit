@@ -2362,6 +2362,7 @@ describe("SessionManagerService", () => {
 					forkPointTimestamp: 250,
 					attention: "idle",
 					limitRecovery: null,
+					resumes: [],
 				},
 			]);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));

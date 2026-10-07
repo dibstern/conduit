@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
@@ -307,8 +313,14 @@ for (const decision of [
 	"stale",
 	"scheduled",
 ] as const) {
-	test(`Try again through RPC: ${decision}`, async ({ harness }, testInfo) => {
+	test(`Try again through RPC: ${decision}`, async ({
+		page,
+		harness,
+	}, testInfo) => {
 		test.setTimeout(120_000);
+		const app = new AppPage(page);
+		const strip = page.getByTestId("usage-limit-strip");
+		const tryAgain = page.getByTestId("usage-limit-try-again");
 		const artifacts = resolve(
 			"test-results/account-switch",
 			`${testInfo.project.name}-continue-${decision}-${testInfo.retry}`,
@@ -332,6 +344,20 @@ for (const decision of [
 			browser.rpc.SaveProject({ folders: [directory], instanceId }),
 		);
 		if (!projectSlug) throw new Error("No retry project slug");
+		// Session creation resolves the account from daemon.json, which reaches
+		// disk only after 500 ms without project RPCs (each one bumps lastUsed
+		// and restarts that debounce), so wait without sending any.
+		await expect
+			.poll(
+				() =>
+					existsSync(join(harness.configDir, "daemon.json")) &&
+					JSON.parse(
+						readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+					).instances?.some(
+						(instance: { id: string }) => instance.id === instanceId,
+					),
+			)
+			.toBe(true);
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
 				projectSlug,
@@ -394,6 +420,21 @@ for (const decision of [
 			await expect.poll(() => latest()?.status).toBe("idle");
 			const cutOffMessageId = latest()?.limitRecovery?.cutOffMessageId;
 			if (!cutOffMessageId) throw new Error("No open cut-off");
+			// The success and the probe refusal are also driven from the strip.
+			if (decision === "available" || decision === "limited") {
+				await app.goto(
+					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+				);
+				await expect(page.getByTestId("usage-limit-detail")).toHaveText(
+					testInfo.project.name === "mobile"
+						? "Retry account · reset time unavailable"
+						: "Reset time unavailable",
+				);
+				await expect(tryAgain).toHaveText("Try again");
+				await page.screenshot({
+					path: join(artifacts, "01-no-reset-strip.png"),
+				});
+			}
 			await expect
 				.poll(() =>
 					harness.marks.some(
@@ -455,23 +496,29 @@ for (const decision of [
 				writeFileSync(join(harness.root, "limit-continuation"), "limit");
 			const before = await snapshot();
 			const started = Date.now();
-			const result = await Effect.runPromise(
-				browser.rpc
-					.ContinueSession({
-						projectSlug,
-						sessionId,
-						instanceId,
-						expectedInstanceId:
-							decision === "stale" ? "stale-account" : instanceId,
-						...(decision === "scheduled" ? { at: Date.now() + 60_000 } : {}),
-						originId: browser.originId,
-					})
-					.pipe(Effect.either),
-			);
+			if (decision === "available") await tryAgain.click();
+			const result =
+				decision === "available"
+					? undefined
+					: await Effect.runPromise(
+							browser.rpc
+								.ContinueSession({
+									projectSlug,
+									sessionId,
+									instanceId,
+									expectedInstanceId:
+										decision === "stale" ? "stale-account" : instanceId,
+									...(decision === "scheduled"
+										? { at: Date.now() + 60_000 }
+										: {}),
+									originId: browser.originId,
+								})
+								.pipe(Effect.either),
+						);
 			evidence["before"] = before;
 			evidence["result"] = result;
 			evidence["elapsedMs"] = Date.now() - started;
-			if (!["busy", "stale", "scheduled", "unavailable"].includes(decision))
+			if (!["busy", "stale", "scheduled"].includes(decision))
 				await expect
 					.poll(() =>
 						harness.marks.find(
@@ -480,7 +527,9 @@ for (const decision of [
 						),
 					)
 					.toMatchObject({
-						behavior: ["fail", "hang", "limited"].includes(decision)
+						behavior: ["fail", "hang", "limited", "unavailable"].includes(
+							decision,
+						)
 							? decision
 							: "available",
 					});
@@ -492,25 +541,39 @@ for (const decision of [
 				scheduled: "WsRpcError",
 			};
 			if (decision in refusal) {
-				expect(result._tag).toBe("Left");
-				if (result._tag !== "Left") throw new Error("Expected refusal");
+				expect(result?._tag).toBe("Left");
+				if (result?._tag !== "Left") throw new Error("Expected refusal");
 				expect(result.left._tag).toBe(
 					refusal[decision as keyof typeof refusal],
 				);
 				const after = await snapshot();
 				expect(after).toEqual(before);
 				evidence["after"] = after;
+				if (decision === "limited") {
+					await tryAgain.click();
+					await expect(
+						page.locator('.toast-card[data-variant="error"]'),
+					).toContainText(result.left.message);
+					await expect(strip).toBeVisible();
+					await expect(tryAgain).toBeEnabled();
+					await page.screenshot({ path: join(artifacts, "02-refused.png") });
+				}
 				expect(
 					harness
 						.claudeOptions()
 						.some((call) => call.prompt === "Continue where you left off."),
 				).toBe(false);
 			} else {
-				expect(result._tag).toBe("Right");
+				if (result) expect(result._tag).toBe("Right");
 				if (decision === "hang")
 					expect(Date.now() - started).toBeGreaterThanOrEqual(4_900);
 				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(true);
 				expect(latest()?.limitRecovery?.cutOffMessageId).toBe(cutOffMessageId);
+				if (decision === "available") {
+					// The continuation runs: the strip stays, its button goes.
+					await expect(tryAgain).toHaveCount(0);
+					await expect(strip).toBeVisible();
+				}
 				await expect
 					.poll(() =>
 						harness
@@ -570,6 +633,36 @@ for (const decision of [
 				else await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");
 				evidence["afterReply"] = await snapshot();
+				if (decision === "available") {
+					const divider = page.getByTestId("transcript-divider");
+					const reply = page
+						.locator(".msg-assistant")
+						.filter({ hasText: "done(Continue where you left off.)" });
+					const dividerAboveReply = async (): Promise<void> => {
+						await expect(strip).toHaveCount(0);
+						await expect(divider).toHaveText(
+							"↻ Resumed on Retry account · retried by you",
+						);
+						await expect(reply).toBeVisible();
+						const [dividerBox, replyBox] = await Promise.all([
+							divider.boundingBox(),
+							reply.boundingBox(),
+						]);
+						if (!dividerBox || !replyBox)
+							throw new Error("No divider or reply box");
+						expect(replyBox.y).toBeGreaterThanOrEqual(
+							dividerBox.y + dividerBox.height,
+						);
+					};
+					await dividerAboveReply();
+					await page.screenshot({ path: join(artifacts, "02-resumed.png") });
+					await page.reload();
+					await app.connectOverlay.waitFor({ state: "detached" });
+					await dividerAboveReply();
+					await page.screenshot({
+						path: join(artifacts, "03-resumed-after-reload.png"),
+					});
+				}
 			}
 		} finally {
 			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");

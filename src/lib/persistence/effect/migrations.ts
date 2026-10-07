@@ -33,6 +33,7 @@ import {
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
+	SESSIONS_RESUMES_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
@@ -457,6 +458,7 @@ const appendedSessionColumns = [
 	"context_window",
 	"side_thread",
 	"limit_recovery",
+	"resumes",
 ] as const;
 
 function sameStrings(
@@ -1032,6 +1034,11 @@ export const effectMigrationEntries = {
 		"sessions",
 		"limit_recovery",
 		readMigrationSql(SESSIONS_LIMIT_RECOVERY_MIGRATION),
+	),
+	"0037_sessions_resumes": runAddColumnMigrationIfMissing(
+		"sessions",
+		"resumes",
+		readMigrationSql(SESSIONS_RESUMES_MIGRATION),
 	),
 } satisfies Record<
 	string,

@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN resumes TEXT NOT NULL DEFAULT '[]';

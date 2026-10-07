@@ -16,7 +16,7 @@ Examples:
   | limit      | account | resets               | title                                | detail                          |
   | seven_day  | claude  | 2026-01-05T09:00:00Z | Usage limit reached · work2claude    | Weekly limit · resets Mon 9:00  |
   | five_hour  | claude  | 2026-01-01T14:30:00Z | Usage limit reached · work2claude    | 5-hour limit · resets 14:30     |
-  | seven_day  | claude  | none                 | Usage limit reached · work2claude    | Weekly limit                    |
+  | seven_day  | claude  | none                 | Usage limit reached · work2claude    | Reset time unavailable          |
   | five_hour  | retired | 2026-01-01T14:30:00Z | Usage limit reached · retired        | 5-hour limit · resets 14:30     |
 
 Scenario Outline: phone limit strip folds the account into the detail line
@@ -32,9 +32,10 @@ Scenario Outline: phone limit strip folds the account into the detail line
   And the cut-off tag under Now run the provider tests reads ⏸ Cut off · Dismiss
 
 Examples:
-  | limit     | resets               | detail                        |
-  | seven_day | 2026-01-05T09:00:00Z | work2claude · resets Mon 9:00 |
-  | five_hour | 2026-01-01T14:30:00Z | work2claude · resets 14:30    |
+  | limit     | resets               | detail                                     |
+  | seven_day | 2026-01-05T09:00:00Z | work2claude · resets Mon 9:00              |
+  | five_hour | 2026-01-01T14:30:00Z | work2claude · resets 14:30                 |
+  | seven_day | none                 | work2claude · reset time unavailable       |
 
 Scenario Outline: Dismiss clears the cut-off tag and leaves the strip
   Given the conduit app is served with the connected mockup
@@ -94,3 +95,78 @@ Scenario Outline: phone limited session matches frame A
 Examples:
   | baseline                | threshold |
   | usage-limit-strip-phone | 98        |
+
+Scenario Outline: a strip without a reset time offers Try again on the same account
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at none
+  Then the usage limit strip shows Try again
+  When I press Try again on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude now
+  When the server starts the continuation
+  Then the usage limit strip has no Try again
+  And the usage limit strip is visible
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario: a strip with a reset time offers no Try again
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  Then the usage limit strip has no Try again
+
+Scenario Outline: a session that resumed keeps a divider above the reply
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at none
+  And the session resumes on claude by user and replies All provider tests pass now.
+  Then the usage limit strip is not visible
+  And the transcript divider reading ↻ Resumed on work2claude · retried by you sits directly above the reply All provider tests pass now.
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: limited session without a reset time matches the no-reset strip
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at none
+  Then the usage limit strip shows Try again
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                           | threshold |
+  | desktop  | usage-limit-strip-no-reset-desktop | 98        |
+  | phone    | usage-limit-strip-no-reset-phone   | 98        |
+
+Scenario Outline: resumed session matches frame F
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at none
+  And the session resumes on claude by user and replies All provider tests pass now.
+  Then the usage limit strip is not visible
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                        | threshold |
+  | desktop  | usage-limit-resumed-desktop     | 98        |
+  | phone    | usage-limit-resumed-phone       | 98        |

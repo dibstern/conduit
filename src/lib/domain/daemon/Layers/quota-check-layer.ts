@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref } from "effect";
+import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import {
 	type ClaudeUsageProbeOptions,
@@ -6,6 +6,7 @@ import {
 } from "../../../provider/claude/claude-usage-probe.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
+import { InstanceManagerStateTag } from "../Services/instance-manager-service.js";
 import { makeQuotaCheck, QuotaCheckTag } from "../Services/quota-check.js";
 
 /** One instance for the daemon, shared by every project's continuation module. */
@@ -14,6 +15,8 @@ export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
 		QuotaCheckTag,
 		Effect.gen(function* () {
 			const state = yield* DaemonStateTag;
+			// Live accounts: DaemonState only holds the instances read at startup.
+			const accounts = yield* InstanceManagerStateTag;
 			const config = yield* Effect.serviceOption(DaemonConfigRefTag);
 			const sdk = options.queryFactory
 				? undefined
@@ -21,11 +24,11 @@ export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
 			const initial = yield* Ref.get(state);
 			return yield* makeQuotaCheck({
 				instances: Effect.gen(function* () {
-					const current = yield* Ref.get(state);
+					const { instances } = yield* Ref.get(accounts);
 					const fallback = Option.isSome(config)
 						? (yield* Ref.get(config.value)).claudeConfigDir
 						: undefined;
-					return current.instances
+					return Array.from(HashMap.values(instances))
 						.filter((instance) => instance.driver === "claude")
 						.map((instance) => {
 							const configDir = instance.configDir ?? fallback;

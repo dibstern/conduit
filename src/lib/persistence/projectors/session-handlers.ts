@@ -417,6 +417,19 @@ export const sessionHandlers: {
 			sql: "UPDATE sessions SET limit_recovery = json_set(limit_recovery, '$.continued', json('true')), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
 			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
+		{
+			// The transcript divider outlives limit_recovery, which the reply nulls.
+			sql: "UPDATE sessions SET resumes = json_insert(resumes, '$[#]', json(?)), updated_at = ? WHERE id = ?",
+			params: [
+				JSON.stringify({
+					at: event.createdAt,
+					instanceId: event.data.instanceId,
+					reason: event.data.reason,
+				}),
+				event.createdAt,
+				event.sessionId,
+			],
+		},
 	],
 
 	"turn.completed": (event) => {

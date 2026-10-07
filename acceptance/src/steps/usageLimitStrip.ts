@@ -15,6 +15,21 @@ function currentSessionId(page: Page): string {
 	return sessionId;
 }
 
+/** The transcript as the server last sent it. */
+const transcripts = new WeakMap<Page, readonly Record<string, unknown>[]>();
+
+function sendTranscript(
+	page: Page,
+	messages: readonly Record<string, unknown>[],
+): void {
+	transcripts.set(page, messages);
+	requireRelayControl(page).sendMessage({
+		type: "mock_transcript_snapshot",
+		sessionId: currentSessionId(page),
+		history: { messages, hasMore: false },
+	});
+}
+
 /** The session row's limitRecovery, as the server last projected it. */
 const limits = new WeakMap<Page, Record<string, unknown>>();
 
@@ -52,46 +67,39 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const text = match[1] ?? "";
 			const created = PINNED_CLOCK_MS - 3 * 60_000;
-			requireRelayControl(world.page).sendMessage({
-				type: "mock_transcript_snapshot",
-				sessionId: currentSessionId(world.page),
-				history: {
-					messages: [
+			sendTranscript(world.page, [
+				{
+					id: "msg-limit-earlier",
+					role: "user",
+					time: { created },
+					parts: [
 						{
-							id: "msg-limit-earlier",
-							role: "user",
-							time: { created },
-							parts: [
-								{
-									id: "part-limit-earlier",
-									type: "text",
-									text: "Thread configDir through the subagent materializer",
-								},
-							],
-						},
-						{
-							id: "msg-limit-earlier-reply",
-							role: "assistant",
-							parentID: "msg-limit-earlier",
-							time: { created: created + 1, completed: created + 60_000 },
-							parts: [
-								{
-									id: "part-limit-earlier-reply",
-									type: "text",
-									text: "Done. Both read paths now pass the session's config dir through the SDK worker; typecheck is clean.",
-								},
-							],
-						},
-						{
-							id: cutOffMessageId,
-							role: "user",
-							time: { created: created + 120_000 },
-							parts: [{ id: "part-cut-off", type: "text", text }],
+							id: "part-limit-earlier",
+							type: "text",
+							text: "Thread configDir through the subagent materializer",
 						},
 					],
-					hasMore: false,
 				},
-			});
+				{
+					id: "msg-limit-earlier-reply",
+					role: "assistant",
+					parentID: "msg-limit-earlier",
+					time: { created: created + 1, completed: created + 60_000 },
+					parts: [
+						{
+							id: "part-limit-earlier-reply",
+							type: "text",
+							text: "Done. Both read paths now pass the session's config dir through the SDK worker; typecheck is clean.",
+						},
+					],
+				},
+				{
+					id: cutOffMessageId,
+					role: "user",
+					time: { created: created + 120_000 },
+					parts: [{ id: "part-cut-off", type: "text", text }],
+				},
+			]);
 			await expect(
 				world.page.locator("#messages .msg-user").last(),
 			).toContainText(text);
@@ -204,6 +212,123 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
 			expect(request.payload["projectSlug"]).toBe("myapp");
+		},
+	},
+	{
+		name: "press Try again on the usage limit strip",
+		match: /^I press Try again on the usage limit strip$/,
+		run: async ({ world }) => {
+			requireRpcControl(world.page).setResponse("ContinueSession", {
+				ok: true,
+			});
+			await world.page.getByTestId("usage-limit-try-again").click();
+		},
+	},
+	{
+		name: "assert ContinueSession RPC",
+		match:
+			/^the ContinueSession RPC continues the current session on (\S+) now$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "ContinueSession",
+			);
+			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
+			expect(request.payload["projectSlug"]).toBe("myapp");
+			expect(request.payload["instanceId"]).toBe(match[1]);
+			expect(request.payload["expectedInstanceId"]).toBe(match[1]);
+			expect(request.payload["at"]).toBeUndefined();
+		},
+	},
+	{
+		name: "assert Try again visibility",
+		match: /^the usage limit strip (shows|has no) Try again$/,
+		run: async ({ world, match }) => {
+			const button = world.page.getByTestId("usage-limit-try-again");
+			if (match[1] === "has no") {
+				await expect(button).toHaveCount(0);
+				return;
+			}
+			await expect(button).toHaveText("Try again");
+			await expect(button).toBeEnabled();
+			const [buttonBox, stripBox] = await Promise.all([
+				button.boundingBox(),
+				world.page.getByTestId("usage-limit-strip").boundingBox(),
+			]);
+			if (!buttonBox || !stripBox) throw new Error("No button or strip box");
+			// Desktop: the right slot of the strip. Phone: a full-width row of its own.
+			const compact = (world.page.viewportSize()?.width ?? 1280) < 768;
+			if (compact) expect(buttonBox.width).toBeGreaterThan(stripBox.width - 30);
+			else
+				expect(
+					stripBox.x + stripBox.width - (buttonBox.x + buttonBox.width),
+				).toBeLessThan(16);
+		},
+	},
+	{
+		name: "server marks the continuation running",
+		match: /^the server starts the continuation$/,
+		run: ({ world }) => {
+			const limitRecovery = { ...limits.get(world.page), continued: true };
+			limits.set(world.page, limitRecovery);
+			projectLimit(world.page, limitRecovery);
+		},
+	},
+	{
+		name: "server records a resume and the reply",
+		match:
+			/^the session resumes on (\S+) by (user|reset|auto-switch) and replies (.+)$/,
+		run: async ({ world, match }) => {
+			const previous = transcripts.get(world.page) ?? [];
+			const parent = previous.at(-1);
+			const parentCreated =
+				(parent?.["time"] as { created?: number } | undefined)?.created ??
+				PINNED_CLOCK_MS - 60_000;
+			const at = parentCreated + 30_000;
+			sendTranscript(world.page, [
+				...previous,
+				{
+					id: "msg-resumed-reply",
+					role: "assistant",
+					parentID: parent?.["id"],
+					time: { created: at + 1, completed: at + 20_000 },
+					parts: [
+						{ id: "part-resumed-reply", type: "text", text: match[3] ?? "" },
+					],
+				},
+			]);
+			setSessionRowStatus(world.page, currentSessionId(world.page), "idle", {
+				title: "Provider tests",
+				limitRecovery: null,
+				resumes: [{ at, instanceId: match[1], reason: match[2] }],
+			});
+			await expect(
+				world.page.locator("#messages .msg-assistant").last(),
+			).toContainText(match[3] ?? "");
+		},
+	},
+	{
+		name: "assert the transcript divider sits above the reply",
+		match:
+			/^the transcript divider reading (.+) sits directly above the reply (.+)$/,
+		run: async ({ world, match }) => {
+			const divider = world.page.getByTestId("transcript-divider");
+			await expect(divider).toHaveCount(1);
+			await expect(divider).toHaveText(match[1] ?? "");
+			await expect(divider.locator("b")).toHaveCSS("color", "rgb(0, 229, 255)");
+			const reply = world.page
+				.locator("#messages .msg-assistant")
+				.filter({ hasText: match[2] ?? "" });
+			const user = world.page.locator("#messages .msg-user").last();
+			const [dividerBox, replyBox, userBox] = await Promise.all([
+				divider.boundingBox(),
+				reply.boundingBox(),
+				user.boundingBox(),
+			]);
+			if (!dividerBox || !replyBox || !userBox)
+				throw new Error("No divider, reply or user box");
+			expect(dividerBox.y).toBeGreaterThan(userBox.y + userBox.height - 1);
+			expect(replyBox.y).toBeGreaterThan(dividerBox.y + dividerBox.height - 1);
+			expect(replyBox.y - (dividerBox.y + dividerBox.height)).toBeLessThan(40);
 		},
 	},
 ];

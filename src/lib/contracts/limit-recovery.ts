@@ -75,3 +75,13 @@ export const LimitRecoverySchema = Schema.Struct({
 });
 
 export type LimitRecovery = typeof LimitRecoverySchema.Type;
+
+/** One continuation of a cut-off session; the transcript keeps a divider for each. */
+export const SessionResumeSchema = Schema.Struct({
+	/** Unix ms, from the session.resumed event. */
+	at: Schema.Number,
+	instanceId: Schema.String,
+	reason: ContinuationReasonSchema,
+});
+
+export type SessionResume = typeof SessionResumeSchema.Type;

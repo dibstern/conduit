@@ -1,7 +1,10 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
-import { LimitRecoverySchema } from "../../contracts/limit-recovery.js";
+import {
+	LimitRecoverySchema,
+	SessionResumeSchema,
+} from "../../contracts/limit-recovery.js";
 import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
@@ -248,6 +251,12 @@ export const sessionRowsToSessionInfoList = (
 					: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
 							row.limit_recovery,
 						),
+			resumes:
+				row.resumes == null
+					? []
+					: Schema.decodeUnknownSync(
+							Schema.parseJson(Schema.Array(SessionResumeSchema)),
+						)(row.resumes),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }
 				: {}),
