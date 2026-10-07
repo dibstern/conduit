@@ -42,6 +42,7 @@
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
+	import ContinuationDivider from "./ContinuationDivider.svelte";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
@@ -446,9 +447,13 @@
 
 	{#snippet resumed(key: string)}
 		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
-			<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
-				↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
-			</TranscriptDivider>
+			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
+				<ContinuationDivider {resume} sessionId={activeSession.id} projectSlug={activeSession.projectSlug ?? getCurrentSlug() ?? ""} />
+			{:else}
+				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
+					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
+				</TranscriptDivider>
+			{/if}
 		{/each}
 	{/snippet}
 

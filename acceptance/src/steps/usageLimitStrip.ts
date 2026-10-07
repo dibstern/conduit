@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -8,6 +9,9 @@ import {
 } from "./shared.js";
 
 const cutOffMessageId = "msg-cut-off";
+
+const pickerRow = (page: Page, name: string) =>
+	page.getByTestId("account-switch-option").filter({ hasText: name });
 
 function currentSessionId(page: Page): string {
 	const sessionId = new URL(page.url()).pathname.split("/")[2];
@@ -40,6 +44,24 @@ function projectLimit(page: Page, limitRecovery: unknown): void {
 	});
 }
 
+function setClaudeAccounts(
+	page: Page,
+	accounts: readonly (readonly [id: string, name: string])[],
+): void {
+	requireRpcControl(page).setDaemonList("SubscribeInstances", {
+		instances: accounts.map(([id, name]) => ({
+			id,
+			name,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+			driver: "claude",
+		})),
+	});
+}
+
 type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";
 
 const stripActions: Record<StripAction, { testId: string; rpc: string }> = {
@@ -59,20 +81,20 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "name a Claude account",
 		match: /^the Claude account (\S+) is named (.+)$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
-				instances: [
-					{
-						id: match[1],
-						name: match[2],
-						port: 0,
-						managed: false,
-						status: "healthy",
-						restartCount: 0,
-						createdAt: 1,
-						driver: "claude",
-					},
-				],
-			});
+			setClaudeAccounts(world.page, [[match[1] ?? "", match[2] ?? ""]]);
+		},
+	},
+	{
+		name: "name several Claude accounts",
+		match: /^the Claude accounts are (.+)$/,
+		run: ({ world, match }) => {
+			setClaudeAccounts(
+				world.page,
+				(match[1] ?? "").split(", ").map((account) => {
+					const [id = "", name = ""] = account.split(" as ");
+					return [id, name];
+				}),
+			);
 		},
 	},
 	{
@@ -348,7 +370,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "server records a resume and the reply",
 		match:
-			/^the session resumes on (\S+) by (user|reset|auto-switch) and replies (.+)$/,
+			/^the session resumes on (\S+)(?: from (\S+))? by (user|reset|auto-switch) and replies (.+)$/,
 		run: async ({ world, match }) => {
 			const previous = transcripts.get(world.page) ?? [];
 			const parent = previous.at(-1);
@@ -364,18 +386,25 @@ export const usageLimitStripHandlers: StepHandler[] = [
 					parentID: parent?.["id"],
 					time: { created: at + 1, completed: at + 20_000 },
 					parts: [
-						{ id: "part-resumed-reply", type: "text", text: match[3] ?? "" },
+						{ id: "part-resumed-reply", type: "text", text: match[4] ?? "" },
 					],
 				},
 			]);
 			setSessionRowStatus(world.page, currentSessionId(world.page), "idle", {
 				title: "Provider tests",
 				limitRecovery: null,
-				resumes: [{ at, instanceId: match[1], reason: match[2] }],
+				resumes: [
+					{
+						at,
+						instanceId: match[1],
+						reason: match[3],
+						...(match[2] === undefined ? {} : { from: match[2] }),
+					},
+				],
 			});
 			await expect(
 				world.page.locator("#messages .msg-assistant").last(),
-			).toContainText(match[3] ?? "");
+			).toContainText(match[4] ?? "");
 		},
 	},
 	{
@@ -401,6 +430,288 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			expect(dividerBox.y).toBeGreaterThan(userBox.y + userBox.height - 1);
 			expect(replyBox.y).toBeGreaterThan(dividerBox.y + dividerBox.height - 1);
 			expect(replyBox.y - (dividerBox.y + dividerBox.height)).toBeLessThan(40);
+		},
+	},
+	{
+		name: "quota check results for the accounts",
+		match: /^the quota check reads (.+)$/,
+		run: ({ world, match }) => {
+			const accounts = (match[1] ?? "").split(", ").map((reading) => {
+				const [instanceId = "", ...words] = reading.split(" ");
+				const said = words.join(" ");
+				const used = /^(\d+)% used$/.exec(said)?.[1];
+				const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
+				const quota =
+					used !== undefined
+						? { _tag: "Available", utilization: Number(used) }
+						: limitedUntil !== undefined
+							? {
+									_tag: "Limited",
+									rateLimitType: "seven_day",
+									resetsAt: Date.parse(limitedUntil) / 1000,
+								}
+							: said === "unavailable"
+								? { _tag: "Unavailable", reason: "not logged in" }
+								: { _tag: "Unknown" };
+				return { instanceId, quota };
+			});
+			requireRpcControl(world.page).setResponse("QuotaForAccounts", {
+				accounts,
+			});
+		},
+	},
+	{
+		name: "handoff summary for the preview and the delivered handoff",
+		match:
+			/^the handoff carries (\d+) of (\d+) messages (with|without) the first$/,
+		run: ({ world, match }) => {
+			const included = Number(match[1]);
+			const summary = {
+				included,
+				omitted: Number(match[2]) - included,
+				firstMessageIncluded: match[3] === "with",
+				tokens: 18_400,
+			};
+			const rpc = requireRpcControl(world.page);
+			rpc.setResponse("PreviewContinuation", summary);
+			rpc.setResponse("GetContinuationHandoff", {
+				handoff: {
+					...summary,
+					eventId: "evt-handoff",
+					instanceId: "self",
+					at: PINNED_CLOCK_MS - 60_000,
+				},
+			});
+		},
+	},
+	{
+		name: "open the account picker",
+		match: /^I open Switch account on the usage limit strip$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-limit-switch-account").click();
+			await expect(
+				world.page.getByTestId("account-switch-picker"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert an account picker row",
+		match:
+			/^the account picker row for (.+) reads (.+) and (can|cannot) be picked$/,
+		run: async ({ world, match }) => {
+			const row = pickerRow(world.page, match[1] ?? "");
+			await expect(row.getByTestId("quota-meter-caption")).toHaveText(
+				match[2] ?? "",
+			);
+			if (match[3] === "can")
+				await expect(row).not.toHaveAttribute("data-disabled");
+			else await expect(row).toHaveAttribute("data-disabled");
+		},
+	},
+	{
+		name: "assert the pre-selected account",
+		match: /^the account picker pre-selects (.+)$/,
+		run: async ({ world, match }) => {
+			const selected = world.page.locator(
+				'[data-testid="account-switch-option"][data-selected="true"]',
+			);
+			await expect(selected).toHaveCount(1);
+			await expect(selected).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "pick an account",
+		match: /^I pick (.+) in the account picker$/,
+		run: async ({ world, match }) => {
+			await pickerRow(world.page, match[1] ?? "").click();
+		},
+	},
+	{
+		name: "assert PreviewContinuation RPC",
+		match:
+			/^the PreviewContinuation RPC previews the current session on (\S+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "PreviewContinuation",
+			);
+			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
+			expect(request.payload["projectSlug"]).toBe("myapp");
+			expect(request.payload["instanceId"]).toBe(match[1]);
+		},
+	},
+	{
+		name: "assert the handoff dialog title",
+		match: /^the handoff dialog asks (.+)$/,
+		run: async ({ world, match }) => {
+			const dialog = world.page.getByTestId("handoff-dialog");
+			await expect(dialog).toHaveAttribute("data-mode", "confirm");
+			await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "assert the handoff message count",
+		match: /^the handoff dialog carries (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("handoff-message-count")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "assert the swap card",
+		match: /^the swap card hands (\S+) at (.+) to (\S+) at (.+)$/,
+		run: async ({ world, match }) => {
+			const card = world.page.getByTestId("handoff-swap");
+			const squash = (text: string | null) => text?.replace(/\s+/g, "");
+			// The arrow reads "to" for screen readers.
+			await expect
+				.poll(async () => squash(await card.textContent()))
+				.toBe(squash(`${match[1]}${match[2]}→to${match[3]}${match[4]}`));
+			await expect(card.locator("b")).toHaveText(match[3] ?? "");
+		},
+	},
+	{
+		name: "assert an account dot colour",
+		match:
+			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (violet|teal|blue) dot$/,
+		run: async ({ world, match }) => {
+			const region = world.page.getByTestId(
+				{
+					"account picker": "account-switch-picker",
+					"handoff dialog": "handoff-dialog",
+					"transcript divider": "transcript-divider",
+				}[match[1] ?? ""] ?? "",
+			);
+			await expect(
+				region
+					.locator(`[data-testid="account-dot"][data-account="${match[2]}"]`)
+					.first(),
+			).toHaveCSS(
+				"background-color",
+				{
+					violet: "rgb(176, 140, 255)",
+					teal: "rgb(47, 211, 192)",
+					blue: "rgb(90, 169, 245)",
+				}[match[3] ?? ""] ?? "",
+			);
+		},
+	},
+	{
+		name: "the daemon refuses the switch",
+		match: /^the daemon refuses the switch with (.+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setHandler("ContinueSession", () => {
+				throw new WsRpcError({ message: match[1] ?? "" });
+			});
+		},
+	},
+	{
+		name: "press Switch and continue",
+		match: /^I press Switch and continue$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			if (!rpc.getResponseHandler("ContinueSession"))
+				rpc.setResponse("ContinueSession", { ok: true });
+			await world.page.getByTestId("handoff-confirm").click();
+		},
+	},
+	{
+		name: "assert the switching ContinueSession RPC",
+		match:
+			/^the ContinueSession RPC switches the current session from (\S+) to (\S+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "ContinueSession",
+			);
+			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
+			expect(request.payload["expectedInstanceId"]).toBe(match[1]);
+			expect(request.payload["instanceId"]).toBe(match[2]);
+		},
+	},
+	{
+		name: "assert an error toast",
+		match: /^an error toast titled (.+) says (.+)$/,
+		run: async ({ world, match }) => {
+			const toast = world.page
+				.getByRole("alert")
+				.filter({ hasText: match[1] ?? "" });
+			await expect(toast).toBeVisible();
+			await expect(toast).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert the handoff dialog is gone",
+		match: /^the handoff dialog is closed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("handoff-dialog")).toHaveCount(0);
+		},
+	},
+	{
+		name: "server hands the session to another account",
+		match: /^the server switches the session$/,
+		run: ({ world }) => {
+			const limitRecovery = {
+				...limits.get(world.page),
+				continued: true,
+				switched: true,
+			};
+			limits.set(world.page, limitRecovery);
+			projectLimit(world.page, limitRecovery);
+		},
+	},
+	{
+		name: "open What carried over?",
+		match: /^I open What carried over\? on the transcript divider$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("transcript-divider-handoff").click();
+		},
+	},
+	{
+		name: "assert the read-only handoff summary",
+		match: /^the handoff dialog is read-only and carries (.+)$/,
+		run: async ({ world, match }) => {
+			const dialog = world.page.getByTestId("handoff-dialog");
+			await expect(dialog).toHaveAttribute("data-mode", "review");
+			await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(
+				"What carried over?",
+			);
+			await expect(dialog.getByTestId("handoff-message-count")).toHaveText(
+				match[1] ?? "",
+			);
+			await expect(dialog.getByTestId("handoff-close")).toBeVisible();
+			await expect(dialog.getByTestId("handoff-confirm")).toHaveCount(0);
+			await expect(dialog.getByTestId("handoff-swap")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the What carried over? link placement",
+		match:
+			/^the What carried over\? link sits (inline|on its own line) under the divider$/,
+		run: async ({ world, match }) => {
+			const divider = world.page.getByTestId("transcript-divider");
+			const link = world.page.getByTestId("transcript-divider-handoff");
+			await expect(link).toHaveText("What carried over?");
+			if (match[1] === "inline") {
+				await expect(
+					divider.getByTestId("transcript-divider-handoff"),
+				).toHaveCount(1);
+				return;
+			}
+			await expect(
+				divider.getByTestId("transcript-divider-handoff"),
+			).toHaveCount(0);
+			const [dividerBox, linkBox] = await Promise.all([
+				divider.boundingBox(),
+				link.boundingBox(),
+			]);
+			if (!dividerBox || !linkBox) throw new Error("No divider or link box");
+			expect(linkBox.y).toBeGreaterThan(dividerBox.y + dividerBox.height - 4);
+			expect(linkBox.x + linkBox.width / 2).toBeCloseTo(
+				dividerBox.x + dividerBox.width / 2,
+				0,
+			);
 		},
 	},
 ];

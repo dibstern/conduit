@@ -13,7 +13,10 @@ const meta = {
 	tags: ["autodocs"],
 	args: { children: label("Text button") },
 	argTypes: {
-		tone: { control: "inline-radio", options: ["muted", "dimmer", "accent"] },
+		tone: {
+			control: "inline-radio",
+			options: ["muted", "secondary", "dimmer", "accent"],
+		},
 		underline: {
 			control: "inline-radio",
 			options: ["none", "hover", "always"],

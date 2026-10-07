@@ -443,7 +443,11 @@ export const makeContinuation = Effect.gen(function* () {
 									canonicalEvent(
 										"session.resumed",
 										sessionId,
-										{ reason: options.reason, instanceId: options.instanceId },
+										{
+											reason: options.reason,
+											instanceId: options.instanceId,
+											from: continued.previousInstanceId,
+										},
 										{ provider: "claude" },
 									),
 								]);

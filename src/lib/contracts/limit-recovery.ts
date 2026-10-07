@@ -84,6 +84,8 @@ export const LimitRecoverySchema = Schema.Struct({
 	auto: Schema.optional(Schema.Boolean),
 	rearms: Schema.NonNegativeInt,
 	continued: Schema.Boolean,
+	/** The session moved to another account: the strip leaves, the cut-off tag stays. */
+	switched: Schema.optional(Schema.Boolean),
 });
 
 export type LimitRecovery = typeof LimitRecoverySchema.Type;
@@ -94,6 +96,8 @@ export const SessionResumeSchema = Schema.Struct({
 	at: Schema.Number,
 	instanceId: Schema.String,
 	reason: ContinuationReasonSchema,
+	/** The account it switched from; absent when it continued on the same one. */
+	from: Schema.optional(Schema.String),
 });
 
 export type SessionResume = typeof SessionResumeSchema.Type;

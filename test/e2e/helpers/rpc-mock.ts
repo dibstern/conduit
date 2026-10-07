@@ -111,6 +111,11 @@ export class RpcMockControl {
 		this.responseHandlers.set(tag, () => value);
 	}
 
+	/** Answers `tag` from a handler, which may throw a WsRpcError to fail it. */
+	setHandler(tag: string, handler: RpcHandler): void {
+		this.responseHandlers.set(tag, handler);
+	}
+
 	getResponseHandler(tag: string): RpcHandler | undefined {
 		return this.responseHandlers.get(tag);
 	}

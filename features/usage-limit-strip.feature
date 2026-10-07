@@ -267,3 +267,154 @@ Examples:
   | viewport | title                              | detail                                      | baseline                         | threshold |
   | desktop  | Resumes on work2claude at Mon 9:00 | in 3d 23h · auto-resume is on               | usage-limit-auto-waiting-desktop | 98        |
   | phone    | Resumes Mon 9:00                   | work2claude · in 3d 23h · auto-resume is on | usage-limit-auto-waiting-phone   | 98        |
+
+Scenario Outline: Switch account lists each account's fresh quota and pre-selects the most headroom
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self <quota>, team limited until 2026-01-01T14:30:00Z
+  And I open Switch account on the usage limit strip
+  Then the account picker row for personal reads <caption> and can be picked
+  And the account picker row for work2claude reads limited · Mon 9:00 and cannot be picked
+  And the account picker row for team-max reads limited · 14:30 and cannot be picked
+  And the account picker pre-selects personal
+  And the account picker shows claude with a blue dot
+  And the account picker shows self with a teal dot
+  And the account picker shows team with a violet dot
+
+Examples:
+  | viewport | quota       | caption       |
+  | desktop  | 23% used    | 77% left      |
+  | desktop  | 85% used    | 15% left      |
+  | desktop  | unknown     | quota unknown |
+  | phone    | 23% used    | 77% left      |
+  | phone    | unavailable | unavailable   |
+
+Scenario Outline: switching confirms what carries over, hands the session over and marks the transcript
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 23% used, team limited until 2026-01-01T14:30:00Z
+  And the handoff carries 47 of 112 messages with the first
+  And I open Switch account on the usage limit strip
+  And I pick personal in the account picker
+  Then the PreviewContinuation RPC previews the current session on self
+  And the handoff dialog asks Continue on personal?
+  And the handoff dialog carries <messages>
+  And the swap card hands work2claude at limited to personal at 77% left
+  And the handoff dialog shows claude with a blue dot
+  And the handoff dialog shows self with a teal dot
+  When I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to self
+  And the handoff dialog is closed
+  When the server switches the session
+  Then the usage limit strip is not visible
+  And the cut-off tag is visible
+  When the session resumes on self from claude by user and replies All provider tests pass now.
+  Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
+  And the transcript divider shows self with a teal dot
+  And the What carried over? link sits <link> under the divider
+  When I open What carried over? on the transcript divider
+  Then the handoff dialog is read-only and carries <messages>
+
+Examples:
+  | viewport | messages                                             | divider                                                        | link             |
+  | desktop  | Last 46 messages and your first one, word for word   | ↪ Continued on personal · switched by you · What carried over? | inline           |
+  | phone    | Last 46 messages and your first one                  | ↪ Continued on personal · switched by you                      | on its own line  |
+
+Scenario Outline: a switch the daemon refuses changes nothing and says why
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self unavailable
+  And the handoff carries 3 of 3 messages with the first
+  And the daemon refuses the switch with Claude account authentication failed
+  And I open Switch account on the usage limit strip
+  And I pick personal in the account picker
+  And I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to self
+  And an error toast titled Couldn't switch to personal says Claude account authentication failed
+  And the handoff dialog is closed
+  And the usage limit strip is visible
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: limited session with a second account matches frame A
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  Then the usage limit strip is visible
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                          | threshold |
+  | desktop  | usage-limit-switch-strip-desktop  | 98        |
+  | phone    | usage-limit-switch-strip-phone    | 98        |
+
+Scenario Outline: account picker matches frame B
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 23% used, team limited until 2026-01-01T14:30:00Z
+  And I open Switch account on the usage limit strip
+  Then the account picker pre-selects personal
+  And the screen region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                    | threshold |
+  | desktop  | usage-limit-picker-desktop  | 98        |
+  | phone    | usage-limit-picker-phone    | 98        |
+
+Scenario Outline: handoff confirm matches frame C
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 23% used, team limited until 2026-01-01T14:30:00Z
+  And the handoff carries 47 of 112 messages with the first
+  And I open Switch account on the usage limit strip
+  And I pick personal in the account picker
+  Then the handoff dialog asks Continue on personal?
+  And the screen region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                     | threshold |
+  | desktop  | usage-limit-confirm-desktop  | 98        |
+  | phone    | usage-limit-confirm-phone    | 98        |
+
+Scenario Outline: switched session matches frame D
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the server switches the session
+  And the session resumes on self from claude by user and replies All provider tests pass now.
+  Then the usage limit strip is not visible
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                      | threshold |
+  | desktop  | usage-limit-switched-desktop  | 98        |
+  | phone    | usage-limit-switched-phone    | 98        |

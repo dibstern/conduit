@@ -81,6 +81,9 @@ export const MENU_ITEM_DENSITY_CLASSES = {
 	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES} text-sm`,
 	touch: "gap-2.5 px-4 py-3 text-sm",
 	sheet: "min-h-[44px] gap-[13px] px-4 py-0 font-[system-ui] text-[14.5px]",
+	// Rows that carry a status read-out beside the label (the account picker's
+	// quota meters), kept to the 30px the design draws in a popover and a sheet.
+	compact: "min-h-[30px] gap-[8px] p-[6px] text-[11.5px]",
 } as const;
 
 export type MenuItemDensity = keyof typeof MENU_ITEM_DENSITY_CLASSES;

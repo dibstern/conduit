@@ -8,6 +8,7 @@ import {
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
+import { handoffMessagesLine } from "../../../src/lib/frontend/utils/continuation.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
@@ -1709,12 +1710,20 @@ for (const behavior of [
 					: behavior === "plan-unavailable"
 						? 14
 						: 2;
-	test(`scenario ${scenario}: manual account switch through RPC (${behavior})`, async ({
+	// These switch from the strip's picker and confirm; the rest through RPC.
+	const viaStrip =
+		behavior === "available" ||
+		behavior === "unavailable" ||
+		behavior === "plan-unavailable";
+	test(`scenario ${scenario}: manual account switch through ${viaStrip ? "the strip" : "RPC"} (${behavior})`, async ({
+		page,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
 		const hasCutOff =
 			behavior !== "no-cut-off" && behavior !== "send-during-switch";
+		const mobile = testInfo.project.name === "mobile";
+		const strip = page.getByTestId("usage-limit-strip");
 		const artifacts = resolve(
 			"test-results/account-switch",
 			`${testInfo.project.name}-switch-${behavior}-${testInfo.retry}`,
@@ -1830,6 +1839,18 @@ for (const behavior of [
 					)
 					.toBe(true);
 			}
+			if (viaStrip) {
+				await new AppPage(page).goto(
+					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+				);
+				await expect(strip).toBeVisible();
+				// Clicking in the session view marks it read (ADR-0004), so start
+				// read: the refused switch must leave nothing else changed.
+				await Effect.runPromise(
+					browser.rpc.MarkSessionRead({ projectSlug, sessionId }),
+				);
+				await expect.poll(() => latest()?.attention).toBe("idle");
+			}
 			const before = await snapshot();
 			const historyBefore = await Effect.runPromise(
 				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
@@ -1911,17 +1932,61 @@ for (const behavior of [
 			if (quota?._tag === "Available") expect(quota.utilization).toBe(37);
 			if (behavior === "send-during-switch")
 				writeFileSync(join(source.configDir, "conduit-test-hold-stop"), "hold");
-			const switching = Effect.runPromise(
-				browser.rpc
-					.ContinueSession({
-						projectSlug,
-						sessionId,
-						instanceId: target.id,
-						expectedInstanceId: source.id,
-						originId: browser.originId,
-					})
-					.pipe(Effect.either),
-			);
+			const continueSession = () =>
+				Effect.runPromise(
+					browser.rpc
+						.ContinueSession({
+							projectSlug,
+							sessionId,
+							instanceId: target.id,
+							expectedInstanceId: source.id,
+							originId: browser.originId,
+						})
+						.pipe(Effect.either),
+				);
+			const switchFromStrip = async () => {
+				if (preview._tag !== "Right") throw new Error("Preview failed");
+				await page.getByTestId("usage-limit-switch-account").click();
+				const row = page.locator(
+					`[data-testid="account-switch-option"][data-account="${target.id}"]`,
+				);
+				await expect(row.getByTestId("quota-meter-caption")).toHaveText(
+					behavior === "available"
+						? "63% left"
+						: behavior === "unavailable"
+							? "unavailable"
+							: "quota unknown",
+				);
+				await expect(row).not.toHaveAttribute("data-disabled");
+				await page.screenshot({ path: join(artifacts, "01-picker.png") });
+				await row.click();
+				const dialog = page.getByTestId("handoff-dialog");
+				await expect(dialog).toHaveAttribute("data-mode", "confirm");
+				await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(
+					"Continue on Account 2?",
+				);
+				// The count the dialog shows is the preview's, the handoff's own budget.
+				await expect(page.getByTestId("handoff-message-count")).toHaveText(
+					handoffMessagesLine(preview.right, mobile),
+				);
+				await page.screenshot({ path: join(artifacts, "02-confirm.png") });
+				await page.getByTestId("handoff-confirm").click();
+				await expect(dialog).toHaveCount(0);
+				if (behavior !== "unavailable") {
+					await expect(strip).toHaveCount(0);
+					return { _tag: "Right" } as const;
+				}
+				const toast = page.locator('.toast-card[data-variant="error"]');
+				await expect(toast).toContainText("Couldn't switch to Account 2");
+				await expect(strip).toBeVisible();
+				await page.screenshot({ path: join(artifacts, "03-refused.png") });
+				// The typed refusal behind the toast; asking again changes nothing either.
+				const refused = await continueSession();
+				if (refused._tag === "Left")
+					await expect(toast).toContainText(refused.left.message);
+				return refused;
+			};
+			const switching = viaStrip ? switchFromStrip() : continueSession();
 			let queuedSend: Promise<unknown> | undefined;
 			if (behavior === "send-during-switch") {
 				await expect
@@ -1979,6 +2044,7 @@ for (const behavior of [
 			expect(resume).toMatchObject({
 				reason: "user",
 				instanceId: target.id,
+				from: source.id,
 				at: expect.any(Number),
 			});
 			expect(latest()).toMatchObject({
@@ -1995,7 +2061,10 @@ for (const behavior of [
 						originId: browser.originId,
 					}),
 				);
-			expect(await receipt()).toEqual({ handoff: null });
+			// A limited target's turn ends at once, and the limit interceptor keeps
+			// it a completed turn, so only the held targets are still undelivered.
+			if (behavior !== "fail" && behavior !== "hang")
+				expect(await receipt()).toEqual({ handoff: null });
 			if (!hasCutOff) {
 				if (queuedSend) await queuedSend;
 				else {
@@ -2045,7 +2114,11 @@ for (const behavior of [
 					});
 				await expect.poll(() => latest()?.status).toBe("idle");
 				expect(latest()?.resumes).toHaveLength(1);
-				expect(await receipt()).toEqual({ handoff: null });
+				// The limited turn still wrote the handoff into account 2's native
+				// session, so a later continuation there resumes it natively.
+				expect(await receipt()).toMatchObject({
+					handoff: { instanceId: target.id, firstMessageIncluded: true },
+				});
 			} else {
 				if (behavior === "die-once") {
 					await expect
@@ -2093,6 +2166,26 @@ for (const behavior of [
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");
 				const delivered = await receipt();
+				if (viaStrip && delivered.handoff) {
+					const divider = page.getByTestId("transcript-divider");
+					await expect(divider).toContainText(
+						"↪ Continued on Account 2 · switched by you",
+					);
+					await expect(page.getByTestId("cut-off-tag")).toHaveCount(0);
+					await page.screenshot({ path: join(artifacts, "04-switched.png") });
+					await page.getByTestId("transcript-divider-handoff").click();
+					const summary = page.getByTestId("handoff-dialog");
+					await expect(summary).toHaveAttribute("data-mode", "review");
+					await expect(summary.getByTestId("handoff-message-count")).toHaveText(
+						handoffMessagesLine(delivered.handoff, mobile),
+					);
+					await expect(summary.getByTestId("handoff-confirm")).toHaveCount(0);
+					await page.screenshot({
+						path: join(artifacts, "05-carried-over.png"),
+					});
+					await summary.getByTestId("handoff-close").click();
+					await expect(summary).toHaveCount(0);
+				}
 				const reconnected = await harness.connect();
 				try {
 					expect(

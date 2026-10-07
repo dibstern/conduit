@@ -2,11 +2,12 @@
      limit. A pure render of the session row's `limitRecovery` plus its recovery
      actions: no close button, it leaves when the server nulls the field. Once a
      resume at reset is scheduled it turns amber and counts down to it. The
-     actions sit at the right of the row, on a wrapped second row on phones. -->
+     actions sit at the right of the row, on a wrapped second row on phones.
+     With another Claude account to go to, Switch account leads both states. -->
 <script lang="ts">
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getInstanceById } from "../../stores/instance.svelte.js";
+	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -15,6 +16,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import AccountSwitch from "./AccountSwitch.svelte";
 
 	let {
 		limitRecovery,
@@ -26,6 +28,13 @@
 
 	const account = $derived(
 		getInstanceById(limitRecovery.instanceId)?.name ?? limitRecovery.instanceId,
+	);
+	// Switch account needs another Claude account to go to.
+	const canSwitch = $derived(
+		instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== limitRecovery.instanceId),
+	);
+	const geometry = $derived(
+		sessionViewState.compact ? "h-[34px] flex-1 rounded-[10px] text-[12px]" : "h-[24px] rounded-[8px] text-[11px]",
 	);
 	const limitWindow = $derived(
 		limitRecovery.rateLimitType.startsWith("seven_day")
@@ -101,10 +110,13 @@
 		</span>
 		{#if !limitRecovery.continued}
 			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+				{#if canSwitch}
+					<AccountSwitch {limitRecovery} {sessionId} {projectSlug} primary class="px-[10px] {geometry}" />
+				{/if}
 				{#if limitRecovery.resetsAt === undefined}
-					<Button variant="inverse" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class="px-[10px] font-semibold {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] text-[12px]' : 'h-[24px] rounded-[8px] text-[11px]'}" onclick={() => continueAt()}>Try again</Button>
+					<Button variant={canSwitch ? "secondary" : "inverse"} size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class="px-[10px] {canSwitch ? '' : 'font-semibold'} {geometry}" onclick={() => continueAt()}>Try again</Button>
 				{:else}
-					<Button variant="secondary" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class="px-[10px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] text-[12px]' : 'h-[24px] rounded-[8px] text-[11px]'}" onclick={() => continueAt(limitRecovery.resetsAt)}>Resume at reset</Button>
+					<Button variant="secondary" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class="px-[10px] {geometry}" onclick={() => continueAt(limitRecovery.resetsAt)}>Resume at reset</Button>
 				{/if}
 			</div>
 		{/if}
@@ -115,6 +127,9 @@
 			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
 		</span>
 		<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+			{#if canSwitch}
+				<AccountSwitch {limitRecovery} {sessionId} {projectSlug} primary={false} class="px-[10px] {geometry}" />
+			{/if}
 			<Button variant="ghost" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class="text-[11px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] px-[8px]' : 'h-[24px] rounded-[8px] px-[10px]'}" onclick={cancelResume}>Cancel auto-resume</Button>
 		</div>
 	{/if}

@@ -438,6 +438,8 @@ export interface SessionCutOffDismissedPayload {
 export interface SessionResumedPayload {
 	readonly reason: ContinuationReason;
 	readonly instanceId: string;
+	/** The previous account, when the continuation switched accounts. */
+	readonly from?: string;
 }
 
 export interface SessionResumeScheduledPayload {
@@ -999,6 +1001,7 @@ const SessionCutOffDismissedPayloadSchema = Schema.Struct({
 const SessionResumedPayloadSchema = Schema.Struct({
 	reason: ContinuationReasonSchema,
 	instanceId: Schema.String,
+	from: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const SessionResumeScheduledPayloadSchema = Schema.Struct({

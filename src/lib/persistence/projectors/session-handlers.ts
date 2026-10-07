@@ -353,7 +353,7 @@ export const sessionHandlers: {
 				params: [event.data.newProvider, event.createdAt, event.data.sessionId],
 			},
 			{
-				sql: "UPDATE sessions SET limit_recovery = CASE WHEN json_extract(limit_recovery, '$.cutOffMessageId') IS NULL THEN NULL ELSE json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt') END WHERE id = ? AND limit_recovery IS NOT NULL",
+				sql: "UPDATE sessions SET limit_recovery = CASE WHEN json_extract(limit_recovery, '$.cutOffMessageId') IS NULL THEN NULL ELSE json_remove(json_set(limit_recovery, '$.continued', json('true'), '$.switched', json('true')), '$.scheduledAt') END WHERE id = ? AND limit_recovery IS NOT NULL",
 				params: [event.data.sessionId],
 			},
 		];
@@ -431,6 +431,7 @@ export const sessionHandlers: {
 					at: event.createdAt,
 					instanceId: event.data.instanceId,
 					reason: event.data.reason,
+					...(event.data.from === undefined ? {} : { from: event.data.from }),
 				}),
 				event.createdAt,
 				event.sessionId,

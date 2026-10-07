@@ -966,7 +966,7 @@
 			</div>
 		{/if}
 
-		{#if currentSession?.limitRecovery}
+		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
 		{/if}
 
