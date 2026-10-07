@@ -55,6 +55,7 @@ function mockWsHandler(
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => sessionId),
 		getClientsForSession: vi.fn(() => ["client-1"]),
+		registerSessionViewer: vi.fn(() => () => {}),
 		sendToSession: vi.fn(),
 		broadcastPerSessionEvent: vi.fn(),
 		markClientBootstrapped: vi.fn(),

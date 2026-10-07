@@ -8,6 +8,7 @@ import {
 	Context,
 	Effect,
 	Exit,
+	Fiber,
 	Layer,
 	ManagedRuntime,
 	Stream,
@@ -57,7 +58,11 @@ export class TestWsClient {
 	}> = [];
 	private openPromise: Promise<void>;
 	private readonly projectSlug: string;
-	private readonly subscriptions = new Map<string, Promise<void>>();
+	private readonly subscriptions = new Map<
+		string,
+		Promise<Fiber.RuntimeFiber<void, unknown>>
+	>();
+	private detailSubscriptionKey: string | undefined;
 	private readonly sessionRows = new Map<string, SessionInfo>();
 	private readonly turnEndVersions = new Map<string, number>();
 	private readonly turnCursors = new Map<string, number>();
@@ -479,7 +484,7 @@ export class TestWsClient {
 			"shell",
 			(client) => client.SubscribeShell({ projectSlug }),
 			{ projectSlug },
-			async (envelope) => {
+			(envelope) => {
 				const rows =
 					envelope._tag === "snapshot"
 						? envelope.rows
@@ -489,9 +494,6 @@ export class TestWsClient {
 				if (envelope._tag === "snapshot") this.sessionRows.clear();
 				for (const row of rows) this.sessionRows.set(row.id, row);
 				if (envelope._tag === "remove") this.sessionRows.delete(envelope.id);
-				await Promise.all(
-					rows.map((row) => this.subscribeSessionDetail(row.id, projectSlug)),
-				);
 			},
 		);
 	}
@@ -632,7 +634,7 @@ export class TestWsClient {
 			"family",
 			(client) => client.SubscribeSessionFamily({ projectSlug, sessionId }),
 			{ projectSlug, familyOf: sessionId },
-			async (envelope) => {
+			(envelope) => {
 				const rows =
 					envelope._tag === "snapshot"
 						? envelope.rows
@@ -641,9 +643,6 @@ export class TestWsClient {
 							: [];
 				for (const row of rows) this.sessionRows.set(row.id, row);
 				if (envelope._tag === "remove") this.sessionRows.delete(envelope.id);
-				await Promise.all(
-					rows.map((row) => this.subscribeSessionDetail(row.id, projectSlug)),
-				);
 			},
 		);
 	}
@@ -671,7 +670,7 @@ export class TestWsClient {
 	}
 
 	/** Each feed records its typed envelopes and waits for synchronization. */
-	private follow<A extends object>(
+	private async follow<A extends object>(
 		type: string,
 		open: (client: TestRpc["Type"]) => Stream.Stream<A, unknown>,
 		scope: { projectSlug: string; familyOf?: string; sessionId?: string },
@@ -679,19 +678,23 @@ export class TestWsClient {
 	): Promise<void> {
 		const key = JSON.stringify([type, scope]);
 		const existing = this.subscriptions.get(key);
-		if (existing) return existing;
+		if (existing) {
+			await existing;
+			return;
+		}
 		const ready = (async () => {
 			if (this.closed) throw new Error("Client closed");
 			if (this.failure) throw this.failure;
 			const client = await this.client;
 			const synchronized = this.waitFor(type, {
+				cursor: this.received.length,
 				predicate: (msg) =>
 					msg["_tag"] === "synchronized" &&
 					msg["projectSlug"] === scope.projectSlug &&
 					msg["familyOf"] === scope.familyOf &&
 					msg["sessionId"] === scope.sessionId,
 			});
-			this.runtime.runFork(
+			const fiber = this.runtime.runFork(
 				Stream.runForEach(open(client), (envelope) =>
 					Effect.promise(async () => {
 						this.receive({ type, ...scope, ...envelope });
@@ -700,6 +703,8 @@ export class TestWsClient {
 				).pipe(
 					Effect.onExit((exit) =>
 						Effect.sync(() => {
+							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
+								return;
 							if (Exit.isFailure(exit)) this.fail(Cause.squash(exit.cause));
 							else this.fail(new Error("RPC subscription ended"));
 						}),
@@ -707,19 +712,37 @@ export class TestWsClient {
 				),
 			);
 			await synchronized;
+			return fiber;
 		})();
 		this.subscriptions.set(key, ready);
-		return ready;
+		await ready;
 	}
 
 	async subscribeSessionDetail(
 		sessionId: string,
 		projectSlug = this.projectSlug,
 	): Promise<void> {
+		const scope = { projectSlug, sessionId };
+		const key = JSON.stringify(["session_detail", scope]);
+		while (
+			this.detailSubscriptionKey !== undefined &&
+			this.detailSubscriptionKey !== key
+		) {
+			const previous = this.detailSubscriptionKey;
+			const subscription = this.subscriptions.get(previous);
+			if (subscription)
+				await this.runtime.runPromise(Fiber.interrupt(await subscription));
+			if (this.subscriptions.get(previous) === subscription) {
+				this.subscriptions.delete(previous);
+				if (this.detailSubscriptionKey === previous)
+					this.detailSubscriptionKey = undefined;
+			}
+		}
+		this.detailSubscriptionKey = key;
 		await this.follow(
 			"session_detail",
 			(client) => client.SubscribeSessionDetail({ projectSlug, sessionId }),
-			{ projectSlug, sessionId },
+			scope,
 			(envelope) => {
 				const items =
 					envelope._tag === "snapshot"

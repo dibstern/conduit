@@ -22,6 +22,7 @@ import { subscribeApprovals } from "../domain/relay/Services/approvals-subscript
 import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
@@ -172,6 +173,20 @@ const unaryHandlers = {
 	...conversationHandlers,
 };
 
+const subscribeSessionDetailWithPresence = (
+	options: Parameters<typeof subscribeSessionDetail>[0],
+) =>
+	Stream.unwrapScoped(
+		Effect.gen(function* () {
+			const wsHandler = yield* WebSocketHandlerTag;
+			yield* Effect.acquireRelease(
+				Effect.sync(() => wsHandler.registerSessionViewer(options.sessionId)),
+				(removeViewer) => Effect.sync(removeViewer),
+			);
+			return subscribeSessionDetail(options);
+		}),
+	);
+
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
@@ -205,7 +220,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		),
 	SubscribeSessionDetail: (request) =>
 		Rpc.fork(
-			subscribeSessionDetail({
+			subscribeSessionDetailWithPresence({
 				sessionId: request.sessionId,
 				...(request.resumeFromSequence === undefined
 					? {}
@@ -485,7 +500,7 @@ export const makeRoutedWsRpcServerLayer = (
 			),
 		SubscribeSessionDetail: (request) =>
 			routeStream(request.projectSlug, () => {
-				const source = subscribeSessionDetail({
+				const source = subscribeSessionDetailWithPresence({
 					sessionId: request.sessionId,
 					...(request.resumeFromSequence === undefined
 						? {}

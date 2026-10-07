@@ -615,6 +615,7 @@ export function makeMockWebSocketHandler(
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => undefined),
 		getClientsForSession: vi.fn(() => []),
+		registerSessionViewer: vi.fn(() => () => {}),
 		sendToSession: vi.fn(),
 		broadcastPerSessionEvent: vi.fn(),
 		markClientBootstrapped: vi.fn(),

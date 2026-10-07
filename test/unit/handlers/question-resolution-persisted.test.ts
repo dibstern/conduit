@@ -77,6 +77,7 @@ const makeWsHandler = () => ({
 	setClientSession: vi.fn(),
 	getClientSession: vi.fn(() => SESSION),
 	getClientsForSession: vi.fn(() => ["client-1"]),
+	registerSessionViewer: vi.fn(() => () => {}),
 	sendToSession: vi.fn(),
 	broadcastPerSessionEvent: vi.fn(),
 	markClientBootstrapped: vi.fn(),

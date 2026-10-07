@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { Cause, Effect, Exit, Fiber, Runtime } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
@@ -113,6 +114,19 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 
 	getClientsForSession(sessionId: string): string[] {
 		return [...(this.sessionClients.get(sessionId) ?? [])];
+	}
+
+	registerSessionViewer(sessionId: string): () => void {
+		if (this.closed) return () => {};
+		const viewerId = `rpc-viewer-${randomUUID()}`;
+		const viewers = this.sessionClients.get(sessionId) ?? new Set<string>();
+		viewers.add(viewerId);
+		this.sessionClients.set(sessionId, viewers);
+		return () => {
+			const current = this.sessionClients.get(sessionId);
+			current?.delete(viewerId);
+			if (current?.size === 0) this.sessionClients.delete(sessionId);
+		};
 	}
 
 	sendToSession(sessionId: string, msg: RelayMessage): void {

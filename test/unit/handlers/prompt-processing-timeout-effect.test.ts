@@ -54,6 +54,7 @@ function makeWsHandler() {
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => "session-1"),
 		getClientsForSession: vi.fn(() => ["client-1"]),
+		registerSessionViewer: vi.fn(() => () => {}),
 		sendToSession: vi.fn(),
 		broadcastPerSessionEvent: vi.fn(),
 		markClientBootstrapped: vi.fn(),
