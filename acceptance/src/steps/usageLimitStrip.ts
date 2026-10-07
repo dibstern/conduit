@@ -40,6 +40,20 @@ function projectLimit(page: Page, limitRecovery: unknown): void {
 	});
 }
 
+type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";
+
+const stripActions: Record<StripAction, { testId: string; rpc: string }> = {
+	"Try again": { testId: "usage-limit-try-again", rpc: "ContinueSession" },
+	"Resume at reset": {
+		testId: "usage-limit-resume-at-reset",
+		rpc: "ContinueSession",
+	},
+	"Cancel auto-resume": {
+		testId: "usage-limit-cancel-resume",
+		rpc: "CancelContinuation",
+	},
+};
+
 export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "name a Claude account",
@@ -215,19 +229,19 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "press Try again on the usage limit strip",
-		match: /^I press Try again on the usage limit strip$/,
-		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("ContinueSession", {
-				ok: true,
-			});
-			await world.page.getByTestId("usage-limit-try-again").click();
+		name: "press a usage limit strip action",
+		match:
+			/^I press (Try again|Resume at reset|Cancel auto-resume) on the usage limit strip$/,
+		run: async ({ world, match }) => {
+			const action = stripActions[match[1] as StripAction];
+			requireRpcControl(world.page).setResponse(action.rpc, { ok: true });
+			await world.page.getByTestId(action.testId).click();
 		},
 	},
 	{
 		name: "assert ContinueSession RPC",
 		match:
-			/^the ContinueSession RPC continues the current session on (\S+) now$/,
+			/^the ContinueSession RPC continues the current session on (\S+) (now|at (\S+))$/,
 		run: async ({ world, match }) => {
 			const request = await requireRpcControl(world.page).waitForRequest(
 				(candidate) => candidate.tag === "ContinueSession",
@@ -236,19 +250,35 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			expect(request.payload["projectSlug"]).toBe("myapp");
 			expect(request.payload["instanceId"]).toBe(match[1]);
 			expect(request.payload["expectedInstanceId"]).toBe(match[1]);
-			expect(request.payload["at"]).toBeUndefined();
+			expect(request.payload["at"]).toBe(
+				match[3] === undefined ? undefined : Date.parse(match[3]) / 1000,
+			);
 		},
 	},
 	{
-		name: "assert Try again visibility",
-		match: /^the usage limit strip (shows|has no) Try again$/,
+		name: "assert CancelContinuation RPC",
+		match: /^the CancelContinuation RPC names the current session$/,
+		run: async ({ world }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "CancelContinuation",
+			);
+			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
+			expect(request.payload["projectSlug"]).toBe("myapp");
+		},
+	},
+	{
+		name: "assert a usage limit strip action",
+		match:
+			/^the usage limit strip (shows|has no) (Try again|Resume at reset|Cancel auto-resume)$/,
 		run: async ({ world, match }) => {
-			const button = world.page.getByTestId("usage-limit-try-again");
+			const button = world.page.getByTestId(
+				stripActions[match[2] as StripAction].testId,
+			);
 			if (match[1] === "has no") {
 				await expect(button).toHaveCount(0);
 				return;
 			}
-			await expect(button).toHaveText("Try again");
+			await expect(button).toHaveText(match[2] ?? "");
 			await expect(button).toBeEnabled();
 			const [buttonBox, stripBox] = await Promise.all([
 				button.boundingBox(),
@@ -262,6 +292,34 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				expect(
 					stripBox.x + stripBox.width - (buttonBox.x + buttonBox.width),
 				).toBeLessThan(16);
+		},
+	},
+	{
+		name: "assert the usage limit strip state",
+		match: /^the usage limit strip is (limited|waiting)$/,
+		run: async ({ world, match }) => {
+			const strip = world.page.getByTestId("usage-limit-strip");
+			await expect(strip).toHaveAttribute("data-state", match[1] ?? "");
+			// Waiting wears the theme amber (#f4b740) at 40%; limited the red at 45%.
+			await expect(strip).toHaveCSS(
+				"border-top-color",
+				match[1] === "waiting"
+					? "oklab(0.815817 0.0250889 0.14507 / 0.4)"
+					: "oklab(0.684887 0.17753 0.0399031 / 0.45)",
+			);
+		},
+	},
+	{
+		name: "server schedules or cancels the resume",
+		match: /^the server (schedules|cancels) the resume at reset$/,
+		run: ({ world, match }) => {
+			const { scheduledAt: _, ...limited } = limits.get(world.page) ?? {};
+			const limitRecovery =
+				match[1] === "schedules"
+					? { ...limited, scheduledAt: limited["resetsAt"] }
+					: limited;
+			limits.set(world.page, limitRecovery);
+			projectLimit(world.page, limitRecovery);
 		},
 	},
 	{

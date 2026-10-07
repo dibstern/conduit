@@ -704,8 +704,16 @@ for (const scenario of [
 		cancel:
 			"CancelContinuation restores the plain limited state and is idempotent",
 	};
-	test(title[scenario], async ({ harness }, testInfo) => {
+	test(title[scenario], async ({ page, harness }, testInfo) => {
 		test.setTimeout(120_000);
+		// These drive Resume at reset and Cancel auto-resume from the strip.
+		const ui =
+			scenario === "reset" || scenario === "restart" || scenario === "cancel";
+		const app = new AppPage(page);
+		const strip = page.getByTestId("usage-limit-strip");
+		const resumeAtReset = page.getByTestId("usage-limit-resume-at-reset");
+		const cancelResume = page.getByTestId("usage-limit-cancel-resume");
+		const mobile = testInfo.project.name === "mobile";
 		const artifacts = resolve(
 			"test-results/account-switch",
 			`${testInfo.project.name}-scheduled-${scenario}-${testInfo.retry}`,
@@ -790,7 +798,8 @@ for (const scenario of [
 		try {
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			writeFileSync(join(harness.root, "hold-continuation"), "hold");
-			const at = Math.floor(Date.now() / 1000) + 10;
+			// Loading the page and clicking needs a longer lead before the reset.
+			const at = Math.floor(Date.now() / 1000) + (ui ? 20 : 10);
 			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
 			await Effect.runPromise(
 				browser.rpc.SendMessage({
@@ -830,19 +839,50 @@ for (const scenario of [
 			);
 			// Even a known Limited account must be schedulable without a quota probe.
 			writeFileSync(join(configDir, "conduit-test-quota"), "limited");
-			await Effect.runPromise(
-				browser.rpc.ContinueSession({
-					projectSlug,
-					sessionId,
-					instanceId,
-					expectedInstanceId: instanceId,
-					at,
-					originId: browser.originId,
-				}),
-			);
+			if (ui) {
+				await app.goto(
+					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+				);
+				await expect(strip).toHaveAttribute("data-state", "limited");
+				await resumeAtReset.click();
+			} else
+				await Effect.runPromise(
+					browser.rpc.ContinueSession({
+						projectSlug,
+						sessionId,
+						instanceId,
+						expectedInstanceId: instanceId,
+						at,
+						originId: browser.originId,
+					}),
+				);
 			await expect
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at });
+			if (ui) {
+				const resetLabel = formatSnoozeTime(at * 1000);
+				await expect(strip).toHaveAttribute("data-state", "waiting");
+				await expect(page.getByTestId("usage-limit-title")).toHaveText(
+					mobile
+						? `Resumes ${resetLabel}`
+						: `Resumes on Reset account at ${resetLabel}`,
+				);
+				const countdown = page.getByTestId("usage-limit-detail");
+				await expect(countdown).toHaveText(
+					mobile ? /^Reset account · in \d+s$/ : /^in \d+s$/,
+				);
+				// The countdown is derived from the local clock: it ticks with no
+				// projection change from the server.
+				const shown = await countdown.textContent();
+				await expect(countdown).not.toHaveText(shown ?? "");
+				expect(latest()?.limitRecovery).toEqual({
+					...limited,
+					scheduledAt: at,
+				});
+				await expect(resumeAtReset).toHaveCount(0);
+				await expect(cancelResume).toHaveText("Cancel auto-resume");
+				await page.screenshot({ path: join(artifacts, "01-waiting.png") });
+			}
 			expect(probes()).toHaveLength(0);
 			expect(continuations()).toHaveLength(0);
 			evidence["waiting"] = await snapshot();
@@ -850,15 +890,19 @@ for (const scenario of [
 				writeFileSync(join(configDir, "conduit-test-quota"), "available");
 			if (scenario === "dismiss" || scenario === "cancel") {
 				const request = { projectSlug, sessionId, originId: browser.originId };
-				await Effect.runPromise(
-					scenario === "dismiss"
-						? browser.rpc.DismissCutOff(request)
-						: browser.rpc.CancelContinuation(request),
-				);
+				if (scenario === "cancel") await cancelResume.click();
+				else await Effect.runPromise(browser.rpc.DismissCutOff(request));
 				const { cutOffMessageId: _cutOff, ...dismissed } = limited ?? {};
 				await expect
 					.poll(() => latest()?.limitRecovery)
 					.toEqual(scenario === "dismiss" ? dismissed : limited);
+				if (scenario === "cancel") {
+					// Back to frame A: the plain limited strip offers Resume at reset again.
+					await expect(strip).toHaveAttribute("data-state", "limited");
+					await expect(resumeAtReset).toBeEnabled();
+					await expect(cancelResume).toHaveCount(0);
+					await page.screenshot({ path: join(artifacts, "02-cancelled.png") });
+				}
 				const cancelled = await snapshot();
 				await Effect.runPromise(browser.rpc.CancelContinuation(request));
 				expect(await snapshot()).toEqual(cancelled);
@@ -900,6 +944,9 @@ for (const scenario of [
 					await harness.restart({ continuationSweepIntervalMs: 60_000 });
 					browser = await harness.connect(sessionId, undefined, projectSlug);
 					subscription = subscribe();
+					await app.goto(
+						`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+					);
 				}
 				await expect
 					.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
@@ -945,6 +992,40 @@ for (const scenario of [
 				writeFileSync(join(harness.root, "release-continuation"), "release");
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");
+				// Frame F: the strip is gone and a divider names the reset, above the reply.
+				const resume = latest()?.resumes?.at(-1);
+				expect(resume).toMatchObject({ instanceId, reason: "reset" });
+				if (!resume) throw new Error("No reset resume");
+				const divider = page.getByTestId("transcript-divider");
+				const reply = page
+					.locator(".msg-assistant")
+					.filter({ hasText: "done(Continue where you left off.)" });
+				const dividerAboveReply = async (): Promise<void> => {
+					await expect(strip).toHaveCount(0);
+					await expect(divider).toHaveText(
+						`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+					);
+					await expect(reply).toBeVisible();
+					const [dividerBox, replyBox] = await Promise.all([
+						divider.boundingBox(),
+						reply.boundingBox(),
+					]);
+					if (!dividerBox || !replyBox)
+						throw new Error("No divider or reply box");
+					expect(replyBox.y).toBeGreaterThanOrEqual(
+						dividerBox.y + dividerBox.height,
+					);
+				};
+				await dividerAboveReply();
+				await page.screenshot({
+					path: join(artifacts, "02-reset-divider.png"),
+				});
+				await page.reload();
+				await app.connectOverlay.waitFor({ state: "detached" });
+				await dividerAboveReply();
+				await page.screenshot({
+					path: join(artifacts, "03-reset-divider-after-reload.png"),
+				});
 			}
 			evidence["after"] = await snapshot();
 		} finally {

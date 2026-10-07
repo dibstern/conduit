@@ -97,6 +97,7 @@
     Workflow,
     Radar,
     Gauge,
+    Timer,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
@@ -209,6 +210,7 @@
     'workflow': Workflow,
     'radar': Radar,
     'gauge': Gauge,
+    'timer': Timer,
 
     // Harness brand marks (not lucide).
     'claude': ClaudeMark,

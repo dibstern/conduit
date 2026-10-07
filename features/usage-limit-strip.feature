@@ -170,3 +170,80 @@ Examples:
   | viewport | baseline                        | threshold |
   | desktop  | usage-limit-resumed-desktop     | 98        |
   | phone    | usage-limit-resumed-phone       | 98        |
+
+Scenario Outline: Resume at reset schedules the resume and Cancel auto-resume undoes it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  Then the usage limit strip is limited
+  And the usage limit strip shows Resume at reset
+  When I press Resume at reset on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude at 2026-01-05T09:00:00Z
+  When the server schedules the resume at reset
+  Then the usage limit strip is waiting
+  And the usage limit strip title reads <title>
+  And the usage limit strip detail reads <detail>
+  And the usage limit strip has no Resume at reset
+  And the usage limit strip shows Cancel auto-resume
+  When I press Cancel auto-resume on the usage limit strip
+  Then the CancelContinuation RPC names the current session
+  When the server cancels the resume at reset
+  Then the usage limit strip is limited
+  And the usage limit strip shows Resume at reset
+  And the usage limit strip has no Cancel auto-resume
+
+Examples:
+  | viewport | title                                | detail                       |
+  | desktop  | Resumes on work2claude at Mon 9:00   | in 3d 23h                    |
+  | phone    | Resumes Mon 9:00                     | work2claude · in 3d 23h      |
+
+Scenario Outline: a session that resumed at reset keeps a divider with the reset time
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-01T09:40:00Z
+  And the session resumes on claude by reset and replies All provider tests pass now.
+  Then the usage limit strip is not visible
+  And the transcript divider reading ↻ Resumed on work2claude after reset · 9:40 sits directly above the reply All provider tests pass now.
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: waiting session matches frame E
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the server schedules the resume at reset
+  Then the usage limit strip is waiting
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                        | threshold |
+  | desktop  | usage-limit-waiting-desktop     | 98        |
+  | phone    | usage-limit-waiting-phone       | 98        |
+
+Scenario Outline: session resumed at reset matches frame F
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-01T09:40:00Z
+  And the session resumes on claude by reset and replies All provider tests pass now.
+  Then the usage limit strip is not visible
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                           | threshold |
+  | desktop  | usage-limit-reset-resumed-desktop  | 98        |
+  | phone    | usage-limit-reset-resumed-phone    | 98        |
