@@ -69,7 +69,6 @@ const makeReadQuery = (
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),

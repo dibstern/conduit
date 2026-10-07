@@ -55,8 +55,7 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "recordMessageActivity"
 	| "addToParentMap"
 	| "getSessionParentMap"
-	| "pushViewerFamilies"
-	| "getSessionFamily"
+	| "refreshSessionLineage"
 >;
 
 type ReadModelMutation = Exclude<

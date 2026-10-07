@@ -203,7 +203,6 @@ const makeReadQuery = (
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),

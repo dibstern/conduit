@@ -129,7 +129,6 @@ function makeReadQuery(
 		readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 		readSessionList: () => Effect.succeed({ rows: [], version: 0 }),
 		getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-		getSessionFamily: () => Effect.succeed([]),
 		countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 		readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 		getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
@@ -237,7 +236,7 @@ function runClientInit(
 }
 
 describe("handleClientConnectedEffect — session selection", () => {
-	it("sends family and status without a server-selected session frame", async () => {
+	it("binds the requested session without a family push or a session_switched frame", async () => {
 		const deps = makeClientInitEffectLayer();
 		await runClientInit(deps, "client-1", "requested-session");
 		expect(deps.sessionService.sessionExists).toHaveBeenCalledWith(
@@ -247,12 +246,9 @@ describe("handleClientConnectedEffect — session selection", () => {
 			"client-1",
 			"requested-session",
 		);
-		expect(deps.wsHandler.sendTo).toHaveBeenCalledWith(
+		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
-			expect.objectContaining({
-				type: "session_family",
-				rootId: "requested-session",
-			}),
+			expect.objectContaining({ type: "session_family" }),
 		);
 		expect(deps.wsHandler.sendTo).not.toHaveBeenCalledWith(
 			"client-1",
@@ -346,7 +342,6 @@ describe("handleClientConnectedEffect — session selection", () => {
 		expect(getDefaultSessionId).not.toHaveBeenCalled();
 		expect(createSession).not.toHaveBeenCalled();
 		expect(deps.wsHandler.setClientSession).not.toHaveBeenCalled();
-		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
@@ -398,53 +393,6 @@ describe("handleClientConnectedEffect — model info", () => {
 				expect.stringMatching(/^(model|variant|context_window)_info$/),
 			]),
 		);
-	});
-});
-
-describe("handleClientConnectedEffect — viewed families", () => {
-	it("pushes viewed families before marking the client bootstrapped", async () => {
-		const deps = makeClientInitEffectLayer();
-		await runClientInit(deps, "client-1");
-		const pushOrder = vi.mocked(deps.sessionService.pushViewerFamilies).mock
-			.invocationCallOrder[0];
-		const bootstrapOrder = vi.mocked(deps.wsHandler.markClientBootstrapped).mock
-			.invocationCallOrder[0];
-		expect(pushOrder).toBeDefined();
-		expect(bootstrapOrder).toBeDefined();
-		if (pushOrder === undefined || bootstrapOrder === undefined) {
-			throw new Error(
-				"family push and bootstrap calls should both be recorded",
-			);
-		}
-		expect(pushOrder).toBeLessThan(bootstrapOrder);
-	});
-
-	it("logs, without a browser error, when pushViewerFamilies throws", async () => {
-		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.sessionService.pushViewerFamilies).mockReturnValue(
-			Effect.fail(
-				new SessionManagerError({
-					operation: "pushViewerFamilies",
-					cause: new Error("family fail"),
-				}),
-			),
-		);
-		await runClientInit(deps, "client-1");
-		// Init failures are background-task errors (fork 3.2): log only.
-		expect(deps.log.warn).toHaveBeenCalledWith(
-			expect.stringContaining("Failed to push viewed families"),
-		);
-		const errorOrder = vi.mocked(deps.log.warn).mock.invocationCallOrder[0];
-		const bootstrapOrder = vi.mocked(deps.wsHandler.markClientBootstrapped).mock
-			.invocationCallOrder[0];
-		expect(errorOrder).toBeDefined();
-		expect(bootstrapOrder).toBeDefined();
-		if (errorOrder === undefined || bootstrapOrder === undefined) {
-			throw new Error(
-				"init-failure log and bootstrap calls should both be recorded",
-			);
-		}
-		expect(errorOrder).toBeLessThan(bootstrapOrder);
 	});
 });
 
@@ -588,7 +536,6 @@ describe("handleClientConnectedEffect — no active session", () => {
 
 		expect(deps.wsHandler.setClientSession).not.toHaveBeenCalled();
 
-		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
@@ -605,7 +552,6 @@ describe("handleClientConnectedEffect — error resilience", () => {
 		await runClientInit(deps, "client-1");
 
 		expect(deps.client.session.get).not.toHaveBeenCalled();
-		expect(deps.sessionService.pushViewerFamilies).toHaveBeenCalledOnce();
 		expect(deps.wsHandler.markClientBootstrapped).toHaveBeenCalledWith(
 			"client-1",
 		);
@@ -613,14 +559,6 @@ describe("handleClientConnectedEffect — error resilience", () => {
 
 	it("does not crash when all API calls fail", async () => {
 		const deps = makeClientInitEffectLayer();
-		vi.mocked(deps.sessionService.pushViewerFamilies).mockReturnValue(
-			Effect.fail(
-				new SessionManagerError({
-					operation: "pushViewerFamilies",
-					cause: new Error("fail"),
-				}),
-			),
-		);
 		// No cached OpenCode catalog and no Claude models: no providers at all.
 		deps.discoverClaudeCapabilities.mockReturnValue(
 			Effect.fail(new Cause.UnknownException(new Error("fail"))),
@@ -630,9 +568,7 @@ describe("handleClientConnectedEffect — error resilience", () => {
 		await expect(runClientInit(deps, "client-1")).resolves.toBeUndefined();
 
 		// Genuinely unavailable init data is logged, never sent to the browser.
-		expect(vi.mocked(deps.log.warn).mock.calls.length).toBeGreaterThanOrEqual(
-			2,
-		);
+		expect(deps.log.warn).toHaveBeenCalled();
 	});
 });
 

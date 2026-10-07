@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { sendMockFamily } from "../../../test/e2e/helpers/rpc-mock.js";
 import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
 import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -119,22 +120,16 @@ export const composerHandlers: StepHandler[] = [
 		name: "replay subagent family",
 		match: /^the mock relay replays a session family with a parent$/,
 		run: async ({ world }) => {
-			const relayControl = relayControls.get(world.page);
-			if (!relayControl) throw new Error("Mock relay was not initialised");
 			await openSessionRoute(world.page, "sess-subagent");
-			relayControl.sendMessage({
-				type: "session_family",
-				rootId: "sess-mockup-001",
-				sessions: [
-					{ id: "sess-mockup-001", title: "Parent session", status: "idle" },
-					{
-						id: "sess-subagent",
-						title: "Subagent session",
-						status: "idle",
-						parentID: "sess-mockup-001",
-					},
-				],
-			});
+			sendMockFamily(world.page, [
+				{ id: "sess-mockup-001", title: "Parent session", status: "idle" },
+				{
+					id: "sess-subagent",
+					title: "Subagent session",
+					status: "idle",
+					parentID: "sess-mockup-001",
+				},
+			]);
 		},
 	},
 	{

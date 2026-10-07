@@ -45,7 +45,7 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
-import type { RelayMessage, SessionInfo } from "../../../types.js";
+import type { SessionInfo } from "../../../types.js";
 import {
 	DaemonEventBusTag,
 	publishSessionCreated,
@@ -63,7 +63,6 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "./services.js";
 import {
 	applySessionCommand,
@@ -604,12 +603,6 @@ export interface SessionManagerService {
 		options?: ListSessionsOptions,
 	): Effect.Effect<SessionInfo[], SessionManagerError>;
 	sessionExists(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
-	getSessionFamily(
-		sessionId: string,
-	): Effect.Effect<
-		Extract<RelayMessage, { type: "session_family" }>,
-		SessionManagerError
-	>;
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
@@ -665,7 +658,12 @@ export interface SessionManagerService {
 		sessionId: string,
 		entry: ForkEntry,
 	): Effect.Effect<void, SessionManagerError>;
-	pushViewerFamilies(): Effect.Effect<void, SessionManagerError>;
+	/**
+	 * Re-read session lineage into the parent map, side-thread set and session
+	 * count. Status propagation and the relay snapshot read these caches, so
+	 * call it wherever a session or a parent edge may have appeared.
+	 */
+	refreshSessionLineage(): Effect.Effect<void, SessionManagerError>;
 }
 
 /** Bundled service object for callers that prefer DI over free functions. */
@@ -888,7 +886,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| SessionManagerStateTag
 	| LoggerTag
 	| ConfigTag
-	| WebSocketHandlerTag
 	| RelayStatusSnapshotTag
 	| OpenCodeInstancesTag
 	| BackgroundLivenessTag
@@ -916,7 +913,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const backgroundOf = yield* BackgroundLivenessTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const overrides = yield* OverridesStateTag;
@@ -928,7 +924,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
 		>();
-		const { serviceListSessions, getSessionFamily, pushViewerFamilies } =
+		const { serviceListSessions, refreshSessionLineage } =
 			makeSessionListOperations({
 				api,
 				stateRef,
@@ -936,7 +932,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				statusPollerOption,
 				backgroundOf,
 				snapshot,
-				wsHandler,
 				projectDir: config.projectDir,
 			});
 		const establishOpenCodeSession = (
@@ -1156,7 +1151,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				sessionExists(sessionId).pipe(
 					Effect.provideService(ReadQueryEffectTag, readQuery),
 				),
-			getSessionFamily,
 			createSession: (title, options) =>
 				Effect.gen(function* () {
 					const session = yield* createSessionWithServices(title, options);
@@ -1296,7 +1290,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(OpenCodeAPITag, api),
 					);
 				}),
-			pushViewerFamilies,
+			refreshSessionLineage,
 		} satisfies SessionManagerService;
 	}),
 );

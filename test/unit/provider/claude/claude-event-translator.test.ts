@@ -330,6 +330,22 @@ describe("ClaudeEventTranslator", () => {
 		});
 	});
 
+	it("does not treat a locally generated reply as the serving model", async () => {
+		// Claude Code answers quota exhaustion and unsupported slash commands
+		// itself, labelling the message `<synthetic>`. No model served it.
+		ctx.currentModel = "opus";
+		ctx.expectedApiModelId = "claude-opus-5-5";
+
+		await runTranslate(translator, ctx, makeInitMessage("claude-opus-5-5"));
+		await runTranslate(translator, ctx, makeAssistantMessage("<synthetic>"));
+
+		expect(
+			sink.events
+				.filter((event) => event.type === "turn.model_resolved")
+				.map((event) => dataOf(event)["actualModel"]),
+		).toEqual(["claude-opus-5-5"]);
+	});
+
 	it("warns when init reports a different model than expected", async () => {
 		ctx.currentModel = "opus[1m]";
 		ctx.expectedApiModelId = "claude-opus-5[1m]";

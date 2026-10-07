@@ -95,11 +95,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				title: "New Session",
 			} as unknown as SessionDetail),
 		);
-		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession,
-			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -124,11 +122,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-new",
 			);
-			expect(wsHandler.sendTo).toHaveBeenCalledWith(
+			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
 				"browser-tab-a",
 				expect.objectContaining({ type: "session_family" }),
 			);
-			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -163,7 +160,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-1",
 			);
-			expect(wsHandler.sendTo).toHaveBeenCalledWith(
+			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
 				"browser-tab-a",
 				expect.objectContaining({ type: "session_family" }),
 			);
@@ -179,13 +176,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(true));
-		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -204,7 +199,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				type: "session_deleted",
 				sessionId: "session-1",
 			});
-			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -219,13 +213,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("returns ok for a coalesced delete without rebroadcasting", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(false));
-		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
-			pushViewerFamilies,
 		});
 
 		return Effect.gen(function* () {
@@ -240,7 +232,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
 			expect(wsHandler.broadcast).not.toHaveBeenCalled();
-			expect(pushViewerFamilies).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -265,7 +256,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			{ id: "message-2", time: { created: 11 } },
 		] as unknown as Awaited<ReturnType<typeof api.session.messages>>);
 		const setForkEntry = vi.fn(() => Effect.void);
-		const pushViewerFamilies = vi.fn(() => Effect.void);
 		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions: vi.fn(() =>
@@ -278,7 +268,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				]),
 			),
 			setForkEntry,
-			pushViewerFamilies,
 		});
 		const persistenceLayer = makePersistenceEffectLayer(":memory:");
 
@@ -329,7 +318,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				}),
 			);
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
-			expect(pushViewerFamilies).toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

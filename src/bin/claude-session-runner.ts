@@ -393,6 +393,7 @@ const main = Effect.gen(function* () {
 												frozenSnapshot.fileSettings,
 												frozenSnapshot.options,
 												settingsResolver,
+												role === "candidate",
 											);
 										},
 										...(subagentSdk ? { subagentSdk } : {}),
@@ -699,6 +700,7 @@ const main = Effect.gen(function* () {
 													frozenSnapshot.fileSettings,
 													options,
 													resolver,
+													role === "candidate",
 												);
 											else
 												fileSettings = await captureClaudeRunnerFileSettings(

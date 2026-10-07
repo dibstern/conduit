@@ -138,16 +138,9 @@ describe("Integration: Model Selection", () => {
 
 		// Create a new session — should reset model selection
 		client.clearReceived();
-		await client.createSession("Model Reset Test");
-		const switched = await client.waitFor("session_switched");
-
-		await client.waitFor("session_family", {
-			predicate: (message) =>
-				Array.isArray(message["sessions"]) &&
-				message["sessions"].some(
-					(session: { id: string }) => session.id === switched["id"],
-				),
-		});
+		const created = await client.createSession("Model Reset Test");
+		const newId = created["id"] as string;
+		await client.waitForFamilyRows(newId, (session) => session.id === newId);
 		client.clearReceived();
 
 		// Send a message in the new session — should work

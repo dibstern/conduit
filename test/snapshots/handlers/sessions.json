@@ -4,15 +4,6 @@
 			"channel": "sendTo",
 			"clientId": "client-1",
 			"message": {
-				"type": "session_family",
-				"rootId": "session-1",
-				"sessions": []
-			}
-		},
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
 				"type": "session.goal_changed",
 				"sessionId": "session-1",
 				"goal": null
@@ -37,17 +28,7 @@
 			}
 		}
 	],
-	"new_session_success": [
-		{
-			"channel": "sendTo",
-			"clientId": "client-1",
-			"message": {
-				"type": "session_family",
-				"rootId": "new-session",
-				"sessions": []
-			}
-		}
-	],
+	"new_session_success": [],
 	"delete_session_success": [
 		{
 			"channel": "broadcast",

@@ -76,7 +76,7 @@ interface MonitoringWsHandlerLike {
 
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
-	pushViewerFamilies(): Promise<void>;
+	refreshSessionLineage(): Promise<void>;
 	getSessionParentMap(options?: {
 		readonly activityOnly?: boolean;
 	}): Map<string, string>;
@@ -502,13 +502,14 @@ export function wireMonitoring(
 	statusPoller.on("changed", async (statuses, statusesChanged) => {
 		if (!monitoringActive) return;
 
-		// Session list broadcast (only when statuses actually changed)
+		// A changed status set can carry a new session; the parent map read
+		// below must know it.
 		if (statusesChanged) {
 			try {
-				await sessionService.pushViewerFamilies();
+				await sessionService.refreshSessionLineage();
 			} catch (err) {
 				statusLog.warn(
-					`Failed to push viewed families: ${err instanceof Error ? err.message : err}`,
+					`Failed to refresh session lineage: ${err instanceof Error ? err.message : err}`,
 				);
 			}
 		}
@@ -623,7 +624,7 @@ export const wireMonitoringEffect = (
 
 		const runFork = Runtime.runFork(runtime);
 		const tickSemaphore = yield* Effect.makeSemaphore(1);
-		// Ticks can reach reduction out of order (the list broadcast before it is
+		// Ticks can reach reduction out of order (the lineage refresh before it is
 		// async), so a snapshot older than the last reduced one is dropped.
 		let capturedTicks = 0;
 		let lastReducedTick = 0;
@@ -638,12 +639,12 @@ export const wireMonitoringEffect = (
 
 					if (statusesChanged) {
 						yield* sessionService
-							.pushViewerFamilies()
+							.refreshSessionLineage()
 							.pipe(
 								Effect.catchAll((err) =>
 									Effect.sync(() =>
 										statusLog.warn(
-											`Failed to push viewed families: ${err instanceof Error ? err.message : err}`,
+											`Failed to refresh session lineage: ${err instanceof Error ? err.message : err}`,
 										),
 									),
 								),

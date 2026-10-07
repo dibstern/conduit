@@ -56,10 +56,12 @@ describe("Integration: Error Handling", () => {
 				ws.once("open", resolve);
 				ws.once("error", reject);
 			});
+			// Client init has bound a session to the attached client.
 			await vi.waitFor(() => {
+				const clientId = attach.mock.calls[0]?.[1].clientId;
 				expect(
-					messages.some((message) => message["type"] === "session_family"),
-				).toBe(true);
+					clientId && harness.stack.wsHandler.getClientSession(clientId),
+				).toBeTruthy();
 			});
 			expect(messages.map((message) => message["type"])).not.toContain(
 				"project_attached",

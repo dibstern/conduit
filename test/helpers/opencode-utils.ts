@@ -2,7 +2,7 @@
 
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 
@@ -24,39 +24,9 @@ export async function switchModelViaWs(
 	modelId: string,
 	providerId: string,
 ): Promise<void> {
-	const sessionId = await new Promise<string>((resolve, reject) => {
-		const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws?p=e2e`);
-		const timer = setTimeout(() => {
-			ws.close();
-			reject(new Error("Timeout switching model"));
-		}, 5000);
-		ws.on("message", (data) => {
-			try {
-				const message = JSON.parse(data.toString()) as {
-					type?: string;
-					sessions?: Array<{ id?: unknown }>;
-				};
-				if (message.type !== "session_family") return;
-				clearTimeout(timer);
-				ws.close();
-				const id = Array.isArray(message.sessions)
-					? message.sessions[0]?.id
-					: undefined;
-				if (typeof id === "string") {
-					resolve(id);
-				} else {
-					reject(new Error("session_family did not include a session id"));
-				}
-			} catch {
-				// Ignore non-JSON setup frames.
-			}
-		});
-		ws.on("error", (err) => {
-			clearTimeout(timer);
-			reject(err);
-		});
-	});
-
+	// Attaching /ws settles the relay's default session; the shell serves it
+	// as its newest root.
+	const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/ws?p=e2e`);
 	const previousWebSocket = globalThis.WebSocket;
 	globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
 	try {
@@ -64,9 +34,29 @@ export async function switchModelViaWs(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
+					const session = yield* client
+						.SubscribeShell({ projectSlug: "e2e" })
+						.pipe(
+							Stream.flatMap((envelope) =>
+								Stream.fromIterable(
+									envelope._tag === "snapshot"
+										? envelope.rows
+										: envelope._tag === "upsert"
+											? [envelope.item]
+											: [],
+								),
+							),
+							Stream.runHead,
+							Effect.flatten,
+							Effect.timeoutFail({
+								duration: "5 seconds",
+								onTimeout: () =>
+									new Error("Timeout finding the default session"),
+							}),
+						);
 					yield* client.SwitchModel({
 						projectSlug: "e2e",
-						sessionId,
+						sessionId: session.id,
 						modelId,
 						providerId,
 					});
@@ -82,5 +72,6 @@ export async function switchModelViaWs(
 		);
 	} finally {
 		globalThis.WebSocket = previousWebSocket;
+		ws.close();
 	}
 }

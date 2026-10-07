@@ -25,7 +25,7 @@ import {
 
 describe("SessionStateProjectionNotifier", () => {
 	it.effect(
-		"interrupts an in-flight broadcast when its relay scope closes",
+		"interrupts an in-flight lineage refresh when its relay scope closes",
 		() =>
 			Effect.gen(function* () {
 				const started = yield* Deferred.make<void>();
@@ -37,7 +37,7 @@ describe("SessionStateProjectionNotifier", () => {
 						errors.push(String(entry.message));
 				});
 				const sessionManagerService = makeMockSessionManagerService({
-					pushViewerFamilies: () =>
+					refreshSessionLineage: () =>
 						Effect.gen(function* () {
 							yield* Deferred.succeed(started, undefined);
 							yield* Deferred.await(release);
@@ -79,14 +79,14 @@ describe("SessionStateProjectionNotifier", () => {
 			}),
 	);
 
-	it.effect("logs the underlying cause of a real broadcast failure", () =>
+	it.effect("logs the underlying cause of a real lineage refresh failure", () =>
 		Effect.gen(function* () {
 			const errors: string[] = [];
 			const logger = Logger.make<unknown, void>((entry) => {
 				if (entry.logLevel._tag === "Error") errors.push(String(entry.message));
 			});
 			const sessionManagerService = makeMockSessionManagerService({
-				pushViewerFamilies: () =>
+				refreshSessionLineage: () =>
 					Effect.fail(
 						new SessionManagerError({
 							operation: "listSessions",
@@ -146,61 +146,20 @@ describe("SessionStateProjectionNotifier", () => {
 			}).pipe(Effect.provide(layer));
 		}),
 	);
-	it.effect("refreshes git before broadcasting a completed turn", () =>
-		Effect.gen(function* () {
-			const order: string[] = [];
-			const wsHandler = makeMockWebSocketHandler();
-			const sessionManagerService = makeMockSessionManagerService({
-				pushViewerFamilies: () =>
-					Effect.sync(() => {
-						order.push("broadcast");
-					}),
-			});
-			const layer = makeSessionStateProjectionNotifierLive(async () => {
-				order.push("refresh");
-			}).pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					),
-				),
-			);
-			yield* Effect.gen(function* () {
-				const notifier = yield* SessionStateProjectionNotifierTag;
-				yield* notifier.sessionStateProjected("session-1", "turn.completed");
-				yield* Effect.yieldNow();
-				expect(order).toEqual(["refresh"]);
-				yield* TestClock.adjust("150 millis");
-				expect(order).toEqual(["refresh", "broadcast"]);
-			}).pipe(Effect.provide(layer));
-		}),
-	);
 	it.effect(
-		"delivers refreshed git context to the list after a turn ends",
+		"refreshes git before refreshing lineage after a completed turn",
 		() =>
 			Effect.gen(function* () {
-				let branch = "before";
+				const order: string[] = [];
 				const wsHandler = makeMockWebSocketHandler();
 				const sessionManagerService = makeMockSessionManagerService({
-					pushViewerFamilies: () =>
-						Effect.sync(() =>
-							wsHandler.sendTo("viewer", {
-								type: "session_family",
-								rootId: "session-1",
-								sessions: [
-									{
-										id: "session-1",
-										title: "Session",
-										status: "idle",
-										git: { branch },
-									},
-								],
-							}),
-						),
+					refreshSessionLineage: () =>
+						Effect.sync(() => {
+							order.push("lineage");
+						}),
 				});
 				const layer = makeSessionStateProjectionNotifierLive(async () => {
-					branch = "after";
+					order.push("refresh");
 				}).pipe(
 					Layer.provide(
 						Layer.merge(
@@ -212,28 +171,19 @@ describe("SessionStateProjectionNotifier", () => {
 				yield* Effect.gen(function* () {
 					const notifier = yield* SessionStateProjectionNotifierTag;
 					yield* notifier.sessionStateProjected("session-1", "turn.completed");
+					yield* Effect.yieldNow();
+					expect(order).toEqual(["refresh"]);
 					yield* TestClock.adjust("150 millis");
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("viewer", {
-						type: "session_family",
-						rootId: "session-1",
-						sessions: [
-							{
-								id: "session-1",
-								title: "Session",
-								status: "idle",
-								git: { branch: "after" },
-							},
-						],
-					});
+					expect(order).toEqual(["refresh", "lineage"]);
 				}).pipe(Effect.provide(layer));
 			}),
 	);
-	it.effect("broadcasts after a git refresh failure", () =>
+	it.effect("refreshes lineage after a git refresh failure", () =>
 		Effect.gen(function* () {
 			const wsHandler = makeMockWebSocketHandler();
-			const pushViewerFamilies = vi.fn(() => Effect.void);
+			const refreshSessionLineage = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
-				pushViewerFamilies,
+				refreshSessionLineage,
 			});
 			const layer = makeSessionStateProjectionNotifierLive(async () => {
 				throw new Error("git unavailable");
@@ -249,57 +199,18 @@ describe("SessionStateProjectionNotifier", () => {
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.error");
 				yield* TestClock.adjust("150 millis");
-				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
+				expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(layer));
 		}),
 	);
-	it.effect("coalesces a burst of projected events into one broadcast", () =>
-		Effect.gen(function* () {
-			const wsHandler = makeMockWebSocketHandler();
-			const pushViewerFamilies = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				pushViewerFamilies,
-			});
-			const layer = SessionStateProjectionNotifierLive.pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag, wsHandler),
-						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-					),
-				),
-			);
-
-			yield* Effect.gen(function* () {
-				const notifier = yield* SessionStateProjectionNotifierTag;
-				for (let index = 0; index < 100; index++) {
-					yield* notifier.sessionStateProjected("session-1", "text.delta");
-				}
-				yield* TestClock.adjust("150 millis");
-
-				expect(pushViewerFamilies).toHaveBeenCalledTimes(1);
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
-		}),
-	);
-
-	// A state change that lands while a broadcast is in flight is the whole
-	// reason this service exists: if the coalescing slot stayed taken until the
-	// fan-out finished, that change would be silently dropped with nothing left
-	// to ever publish it.
 	it.effect(
-		"arms a fresh broadcast for a change that lands mid-broadcast",
+		"coalesces a burst of projected events into one lineage refresh",
 		() =>
 			Effect.gen(function* () {
-				const started = yield* Deferred.make<void>();
-				const release = yield* Deferred.make<void>();
 				const wsHandler = makeMockWebSocketHandler();
-				const pushViewerFamilies = vi.fn(() =>
-					Deferred.succeed(started, undefined).pipe(
-						Effect.zipRight(Deferred.await(release)),
-					),
-				);
+				const refreshSessionLineage = vi.fn(() => Effect.void);
 				const sessionManagerService = makeMockSessionManagerService({
-					pushViewerFamilies,
+					refreshSessionLineage,
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
@@ -312,22 +223,61 @@ describe("SessionStateProjectionNotifier", () => {
 
 				yield* Effect.gen(function* () {
 					const notifier = yield* SessionStateProjectionNotifierTag;
-					yield* notifier.sessionStateProjected("session-1", "text.delta");
+					for (let index = 0; index < 100; index++) {
+						yield* notifier.sessionStateProjected("session-1", "text.delta");
+					}
 					yield* TestClock.adjust("150 millis");
-					// The first fan-out has begun and is parked, holding no slot.
-					yield* Deferred.await(started);
 
-					yield* notifier.sessionStateProjected("session-1", "text.delta");
-					// The newly forked fiber needs one scheduling turn to reach its sleep;
-					// TestClock only fires sleeps already registered when it advances.
-					// Under a real clock that gap is microseconds against 150ms.
-					yield* Effect.yieldNow();
-					yield* TestClock.adjust("150 millis");
-					expect(pushViewerFamilies).toHaveBeenCalledTimes(2);
-
-					yield* Deferred.succeed(release, undefined);
+					expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
+					expect(wsHandler.broadcast).not.toHaveBeenCalled();
 				}).pipe(Effect.provide(layer));
 			}),
+	);
+
+	// A state change that lands while a refresh is in flight is the whole
+	// reason this service exists: if the coalescing slot stayed taken until the
+	// fan-out finished, that change would be silently dropped with nothing left
+	// to ever publish it.
+	it.effect("arms a fresh refresh for a change that lands mid-refresh", () =>
+		Effect.gen(function* () {
+			const started = yield* Deferred.make<void>();
+			const release = yield* Deferred.make<void>();
+			const wsHandler = makeMockWebSocketHandler();
+			const refreshSessionLineage = vi.fn(() =>
+				Deferred.succeed(started, undefined).pipe(
+					Effect.zipRight(Deferred.await(release)),
+				),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				refreshSessionLineage,
+			});
+			const layer = SessionStateProjectionNotifierLive.pipe(
+				Layer.provide(
+					Layer.merge(
+						Layer.succeed(WebSocketHandlerTag, wsHandler),
+						Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					),
+				),
+			);
+
+			yield* Effect.gen(function* () {
+				const notifier = yield* SessionStateProjectionNotifierTag;
+				yield* notifier.sessionStateProjected("session-1", "text.delta");
+				yield* TestClock.adjust("150 millis");
+				// The first fan-out has begun and is parked, holding no slot.
+				yield* Deferred.await(started);
+
+				yield* notifier.sessionStateProjected("session-1", "text.delta");
+				// The newly forked fiber needs one scheduling turn to reach its sleep;
+				// TestClock only fires sleeps already registered when it advances.
+				// Under a real clock that gap is microseconds against 150ms.
+				yield* Effect.yieldNow();
+				yield* TestClock.adjust("150 millis");
+				expect(refreshSessionLineage).toHaveBeenCalledTimes(2);
+
+				yield* Deferred.succeed(release, undefined);
+			}).pipe(Effect.provide(layer));
+		}),
 	);
 
 	// A turn end is what makes a session unread; only a user's pick clears it

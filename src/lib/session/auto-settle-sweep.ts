@@ -7,24 +7,19 @@ import {
 } from "./auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 
-export interface AutoSettleSweepPorts<SettleError, BroadcastError> {
+export interface AutoSettleSweepPorts<SettleError> {
 	readonly hasViewer: (sessionId: string) => boolean;
 	readonly hasLiveBackgroundWork: (sessionId: string) => boolean;
 	readonly setSettled: (
 		sessionId: string,
 	) => Effect.Effect<boolean, SettleError>;
-	readonly broadcastSessionList: () => Effect.Effect<void, BroadcastError>;
 }
 
-export const settleIdleSessions = <SettleError, BroadcastError>(
-	ports: AutoSettleSweepPorts<SettleError, BroadcastError>,
+export const settleIdleSessions = <SettleError>(
+	ports: AutoSettleSweepPorts<SettleError>,
 	idleWindowMs: number,
 	now: number,
-): Effect.Effect<
-	number,
-	SqlError | SettleError | BroadcastError,
-	SqlClient.SqlClient
-> =>
+): Effect.Effect<number, SqlError | SettleError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
 			shouldSettleIdleSession(
@@ -49,6 +44,5 @@ export const settleIdleSessions = <SettleError, BroadcastError>(
 			if (facts === undefined || !decide(sessionId, facts)) continue;
 			if (yield* ports.setSettled(sessionId)) settled++;
 		}
-		if (settled > 0) yield* ports.broadcastSessionList();
 		return settled;
 	});

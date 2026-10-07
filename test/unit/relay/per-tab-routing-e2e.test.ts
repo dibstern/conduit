@@ -353,8 +353,10 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
 
-		const families = client.getReceivedOfType("session_family");
-		expect(families.length).toBeGreaterThan(0);
+		expect(client.getReceivedOfType("family")).toContainEqual(
+			expect.objectContaining({ _tag: "snapshot" }),
+		);
+		expect(client.getReceivedOfType("session_family")).toEqual([]);
 
 		await client.close();
 	});
@@ -486,8 +488,10 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 
 		// On reconnect, the frontend sends ViewSession RPC.
 		await client2.viewSession("sess-B");
-		expect(client2.getReceivedOfType("session_family")).toContainEqual(
-			expect.objectContaining({ rootId: "sess-B" }),
+		await client2.subscribeFamily("sess-B");
+		expect(client2.getActiveSessionId()).toBe("sess-B");
+		expect(client2.getReceivedOfType("family")).toContainEqual(
+			expect.objectContaining({ familyOf: "sess-B", _tag: "snapshot" }),
 		);
 
 		await client2.close();
@@ -504,12 +508,12 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		const client = await harness.connectClient({ session: "sess-B" });
 		await client.waitForInitialState();
 
-		const families = client.getReceivedOfType("session_family");
+		const families = client.getReceivedOfType("family");
 		expect(families).toContainEqual(
-			expect.objectContaining({ rootId: "sess-B" }),
+			expect.objectContaining({ familyOf: "sess-B", _tag: "snapshot" }),
 		);
 		expect(families).not.toContainEqual(
-			expect.objectContaining({ rootId: "sess-A" }),
+			expect.objectContaining({ familyOf: "sess-A" }),
 		);
 
 		await client.close();

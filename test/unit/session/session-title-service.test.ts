@@ -12,10 +12,6 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	type SessionManagerService,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import {
 	type ClaudeTitleQueryFactory,
 	formatClaudeTitleFallback,
 	isDefaultSessionTitle,
@@ -34,7 +30,6 @@ import type { RelayMessage } from "../../../src/lib/types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockSessionManagerService,
 } from "../../helpers/mock-factories.js";
 
 function makeWebSocketHandler() {
@@ -89,7 +84,6 @@ const resultMessage = (text: string) => ({
 
 function makeTestLayer(input: {
 	readonly queryFactory: ClaudeTitleQueryFactory;
-	readonly sessionManager?: SessionManagerService;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly config?: ReturnType<typeof makeMockConfig>;
@@ -99,10 +93,6 @@ function makeTestLayer(input: {
 	const deps = Layer.mergeAll(
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(
-			SessionManagerServiceTag,
-			input.sessionManager ?? makeMockSessionManagerService(),
-		),
 		Layer.succeed(
 			ConfigTag,
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
@@ -120,7 +110,6 @@ function makeTestLayer(input: {
 
 function makePersistenceTestLayer(input: {
 	readonly queryFactory: ClaudeTitleQueryFactory;
-	readonly sessionManager?: SessionManagerService;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly persistenceDbPath: string;
@@ -131,10 +120,6 @@ function makePersistenceTestLayer(input: {
 	const deps = Layer.mergeAll(
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
-		Layer.succeed(
-			SessionManagerServiceTag,
-			input.sessionManager ?? makeMockSessionManagerService(),
-		),
 		Layer.succeed(
 			ConfigTag,
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
@@ -224,7 +209,6 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 
 const makeManualRenameRaceLayer = (input: {
 	readonly queryFactory: ClaudeTitleQueryFactory;
-	readonly sessionManager?: SessionManagerService;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
@@ -279,10 +263,6 @@ const makeManualRenameRaceLayer = (input: {
 			Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
-			Layer.succeed(
-				SessionManagerServiceTag,
-				input.sessionManager ?? makeMockSessionManagerService(),
-			),
 			Layer.succeed(ReadQueryEffectTag, raceReadQuery),
 			Layer.succeed(EventStoreEffectTag, eventStore),
 			Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
@@ -426,13 +406,6 @@ describe("SessionTitleService", () => {
 	it.effect("truncates overlong Opus output and applies it", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-apply-");
 		return Effect.gen(function* () {
-			const listsSent = yield* Deferred.make<void>();
-			const pushViewerFamilies = vi.fn(() =>
-				Deferred.succeed(listsSent, undefined),
-			);
-			const sessionManager = makeMockSessionManagerService({
-				pushViewerFamilies,
-			});
 			const ws = makeWebSocketHandler();
 			const layer = makePersistenceTestLayer({
 				queryFactory: () =>
@@ -441,7 +414,6 @@ describe("SessionTitleService", () => {
 							"Investigate OAuth Callback Loop In Production Immediately",
 						),
 					]),
-				sessionManager,
 				wsHandler: ws.handler,
 				persistenceDbPath: filename,
 			});
@@ -452,12 +424,11 @@ describe("SessionTitleService", () => {
 					sessionId: "session-1",
 					firstMessage: "OAuth keeps redirecting after callback.",
 				});
-				yield* Deferred.await(listsSent);
+				yield* waitForSessionProjectorToReachLatestRename();
 
 				expect(yield* getSessionTitle()).toBe(
 					"Investigate OAuth Callback Loop In Production",
 				);
-				expect(pushViewerFamilies).toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
@@ -465,17 +436,12 @@ describe("SessionTitleService", () => {
 	it.effect("prefers result text over partial stream text", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-result-wins-");
 		return Effect.gen(function* () {
-			const listsSent = yield* Deferred.make<void>();
-			const sessionManager = makeMockSessionManagerService({
-				pushViewerFamilies: vi.fn(() => Deferred.succeed(listsSent, undefined)),
-			});
 			const layer = makePersistenceTestLayer({
 				queryFactory: () =>
 					makeQuery([
 						streamTextDelta("Partial Stream Title"),
 						resultMessage("Final Result Title"),
 					]),
-				sessionManager,
 				persistenceDbPath: filename,
 			});
 			yield* Effect.gen(function* () {
@@ -485,65 +451,16 @@ describe("SessionTitleService", () => {
 					sessionId: "session-1",
 					firstMessage: "Fix OAuth callback loop.",
 				});
-				yield* Deferred.await(listsSent);
+				yield* waitForSessionProjectorToReachLatestRename();
 
 				expect(yield* getSessionTitle()).toBe("Final Result Title");
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
 
-	it.effect(
-		"sends fresh session lists when updated_at changes after title projection",
-		() => {
-			const { dir, filename } = makeTempDbPath("conduit-title-updated-at-");
-			return Effect.gen(function* () {
-				const pushViewerFamilies = vi.fn(() => Effect.void);
-				const sessionManager = makeMockSessionManagerService({
-					pushViewerFamilies,
-				});
-				const layer = makePersistenceTestLayer({
-					queryFactory: () =>
-						makeQuery([assistantMessage("Fix OAuth Callback Loop")]),
-					sessionManager,
-					persistenceDbPath: filename,
-				});
-				yield* Effect.gen(function* () {
-					yield* seedSessionRow();
-					const sql = yield* SqlClient.SqlClient;
-					yield* sql`
-						CREATE TRIGGER bump_updated_at_after_title_update
-						AFTER UPDATE OF title ON sessions
-						BEGIN
-							UPDATE sessions SET updated_at = NEW.updated_at + 1 WHERE id = NEW.id;
-						END`;
-					const service = yield* SessionTitleServiceTag;
-					yield* service.startForFirstClaudeMessage({
-						sessionId: "session-1",
-						firstMessage: "Fix OAuth callback loop.",
-					});
-					yield* Effect.promise(() =>
-						vi.waitFor(async () => {
-							const rows = await Effect.runPromise(sql<{ title: string }>`
-							SELECT title FROM sessions WHERE id = 'session-1'`);
-							expect(rows[0]?.title).toBe("Fix OAuth Callback Loop");
-							expect(pushViewerFamilies).toHaveBeenCalled();
-						}),
-					);
-
-					expect(yield* getSessionTitle()).toBe("Fix OAuth Callback Loop");
-					expect(pushViewerFamilies).toHaveBeenCalled();
-				}).pipe(Effect.provide(layer));
-			}).pipe(Effect.ensuring(removeTempDir(dir)));
-		},
-	);
-
 	it.effect("falls back when the Opus query fails", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-fallback-");
 		return Effect.gen(function* () {
-			const listsSent = yield* Deferred.make<void>();
-			const sessionManager = makeMockSessionManagerService({
-				pushViewerFamilies: vi.fn(() => Deferred.succeed(listsSent, undefined)),
-			});
 			const ws = makeWebSocketHandler();
 			const log = makeMockLogger();
 			const fallbackNow = new Date(2026, 4, 17, 10, 11, 0);
@@ -551,7 +468,6 @@ describe("SessionTitleService", () => {
 				queryFactory: () => {
 					throw new Error("SDK unavailable");
 				},
-				sessionManager,
 				wsHandler: ws.handler,
 				logger: log,
 				now: () => fallbackNow,
@@ -564,7 +480,7 @@ describe("SessionTitleService", () => {
 					sessionId: "session-1",
 					firstMessage: "Create OAuth callback tests.",
 				});
-				yield* Deferred.await(listsSent);
+				yield* waitForSessionProjectorToReachLatestRename();
 
 				const fallbackTitle = "Claude Session 2026-05-17 10:11";
 				expect(yield* getSessionTitle()).toBe(fallbackTitle);
@@ -585,7 +501,6 @@ describe("SessionTitleService", () => {
 				releaseQuery = resolve;
 			});
 			const queryStarted = yield* Deferred.make<void>();
-			const listsSent = yield* Deferred.make<void>();
 			const queryFactory = vi.fn(() =>
 				(async function* () {
 					Effect.runSync(Deferred.succeed(queryStarted, undefined));
@@ -593,12 +508,8 @@ describe("SessionTitleService", () => {
 					yield assistantMessage("Fix OAuth Callback Loop");
 				})(),
 			);
-			const sessionManager = makeMockSessionManagerService({
-				pushViewerFamilies: vi.fn(() => Deferred.succeed(listsSent, undefined)),
-			});
 			const layer = makePersistenceTestLayer({
 				queryFactory,
-				sessionManager,
 				persistenceDbPath: filename,
 			});
 			yield* Effect.gen(function* () {
@@ -616,7 +527,7 @@ describe("SessionTitleService", () => {
 				expect(queryFactory).toHaveBeenCalledTimes(1);
 
 				releaseQuery?.();
-				yield* Deferred.await(listsSent);
+				yield* waitForSessionProjectorToReachLatestRename();
 				expect(queryFactory).toHaveBeenCalledTimes(1);
 				expect(yield* getSessionTitle()).toBe("Fix OAuth Callback Loop");
 			}).pipe(Effect.provide(layer));
@@ -677,10 +588,6 @@ describe("SessionTitleService", () => {
 		() => {
 			const { dir, filename } = makeTempDbPath("conduit-title-manual-race-");
 			return Effect.gen(function* () {
-				const pushViewerFamilies = vi.fn(() => Effect.void);
-				const sessionManager = makeMockSessionManagerService({
-					pushViewerFamilies,
-				});
 				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
 					yield* seedSessionRow();
@@ -689,7 +596,6 @@ describe("SessionTitleService", () => {
 					const race = yield* makeManualRenameRaceLayer({
 						queryFactory: () =>
 							makeQuery([assistantMessage("Generated OAuth Callback Title")]),
-						sessionManager,
 						wsHandler: ws.handler,
 					});
 					yield* Effect.gen(function* () {
@@ -717,7 +623,6 @@ describe("SessionTitleService", () => {
 							},
 						]);
 						expect(yield* getSessionTitle()).toBe("Claude Session");
-						expect(pushViewerFamilies).not.toHaveBeenCalled();
 
 						yield* projectionRunner.projectEvent(manualRename);
 						expect(yield* getSessionTitle()).toBe("Manual OAuth Title");
@@ -735,10 +640,6 @@ describe("SessionTitleService", () => {
 			);
 			return Effect.gen(function* () {
 				const log = makeMockLogger();
-				const pushViewerFamilies = vi.fn(() => Effect.void);
-				const sessionManager = makeMockSessionManagerService({
-					pushViewerFamilies,
-				});
 				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
 					yield* seedSessionRow();
@@ -748,7 +649,6 @@ describe("SessionTitleService", () => {
 						queryFactory: () => {
 							throw new Error("SDK unavailable");
 						},
-						sessionManager,
 						wsHandler: ws.handler,
 						logger: log,
 						now: () => new Date(2026, 4, 17, 10, 11, 0),
@@ -778,7 +678,6 @@ describe("SessionTitleService", () => {
 							},
 						]);
 						expect(yield* getSessionTitle()).toBe("Claude Session");
-						expect(pushViewerFamilies).not.toHaveBeenCalled();
 						expect(log.warn).not.toHaveBeenCalled();
 
 						yield* projectionRunner.projectEvent(manualRename);

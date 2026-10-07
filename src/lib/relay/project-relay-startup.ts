@@ -449,12 +449,10 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				return {
 					sql,
 					sessionManagerService,
-					// The sidebar follows the stamped row; open session views follow
-					// their family push.
+					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
 							announceBackgroundWork(changedSessionId).pipe(
-								Effect.andThen(sessionManagerService.pushViewerFamilies()),
 								Effect.catchAllCause((cause) =>
 									Effect.sync(() =>
 										log.warn(

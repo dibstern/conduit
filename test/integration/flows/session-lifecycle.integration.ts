@@ -1,7 +1,7 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
-import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -39,18 +39,12 @@ describe("Integration: Session Lifecycle", () => {
 		const title = "Lifecycle-Family-Test";
 		const switched = await client.createSession(title);
 		const newId = switched["id"] as string;
-		const list = await client.waitFor("session_family", {
-			timeout: 5000,
-			predicate: (message) =>
-				(message["sessions"] as Array<{ id: string }>).some(
-					(row) => row.id === newId,
-				),
-		});
-		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
-		expect(Array.isArray(sessions)).toBe(true);
-
-		const found = sessions.find((s) => s.id === newId);
-		expect(found).toBeTruthy();
+		const sessions = await client.waitForFamilyRows(
+			newId,
+			(row) => row.id === newId,
+			5000,
+		);
+		expect(sessions.find((s) => s.id === newId)).toMatchObject({ title });
 
 		await client.close();
 	});
@@ -91,23 +85,12 @@ describe("Integration: Session Lifecycle", () => {
 		const newTitle = "Renamed-Session-Test";
 		await client.renameSession(sessionId, newTitle);
 
-		const list = await client.waitFor("session_family", {
-			timeout: 5000,
-			predicate: (msg) => {
-				const sessions = msg["sessions"] as
-					| Array<{ id: string; title?: string }>
-					| undefined;
-				return (
-					Array.isArray(sessions) &&
-					sessions.some((s) => s.id === sessionId && s.title === newTitle)
-				);
-			},
-		});
-		const sessions = list["sessions"] as Array<{ id: string; title?: string }>;
-		const found = sessions.find((s) => s.id === sessionId);
-		expect(found).toBeTruthy();
-		assert.exists(found, "expected the renamed session");
-		expect(found.title).toBe(newTitle);
+		const sessions = await client.waitForFamilyRows(
+			sessionId,
+			(s) => s.id === sessionId && s.title === newTitle,
+			5000,
+		);
+		expect(sessions.find((s) => s.id === sessionId)?.title).toBe(newTitle);
 
 		await client.close();
 	});
@@ -143,6 +126,14 @@ describe("Integration: Session Lifecycle", () => {
 		expect(firstId).toBeTruthy();
 		if (!firstId) throw new Error("No initial session");
 		await client.syncInputDraft("Unsent draft", { sessionId: firstId });
+		// The family comes from the client's own SubscribeSessionFamily, opened
+		// when it settled on the session, not from a push on switch.
+		const family = await client.waitForFamilyRows(
+			firstId,
+			(row) => row.id === firstId,
+			5000,
+		);
+		expect(family.map((row) => row.id)).toContain(firstId);
 
 		// Create a new session (auto-switches)
 		client.clearReceived();
@@ -154,12 +145,6 @@ describe("Integration: Session Lifecycle", () => {
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
 		expect(switched["draft"]).toBe("Unsent draft");
-
-		const list = await client.waitFor("session_family", {
-			timeout: 5000,
-			predicate: (message) => message["rootId"] === firstId,
-		});
-		expect(Array.isArray(list["sessions"])).toBe(true);
 
 		await client.close();
 	});

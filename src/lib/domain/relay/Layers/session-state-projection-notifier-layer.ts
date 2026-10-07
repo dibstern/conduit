@@ -29,26 +29,27 @@ export const makeSessionStateProjectionNotifierLive = (
 			const sessionManagerService = yield* SessionManagerServiceTag;
 			const broadcastPending = yield* Ref.make(false);
 
-			// One broadcast per burst. A streaming turn projects thousands of deltas
-			// and the list only has to be right at the end of them.
-			const broadcastSessionLists = Effect.sleep("150 millis").pipe(
-				// Release the slot BEFORE reading the list, not after the fan-out.
-				// A state change that lands while a broadcast is in flight has to arm
-				// a fresh cycle: if the slot stayed taken until the fan-out finished,
-				// that change would be dropped with nothing left to ever broadcast it,
+			// One lineage refresh per burst. A streaming turn projects thousands of
+			// deltas, and the parent map and session count only have to be right at
+			// the end of them. The sidebar and family feeds follow the store
+			// themselves.
+			const refreshLineage = Effect.sleep("150 millis").pipe(
+				// Release the slot BEFORE reading lineage, not after the refresh.
+				// A state change that lands while a refresh is in flight has to arm
+				// a fresh cycle: if the slot stayed taken until the refresh finished,
+				// that change would be dropped with nothing left to ever read it,
 				// which is the exact staleness this service exists to prevent. Paying
-				// for it with an occasional redundant broadcast is a good trade -- a
-				// duplicate list is invisible, a missing one is the bug.
+				// for it with an occasional redundant read is a good trade.
 				Effect.zipRight(Ref.set(broadcastPending, false)),
-				// Suspended so each broadcast builds its own effect. The same effect
-				// value is forked repeatedly, and pushViewerFamilies happens to be
+				// Suspended so each refresh builds its own effect. The same effect
+				// value is forked repeatedly, and refreshSessionLineage happens to be
 				// lazy today; relying on that would make a future eager read here
-				// publish one frozen snapshot forever.
+				// apply one frozen snapshot forever.
 				Effect.zipRight(
-					Effect.suspend(() => sessionManagerService.pushViewerFamilies()),
+					Effect.suspend(() => sessionManagerService.refreshSessionLineage()),
 				),
 				Effect.catchAllCause((cause) =>
-					logFailure("Failed to broadcast projected session state", cause),
+					logFailure("Failed to refresh session lineage", cause),
 				),
 				// Only reachable if the fiber is interrupted during the sleep, e.g. at
 				// runtime teardown. Without it an interrupt there would leave the slot
@@ -61,10 +62,7 @@ export const makeSessionStateProjectionNotifierLive = (
 				if (!alreadyPending) {
 					// Arming happens inside the uninterruptible commit, and a fork inherits
 					// that. Without this the scope-close interrupt waits out the sleep.
-					yield* Effect.forkIn(
-						Effect.interruptible(broadcastSessionLists),
-						scope,
-					);
+					yield* Effect.forkIn(Effect.interruptible(refreshLineage), scope);
 				}
 			});
 

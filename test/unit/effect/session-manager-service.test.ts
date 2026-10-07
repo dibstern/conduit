@@ -194,7 +194,6 @@ function makeReadQueryEffect(
 				count: rows.length,
 			}),
 		),
-		getSessionFamily: vi.fn(() => Effect.succeed(rows)),
 		countPendingApprovalsBySession: vi.fn(() =>
 			Effect.succeed(pendingApprovalCounts),
 		),
@@ -2712,39 +2711,23 @@ describe("SessionManagerService", () => {
 	});
 
 	it.effect(
-		"refreshes lineage and sends one family query to its viewers",
+		"refreshes the lineage caches without sending to any client",
 		() => {
 			const rows = [
 				makeRow("root"),
 				makeRow("child", { parent_id: "root" }),
-				makeRow("grandchild", { parent_id: "child", status: "busy" }),
+				makeRow("side", { parent_id: "root", side_thread: 1 }),
 			];
 			const readQuery = makeReadQueryEffect(rows);
-			vi.mocked(readQuery.listSessions).mockReturnValue(
-				Effect.succeed([makeRow("root")]),
-			);
 			const ws = makeMockWebSocketHandler({
-				getClientIds: vi.fn(() => ["root-viewer", "child-viewer"]),
-				getClientSession: vi.fn((id) =>
-					id === "root-viewer" ? "root" : "grandchild",
-				),
+				getClientIds: vi.fn(() => ["root-viewer"]),
+				getClientSession: vi.fn(() => "root"),
 			});
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(
-					StatusPollerTag,
-					makeMockStatusPoller({
-						getCurrentStatuses: vi.fn(() =>
-							Effect.succeed({
-								root: { type: "busy" as const },
-								child: { type: "busy" as const },
-								grandchild: { type: "busy" as const },
-							}),
-						),
-					}),
-				),
+				Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
@@ -2752,37 +2735,18 @@ describe("SessionManagerService", () => {
 			);
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
-				yield* service.pushViewerFamilies();
+				yield* service.refreshSessionLineage();
 				expect(readQuery.listSessionInfos).not.toHaveBeenCalled();
 				expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
-				expect(readQuery.getSessionFamily).toHaveBeenCalledTimes(1);
-				expect(readQuery.getSessionFamily).toHaveBeenCalledWith("root");
-				for (const client of ["root-viewer", "child-viewer"]) {
-					expect(ws.sendTo).toHaveBeenCalledWith(
-						client,
-						expect.objectContaining({
-							type: "session_family",
-							rootId: "root",
-							sessions: expect.arrayContaining([
-								expect.objectContaining({
-									id: "grandchild",
-									parentID: "child",
-									processing: true,
-								}),
-								expect.objectContaining({
-									id: "root",
-									status: "idle",
-									attention: "working",
-								}),
-								expect.objectContaining({ id: "child", attention: "idle" }),
-							]),
-						}),
-					);
-				}
+				expect(ws.sendTo).not.toHaveBeenCalled();
 				const state = yield* Ref.get(yield* SessionManagerStateTag);
 				expect(state.lastKnownSessionCount).toBe(3);
-				expect(HashMap.get(state.cachedParentMap, "grandchild")).toEqual(
-					Option.some("child"),
+				expect(HashMap.get(state.cachedParentMap, "child")).toEqual(
+					Option.some("root"),
+				);
+				expect([...state.cachedSideThreadIds]).toEqual(["side"]);
+				expect((yield* RelayStatusSnapshotTag).getSnapshot().sessionCount).toBe(
+					3,
 				);
 			}).pipe(
 				Effect.provide(SessionManagerServiceLive),

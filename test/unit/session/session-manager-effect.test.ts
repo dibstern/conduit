@@ -570,7 +570,6 @@ describe("SessionManager Effect", () => {
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-				getSessionFamily: () => Effect.succeed([]),
 				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 				readPendingApprovals: vi.fn(() =>
 					Effect.succeed({ rows: [], version: 0 }),

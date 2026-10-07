@@ -491,10 +491,9 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(newId).not.toBe(localId);
 
 		// Bug 2: the viewed family after materialization includes the session.
-		const list = await client1.waitFor("session_family", {
-			predicate: (m) => m["rootId"] === newId,
-		});
-		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
+		const ids = (
+			await client1.waitForFamilyRows(newId, (row) => row.id === newId)
+		).map((s) => s.id);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-C] post-materialize list=${JSON.stringify(ids)}`);
 		expect(ids).toContain(newId);
@@ -1170,10 +1169,9 @@ describe("Integration: Session Visibility Repros", () => {
 		const newId = switched["id"] as string;
 		expect(newId).toBeTruthy();
 
-		const list = await client1.waitFor("session_family", {
-			predicate: (m) => m["rootId"] === newId,
-		});
-		const ids = (list["sessions"] as Array<{ id: string }>).map((s) => s.id);
+		const ids = (
+			await client1.waitForFamilyRows(newId, (row) => row.id === newId)
+		).map((s) => s.id);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-B] new=${newId} listed=${JSON.stringify(ids)}`);
 		expect(ids).toContain(newId);

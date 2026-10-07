@@ -11,11 +11,10 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("WsRpcServerLayer RenameSession", () => {
-	it.effect("renames a session and refreshes viewed families", () => {
+	it.effect("renames a session without sending to any client", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession: vi.fn(() => Effect.void),
-			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		return Effect.gen(function* () {
@@ -33,7 +32,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 				"root-1",
 				"Renamed Root",
 			);
-			expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalledOnce();
 			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.scoped,
@@ -47,11 +45,10 @@ describe("WsRpcServerLayer RenameSession", () => {
 		);
 	});
 
-	it.effect("marks a session unread and refreshes viewed families", () => {
+	it.effect("marks a session unread without sending to any client", () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			markSessionUnread: vi.fn(() => Effect.void),
-			pushViewerFamilies: vi.fn(() => Effect.void),
 		});
 
 		return Effect.gen(function* () {
@@ -66,14 +63,7 @@ describe("WsRpcServerLayer RenameSession", () => {
 			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
 				"root-1",
 			);
-			expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalledOnce();
-			expect(calls).toEqual([
-				{
-					channel: "sendToSession",
-					sessionId: "root-1",
-					message: { type: "session_family", rootId: "root-1", sessions: [] },
-				},
-			]);
+			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

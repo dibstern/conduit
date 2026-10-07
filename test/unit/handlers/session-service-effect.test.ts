@@ -107,11 +107,10 @@ function makeSessionMetadataLayer(options: {
 
 describe("session handler metadata", () => {
 	for (const changed of [true, false]) {
-		it.effect(`refreshes viewed families only when changed=${changed}`, () => {
+		it.effect(`pushes no family when changed=${changed}`, () => {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(changed)),
 				setSessionPinned: vi.fn(() => Effect.succeed(changed)),
-				pushViewerFamilies: vi.fn(() => Effect.void),
 			});
 			const { wsHandler, layer } = makeSessionMetadataLayer({
 				sessionManagerService: service,
@@ -131,9 +130,7 @@ describe("session handler metadata", () => {
 					settled: true,
 				});
 				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
-				expect(service.pushViewerFamilies).toHaveBeenCalledTimes(
-					changed ? 2 : 0,
-				);
+				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		});
@@ -198,7 +195,6 @@ describe("session handler metadata", () => {
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-			getSessionFamily: () => Effect.succeed([]),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			readPendingApprovals: vi.fn(() =>
 				Effect.succeed({ rows: [], version: 0 }),
@@ -306,9 +302,7 @@ describe("session handler metadata", () => {
 			const legacySendSessionLists = vi.fn(async () => {
 				throw new Error("legacy session manager sendDual should not be called");
 			});
-			const sessionManagerService = makeMockSessionManagerService({
-				pushViewerFamilies: vi.fn(() => Effect.void),
-			});
+			const sessionManagerService = makeMockSessionManagerService({});
 			const logger = makeMockLogger();
 			const api = makeHandlerOpenCodeAPI({
 				permission: {
@@ -338,7 +332,6 @@ describe("session handler metadata", () => {
 						provider: "openai",
 					});
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(sessionManagerService.pushViewerFamilies).toHaveBeenCalled();
 				}),
 			);
 		},
@@ -386,7 +379,6 @@ describe("viewing a session", () => {
 			Effect.tap(() => {
 				expect(markSessionRead).not.toHaveBeenCalled();
 				expect(markSessionSeen).not.toHaveBeenCalled();
-				expect(service.pushViewerFamilies).toHaveBeenCalledOnce();
 				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
 					expect.objectContaining({ type: "session_list", roots: false }),
 				);

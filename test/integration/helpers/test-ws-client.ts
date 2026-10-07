@@ -21,6 +21,7 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 export interface ReceivedMessage {
 	type: string;
@@ -43,6 +44,7 @@ export class TestWsClient {
 	private readonly projectSlug: string;
 	private subscriptions: Array<{
 		type: string;
+		familyOf?: string | undefined;
 		fiber: Fiber.RuntimeFiber<void, unknown>;
 	}> = [];
 
@@ -97,12 +99,7 @@ export class TestWsClient {
 	}
 
 	getActiveSessionId(): string | undefined {
-		if (this.activeSessionId) return this.activeSessionId;
-		const family = this.received.find((msg) => msg.type === "session_family");
-		const sessions = family?.["sessions"];
-		if (!Array.isArray(sessions)) return undefined;
-		const first = sessions[0];
-		return first && typeof first.id === "string" ? first.id : undefined;
+		return this.activeSessionId;
 	}
 
 	async sendMessage(
@@ -756,6 +753,49 @@ export class TestWsClient {
 		await started;
 	}
 
+	/** Follow a session's family over SubscribeSessionFamily, as the browser
+	 *  does for the viewed session. Each envelope lands in `received` as
+	 *  `{ type: "family", familyOf: sessionId, ...envelope }`. Idempotent per
+	 *  session. */
+	async subscribeFamily(sessionId: string): Promise<void> {
+		if (
+			!this.subscriptions.some(
+				({ type, familyOf }) => type === "family" && familyOf === sessionId,
+			)
+		)
+			await this.follow(
+				"family",
+				(client) =>
+					client.SubscribeSessionFamily({
+						projectSlug: this.projectSlug,
+						sessionId,
+					}),
+				sessionId,
+			);
+	}
+
+	/** Follow `familyOf`'s family and resolve with the rows of the first
+	 *  envelope (snapshot or upsert) carrying a row that matches `predicate`. */
+	async waitForFamilyRows(
+		familyOf: string,
+		predicate: (row: SessionInfo) => boolean = () => true,
+		timeout?: number,
+	): Promise<readonly SessionInfo[]> {
+		const rowsOf = (msg: ReceivedMessage): readonly SessionInfo[] =>
+			msg["_tag"] === "upsert"
+				? [msg["item"] as SessionInfo]
+				: msg["_tag"] === "snapshot"
+					? (msg["rows"] as SessionInfo[])
+					: [];
+		const match = this.waitFor("family", {
+			...(timeout !== undefined && { timeout }),
+			predicate: (msg) =>
+				msg["familyOf"] === familyOf && rowsOf(msg).some(predicate),
+		});
+		await this.subscribeFamily(familyOf);
+		return rowsOf(await match);
+	}
+
 	/** Resolves once the opening snapshot is synchronized; the WebSocket
 	 *  global stays swapped until then, while the socket is being opened. */
 	private async follow(
@@ -766,6 +806,7 @@ export class TestWsClient {
 				RpcClientError.RpcClientError
 			>,
 		) => Stream.Stream<object, unknown>,
+		familyOf?: string,
 	): Promise<void> {
 		const previousWebSocket = globalThis.WebSocket;
 		globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -777,7 +818,9 @@ export class TestWsClient {
 						const client = yield* RpcClient.make(WsRpcGroup);
 						yield* open(client).pipe(
 							Stream.runForEach((envelope) =>
-								Effect.sync(() => receive({ type, ...envelope })),
+								Effect.sync(() =>
+									receive({ type, ...(familyOf && { familyOf }), ...envelope }),
+								),
 							),
 						);
 					}),
@@ -788,9 +831,10 @@ export class TestWsClient {
 					Effect.provide(RpcSerialization.layerJson),
 				),
 			);
-			this.subscriptions.push({ type, fiber });
+			this.subscriptions.push({ type, familyOf, fiber });
 			await this.waitFor(type, {
-				predicate: (msg) => msg["_tag"] === "synchronized",
+				predicate: (msg) =>
+					msg["_tag"] === "synchronized" && msg["familyOf"] === familyOf,
 			});
 		} finally {
 			globalThis.WebSocket = previousWebSocket;
@@ -1005,11 +1049,30 @@ export class TestWsClient {
 		});
 	}
 
-	/** Wait for the initial connect handshake to settle. */
+	/** Settle on a session as the browser does on load: the requested one, or
+	 *  else the newest root row the shell serves (waiting for the relay's
+	 *  default session to land when the shell starts empty). Then follow its
+	 *  family and view it. */
 	async waitForInitialState(timeout = 5000): Promise<void> {
-		await this.waitFor("session_family", { timeout });
-		const sessionId = this.getActiveSessionId();
-		if (sessionId) await this.viewSession(sessionId);
+		let sessionId = this.getActiveSessionId();
+		if (!sessionId) {
+			const firstRow = this.waitFor("shell", {
+				timeout,
+				predicate: (msg) =>
+					msg["_tag"] === "upsert" ||
+					(msg["_tag"] === "snapshot" &&
+						Array.isArray(msg["rows"]) &&
+						msg["rows"].length > 0),
+			});
+			await this.subscribeShell();
+			const msg = await firstRow;
+			const row = (
+				msg["_tag"] === "upsert" ? msg["item"] : (msg["rows"] as unknown[])[0]
+			) as { id: string };
+			sessionId = row.id;
+		}
+		await this.subscribeFamily(sessionId);
+		await this.viewSession(sessionId);
 	}
 
 	/**

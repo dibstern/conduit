@@ -128,15 +128,10 @@ describe("daemon shared RPC routing", () => {
 									wsHandler.setClientSession(clientId, requestedSessionId);
 								}
 								wsHandler.sendTo(clientId, {
-									type: "session_family",
-									rootId: requestedSessionId ?? `${slug}-default`,
-									sessions: [
-										{
-											id: requestedSessionId ?? `${slug}-default`,
-											title: `${slug} bootstrap`,
-											status: "idle",
-										},
-									],
+									type: "error",
+									sessionId: requestedSessionId ?? `${slug}-default`,
+									code: "BOOTSTRAP",
+									message: `${slug} bootstrap`,
 								});
 							},
 						);
@@ -223,14 +218,14 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "session_family" &&
+								message["code"] === "BOOTSTRAP" &&
 								JSON.stringify(message).includes("project-a bootstrap"),
 						),
 					).toBe(true);
 				});
 				const bootstrapA = eventMessages.findIndex(
 					(message) =>
-						message["type"] === "session_family" &&
+						message["code"] === "BOOTSTRAP" &&
 						JSON.stringify(message).includes("project-a bootstrap"),
 				);
 				expect(bootstrapA).toBeGreaterThanOrEqual(0);
@@ -267,44 +262,35 @@ describe("daemon shared RPC routing", () => {
 					expect(
 						eventMessages.some(
 							(message) =>
-								message["type"] === "session_family" &&
+								message["code"] === "BOOTSTRAP" &&
 								JSON.stringify(message).includes("project-b bootstrap"),
 						),
 					).toBe(true);
 				});
 				const bootstrapB = eventMessages.findIndex(
 					(message) =>
-						message["type"] === "session_family" &&
+						message["code"] === "BOOTSTRAP" &&
 						JSON.stringify(message).includes("project-b bootstrap"),
 				);
 				expect(bootstrapB).toBeGreaterThan(bootstrapA);
 				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
 				expect(
-					eventMessages.filter(
-						(message) => message["type"] === "session_family",
-					),
+					eventMessages.filter((message) => message["code"] === "BOOTSTRAP"),
 				).toEqual([
 					{
-						type: "session_family",
-						rootId: "session-a",
-						sessions: [
-							{ id: "session-a", title: "project-a bootstrap", status: "idle" },
-						],
+						type: "error",
+						alertId: expect.any(String),
+						sessionId: "session-a",
+						code: "BOOTSTRAP",
+						message: "project-a bootstrap",
 					},
 					{
-						type: "session_family",
-						rootId:
+						type: "error",
+						alertId: expect.any(String),
+						sessionId:
 							operation === "ViewSession" ? "session-b" : "project-b-default",
-						sessions: [
-							{
-								id:
-									operation === "ViewSession"
-										? "session-b"
-										: "project-b-default",
-								title: "project-b bootstrap",
-								status: "idle",
-							},
-						],
+						code: "BOOTSTRAP",
+						message: "project-b bootstrap",
 					},
 				]);
 

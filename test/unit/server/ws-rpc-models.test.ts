@@ -55,7 +55,6 @@ const makeReadQuery = (
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
-	getSessionFamily: () => Effect.succeed([]),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
 	getSessionHistoryMetadata: vi.fn(() =>
