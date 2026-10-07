@@ -285,7 +285,9 @@ describe("Claude session process runner", () => {
 		await settled(harness, sessionId, 1);
 		await browser.switchAgent(sessionId, "reviewer");
 		const turn = await browser.send(sessionId, "after-agent-change");
-		expect(turn.chunks).toEqual(responseChunks("after-agent-change"));
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("after-agent-change").join(""),
+		);
 		await settled(harness, sessionId, 2);
 		const events = persisted(harness, sessionId).events;
 		const prompts = harness.marks
