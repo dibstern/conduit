@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { accessSync, writeFileSync } from "node:fs";
 import { arch, cpus, platform, release } from "node:os";
 import { join, resolve } from "node:path";
+import type { HistoryMessage } from "../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -36,10 +37,22 @@ async function measureBatch(
 	for (let index = 0; index < SENDS; index++) {
 		const prompt = `${prefix}-send-${index}`;
 		prompts.push(prompt);
+		const turnCursor = browser.frames.length;
 		const response = await browser.send(sessionId, prompt);
 		if (response.chunks.join("") !== responseChunks(prompt).join("")) {
 			throw new Error(`Stream mismatch for ${prompt}`);
 		}
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				message["sessionId"] === sessionId &&
+				(message["parts"] as HistoryMessage["parts"])
+					?.filter((part) => part.type === "text")
+					.map((part) => part.text ?? "")
+					.join("") === responseChunks(prompt).join(""),
+			turnCursor,
+		);
 	}
 	// IPC and WS are independent channels. Wait for all marks rather than
 	// assuming that a browser completion frame also drained the IPC pipe.
@@ -87,26 +100,29 @@ async function measureBatch(
 			);
 		}
 		enqueue.push(Number(BigInt(received.at) - BigInt(receipt.at)) / 1e6);
+		let projectedText = "";
 		for (const text of responseChunks(prompt)) {
+			projectedText += text;
 			const emissions = marks.filter(
-				(mark) => mark.kind === "emit" && mark.text === text,
-			);
-			const frames = batchFrames.filter(
-				({ message }) =>
-					message["type"] === "delta" && message["text"] === text,
+				(mark) =>
+					mark.kind === "emit" && mark.prompt === prompt && mark.text === text,
 			);
 			const emission = emissions[0];
-			const frame = frames[0];
-			if (
-				emissions.length !== 1 ||
-				frames.length !== 1 ||
-				emission?.kind !== "emit" ||
-				!frame
-			) {
-				throw new Error(
-					`Expected one SDK emission and one browser delta for ${text}`,
-				);
-			}
+			if (emissions.length !== 1 || emission?.kind !== "emit")
+				throw new Error(`Expected one SDK emission for ${text}`);
+			const frame = batchFrames.find(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					message["role"] === "assistant" &&
+					message["sessionId"] === sessionId &&
+					(message["parts"] as HistoryMessage["parts"])
+						?.filter((part) => part.type === "text")
+						.map((part) => part.text ?? "")
+						.join("")
+						.includes(projectedText),
+			);
+			if (!frame)
+				throw new Error(`Missing browser transcript projection for ${text}`);
 			forward.push(Number(frame.at - BigInt(emission.at)) / 1e6);
 		}
 	}
@@ -170,6 +186,9 @@ async function main(): Promise<void> {
 	};
 	console.log(`Machine: ${JSON.stringify(machine)}`);
 	const method = {
+		transport: "typed-rpc-read-model",
+		forwardMetric: "sdk-emission-to-first-projection-containing-text",
+		rawDeltaTimingAvailable: false,
 		batchesPerBuild: BATCHES,
 		sendsPerBatch: SENDS,
 		warmupPerBuild: WARMUP,
@@ -245,7 +264,7 @@ async function main(): Promise<void> {
 				);
 				build.batches.push(batch);
 				console.log(
-					`batch ${index + 1} ${buildIndex === 0 ? "baseline" : "candidate"}: enqueue p99=${batch.enqueue.p99.toFixed(3)}ms forward p99=${batch.forward.p99.toFixed(3)}ms`,
+					`batch ${index + 1} ${buildIndex === 0 ? "baseline" : "candidate"}: enqueue p99=${batch.enqueue.p99.toFixed(3)}ms projection-forward p99=${batch.forward.p99.toFixed(3)}ms`,
 				);
 			}
 		}
@@ -307,14 +326,14 @@ async function main(): Promise<void> {
 			`  send-to-provider-enqueue p50=${result.enqueue.p50.toFixed(3)}ms p99=${result.enqueue.p99.toFixed(3)}ms`,
 		);
 		console.log(
-			`  per-event forward       p50=${result.forward.p50.toFixed(3)}ms p99=${result.forward.p99.toFixed(3)}ms`,
+			`  projection-forward p50=${result.forward.p50.toFixed(3)}ms p99=${result.forward.p99.toFixed(3)}ms`,
 		);
 	}
 	if (candidate) {
 		let regressed = false;
 		for (const [key, label] of [
 			["enqueue", "send-to-provider-enqueue"],
-			["forward", "per-event forward"],
+			["forward", "projection-forward"],
 		] as const) {
 			const delta = candidate[key].p99 - baseline[key].p99;
 			const failed = delta > MAX_P99_REGRESSION_MS;

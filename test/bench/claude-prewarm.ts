@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { accessSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { arch, cpus, platform, release } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { HistoryMessage } from "../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -92,7 +93,7 @@ async function measureFirstSend(
 	const clientSendAt = process.hrtime.bigint();
 	const response = await browser.send(sessionId, prompt);
 	if (
-		response.done["code"] !== 0 ||
+		response.done["status"] !== "idle" ||
 		response.chunks.join("") !== responseChunks(prompt).join("")
 	)
 		throw new Error(`First-send stream mismatch for ${prompt}`);
@@ -113,19 +114,25 @@ async function measureFirstSend(
 		(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
 	);
 	const runner = marks.find((mark) => mark.kind === "runner-started");
-	const firstChunk = browser.frames
+	const firstProjection = browser.frames
 		.slice(frameStart)
 		.find(
 			({ message }) =>
-				message["type"] === "delta" &&
-				message["text"] === responseChunks(prompt)[0],
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				message["sessionId"] === sessionId &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) =>
+						part.type === "text" &&
+						part.text?.includes(responseChunks(prompt)[0] ?? ""),
+				),
 		);
 	if (
 		query?.kind !== "query" ||
 		ready?.kind !== "initialization-ready" ||
 		receipt?.kind !== "receipt" ||
 		enqueue?.kind !== "enqueue" ||
-		!firstChunk
+		!firstProjection
 	)
 		throw new Error("Missing first-send query/readiness/RPC/browser evidence");
 	if (
@@ -160,7 +167,7 @@ async function measureFirstSend(
 		initializedAt: ready.at,
 		initializationMs: Number(BigInt(ready.at) - BigInt(query.at)) / 1e6,
 		sendToEnqueueMs: Number(BigInt(enqueue.at) - BigInt(receipt.at)) / 1e6,
-		clientToFirstChunkMs: Number(firstChunk.at - clientSendAt) / 1e6,
+		clientToFirstProjectionMs: Number(firstProjection.at - clientSendAt) / 1e6,
 		...(preWarmMs !== undefined ? { preWarmMs, repeatPreWarmMs } : {}),
 	};
 	await browser.deleteSession(sessionId);
@@ -238,6 +245,9 @@ async function main(): Promise<void> {
 		node: process.version,
 	};
 	const method = {
+		transport: "typed-rpc-read-model",
+		firstTextMetric: "client-send-to-first-transcript-projection",
+		rawDeltaTimingAvailable: false,
 		batches,
 		freshSessionsPerBatchPerMode: sessions,
 		initializationMs,
@@ -331,8 +341,8 @@ async function main(): Promise<void> {
 		sendToEnqueue: mode.samples.length
 			? summary(mode.samples.map((sample) => sample.sendToEnqueueMs))
 			: undefined,
-		clientToFirstChunk: mode.samples.length
-			? summary(mode.samples.map((sample) => sample.clientToFirstChunkMs))
+		clientToFirstProjection: mode.samples.length
+			? summary(mode.samples.map((sample) => sample.clientToFirstProjectionMs))
 			: undefined,
 		medianBatchP99: mode.samples.length
 			? percentile(

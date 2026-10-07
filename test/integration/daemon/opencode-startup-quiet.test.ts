@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -256,7 +258,32 @@ describe("Managed OpenCode starts on first use", () => {
 				"opencode",
 			);
 			const started = (await browser.instanceStatus(instanceId)).instance;
-			const reply = await browser.send(sessionId, "hello");
+			// This fixture emits session status updates without a stored turn terminal.
+			const cursor = browser.frames.length;
+			const accepted = await Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug: "process-test",
+					sessionId,
+					text: "hello",
+					commandId: randomUUID(),
+					originId: browser.originId,
+				}),
+			);
+			expect(accepted).toEqual({ ok: true, sessionId });
+			const busy = await browser.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionId &&
+					message["status"] === "busy",
+				cursor,
+			);
+			const idle = await browser.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionId &&
+					message["status"] === "idle",
+				browser.frames.findIndex(({ message }) => message === busy) + 1,
+			);
 			await fixture.addOpenCodePrompt("permission", fixture.projectDir, {
 				id: "pa7-dynamic-port",
 				sessionID: sessionId,
@@ -296,7 +323,9 @@ describe("Managed OpenCode starts on first use", () => {
 				actualPort: started?.port,
 				status: started?.status,
 				spawnCount: spawned(fixture).length,
-				promptDone: reply.done,
+				promptAccepted: accepted,
+				promptBusy: busy,
+				promptIdle: idle,
 				pendingPermissionsAfterReply: Object.values(state.permissions).flat(),
 				squatterRequests,
 				fakeRequests: fixture.opencodeRequests(),
@@ -305,7 +334,7 @@ describe("Managed OpenCode starts on first use", () => {
 			expect(dynamic.spawnCount).toBe(1);
 			expect(dynamic.status).toBe("healthy");
 			expect(dynamic.actualPort).not.toBe(configuredPort);
-			expect(dynamic.promptDone["code"]).toBe(0);
+			expect(dynamic.promptIdle["status"]).toBe("idle");
 			expect(
 				dynamic.fakeRequests.filter(
 					({ method, url }) =>

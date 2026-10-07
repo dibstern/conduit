@@ -1,7 +1,8 @@
 // Verifies that SSE events from OpenCode flow through the relay and arrive at
-// WebSocket clients. Sends prompts and observes the full event pipeline:
-// SSE -> translator -> WebSocket broadcast.
+// RPC clients. Sends prompts and observes the full event pipeline:
+// SSE -> persisted projections -> SubscribeSessionDetail and SubscribeShell.
 
+import Database from "better-sqlite3";
 import {
 	afterAll,
 	beforeAll,
@@ -11,12 +12,13 @@ import {
 	it,
 	vi,
 } from "vitest";
+import type { TurnErrorPayload } from "../../../src/lib/contracts/stored-event.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
 } from "../helpers/relay-harness.js";
 
-describe("Integration: SSE to WS Pipeline", () => {
+describe("Integration: SSE to RPC Pipeline", () => {
 	let harness: RelayHarness;
 
 	beforeAll(async () => {
@@ -29,6 +31,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
+		await harness.stack.client.app.path();
 		await vi.waitFor(() => {
 			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
 		});
@@ -48,7 +51,7 @@ describe("Integration: SSE to WS Pipeline", () => {
 		});
 	});
 
-	it("sending a prompt starts a turn that ends in done", async () => {
+	it("sending a prompt starts a turn that completes", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		await client.subscribeShell();
@@ -59,113 +62,142 @@ describe("Integration: SSE to WS Pipeline", () => {
 		// The session's shell row shows the turn started
 		await client.waitForTurnStart(undefined, 10_000);
 
-		// The event translator maps session.updated(idle) → { type: "done", code: 0 }
-		// So we wait for "done" not "status: idle"
-		const done = await client.waitFor("done", { timeout: 10_000 });
-		expect(done["code"]).toBe(0);
+		const done = await client.waitForTurnEnd(undefined, 10_000);
+		expect(done.status).toBe("idle");
+		expect(done.attention).not.toBe("error");
 
 		await client.close();
 	}, 30_000);
 
-	it("delta events contain incremental text", async () => {
+	it("successive text deltas grow the subscribed transcript", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
-
-		// Collect delta events until done
-		await client.waitFor("done", { timeout: 10_000 });
-
-		const deltas = client.getReceivedOfType("delta");
-		expect(deltas.length).toBeGreaterThan(0);
-
-		// Each delta should have text content
-		for (const delta of deltas) {
-			expect(typeof delta["text"]).toBe("string");
-			expect((delta["text"] as string).length).toBeGreaterThan(0);
+		const sessionId = client.getActiveSessionId();
+		if (!sessionId) throw new Error("No initial session");
+		let text = "";
+		for (const delta of ["po", "ng"]) {
+			harness.mock.injectSSEEvents([
+				{
+					type: "message.part.delta",
+					properties: {
+						sessionID: sessionId,
+						messageID: "msg-incremental-rpc",
+						partID: "part-incremental-rpc",
+						field: "text",
+						delta,
+					},
+				},
+			]);
+			text += delta;
+			const message = await client.waitForTranscriptMessage(
+				(message) =>
+					message.id === "msg-incremental-rpc" && message.text === text,
+				sessionId,
+			);
+			expect(message.text).toBe(text);
 		}
 
 		await client.close();
 	}, 30_000);
 
-	it("done event arrives after deltas", async () => {
+	it("persists text before turn completion and exposes both through RPC", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// Wait for done
-		await client.waitFor("done", { timeout: 10_000 });
-
-		const all = client.getReceived();
-		const deltaIndex = all.findIndex((m) => m.type === "delta");
-		const doneIndex = all.findIndex((m) => m.type === "done");
-
-		// At least one delta must exist before done
-		expect(deltaIndex).toBeGreaterThanOrEqual(0);
-		expect(doneIndex).toBeGreaterThan(deltaIndex);
+		await client.waitForAssistantText();
+		const done = await client.waitForTurnEnd(undefined, 10_000);
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			const events = db
+				.prepare(
+					"SELECT type, sequence FROM events WHERE session_id = ? AND type IN ('text.delta', 'turn.completed') ORDER BY sequence",
+				)
+				.all(done.id) as Array<{ type: string; sequence: number }>;
+			const delta = events.find((event) => event.type === "text.delta");
+			const completed = events.find((event) => event.type === "turn.completed");
+			expect(delta).toBeDefined();
+			expect(completed).toBeDefined();
+			expect(completed?.sequence).toBeGreaterThan(delta?.sequence ?? 0);
+		} finally {
+			db.close();
+		}
 
 		await client.close();
 	}, 30_000);
 
-	it("multiple clients all receive same SSE-sourced events", async () => {
+	it("multiple clients receive the same SSE-sourced transcript", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
+		const sessionId = client1.getActiveSessionId();
+		if (!sessionId) throw new Error("No initial session");
+		await client2.viewSession(sessionId);
 		client1.clearReceived();
 		client2.clearReceived();
 
 		// Send prompt from client1
 		await client1.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// Both clients should receive delta events
-		const [delta1, delta2] = await Promise.all([
-			client1.waitFor("delta", { timeout: 10_000 }),
-			client2.waitFor("delta", { timeout: 10_000 }),
+		const [message1, message2] = await Promise.all([
+			client1.waitForAssistantText(sessionId, 10_000),
+			client2.waitForAssistantText(sessionId, 10_000),
 		]);
-		expect(delta1["text"]).toBeTruthy();
-		expect(delta2["text"]).toBeTruthy();
+		expect(message1.text).toBeTruthy();
+		expect(message2.text).toBeTruthy();
 
-		// Both should receive done
 		await Promise.all([
-			client1.waitFor("done", { timeout: 10_000 }),
-			client2.waitFor("done", { timeout: 10_000 }),
+			client1.waitForTurnEnd(sessionId, 10_000),
+			client2.waitForTurnEnd(sessionId, 10_000),
 		]);
-
-		// Both clients should have received delta events
-		const deltas1 = client1.getReceivedOfType("delta");
-		const deltas2 = client2.getReceivedOfType("delta");
-		expect(deltas1.length).toBeGreaterThan(0);
-		expect(deltas2.length).toBeGreaterThan(0);
+		const [history1, history2] = await Promise.all([
+			client1.loadMoreHistory(sessionId),
+			client2.loadMoreHistory(sessionId),
+		]);
+		expect(history2.messages).toEqual(history1.messages);
 
 		await client1.close();
 		await client2.close();
 	}, 30_000);
 
-	it("done signal arrives after completion with no errors", async () => {
+	it("turn completion arrives with no errors", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
 		await client.sendMessage("Reply with just the word 'pong'. Nothing else.");
 
-		// Wait for the full cycle: processing → deltas → done
-		const done = await client.waitFor("done", { timeout: 10_000 });
-		expect(done["code"]).toBe(0);
+		// Wait for a new terminal shell version.
+		const done = await client.waitForTurnEnd(undefined, 10_000);
+		expect(done.status).toBe("idle");
+		expect(done.attention).not.toBe("error");
 
 		// Verify no relay-level errors occurred during the pipeline
 		// (filter out SSE-sourced session.error events from previous tests)
-		const errors = client.getReceivedOfType("error");
-		const pipelineErrors = errors.filter(
-			(e) =>
-				!["insufficient_quota", "api_error", "Unknown"].includes(
-					String((e as Record<string, unknown>)["code"] ?? ""),
-				),
-		);
-		expect(pipelineErrors).toHaveLength(0);
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			const errors = db
+				.prepare(
+					"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
+				)
+				.all(done.id) as Array<{ data: string }>;
+			const pipelineErrors = errors
+				.map((event) => JSON.parse(event.data) as TurnErrorPayload)
+				.filter(
+					(error) =>
+						!["insufficient_quota", "api_error", "Unknown"].includes(
+							error.code ?? "",
+						),
+				);
+			expect(pipelineErrors).toHaveLength(0);
+		} finally {
+			db.close();
+		}
 
 		await client.close();
 	}, 30_000);

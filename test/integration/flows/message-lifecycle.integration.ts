@@ -1,16 +1,8 @@
 // Full end-to-end lifecycle test against a mock OpenCode server.
 // Verifies the complete message flow:
-//   send → busy shell row → delta(s) → done(code:0) → idle
+//   send → busy shell row → transcript text → completed idle shell row
 
-import {
-	afterAll,
-	assert,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -31,7 +23,7 @@ describe("Integration: Message Lifecycle", () => {
 		harness.mock.resetQueues();
 	});
 
-	it("complete lifecycle: send → processing → delta → done", async () => {
+	it("complete lifecycle: send → processing → transcript text → idle", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		await client.subscribeShell();
@@ -43,14 +35,15 @@ describe("Integration: Message Lifecycle", () => {
 		// 1. The session's shell row shows the turn started
 		await client.waitForTurnStart();
 
-		// 2. Should receive at least one delta (streamed text)
-		const delta = await client.waitFor("delta");
-		expect(delta["text"]).toBeTruthy();
-		expect(typeof delta["text"]).toBe("string");
+		// 2. The detail subscription publishes the assistant's text.
+		const message = await client.waitForAssistantText();
+		expect(message.text).toBeTruthy();
+		expect(typeof message.text).toBe("string");
 
-		// 3. Should receive done with code 0 (successful completion)
-		const done = await client.waitFor("done");
-		expect(done["code"]).toBe(0);
+		// 3. The shell reports a completed turn, with no processing state left.
+		const done = await client.waitForTurnEnd();
+		expect(done.status).toBe("idle");
+		expect(done.attention).not.toBe("error");
 
 		await client.close();
 	}, 15_000);
@@ -65,8 +58,9 @@ describe("Integration: Message Lifecycle", () => {
 		await client.sendMessage("Reply with just 'one'.");
 
 		await client.waitForTurnStart();
-		const done1 = await client.waitFor("done");
-		expect(done1["code"]).toBe(0);
+		const done1 = await client.waitForTurnEnd();
+		expect(done1.status).toBe("idle");
+		expect(done1.attention).not.toBe("error");
 
 		// Clear messages between turns and reset mock queues so the second
 		// prompt_async has fresh SSE events (deltas + idle) to replay.
@@ -79,34 +73,33 @@ describe("Integration: Message Lifecycle", () => {
 		// Should enter processing again (not stuck from first turn)
 		await client.waitForTurnStart();
 
-		// Should receive delta for second message
-		const delta2 = await client.waitFor("delta");
-		expect(delta2["text"]).toBeTruthy();
+		const message2 = await client.waitForAssistantText();
+		expect(message2.text).toBeTruthy();
 
 		// Should complete
-		const done2 = await client.waitFor("done");
-		expect(done2["code"]).toBe(0);
+		const done2 = await client.waitForTurnEnd();
+		expect(done2.status).toBe("idle");
+		expect(done2.attention).not.toBe("error");
+		expect(done2.lastTurnEndVersion).toBeGreaterThan(
+			done1.lastTurnEndVersion ?? 0,
+		);
 
 		await client.close();
 	}, 120_000);
 
-	it("done event resets state — no stale processing status", async () => {
+	it("turn completion resets state without stale processing status", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		await client.subscribeShell();
 		client.clearReceived();
 
 		await client.sendMessage("Reply with just 'ok'.");
 
-		// Wait for full cycle
-		await client.waitFor("done");
-
-		// After done, the last status-related message should indicate idle/done
-		// (no lingering processing status)
-		const allDone = client.getReceivedOfType("done");
-		expect(allDone.length).toBeGreaterThan(0);
-		const lastDone = allDone.at(-1);
-		assert.exists(lastDone, "expected a done message");
-		expect(lastDone["code"]).toBe(0);
+		const done = await client.waitForTurnEnd();
+		expect(done.lastTurnEndVersion).toBeGreaterThan(0);
+		expect(done.status).toBe("idle");
+		expect(done.processing).not.toBe(true);
+		expect(done.attention).not.toBe("error");
 
 		await client.close();
 	}, 15_000);

@@ -311,7 +311,7 @@ async function runPaginationDifferential(count: number) {
 		);
 
 		client2 = new TestWsClient(
-			`ws://127.0.0.1:${paginationHarness.relayPort}/ws?session=${sessionId}`,
+			`ws://127.0.0.1:${paginationHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -397,6 +397,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 	beforeEach(async () => {
 		harness.mock.resetQueues();
+		await harness.stack.client.app.path();
 		await vi.waitFor(() => {
 			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
 		});
@@ -411,7 +412,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Run a full turn so the session has at least one user + assistant message.
 		await client1.sendMessage("Reply with just the word 'pong'.");
-		await client1.waitFor("done");
+		await client1.waitForTurnEnd();
 
 		await vi.waitFor(
 			async () => {
@@ -435,7 +436,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Fresh client (second browser tab) opens the same session URL.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${harness.relayPort}/ws?session=${sessionId}`,
+			`ws://127.0.0.1:${harness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -490,17 +491,14 @@ describe("Integration: Session Visibility Repros", () => {
 		console.log(`[REPRO-C] materialized ${localId} -> ${newId}`);
 		expect(newId).not.toBe(localId);
 
-		// Bug 1 (server contract): the echo for the materialized session must be
-		// renderable by the sender — the optimistic copy lives in the OLD slot,
-		// so the echo must NOT carry the sender's originId.
-		const userMsg = await client1.waitFor("user_message", {
-			predicate: (m) => m["sessionId"] === newId,
-		});
-		// eslint-disable-next-line no-console
-		console.log(
-			`[REPRO-C] user_message originId=${String(userMsg["originId"])}`,
+		// The materialized session must publish a renderable user row to the sender.
+		const userMsg = await client1.waitForTranscriptMessage(
+			(message) =>
+				message.role === "user" && JSON.stringify(message).includes("pong"),
+			newId,
 		);
-		expect(userMsg["originId"]).toBeUndefined();
+		expect(userMsg.role).toBe("user");
+		expect(JSON.stringify(userMsg)).toContain("pong");
 
 		// Bug 2: the viewed family after materialization includes the session.
 		const ids = (
@@ -511,7 +509,7 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(ids).toContain(newId);
 
 		// Let the turn complete and the pipeline persist.
-		await client1.waitFor("done", { timeout: 10_000 });
+		await client1.waitForTurnEnd(newId, 10_000);
 		await vi.waitFor(
 			async () => {
 				const projected = await projectedHistory(harness.eventsDbPath, newId);
@@ -532,7 +530,7 @@ describe("Integration: Session Visibility Repros", () => {
 		// Bug 4: a second tab opening the materialized session URL must get
 		// populated history.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${harness.relayPort}/ws?session=${newId}`,
+			`ws://127.0.0.1:${harness.relayPort}/rpc?p=integration-test&session=${newId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -553,8 +551,14 @@ describe("Integration: Session Visibility Repros", () => {
 		const back = await client1.loadMoreHistory(newId);
 		expect(JSON.stringify(back.messages)).toContain("pong");
 		const errorFrames = client1
-			.getReceived()
-			.filter((m) => m.type === "done" && m["error"] !== undefined);
+			.getReceivedOfType("transcript_message")
+			.filter(
+				(message) =>
+					message["sessionId"] === newId &&
+					(message["parts"] as Array<{ type: string }> | undefined)?.some(
+						(part) => part.type === "error",
+					),
+			);
 		// eslint-disable-next-line no-console
 		console.log(`[REPRO-D] errorFrames=${JSON.stringify(errorFrames)}`);
 		expect(errorFrames).toEqual([]);
@@ -577,7 +581,7 @@ describe("Integration: Session Visibility Repros", () => {
 			localId,
 			"Reply with just the word 'pong'.",
 		);
-		await client1.waitFor("done");
+		await client1.waitForTurnEnd(sessionId);
 		await vi.waitFor(
 			async () => {
 				const projected = await projectedHistory(textDbPath, sessionId);
@@ -598,7 +602,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// A fresh client requests its own transcript page.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${textHarness.relayPort}/ws?session=${sessionId}`,
+			`ws://127.0.0.1:${textHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -663,8 +667,16 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				"List the files in the current directory.",
 			);
-			// This recording has no trailing done frame; wait for its tool result.
-			await client1.waitFor("tool_result", { timeout: 15_000 });
+			// This recording has no trailing turn end; wait for its completed tool.
+			await client1.waitForTranscriptMessage(
+				(message) =>
+					message.parts?.some(
+						(part) =>
+							part.type === "tool" && part.state?.["status"] === "completed",
+					) === true,
+				sessionId,
+				15_000,
+			);
 			await vi.waitFor(
 				async () => {
 					expect(
@@ -675,7 +687,7 @@ describe("Integration: Session Visibility Repros", () => {
 			);
 
 			const client2 = new TestWsClient(
-				`ws://127.0.0.1:${toolHarness.relayPort}/ws?session=${sessionId}`,
+				`ws://127.0.0.1:${toolHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
@@ -827,7 +839,12 @@ describe("Integration: Session Visibility Repros", () => {
 				localId,
 				synthetic.prompt,
 			);
-			await client1.waitFor("tool_result", { timeout: 15_000 });
+			await client1.waitForToolState(
+				"part-tool-g",
+				"completed",
+				sessionId,
+				15_000,
+			);
 			await vi.waitFor(
 				async () => {
 					expect(
@@ -838,7 +855,7 @@ describe("Integration: Session Visibility Repros", () => {
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${metadataHarness.relayPort}/ws?session=${sessionId}`,
+				`ws://127.0.0.1:${metadataHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
@@ -965,7 +982,7 @@ describe("Integration: Session Visibility Repros", () => {
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${fileHarness.relayPort}/ws?session=${sessionId}`,
+				`ws://127.0.0.1:${fileHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
@@ -1031,7 +1048,7 @@ describe("Integration: Session Visibility Repros", () => {
 				"List the files in the current directory using bash: ls -la",
 			);
 			// The card reaches browsers through the approvals subscription (ni8.9),
-			// which reads this row; this harness serves the socket, not /rpc. The
+			// which reads this row through RPC. The
 			// recording may resolve it first, so the row's status is not asserted.
 			const requestId = await vi.waitFor(
 				async () => {
@@ -1051,7 +1068,15 @@ describe("Integration: Session Visibility Repros", () => {
 				{ timeout: 15_000 },
 			);
 			await client1.respondPermission(requestId, "allow");
-			await client1.waitFor("tool_result", { timeout: 20_000 });
+			await client1.waitForTranscriptMessage(
+				(message) =>
+					message.parts?.some(
+						(part) =>
+							part.type === "tool" && part.state?.["status"] === "completed",
+					) === true,
+				sessionId,
+				20_000,
+			);
 			await vi.waitFor(
 				async () => {
 					const eventTypes = await readStore(
@@ -1075,7 +1100,7 @@ describe("Integration: Session Visibility Repros", () => {
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${permissionHarness.relayPort}/ws?session=${sessionId}`,
+				`ws://127.0.0.1:${permissionHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();

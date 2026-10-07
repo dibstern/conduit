@@ -13,7 +13,6 @@
 // Uses accelerated timing intervals (~10x faster than production) to avoid
 // 100+ second real-time waits while still exercising the same code paths.
 
-import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
@@ -24,9 +23,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { getCurrentStatuses } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -301,24 +299,7 @@ async function createTestHarness(
 		messagePollerInterval: TEST_MSG_POLL_MS,
 	});
 
-	const eventSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			eventSockets.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const requestedClientId = params.get("client") ?? "";
-				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
-					? requestedClientId
-					: randomBytes(8).toString("hex");
-				const requestedSessionId = params.get("session") || undefined;
-				relay.wsHandler.attach(ws, {
-					clientId,
-					...(requestedSessionId != null && { requestedSessionId }),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			relay.rpcWsHandler.handleUpgrade(req, socket, head);
 			return;
@@ -389,7 +370,7 @@ async function createTestHarness(
 		relayPort,
 		async connectClient() {
 			const client = new TestWsClient(
-				`ws://127.0.0.1:${relayPort}/ws?p=test-sse-gating-${relayPort}`,
+				`ws://127.0.0.1:${relayPort}/rpc?p=test-sse-gating-${relayPort}`,
 			);
 			await client.waitForOpen();
 			return client;
@@ -397,7 +378,6 @@ async function createTestHarness(
 		async stop() {
 			await relay.stop();
 			db.close();
-			await new Promise<void>((resolve) => eventSockets.close(() => resolve()));
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 			rmSync(dirname(dbPath), { recursive: true, force: true });
@@ -439,8 +419,56 @@ async function connectAndView(
 	const client = await harness.connectClient();
 	await client.waitForInitialState();
 	await client.viewSession(sessionId);
+	await client.subscribeAlerts();
 	client.clearReceived();
 	return client;
+}
+
+// These scenarios mutate SQLite without publishing a read-model advance or
+// a turn event. An actual completion alert fences the monitoring effects;
+// a fresh family snapshot then verifies the resulting status through RPC.
+async function waitForIdle(
+	harness: TestHarness,
+	client: TestWsClient,
+	options: { timeout?: number; completionAlert?: boolean } = {},
+): Promise<void> {
+	const timeout = options.timeout ?? 3000;
+	const sessionId = client.getActiveSessionId();
+	if (!sessionId) throw new Error("No viewed session");
+	await vi.waitFor(
+		async () => {
+			const statuses =
+				await harness.relay.effectRuntime.runtime.runPromise(
+					getCurrentStatuses,
+				);
+			expect(statuses[sessionId]?.type).toBe("idle");
+		},
+		{ timeout, interval: 10 },
+	);
+	if (options.completionAlert !== false)
+		await client.waitFor("alerts", {
+			timeout,
+			predicate: (message) =>
+				message["_tag"] === "alert" &&
+				message["kind"] === "done" &&
+				message["sessionId"] === sessionId,
+		});
+	const snapshot = await client.rpcCall((rpc) =>
+		rpc
+			.SubscribeSessionFamily({
+				projectSlug: `test-sse-gating-${harness.relayPort}`,
+				sessionId,
+			})
+			.pipe(
+				Stream.filter((envelope) => envelope._tag === "snapshot"),
+				Stream.runHead,
+				Effect.flatten,
+			),
+	);
+	if (snapshot._tag !== "snapshot") throw new Error("Missing family snapshot");
+	expect(snapshot.rows.find((row) => row.id === sessionId)).toMatchObject({
+		status: "idle",
+	});
 }
 
 /** Helper: reset harness state for the next test within a shared describe. */
@@ -494,7 +522,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 10_000);
 
@@ -532,7 +560,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
 
@@ -570,7 +598,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
 
@@ -599,7 +627,7 @@ describe("Group 1: SSE coverage and grace period", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
 });
@@ -657,7 +685,7 @@ describe("Group 2: SSE dynamics", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
 
@@ -716,7 +744,7 @@ describe("Group 2: SSE dynamics", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 5000 });
+		await waitForIdle(harness, client, { timeout: 5000 });
 		await client.close();
 	}, 5_000);
 });
@@ -732,7 +760,7 @@ describe("Group 3: Idle transitions", () => {
 		if (harness) await harness.stop();
 	}, 5_000);
 
-	it("Scenario 7: Busy-grace → idle → done sent, no poller to stop", async () => {
+	it("Scenario 7: Busy-grace → idle → idle observed, no poller to stop", async () => {
 		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
 
@@ -747,9 +775,8 @@ describe("Group 3: Idle transitions", () => {
 		await wait(Math.floor(TEST_GRACE_MS * 0.3));
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
-		// Client should receive done
-		const done = await client.waitFor("done", { timeout: 3000 });
-		expect(done["type"]).toBe("done");
+		// The RPC family snapshot should report idle.
+		await waitForIdle(harness, client);
 
 		// Message request count should be at baseline (no poller was started)
 		const count = harness.mock.getMessageRequestCount("sess-1");
@@ -758,7 +785,7 @@ describe("Group 3: Idle transitions", () => {
 		await client.close();
 	}, 5_000);
 
-	it("Scenario 8: Busy-sse-covered → idle → done sent, no poller to stop", async () => {
+	it("Scenario 8: Busy-sse-covered → idle → idle observed, no poller to stop", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
 		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
@@ -792,9 +819,8 @@ describe("Group 3: Idle transitions", () => {
 		clearInterval(sseInterval);
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
 
-		// Client should receive done — use generous timeout for contention
-		const done = await client.waitFor("done", { timeout: 5000 });
-		expect(done["type"]).toBe("done");
+		// Wait for monitored idle and its RPC snapshot under contention.
+		await waitForIdle(harness, client, { timeout: 5000 });
 
 		// No poller was started → baseline message request count
 		const count = harness.mock.getMessageRequestCount("sess-1");
@@ -803,7 +829,7 @@ describe("Group 3: Idle transitions", () => {
 		await client.close();
 	}, 8_000);
 
-	it("Scenario 9: Busy-polling → idle → poller stops + done sent", async () => {
+	it("Scenario 9: Busy-polling → idle → poller stops + idle observed", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
 		const client = await connectAndView(harness, "sess-1");
 		harness.mock.resetMessageRequestCounts();
@@ -828,8 +854,7 @@ describe("Group 3: Idle transitions", () => {
 
 		// Go idle
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		const done = await client.waitFor("done", { timeout: 3000 });
-		expect(done["type"]).toBe("done");
+		await waitForIdle(harness, client);
 
 		// Reset counts after idle; verify no further polling over several intervals.
 		harness.mock.resetMessageRequestCounts();
@@ -1009,12 +1034,12 @@ describe("Group 5: Notifications", () => {
 
 		client.clearReceived();
 
-		// sess-1 goes idle → done should be sent directly to session viewer
+		// Viewer completion has no RPC outcome; retain the no-alert assertion
+		// while checking the available family state.
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		const done = await client.waitFor("done", { timeout: 3000 });
-		expect(done["type"]).toBe("done");
+		await waitForIdle(harness, client, { completionAlert: false });
 
-		// Should NOT receive an alert (done was delivered to viewer directly)
+		// A session with an active viewer should not receive a cross-session alert.
 		await waitForStatusPollCycles(harness.mock);
 		expect(alertsOf(client)).toEqual([]);
 
@@ -1074,11 +1099,11 @@ describe("Group 6: Retry status and cycling", () => {
 
 		// Cleanup
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 		await client.close();
 	}, 5_000);
 
-	it("Scenario 17: Rapid busy→idle→busy cycling → correct status/done sequence", async () => {
+	it("Scenario 17: Rapid busy→idle→busy cycling → correct status sequence", async () => {
 		await resetForNextTest(harness, ["sess-1"]);
 		const client = await connectAndView(harness, "sess-1");
 
@@ -1087,7 +1112,7 @@ describe("Group 6: Retry status and cycling", () => {
 		await waitForMonitoredBusy(harness, "sess-1");
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 
 		client.clearReceived();
 
@@ -1096,11 +1121,9 @@ describe("Group 6: Retry status and cycling", () => {
 		await waitForMonitoredBusy(harness, "sess-1");
 
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await client.waitFor("done", { timeout: 3000 });
+		await waitForIdle(harness, client);
 
-		// Verify the sequence: busy row, done, busy row, done
-		// (We cleared after the first done, so only the second cycle is in received)
-		expect(client.getReceivedOfType("done").length).toBeGreaterThanOrEqual(1);
+		// Each cycle emitted a monitoring completion alert and reached idle.
 
 		await client.close();
 	}, 5_000);

@@ -388,26 +388,25 @@ describe("Status poller → browser done transitions", () => {
 		);
 	});
 
-	it("sends done to clients viewing a session that becomes idle", async () => {
+	it("publishes an idle shell row when a viewed session becomes idle", async () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
-
 		await client.viewSession("sess-B");
-		client.clearReceived();
+		await client.subscribeShell();
 
-		// First make session B busy
 		publishStatus("sess-B", "busy");
-		await vi.waitFor(
-			() => expect(harness.relay.isAnySessionProcessing()).toBe(true),
-			{ timeout: 3000 },
-		);
-		client.clearReceived();
+		await client.waitForTurnStart("sess-B", 3000);
+		const afterBusy = client.getReceived().length;
 
-		// Now make session B idle again
 		publishStatus("sess-B", "idle");
-
-		const done = await client.waitFor("done", { timeout: 3000 });
-		expect(done["type"]).toBe("done");
+		await client.waitForAny(["shell"], {
+			timeout: 3000,
+			cursor: afterBusy,
+			predicate: (msg) =>
+				msg["_tag"] === "upsert" &&
+				(msg["item"] as { id?: string; status?: string }).id === "sess-B" &&
+				(msg["item"] as { status?: string }).status === "idle",
+		});
 
 		await client.close();
 	});

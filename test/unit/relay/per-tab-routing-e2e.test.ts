@@ -362,25 +362,26 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client.close();
 	});
 
-	it("SSE chat events reach every client on the project (Phase 0b firehose)", async () => {
-		// Phase 0b: per-session chat events are broadcast to every client on
-		// the project's /p/<slug> regardless of viewed session. The frontend
-		// dispatcher routes into the correct per-session slot using each
-		// event's sessionId.
+	it("SSE chat events reach every session subscriber, whatever it views", async () => {
 		const client1 = await harness.connectClient();
 		const client2 = await harness.connectClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		// Client1 views session A, Client2 views session B — but this no
-		// longer gates event delivery under Phase 0b.
+		// Viewing does not gate delivery: a subscriber to session A's detail
+		// receives its transcript while viewing session B.
 		await client1.viewSession("sess-A");
 		await client2.viewSession("sess-B");
+		await client1.subscribeSessionDetail("sess-A");
+		await client2.subscribeSessionDetail("sess-A");
 
-		client1.clearReceived();
-		client2.clearReceived();
-
-		// Inject an SSE text delta event for session A only.
+		harness.mock.injectSSE({
+			type: "message.updated",
+			properties: {
+				sessionID: "sess-A",
+				info: { id: "msg-1", sessionID: "sess-A", role: "assistant" },
+			},
+		});
 		harness.mock.injectSSE({
 			type: "message.part.delta",
 			properties: {
@@ -392,80 +393,14 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 			},
 		});
 
-		// Both clients should receive it — the frontend dispatcher decides
-		// which session slot to write into.
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		expect(delta1["text"]).toBe("hello from session A");
-		expect(delta2["text"]).toBe("hello from session A");
-
-		await client1.close();
-		await client2.close();
-	});
-
-	it("SSE events for session B reach every client on the project", async () => {
-		const client1 = await harness.connectClient();
-		const client2 = await harness.connectClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-
-		await client1.viewSession("sess-A");
-		await client2.viewSession("sess-B");
-
-		client1.clearReceived();
-		client2.clearReceived();
-
-		harness.mock.injectSSE({
-			type: "message.part.delta",
-			properties: {
-				sessionID: "sess-B",
-				partID: "part-2",
-				messageID: "msg-2",
-				field: "text",
-				delta: "hello from session B",
-			},
-		});
-
-		// Both clients receive it under Phase 0b.
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		expect(delta2["text"]).toBe("hello from session B");
-		expect(delta1["text"]).toBe("hello from session B");
-
-		await client1.close();
-		await client2.close();
-	});
-
-	it("both clients viewing same session both receive SSE events", async () => {
-		const client1 = await harness.connectClient();
-		const client2 = await harness.connectClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-
-		// Both view session A
-		await client1.viewSession("sess-A");
-		await client2.viewSession("sess-A");
-
-		client1.clearReceived();
-		client2.clearReceived();
-
-		// Inject SSE delta event for session A
-		harness.mock.injectSSE({
-			type: "message.part.delta",
-			properties: {
-				sessionID: "sess-A",
-				partID: "part-3",
-				messageID: "msg-3",
-				field: "text",
-				delta: "shared update",
-			},
-		});
-
-		// Both clients should receive it
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		expect(delta1["text"]).toBe("shared update");
-		expect(delta2["text"]).toBe("shared update");
+		const hasText: Parameters<TestWsClient["waitForTranscriptMessage"]>[0] = (
+			message,
+		) =>
+			(message.parts ?? []).some(
+				(part) => part.text === "hello from session A",
+			);
+		await client1.waitForTranscriptMessage(hasText, "sess-A", 3000);
+		await client2.waitForTranscriptMessage(hasText, "sess-A", 3000);
 
 		await client1.close();
 		await client2.close();

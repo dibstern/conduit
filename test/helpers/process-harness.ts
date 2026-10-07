@@ -19,7 +19,16 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
-import { Context, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect";
+import {
+	Cause,
+	Context,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Stream,
+} from "effect";
 import WebSocket from "ws";
 import {
 	defaultInstanceIdForDriver,
@@ -73,14 +82,21 @@ class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
 	>
 >() {}
 
-function browserRpcRuntime(port: number) {
+function browserRpcRuntime(
+	port: number,
+	onDisconnect?: (error: Error) => void,
+) {
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
 		Layer.provide(
-			Layer.succeed(
-				Socket.WebSocketConstructor,
-				(url) => new WebSocket(url) as unknown as globalThis.WebSocket,
-			),
+			Layer.succeed(Socket.WebSocketConstructor, (url) => {
+				const socket = new WebSocket(url);
+				socket.once("error", (error) => onDisconnect?.(error));
+				socket.once("close", () =>
+					onDisconnect?.(new Error("Browser RPC socket closed")),
+				);
+				return socket as unknown as globalThis.WebSocket;
+			}),
 		),
 		Layer.provide(RpcSerialization.layerJson),
 	);
@@ -1604,26 +1620,18 @@ export class ProcessBrowser {
 	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
 	private sessions: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private sessionsReady: Promise<void> | undefined;
+	private readonly details = new Map<string, Promise<void>>();
+	private readonly detailFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly families = new Map<string, Promise<void>>();
+	private readonly familyFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
 	private constructor(
-		private readonly ws: WebSocket,
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
 		readonly rpc: BrowserRpc["Type"],
 		originId: string,
 		private readonly projectSlug: string,
 	) {
 		this.originId = originId;
-		ws.on("message", (data) => {
-			this.record(JSON.parse(data.toString()) as Record<string, unknown>);
-		});
-		ws.on("error", (error) => {
-			this.failure = error;
-			for (const notify of this.waiters) notify();
-		});
-		ws.on("close", () => {
-			this.closed = true;
-			for (const notify of this.waiters) notify();
-		});
-		ws.on("ping", () => ws.pong());
 	}
 
 	static async connect(
@@ -1632,40 +1640,53 @@ export class ProcessBrowser {
 		originId: string = randomUUID(),
 		projectSlug = "process-test",
 	): Promise<ProcessBrowser> {
-		const runtime = browserRpcRuntime(port);
+		let browser: ProcessBrowser | undefined;
+		let connectionFailure: Error | undefined;
+		const runtime = browserRpcRuntime(port, (error) => {
+			connectionFailure = error;
+			browser?.fail(error);
+		});
 		const rpc = await runtime
 			.runPromise(BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)))
 			.catch(async (error: unknown) => {
 				await runtime.dispose();
 				throw error;
 			});
-		const ws = new WebSocket(
-			`ws://127.0.0.1:${port}/ws?p=${projectSlug}&client=${originId}${sessionId ? `&session=${sessionId}` : ""}`,
-		);
-		const browser = new ProcessBrowser(ws, runtime, rpc, originId, projectSlug);
-		browser.watchApprovals();
-		browser.watchProjectSettings();
+		browser = new ProcessBrowser(runtime, rpc, originId, projectSlug);
+		if (connectionFailure) browser.fail(connectionFailure);
 		try {
-			await new Promise<void>((done, fail) => {
-				const timer = setTimeout(
-					() => fail(new Error("Browser WS connect timeout")),
-					TIMEOUT_MS,
-				);
-				ws.once("open", () => {
-					clearTimeout(timer);
-					done();
-				});
-				ws.once("error", (error) => {
-					clearTimeout(timer);
-					fail(error);
-				});
-			});
 			await browser.followPtys();
+			await browser.watchApprovals();
+			await browser.watchProjectSettings();
+			await browser.followSessions();
+			if (sessionId) await browser.view(sessionId);
 			return browser;
 		} catch (error) {
 			await browser.close();
 			throw error;
 		}
+	}
+
+	private fail(error: unknown): void {
+		if (this.closed) return;
+		this.failure = error instanceof Error ? error : new Error(String(error));
+		for (const notify of this.waiters) notify();
+	}
+
+	private watch<A, E>(
+		stream: Stream.Stream<A, E>,
+		record: (envelope: A) => Effect.Effect<void, unknown>,
+	): Fiber.RuntimeFiber<void, unknown> {
+		return this.runtime.runFork(
+			Stream.runForEach(stream, record).pipe(
+				Effect.onExit((exit) =>
+					Effect.sync(() => {
+						if (Exit.isFailure(exit)) this.fail(Cause.squash(exit.cause));
+						else this.fail(new Error("Browser RPC subscription ended"));
+					}),
+				),
+			),
+		);
 	}
 
 	private record(message: Record<string, unknown>): void {
@@ -1680,14 +1701,10 @@ export class ProcessBrowser {
 	 */
 	private async followPtys(): Promise<void> {
 		const cursor = this.frames.length;
-		this.ptys = this.runtime.runFork(
-			this.rpc
-				.SubscribePtys({ projectSlug: this.projectSlug })
-				.pipe(
-					Stream.runForEach((envelope) =>
-						Effect.sync(() => this.record({ type: "pty", ...envelope })),
-					),
-				),
+		this.ptys = this.watch(
+			this.rpc.SubscribePtys({ projectSlug: this.projectSlug }),
+			(envelope) =>
+				Effect.sync(() => this.record({ type: "pty", ...envelope })),
 		);
 		await this.waitFor(
 			(message) =>
@@ -1699,45 +1716,56 @@ export class ProcessBrowser {
 	// The approvals subscription, recorded as frames in the harness's own
 	// vocabulary: `permission_pending` / `question_pending` carry the card, and
 	// `approval_removed` its resolution.
-	private watchApprovals(): void {
-		this.approvals = this.runtime.runFork(
-			Stream.runForEach(
-				this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						const items =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const item of items)
-							this.record({ ...item, type: `${item._tag}_pending` });
-						if (envelope._tag === "remove")
-							this.record({ type: "approval_removed", id: envelope.id });
-					}),
-			).pipe(Effect.ignore),
+	private async watchApprovals(): Promise<void> {
+		const cursor = this.frames.length;
+		this.approvals = this.watch(
+			this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
+			(envelope) =>
+				Effect.sync(() => {
+					this.record({ type: "approvals", ...envelope });
+					const items =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const item of items)
+						this.record({ ...item, type: `${item._tag}_pending` });
+					if (envelope._tag === "remove")
+						this.record({ type: "approval_removed", id: envelope.id });
+				}),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "approvals" && message["_tag"] === "synchronized",
+			cursor,
 		);
 	}
 
 	// Project settings and live project facts, each row recorded as a
 	// `{ type: "project_setting", ...row }` frame.
-	private watchProjectSettings(): void {
-		this.projectSettings = this.runtime.runFork(
-			Stream.runForEach(
-				this.rpc.SubscribeProjectSettings({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "project_setting" });
-					}),
-			).pipe(Effect.ignore),
+	private async watchProjectSettings(): Promise<void> {
+		const cursor = this.frames.length;
+		this.projectSettings = this.watch(
+			this.rpc.SubscribeProjectSettings({ projectSlug: this.projectSlug }),
+			(envelope) =>
+				Effect.sync(() => {
+					this.record({ type: "project_settings", ...envelope });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows)
+						this.record({ ...row, type: "project_setting" });
+				}),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "project_settings" &&
+				message["_tag"] === "synchronized",
+			cursor,
 		);
 	}
 
@@ -1745,13 +1773,15 @@ export class ProcessBrowser {
 	 * Follow the project's session list as the sidebar does. Each row is
 	 * recorded as a `session_row` frame and each removal as `session_removed`.
 	 */
-	async followSessions(): Promise<void> {
-		const cursor = this.frames.length;
-		this.sessions = this.runtime.runFork(
-			Stream.runForEach(
+	followSessions(): Promise<void> {
+		if (this.sessionsReady) return this.sessionsReady;
+		this.sessionsReady = (async () => {
+			const cursor = this.frames.length;
+			this.sessions = this.watch(
 				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
 				(envelope) =>
-					Effect.sync(() => {
+					Effect.gen(this, function* () {
+						this.record({ type: "shell", ...envelope });
 						if (envelope._tag === "snapshot")
 							this.record({ type: "session_snapshot" });
 						const rows =
@@ -1762,19 +1792,119 @@ export class ProcessBrowser {
 									: [];
 						for (const row of rows)
 							this.record({ ...row, type: "session_row" });
+						yield* Effect.forEach(
+							rows,
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
 						if (envelope._tag === "remove")
 							this.record({ type: "session_removed", id: envelope.id });
 					}),
-			).pipe(Effect.ignore),
-		);
-		await this.waitFor(
-			(message) => message["type"] === "session_snapshot",
-			cursor,
-		);
+			);
+			await this.waitFor(
+				(message) =>
+					message["type"] === "shell" && message["_tag"] === "synchronized",
+				cursor,
+			);
+		})();
+		return this.sessionsReady;
 	}
 
-	private run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
-		return this.runtime.runPromise(effect.pipe(Effect.timeout(TIMEOUT_MS)));
+	followSession(sessionId: string): Promise<void> {
+		const existing = this.details.get(sessionId);
+		if (existing) return existing;
+		const ready = (async () => {
+			const cursor = this.frames.length;
+			this.detailFibers.add(
+				this.watch(
+					this.rpc.SubscribeSessionDetail({
+						projectSlug: this.projectSlug,
+						sessionId,
+					}),
+					(envelope) =>
+						Effect.sync(() => {
+							this.record({ type: "session_detail", sessionId, ...envelope });
+							const items =
+								envelope._tag === "snapshot"
+									? envelope.rows
+									: envelope._tag === "upsert"
+										? [envelope.item]
+										: [];
+							for (const item of items)
+								if (item._tag === "event")
+									this.record({
+										...item.event,
+										type: item.event.type,
+										sessionId,
+									});
+								else
+									this.record({
+										...item.message,
+										type: "transcript_message",
+										sessionId,
+									});
+						}),
+				),
+			);
+			await this.waitFor(
+				(message) =>
+					message["type"] === "session_detail" &&
+					message["sessionId"] === sessionId &&
+					message["_tag"] === "synchronized",
+				cursor,
+			);
+		})();
+		this.details.set(sessionId, ready);
+		return ready;
+	}
+
+	followFamily(sessionId: string): Promise<void> {
+		const existing = this.families.get(sessionId);
+		if (existing) return existing;
+		const ready = (async () => {
+			const cursor = this.frames.length;
+			this.familyFibers.add(
+				this.watch(
+					this.rpc.SubscribeSessionFamily({
+						projectSlug: this.projectSlug,
+						sessionId,
+					}),
+					(envelope) =>
+						Effect.gen(this, function* () {
+							this.record({ type: "family", familyOf: sessionId, ...envelope });
+							const rows =
+								envelope._tag === "snapshot"
+									? envelope.rows
+									: envelope._tag === "upsert"
+										? [envelope.item]
+										: [];
+							for (const row of rows)
+								this.record({ ...row, type: "session_row" });
+							yield* Effect.forEach(
+								rows,
+								(row) => Effect.promise(() => this.followSession(row.id)),
+								{ discard: true },
+							);
+						}),
+				),
+			);
+			await this.waitFor(
+				(message) =>
+					message["type"] === "family" &&
+					message["familyOf"] === sessionId &&
+					message["_tag"] === "synchronized",
+				cursor,
+			);
+		})();
+		this.families.set(sessionId, ready);
+		return ready;
+	}
+
+	private run<A, E>(
+		effect: Effect.Effect<A, E>,
+		timeoutMs = TIMEOUT_MS,
+	): Promise<A> {
+		return this.runtime.runPromise(effect.pipe(Effect.timeout(timeoutMs)));
 	}
 
 	async shutdown(): Promise<void> {
@@ -1900,6 +2030,7 @@ export class ProcessBrowser {
 	}
 
 	async view(sessionId: string): Promise<void> {
+		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.ViewSession({
 				projectSlug: this.projectSlug,
@@ -1907,9 +2038,11 @@ export class ProcessBrowser {
 				originId: this.originId,
 			}),
 		);
+		await this.followFamily(sessionId);
 	}
 
 	async preWarmSession(sessionId: string): Promise<void> {
+		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
 		);
@@ -1918,9 +2051,20 @@ export class ProcessBrowser {
 	async send(
 		sessionId: string,
 		prompt: string,
+		timeoutMs = TIMEOUT_MS,
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
+		await this.followSession(sessionId);
+		await this.followFamily(sessionId);
 		const cursor = this.frames.length;
-		await this.run(
+		const knownMessages = new Map<string, Set<string>>();
+		for (const { message } of this.frames) {
+			if (message["type"] !== "transcript_message") continue;
+			const owner = String(message["sessionId"]);
+			const ids = knownMessages.get(owner) ?? new Set<string>();
+			ids.add(String(message["id"]));
+			knownMessages.set(owner, ids);
+		}
+		const result = await this.run(
 			this.rpc.SendMessage({
 				projectSlug: this.projectSlug,
 				sessionId,
@@ -1928,17 +2072,55 @@ export class ProcessBrowser {
 				commandId: randomUUID(),
 				text: prompt,
 			}),
+			timeoutMs,
 		);
-		const done = await this.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
-			cursor,
-		);
-		const chunks = this.frames
-			.slice(cursor)
-			.filter(({ message }) => message["type"] === "delta")
-			.map(({ message }) => String(message["text"]));
+		await this.followSession(result.sessionId);
+		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		// The detail source currently emits projected messages, not StoredEvents.
+		// A fresh typed history read fences the final text against shell completion.
+		const history = await this.history(result.sessionId);
+		const previous = knownMessages.get(result.sessionId);
+		const chunks = history
+			.filter(
+				(message) => message.role === "assistant" && !previous?.has(message.id),
+			)
+			.flatMap((message) => {
+				const texts = (message.parts ?? [])
+					.filter(
+						(part) => part.type === "text" && typeof part.text === "string",
+					)
+					.map((part) => String(part.text));
+				return texts.length ? texts : message.text ? [message.text] : [];
+			});
 		return { chunks, done };
+	}
+
+	/** Wait for a completed/failed turn's shell version to advance past cursor.
+	 * The current read model does not advance this field on interruption. */
+	waitForTurnEnd(
+		sessionId: string,
+		cursor = 0,
+		timeoutMs = TIMEOUT_MS,
+	): Promise<Record<string, unknown>> {
+		const endedBefore = Math.max(
+			-1,
+			...this.frames
+				.slice(0, cursor)
+				.filter(
+					({ message }) =>
+						message["type"] === "session_row" && message["id"] === sessionId,
+				)
+				.map(({ message }) => Number(message["lastTurnEndVersion"] ?? -1)),
+		);
+		return this.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				(message["status"] === "idle" || message["status"] === "error") &&
+				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
+			cursor,
+			timeoutMs,
+		);
 	}
 
 	async answerApproval(
@@ -1971,6 +2153,7 @@ export class ProcessBrowser {
 	}
 
 	async history(sessionId: string) {
+		await this.followSession(sessionId);
 		return (
 			await this.run(
 				this.rpc.LoadMoreHistory({ projectSlug: this.projectSlug, sessionId }),
@@ -1989,6 +2172,7 @@ export class ProcessBrowser {
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {
+		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.DeleteSession({
 				projectSlug: this.projectSlug,
@@ -1999,6 +2183,7 @@ export class ProcessBrowser {
 	}
 
 	async switchAgent(sessionId: string, agentId: string): Promise<void> {
+		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.SwitchAgent({
 				projectSlug: this.projectSlug,
@@ -2010,6 +2195,7 @@ export class ProcessBrowser {
 	}
 
 	async reloadSession(sessionId: string, signal?: AbortSignal): Promise<void> {
+		await this.followSession(sessionId);
 		await this.runtime.runPromise(
 			this.rpc
 				.ReloadProviderSession({
@@ -2026,12 +2212,13 @@ export class ProcessBrowser {
 	waitFor(
 		predicate: (message: Record<string, unknown>) => boolean,
 		cursor = 0,
+		timeoutMs = TIMEOUT_MS,
 	): Promise<Record<string, unknown>> {
 		return new Promise((done, fail) => {
 			const timer = setTimeout(() => {
 				this.waiters.delete(check);
 				fail(new Error("Timed out waiting for browser event"));
-			}, TIMEOUT_MS);
+			}, timeoutMs);
 			const check = () => {
 				const frame = this.frames
 					.slice(cursor)
@@ -2049,14 +2236,18 @@ export class ProcessBrowser {
 	}
 
 	async close(): Promise<void> {
-		if (!this.closed) this.ws.terminate();
+		this.closed = true;
+		for (const notify of this.waiters) notify();
 		if (this.ptys) await Effect.runPromise(Fiber.interrupt(this.ptys));
 		if (this.approvals)
 			await Effect.runPromise(Fiber.interrupt(this.approvals));
 		if (this.projectSettings)
 			await Effect.runPromise(Fiber.interrupt(this.projectSettings));
 		if (this.sessions) await Effect.runPromise(Fiber.interrupt(this.sessions));
+		for (const fiber of this.detailFibers)
+			await Effect.runPromise(Fiber.interrupt(fiber));
+		for (const fiber of this.familyFibers)
+			await Effect.runPromise(Fiber.interrupt(fiber));
 		await this.runtime.dispose();
-		this.closed = true;
 	}
 }

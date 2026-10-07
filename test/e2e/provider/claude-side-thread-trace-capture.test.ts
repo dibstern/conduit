@@ -8,7 +8,6 @@
  * answer recalls the parent's word and the SDK reports plan mode. Hook output
  * and home paths are redacted; review the trace before committing it.
  */
-import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -59,40 +58,9 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					await harness.restart();
 					const browser = await harness.connect();
 					const send = async (sessionId: string, text: string) => {
-						const cursor = browser.frames.length;
-						await Effect.runPromise(
-							browser.rpc
-								.SendMessage({
-									projectSlug: "process-test",
-									sessionId,
-									originId: browser.originId,
-									commandId: randomUUID(),
-									text,
-								})
-								.pipe(Effect.timeout(15_000)),
-						);
-						await vi.waitFor(
-							() =>
-								expect(
-									browser.frames
-										.slice(cursor)
-										.some(
-											({ message }) =>
-												message["type"] === "done" &&
-												message["sessionId"] === sessionId,
-										),
-								).toBe(true),
-							{ timeout: 120_000, interval: 50 },
-						);
-						return browser.frames
-							.slice(cursor)
-							.filter(
-								({ message }) =>
-									message["sessionId"] === sessionId &&
-									message["type"] === "delta",
-							)
-							.map(({ message }) => String(message["text"]))
-							.join("");
+						const response = await browser.send(sessionId, text, 120_000);
+						expect(response.done["status"]).toBe("idle");
+						return response.chunks.join("");
 					};
 
 					const parentId = await browser.createSession("Side Thread capture");

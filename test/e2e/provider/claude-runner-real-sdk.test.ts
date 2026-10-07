@@ -5,13 +5,13 @@
  * RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-runner-real-sdk.test.ts
  */
-import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ClaudeRunnerRegistration } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
@@ -34,11 +34,13 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				runnerCursor: null as number | null,
 				timings: {
 					// Spawn is observed through server IPC at a 10 ms polling interval.
-					// Its origin is session open; the first text delta and turn end use send start.
+					// Its origin is session open; RPC projection timings use send start.
 					runnerSpawnMs: null as number | null,
-					firstEventMs: null as number | null,
-					turnEndMs: null as number | null,
+					firstProjectionMs: null as number | null,
+					completionObservedMs: null as number | null,
 				},
+				timingSource: "typed-rpc-read-model",
+				rawDeltaTimingAvailable: false,
 				remainingRunnerPids: [] as number[],
 			};
 			let harness: ProcessHarness | undefined;
@@ -73,49 +75,37 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				evidence.sessionId = sessionId;
 				const cursor = browser.frames.length;
 				const sendAt = process.hrtime.bigint();
-				await Effect.runPromise(
-					browser.rpc
-						.SendMessage({
-							projectSlug: "process-test",
-							sessionId,
-							originId: browser.originId,
-							commandId: randomUUID(),
-							text: evidence.prompt,
-						})
-						.pipe(Effect.timeout(15_000)),
+				const response = await browser.send(
+					sessionId,
+					evidence.prompt,
+					120_000,
 				);
-				await vi.waitFor(
-					() =>
-						expect(
-							browser.frames
-								.slice(cursor)
-								.some(
-									({ message }) =>
-										message["type"] === "done" &&
-										message["sessionId"] === sessionId,
-								),
-						).toBe(true),
-					{ timeout: 120_000, interval: 50 },
+				const frames = browser.frames.slice(cursor);
+				const firstProjection = frames.find(
+					({ message }) =>
+						message["type"] === "transcript_message" &&
+						message["sessionId"] === sessionId &&
+						message["role"] === "assistant" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) => part.type === "text" && Boolean(part.text),
+						),
 				);
-				const frames = browser.frames
-					.slice(cursor)
-					.filter(({ message }) => message["sessionId"] === sessionId);
-				const deltas = frames.filter(
-					({ message }) => message["type"] === "delta",
-				);
-				const firstEvent = deltas[0];
 				const turnEnd = frames.find(
-					({ message }) => message["type"] === "done",
+					({ message }) =>
+						message["type"] === "session_row" &&
+						message["id"] === sessionId &&
+						message["lastTurnEndVersion"] ===
+							response.done["lastTurnEndVersion"],
 				);
-				if (!firstEvent || !turnEnd)
-					throw new Error("Missing text or turn end");
-				evidence.timings.firstEventMs = Number(firstEvent.at - sendAt) / 1e6;
-				evidence.timings.turnEndMs = Number(turnEnd.at - sendAt) / 1e6;
-				evidence.text = deltas
-					.map(({ message }) => String(message["text"]))
-					.join("");
+				if (!firstProjection || !turnEnd)
+					throw new Error("Missing text projection or completion fence");
+				evidence.timings.firstProjectionMs =
+					Number(firstProjection.at - sendAt) / 1e6;
+				evidence.timings.completionObservedMs =
+					Number(turnEnd.at - sendAt) / 1e6;
+				evidence.text = response.chunks.join("");
 				expect(evidence.text.trim()).toBe("hello world");
-				expect(turnEnd.message["code"]).toBe(0);
+				expect(response.done["status"]).toBe("idle");
 				const runner = harness.marks.find(
 					(mark) =>
 						mark.kind === "runner-started" && mark.sessionId === sessionId,

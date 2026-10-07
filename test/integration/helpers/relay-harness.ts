@@ -22,7 +22,7 @@ export interface RelayHarness {
 	relayBaseUrl: string;
 	eventsDbPath: string;
 
-	/** Connect a test WebSocket client to the relay */
+	/** Connect a typed browser RPC client to the relay */
 	connectWsClient(): Promise<TestWsClient>;
 
 	/** Stop the relay and clean up */
@@ -83,7 +83,7 @@ export async function createRelayHarness(
 
 		async connectWsClient(): Promise<TestWsClient> {
 			const client = new TestWsClient(
-				`ws://127.0.0.1:${relayPort}/ws?p=integration-test`,
+				`ws://127.0.0.1:${relayPort}/rpc?p=integration-test`,
 				stack.initialSessionId,
 			);
 			clients.push(client);

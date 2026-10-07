@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	ProcessHarness,
@@ -140,8 +141,8 @@ describe("Claude session process runner", () => {
 		).toHaveLength(0);
 		for (const prompt of ["stream-parity", "warm-parity"]) {
 			const turn = await browser.send(sessionId, prompt);
-			expect(turn.chunks).toEqual(responseChunks(prompt));
-			expect(turn.done["code"]).toBe(0);
+			expect(turn.chunks.join("")).toBe(responseChunks(prompt).join(""));
+			expect(turn.done["status"]).toBe("idle");
 			await settled(harness, sessionId, prompt === "stream-parity" ? 1 : 2);
 		}
 		const cursor = browser.frames.length;
@@ -156,10 +157,19 @@ describe("Claude session process runner", () => {
 		expect(
 			browser.frames
 				.slice(cursor)
-				.some(({ message }) => message["type"] === "tool_result"),
+				.some(
+					({ message }) =>
+						message["type"] === "transcript_message" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) =>
+								part.type === "tool" && part.state?.status === "completed",
+						) === true,
+				),
 		).toBe(false);
 		await browser.answerApproval(request, decision);
-		expect((await pending).chunks).toEqual(responseChunks("approval-parity"));
+		expect((await pending).chunks.join("")).toBe(
+			responseChunks("approval-parity").join(""),
+		);
 		await browser.waitFor(
 			(message) =>
 				message["type"] === "approval_removed" &&
@@ -167,11 +177,24 @@ describe("Claude session process runner", () => {
 			cursor,
 		);
 		const result = await browser.waitFor(
-			(message) => message["type"] === "tool_result",
+			(message) =>
+				message["type"] === "transcript_message" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "tool" && part.state?.status === "completed",
+				) === true,
 			cursor,
 		);
-		expect(result["content"]).toBe(
-			decision === "allow" ? "harness-approved" : "harness-denied",
+		expect(result["parts"]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "tool",
+					state: expect.objectContaining({
+						status: "completed",
+						output:
+							decision === "allow" ? "harness-approved" : "harness-denied",
+					}),
+				}),
+			]),
 		);
 		await vi.waitFor(() =>
 			expect(
@@ -373,7 +396,9 @@ describe("Claude session process runner", () => {
 		});
 		try {
 			const result = await browser.send(sessionId, "after-runner-exit");
-			expect(result.chunks).toEqual(responseChunks("after-runner-exit"));
+			expect(result.chunks.join("")).toBe(
+				responseChunks("after-runner-exit").join(""),
+			);
 			await settled(harness, sessionId, 2);
 			const runners = harness.marks.filter(
 				(mark) => mark.kind === "runner-started",
@@ -457,8 +482,8 @@ describe("Claude session process runner", () => {
 			action === "interrupt-before-snapshot"
 				? "notification-parent-turn-before-snapshot"
 				: "notification-parent-turn";
-		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		await settled(harness, sessionId, 1);
 		const runner = harness.marks.find(
@@ -654,8 +679,8 @@ describe("Claude session process runner", () => {
 				);
 			});
 		const result = await after.send(sessionId, "after-explicit-approval-stop");
-		expect(result.chunks).toEqual(
-			responseChunks("after-explicit-approval-stop"),
+		expect(result.chunks.join("")).toBe(
+			responseChunks("after-explicit-approval-stop").join(""),
 		);
 	}, 60_000);
 });

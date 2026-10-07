@@ -27,50 +27,9 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-/**
- * Install a WebSocket capture hook before the page navigates.
- */
-async function installWsCapture(
-	page: import("@playwright/test").Page,
-): Promise<void> {
-	await page.addInitScript(() => {
-		const allSockets: WebSocket[] = [];
-		(window as unknown as { __testWs: WebSocket[] }).__testWs = allSockets;
-		const OrigWs = window.WebSocket;
-		const WsProxy = function (
-			this: WebSocket,
-			...args: ConstructorParameters<typeof WebSocket>
-		) {
-			const ws = new OrigWs(...args);
-			allSockets.push(ws);
-			return ws;
-		} as unknown as typeof WebSocket;
-		WsProxy.prototype = OrigWs.prototype;
-		Object.defineProperty(WsProxy, "CONNECTING", { value: OrigWs.CONNECTING });
-		Object.defineProperty(WsProxy, "OPEN", { value: OrigWs.OPEN });
-		Object.defineProperty(WsProxy, "CLOSING", { value: OrigWs.CLOSING });
-		Object.defineProperty(WsProxy, "CLOSED", { value: OrigWs.CLOSED });
-		(window as unknown as { WebSocket: typeof WebSocket }).WebSocket = WsProxy;
-	});
-}
-
-async function getCapturedBrowserClientId(
-	page: import("@playwright/test").Page,
-): Promise<string> {
-	return await page.evaluate(() => {
-		const allSockets = (window as unknown as { __testWs?: WebSocket[] })
-			.__testWs;
-		const ws = allSockets?.find((socket) => socket.url.includes("/ws"));
-		if (!ws) throw new Error("No captured browser WebSocket found");
-		const clientId = new URL(ws.url).searchParams.get("client");
-		if (!clientId) throw new Error("Browser WebSocket has no client id");
-		return clientId;
-	});
-}
-
 async function forkSessionViaRpc(
 	relayUrl: string,
-	originId: string,
+	sessionId: string,
 ): Promise<string> {
 	// The replay harness hosts one project; the daemon /rpc routes by slug.
 	const projectSlug = "e2e-replay";
@@ -87,7 +46,11 @@ async function forkSessionViaRpc(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
-					const result = yield* client.ForkSession({ projectSlug, originId });
+					const result = yield* client.ForkSession({
+						projectSlug,
+						sessionId,
+						originId: crypto.randomUUID(),
+					});
 					return result.sessionId;
 				}),
 			).pipe(
@@ -114,7 +77,6 @@ async function setupForkSession(
 	chat: ChatPage,
 	relayUrl: string,
 ): Promise<void> {
-	await installWsCapture(page);
 	await app.goto(relayUrl);
 
 	await app.sendMessage(
@@ -131,10 +93,11 @@ async function setupForkSession(
 
 	// Keep the original route so the fork response can select a different session.
 	const currentPath = new URL(page.url()).pathname;
-	const originId = await getCapturedBrowserClientId(page);
+	const sessionId = currentPath.split("/").at(-1);
+	if (!sessionId) throw new Error("Missing source session route");
 
 	// Fork: whole-session fork (no messageId)
-	const forkedSessionId = await forkSessionViaRpc(relayUrl, originId);
+	const forkedSessionId = await forkSessionViaRpc(relayUrl, sessionId);
 	await page.evaluate((sessionId) => {
 		const route = new URL(window.location.href);
 		route.pathname = `/s/${encodeURIComponent(sessionId)}`;
@@ -151,7 +114,7 @@ async function setupForkSession(
 		{ timeout: 15_000 },
 	);
 
-	// This triggers SSE events that add at least a user_message to the chat.
+	// This triggers SSE events that add at least a user transcript row to the chat.
 	// Combined with forkMessageId on the session, the fork UI renders.
 	await app.sendMessage(
 		"What words did I ask you to remember? Reply with just the words.",

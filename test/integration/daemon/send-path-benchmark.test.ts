@@ -142,7 +142,7 @@ describe("send-path benchmark CLI aggregation", () => {
 		const { child } = compare(candidate);
 		expect(child.status, child.stderr).toBe(1);
 		expect(child.stdout).toContain(
-			`FAIL ${metric === "enqueue" ? "send-to-provider-enqueue" : "per-event forward"}`,
+			`FAIL ${metric === "enqueue" ? "send-to-provider-enqueue" : "projection-forward"}`,
 		);
 		expect(child.stdout).toContain("p99 delta=3.000ms");
 	});

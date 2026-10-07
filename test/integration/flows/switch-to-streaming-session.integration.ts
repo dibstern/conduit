@@ -23,35 +23,36 @@ describe("Integration: Switch to Streaming Session", () => {
 		const client = await harness.connectWsClient();
 		try {
 			await client.waitForInitialState();
-			const sessionA = client.getActiveSessionId();
-			expect(sessionA).toBeTruthy();
-			if (!sessionA) throw new Error("No initial session");
+			expect(client.getActiveSessionId()).toBeTruthy();
 
 			client.clearReceived();
-			await client.sendMessage(
+			const sessionA = await client.sendMessage(
 				"Reply with just the word 'pong'. Nothing else.",
 			);
-			const firstDelta = await client.waitForAny(["delta", "thinking_delta"]);
-			expect(firstDelta["text"]).toBeTruthy();
-			await client.waitFor("done");
+			const message = await client.waitForAssistantText();
+			expect(message.text).toBeTruthy();
+			await client.waitForTurnEnd();
 			client.clearReceived();
 
 			const created = await client.createSession(
 				"Streaming Bug Test - Session B",
 			);
-			expect(created["id"]).not.toBe(sessionA);
-			expect(
-				client
-					.getReceivedOfType("delta")
-					.filter((message) => message["sessionId"] === sessionA),
-			).toHaveLength(0);
+			const sessionB = created["id"];
+			if (typeof sessionB !== "string") throw new Error("No created session");
+			expect(sessionB).not.toBe(sessionA);
+			expect(client.getActiveSessionId()).toBe(sessionB);
+			const otherPage = await client.loadMoreHistory(sessionB);
+			expect(otherPage.messages).toEqual([]);
 			const viewed = await client.switchSession(sessionA);
 			expect(viewed["id"]).toBe(sessionA);
 
 			const page = await client.loadMoreHistory(sessionA);
 			expect(
 				page.messages.some(
-					(message) => message.role === "assistant" && !!message.text,
+					(returned) =>
+						returned.id === message.id &&
+						returned.role === "assistant" &&
+						!!returned.text,
 				),
 			).toBe(true);
 		} finally {

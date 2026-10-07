@@ -117,7 +117,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		rmSync(missing, { recursive: true });
 		const reply = await browser.send(sessionId, PROMPT);
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toContain(MARKER);
 		expect(
 			browser.frames.filter(
@@ -175,8 +175,8 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"What word did I ask you to remember? Reply with just the word.",
 		);
 		evidence["replies"] = [first, second];
-		expect(first.done["code"]).toBe(0);
-		expect(second.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toContain("banana");
 		expect(permissionUpdates(fixture, sessionId)).toEqual([]);
 		for (const prompt of requestBodies(
@@ -210,8 +210,8 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"What word did I ask you to remember? Reply with just the word.",
 		);
 		evidence["replies"] = [first, second];
-		expect(first.done["code"]).toBe(0);
-		expect(second.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toContain("banana");
 		expect(permissionUpdates(fixture, sessionId)).toEqual([
 			{
@@ -256,7 +256,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			sessionId,
 			"Remember the word 'banana'. Reply with only: ok, remembered.",
 		);
-		expect(first.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
 		expect(permissionUpdates(fixture, sessionId)).toEqual([
 			{
 				permission: [
@@ -279,7 +279,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"What word did I ask you to remember? Reply with just the word.",
 		);
 		evidence["replies"] = [first, second];
-		expect(second.done["code"]).toBe(0);
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toContain("banana");
 		const updates = permissionUpdates(fixture, sessionId);
 		expect(updates).toHaveLength(2);
@@ -311,7 +311,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		rmSync(fixture.projectDir, { recursive: true });
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(1);
+		expect(reply.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		expect(reply.chunks).toEqual([]);
 		expect(
 			requestBodies(fixture, "POST", `/session/${sessionId}/prompt_async`),
@@ -319,7 +319,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		// An identical failure is still its own turn error, not swallowed.
 		const repeat = await browser.send(sessionId, "Reply with pong.");
 		evidence["repeat"] = repeat;
-		expect(repeat.done["code"]).toBe(1);
+		expect(repeat.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		// The failure is a turn error in the transcript, so it survives a reload.
 		const history = await browser.history(sessionId);
 		evidence["history"] = history;

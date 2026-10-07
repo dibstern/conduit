@@ -415,8 +415,8 @@ describe("supervised server build updates", () => {
 		await initialStatus(followStatus(generation.port), false);
 		const sessionId = await browser.createSession("server update restart");
 		const prompt = "before-build-restart";
-		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		const runner = owned.marks.find(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
@@ -434,10 +434,6 @@ describe("supervised server build updates", () => {
 		await browser.close();
 
 		const originId = randomUUID();
-		const projectUrl = `ws://127.0.0.1:${generation.port}/ws?p=process-test&client=${originId}`;
-		const ws = new WebSocket(projectUrl, { headers: { "x-relay-pin": pin } });
-		sockets.add(ws);
-		ws.on("error", () => {});
 		const pinned = followStatus(generation.port, { "x-relay-pin": pin });
 		await initialStatus(pinned, false);
 		const cursor = pinned.frames.length;
@@ -462,17 +458,16 @@ describe("supervised server build updates", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
-					yield* client.AttachProject({
+					const attached = yield* client.AttachProject({
 						projectSlug: "process-test",
 						originId,
 					});
+					expect(attached).toEqual({ projectSlug: "process-test" });
 					return yield* client.RestartWithConfig({});
 				}),
 			).pipe(Effect.provide(protocol), Effect.timeout(10_000)),
 		);
 		expect(restarted).toEqual({ ok: true });
-		ws.terminate();
-		sockets.delete(ws);
 		await owned.waitForExit({ keepBrowsersOpen: true });
 		expect(generation.exitCode).toBe(0);
 		expect(generation.signal).toBeNull();
@@ -508,16 +503,15 @@ describe("supervised server build updates", () => {
 			false,
 		);
 		const afterPrompt = "after-build-restart";
-		expect((await reconnected.send(sessionId, afterPrompt)).chunks).toEqual(
-			responseChunks(afterPrompt),
-		);
+		expect(
+			(await reconnected.send(sessionId, afterPrompt)).chunks.join(""),
+		).toBe(responseChunks(afterPrompt).join(""));
 		expect(owned.runnerPids()).toEqual([runner.pid]);
 		expect(readProof().filter((mark) => mark["kind"] === "query")).toHaveLength(
 			1,
 		);
 		scenarios.push({
 			scenario: "authenticated browser restart and runner re-adoption",
-			projectUrl,
 			rpcUrl,
 			pinRequired: true,
 			generation,

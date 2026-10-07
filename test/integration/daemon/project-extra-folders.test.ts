@@ -132,7 +132,7 @@ describe("Claude project extra folders through the built daemon", () => {
 			`Use the Read tool to read the file at the absolute path ${markerPath}, then reply with its contents.`,
 		);
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toContain(MARKER);
 		await vi.waitFor(async () => {
 			const history = await browser.history(sessionId);
@@ -160,7 +160,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		const sessionId = await before.createSession("Live runner folder change");
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(sessionId, "Reply with pong.");
-		expect(first.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
 		expect(first.chunks.join("")).toBe("pong");
 		const original = runnerOptions(fixture, sessionId).at(-1);
 		if (!original) throw new Error("Missing live runner query options");
@@ -177,7 +177,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		await new Promise((resolve) => setTimeout(resolve, 2_000));
 		const second = await after.send(sessionId, "Reply with pong again.");
 		evidence["replies"] = [first, second];
-		expect(second.done["code"]).toBe(0);
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toBe("pong");
 		const options = runnerOptions(fixture, sessionId);
 		evidence["sessionQueries"] = options;
@@ -206,7 +206,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		const sessionId = await before.createSession("Running turn folder change");
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(sessionId, "Reply with pong.");
-		expect(first.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
 		expect(first.chunks.join("")).toBe("pong");
 		const original = runnerOptions(fixture, sessionId).at(-1);
 		if (!original) throw new Error("Missing live runner query options");
@@ -266,7 +266,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		).toBe("pong");
 		const second = await after.send(sessionId, "Reply with pong again.");
 		evidence["secondReply"] = second;
-		expect(second.done["code"]).toBe(0);
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toBe("pong");
 		evidence["idleRunnerEndedAtSend"] = fixture.marks.some(
 			(mark) =>
@@ -307,7 +307,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		rmSync(extra, { recursive: true });
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toBe("pong");
 		const current = runnerOptions(fixture, sessionId).at(-1)?.options;
 		expect(current?.["cwd"]).toBe(fixture.projectDir);
@@ -324,12 +324,12 @@ describe("Claude project extra folders through the built daemon", () => {
 		rmSync(fixture.projectDir, { recursive: true });
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(1);
+		expect(reply.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		expect(reply.chunks).toEqual([]);
 		// An identical failure is still its own turn error, not swallowed.
 		const repeat = await browser.send(sessionId, "Reply with pong.");
 		evidence["repeat"] = repeat;
-		expect(repeat.done["code"]).toBe(1);
+		expect(repeat.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		// The failure is a turn error in the transcript, so it survives a reload.
 		const history = await browser.history(sessionId);
 		evidence["history"] = history;

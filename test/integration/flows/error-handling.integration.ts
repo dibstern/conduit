@@ -1,7 +1,6 @@
-// Verifies that the relay handles malformed, unknown, and invalid messages
-// gracefully without crashing the server or disconnecting the client.
+// Verifies that malformed RPC input and failed requests leave the server usable.
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
 	createRelayHarness,
@@ -19,89 +18,42 @@ describe("Integration: Error Handling", () => {
 		if (harness) await harness.stop();
 	});
 
-	it.each([
-		"ws",
-		"rpc",
-	])("rejects the removed project %s socket", async (transport) => {
-		const ws = new WebSocket(
-			`ws://127.0.0.1:${harness.relayPort}/p/integration-test/${transport}`,
+	it("rejects the removed project RPC socket", async () => {
+		const socket = new WebSocket(
+			`ws://127.0.0.1:${harness.relayPort}/p/integration-test/rpc`,
 		);
 		try {
 			const error = await new Promise<Error>((resolve, reject) => {
-				ws.once("error", resolve);
-				ws.once("open", () => reject(new Error("Removed socket path opened")));
+				socket.once("error", resolve);
+				socket.once("open", () =>
+					reject(new Error("Removed socket path opened")),
+				);
 			});
 			expect(error).toMatchObject({ code: "ECONNRESET" });
 		} finally {
-			ws.terminate();
-		}
-	});
-
-	it.each([
-		"client.valid_:123-",
-		"invalid client",
-		"x".repeat(129),
-	])("attaches /ws with validated client identity %s and the requested session", async (requestedClientId) => {
-		const attach = vi.spyOn(harness.stack.wsHandler, "attach");
-		const sessionId = harness.stack.initialSessionId;
-		const ws = new WebSocket(
-			`ws://127.0.0.1:${harness.relayPort}/ws?p=integration-test&client=${encodeURIComponent(requestedClientId)}&session=${encodeURIComponent(sessionId)}`,
-		);
-		const messages: Record<string, unknown>[] = [];
-		ws.on("message", (data) => {
-			messages.push(JSON.parse(data.toString()) as Record<string, unknown>);
-		});
-		try {
-			await new Promise<void>((resolve, reject) => {
-				ws.once("open", resolve);
-				ws.once("error", reject);
-			});
-			// Client init has bound a session to the attached client.
-			await vi.waitFor(() => {
-				const clientId = attach.mock.calls[0]?.[1].clientId;
-				expect(
-					clientId && harness.stack.wsHandler.getClientSession(clientId),
-				).toBeTruthy();
-			});
-			expect(messages.map((message) => message["type"])).not.toContain(
-				"project_attached",
-			);
-			expect(attach).toHaveBeenCalledOnce();
-			expect(attach).toHaveBeenCalledWith(expect.any(WebSocket), {
-				clientId:
-					requestedClientId === "client.valid_:123-"
-						? requestedClientId
-						: expect.stringMatching(/^[a-f0-9]{16}$/),
-				requestedSessionId: sessionId,
-			});
-		} finally {
-			attach.mockRestore();
-			await new Promise<void>((resolve) => {
-				ws.once("close", resolve);
-				ws.close();
-			});
+			socket.terminate();
 		}
 	});
 
 	it("sending invalid JSON does not crash the server", async () => {
-		// Use a raw WebSocket to send non-JSON data
-		const rawWs = new WebSocket(
-			`ws://127.0.0.1:${harness.relayPort}/ws?p=integration-test`,
-		);
+		// Exercise malformed input on the RPC transport.
+		const rawWs = new WebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`);
 		await new Promise<void>((resolve, reject) => {
 			rawWs.once("open", resolve);
 			rawWs.once("error", reject);
 		});
 
-		// Send garbage data; the raw socket carries no requests, so it is ignored.
+		// The malformed client may be closed; the server must remain available.
 		rawWs.send("this is not valid json {{{");
 		rawWs.send("<<<>>>");
 
 		// Close the raw socket
-		await new Promise<void>((resolve) => {
-			rawWs.once("close", () => resolve());
-			rawWs.close();
-		});
+		if (rawWs.readyState !== WebSocket.CLOSED) {
+			await new Promise<void>((resolve) => {
+				rawWs.once("close", () => resolve());
+				rawWs.close();
+			});
+		}
 
 		// Verify the server is still alive by connecting a proper client
 		const client = await harness.connectWsClient();
@@ -114,19 +66,22 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("raw socket frames are ignored without a reply", async () => {
+	it("a failed RPC leaves the same client usable", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		// Every request is an RPC; unknown and removed legacy commands sent over
-		// the raw socket earn no error frame (fork 3.2).
-		client.send({ type: "nonexistent_type" });
-		client.send({ type: "message" });
+		await expect(
+			client.rpcCall((rpc) =>
+				rpc.GetToolContent({
+					projectSlug: "integration-test",
+					toolId: "nonexistent-tool",
+				}),
+			),
+		).rejects.toThrow("Full tool content not available");
 
 		const result = await client.getAgents();
 		expect(Array.isArray(result.agents)).toBe(true);
-		expect(client.getReceivedOfType("system_error")).toEqual([]);
 
 		await client.close();
 	});
@@ -157,12 +112,20 @@ describe("Integration: Error Handling", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		// Send a barrage of invalid messages
-		client.send({ type: "nonexistent_type_1" });
-		client.send({ type: "nonexistent_type_2" });
-		client.send({ type: "nonexistent_type_3" });
-		client.send({ type: "get_file_content", path: "/does/not/exist.txt" }); // removed legacy WS command
-		client.send({ type: "message" }); // removed legacy WS command
+		for (const toolId of [
+			"missing-tool-1",
+			"missing-tool-2",
+			"missing-tool-3",
+		]) {
+			await expect(
+				client.rpcCall((rpc) =>
+					rpc.GetToolContent({
+						projectSlug: "integration-test",
+						toolId,
+					}),
+				),
+			).rejects.toThrow("Full tool content not available");
+		}
 
 		// Now send a valid request and verify the server still works
 		client.clearReceived();

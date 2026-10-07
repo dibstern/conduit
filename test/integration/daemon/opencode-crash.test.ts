@@ -154,13 +154,15 @@ describe("Managed OpenCode crash handling", () => {
 			states: ["reconnecting", "connected"],
 		});
 
-		// The turn finishes on the new process and the browser sees it.
+		// The restarted process reports idle through the typed shell feed.
 		await fixture.setOpenCodeStatus(fixture.projectDir, sessionId, {
 			type: "idle",
 		});
 		const finished = await viewer.waitFor(
 			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				message["status"] === "idle",
 			cursor,
 		);
 		evidence["finished"] = finished;

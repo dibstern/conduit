@@ -8,7 +8,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, ManagedRuntime, Ref } from "effect";
 import { expect, vi } from "vitest";
-import WebSocket from "ws";
+import type WebSocket from "ws";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -56,22 +56,9 @@ const makeProjectStore = (
 	);
 };
 
-const waitForOpen = (ws: WebSocket) =>
-	Effect.async<void, Error>((resume) => {
-		ws.once("open", () => resume(Effect.void));
-		ws.once("error", (error) => resume(Effect.fail(error)));
-	});
-
-const waitFor = (assertion: () => void) =>
-	Effect.tryPromise({
-		try: () => vi.waitFor(assertion),
-		catch: (cause) =>
-			cause instanceof Error ? cause : new Error(String(cause)),
-	});
-
 describe("daemon shared RPC routing", () => {
 	it.scoped.each(["ViewSession", "AttachProject"] as const)(
-		"reattaches one daemon event socket when %s moves across projects",
+		"routes %s across projects on one daemon RPC socket",
 		(operation) =>
 			Effect.gen(function* () {
 				const root = yield* Effect.acquireRelease(
@@ -121,20 +108,6 @@ describe("daemon shared RPC routing", () => {
 							runtime,
 						}).pipe(Effect.provide(runtime));
 						handlers.set(slug, wsHandler);
-						wsHandler.on(
-							"client_connected",
-							({ clientId, requestedSessionId }) => {
-								if (requestedSessionId) {
-									wsHandler.setClientSession(clientId, requestedSessionId);
-								}
-								wsHandler.sendTo(clientId, {
-									type: "user_message",
-									sessionId: requestedSessionId ?? `${slug}-default`,
-									messageId: "BOOTSTRAP",
-									text: `${slug} bootstrap`,
-								});
-							},
-						);
 						return {
 							slug,
 							attach: (
@@ -164,6 +137,8 @@ describe("daemon shared RPC routing", () => {
 							server.close(() => resume(Effect.void));
 						}),
 				);
+				const upgrades = vi.fn();
+				server.on("upgrade", upgrades);
 				const routerContext = yield* Layer.build(
 					WebSocketRelayRouterLive.pipe(
 						Layer.provide(
@@ -200,38 +175,6 @@ describe("daemon shared RPC routing", () => {
 				if (!address || typeof address === "string") {
 					return yield* Effect.fail(new Error("No TCP address"));
 				}
-				const eventMessages: Record<string, unknown>[] = [];
-				const eventSocket = yield* Effect.acquireRelease(
-					Effect.sync(
-						() =>
-							new WebSocket(
-								`ws://127.0.0.1:${address.port}/ws?client=daemon-client&session=session-a`,
-							),
-					),
-					(ws) => Effect.sync(() => ws.close()),
-				);
-				eventSocket.on("message", (data) => {
-					eventMessages.push(
-						JSON.parse(data.toString()) as Record<string, unknown>,
-					);
-				});
-				yield* waitForOpen(eventSocket);
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["messageId"] === "BOOTSTRAP" &&
-								JSON.stringify(message).includes("project-a bootstrap"),
-						),
-					).toBe(true);
-				});
-				const bootstrapA = eventMessages.findIndex(
-					(message) =>
-						message["messageId"] === "BOOTSTRAP" &&
-						JSON.stringify(message).includes("project-a bootstrap"),
-				);
-				expect(bootstrapA).toBeGreaterThanOrEqual(0);
-
 				const rpcContext = yield* Layer.build(
 					RpcClient.layerProtocolSocket().pipe(
 						Layer.provide(
@@ -244,6 +187,12 @@ describe("daemon shared RPC routing", () => {
 				const rpcClient = yield* RpcClient.make(WsRpcGroup).pipe(
 					Effect.provide(rpcContext),
 				);
+				expect(
+					yield* rpcClient.AttachProject({
+						projectSlug: "project-a",
+						originId: "daemon-client",
+					}),
+				).toEqual({ projectSlug: "project-a" });
 				expect(
 					yield* operation === "ViewSession"
 						? rpcClient.ViewSession({
@@ -260,71 +209,19 @@ describe("daemon shared RPC routing", () => {
 						? { ok: true }
 						: { projectSlug: "project-b" },
 				);
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["messageId"] === "BOOTSTRAP" &&
-								JSON.stringify(message).includes("project-b bootstrap"),
-						),
-					).toBe(true);
-				});
-				const bootstrapB = eventMessages.findIndex(
-					(message) =>
-						message["messageId"] === "BOOTSTRAP" &&
-						JSON.stringify(message).includes("project-b bootstrap"),
-				);
-				expect(bootstrapB).toBeGreaterThan(bootstrapA);
-				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
-				expect(
-					eventMessages.filter(
-						(message) => message["messageId"] === "BOOTSTRAP",
-					),
-				).toEqual([
-					{
-						type: "user_message",
-						sessionId: "session-a",
-						messageId: "BOOTSTRAP",
-						text: "project-a bootstrap",
-					},
-					{
-						type: "user_message",
-						sessionId:
-							operation === "ViewSession" ? "session-b" : "project-b-default",
-						messageId: "BOOTSTRAP",
-						text: "project-b bootstrap",
-					},
-				]);
+				for (const projectSlug of ["project-a", "project-b"]) {
+					expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
+						projectSlug,
+						commands: [],
+					});
+				}
+				expect(upgrades).toHaveBeenCalledTimes(1);
 
 				const handlerA = handlers.get("project-a");
 				const handlerB = handlers.get("project-b");
 				if (!handlerA || !handlerB) {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
-				handlerA.broadcast({
-					type: "instance_update",
-					instanceId: "from-a",
-				});
-				handlerB.broadcast({
-					type: "instance_update",
-					instanceId: "from-b",
-				});
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["type"] === "instance_update" &&
-								JSON.stringify(message).includes("from-b"),
-						),
-					).toBe(true);
-				});
-				expect(
-					eventMessages.some(
-						(message) =>
-							message["type"] === "instance_update" &&
-							JSON.stringify(message).includes("from-a"),
-					),
-				).toBe(false);
 			}),
 	);
 

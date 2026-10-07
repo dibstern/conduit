@@ -130,7 +130,7 @@ const {Socket}=require(${JSON.stringify(requireFromHere.resolve("@effect/platfor
 const {RpcClient,RpcSerialization}=require(${JSON.stringify(requireFromHere.resolve("@effect/rpc"))});
 __setProbeOverrideForTesting(async()=>({models:[],commands:[],agents:[]}));
 test('actual replay fixture worker',async({harness})=>{
- const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/ws',harness.stack.initialSessionId);
+ const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/rpc?p=e2e-replay',harness.stack.initialSessionId);
  await browser.waitForOpen();
  const originId=browser.getClientId();
  const creation=${JSON.stringify(startupState)}==='losing'?Promise.resolve():Effect.runPromise(Effect.scoped(Effect.gen(function*(){
@@ -322,7 +322,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 			harness = await createReplayHarness("chat-simple", { projectDir });
 			const configDir = dirname(harness.eventsDbPath);
 			browser = new TestWsClient(
-				`ws://127.0.0.1:${harness.relayPort}/ws`,
+				`ws://127.0.0.1:${harness.relayPort}/rpc?p=e2e-replay`,
 				harness.stack.initialSessionId,
 			);
 			await browser.waitForOpen();

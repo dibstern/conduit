@@ -1,7 +1,8 @@
 // Verifies that tool SSE events (pending → running → completed) flow through
-// the relay pipeline and arrive at WebSocket clients in the correct order.
+// the relay pipeline and publish transcript states in the correct order.
 // Also covers the history + SSE overlap scenario.
 
+import Database from "better-sqlite3";
 import {
 	afterAll,
 	beforeAll,
@@ -11,6 +12,7 @@ import {
 	it,
 	vi,
 } from "vitest";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -31,7 +33,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 		harness.mock.resetQueues();
 	});
 
-	it("delivers tool_start, tool_executing, tool_result in order", async () => {
+	it("publishes tool appearance, running, and completion in order", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
@@ -40,7 +42,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 
 		client.clearReceived();
 
-		// Inject SSE pending event — translator sees new part → emits tool_start
+		// Wait for each projected state before injecting its successor.
 		harness.mock.injectSSEEvents([
 			{
 				type: "message.part.updated",
@@ -58,11 +60,15 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolStart = await client.waitFor("tool_start");
-		expect(toolStart["id"]).toBe("toolu_lifecycle1");
-		expect(toolStart["name"]).toBe("Bash");
+		const toolStart = await client.waitForToolState(
+			"part-lifecycle-1",
+			undefined,
+			sessionId,
+		);
+		expect(toolStart.callID).toBe("toolu_lifecycle1");
+		expect(toolStart.tool).toBe("Bash");
 
-		// Inject SSE running event → tool_executing
+		// Inject the running state.
 		harness.mock.injectSSEEvents([
 			{
 				type: "message.part.updated",
@@ -83,10 +89,14 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolExec = await client.waitFor("tool_executing");
-		expect(toolExec["id"]).toBe("toolu_lifecycle1");
+		const toolExec = await client.waitForToolState(
+			"part-lifecycle-1",
+			"running",
+			sessionId,
+		);
+		expect(toolExec.callID).toBe("toolu_lifecycle1");
 
-		// Inject SSE completed event → tool_result
+		// Inject the completed state.
 		harness.mock.injectSSEEvents([
 			{
 				type: "message.part.updated",
@@ -107,21 +117,35 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		const toolResult = await client.waitFor("tool_result");
-		expect(toolResult["id"]).toBe("toolu_lifecycle1");
-		expect(toolResult["content"]).toBe("file1.txt\nfile2.txt");
-		expect(toolResult["is_error"]).toBe(false);
+		const toolResult = await client.waitForToolState(
+			"part-lifecycle-1",
+			"completed",
+			sessionId,
+		);
+		expect(toolResult.callID).toBe("toolu_lifecycle1");
+		expect(toolResult.state?.["output"]).toBe("file1.txt\nfile2.txt");
+		expect(toolResult.state?.["status"]).toBe("completed");
 
-		// Verify ordering: tool_start before tool_executing before tool_result
-		const all = client.getReceived();
-		const startIdx = all.findIndex(
-			(m) => m.type === "tool_start" && m["id"] === "toolu_lifecycle1",
+		const all = client
+			.getReceivedOfType("transcript_message")
+			.filter((message) => message["sessionId"] === sessionId);
+		const startIdx = all.findIndex((message) =>
+			(message["parts"] as HistoryMessage["parts"])?.some(
+				(part) =>
+					part.id === "part-lifecycle-1" && part.state?.status === undefined,
+			),
 		);
-		const execIdx = all.findIndex(
-			(m) => m.type === "tool_executing" && m["id"] === "toolu_lifecycle1",
+		const execIdx = all.findIndex((message) =>
+			(message["parts"] as HistoryMessage["parts"])?.some(
+				(part) =>
+					part.id === "part-lifecycle-1" && part.state?.status === "running",
+			),
 		);
-		const resultIdx = all.findIndex(
-			(m) => m.type === "tool_result" && m["id"] === "toolu_lifecycle1",
+		const resultIdx = all.findIndex((message) =>
+			(message["parts"] as HistoryMessage["parts"])?.some(
+				(part) =>
+					part.id === "part-lifecycle-1" && part.state?.status === "completed",
+			),
 		);
 		expect(startIdx).toBeGreaterThanOrEqual(0);
 		expect(execIdx).toBeGreaterThan(startIdx);
@@ -157,9 +181,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 				},
 			},
 		]);
-		await client.waitFor("tool_start", {
-			predicate: (m) => m["id"] === "toolu_overlap1",
-		});
+		await client.waitForToolState("part-overlap-1", undefined, sessionId);
 
 		harness.mock.injectSSEEvents([
 			{
@@ -180,9 +202,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 				},
 			},
 		]);
-		await client.waitFor("tool_executing", {
-			predicate: (m) => m["id"] === "toolu_overlap1",
-		});
+		await client.waitForToolState("part-overlap-1", "running", sessionId);
 
 		harness.mock.injectSSEEvents([
 			{
@@ -203,16 +223,16 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 				},
 			},
 		]);
-		const result = await client.waitFor("tool_result", {
-			predicate: (m) => m["id"] === "toolu_overlap1",
-		});
-		expect(result["id"]).toBe("toolu_overlap1");
+		const result = await client.waitForToolState(
+			"part-overlap-1",
+			"completed",
+			sessionId,
+		);
+		expect(result.callID).toBe("toolu_overlap1");
 
 		// Now inject STALE SSE events for the same tool (overlap scenario)
-		// The translator's seenParts already has this partID — so a "running"
-		// event for an already-seen partID is not "new", meaning it emits
-		// tool_executing (not tool_start+tool_executing). This exercises the
-		// pipeline's ability to handle stale/replayed events gracefully.
+		// The projection must keep the completed state when stale running arrives.
+		client.clearReceived();
 		harness.mock.injectSSEEvents([
 			{
 				type: "message.part.updated",
@@ -233,29 +253,31 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			},
 		]);
 
-		// The stale running event will produce a tool_executing since the
-		// translator is intentionally stateless about transition validity.
-		// The frontend's ToolRegistry handles the overlap gracefully
-		// (completed→running is silently rejected). We verify the relay
-		// doesn't crash and still delivers events.
-		await vi.waitFor(() => {
-			expect(
-				client
-					.getReceivedOfType("tool_executing")
-					.filter((message) => message["id"] === "toolu_overlap1").length,
-			).toBeGreaterThan(1);
-		});
-
-		// Verify no relay-level errors during the overlap
-		const errors = client
-			.getReceivedOfType("error")
-			.filter(
-				(e) =>
-					!["insufficient_quota", "api_error", "Unknown"].includes(
-						String(e["code"] ?? ""),
-					),
-			);
-		expect(errors).toHaveLength(0);
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			await vi.waitFor(() => {
+				const row = db
+					.prepare(
+						"SELECT count(*) AS count FROM events WHERE session_id = ? AND type = 'tool.running' AND json_extract(data, '$.partId') = ?",
+					)
+					.get(sessionId, "part-overlap-1") as { count: number };
+				expect(row.count).toBeGreaterThan(1);
+			});
+			const errors = db
+				.prepare(
+					"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error' AND COALESCE(json_extract(data, '$.code'), '') NOT IN ('insufficient_quota', 'api_error', 'Unknown')",
+				)
+				.all(sessionId);
+			expect(errors).toHaveLength(0);
+		} finally {
+			db.close();
+		}
+		const afterOverlap = await client.waitForToolState(
+			"part-overlap-1",
+			"completed",
+			sessionId,
+		);
+		expect(afterOverlap.state?.["output"]).toBe("file content");
 
 		await client.close();
 	}, 15_000);

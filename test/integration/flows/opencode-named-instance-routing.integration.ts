@@ -134,22 +134,16 @@ describe("Integration: named OpenCode instance routing", () => {
 		client.clearReceived();
 		const defaultPromptsBeforeNamedTurn = promptCount(harness.mock);
 		const namedPromptsBeforeNamedTurn = promptCount(namedMock);
-		const namedDelta = client.waitFor("delta", {
-			timeout: 15_000,
-			predicate: (message) => message["sessionId"] === namedSessionId,
-		});
-		const namedDone = client.waitFor("done", {
-			timeout: 15_000,
-			predicate: (message) =>
-				message["sessionId"] === namedSessionId && message["code"] === 0,
-		});
+		const namedDelta = client.waitForAssistantText(NAMED_SESSION_ID, 15_000);
+		const namedDone = client.waitForTurnEnd(NAMED_SESSION_ID, 15_000);
 		await client.sendMessage("Reply with just the word 'pong'.", {
 			sessionId: NAMED_SESSION_ID,
 			originId: client.getClientId(),
 		});
 		const [delta, done] = await Promise.all([namedDelta, namedDone]);
-		expect(delta["text"]).toBeTruthy();
-		expect(done["code"]).toBe(0);
+		expect(delta.text).toBeTruthy();
+		expect(done.status).toBe("idle");
+		expect(done.attention).not.toBe("error");
 		expect(promptCount(namedMock)).toBe(namedPromptsBeforeNamedTurn + 1);
 		// Isolation: the named turn never touched the project-default server A.
 		// (Positive default-instance -> A routing is unchanged by 4.4 — the
@@ -162,29 +156,31 @@ describe("Integration: named OpenCode instance routing", () => {
 		await namedMock.stop();
 		client.clearReceived();
 		const defaultPromptsBeforeFailure = promptCount(harness.mock);
-		const failure = client.waitFor("error", {
-			timeout: 8_000,
-			predicate: (message) =>
-				message["sessionId"] === NAMED_SESSION_ID &&
-				message["code"] === "SEND_FAILED",
-		});
-		const failedDone = client.waitFor("done", {
-			timeout: 8_000,
-			predicate: (message) =>
-				message["sessionId"] === NAMED_SESSION_ID && message["code"] === 1,
-		});
+		const failure = client.waitForTranscriptMessage(
+			(message) =>
+				message.parts?.some(
+					(part) => part.type === "error" && part["code"] === "SEND_FAILED",
+				) === true,
+			NAMED_SESSION_ID,
+			8_000,
+		);
+		const failedDone = client.waitForTurnEnd(NAMED_SESSION_ID, 8_000);
 		await client.sendMessage("This must not fall back to server A.", {
 			sessionId: NAMED_SESSION_ID,
 			originId: client.getClientId(),
 		});
-		const [failureMessage] = await Promise.all([failure, failedDone]);
+		const [failureMessage, failedRow] = await Promise.all([
+			failure,
+			failedDone,
+		]);
+		expect(failedRow.attention).toBe("error");
 		// conduit classifies a dead named server as an OpenCodeConnectionError
 		// ("OpenCode unreachable during <label>") regardless of the volatile raw
 		// cause (ECONNREFUSED / fetch failed / undici Request-reuse). Assert that
 		// stable connection-failure classification, not the platform-specific cause.
-		expect(failureMessage["message"]).toMatch(
-			/unreachable|ECONNREFUSED|fetch failed|timed out/i,
-		);
+		expect(
+			failureMessage.parts?.find((part) => part.type === "error")?.text,
+		).toMatch(/unreachable|ECONNREFUSED|fetch failed|timed out/i);
 		expect(promptCount(harness.mock)).toBe(defaultPromptsBeforeFailure);
 	}, 45_000);
 });

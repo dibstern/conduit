@@ -42,7 +42,7 @@ describe("a Claude API retry through the built daemon", () => {
 		const cursor = browser.frames.length;
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toBe("pong");
 
 		const isRow = (message: Record<string, unknown>) =>
