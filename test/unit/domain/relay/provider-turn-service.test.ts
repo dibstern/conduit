@@ -36,6 +36,7 @@ import {
 	hasActiveProcessingTimeout,
 	isModelUserSelected,
 	makeOverridesStateLive,
+	setPermissionMode,
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import type { SessionTitleService } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
@@ -58,6 +59,7 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
@@ -363,6 +365,53 @@ const interruptTurn = () =>
 	});
 
 describe("ProviderTurnService", () => {
+	for (const driver of ["opencode", "claude"] as const) {
+		for (const sideThread of [0, 1]) {
+			it.effect(
+				`prepares a ${driver} plan turn from session side_thread=${sideThread}`,
+				() => {
+					const engine = makeEngine({ providerId: driver });
+					const readQuery: ReadQueryEffect = {
+						...makeReadQuery(vi.fn(() => Effect.succeed([]))),
+						getSession: vi.fn(() =>
+							Effect.succeed(
+								partialFake<SessionRow>({
+									id: "session-1",
+									side_thread: sideThread,
+									goal_state: null,
+								}),
+							),
+						),
+					};
+					const { layer } = serviceLayer({ engine, readQuery });
+
+					return Effect.gen(function* () {
+						yield* setPermissionMode("session-1", "plan");
+						yield* sendTurn({
+							model: { providerID: driver, modelID: "test-model" },
+							agent: "coder",
+						});
+						const command = vi.mocked(engine.dispatchEffect).mock
+							.calls[0]?.[0] as SendTurnCommand;
+						expect(command.input.permissionMode).toBe("plan");
+						expect(command.input.agent).toBe("coder");
+						expect(command.input.sideThread).toBe(
+							sideThread === 1 ? true : undefined,
+						);
+						expect(command.input.goalState).toEqual(
+							driver === "claude"
+								? { sessionId: "session-1", goal: null }
+								: undefined,
+						);
+						expect(readQuery.getSession).toHaveBeenCalledExactlyOnceWith(
+							"session-1",
+						);
+					}).pipe(Effect.provide(layer));
+				},
+			);
+		}
+	}
+
 	it.effect(
 		"passes Claude provider output to the required ingestion service",
 		() =>

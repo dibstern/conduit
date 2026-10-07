@@ -274,7 +274,7 @@ test.describe("OpenCode Side Threads", () => {
 			).toEqual({ title: question, permission: readOnlyRules });
 			expect(
 				JSON.parse(requestBodies[promptIndex]?.body ?? "null"),
-			).toMatchObject({ agent: "plan" });
+			).not.toHaveProperty("agent");
 
 			// The recording includes the real title update emitted by OpenCode.
 			await expect
@@ -366,18 +366,43 @@ test.describe("OpenCode Side Threads", () => {
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(eventsBeforeNested);
 			await app.input.fill("");
 
-			// Plan holds the agent; the picker must not claim another one.
+			// Session rules enforce Plan, so the agent remains selectable.
 			const modelPicker = page.locator(
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 			);
 			const agentRow = page.getByTestId("picker-row-agent");
 			await modelPicker.click();
-			await expect(agentRow).toHaveAttribute("data-locked", "plan");
+			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
+			await expect(agentRow).toContainText("Build");
+			await agentRow.click();
+			await page.getByTestId("picker-agent-plan").click();
 			await expect(agentRow).toContainText("Plan");
+			await expect
+				.poll(() => parentSettings(relayUrl, sideId))
+				.toMatchObject({ permissionMode: "plan", agent: "plan" });
+			await agentRow.click();
+			await page.getByTestId("picker-agent-build").click();
+			await expect(agentRow).toContainText("Build");
 			// Escape in an empty Side Thread composer goes back to the parent.
 			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(approvalPill).toContainText("Plan");
+			await expect
+				.poll(() => parentSettings(relayUrl, sideId))
+				.toMatchObject({ permissionMode: "plan", agent: "build" });
+			await app.sendMessage(raisedPrompt);
+			await expect(chat.assistantMessages.last()).toContainText("ok, raised");
+			await chat.waitForStreamingComplete();
+			const sidePrompts = mockServer.requestBodies
+				.filter(
+					(request) =>
+						request.method === "POST" &&
+						request.path === `/session/${sideId}/prompt_async`,
+				)
+				.map((request) => JSON.parse(request.body ?? "null"));
+			expect(sidePrompts).toHaveLength(2);
+			expect(sidePrompts[1]?.agent).toBe("build");
+			expect(sidePrompts[1]?.agent).not.toBe("plan");
 			await approvalPill.click();
 			const planOption = page.getByTestId("permission-mode-option-plan");
 			await expect(planOption).toBeVisible();
@@ -402,19 +427,6 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
 			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
-			await app.sendMessage(raisedPrompt);
-			await expect(chat.assistantMessages.last()).toContainText("ok, raised");
-			await chat.waitForStreamingComplete();
-			const sidePrompts = mockServer.requestBodies
-				.filter(
-					(request) =>
-						request.method === "POST" &&
-						request.path === `/session/${sideId}/prompt_async`,
-				)
-				.map((request) => JSON.parse(request.body ?? "null"));
-			expect(sidePrompts).toHaveLength(2);
-			expect(sidePrompts[1]?.agent).not.toBe("plan");
-
 			const sideScreenshot = testInfo.outputPath(
 				`${command}-side-thread-after-reload.png`,
 			);
