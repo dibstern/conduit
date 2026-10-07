@@ -55,7 +55,7 @@ until curl --fail --silent --output /dev/null --max-time 2 "$CONDUIT_BASE_URL"; 
   sleep 0.1
 done
 
-for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar transcript-feed-states composer-effort-meter session-goal composer-set-goal composer-field-width composer-live-status composer-picker session-goal-states session-goal-details composer-controls-words composer-context-warning composer-builtin-commands session-skills-chip session-background-tasks composer-final-design opencode-connection-banner side-threads; do
+for feature in composer-send-button composer-approvals-dropdown session-visibility harness-selection agent-harness-filter composer-skill-highlight transcript-skill-highlight provider-instances-settings claude-settings model-drift phone-transcript-scrolling phone-session-bar desktop-session-bar transcript-feed-states composer-effort-meter session-goal composer-set-goal composer-field-width composer-live-status composer-picker session-goal-states session-goal-details composer-controls-words composer-context-warning composer-builtin-commands session-skills-chip session-background-tasks composer-final-design opencode-connection-banner side-threads usage-limit-strip; do
   gherkin-parser \
     "features/$feature.feature" \
     "build/acceptance/ir/$feature.json"

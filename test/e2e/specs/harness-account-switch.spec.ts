@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
+import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -20,6 +21,8 @@ const handoffMarker = "[Conduit context handoff]";
 
 test.use({
 	harnessOptions: {
+		// The fake SDK writes limit transcripts and gates beside the proof file.
+		restartProof: true,
 		capabilityAgents: [
 			{ id: "default", name: "Default" },
 			{ id: "reviewer", name: "Reviewer" },
@@ -136,8 +139,25 @@ for (const dismiss of [false, true]) {
 				await expect(
 					chat.userMessages.last().locator(".whitespace-pre-wrap"),
 				).toHaveText(cutOffText);
-				// UI follow-up hook: add strip and cut-off-tag assertions in this step.
-				await test.step("limited-session UI follow-up hook", async () => {
+				const strip = page.getByTestId("usage-limit-strip");
+				const cutOffTag = page.getByTestId("cut-off-tag");
+				await test.step("limited-session strip and cut-off tag", async () => {
+					const phone = testInfo.project.name === "mobile";
+					const resets = `resets ${formatSnoozeTime(1791370800 * 1000)}`;
+					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
+						phone ? "Usage limit reached" : "Usage limit reached · Account 1",
+					);
+					await expect(strip.getByTestId("usage-limit-detail")).toHaveText(
+						phone ? `Account 1 · ${resets}` : `Weekly limit · ${resets}`,
+					);
+					await expect(cutOffTag).toHaveCount(1);
+					await expect(
+						chat.userMessages.last().getByTestId("cut-off-tag"),
+					).toHaveText(
+						phone
+							? "⏸ Cut off · Dismiss"
+							: "⏸ Cut off by usage limit · Dismiss",
+					);
 					await page.screenshot({ path: join(artifacts, "01-limited.png") });
 				});
 				const before = await snapshot();
@@ -160,13 +180,9 @@ for (const dismiss of [false, true]) {
 					JSON.stringify({ before, after }, null, 2),
 				);
 				if (dismiss) {
-					await Effect.runPromise(
-						browser.rpc.DismissCutOff({
-							projectSlug: slug,
-							sessionId,
-							originId: browser.originId,
-						}),
-					);
+					await page.getByTestId("cut-off-dismiss").click();
+					await expect(cutOffTag).toHaveCount(0);
+					await expect(strip).toBeVisible();
 					const dismissed = await snapshot();
 					if (dismissed?._tag !== "snapshot")
 						throw new Error("No session snapshot after Dismiss");
@@ -222,6 +238,8 @@ for (const dismiss of [false, true]) {
 								?.session.limitRecovery,
 					)
 					.toBeNull();
+				await expect(strip).toHaveCount(0);
+				await expect(cutOffTag).toHaveCount(0);
 				await page.screenshot({ path: join(artifacts, "02-replied.png") });
 				const mark = harness.marks.find(
 					(mark) => mark.kind === "usage-limit" && mark.phase === "limited",

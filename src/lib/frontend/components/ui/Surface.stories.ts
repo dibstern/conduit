@@ -17,7 +17,7 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "select",
-			options: ["card", "quiet", "plain", "bare", "raised", "inset"],
+			options: ["card", "quiet", "plain", "bare", "raised", "inset", "danger"],
 		},
 		padding: {
 			control: "inline-radio",

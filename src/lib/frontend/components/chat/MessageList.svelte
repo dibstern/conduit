@@ -8,6 +8,9 @@
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
@@ -16,6 +19,7 @@
 	import {
 		uiState,
 		selectRewindMessage,
+		showToast,
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
@@ -241,6 +245,15 @@
 	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? sessionState.currentFork?.forkMessageId);
 	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? sessionState.currentFork?.forkPointTimestamp);
 	const isFork = $derived(!!forkMessageId || !!forkPointTimestamp);
+	const cutOffMessageId = $derived(activeSession?.limitRecovery?.cutOffMessageId);
+	// The tag leaves when the server clears the cut-off; nothing is hidden locally.
+	function dismissCutOff(): void {
+		const sessionId = activeSession?.id;
+		const projectSlug = activeSession?.projectSlug ?? getCurrentSlug();
+		if (!sessionId || !projectSlug) return;
+		dismissCutOffRpc({ projectSlug, sessionId, originId: getBrowserClientId() })
+			.catch(() => showToast("Couldn't dismiss the cut-off", { variant: "error" }));
+	}
 	const forkSplit = $derived(
 		isFork
 			? splitAtForkPoint(
@@ -351,7 +364,7 @@
 	{#snippet turnItem(turn: Turn)}
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-				<UserMessage message={turn.user} />
+				<UserMessage message={turn.user} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
 			</div>
 		{/if}
 		{#if goal && turn.id === goalNoticeTurnId}

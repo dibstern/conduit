@@ -20,6 +20,7 @@
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
 	import NewSessionContext from "./NewSessionContext.svelte";
+	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -959,6 +960,10 @@
 					<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
 				{/if}
 			</div>
+		{/if}
+
+		{#if currentSession?.limitRecovery}
+			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} />
 		{/if}
 
 		<div

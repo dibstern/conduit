@@ -96,6 +96,7 @@
     Bot,
     Workflow,
     Radar,
+    Gauge,
   } from '@lucide/svelte';
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
@@ -207,6 +208,7 @@
     'bot': Bot,
     'workflow': Workflow,
     'radar': Radar,
+    'gauge': Gauge,
 
     // Harness brand marks (not lucide).
     'claude': ClaudeMark,
