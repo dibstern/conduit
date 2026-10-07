@@ -52,3 +52,27 @@ Examples:
   | viewport | heading                                        | description                                                              | baseline                      | threshold |
   | desktop  | When a Claude account reaches its usage limit | Continue the cut-off request on the same account when its limit resets. | usage-limit-settings-desktop  | 98        |
   | phone    | Usage limits                                   | Same account, at reset.                                                  | usage-limit-settings-phone    | 98        |
+
+Scenario Outline: auto-switch and its account order match frame H and save the order
+  Given the viewport is a <viewport>
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the daemon's usage limits are auto-resume on, auto-switch off, order team, claude
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 38% used, team unknown
+  When I open settings to the Instances tab
+  Then the Auto-switch account toggle is off and reads <description>
+  And the account order reads team-max, work2claude, personal
+  And the account work2claude shows limited · Mon 9:00 quota
+  And the account personal shows 62% left quota
+  And the account team-max shows quota unknown quota
+  And the usage-limit-settings region visually matches <baseline> at <threshold> percent
+  When I turn on Auto-switch account
+  Then the SetUsageLimitsSetting RPC saves auto-resume on, auto-switch on, order team, claude
+  When I move personal to the top of the account order by <input>
+  Then the account order reads personal, team-max, work2claude
+  And the SetUsageLimitsSetting RPC saves auto-resume on, auto-switch on, order self, team, claude
+  And the account order announces Dropped personal at position 1 of 3.
+
+Examples:
+  | viewport | description                                                                          | input    | baseline                         | threshold |
+  | desktop  | Move the session to the first account below that has quota. Runs before auto-resume. | keyboard | usage-limit-auto-switch-desktop  | 98        |
+  | phone    | First account with quota.                                                            | touch    | usage-limit-auto-switch-phone    | 98        |

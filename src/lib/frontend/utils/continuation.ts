@@ -86,3 +86,9 @@ export function handoffMessagesLine(
 					: `${recent === 1 ? "Last message" : `Last ${recent} messages`}${summary.firstMessageIncluded ? " and your first one" : ""}`;
 	return compact || summary.included === 0 ? line : `${line}, word for word`;
 }
+
+/** The limit window a rate limit type names, lower case: "weekly limit", "5-hour limit" or "usage limit". */
+export function limitWindowName(rateLimitType: string | undefined): string {
+	if (rateLimitType?.startsWith("seven_day")) return "weekly limit";
+	return rateLimitType === "five_hour" ? "5-hour limit" : "usage limit";
+}

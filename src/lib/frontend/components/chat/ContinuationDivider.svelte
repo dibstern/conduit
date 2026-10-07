@@ -5,40 +5,19 @@
   the link drops to its own centred line so the caption doesn't truncate it.
 -->
 <script lang="ts">
-	import type { HandoffSummary, SessionResume } from "../../../contracts/limit-recovery.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import type { SessionResume } from "../../../contracts/limit-recovery.js";
+	import { reviewHandoff } from "../../stores/handoff-review.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { getContinuationHandoffRpc } from "../../transport/ws-rpc-client.js";
-	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
 
 	let { resume, sessionId, projectSlug }: { resume: SessionResume; sessionId: string; projectSlug: string } = $props();
-
-	// undefined until asked for; null when nothing has been handed over yet.
-	let handoff = $state<HandoffSummary | null | undefined>();
-
-	async function showHandoff(): Promise<void> {
-		try {
-			const response = await getContinuationHandoffRpc({
-				projectSlug,
-				sessionId,
-				instanceId: resume.instanceId,
-				at: resume.at,
-				originId: getBrowserClientId(),
-			});
-			handoff = response.handoff;
-		} catch {
-			showToast("Couldn't load what carried over", { variant: "error" });
-		}
-	}
 </script>
 
 {#snippet link()}
-	<TextButton tone="secondary" underline="always" data-testid="transcript-divider-handoff" onclick={() => void showHandoff()}>What carried over?</TextButton>
+	<TextButton tone="secondary" underline="always" data-testid="transcript-divider-handoff" onclick={() => void reviewHandoff(projectSlug, sessionId, resume)}>What carried over?</TextButton>
 {/snippet}
 
 <TranscriptDivider data-testid="transcript-divider" data-switch="true" class="max-w-[760px] mx-auto px-5">
@@ -46,8 +25,4 @@
 </TranscriptDivider>
 {#if sessionViewState.compact}
 	<div class="-mt-[10px] mb-[12px] flex justify-center font-mono text-[10.5px]">{@render link()}</div>
-{/if}
-
-{#if handoff !== undefined}
-	<HandoffDialog open onclose={() => (handoff = undefined)} to={resume.instanceId} summary={handoff} />
 {/if}

@@ -418,3 +418,42 @@ Examples:
   | viewport | baseline                      | threshold |
   | desktop  | usage-limit-switched-desktop  | 98        |
   | phone    | usage-limit-switched-phone    | 98        |
+
+Scenario Outline: auto-switch matches frame G: a divider and a toast say the session moved
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  And the handoff carries 47 of 112 messages with the first
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the session resumes on self from claude by auto-switch and replies All provider tests pass now.
+  Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
+  And the transcript divider shows self with a teal dot
+  And a toast titled Switched to personal says work2claude reached its weekly limit.
+  And the toast offers What carried over? at the left and Settings at the right
+  And the layout region visually matches <baseline> at <threshold> percent
+  When I press What carried over? on the toast
+  Then the handoff dialog is read-only and carries <messages>
+
+Examples:
+  | viewport | divider                                                    | messages                                           | baseline                         | threshold |
+  | desktop  | ↪ Continued on personal · auto-switch · What carried over? | Last 46 messages and your first one, word for word | usage-limit-auto-switched-desktop | 98        |
+  | phone    | ↪ Continued on personal · auto-switch                      | Last 46 messages and your first one                | usage-limit-auto-switched-phone   | 98        |
+
+Scenario Outline: the auto-switch toast's Settings opens the usage limit settings
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the five_hour limit on claude resetting at 2026-01-05T09:00:00Z
+  And the session resumes on self from claude by auto-switch and replies All provider tests pass now.
+  Then a toast titled Switched to personal says work2claude reached its 5-hour limit.
+  When I press Settings on the toast
+  Then settings are open on the Instances tab at the usage limit settings
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |

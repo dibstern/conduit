@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
 import {
 	instanceSlug,
@@ -8,19 +8,57 @@ import {
 	requireRpcControl,
 } from "./shared.js";
 
-const usageLimits = (autoResume: boolean) => ({
-	usageLimits: { autoResume, autoSwitch: false, order: [] },
+const usageLimits = (
+	autoResume: boolean,
+	autoSwitch = false,
+	order: string[] = [],
+) => ({
+	usageLimits: { autoResume, autoSwitch, order },
 });
+
+/** The daemon saves what it is sent and answers with it. */
+function seedUsageLimits(
+	page: Page,
+	setting: ReturnType<typeof usageLimits>,
+): void {
+	const rpc = requireRpcControl(page);
+	rpc.setResponse("GetUsageLimitsSetting", setting);
+	rpc.setHandler("SetUsageLimitsSetting", (params) => params);
+}
+
+const usageLimitToggles = {
+	"Auto-resume limited sessions": "Toggle auto-resume limited sessions",
+	"Auto-switch account": "Toggle auto-switch account when limited",
+} as const;
+
+const usageLimitToggle = (page: Page, label: string) =>
+	page.locator("#usage-limit-settings").getByRole("switch", {
+		name: usageLimitToggles[label as keyof typeof usageLimitToggles],
+	});
+
+const listOf = (list: string) => (list === "none" ? [] : list.split(", "));
 
 export const providerInstancesHandlers: StepHandler[] = [
 	{
 		name: "seed the daemon's usage limit setting",
 		match: /^auto-resume limited sessions is (on|off) on the daemon$/,
 		run: ({ world, match }) => {
-			const on = match[1] === "on";
-			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetUsageLimitsSetting", usageLimits(on));
-			rpc.setResponse("SetUsageLimitsSetting", usageLimits(!on));
+			seedUsageLimits(world.page, usageLimits(match[1] === "on"));
+		},
+	},
+	{
+		name: "seed the daemon's whole usage limit setting",
+		match:
+			/^the daemon's usage limits are auto-resume (on|off), auto-switch (on|off), order (.+)$/,
+		run: ({ world, match }) => {
+			seedUsageLimits(
+				world.page,
+				usageLimits(
+					match[1] === "on",
+					match[2] === "on",
+					listOf(match[3] ?? ""),
+				),
+			);
 		},
 	},
 	{
@@ -33,30 +71,25 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the auto-resume toggle",
+		name: "assert a usage limit toggle",
 		match:
-			/^the Auto-resume limited sessions toggle is (on|off) and reads (.+)$/,
+			/^the (Auto-resume limited sessions|Auto-switch account) toggle is (on|off) and reads (.+)$/,
 		run: async ({ world, match }) => {
-			const toggle = world.page
-				.locator("#usage-limit-settings")
-				.getByRole("switch", { name: "Toggle auto-resume limited sessions" });
+			const toggle = usageLimitToggle(world.page, match[1] ?? "");
 			await expect(toggle).toBeEnabled();
 			await expect(toggle).toHaveAttribute(
 				"aria-checked",
-				String(match[1] === "on"),
+				String(match[2] === "on"),
 			);
-			await expect(toggle).toContainText("Auto-resume limited sessions");
-			await expect(toggle).toContainText(match[2] ?? "");
+			await expect(toggle).toContainText(match[1] ?? "");
+			await expect(toggle).toContainText(match[3] ?? "");
 		},
 	},
 	{
-		name: "turn on auto-resume",
-		match: /^I turn on Auto-resume limited sessions$/,
-		run: async ({ world }) => {
-			await world.page
-				.locator("#usage-limit-settings")
-				.getByRole("switch", { name: "Toggle auto-resume limited sessions" })
-				.click();
+		name: "turn on a usage limit toggle",
+		match: /^I turn on (Auto-resume limited sessions|Auto-switch account)$/,
+		run: async ({ world, match }) => {
+			await usageLimitToggle(world.page, match[1] ?? "").click();
 		},
 	},
 	{
@@ -67,6 +100,115 @@ export const providerInstancesHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "SetUsageLimitsSetting",
 			);
 			expect(request.payload).toMatchObject(usageLimits(true));
+		},
+	},
+	{
+		name: "assert a whole SetUsageLimitsSetting RPC",
+		match:
+			/^the SetUsageLimitsSetting RPC saves auto-resume (on|off), auto-switch (on|off), order (.+)$/,
+		run: async ({ world, match }) => {
+			const expected = JSON.stringify(
+				usageLimits(
+					match[1] === "on",
+					match[2] === "on",
+					listOf(match[3] ?? ""),
+				).usageLimits,
+			);
+			const seen: unknown[] = [];
+			await requireRpcControl(world.page)
+				.waitForRequest((candidate) => {
+					if (candidate.tag !== "SetUsageLimitsSetting") return false;
+					seen.push(candidate.payload);
+					return JSON.stringify(candidate.payload["usageLimits"]) === expected;
+				})
+				.catch(() => {
+					throw new Error(
+						`No SetUsageLimitsSetting saved ${expected}; saw ${JSON.stringify(seen.slice(-3))}`,
+					);
+				});
+		},
+	},
+	{
+		name: "assert the auto-switch account order",
+		match: /^the account order reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.locator("#usage-limit-settings")
+					.getByTestId("usage-limit-account-name"),
+			).toHaveText(listOf(match[1] ?? ""));
+		},
+	},
+	{
+		name: "assert an account row's quota",
+		match: /^the account (.+) shows (.+) quota$/,
+		run: async ({ world, match }) => {
+			const row = world.page
+				.locator("#usage-limit-settings")
+				.getByTestId("sortable-row")
+				.filter({ hasText: match[1] ?? "" });
+			await expect(row.getByTestId("quota-meter-caption")).toHaveText(
+				match[2] ?? "",
+			);
+		},
+	},
+	{
+		name: "move an account to the top of the order",
+		match: /^I move (.+) to the top of the account order by (keyboard|touch)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const section = page.locator("#usage-limit-settings");
+			const handle = section.getByRole("button", {
+				name: `Reorder ${match[1]}`,
+			});
+			const names = await section
+				.getByTestId("usage-limit-account-name")
+				.allTextContents();
+			const index = names.indexOf(match[1] ?? "");
+			if (index < 0) throw new Error(`No account row named ${match[1]}`);
+			if (match[2] === "keyboard") {
+				await handle.focus();
+				await page.keyboard.press("Space");
+				for (let step = 0; step < index; step++)
+					await page.keyboard.press("ArrowUp");
+				await page.keyboard.press("Space");
+				return;
+			}
+			const [from, top] = await Promise.all([
+				handle.boundingBox(),
+				section.getByTestId("sortable-row").first().boundingBox(),
+			]);
+			if (!from || !top) throw new Error("No handle or first row box");
+			const x = from.x + from.width / 2;
+			const startY = from.y + from.height / 2;
+			const endY = top.y + 2;
+			const touch = await page.context().newCDPSession(page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [{ x, y: startY }],
+				});
+				for (let step = 1; step <= 8; step++)
+					await touch.send("Input.dispatchTouchEvent", {
+						type: "touchMove",
+						touchPoints: [{ x, y: startY + ((endY - startY) * step) / 8 }],
+					});
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
+		},
+	},
+	{
+		name: "assert the account order announcement",
+		match: /^the account order announces (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("sortable-announcement")).toHaveText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{

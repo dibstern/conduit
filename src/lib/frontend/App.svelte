@@ -8,6 +8,7 @@
 	import SetupPage from "./pages/SetupPage.svelte";
 	import ConfirmModal from "./components/overlays/ConfirmModal.svelte";
 	import SnoozePickerHost from "./components/session/SnoozePickerHost.svelte";
+	import HandoffReviewHost from "./components/overlays/HandoffReviewHost.svelte";
 
 	const route = $derived(getCurrentRoute());
 	// Pre, so a legacy /p/<slug>/ address is already ?p=<slug> when ChatLayout
@@ -26,3 +27,4 @@
 
 <ConfirmModal />
 <SnoozePickerHost />
+<HandoffReviewHost />

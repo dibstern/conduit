@@ -17,6 +17,7 @@ import {
 	handlePermissionModeInfo,
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
+import { followSessionResumes } from "../stores/handoff-review.svelte.js";
 import {
 	forgetSession,
 	leaveDeletedSession,
@@ -131,6 +132,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
 			followSessionRetry(change.item.id, change.item.retrying);
+		followSessionResumes(change.item, previous);
 	}
 	if (change._tag === "remove") {
 		// `remove` names a deleted session; a snapshot omission does not.
@@ -147,6 +149,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionBusy(row.id, isBusy(row));
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
+			followSessionResumes(row, applied.rows.get(row.id));
 		}
 	}
 	applied = next;

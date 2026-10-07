@@ -864,4 +864,50 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			expect(request.payload["instanceId"]).toBe(match[1]);
 		},
 	},
+	{
+		name: "assert a toast",
+		match: /^a toast titled (.+) says (.+)$/,
+		run: async ({ world, match }) => {
+			const toast = world.page
+				.getByRole("status")
+				.filter({ hasText: match[1] ?? "" });
+			await expect(toast).toBeVisible();
+			await expect(toast).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert the toast's actions",
+		match: /^the toast offers (.+) at the left and (.+) at the right$/,
+		run: async ({ world, match }) => {
+			const actions = world.page.getByTestId("toast-action");
+			await expect(actions).toHaveText([match[1] ?? "", match[2] ?? ""]);
+			await expect(actions.first()).toHaveAttribute("data-kind", "primary");
+			const toast = await world.page
+				.locator(".toast-card")
+				.filter({ has: actions.first() })
+				.boundingBox();
+			const right = await actions.last().boundingBox();
+			if (!toast || !right) throw new Error("No toast or action box");
+			expect(toast.x + toast.width - (right.x + right.width)).toBeLessThan(20);
+		},
+	},
+	{
+		name: "press a toast action",
+		match: /^I press (.+) on the toast$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("toast-action")
+				.filter({ hasText: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "assert settings are open on the Instances tab",
+		match:
+			/^settings are open on the Instances tab at the usage limit settings$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator("#instances-settings")).toBeVisible();
+			await expect(world.page.locator("#usage-limit-settings")).toBeAttached();
+		},
+	},
 ];

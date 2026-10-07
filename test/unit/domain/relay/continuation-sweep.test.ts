@@ -562,7 +562,15 @@ for (const scenario of [
 							.filter((event) => event.type === "session.resumed")
 							.map((event) => event.data),
 					).toEqual(
-						switched ? [{ instanceId: "target", reason: "auto-switch" }] : [],
+						switched
+							? [
+									{
+										instanceId: "target",
+										reason: "auto-switch",
+										from: "claude",
+									},
+								]
+							: [],
 					);
 					if (switched) {
 						expect(events.map((event) => event.type)).toEqual([

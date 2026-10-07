@@ -959,11 +959,14 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			}),
 		);
 		if (!projectSlug) throw new Error("No auto-switch project slug");
-		const usageLimits = {
-			autoResume: false,
-			autoSwitch: true,
-			order: preferred ? [preferred.id, target.id] : [target.id, source.id],
-		};
+		// The ordered scenario turns auto-switch on and saves its order through Settings below.
+		const usageLimits = preferred
+			? {
+					autoResume: false,
+					autoSwitch: false,
+					order: [target.id, preferred.id],
+				}
+			: { autoResume: false, autoSwitch: true, order: [target.id, source.id] };
 		expect(
 			await Effect.runPromise(
 				browser.rpc.SetUsageLimitsSetting({ usageLimits }),
@@ -1009,6 +1012,17 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		);
 		const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
 		const proofMarks = () => readProofMarks(harness.root);
+		const sessionUrl = `${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`;
+		const openUsageLimitSettings = async () => {
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { tab: "instances" } }),
+				),
+			);
+			const section = page.locator("#usage-limit-settings");
+			await expect(section.getByTestId("sortable-row").first()).toBeVisible();
+			return section;
+		};
 		const first = `auto-switch-first-request-${scenario}`;
 		const cutOff =
 			"usage-limit-account-1-no-reset: finish the original request";
@@ -1042,6 +1056,70 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				.poll(() => JSON.stringify(proofMarks()))
 				.toContain(`done(${first})`);
 			await expect.poll(() => latest()?.status).toBe("idle");
+			if (preferred) {
+				await new AppPage(page).goto(sessionUrl);
+				const settings = await openUsageLimitSettings();
+				const autoSwitch = settings.getByRole("switch", {
+					name: "Toggle auto-switch account when limited",
+				});
+				await expect(autoSwitch).toHaveAttribute("aria-checked", "false");
+				await autoSwitch.click();
+				await expect(autoSwitch).toHaveAttribute("aria-checked", "true");
+				const names = settings.getByTestId("usage-limit-account-name");
+				await expect(names.nth(0)).toHaveText("Account 2");
+				await expect(names.nth(1)).toHaveText("Account 3");
+				// Drag Account 3 above Account 2 with the mouse. Hovering waits for each
+				// handle to stop moving: the rows slide into the saved order as it loads.
+				const handleBox = async (name: string) => {
+					const handle = settings.getByRole("button", {
+						name: `Reorder ${name}`,
+					});
+					await handle.hover();
+					const box = await handle.boundingBox();
+					if (!box) throw new Error(`No drag handle for ${name}`);
+					return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+				};
+				const top = await handleBox("Account 2");
+				const dragged = await handleBox("Account 3");
+				await page.mouse.down();
+				await page.mouse.move(dragged.x, top.y - 10, { steps: 12 });
+				await page.mouse.up();
+				await expect(names.nth(0)).toHaveText("Account 3");
+				await expect(names.nth(1)).toHaveText("Account 2");
+				const shown = await names.allTextContents();
+				await expect
+					.poll(() => {
+						const persisted: { usageLimits?: typeof usageLimits } = JSON.parse(
+							readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+						);
+						const saved = persisted.usageLimits;
+						return {
+							autoSwitch: saved?.autoSwitch,
+							first: saved?.order.slice(0, 2),
+							length: saved?.order.length,
+						};
+					})
+					.toEqual({
+						autoSwitch: true,
+						first: [preferred.id, target.id],
+						length: shown.length,
+					});
+				await page.screenshot({
+					path: join(artifacts, "settings-reordered.png"),
+				});
+				await page.reload();
+				const reloaded = await openUsageLimitSettings();
+				await expect(
+					reloaded.getByTestId("usage-limit-account-name"),
+				).toHaveText(shown);
+				await expect(
+					reloaded.getByRole("switch", {
+						name: "Toggle auto-switch account when limited",
+					}),
+				).toHaveAttribute("aria-checked", "true");
+				await page.getByTestId("settings-close-btn").click();
+				await expect(page.locator("#settings-panel")).toBeHidden();
+			}
 			const before = proofMarks().length;
 			await send(cutOff, `cut-off-auto-switch-${scenario}`);
 			await expect.poll(() => latest()?.resumes?.length).toBe(1);
@@ -1050,6 +1128,27 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				reason: "auto-switch",
 				at: expect.any(Number),
 			});
+			if (preferred) {
+				// The toast lives seven seconds, so it is checked before anything slower.
+				const toast = page
+					.locator(".toast-card")
+					.filter({ hasText: "Switched to Account 2" });
+				await expect(toast).toBeVisible();
+				await expect(toast).toContainText(
+					/Account 1 reached its (weekly|5-hour|usage) limit\./,
+				);
+				await toast
+					.getByTestId("toast-action")
+					.filter({ hasText: "What carried over?" })
+					.click();
+				const review = page.getByTestId("handoff-dialog");
+				await expect(review).toHaveAttribute("data-mode", "review");
+				await page.screenshot({
+					path: join(artifacts, "auto-switch-toast-review.png"),
+				});
+				await review.getByTestId("handoff-close").click();
+				await expect(review).toHaveCount(0);
+			}
 			await expect
 				.poll(() =>
 					harness
@@ -1097,6 +1196,12 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				).toBe(false);
 				writeFileSync(join(harness.root, "release-switch-turn"), "release");
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
+				await expect(page.getByTestId("transcript-divider")).toContainText(
+					"Continued on Account 2 · auto-switch",
+				);
+				await page.screenshot({
+					path: join(artifacts, "auto-switch-divider.png"),
+				});
 			} else {
 				await expect
 					.poll(() => latest()?.limitRecovery)
@@ -1106,9 +1211,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						continued: false,
 					});
 				await expect.poll(() => latest()?.status).toBe("idle");
-				await new AppPage(page).goto(
-					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
-				);
+				await new AppPage(page).goto(sessionUrl);
 				const strip = page.getByTestId("usage-limit-strip");
 				await expect(strip).toBeVisible();
 				await expect(strip).toHaveAttribute("data-state", "limited");
