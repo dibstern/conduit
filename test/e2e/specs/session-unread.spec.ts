@@ -558,7 +558,8 @@ const OTHER_SESSION = "ses_e2e_other";
 /** A switches to another session and comes back without picking this one. */
 async function switchAwayAndBack(ctx: Interaction) {
 	const { A } = ctx.windows;
-	await row(A, OTHER_SESSION).click();
+	// The title, not the row centre: that can land on a hover verb (e5b2819b).
+	await row(A, OTHER_SESSION).locator(".session-item-title").click();
 	await expect(A).not.toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));
 	await A.goBack();
 	await expect(A).toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));

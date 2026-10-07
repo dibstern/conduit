@@ -27,6 +27,8 @@ interface QueuedRestResponse {
 	responseBody: unknown;
 	/** Mutation events that must wait for the corresponding HTTP operation. */
 	sseEvents?: SseEvent[];
+	/** How many prompts the recording had sent when this response was taken. */
+	afterPrompts?: number;
 }
 
 /** PTY interaction for replay. */
@@ -153,6 +155,10 @@ export class MockOpenCodeServer {
 
 	/** Number of prompt_async calls processed so far. */
 	private promptsFired = 0;
+	private readonly lastReads = new WeakMap<
+		QueuedRestResponse[],
+		QueuedRestResponse
+	>();
 
 	/**
 	 * Session IDs from the recording's prompt_async URLs, in order.
@@ -521,6 +527,7 @@ export class MockOpenCodeServer {
 
 		for (const [index, ix] of interactions.entries()) {
 			if (ix.kind === "rest") {
+				const afterPrompts = currentSegment;
 				if (ix.method === "POST" && ix.path.includes("/prompt_async")) {
 					currentSegment++;
 					this.sseSegments[currentSegment] = [];
@@ -536,6 +543,7 @@ export class MockOpenCodeServer {
 					status: ix.status,
 					responseBody: ix.responseBody,
 					...(sseEvents ? { sseEvents } : {}),
+					afterPrompts,
 				};
 
 				const ek = exactKey(ix.method, ix.path);
@@ -661,10 +669,11 @@ export class MockOpenCodeServer {
 
 		const basePath = path.split("?")[0] ?? path;
 
+		// The relay answers permissions on the session-scoped route.
 		const answered =
-			/^\/(?:permission|question)\/([^/]+)\/(?:reply|reject)$/.exec(
+			(/^\/(?:permission|question)\/([^/]+)\/(?:reply|reject)$/.exec(
 				basePath,
-			)?.[1];
+			) ?? /^\/session\/[^/]+\/permissions\/([^/]+)$/.exec(basePath))?.[1];
 		if (method === "POST" && answered && this.answers) {
 			this.answer(answered, this.answers).resolve();
 		}
@@ -1069,9 +1078,18 @@ export class MockOpenCodeServer {
 			return;
 		}
 
-		// Dequeue next response, or repeat last if exhausted
-		const shifted = queue.length > 1 ? queue.shift() : undefined;
-		const entry = shifted ?? queue[0];
+		// Dequeue next response, or repeat last if exhausted. A read recorded
+		// after a prompt the test has not sent yet would leak that turn's
+		// outcome, so it waits and the previous read repeats instead.
+		const head = queue[0];
+		const lastRead = this.lastReads.get(queue);
+		const entry =
+			method === "GET" &&
+			lastRead &&
+			(head?.afterPrompts ?? 0) > this.promptsFired
+				? lastRead
+				: ((queue.length > 1 ? queue.shift() : undefined) ?? head);
+		if (method === "GET" && entry) this.lastReads.set(queue, entry);
 		if (!entry) {
 			res.writeHead(404);
 			res.end(JSON.stringify({ error: "empty queue", exact, normalized }));

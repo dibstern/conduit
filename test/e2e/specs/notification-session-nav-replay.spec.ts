@@ -151,12 +151,23 @@ test.describe("Notification → session navigation (replay)", () => {
 		mockServer,
 	}) => {
 		const receivedFrames: string[] = [];
+		const sentFrames: string[] = [];
 		page.on("websocket", (ws) => {
 			ws.on("framereceived", (frame) => {
 				if (typeof frame.payload === "string")
 					receivedFrames.push(frame.payload);
 			});
+			ws.on("framesent", (frame) => {
+				if (typeof frame.payload === "string") sentFrames.push(frame.payload);
+			});
 		});
+		const parse = (frame: string): Record<string, unknown> => {
+			try {
+				return JSON.parse(frame);
+			} catch {
+				return {};
+			}
+		};
 
 		await gotoRelay(page, relayUrl);
 		await expect(
@@ -176,19 +187,30 @@ test.describe("Notification → session navigation (replay)", () => {
 		if (!watchedSession) throw new Error("expected watched session");
 		const watchedId = watchedSession;
 
-		// The relay registers the viewer before it sends session_switched, so
-		// this frame proves the session HAS a viewer before the error arrives.
+		// The tab views the session through ViewSession (197cbb7c retired
+		// session_switched). Its success reply proves the relay registered the
+		// viewer before the error arrives.
 		await expect
-			.poll(() =>
-				receivedFrames.some((f) => {
-					try {
-						const msg = JSON.parse(f);
-						return msg.type === "session_switched" && msg.id === watchedId;
-					} catch {
-						return false;
-					}
-				}),
-			)
+			.poll(() => {
+				const requestIds = sentFrames
+					.map(parse)
+					.filter(
+						(msg) =>
+							msg["tag"] === "ViewSession" &&
+							(msg["payload"] as { sessionId?: unknown } | undefined)
+								?.sessionId === watchedId,
+					)
+					.map((msg) => msg["id"]);
+				return receivedFrames
+					.map(parse)
+					.some(
+						(msg) =>
+							msg["_tag"] === "Exit" &&
+							requestIds.includes(msg["requestId"]) &&
+							(msg["exit"] as { _tag?: unknown } | undefined)?._tag ===
+								"Success",
+					);
+			})
 			.toBe(true);
 
 		// Clear any frames accumulated during init so we only check new ones.

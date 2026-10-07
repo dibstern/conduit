@@ -56,7 +56,11 @@ test.describe("Tool Call", () => {
 		const ledgers = page.locator(".turn-activity");
 		await app.goto(relayUrl);
 
-		await app.sendMessage("Show me a tool call");
+		// The recorded prompt: the optimistic send is adopted by its text
+		// (812de08a), and a stray one would sit between the turn's two steps.
+		await app.sendMessage(
+			'Read the file package.json and tell me the exact value of the "version" field.',
+		);
 		await chat.waitForAssistantMessage();
 		await chat.waitForStreamingComplete();
 
