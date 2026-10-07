@@ -401,6 +401,12 @@ export interface ContinueSessionRpcInput {
 	readonly originId?: string;
 }
 
+export interface CancelContinuationRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
 export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1261,6 +1267,16 @@ export async function continueSessionRpc(
 		),
 	);
 	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function cancelContinuationRpc(
+	input: CancelContinuationRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.CancelContinuation(input).pipe(Effect.asVoid),
+		),
+	);
 }
 
 export async function switchVariantRpc(

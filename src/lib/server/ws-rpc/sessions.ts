@@ -178,15 +178,12 @@ export const sessionsHandlers = {
 		),
 	ContinueSession: (request) =>
 		Effect.gen(function* () {
-			if (request.at !== undefined)
-				return yield* new WsRpcError({
-					message: "Scheduled continuation is not supported yet.",
-				});
 			const continuation = yield* ContinuationTag;
 			yield* continuation.requestContinuation(request.sessionId, {
 				instanceId: request.instanceId,
 				expectedInstanceId: request.expectedInstanceId,
-				reason: "user",
+				reason: request.at === undefined ? "user" : "reset",
+				...(request.at === undefined ? {} : { at: request.at }),
 			});
 			return { ok: true as const };
 		}).pipe(
@@ -196,6 +193,13 @@ export const sessionsHandlers = {
 						? Effect.fail(error)
 						: mapRpcFailure("ContinueSession")(error),
 			),
+		),
+	CancelContinuation: (request) =>
+		Effect.flatMap(ContinuationTag, (continuation) =>
+			continuation.cancelContinuation(request.sessionId),
+		).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("CancelContinuation")),
 		),
 	UnsnoozeSession: (request) =>
 		unsnoozeSessionForClient({
@@ -405,6 +409,7 @@ export const sessionsHandlers = {
 	| "UnsnoozeSession"
 	| "DismissCutOff"
 	| "ContinueSession"
+	| "CancelContinuation"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
 	| "MarkSessionSeen"

@@ -96,4 +96,11 @@ export const ENV = {
 		(process.env["LOG_LEVEL"] as LogLevel | undefined) ?? ("info" as const),
 	/** Log format (default: pretty). */
 	logFormat: process.env["LOG_FORMAT"] as LogFormat | undefined,
+	/** Per-project resume sweep; tests use a one-second interval. */
+	continuationSweepIntervalMs: parseBoundedInteger(
+		process.env["CONDUIT_CONTINUATION_SWEEP_INTERVAL_MS"],
+		30_000,
+		1,
+		2_147_483_647,
+	),
 } as const;

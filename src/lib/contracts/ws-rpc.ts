@@ -1349,7 +1349,21 @@ export class ContinueSession extends Schema.TaggedRequest<ContinueSession>()(
 			sessionId: NonEmptyString,
 			instanceId: NonEmptyString,
 			expectedInstanceId: NonEmptyString,
-			at: Schema.optional(Schema.Number),
+			/** Unix seconds. */
+			at: Schema.optional(Schema.Number.pipe(Schema.finite())),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>()(
+	"CancelContinuation",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -1812,6 +1826,7 @@ export const WsRpcRequest = Schema.Union(
 	UnsnoozeSession,
 	DismissCutOff,
 	ContinueSession,
+	CancelContinuation,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -2187,6 +2202,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(UnsnoozeSession),
 	Rpc.fromTaggedRequest(DismissCutOff),
 	Rpc.fromTaggedRequest(ContinueSession),
+	Rpc.fromTaggedRequest(CancelContinuation),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),

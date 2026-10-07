@@ -106,6 +106,8 @@ type SessionHandledType =
 	| "session.usage_limited"
 	| "session.cut_off_dismissed"
 	| "session.resumed"
+	| "session.resume_scheduled"
+	| "session.resume_cancelled"
 	| "turn.completed"
 	| "turn.error"
 	| "permission.asked"
@@ -414,7 +416,7 @@ export const sessionHandlers: {
 	],
 	"session.resumed": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_set(limit_recovery, '$.continued', json('true')), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
+			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
 			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
 		{
@@ -429,6 +431,25 @@ export const sessionHandlers: {
 				event.createdAt,
 				event.sessionId,
 			],
+		},
+	],
+	"session.resume_scheduled": (event) => [
+		{
+			// Only the sweep re-arms. A user changing the time is still scheduling.
+			sql: "UPDATE sessions SET limit_recovery = json_set(limit_recovery, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
+			params: [
+				event.data.at,
+				event.metadata.source === "continuation-sweep" ? 1 : 0,
+				event.createdAt,
+				event.sessionId,
+				event.data.instanceId,
+			],
+		},
+	],
+	"session.resume_cancelled": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt'), updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
 		},
 	],
 

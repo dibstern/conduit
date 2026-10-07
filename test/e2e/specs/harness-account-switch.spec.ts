@@ -29,6 +29,7 @@ test.use({
 	harnessOptions: {
 		// The fake SDK writes limit transcripts and gates beside the proof file.
 		restartProof: true,
+		continuationSweepIntervalMs: 1000,
 		capabilityAgents: [
 			{ id: "default", name: "Default" },
 			{ id: "reviewer", name: "Reviewer" },
@@ -311,7 +312,6 @@ for (const decision of [
 	"unavailable",
 	"busy",
 	"stale",
-	"scheduled",
 ] as const) {
 	test(`Try again through RPC: ${decision}`, async ({
 		page,
@@ -508,9 +508,6 @@ for (const decision of [
 									instanceId,
 									expectedInstanceId:
 										decision === "stale" ? "stale-account" : instanceId,
-									...(decision === "scheduled"
-										? { at: Date.now() + 60_000 }
-										: {}),
 									originId: browser.originId,
 								})
 								.pipe(Effect.either),
@@ -518,7 +515,7 @@ for (const decision of [
 			evidence["before"] = before;
 			evidence["result"] = result;
 			evidence["elapsedMs"] = Date.now() - started;
-			if (!["busy", "stale", "scheduled"].includes(decision))
+			if (!["busy", "stale"].includes(decision))
 				await expect
 					.poll(() =>
 						harness.marks.find(
@@ -538,7 +535,6 @@ for (const decision of [
 				unavailable: "AccountUnavailable",
 				busy: "SessionBusy",
 				stale: "StaleSwitch",
-				scheduled: "WsRpcError",
 			};
 			if (decision in refusal) {
 				expect(result?._tag).toBe("Left");
@@ -669,6 +665,292 @@ for (const decision of [
 			writeFileSync(join(harness.root, "release-continuation"), "release");
 			writeFileSync(
 				join(artifacts, "continuation-rpc.json"),
+				JSON.stringify(evidence, null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "sdk-calls.json"),
+				JSON.stringify(harness.claudeOptions(), null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "sdk-marks.json"),
+				JSON.stringify(harness.marks, null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "client-session-rows.json"),
+				JSON.stringify(observed, null, 2),
+			);
+			await Effect.runPromise(Fiber.interrupt(subscription));
+		}
+	});
+}
+
+// Failures: scheduling probes quota early; a restart loses the durable schedule;
+// cancel or Dismiss loses to the sweep; a resume changes the native account/thread
+// or adds a user bubble; still-Limited loops forever or uses the stale reset time.
+for (const scenario of [
+	"reset",
+	"restart",
+	"dismiss",
+	"limited",
+	"cancel",
+] as const) {
+	const title = {
+		reset:
+			"scenario 3: resume at reset keeps the config dir and native resume ID",
+		restart:
+			"scenario 4: a reset passing while the daemon is down resumes on startup",
+		dismiss: "scenario 7: Dismiss cancels a scheduled resume",
+		limited: "a due resume re-arms from fresh quota at most three times",
+		cancel:
+			"CancelContinuation restores the plain limited state and is idempotent",
+	};
+	test(title[scenario], async ({ harness }, testInfo) => {
+		test.setTimeout(120_000);
+		const artifacts = resolve(
+			"test-results/account-switch",
+			`${testInfo.project.name}-scheduled-${scenario}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		let browser = await harness.connect();
+		const configDir = mkdtempSync(join(harness.root, "reset-account-"));
+		const { addedInstanceId } = await Effect.runPromise(
+			browser.rpc.AddInstance({
+				name: "Reset account",
+				driver: "claude",
+				configDir,
+			}),
+		);
+		if (!addedInstanceId) throw new Error("No reset account ID");
+		const instanceId = Schema.decodeUnknownSync(
+			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+		)(addedInstanceId);
+		const directory = mkdtempSync(join(harness.root, "reset-project-"));
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+		);
+		if (!projectSlug) throw new Error("No reset project slug");
+		// See the Try again setup: wait for daemon.json without sending RPCs.
+		await expect
+			.poll(
+				() =>
+					existsSync(join(harness.configDir, "daemon.json")) &&
+					JSON.parse(
+						readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+					).instances?.some(
+						(instance: { id: string }) => instance.id === instanceId,
+					),
+			)
+			.toBe(true);
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				originId: browser.originId,
+				instanceId,
+				model: { modelId: "harness", providerId: "claude" },
+			}),
+		);
+		const observed: { sequence: number; session: SessionInfo }[] = [];
+		const subscribe = () =>
+			Effect.runFork(
+				Stream.runForEach(
+					browser.rpc.SubscribeShell({ projectSlug }),
+					(envelope) =>
+						Effect.sync(() => {
+							if (envelope._tag === "snapshot")
+								for (const session of envelope.rows)
+									observed.push({ sequence: envelope.sequence, session });
+							if (envelope._tag === "upsert")
+								observed.push({
+									sequence: envelope.sequence,
+									session: envelope.item,
+								});
+						}),
+				),
+			);
+		let subscription = subscribe();
+		const latest = () =>
+			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
+		const snapshot = () =>
+			Effect.runPromise(
+				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+					Stream.take(1),
+					Stream.runCollect,
+					Effect.map((envelopes) => Array.from(envelopes)[0]),
+				),
+			);
+		const continuations = () =>
+			harness
+				.claudeOptions()
+				.filter((call) => call.prompt === "Continue where you left off.");
+		const probes = () =>
+			harness.marks.filter(
+				(mark) => mark.kind === "usage-probe" && mark.configDir === configDir,
+			);
+		const evidence: Record<string, unknown> = {};
+		try {
+			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+			writeFileSync(join(harness.root, "hold-continuation"), "hold");
+			const at = Math.floor(Date.now() / 1000) + 10;
+			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
+			await Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug,
+					sessionId,
+					text: "usage-limit-account-1: finish the original request after reset",
+					commandId: `cut-off-${scenario}`,
+					originId: browser.originId,
+				}),
+			);
+			await expect
+				.poll(() => latest()?.limitRecovery)
+				.toEqual({
+					instanceId,
+					rateLimitType: "seven_day",
+					resetsAt: at,
+					cutOffMessageId: expect.any(String),
+					rearms: 0,
+					continued: false,
+				});
+			await expect.poll(() => latest()?.status).toBe("idle");
+			await expect
+				.poll(() =>
+					harness.marks.some(
+						(mark) => mark.kind === "usage-limit" && mark.phase === "repeated",
+					),
+				)
+				.toBe(true);
+			const native = harness.marks.find(
+				(mark) => mark.kind === "usage-limit" && mark.phase === "limited",
+			);
+			if (native?.kind !== "usage-limit")
+				throw new Error("No native cut-off session");
+			const limited = latest()?.limitRecovery;
+			const historyBefore = await Effect.runPromise(
+				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+			);
+			// Even a known Limited account must be schedulable without a quota probe.
+			writeFileSync(join(configDir, "conduit-test-quota"), "limited");
+			await Effect.runPromise(
+				browser.rpc.ContinueSession({
+					projectSlug,
+					sessionId,
+					instanceId,
+					expectedInstanceId: instanceId,
+					at,
+					originId: browser.originId,
+				}),
+			);
+			await expect
+				.poll(() => latest()?.limitRecovery)
+				.toEqual({ ...limited, scheduledAt: at });
+			expect(probes()).toHaveLength(0);
+			expect(continuations()).toHaveLength(0);
+			evidence["waiting"] = await snapshot();
+			if (scenario !== "limited")
+				writeFileSync(join(configDir, "conduit-test-quota"), "available");
+			if (scenario === "dismiss" || scenario === "cancel") {
+				const request = { projectSlug, sessionId, originId: browser.originId };
+				await Effect.runPromise(
+					scenario === "dismiss"
+						? browser.rpc.DismissCutOff(request)
+						: browser.rpc.CancelContinuation(request),
+				);
+				const { cutOffMessageId: _cutOff, ...dismissed } = limited ?? {};
+				await expect
+					.poll(() => latest()?.limitRecovery)
+					.toEqual(scenario === "dismiss" ? dismissed : limited);
+				const cancelled = await snapshot();
+				await Effect.runPromise(browser.rpc.CancelContinuation(request));
+				expect(await snapshot()).toEqual(cancelled);
+				await expect
+					.poll(() => Date.now() / 1000, { timeout: 30_000 })
+					.toBeGreaterThan(at + 2);
+				expect(continuations()).toHaveLength(0);
+				expect(probes()).toHaveLength(0);
+			} else if (scenario === "limited") {
+				// The probe's fresh reset is already due, so each later sweep is quick.
+				const freshAt = at - 1;
+				writeFileSync(
+					join(configDir, "conduit-test-resets-at"),
+					String(freshAt),
+				);
+				await expect
+					.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
+					.toEqual({ ...limited, rearms: 3 });
+				const rearmed = observed
+					.filter((row) => row.session.id === sessionId)
+					.flatMap((row) =>
+						row.session.limitRecovery?.scheduledAt === freshAt
+							? [row.session.limitRecovery.rearms]
+							: [],
+					);
+				expect([...new Set(rearmed)]).toEqual([1, 2, 3]);
+				expect(probes()).toHaveLength(4);
+				expect(continuations()).toHaveLength(0);
+			} else {
+				if (scenario === "restart") {
+					await Effect.runPromise(Fiber.interrupt(subscription));
+					await harness.terminate();
+					expect(continuations()).toHaveLength(0);
+					await expect
+						.poll(() => Date.now() / 1000, { timeout: 30_000 })
+						.toBeGreaterThan(at);
+					// A 60-second recurring sweep cannot satisfy the 30-second
+					// assertion below: this must be the pass at relay startup.
+					await harness.restart({ continuationSweepIntervalMs: 60_000 });
+					browser = await harness.connect(sessionId, undefined, projectSlug);
+					subscription = subscribe();
+				}
+				await expect
+					.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
+					.toEqual({ ...limited, continued: true });
+				await expect.poll(continuations).toHaveLength(1);
+				expect(continuations()[0]).toMatchObject({ configDir });
+				// A runner that outlived a restart reports to the old server, so read
+				// every mark from the restart-proof file rather than live IPC.
+				const proofMarks = (): ProcessMark[] =>
+					existsSync(join(harness.root, "sdk-proof.ndjson"))
+						? readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+								.split("\n")
+								.filter(Boolean)
+								.map((line) => JSON.parse(line) as ProcessMark)
+						: [];
+				const continuationEnqueue = () =>
+					proofMarks().find(
+						(mark) =>
+							mark.kind === "enqueue" &&
+							mark.prompt === "Continue where you left off.",
+					);
+				await expect.poll(continuationEnqueue).toBeDefined();
+				const resumed = continuationEnqueue();
+				if (resumed?.kind !== "enqueue")
+					throw new Error("No continuation query enqueue");
+				expect(
+					proofMarks().find(
+						(mark) => mark.kind === "query" && mark.queryId === resumed.queryId,
+					),
+				).toMatchObject({ sessionId: native.sessionId });
+				const resumeId = continuations()[0]?.resumeId;
+				if (resumeId != null) expect(resumeId).toBe(native.sessionId);
+				const history = await Effect.runPromise(
+					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				);
+				expect(
+					history.messages.filter((message) => message.role === "user"),
+				).toEqual(
+					historyBefore.messages.filter((message) => message.role === "user"),
+				);
+				evidence["continued"] = await snapshot();
+				evidence["historyBeforeReply"] = history;
+				writeFileSync(join(harness.root, "release-continuation"), "release");
+				await expect.poll(() => latest()?.limitRecovery).toBeNull();
+				await expect.poll(() => latest()?.status).toBe("idle");
+			}
+			evidence["after"] = await snapshot();
+		} finally {
+			writeFileSync(join(harness.root, "release-continuation"), "release");
+			writeFileSync(
+				join(artifacts, "scheduled-continuation-rpc.json"),
 				JSON.stringify(evidence, null, 2),
 			);
 			writeFileSync(

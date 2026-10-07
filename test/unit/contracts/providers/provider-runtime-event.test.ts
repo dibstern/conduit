@@ -108,6 +108,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.handoff_delivered",
 			"session.cut_off_dismissed",
 			"session.resumed",
+			"session.resume_scheduled",
+			"session.resume_cancelled",
 			"session.usage_limited", // Continuation owns canonical intake of the adapter's same-named signal.
 			"session.forked",
 			"session.permission_mode_changed",

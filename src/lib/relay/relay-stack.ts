@@ -19,10 +19,20 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import {
+	Cause,
+	Data,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Schedule,
+} from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
 import { type GlobalProjectSetting, WsRpcError } from "../contracts/ws-rpc.js";
+import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	refreshGlobalDefaults,
 	syncGlobalSetting,
@@ -579,6 +589,18 @@ export async function createProjectRelay(
 	announceBackgroundWork = startup.announceBackgroundWork;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
+	const continuationSweep = layers.relayManagedRuntime.runFork(
+		Effect.flatMap(ContinuationTag, (continuation) =>
+			continuation.sweepDueContinuations().pipe(
+				Effect.catchAllCause((cause) =>
+					Cause.isInterruptedOnly(cause)
+						? Effect.interrupt
+						: Effect.logError("Continuation sweep failed", cause),
+				),
+				Effect.repeat(Schedule.fixed(ENV.continuationSweepIntervalMs)),
+			),
+		),
+	);
 	const {
 		rpcWsHandler,
 		sessionId,
@@ -653,6 +675,14 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
+			await new Promise<void>((resolve, reject) => {
+				layers.relayManagedRuntime
+					.runFork(Fiber.interrupt(continuationSweep))
+					.addObserver((exit) => {
+						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						else resolve();
+					});
+			});
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			startup.stopMonitoring();

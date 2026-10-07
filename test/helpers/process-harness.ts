@@ -207,6 +207,7 @@ export class ProcessHarness {
 		private readonly claudeCaptureDir?: string,
 		realOpenCode?: string,
 		capabilityAgents?: readonly ProviderAgentInfo[],
+		private continuationSweepIntervalMs?: number,
 	) {
 		this.root = mkdtempSync(rootPrefix);
 		this.projectDir = join(this.root, "process-test");
@@ -436,6 +437,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			capabilityModels?: readonly ModelInfo[];
 			capabilityAgents?: readonly ProviderAgentInfo[];
 			restartProof?: boolean;
+			continuationSweepIntervalMs?: number;
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
@@ -483,6 +485,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.claudeCaptureDir,
 			options.realOpenCode,
 			options.capabilityAgents,
+			options.continuationSweepIntervalMs,
 		);
 	}
 
@@ -505,6 +508,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			cliArgs?: string[];
 			buildId?: string;
 			queryInitializationDelayMs?: number;
+			continuationSweepIntervalMs?: number;
 			serviceEnvironment?: Partial<
 				Pick<
 					NodeJS.ProcessEnv,
@@ -524,6 +528,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
+		this.continuationSweepIntervalMs =
+			options.continuationSweepIntervalMs ?? this.continuationSweepIntervalMs;
 		this.logs = "";
 		if (options.opencodeUrl) this.defaultOpenCodeUrl = options.opencodeUrl;
 		this.opencodeIdleTimeoutMs =
@@ -772,6 +778,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 					...(this.restartProof
 						? {
 								CONDUIT_TEST_PROCESS_PROOF: join(this.root, "sdk-proof.ndjson"),
+							}
+						: {}),
+					...(this.continuationSweepIntervalMs !== undefined
+						? {
+								CONDUIT_CONTINUATION_SWEEP_INTERVAL_MS: String(
+									this.continuationSweepIntervalMs,
+								),
 							}
 						: {}),
 					...(this.holdRunnerAck

@@ -55,6 +55,8 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.usage_limited", // Runtime interception emits the signal; continuation owns canonical intake.
 	"session.cut_off_dismissed", // Continuation owns Dismiss; the adapter does not produce it.
 	"session.resumed", // Continuation owns resume decisions; the adapter only runs the turn.
+	"session.resume_scheduled",
+	"session.resume_cancelled",
 	"session.model_changed", // Relay-owned model settings, appended by the relay's session settings module
 	"session.variant_changed", // Same
 	"session.context_window_changed", // Same

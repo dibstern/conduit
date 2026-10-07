@@ -73,6 +73,8 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.usage_limited": ["instanceId", "rateLimitType", "cutOffMessageId"],
 	"session.cut_off_dismissed": ["cutOffMessageId"],
 	"session.resumed": ["reason", "instanceId"],
+	"session.resume_scheduled": ["instanceId", "at"],
+	"session.resume_cancelled": [],
 	"message.created": ["messageId", "role", "sessionId"],
 	"message.removed": ["messageId"],
 	"message.part.removed": ["messageId", "partId"],

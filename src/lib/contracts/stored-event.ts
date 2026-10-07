@@ -78,6 +78,8 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.usage_limited",
 	"session.cut_off_dismissed",
 	"session.resumed",
+	"session.resume_scheduled",
+	"session.resume_cancelled",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -435,6 +437,14 @@ export interface SessionResumedPayload {
 	readonly instanceId: string;
 }
 
+export interface SessionResumeScheduledPayload {
+	readonly instanceId: string;
+	/** Unix seconds, matching the SDK's reset time. */
+	readonly at: number;
+}
+
+export type SessionResumeCancelledPayload = Record<string, never>;
+
 /**
  * Everything the approval card shows rides the asked event: the approvals
  * subscription serves the card from the pending_approvals row, which keeps
@@ -525,6 +535,8 @@ export interface EventPayloadMap {
 	"session.usage_limited": SessionUsageLimitedPayload;
 	"session.cut_off_dismissed": SessionCutOffDismissedPayload;
 	"session.resumed": SessionResumedPayload;
+	"session.resume_scheduled": SessionResumeScheduledPayload;
+	"session.resume_cancelled": SessionResumeCancelledPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -983,6 +995,13 @@ const SessionResumedPayloadSchema = Schema.Struct({
 	instanceId: Schema.String,
 });
 
+const SessionResumeScheduledPayloadSchema = Schema.Struct({
+	instanceId: Schema.String,
+	at: Schema.Number.pipe(Schema.finite()),
+});
+
+const SessionResumeCancelledPayloadSchema = Schema.Struct({});
+
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
@@ -1217,6 +1236,14 @@ const SessionResumedEventSchema = eventEnvelope(
 	"session.resumed",
 	SessionResumedPayloadSchema,
 );
+const SessionResumeScheduledEventSchema = eventEnvelope(
+	"session.resume_scheduled",
+	SessionResumeScheduledPayloadSchema,
+);
+const SessionResumeCancelledEventSchema = eventEnvelope(
+	"session.resume_cancelled",
+	SessionResumeCancelledPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -1280,6 +1307,8 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionUsageLimitedEventSchema,
 	SessionCutOffDismissedEventSchema,
 	SessionResumedEventSchema,
+	SessionResumeScheduledEventSchema,
+	SessionResumeCancelledEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,

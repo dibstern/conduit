@@ -2,6 +2,7 @@ export {
 	type Alert,
 	type AlertsEnvelope,
 	AnswerQuestion,
+	CancelContinuation,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,

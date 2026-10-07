@@ -448,6 +448,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),
 				DismissCutOff: () => Effect.succeed({ ok: true as const }),
 				ContinueSession: () => Effect.succeed({ ok: true as const }),
+				CancelContinuation: () => Effect.succeed({ ok: true as const }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

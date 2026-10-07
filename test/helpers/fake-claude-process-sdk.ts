@@ -39,6 +39,15 @@ import {
 
 type QuotaBehavior = "available" | "limited" | "fail" | "hang" | "unavailable";
 
+// Unix seconds supplied by the harness; the same marker drives intake and quota.
+function injectedResetAt(configDir: string | undefined): number | undefined {
+	if (!configDir) return;
+	const marker = join(configDir, "conduit-test-resets-at");
+	if (!existsSync(marker)) return;
+	const value = Number(readFileSync(marker, "utf8").trim());
+	return Number.isFinite(value) ? value : undefined;
+}
+
 export type ProcessMark =
 	| {
 			kind: "usage-probe";
@@ -676,6 +685,19 @@ function query(params: {
 			}
 			if (request.startsWith("usage-limit-account-1")) {
 				const noReset = request.startsWith("usage-limit-account-1-no-reset");
+				const resetsAt = noReset
+					? undefined
+					: injectedResetAt(
+							params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+								process.env["CLAUDE_CONFIG_DIR"],
+						);
+				const withReset = (event: SDKMessage): SDKMessage =>
+					event.type === "rate_limit_event" && resetsAt !== undefined
+						? {
+								...event,
+								rate_limit_info: { ...event.rate_limit_info, resetsAt },
+							}
+						: event;
 				const fixture = noReset
 					? provisionalUsageLimitTurnWithoutReset(sessionId, input)
 					: provisionalUsageLimitTurn(sessionId, input);
@@ -684,7 +706,7 @@ function query(params: {
 						join(dirname(proof), `provisional-limit-native-${sessionId}.json`),
 						JSON.stringify(fixture.nativeTranscript, null, 2),
 					);
-				yield* fixture.events;
+				for (const event of fixture.events) yield withReset(event);
 				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
 				if (proof) {
 					const release = join(dirname(proof), "release-limit-repeats");
@@ -693,9 +715,11 @@ function query(params: {
 					if (closed) return;
 				}
 				for (let repeat = 0; repeat < 4; repeat++)
-					yield noReset
-						? provisionalRejectedLimitWithoutReset(sessionId)
-						: provisionalRejectedLimit(sessionId);
+					yield withReset(
+						noReset
+							? provisionalRejectedLimitWithoutReset(sessionId)
+							: provisionalRejectedLimit(sessionId),
+					);
 				mark({ kind: "usage-limit", phase: "repeated", sessionId, prompt });
 				continue;
 			}
@@ -1216,6 +1240,7 @@ function query(params: {
 				const configDir =
 					params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 					process.env["CLAUDE_CONFIG_DIR"];
+				const resetsAt = injectedResetAt(configDir);
 				const marker = configDir
 					? join(configDir, "conduit-test-quota")
 					: undefined;
@@ -1255,7 +1280,10 @@ function query(params: {
 						five_hour: { utilization: 12, resets_at: null },
 						seven_day: {
 							utilization: behavior === "limited" ? 100 : 37,
-							resets_at: null,
+							resets_at:
+								resetsAt === undefined
+									? null
+									: new Date(resetsAt * 1000).toISOString(),
 						},
 					},
 					behaviors: null,

@@ -43,6 +43,7 @@ import { terminalsHandlers } from "./ws-rpc/terminals.js";
 export {
 	AnswerQuestion,
 	AttachProject,
+	CancelContinuation,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,

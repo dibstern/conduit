@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Schema } from "effect";
 import {
 	AccountUnavailable,
 	type ContinuationError,
 	type ContinuationReason,
 	DriverMismatch,
+	type LimitRecovery,
 	LimitRecoverySchema,
 	SessionBusy,
 	StaleSwitch,
@@ -56,6 +57,8 @@ export interface Continuation {
 			readonly instanceId: string;
 			readonly expectedInstanceId: string;
 			readonly reason: ContinuationReason;
+			/** Unix seconds. A scheduled continuation stays on the same account. */
+			readonly at?: number;
 		},
 	) => Effect.Effect<
 		void,
@@ -77,6 +80,12 @@ export interface Continuation {
 	readonly dismissCutOff: (
 		sessionId: string,
 	) => Effect.Effect<void, CommitAndSignalFailure>;
+	readonly cancelContinuation: (
+		sessionId: string,
+	) => Effect.Effect<void, CommitAndSignalFailure>;
+	readonly sweepDueContinuations: (
+		now?: number,
+	) => ReturnType<Continuation["requestContinuation"]>;
 	/** Ingress calls this after its outer commit, for an accepted limit only. */
 	readonly runLimitPolicy: (sessionId: string) => Effect.Effect<void>;
 }
@@ -91,10 +100,52 @@ export const makeContinuation = Effect.gen(function* () {
 	const store = yield* EventStoreEffectTag;
 	const commit = yield* makeCommitAndSignal;
 	const requesting = new Set<string>();
-	const requestContinuation: Continuation["requestContinuation"] = (
-		sessionId,
-		options,
+	const decodeRecovery = Schema.decodeUnknownSync(
+		Schema.parseJson(LimitRecoverySchema),
+	);
+	const sameSchedule = (
+		recovery: LimitRecovery | null,
+		expected: LimitRecovery,
 	) =>
+		recovery?.scheduledAt === expected.scheduledAt &&
+		recovery?.instanceId === expected.instanceId &&
+		recovery?.cutOffMessageId === expected.cutOffMessageId;
+	const cancelledEvent = (sessionId: string) =>
+		canonicalEvent(
+			"session.resume_cancelled",
+			sessionId,
+			{},
+			{ provider: "claude" },
+		);
+	const cancelContinuation = (sessionId: string, expected?: LimitRecovery) =>
+		commit.write((project) =>
+			Effect.gen(function* () {
+				const rows = yield* sql<{
+					limit_recovery: string | null;
+				}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+				const value = rows[0]?.limit_recovery;
+				const recovery = value == null ? null : decodeRecovery(value);
+				if (
+					recovery?.scheduledAt === undefined ||
+					(expected && !sameSchedule(recovery, expected))
+				)
+					return;
+				yield* project(yield* store.appendBatch([cancelledEvent(sessionId)]));
+			}),
+		);
+	const stillCutOff = (sessionId: string, recovery: LimitRecovery) =>
+		Effect.gen(function* () {
+			if (!recovery.cutOffMessageId || recovery.continued) return false;
+			const latest = yield* sql<{
+				message_id: string;
+			}>`SELECT json_extract(data, '$.messageId') AS message_id FROM events WHERE session_id = ${sessionId} AND type = 'message.created' AND json_extract(data, '$.role') = 'user' ORDER BY sequence DESC LIMIT 1`;
+			return latest[0]?.message_id === recovery.cutOffMessageId;
+		});
+	const requestContinuation = (
+		sessionId: string,
+		options: Parameters<Continuation["requestContinuation"]>[1],
+		due?: { readonly recovery: LimitRecovery; readonly now: number },
+	): ReturnType<Continuation["requestContinuation"]> =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const read = yield* ReadQueryEffectTag;
@@ -135,7 +186,16 @@ export const makeContinuation = Effect.gen(function* () {
 						return yield* new SessionBusy({ sessionId });
 					return session;
 				});
-			yield* checkSession();
+			const initial = yield* checkSession();
+			if (due) {
+				const recovery =
+					initial.limit_recovery === null
+						? null
+						: decodeRecovery(initial.limit_recovery);
+				if (!sameSchedule(recovery, due.recovery)) return;
+				if (!recovery || !(yield* stillCutOff(sessionId, recovery)))
+					return yield* cancelContinuation(sessionId, due.recovery);
+			}
 			yield* Effect.acquireUseRelease(
 				Effect.gen(function* () {
 					if (requesting.has(sessionId))
@@ -143,70 +203,165 @@ export const makeContinuation = Effect.gen(function* () {
 					requesting.add(sessionId);
 				}),
 				() =>
-					Effect.gen(function* () {
-						const quota = yield* QuotaCheckTag;
-						const decision = yield* quota.check(options.instanceId);
-						const cutOffMessageId = yield* commit.write((project) =>
-							Effect.gen(function* () {
-								// A probe can take five seconds; selection and turn state must
-								// still agree when the continuation is committed.
-								const session = yield* checkSession(true);
-								if (
-									decision._tag === "Limited" ||
-									decision._tag === "Unavailable"
-								)
-									return yield* new AccountUnavailable({
-										instanceId: options.instanceId,
-										reason:
-											decision._tag === "Unavailable"
-												? decision.reason
-												: `Account is still limited (${decision.rateLimitType}).`,
-									});
-								const recovery =
-									session.limit_recovery === null
-										? null
-										: Schema.decodeUnknownSync(
-												Schema.parseJson(LimitRecoverySchema),
-											)(session.limit_recovery);
-								// Dismiss or a reply may have closed it while the probe ran.
-								if (!recovery?.cutOffMessageId) return;
-								yield* project(
-									yield* store.appendBatch([
-										canonicalEvent(
-											"session.resumed",
-											sessionId,
-											{
-												reason: options.reason,
-												instanceId: options.instanceId,
-											},
-											{ provider: "claude" },
-										),
-									]),
-								);
-								return recovery.cutOffMessageId;
-							}),
-						);
-						if (!cutOffMessageId) return;
-						const turns = yield* ProviderTurnServiceTag;
-						const model = yield* getModel(sessionId);
-						const agent = yield* getAgent(sessionId);
-						const variant = yield* getVariant(sessionId);
-						const contextWindow = yield* getContextWindow(sessionId);
-						yield* turns.sendTurn({
-							clientId: "continuation",
-							commandId: randomUUID(),
-							sessionId,
-							text: "",
-							continuation: { cutOffMessageId },
-							modelUserSelected: yield* isModelUserSelected(sessionId),
-							...(model ? { model } : {}),
-							...(agent ? { agent } : {}),
-							...(variant ? { variant } : {}),
-							...(contextWindow ? { contextWindow } : {}),
-						});
-					}),
+					Effect.uninterruptibleMask((restore) =>
+						Effect.gen(function* () {
+							// Future quota cannot be checked now. Due and immediate resumes
+							// share the fresh probe and the recheck inside the commit.
+							// Shutdown may interrupt the probe, but an accepted resume must
+							// reach the existing turn dispatcher before this fiber stops.
+							const decision =
+								options.at === undefined
+									? yield* restore(
+											Effect.flatMap(QuotaCheckTag, (quota) =>
+												quota.check(options.instanceId),
+											),
+										)
+									: undefined;
+							const cutOffMessageId = yield* commit.write((project) =>
+								Effect.gen(function* () {
+									// A probe can take five seconds; selection and turn state must
+									// still agree when the continuation is committed.
+									const session = yield* checkSession(true);
+									if (
+										!due &&
+										decision &&
+										(decision._tag === "Limited" ||
+											decision._tag === "Unavailable")
+									)
+										return yield* new AccountUnavailable({
+											instanceId: options.instanceId,
+											reason:
+												decision._tag === "Unavailable"
+													? decision.reason
+													: `Account is still limited (${decision.rateLimitType}).`,
+										});
+									const recovery =
+										session.limit_recovery === null
+											? null
+											: decodeRecovery(session.limit_recovery);
+									if (due) {
+										// Cancel or a replacement schedule wins while quota is pending.
+										if (!sameSchedule(recovery, due.recovery)) return;
+										if (
+											!recovery ||
+											!(yield* stillCutOff(sessionId, recovery))
+										) {
+											yield* project(
+												yield* store.appendBatch([cancelledEvent(sessionId)]),
+											);
+											return;
+										}
+									}
+									// Dismiss or a reply may have closed it while the probe ran.
+									if (!recovery?.cutOffMessageId) return;
+									if (options.at !== undefined) {
+										if (recovery.instanceId !== options.instanceId) return;
+										yield* project(
+											yield* store.appendBatch([
+												canonicalEvent(
+													"session.resume_scheduled",
+													sessionId,
+													{
+														instanceId: options.instanceId,
+														at: options.at,
+													},
+													{ provider: "claude" },
+												),
+											]),
+										);
+										return;
+									}
+									if (
+										due &&
+										(decision?._tag === "Limited" ||
+											decision?._tag === "Unavailable")
+									) {
+										const event =
+											decision._tag === "Limited" && recovery.rearms < 3
+												? canonicalEvent(
+														"session.resume_scheduled",
+														sessionId,
+														{
+															instanceId: options.instanceId,
+															at: decision.resetsAt ?? due.now + 300,
+														},
+														{
+															provider: "claude",
+															metadata: { source: "continuation-sweep" },
+														},
+													)
+												: cancelledEvent(sessionId);
+										yield* project(yield* store.appendBatch([event]));
+										return;
+									}
+									yield* project(
+										yield* store.appendBatch([
+											canonicalEvent(
+												"session.resumed",
+												sessionId,
+												{
+													reason: options.reason,
+													instanceId: options.instanceId,
+												},
+												{ provider: "claude" },
+											),
+										]),
+									);
+									return recovery.cutOffMessageId;
+								}),
+							);
+							if (!cutOffMessageId) return;
+							const turns = yield* ProviderTurnServiceTag;
+							const model = yield* getModel(sessionId);
+							const agent = yield* getAgent(sessionId);
+							const variant = yield* getVariant(sessionId);
+							const contextWindow = yield* getContextWindow(sessionId);
+							yield* turns.sendTurn({
+								clientId: "continuation",
+								commandId: randomUUID(),
+								sessionId,
+								text: "",
+								continuation: { cutOffMessageId },
+								modelUserSelected: yield* isModelUserSelected(sessionId),
+								...(model ? { model } : {}),
+								...(agent ? { agent } : {}),
+								...(variant ? { variant } : {}),
+								...(contextWindow ? { contextWindow } : {}),
+							});
+						}),
+					),
 				() => Effect.sync(() => requesting.delete(sessionId)),
 			);
+		});
+	const sweepDueContinuations: Continuation["sweepDueContinuations"] = (now) =>
+		Effect.gen(function* () {
+			const currentTime = now ?? (yield* Clock.currentTimeMillis) / 1000;
+			const rows = yield* sql<{
+				id: string;
+				limit_recovery: string;
+			}>`SELECT id, limit_recovery FROM sessions WHERE json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
+			for (const row of rows) {
+				const recovery = decodeRecovery(row.limit_recovery);
+				const cancel = () => cancelContinuation(row.id, recovery);
+				yield* requestContinuation(
+					row.id,
+					{
+						instanceId: recovery.instanceId,
+						expectedInstanceId: recovery.instanceId,
+						reason: "reset",
+					},
+					{ recovery, now: currentTime },
+				).pipe(
+					Effect.catchTags({
+						DriverMismatch: cancel,
+						StaleSwitch: cancel,
+						SessionBusy: cancel,
+					}),
+					Effect.catchAll((error) =>
+						Effect.logError("Scheduled continuation failed", row.id, error),
+					),
+				);
+			}
 		});
 	// Tickets eon2.12 and eon2.13 supply these policy decisions, in this order.
 	const tryAutoSwitch = (_sessionId: string) => Effect.succeed(false);
@@ -268,24 +423,31 @@ export const makeContinuation = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const rows = yield* sql<{
 					cut_off: string | null;
-				}>`SELECT json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off FROM sessions WHERE id = ${sessionId}`;
+					scheduled_at: number | null;
+				}>`SELECT json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off, json_extract(limit_recovery, '$.scheduledAt') AS scheduled_at FROM sessions WHERE id = ${sessionId}`;
 				const cutOffMessageId = rows[0]?.cut_off;
-				if (cutOffMessageId == null) return;
-				yield* project(
-					yield* store.appendBatch([
-						canonicalEvent(
-							"session.cut_off_dismissed",
-							sessionId,
-							{ cutOffMessageId },
-							{ provider: "claude" },
-						),
-					]),
-				);
+				const events = [
+					...(cutOffMessageId == null
+						? []
+						: [
+								canonicalEvent(
+									"session.cut_off_dismissed",
+									sessionId,
+									{ cutOffMessageId },
+									{ provider: "claude" },
+								),
+							]),
+					...(rows[0]?.scheduled_at == null ? [] : [cancelledEvent(sessionId)]),
+				];
+				if (events.length === 0) return;
+				yield* project(yield* store.appendBatch(events));
 			}),
 		);
 	return {
 		intakeLimit,
 		dismissCutOff,
+		cancelContinuation,
+		sweepDueContinuations,
 		runLimitPolicy,
 		requestContinuation,
 	} satisfies Continuation;
