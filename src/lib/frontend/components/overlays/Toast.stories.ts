@@ -145,6 +145,5 @@ export const MultipleToasts: Story = {
 			actions: [{ label: "Undo", run: fn(), kind: "primary" }],
 		},
 		{ title: "Connection lost", variant: "warn", actions: [] },
-		{ title: "Failed to reconnect", variant: "error", actions: [] },
 	),
 };

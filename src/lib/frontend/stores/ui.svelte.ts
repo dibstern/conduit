@@ -170,7 +170,9 @@ export function showToast(
 		variant: card.variant ?? "default",
 		duration: card.duration ?? 7000,
 	};
-	uiState.toasts = [...uiState.toasts, toast];
+	// At most two cards, so the stack never climbs over the transcript. Older
+	// toasts are dropped, actions and all, rather than queued out of sight.
+	uiState.toasts = [...uiState.toasts, toast].slice(-2);
 
 	// Auto-dismiss
 	setTimeout(() => {

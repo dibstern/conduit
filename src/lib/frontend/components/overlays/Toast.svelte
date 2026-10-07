@@ -2,9 +2,11 @@
   Toast — auto-dismissing notification cards (design 05, "Suggestion toast").
   Reads uiState.toasts. Auto-dismiss is handled by the store's showToast().
 
-  Desktop: a stack of raised cards anchored bottom-right, clear of the session
-  bar's controls. Phone: one full-width sheet along the bottom edge, its
-  toasts divided by hairlines.
+  Desktop: a stack of raised cards anchored bottom-right. Phone: one
+  full-width sheet, its toasts divided by hairlines. Both sit on top of the
+  composer, never over it: InputArea publishes --composer-clearance, which is
+  0 wherever no composer is mounted. The store keeps at most two toasts; the
+  newest is on top.
 
   Each card is a bold title, an optional body line with one emphasised term,
   and an action row: primary and secondary actions in order from the left,
@@ -35,9 +37,9 @@
 
 {#if uiState.toasts.length > 0}
 	<div
-		class="pointer-events-none fixed z-[var(--z-toast)] flex flex-col max-md:pointer-events-auto max-md:inset-x-0 max-md:bottom-0 max-md:divide-y max-md:divide-border-subtle max-md:rounded-t-[18px] max-md:border-t max-md:border-border max-md:bg-bg-alt max-md:pb-[env(safe-area-inset-bottom)] max-md:shadow-modal md:right-[14px] md:bottom-[14px] md:w-[310px] md:gap-2"
+		class="pointer-events-none fixed z-[var(--z-toast)] flex flex-col max-md:pointer-events-auto max-md:inset-x-0 max-md:bottom-[var(--composer-clearance,0px)] max-md:divide-y max-md:divide-border-subtle max-md:rounded-t-[18px] max-md:border-t max-md:border-border max-md:bg-bg-alt max-md:pb-[max(0px,calc(env(safe-area-inset-bottom)_-_var(--composer-clearance,0px)))] max-md:shadow-modal md:right-[14px] md:bottom-[calc(var(--composer-clearance,0px)+14px)] md:w-[310px] md:gap-2"
 	>
-		{#each uiState.toasts as toast (toast.id)}
+		{#each [...uiState.toasts].reverse() as toast (toast.id)}
 			{@const icon = VARIANT_ICON[toast.variant]}
 			{@const at = toast.body && toast.emphasis ? toast.body.indexOf(toast.emphasis) : -1}
 			{@const actions = [
@@ -45,7 +47,7 @@
 				...toast.actions.filter((action) => action.kind === "dismiss"),
 			]}
 			<div
-				class="toast-card pointer-events-auto px-[16px] py-[12px] text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
+				class="toast-card pointer-events-auto px-[16px] py-[12px] font-brand text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
 				data-variant={toast.variant}
 				role={toast.variant === "error" ? "alert" : "status"}
 				aria-live={toast.variant === "error" ? "assertive" : "polite"}

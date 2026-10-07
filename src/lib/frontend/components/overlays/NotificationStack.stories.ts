@@ -97,13 +97,6 @@ export const ToastsOnly: Story = {
 				duration: 999999,
 			},
 			{
-				id: "t2",
-				title: "Connection lost",
-				actions: [],
-				variant: "warn",
-				duration: 999999,
-			},
-			{
 				id: "t3",
 				title: "Failed to reconnect",
 				actions: [],
@@ -158,13 +151,6 @@ export const Combined: Story = {
 			},
 		});
 		setToasts([
-			{
-				id: "t1",
-				title: "Copied to clipboard",
-				actions: [],
-				variant: "default",
-				duration: 999999,
-			},
 			{
 				id: "t2",
 				title: "Rate limited",

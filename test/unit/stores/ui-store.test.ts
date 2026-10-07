@@ -248,6 +248,15 @@ describe("showToast", () => {
 		vi.advanceTimersByTime(1000);
 		expect(uiState.toasts).toHaveLength(0);
 	});
+
+	it("keeps only the two newest toasts, and the survivors still expire", () => {
+		showToast("A");
+		showToast("B");
+		showToast("C");
+		expect(uiState.toasts.map((toast) => toast.title)).toEqual(["B", "C"]);
+		vi.advanceTimersByTime(7000);
+		expect(uiState.toasts).toHaveLength(0);
+	});
 });
 
 describe("dismissToast", () => {

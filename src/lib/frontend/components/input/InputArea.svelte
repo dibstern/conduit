@@ -855,6 +855,25 @@
 		document.addEventListener("keydown", handleGlobalEsc);
 		return () => document.removeEventListener("keydown", handleGlobalEsc);
 	});
+
+	/** Publishes how far the composer's top edge sits above the viewport bottom
+	 *  as --composer-clearance, so the toast stack (Toast.svelte) never covers
+	 *  it. Measured from the viewport rather than the composer's height because a
+	 *  terminal panel below the chat lifts the composer. Watching the parent too
+	 *  catches that move, since the chat column shrinks when it happens. */
+	function publishComposerClearance(area: HTMLElement) {
+		const root = document.documentElement;
+		const observer = new ResizeObserver(() => {
+			const clearance = area.offsetHeight > 0 ? window.innerHeight - area.getBoundingClientRect().top : 0;
+			root.style.setProperty("--composer-clearance", `${Math.max(0, clearance)}px`);
+		});
+		observer.observe(area);
+		if (area.parentElement) observer.observe(area.parentElement);
+		return () => {
+			observer.disconnect();
+			root.style.removeProperty("--composer-clearance");
+		};
+	}
 </script>
 
 <!-- File Menu (above input when "@" is typed) -->
@@ -896,6 +915,7 @@
      keyboard. Drop the inset then. -->
 <div
 	id="input-area"
+	{@attach publishComposerClearance}
 	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
