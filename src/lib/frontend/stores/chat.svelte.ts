@@ -1,15 +1,12 @@
 // Manages chat messages, streaming state, and processing.
 //
-// Two-tier per-session chat state. Handlers receive (activity, messages, event)
-// and write to per-session tiers. The routePerSession dispatcher in
-// ws-dispatch.ts resolves the correct session slot by event.sessionId.
+// Per-session activity follows shell rows; transcripts follow session detail.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
-	RelayMessage,
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
@@ -20,6 +17,7 @@ import { createFrontendLogger } from "../utils/logger.js";
 import { getBrowserClientId } from "./client-identity.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { findSession, isBusy, sessionState } from "./session.svelte.js";
+import { refreshSessionSkills } from "./session-skills.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
@@ -35,7 +33,6 @@ export type SessionActivity = {
 	doneMessageIds: SvelteSet<string>;
 	seenMessageIds: SvelteSet<string>;
 	renderTimer: ReturnType<typeof setTimeout> | null;
-	thinkingStartTime: number;
 };
 
 // Tier 2 — Messages. LRU-capped. Holds only data safely reconstructable
@@ -80,7 +77,6 @@ export function createEmptySessionActivity(): SessionActivity {
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
 		renderTimer: null,
-		thinkingStartTime: 0,
 	};
 }
 
@@ -537,6 +533,38 @@ function flushAndFinalizeAssistant(
 	return finalizedMessageId;
 }
 
+/** Replace a truncated tool result with the full content returned by RPC. */
+export function applyToolContentResponse(response: {
+	readonly projectSlug?: string;
+	readonly toolId: string;
+	readonly content: string;
+	readonly sessionId?: string;
+}): void {
+	const sessionId = response.sessionId ?? sessionState.currentId;
+	if (sessionId == null) return;
+	const messages = getOrCreateSessionSlot(sessionId).messages;
+	const currentMsgs = [...getMessages(messages)];
+	const found = findMessage(
+		currentMsgs,
+		"tool",
+		(m) => m.id === response.toolId,
+	);
+	if (!found) return;
+	setMessages(
+		messages,
+		currentMsgs.map((m, i) => {
+			if (i !== found.index) return m;
+			const updated: ToolMessage = {
+				...found.message,
+				result: response.content,
+				isTruncated: false,
+			};
+			delete updated.fullContentLength;
+			return updated;
+		}),
+	);
+}
+
 export function getMessages(messages?: SessionMessages): ChatMessage[] {
 	return messages?.messages ?? [];
 }
@@ -708,18 +736,9 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 	}
 }
 
-export function handleDone(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	_msg: Extract<RelayMessage, { type: "done" }>,
-): void {
-	applyTerminalTurn(activity, messages);
-}
-
 /** Apply durable terminal state without delivering alerts. `turnId` must be
  * turns.id (the user message id), not the provider runtime's turnId.
- * Legacy push events lack that identity; their fallback identifies the
- * current monotone generation, not an old envelope.
+ * Shell idle transitions have no turn identity and use the current generation.
  * The turn projection currently has no per-turn revision. */
 export function applyTerminalTurn(
 	activity: SessionActivity,
@@ -808,8 +827,8 @@ export function followSessionBusy(id: string, busy: boolean): void {
 		else phaseToIdle(activity);
 	}
 	activity.currentMessageId = null;
-	activity.thinkingStartTime = 0;
 	if (messages) messages.currentAssistantText = "";
+	refreshSessionSkills(id);
 	// seenMessageIds / doneMessageIds remain (cross-turn dedup)
 }
 

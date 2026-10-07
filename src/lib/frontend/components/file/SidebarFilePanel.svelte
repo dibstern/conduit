@@ -5,12 +5,11 @@
 	import type { Snippet } from "svelte";
 	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry } from "../../types.js";
-	import { onFileBrowser } from "../../stores/ws.svelte.js";
+	import { onFileBrowser, applyGetFileListResponse } from "../../stores/ws-listeners.js";
 	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 	import { setFilesOpen } from "../../stores/session-view.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
-	import { applyGetFileListResponse } from "../../stores/ws-dispatch.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";

@@ -18,7 +18,7 @@
 -->
 
 <script lang="ts">
-	import { isProcessing } from "../../stores/chat.svelte.js";
+	import { followSessionBusy, isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
@@ -31,7 +31,7 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, isSessionBusy, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
@@ -117,7 +117,10 @@
 		const projectSlug = getCurrentSlug();
 		tasksPanel.open = false;
 		if (!sessionId || !projectSlug) return;
-		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).catch(() => {
+		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).then(() => {
+			// See InputArea's handleStop: an interrupt may end a turn the row never reported.
+			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
+		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
 	}

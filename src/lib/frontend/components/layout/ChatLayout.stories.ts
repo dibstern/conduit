@@ -14,7 +14,7 @@ import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 import {
 	applyGetFileContentResponse,
 	applyGetFileListResponse,
-} from "../../stores/ws-dispatch.js";
+} from "../../stores/ws-listeners.js";
 import { mockFileContent, mockFileTree } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import ChatLayout from "./ChatLayout.svelte";

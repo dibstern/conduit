@@ -76,7 +76,7 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 describe("build ID dispatch", () => {
 	let server: typeof import("../../../src/lib/frontend/stores/server-status.js");
 	let current: ServerStatus;
-	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/ws-dispatch.js")["setAttachedProject"];
+	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/session.svelte.js")["setAttachedProject"];
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -127,7 +127,7 @@ describe("build ID dispatch", () => {
 
 	async function load() {
 		({ setAttachedProject } = await import(
-			"../../../src/lib/frontend/stores/ws-dispatch.js"
+			"../../../src/lib/frontend/stores/session.svelte.js"
 		));
 		server = await import("../../../src/lib/frontend/stores/server-status.js");
 	}

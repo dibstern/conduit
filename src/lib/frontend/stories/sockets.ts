@@ -2,7 +2,7 @@
  * A WebSocket stand-in for stories of components that mount the real connection
  * lifecycle.
  *
- * ChatLayout opens legacy and RPC WebSockets on mount. Storybook is served by a
+ * ChatLayout opens RPC WebSockets on mount. Storybook is served by a
  * static file server, so upgrades never complete, `connectionState.status` never reaches
  * "connected", and ConnectOverlay — `fixed inset-0 bg-bg`, gated on
  * `connected && displayNone` — covers the entire viewport. Every Layout/ChatLayout
@@ -15,8 +15,6 @@
  * the attempt counter and clears relay state; poking the store would skip all
  * of it and leave the component in a state the app can never actually be in.
  */
-
-import { setAttachedProject } from "../stores/ws-dispatch.js";
 
 type Listener = (event?: unknown) => void;
 
@@ -41,16 +39,11 @@ export function connectedSocket(): () => void {
 
 		constructor(url: string | URL) {
 			this.url = String(url);
-			// A macrotask, not a microtask: `doConnect` attaches its listeners
-			// synchronously after the constructor returns, so firing sooner would
-			// open a socket nobody is listening to.
+			// Open after the RPC transport has attached its listeners.
 			setTimeout(() => {
 				if (this.readyState !== OpenSocket.CONNECTING) return;
 				this.readyState = OpenSocket.OPEN;
 				this.emit("open");
-				// Stands in for the AttachProject reply: Storybook has no RPC server.
-				const slug = new URL(this.url).searchParams.get("p");
-				if (slug) setAttachedProject(slug);
 			}, 0);
 		}
 
@@ -67,12 +60,32 @@ export function connectedSocket(): () => void {
 		send(data: unknown): void {
 			if (new URL(this.url).pathname !== "/rpc" || typeof data !== "string")
 				return;
-			const request: { _tag?: string } = JSON.parse(data);
+			const request: {
+				_tag?: string;
+				id?: string;
+				tag?: string;
+				payload?: { projectSlug?: string };
+			} = JSON.parse(data);
 			if (request._tag === "Ping") {
 				this.emit(
 					"message",
 					new MessageEvent("message", {
 						data: JSON.stringify({ _tag: "Pong" }),
+					}),
+				);
+			}
+			if (request._tag === "Request" && request.tag === "AttachProject") {
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({
+							_tag: "Exit",
+							requestId: request.id,
+							exit: {
+								_tag: "Success",
+								value: { projectSlug: request.payload?.projectSlug ?? null },
+							},
+						}),
 					}),
 				);
 			}

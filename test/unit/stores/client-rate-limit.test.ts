@@ -1,6 +1,6 @@
-// Tests for the client-side message queue in ws.svelte.ts.
+// Tests for the client-side chat RPC rate limit.
 // Verifies: immediate sends under limit, queuing at limit, drain timer,
-// queue replacement, and non-message bypass.
+// and queue replacement.
 
 import {
 	afterEach,
@@ -13,58 +13,10 @@ import {
 } from "vitest";
 
 // Hoisted mocks (run before imports)
-const { showToastMock, sentMessages } = vi.hoisted(() => {
-	const showToastMock = vi.fn();
-	const sentMessages: string[] = [];
-
-	class MockWebSocket {
-		static readonly OPEN = 1;
-		static readonly CLOSED = 3;
-		readyState = MockWebSocket.OPEN;
-		private listeners: Record<string, Array<(ev?: unknown) => void>> = {};
-
-		send(data: string): void {
-			sentMessages.push(data);
-		}
-
-		addEventListener(event: string, fn: (ev?: unknown) => void): void {
-			const listeners = (this.listeners[event] ??= []);
-			listeners.push(fn);
-		}
-
-		close(): void {
-			this.readyState = MockWebSocket.CLOSED;
-		}
-
-		_fire(event: string, data?: unknown): void {
-			for (const fn of this.listeners[event] ?? []) {
-				fn(data);
-			}
-		}
-	}
-
-	// Install mock WebSocket globally before any module imports
-	Object.defineProperty(globalThis, "WebSocket", {
-		value: MockWebSocket,
-		writable: true,
-		configurable: true,
-	});
-
-	// Mock window.location so connect() can build the URL
-	if (typeof globalThis.window === "undefined") {
-		Object.defineProperty(globalThis, "window", {
-			value: {
-				location: { protocol: "http:", host: "localhost:3000", pathname: "/" },
-				history: { pushState: () => {}, replaceState: () => {} },
-				addEventListener: () => {},
-			},
-			writable: true,
-			configurable: true,
-		});
-	}
-
-	return { showToastMock, sentMessages, MockWebSocket };
-});
+const { showToastMock, sentMessages } = vi.hoisted(() => ({
+	showToastMock: vi.fn(),
+	sentMessages: [] as string[],
+}));
 
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastMock,
@@ -75,11 +27,8 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 
 import {
 	_resetRateLimit,
-	connect,
-	disconnect,
 	rateLimitChatSend,
-	wsSend,
-} from "../../../src/lib/frontend/stores/ws.svelte.js";
+} from "../../../src/lib/frontend/stores/ws-send.svelte.js";
 
 /** Parsed version of the last sent message. */
 function lastSent(): Record<string, unknown> | undefined {
@@ -101,42 +50,14 @@ beforeEach(() => {
 	sentMessages.length = 0;
 	showToastMock.mockClear();
 	_resetRateLimit({ now: () => clock });
-
-	// Establish a "connected" WebSocket so rawSend works.
-	// connect() creates a new MockWebSocket; we fire "open" to mark it connected.
-	connect();
-	// The connect function adds event listeners; find the mock and fire "open"
-	// We need to get the MockWebSocket instance. Since connect() assigns to _ws,
-	// and our MockWebSocket is used, we access it via the global constructor calls.
-	// Actually, connect() creates `new WebSocket(url)` which is our MockWebSocket.
-	// The "open" listener sets status. Let's fire it by accessing the instance.
 });
 
 afterEach(() => {
-	disconnect();
+	_resetRateLimit();
 	vi.useRealTimers();
 });
 
-// connect() creates a MockWebSocket but we need to fire "open" on it.
-// Since we can't directly access _ws, we verify sends work by checking sentMessages.
-
-// Actually, connect() constructs a WebSocket internally. Our MockWebSocket captures
-// addEventListener calls. We need to trigger the open event. Since the mock is
-// simple, let's just verify the flow by testing wsSend directly — if _ws is set
-// and readyState is OPEN (default in our mock), rawSend works.
-
-describe("wsSend client-side rate limiting", () => {
-	describe("non-message types", () => {
-		it("sends control messages immediately without rate limiting", () => {
-			for (let i = 0; i < 10; i++) {
-				wsSend({ type: "subscribe", channel: "test" });
-			}
-			// All 10 should have been sent (no queuing)
-			expect(sentMessages).toHaveLength(10);
-			expect(showToastMock).not.toHaveBeenCalled();
-		});
-	});
-
+describe("chat RPC client-side rate limiting", () => {
 	describe("under rate limit", () => {
 		it("sends up to MAX_MESSAGES immediately", () => {
 			for (let i = 0; i < 5; i++) {
@@ -244,22 +165,6 @@ describe("wsSend client-side rate limiting", () => {
 			expect(sentMessages).toHaveLength(6);
 			expect(lastSent()).toEqual({ type: "message", text: "after window" });
 		});
-
-		it("mixed message types: control messages don't count against limit", () => {
-			for (let i = 0; i < 5; i++) {
-				sendChat(`msg ${i}`);
-				wsSend({ type: "subscribe", channel: "foo" });
-				clock += 100;
-			}
-			// 5 chat + 5 control = 10 total sent
-			expect(sentMessages).toHaveLength(10);
-
-			// Next chat message should be queued (limit reached)
-			const before = sentMessages.length;
-			sendChat("over limit");
-			expect(sentMessages).toHaveLength(before); // no new send
-			expect(showToastMock).toHaveBeenCalled();
-		});
 	});
 
 	// AC7 requires messages to be processed in order. Previous tests proved
@@ -303,29 +208,6 @@ describe("wsSend client-side rate limiting", () => {
 				"msg-5",
 				"msg-7",
 			]);
-		});
-
-		it("preserves order when interleaving chat and control messages", () => {
-			// Alternate chat and control messages
-			sendChat("chat-1");
-			clock += 10;
-			wsSend({ type: "subscribe", channel: "a" });
-			clock += 10;
-			sendChat("chat-2");
-			clock += 10;
-			wsSend({ type: "subscribe", channel: "b" });
-			clock += 10;
-			sendChat("chat-3");
-
-			// All should be sent (3 chat + 2 control = under limit)
-			expect(sentMessages).toHaveLength(5);
-
-			// Verify chat messages are in order relative to each other
-			const chatTexts = sentMessages
-				.map((raw) => JSON.parse(raw) as { type: string; text?: string })
-				.filter((m) => m.type === "message")
-				.map((m) => m.text);
-			expect(chatTexts).toEqual(["chat-1", "chat-2", "chat-3"]);
 		});
 	});
 

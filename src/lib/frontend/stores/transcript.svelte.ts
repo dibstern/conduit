@@ -575,16 +575,16 @@ export function viewTranscript(
 								) {
 									const row = envelope.item.message;
 									const held = before.rows.find((old) => old.id === row.id);
-									// The server names a skill from the tool's input, which can
-									// land after the tool starts.
+									// Skill names and running state follow the tool's input,
+									// output and status, which can arrive in separate updates.
 									if (
 										row.parts?.some(
 											(part) =>
 												part.tool?.toLowerCase() === "skill" &&
-												JSON.stringify(part.state?.["input"]) !==
+												JSON.stringify(part.state) !==
 													JSON.stringify(
 														held?.parts?.find((old) => old.id === part.id)
-															?.state?.["input"],
+															?.state,
 													),
 										)
 									)
@@ -594,8 +594,10 @@ export function viewTranscript(
 										row.role === "user" &&
 										row.parts?.length &&
 										!held?.parts?.length
-									)
+									) {
 										newUserIds.add(row.id);
+										refreshSessionSkills(sessionId);
+									}
 									if (
 										!held &&
 										row.role === "assistant" &&

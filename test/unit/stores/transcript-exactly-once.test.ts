@@ -13,16 +13,12 @@ import {
 	transcriptStatus,
 	viewTranscript,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcConnect,
 } from "../../../src/lib/frontend/transport/shared-client.js";
 import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
-import type {
-	HistoryMessage,
-	RelayMessage,
-} from "../../../src/lib/frontend/types.js";
+import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 
 const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
@@ -101,46 +97,6 @@ function adapter() {
 	};
 }
 
-const retired: RelayMessage[] = [
-	{
-		type: "delta",
-		sessionId: "A",
-		text: " legacy",
-		messageId: "a1",
-		partId: "a-text",
-	},
-	{ type: "thinking_start", sessionId: "A", messageId: "a1" },
-	{
-		type: "thinking_delta",
-		sessionId: "A",
-		text: "legacy thought",
-		messageId: "a1",
-	},
-	{
-		type: "tool_start",
-		sessionId: "A",
-		id: "tool-2",
-		name: "Read",
-		messageId: "a1",
-	},
-	{
-		type: "result",
-		sessionId: "A",
-		usage: { input: 4, output: 2, cache_read: 0, cache_creation: 0 },
-		cost: 1,
-		duration: 1,
-		messageId: "a1",
-	},
-	{
-		type: "user_message",
-		sessionId: "A",
-		text: "legacy user",
-		messageId: "u2",
-	},
-	{ type: "part_removed", sessionId: "A", messageId: "a1", partId: "a-text" },
-	{ type: "message_removed", sessionId: "A", messageId: "u1" },
-];
-
 let wire: ReturnType<typeof adapter>;
 let runtime: ManagedRuntime.ManagedRuntime<
 	import("../../../src/lib/frontend/transport/shared-client.js").WsRpcClients,
@@ -166,9 +122,7 @@ afterEach(async () => {
 	sessionState.currentId = null;
 });
 
-it.each(
-	retired,
-)("ignores legacy $type while detail is live", async (legacy) => {
+it("applies each detail update once", async () => {
 	viewTranscript("project", "A");
 	await vi.waitFor(() => expect(wire.ready).toBe(true));
 	await wire.emit({
@@ -181,11 +135,6 @@ it.each(
 	});
 	await wire.emit({ _tag: "synchronized" });
 	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
-	const messages = getOrCreateSessionSlot("A").messages.messages;
-	const before = JSON.stringify(messages);
-	handleMessage(legacy);
-	expect(getOrCreateSessionSlot("A").messages.messages).toBe(messages);
-	expect(JSON.stringify(messages)).toBe(before);
 	await wire.emit({
 		_tag: "upsert",
 		sequence: 5,

@@ -12,7 +12,6 @@ import {
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 
-const wsSendSpy = vi.hoisted(() => vi.fn());
 const getAgentsRpcSpy = vi.hoisted(() =>
 	vi.fn(async (_input: unknown) => ({ projectSlug: "project-a", agents: [] })),
 );
@@ -53,9 +52,6 @@ vi.mock(
 	"../../../src/lib/frontend/components/model/ModelVariant.svelte",
 	closeableEmptyComponent,
 );
-vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
-	wsSend: (...args: unknown[]) => wsSendSpy(...args),
-}));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "project-a",
 }));
@@ -95,7 +91,6 @@ const CLAUDE_PROVIDER: ProviderInfo = {
 
 describe("InstanceModelPicker", () => {
 	beforeEach(() => {
-		wsSendSpy.mockClear();
 		getAgentsRpcSpy.mockClear();
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
@@ -191,7 +186,6 @@ describe("InstanceModelPicker", () => {
 				providerId: "claude",
 			});
 		});
-		expect(wsSendSpy).not.toHaveBeenCalled();
 		expect(getAgentsRpcSpy).toHaveBeenCalledWith({
 			projectSlug: "project-a",
 			sessionId: "session-1",
@@ -254,7 +248,6 @@ describe("InstanceModelPicker", () => {
 				provider: "claude",
 			});
 		});
-		expect(wsSendSpy).not.toHaveBeenCalled();
 		expect(discoveryState.defaultModelId).toBe("claude-opus-4-7");
 		expect(discoveryState.defaultProviderId).toBe("claude");
 	});
@@ -282,7 +275,6 @@ describe("InstanceModelPicker", () => {
 				commandId: expect.any(String),
 			});
 		});
-		expect(wsSendSpy).not.toHaveBeenCalled();
 		expect(showToastSpy).toHaveBeenCalledWith("Reloading skills…", {
 			duration: 1500,
 		});

@@ -4,7 +4,7 @@
 	import type { ToolMessage } from "../../types.js";
 	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { applyToolContentResponse } from "../../stores/ws-dispatch.js";
+	import { applyToolContentResponse } from "../../stores/chat.svelte.js";
 	import { getToolContentRpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
 

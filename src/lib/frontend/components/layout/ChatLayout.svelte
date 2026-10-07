@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
-	import { interruptStream, disposeRuntime } from "../../transport/runtime.js";
+	import { disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
@@ -38,20 +38,17 @@
 		SIDEBAR_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
 	import {
-		connect,
-		disconnect,
-		onProjectAttached,
-		setAttachedProject,
 		onNavigateToSession,
 		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
-	} from "../../stores/ws.svelte.js";
+	} from "../../stores/ws-notifications.js";
+	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { clearSessionState, findSession, sessionState, setAttachedProject, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
@@ -346,8 +343,7 @@
 	// Each mount attaches once: a remount keeps the previous mount's slug.
 	let attachedThisMount = false;
 	onMount(() => {
-		// A page load starts clean, and the /ws bootstrap can land before the
-		// AttachProject reply, so only a change of project clears state.
+		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
 		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
@@ -421,7 +417,6 @@
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
-		connect();
 		return () => {
 			attachGeneration++;
 			detachSessionList();
@@ -430,8 +425,6 @@
 			unsubscribe();
 			unsubscribeShell();
 			clearNavigateToSession();
-			interruptStream();
-			disconnect();
 		};
 	});
 
@@ -534,8 +527,7 @@
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
 	// on unload, and `persisted` is how the two are told apart. Disposing on a
-	// background left the app mute on return: the message fiber was gone but the
-	// socket was still open, so no close event fired and nothing reconnected.
+	// background would leave the app with no RPC sockets or subscriptions on return.
 	if (typeof window !== "undefined") {
 		window.addEventListener("pagehide", (event) => {
 			if (!event.persisted) void disposeRuntime();

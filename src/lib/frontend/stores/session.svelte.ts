@@ -6,6 +6,7 @@ import {
 	isBusy,
 	resetSessionSubscription,
 	sessionSubscription,
+	turnEnded,
 } from "../transport/session-subscription.svelte.js";
 import {
 	type Change,
@@ -31,7 +32,6 @@ import type {
 	AttentionGroups,
 	DateGroups,
 	Immutable,
-	RelayMessage,
 	SessionAttention,
 	SessionInfo,
 } from "../types.js";
@@ -53,18 +53,19 @@ import {
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import {
+	attachedProjectState,
 	getCurrentRoute,
 	getCurrentSessionId,
 	getCurrentSlug,
 	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
-import { sessionActivityBridge } from "./session-activity.svelte.js";
+import { restoreServerUpdateBanner } from "./server-status.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { showToast, updateContextPercent } from "./ui.svelte.js";
-import { setAttachedProject } from "./ws-dispatch.js";
+import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Re-exported so chat.svelte.ts need not import the subscription directly,
 // which would load it ahead of this store and leave its rows undefined.
@@ -89,15 +90,6 @@ let familyApplied = $state.raw<SubscriptionState<SessionInfo>>(
 );
 const familySessions = $derived([...familyApplied.rows.values()]);
 
-/** A session can receive events while its row is still arriving. */
-export function isRoutable(id: string): boolean {
-	return (
-		id === clientSession.currentId ||
-		serverSessions.has(id) ||
-		familySessions.some((row) => row.id === id)
-	);
-}
-
 /** Prefer the versioned row when a family message carries older metadata. */
 export function parentOf(id: string): string | null {
 	return (
@@ -112,17 +104,7 @@ export function parentOf(id: string): string | null {
 const busySessionIds = $derived.by(() => {
 	const rows = new Map(familySessions.map((row) => [row.id, row]));
 	for (const row of serverSessions.values()) rows.set(row.id, row);
-	// Activity can arrive before the current session's first family row.
-	const currentId = clientSession.currentId;
-	if (currentId && !rows.has(currentId)) {
-		rows.set(currentId, {
-			id: currentId,
-			title: "",
-			status: "idle",
-			parentID: parentOf(currentId) ?? undefined,
-		});
-	}
-	return calculateBusySessionIds(rows, sessionActivityBridge.pending.keys());
+	return calculateBusySessionIds(rows);
 });
 
 /** The session view's single busy decision, shared by every sidebar row. */
@@ -130,22 +112,15 @@ export function isSessionBusy(id: string): boolean {
 	return busySessionIds.has(id);
 }
 
-/** Live content only. Replay must never create a new activity bridge. */
-export function observeSessionActivity(event: RelayMessage): void {
-	if (!("sessionId" in event) || !event.sessionId) return;
-	const id = event.sessionId;
-	if (!isRoutable(id)) return;
-	// Legacy `status` hints may come from the poller. Only the shell's
-	// accepted row can retire activity or supply a status for this view.
-	switch (event.type) {
-		case "delta":
-		case "thinking_start":
-		case "thinking_delta":
-		case "tool_start":
-		case "tool_executing":
-		case "tool_result":
-			sessionActivityBridge.mark(id);
-	}
+/** Attach this tab from an AttachProject or cross-project ViewSession reply. */
+export function setAttachedProject(slug: string): void {
+	if (attachedProjectState.slug !== slug)
+		for (const activity of sessionActivity.values())
+			activity.replayGeneration++;
+	attachedProjectState.slug = slug;
+	for (const listener of projectAttachedListeners) listener(slug);
+	// Project listeners reset banners, so restore the daemon-wide update offer.
+	restoreServerUpdateBanner();
 }
 
 // What this tab is looking at. Applying server rows never touches it.
@@ -546,15 +521,21 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (viewed?.parentID && viewed !== previous)
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
-	// A child has no shell row, so its family row is the only status it has.
+	// The shell feed carries roots only, so a child's family row is the only
+	// status it has. Key on parentID, not shell membership: a fork leaves the
+	// root set without a shell remove, so its stale shell row never updates.
 	if (change._tag === "snapshot") {
 		for (const row of next.rows.values()) {
-			if (!serverSessions.has(row.id)) followSessionBusy(row.id, isBusy(row));
+			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
 		}
 	}
-	if (change._tag === "upsert" && !serverSessions.has(change.item.id)) {
+	if (change._tag === "upsert" && change.item.parentID !== undefined) {
+		const previousRow = previousRows.get(change.item.id);
 		const busy = isBusy(change.item);
-		if (busy !== isBusy(previousRows.get(change.item.id)))
+		if (
+			busy !== isBusy(previousRow) ||
+			(!busy && turnEnded(previousRow, change.item))
+		)
 			followSessionBusy(change.item.id, busy);
 	}
 }

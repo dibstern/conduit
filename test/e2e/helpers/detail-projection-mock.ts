@@ -119,7 +119,7 @@ function assistant(
 export function projectLegacyRelayMessage(
 	page: Page,
 	event: MockMessage,
-): void {
+): boolean {
 	const sessionId =
 		typeof event["sessionId"] === "string"
 			? event["sessionId"]
@@ -127,7 +127,7 @@ export function projectLegacyRelayMessage(
 					typeof event["id"] === "string"
 				? event["id"]
 				: null;
-	if (!sessionId) return;
+	if (!sessionId) return false;
 	const state = session(page, sessionId);
 	if (event.type === "mock_transcript_snapshot") {
 		const listener = listeners.get(page);
@@ -164,7 +164,7 @@ export function projectLegacyRelayMessage(
 			if (messages || Array.isArray(events))
 				listener(sessionId, snapshot(state));
 		}
-		return;
+		return true;
 	}
 	if (event.type === "user_message" && typeof event["text"] === "string") {
 		const id =
@@ -182,7 +182,7 @@ export function projectLegacyRelayMessage(
 			},
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
 		});
-		return;
+		return true;
 	}
 	if (event.type === "delta" && typeof event["text"] === "string") {
 		const message = assistant(state, event);
@@ -201,7 +201,7 @@ export function projectLegacyRelayMessage(
 				text: (previous?.text ?? "") + event["text"],
 			}),
 		);
-		return;
+		return true;
 	}
 	if (event.type === "thinking_start" || event.type === "thinking_delta") {
 		const message = assistant(state, event);
@@ -224,7 +224,7 @@ export function projectLegacyRelayMessage(
 						: ""),
 			}),
 		);
-		return;
+		return true;
 	}
 	if (event.type === "tool_start" && typeof event["id"] === "string") {
 		const message = assistant(state, event);
@@ -239,7 +239,7 @@ export function projectLegacyRelayMessage(
 				state: { status: "pending" },
 			}),
 		);
-		return;
+		return true;
 	}
 	if (event.type === "tool_executing" && typeof event["id"] === "string") {
 		for (const message of state.rows.values()) {
@@ -262,7 +262,7 @@ export function projectLegacyRelayMessage(
 			);
 			break;
 		}
-		return;
+		return true;
 	}
 	if (event.type === "tool_result" && typeof event["id"] === "string") {
 		for (const message of state.rows.values()) {
@@ -287,7 +287,7 @@ export function projectLegacyRelayMessage(
 			);
 			break;
 		}
-		return;
+		return true;
 	}
 	if (event.type === "result" || event.type === "done") {
 		const id =
@@ -312,7 +312,7 @@ export function projectLegacyRelayMessage(
 			state.textPartId = null;
 			state.thinkingPartId = null;
 		}
-		return;
+		return true;
 	}
 	// Like the message projector: a compaction's outcome is its own synthetic
 	// message; the "started" notice stays transient.
@@ -342,7 +342,7 @@ export function projectLegacyRelayMessage(
 				},
 			],
 		});
-		return;
+		return true;
 	}
 	if (
 		event.type === "message_removed" &&
@@ -355,7 +355,9 @@ export function projectLegacyRelayMessage(
 			id: event["messageId"],
 			sequence,
 		});
+		return true;
 	}
+	return false;
 }
 
 export function mockDetailSnapshot(

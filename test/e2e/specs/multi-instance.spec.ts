@@ -336,14 +336,14 @@ test.describe("Instance Store: Reactivity", () => {
 		).toHaveClass(/bg-green-500/);
 	});
 
-	test("store survives a /ws disconnect", async ({ page, baseURL }) => {
+	test("store survives an RPC disconnect", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
 
-		// The list rides the RPC subscription, so closing /ws must not empty it:
-		// nothing on /ws would re-populate it after the reconnect.
+		// Keep the current list during the RPC disconnect, then replay it to
+		// the replacement subscription after reconnecting.
 		control.close();
 		await expect(page.locator(".connect-overlay")).toBeHidden({
 			timeout: 5_000,

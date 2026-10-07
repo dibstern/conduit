@@ -1,4 +1,4 @@
-// Extracted from ws.svelte.ts — handles sound/browser notifications when the
+// Handles sound/browser notifications when the
 // tab is hidden and a notable event arrives, plus push-active tracking.
 
 import { notificationContent } from "../../notification-content.js";

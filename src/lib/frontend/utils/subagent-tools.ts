@@ -3,7 +3,7 @@
 // task_notification → tool.completed and may still be running after the parent
 // emits `done` (backgrounded or long-running subagents). Several call sites must
 // treat them specially — skip turn finalization (tool-registry), preserve a
-// cached terminal status across navigate-in/out reloads (ws-dispatch), keep live
+// cached terminal status across transcript reloads, keep live
 // status when loaded from history (history-logic), mark their row in the activity
 // log with a rail (turns/ActivityRow), and render the subagent card when one is
 // handed back to the transcript (ToolItem). Keep the name check in ONE place so a

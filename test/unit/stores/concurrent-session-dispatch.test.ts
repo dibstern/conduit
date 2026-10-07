@@ -3,9 +3,7 @@ import {
 	seedRootSessions,
 	seedSessions,
 } from "./session-fixtures.js";
-// Verifies that interleaved per-session events for sessions A/B/C are routed
-// independently. Covers: live event buffering during replay, prod
-// missing-sessionId drop, and unknown-session drop.
+// Family attention follows shell and family rows.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,25 +39,17 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
-	chatState,
 	clearMessages,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { featureFlags } from "../../../src/lib/frontend/stores/feature-flags.svelte.js";
 import { clearAllPermissions } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
 	clearSessionState,
 	getAttentionSessions,
 	getSessionIndicator,
-	isSessionBusy,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import {
-	handleMessage,
-	isPerSessionEvent,
-} from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 beforeEach(() => {
 	clearMessages();
@@ -87,120 +77,6 @@ afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	clearSessionState();
-});
-
-describe("Missing sessionId — dev throws, prod drops", () => {
-	it("throws in dev mode when sessionId is missing", () => {
-		// Events with per-session types but no sessionId should throw in dev
-		expect(() => {
-			handleMessage({
-				type: "thinking_stop",
-			} as RelayMessage);
-		}).toThrow(/routePerSession: missing sessionId/);
-	});
-
-	it("throws in dev mode when sessionId is empty string", () => {
-		expect(() => {
-			handleMessage({
-				type: "thinking_stop",
-				sessionId: "",
-			} as RelayMessage);
-		}).toThrow(/routePerSession: missing sessionId/);
-	});
-});
-
-describe("Unknown-session guard — drops events silently", () => {
-	it("logs and drops an unknown event without replaying it after the snapshot", () => {
-		clearSessionState();
-		sessionState.currentId = "viewed";
-		featureFlags.debug = true;
-		const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
-		try {
-			handleMessage({
-				type: "thinking_stop",
-				sessionId: "background",
-			});
-			expect(debug).toHaveBeenCalledWith(
-				"[ws]",
-				"routePerSession: unknown sessionId %s for event %s",
-				"background",
-				"thinking_stop",
-			);
-			expect(sessionMessages.has("background")).toBe(false);
-
-			seedSessions([{ id: "background", title: "Background", status: "busy" }]);
-			expect(isSessionBusy("background")).toBe(true);
-			expect(sessionMessages.has("background")).toBe(false);
-		} finally {
-			featureFlags.debug = false;
-			debug.mockRestore();
-		}
-	});
-
-	it("drops events for unknown sessionId without throwing", () => {
-		// "unknown-session" is not in sessionState.sessions
-		expect(() => {
-			handleMessage({
-				type: "thinking_stop",
-				sessionId: "unknown-session",
-			} as RelayMessage);
-		}).not.toThrow();
-
-		// No messages should have been created
-		expect(chatState.messages).toHaveLength(0);
-	});
-
-	it("processes events after session is registered", () => {
-		// Register the session
-		seedSessions([
-			...sessionState.sessions.values(),
-			{
-				id: "new-session",
-				title: "",
-				status: "idle",
-			},
-		]);
-
-		handleMessage({
-			type: "thinking_stop",
-			sessionId: "new-session",
-		} as RelayMessage);
-
-		expect(sessionActivity.has("new-session")).toBe(true);
-	});
-});
-
-describe("isPerSessionEvent — runtime guard", () => {
-	it("returns true for all per-session event types", () => {
-		const perSessionTypes = [
-			"delta",
-			"thinking_start",
-			"thinking_delta",
-			"thinking_stop",
-			"tool_start",
-			"tool_executing",
-			"tool_result",
-			"tool_content",
-			"result",
-			"done",
-			"user_message",
-			"part_removed",
-			"message_removed",
-			"provider_session_reloaded",
-		];
-		for (const type of perSessionTypes) {
-			const msg = { type, sessionId: "s1" } as RelayMessage;
-			expect(isPerSessionEvent(msg)).toBe(true);
-		}
-	});
-
-	it("returns false for global event types", () => {
-		const globalTypes = ["session_list", "model_info"];
-		for (const type of globalTypes) {
-			const msg = { type } as RelayMessage;
-			expect(isPerSessionEvent(msg)).toBe(false);
-		}
-	});
 });
 
 describe("family attention before membership", () => {

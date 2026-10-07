@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
-import { fileBrowserListeners } from "../../stores/ws.svelte.js";
-import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
+import {
+	applyGetFileContentResponse,
+	fileBrowserListeners,
+} from "../../stores/ws-listeners.js";
 import { mockFileContent } from "../../stories/mocks.js";
 import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 

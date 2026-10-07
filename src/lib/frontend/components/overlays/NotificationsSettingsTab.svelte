@@ -2,7 +2,7 @@
 	import Toggle from "../ui/Toggle.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { saveNotifSettings, type NotifSettings } from "../../utils/notif-settings.js";
-	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { setPushActive } from "../../stores/ws-notifications.js";
 	const log = createFrontendLogger("push");
 	let { state = $bindable() }: { state: {
 		notifSettings: NotifSettings;

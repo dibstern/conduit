@@ -106,10 +106,6 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 		.join("\n\n");
 }
 
-// shouldLoadMore() and getOldestMessageId() were removed — dead code after
-// the unified rendering migration. HistoryLoader.svelte inlines the guard
-// logic and ws-dispatch tracks messageCount for the pagination offset.
-
 /** Tool names that should preserve their live status in history.
  *  Question tools may still be awaiting a user response even when loaded
  *  from the REST API, so we must not force them to "completed".

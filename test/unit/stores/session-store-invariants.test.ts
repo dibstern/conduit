@@ -1,4 +1,3 @@
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applySessionChange,
 	applySessionRemoved,
@@ -45,14 +44,17 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import { sessionActivity } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	followSessionBusy,
+	getOrCreateSessionSlot,
+	sessionActivity,
+} from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
 	followFork,
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const decodeSessionInfo = Schema.decodeUnknownSync(SessionInfoSchema);
@@ -261,7 +263,7 @@ describe("deleting the session being viewed", () => {
 		try {
 			applySessionUpsert({ id: "ses_doomed", title: "Doomed", status: "idle" });
 			sessionState.currentId = "ses_doomed";
-			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
+			getOrCreateSessionSlot("ses_doomed");
 			expect(sessionActivity.has("ses_doomed")).toBe(true);
 
 			// The server deletes it. Deleting the last session leaves no other to
@@ -271,29 +273,11 @@ describe("deleting the session being viewed", () => {
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 
 			// An event that was already in flight when it went.
-			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
+			followSessionBusy("ses_doomed", false);
 			await vi.advanceTimersByTimeAsync(200);
 
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 			expect(sessionState.currentId).toBeNull();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-});
-
-describe("event routing for the session being viewed", () => {
-	it("routes events for the selected session before its row arrives", async () => {
-		vi.useFakeTimers();
-		try {
-			routerState.path = "/s/ses_new";
-			sessionState.currentId = "ses_new";
-			expect(sessionState.sessions.has("ses_new")).toBe(false);
-
-			handleMessage({ type: "thinking_stop", sessionId: "ses_new" });
-			await vi.advanceTimersByTimeAsync(200);
-
-			expect(sessionActivity.has("ses_new")).toBe(true);
 		} finally {
 			vi.useRealTimers();
 		}

@@ -8,13 +8,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
-import { projectLegacyRelayMessage } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
-import {
-	createMockRelayProtocolContext,
-	mockRelayWebSocket,
-	normalizeMockRelayMessage,
-} from "../helpers/ws-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -198,14 +193,12 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		let sendMockRelayMessage: ((msg: MockMessage) => void) | undefined;
+		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		const rpc = await mockWsRpc(page, {
 			handlers: {
 				ViewSession: (params) => {
 					if (params["sessionId"] === snapshot.childSession.id) {
-						for (const msg of childSwitchMessages) {
-							sendMockRelayMessage?.(msg);
-						}
+						void control.sendMessages(childSwitchMessages);
 					}
 					return { ok: true };
 				},
@@ -221,30 +214,9 @@ test.describe("Subagent navigation", () => {
 			})),
 		);
 
-		await page.routeWebSocket(/\/ws/, (ws) => {
-			const protocolContext = createMockRelayProtocolContext(
-				new URL(page.url()).pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null,
-			);
-			sendMockRelayMessage = (msg: MockMessage) => {
-				if (msg.type === "mock_transcript_snapshot") {
-					projectLegacyRelayMessage(page, msg);
-					return;
-				}
-				ws.send(
-					JSON.stringify(normalizeMockRelayMessage(msg, protocolContext)),
-				);
-			};
-			const url = ws.url();
-			const sessionParam = new URL(url).searchParams.get("session");
-
-			// Pick init messages based on the session query param
-			const msgs =
-				sessionParam === snapshot.childSession.id
-					? childInitMessages
-					: initMessages;
-			for (const msg of msgs) {
-				sendMockRelayMessage(msg);
-			}
+		control = await mockRelayWebSocket(page, {
+			initMessages: [...initMessages, ...childInitMessages],
+			responses: new Map(),
 		});
 
 		sendMockFamily(page, familyRows);

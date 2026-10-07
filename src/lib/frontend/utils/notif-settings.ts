@@ -1,5 +1,5 @@
 // Shared reader/writer for the notification toggle preferences stored in
-// localStorage. Used by both NotifSettings.svelte (UI) and ws.svelte.ts
+// localStorage. Used by both NotificationsSettingsTab.svelte and ws-notifications.ts
 // (trigger logic) so neither needs to import the other.
 
 export interface NotifSettings {

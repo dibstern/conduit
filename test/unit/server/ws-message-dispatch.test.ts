@@ -1,67 +1,15 @@
 import { seedSessions } from "../stores/session-fixtures.js";
-// Gap 1: handleToolContentResponse — tool_content message updates chat state
-//
-// Tests the handleMessage() dispatch for message types that previously had
-// zero test coverage.
+// Full tool content and input drafts arrive through RPC replies.
 
-import {
-	afterEach,
-	assert,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mocks (run before imports)
 
-const { showBannerMock, removeBannerMock, showToastMock } = vi.hoisted(() => {
-	const showBannerMock = vi.fn();
-	const removeBannerMock = vi.fn();
-	const showToastMock = vi.fn();
-
-	// Minimal WebSocket mock — connect() needs a constructor
-	class MockWebSocket {
-		static readonly OPEN = 1;
-		static readonly CLOSED = 3;
-		readyState = MockWebSocket.OPEN;
-		private listeners: Record<string, Array<(ev?: unknown) => void>> = {};
-
-		send(_data: string): void {}
-
-		addEventListener(event: string, fn: (ev?: unknown) => void): void {
-			if (!this.listeners[event]) this.listeners[event] = [];
-			const listeners = this.listeners[event];
-			assert.exists(listeners, "expected event listeners");
-			listeners.push(fn);
-		}
-
-		close(): void {
-			this.readyState = MockWebSocket.CLOSED;
-		}
-	}
-
-	Object.defineProperty(globalThis, "WebSocket", {
-		value: MockWebSocket,
-		writable: true,
-		configurable: true,
-	});
-
-	if (typeof globalThis.window === "undefined") {
-		Object.defineProperty(globalThis, "window", {
-			value: {
-				location: { protocol: "http:", host: "localhost:3000", pathname: "/" },
-				history: { pushState: () => {}, replaceState: () => {} },
-				addEventListener: () => {},
-			},
-			writable: true,
-			configurable: true,
-		});
-	}
-
-	return { showBannerMock, removeBannerMock, showToastMock };
-});
+const { showBannerMock, removeBannerMock, showToastMock } = vi.hoisted(() => ({
+	showBannerMock: vi.fn(),
+	removeBannerMock: vi.fn(),
+	showToastMock: vi.fn(),
+}));
 
 // Mock DOMPurify (required by chat.svelte.ts → markdown.ts)
 vi.mock("dompurify", () => ({
@@ -78,6 +26,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 import {
+	applyToolContentResponse,
 	chatState,
 	clearMessages,
 	inputSyncState,
@@ -89,8 +38,6 @@ import { applyInputDraft } from "../../../src/lib/frontend/stores/input-draft.js
 import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
-import { applyToolContentResponse } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -128,9 +75,7 @@ afterEach(() => {
 	inputSyncState.lastUpdated = 0;
 });
 
-// Gap 1: handleToolContentResponse (AC5)
-
-describe("handleToolContentResponse via handleMessage (AC5)", () => {
+describe("applyToolContentResponse", () => {
 	/** Helper: set up a tool message with truncated result */
 	function seedTruncatedTool(
 		toolId: string,
@@ -156,8 +101,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 	it("replaces truncated tool result with full content", () => {
 		seedTruncatedTool("tool-1", "bash");
 
-		handleMessage({
-			type: "tool_content",
+		applyToolContentResponse({
 			sessionId: "s1",
 			toolId: "tool-1",
 			content: "full output here — all 50,000 chars",
@@ -196,8 +140,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		seedTruncatedTool("tool-1", "bash");
 		const messagesBefore = chatState.messages.map((m) => ({ ...m }));
 
-		handleMessage({
-			type: "tool_content",
+		applyToolContentResponse({
 			sessionId: "s1",
 			toolId: "nonexistent-tool",
 			content: "should be ignored",
@@ -216,8 +159,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 	it("preserves other tool message fields when updating", () => {
 		seedTruncatedTool("tool-2", "file_read", { messageId: "msg-123" });
 
-		handleMessage({
-			type: "tool_content",
+		applyToolContentResponse({
 			sessionId: "s1",
 			toolId: "tool-2",
 			content: "full file contents",
@@ -241,8 +183,7 @@ describe("handleToolContentResponse via handleMessage (AC5)", () => {
 		seedTruncatedTool("tool-b", "grep");
 
 		// Only update tool-a
-		handleMessage({
-			type: "tool_content",
+		applyToolContentResponse({
 			sessionId: "s1",
 			toolId: "tool-a",
 			content: "full-a",

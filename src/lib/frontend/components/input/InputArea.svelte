@@ -53,7 +53,7 @@
 	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
+	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
@@ -687,6 +687,10 @@
 			projectSlug,
 			sessionId,
 			commandId: crypto.randomUUID(),
+		}).then(() => {
+			// An interrupt can end a turn the row never reported busy for, so
+			// nothing else would end it. A still-busy row ends it on idle.
+			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
 		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});

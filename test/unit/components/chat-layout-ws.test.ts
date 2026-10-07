@@ -101,35 +101,18 @@ vi.mock(
 // Mock all stores EXCEPT router.svelte.ts (which must be real to test
 // reactive dependencies on routerState.path).
 
-vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
-	// The real connect() calls getCurrentSessionId() which reads
-	// routerState.path. Our mock must replicate this read so the
-	// $effect registers routerState.path as a dependency when
-	// connect() is called outside untrack(). Without this, the
-	// mock connect is a no-op that never touches routerState.path,
-	// making the regression test vacuously pass.
-	const { getCurrentSessionId } = await import(
-		"../../../src/lib/frontend/stores/router.svelte.js"
-	);
-	return {
-		connect: vi.fn(() => {
-			getCurrentSessionId();
-		}),
-		disconnect: vi.fn(),
-		onProjectAttached: vi.fn((callback: (slug: string) => void) => {
-			wsLifecycleHarness.onAttachCallbacks.push(callback);
-			return () => {};
-		}),
-		setAttachedProject: vi.fn((slug: string) => {
-			wsLifecycleHarness.attachedSlugs.push(slug);
-		}),
-		onNavigateToSession: vi.fn(),
-		clearNavigateToSession: vi.fn(),
-		initSWMessageListener: vi.fn(),
-		reconcilePushActive: vi.fn(async () => {}),
-		wsSend: vi.fn(),
-	};
-});
+vi.mock("../../../src/lib/frontend/stores/ws-listeners.js", () => ({
+	onProjectAttached: vi.fn((callback: (slug: string) => void) => {
+		wsLifecycleHarness.onAttachCallbacks.push(callback);
+		return () => {};
+	}),
+}));
+vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
+	onNavigateToSession: vi.fn(),
+	clearNavigateToSession: vi.fn(),
+	initSWMessageListener: vi.fn(),
+	reconcilePushActive: vi.fn(async () => {}),
+}));
 
 vi.mock(
 	"../../../src/lib/frontend/transport/connection-status.svelte.js",
@@ -160,6 +143,9 @@ vi.mock("../../../src/lib/frontend/stores/input-draft.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
+	setAttachedProject: vi.fn((slug: string) => {
+		wsLifecycleHarness.attachedSlugs.push(slug);
+	}),
 	sessionState: {
 		currentId: null,
 		sessions: [],
@@ -259,7 +245,6 @@ vi.mock("../../../src/lib/frontend/stores/client-identity.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
-	interruptStream: vi.fn(),
 	disposeRuntime: vi.fn(),
 }));
 
@@ -316,11 +301,7 @@ import {
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import {
-	connect,
-	disconnect,
-	onProjectAttached,
-} from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { onProjectAttached } from "../../../src/lib/frontend/stores/ws-listeners.js";
 import {
 	attachProjectRpc,
 	resolveSessionRpc,
@@ -331,7 +312,7 @@ function attach(slug: string): void {
 	wsLifecycleHarness.onAttachCallbacks[0]?.(slug);
 }
 
-describe("ChatLayout WS lifecycle", () => {
+describe("ChatLayout RPC lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.stubGlobal(
@@ -375,13 +356,6 @@ describe("ChatLayout WS lifecycle", () => {
 		sessionViewState.compact = false;
 	});
 
-	it("connects once on mount", () => {
-		render(ChatLayout);
-
-		expect(connect).toHaveBeenCalledTimes(1);
-		expect(connect).toHaveBeenCalledWith();
-	});
-
 	it("does not toast when optional discovery RPCs fail after shell synchronization", async () => {
 		render(ChatLayout);
 
@@ -409,14 +383,12 @@ describe("ChatLayout WS lifecycle", () => {
 		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
-	it("keeps one connection when resolving a session within the attached project", async () => {
+	it("resolves a session within the attached project", async () => {
 		render(ChatLayout);
 		attach("test-project");
 		replaceRoute("/s/ses_abc123");
 		flushSync();
 		await tick();
-		expect(connect).toHaveBeenCalledTimes(1);
-		expect(disconnect).not.toHaveBeenCalled();
 		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "ses_abc123",
 			projectSlug: "test-project",
@@ -441,8 +413,6 @@ describe("ChatLayout WS lifecycle", () => {
 			"session-b",
 			"other-project",
 		);
-		expect(connect).not.toHaveBeenCalled();
-		expect(disconnect).not.toHaveBeenCalled();
 		expect(clearMessages).not.toHaveBeenCalled();
 		expect(attachSessionList).not.toHaveBeenCalled();
 		attach("other-project");
@@ -512,7 +482,6 @@ describe("ChatLayout WS lifecycle", () => {
 			),
 		);
 		expect(resolveSessionRpc).toHaveBeenCalledTimes(2);
-		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not resolve or select a session at the list front door", async () => {
@@ -651,8 +620,6 @@ describe("ChatLayout WS lifecycle", () => {
 			originId: "browser-client-1",
 		});
 		expect(switchToSession).not.toHaveBeenCalled();
-		expect(connect).toHaveBeenCalledTimes(1);
-		expect(disconnect).not.toHaveBeenCalled();
 	});
 
 	it("attaches the cold-load project from the AttachProject reply", async () => {
@@ -676,7 +643,6 @@ describe("ChatLayout WS lifecycle", () => {
 			projectSlug: "first-project",
 			originId: "browser-client-1",
 		});
-		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
 	it("cancels a pending project switch when navigating back to the attached project", async () => {
@@ -694,14 +660,11 @@ describe("ChatLayout WS lifecycle", () => {
 			projectSlug: "test-project",
 			originId: "browser-client-1",
 		});
-		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
-	it("disconnects on unmount", () => {
+	it("detaches the shell feed on unmount", () => {
 		const { unmount } = render(ChatLayout);
 		unmount();
 		expect(detachSessionList).toHaveBeenCalledTimes(1);
-		expect(disconnect).toHaveBeenCalledTimes(1);
-		expect(connect).toHaveBeenCalledTimes(1);
 	});
 });

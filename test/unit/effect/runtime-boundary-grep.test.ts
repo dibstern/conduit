@@ -159,11 +159,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		snippetPattern: /getOrCreateSessionMessages: empty sessionId/,
 		reason: "frontend session-store invariant",
 	},
-	{
-		path: "src/lib/frontend/stores/ws-dispatch.ts",
-		snippetPattern: /routePerSession: missing sessionId/,
-		reason: "dev-only frontend event-routing invariant",
-	},
 ];
 
 function tsFiles(dir: string): string[] {

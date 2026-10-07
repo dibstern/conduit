@@ -46,7 +46,6 @@ export function testActivity(sessionId?: string): SessionActivity {
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
 		renderTimer: null,
-		thinkingStartTime: 0,
 	};
 	sessionActivity.set(id, a);
 	return a;

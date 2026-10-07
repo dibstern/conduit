@@ -295,8 +295,8 @@ test.describe("Debug Panel — Console API", () => {
 
 		expect(snapshot.eventCount).toBeGreaterThan(0);
 
-		// Should have at least a "connect" event
+		// The RPC socket logs its connect.
 		const eventNames = snapshot.events.map((e: { event: string }) => e.event);
-		expect(eventNames).toContain("connect");
+		expect(eventNames).toContain("rpc:connect");
 	});
 });
