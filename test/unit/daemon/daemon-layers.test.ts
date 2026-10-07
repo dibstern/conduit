@@ -107,6 +107,8 @@ describe("daemon-layers", () => {
 						attach: () => () => {},
 						wsHandler: {},
 						rpcWsHandler: {},
+						syncGlobalSetting: () => Effect.void,
+						refreshGlobalDefaults: () => Effect.void,
 						stop: () => {},
 					} satisfies Relay),
 				),

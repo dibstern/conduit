@@ -138,6 +138,8 @@ const relayWithSnapshot = (
 	attach: () => () => {},
 	wsHandler: {},
 	rpcWsHandler: {},
+	syncGlobalSetting: () => Effect.void,
+	refreshGlobalDefaults: () => Effect.void,
 	getStatusSnapshot: () => snapshot,
 	stop: () => {},
 });

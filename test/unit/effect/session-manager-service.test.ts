@@ -247,6 +247,7 @@ function makeRelayConfig(configDir: string): ProjectRelayConfig {
 		projectDir: "/tmp/project",
 		slug: "project",
 		persistenceDbPath: tempEventsDbPath(),
+		publishGlobalSetting: () => Effect.void,
 		configDir,
 	};
 }
@@ -982,6 +983,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				persistenceDbPath: tempEventsDbPath(),
+				publishGlobalSetting: () => Effect.void,
 				configDir: tmpDir,
 			};
 			const api = makeMockOpenCodeAPI();

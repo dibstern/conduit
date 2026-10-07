@@ -21,6 +21,7 @@ import {
 	ConfigTag,
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,
@@ -38,6 +39,7 @@ import {
 function makeLayer(configDir: string) {
 	return Layer.mergeAll(
 		ProjectSettingsLive,
+		makeOverridesStateLive(),
 		Layer.succeed(LoggerTag, makeMockLogger() as Logger),
 		Layer.succeed(ConfigTag, makeMockConfig({ configDir })),
 	);

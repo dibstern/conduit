@@ -75,6 +75,7 @@ function makeTestLayer() {
 			projectDir: "/tmp/test",
 			slug: "test-project",
 			persistenceDbPath: tempEventsDbPath(),
+			publishGlobalSetting: () => Effect.void,
 		}),
 		Layer.succeed(
 			LoggerTag,

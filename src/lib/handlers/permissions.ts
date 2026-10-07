@@ -9,7 +9,7 @@ import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
-import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -19,7 +19,6 @@ import {
 } from "../domain/relay/Services/services.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
-	setDefaultPermissionMode,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
@@ -61,11 +60,7 @@ export const setDefaultPermissionModeForRelay = (input: {
 				),
 			catch: (cause) => new RelaySettingsSaveError({ cause }),
 		});
-		yield* setDefaultPermissionMode(input.mode);
-		yield* publishProjectSetting({
-			_tag: "defaultPermissionMode",
-			mode: input.mode,
-		});
+		yield* publishGlobalProjectSetting("defaultPermissionMode");
 		log.info(
 			`client=${input.clientId} Set default permission mode to: ${input.mode}`,
 		);

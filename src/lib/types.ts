@@ -184,6 +184,10 @@ export interface ProjectRelayConfig {
 	) => MaybePromise<DaemonSessionQueryResult>;
 	/** Notify browsers on other project relays that the daemon list changed. */
 	broadcastSessionListChanged?: () => Promise<void>;
+	/** Notify the daemon's other live relays; standalone relays use a no-op. */
+	publishGlobalSetting: (
+		tag: import("./contracts/ws-rpc.js").GlobalProjectSetting["_tag"],
+	) => import("effect").Effect.Effect<void>;
 	/** Refresh the daemon's cached git context before publishing a turn-end list. */
 	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */

@@ -41,6 +41,8 @@ function fakeRelay(
 		attach: () => () => {},
 		wsHandler: {},
 		rpcWsHandler: {} as Relay["rpcWsHandler"],
+		syncGlobalSetting: () => Effect.void,
+		refreshGlobalDefaults: () => Effect.void,
 		stop: () => {},
 		settleIdleSessions: sweep,
 	};

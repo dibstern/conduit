@@ -254,6 +254,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		configDir: persistenceDir,
 		slug: "test-project",
 		persistenceDbPath: join(persistenceDir, "events.db"),
+		publishGlobalSetting: () => Effect.void,
 		log: createSilentLogger(), // silence logs
 		noServer: true,
 		statusPollerInterval: 100,

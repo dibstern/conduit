@@ -9,7 +9,7 @@ import {
 	resolveClaudeInstanceConfigDir,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
-import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import {
 	type ClaudeSettingsChildRunner,
@@ -61,7 +61,7 @@ export const setClaudeSettingsForRelay = (input: {
 		});
 
 		const overrides = getClaudeSettingsOverrides(config.configDir);
-		yield* publishProjectSetting({ _tag: "claudeSettings", overrides });
+		yield* publishGlobalProjectSetting("claudeSettings");
 		log.info(
 			`client=${input.clientId} Claude settings overrides updated: ${Object.keys(overrides).length} keys`,
 		);

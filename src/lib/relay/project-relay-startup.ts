@@ -5,6 +5,7 @@ import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instanc
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
+import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
@@ -19,6 +20,7 @@ import { restoreSessionPermissionModes } from "../domain/relay/Services/session-
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { restoreSessionModelSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
+	type OverridesStateTag,
 	setContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
@@ -76,6 +78,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 	const { relayManagedRuntime } = layers;
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const projectSettingsContext = yield* Effect.context<
+			ProjectSettingsTag | OverridesStateTag | ConfigTag
+		>();
 		const api = yield* OpenCodeAPITag;
 		const translator = yield* TranslatorTag;
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -244,6 +249,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		return {
 			sql,
+			projectSettingsContext,
 			translator,
 			api,
 			wsHandler,
@@ -441,6 +447,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				} = services;
 				return {
 					sql,
+					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: (changedSessionId: string) => {

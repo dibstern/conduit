@@ -54,6 +54,8 @@ const makeStubRelayCache = (): RelayCache => ({
 			attach: () => () => {},
 			wsHandler: {},
 			rpcWsHandler: {},
+			syncGlobalSetting: () => Effect.void,
+			refreshGlobalDefaults: () => Effect.void,
 			stop: () => {},
 		}),
 	peek: () => Effect.succeed(Option.none()),

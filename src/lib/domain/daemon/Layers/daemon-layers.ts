@@ -428,6 +428,8 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
+						syncGlobalSetting: relay.syncGlobalSetting,
+						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.settleIdleSessions(idleWindowMs, now),
 						attach: (ws, options) => relay.wsHandler.attach(ws, options),

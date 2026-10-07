@@ -161,6 +161,8 @@ describe("WebSocketRelayRouterLive", () => {
 				attach: relay.attach,
 				wsHandler: {},
 				rpcWsHandler: relay.rpcWsHandler,
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
 				stop: vi.fn(),
 			}),
 		);
@@ -187,6 +189,8 @@ describe("WebSocketRelayRouterLive", () => {
 				attach: vi.fn(() => () => {}),
 				wsHandler: {},
 				rpcWsHandler: {},
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
 				stop: vi.fn(),
 			}),
 		);

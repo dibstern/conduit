@@ -177,6 +177,8 @@ describe("daemon RPC handlers", () => {
 					attach: () => () => {},
 					wsHandler: { broadcast: vi.fn() },
 					rpcWsHandler: {},
+					syncGlobalSetting: () => Effect.void,
+					refreshGlobalDefaults: () => Effect.void,
 					stop: vi.fn(),
 				}),
 			);

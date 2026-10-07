@@ -402,6 +402,14 @@ export const RelayFactoryLive = (
 									getProjects,
 									listDaemonSessions,
 									broadcastSessionListChanged,
+									publishGlobalSetting: (tag) =>
+										PubSub.publish(
+											eventBus,
+											DaemonEvent.GlobalSettingChanged({
+												originSlug: project.slug,
+												tag,
+											}),
+										).pipe(Effect.asVoid),
 									refreshSessionGit: async () => {
 										const git = await daemonSessionGitCache.refresh(
 											project.folders[0],

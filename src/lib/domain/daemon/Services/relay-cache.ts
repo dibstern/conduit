@@ -24,6 +24,7 @@ import {
 	ScopedRef,
 } from "effect";
 import type { WebSocket } from "ws";
+import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
 import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
@@ -42,6 +43,8 @@ export interface RelayStatusSnapshot {
 }
 
 export interface Relay {
+	syncGlobalSetting: (tag: GlobalProjectSetting["_tag"]) => Effect.Effect<void>;
+	refreshGlobalDefaults: () => Effect.Effect<void>;
 	settleIdleSessions?: (
 		idleWindowMs: number,
 		now: number,
@@ -174,6 +177,10 @@ export const makeRelayCacheService = (
 								return relay;
 							}),
 						);
+						// Startup may have read defaults before a global write. Once
+						// installed, broadcasts can reach this relay; refresh before
+						// allowing its first client to read the snapshot.
+						yield* relay.refreshGlobalDefaults();
 						return relay;
 					}),
 				).pipe(

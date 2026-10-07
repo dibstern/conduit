@@ -135,6 +135,7 @@ describe("createProjectRelay override-state defaults", () => {
 			slug: "test-default-overrides",
 			configDir,
 			persistenceDbPath: join(configDir, "events.db"),
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
 		const sseHealth = {
@@ -192,6 +193,7 @@ describe("createProjectRelay override-state defaults", () => {
 			slug: "test-default-agent-command",
 			configDir,
 			persistenceDbPath: join(configDir, "events.db"),
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
 
@@ -218,6 +220,7 @@ describe("createProjectRelay override-state defaults", () => {
 			slug: "test-no-opencode-startup",
 			configDir,
 			persistenceDbPath: join(configDir, "events.db"),
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 			statusPollerInterval: 60_000,
 			messagePollerInterval: 60_000,
@@ -237,6 +240,7 @@ describe("createProjectRelay override-state defaults", () => {
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
 			persistenceDbPath: join(tmpdir(), "conduit-aborted-relay.db"),
+			publishGlobalSetting: () => Effect.void,
 			signal: controller.signal,
 			log: createSilentLogger(),
 		});

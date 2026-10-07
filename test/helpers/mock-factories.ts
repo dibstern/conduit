@@ -294,6 +294,7 @@ function createMockConfig(): HandlerDeps["config"] {
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
+		publishGlobalSetting: () => Effect.void,
 	} satisfies HandlerDeps["config"];
 }
 
@@ -354,6 +355,8 @@ export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
 ): ProjectRelay {
 	return {
+		syncGlobalSetting: () => Effect.void,
+		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
 		wsHandler: partialFake<ProjectRelay["wsHandler"]>({
 			...createMockWsHandlerFull(),
@@ -855,6 +858,7 @@ export function makeMockConfig(
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
+		publishGlobalSetting: () => Effect.void,
 		...overrides,
 	} as unknown as ProjectRelayConfig;
 }

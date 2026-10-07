@@ -22,7 +22,11 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
-import { WsRpcError } from "../contracts/ws-rpc.js";
+import { type GlobalProjectSetting, WsRpcError } from "../contracts/ws-rpc.js";
+import {
+	refreshGlobalDefaults,
+	syncGlobalSetting,
+} from "../domain/relay/Services/project-settings.js";
 import type { SessionManagerError } from "../domain/relay/Services/session-manager-error.js";
 import {
 	type OverridesStateTag,
@@ -266,6 +270,9 @@ export class EffectRelayServer {
 
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
+	/** Reload a global setting without writing or echoing its notification. */
+	syncGlobalSetting(tag: GlobalProjectSetting["_tag"]): Effect.Effect<void>;
+	refreshGlobalDefaults(): Effect.Effect<void>;
 	settleIdleSessions(
 		idleWindowMs: number,
 		now: number,
@@ -603,6 +610,15 @@ export async function createProjectRelay(
 	}
 
 	return {
+		refreshGlobalDefaults: () =>
+			refreshGlobalDefaults.pipe(
+				Effect.asVoid,
+				Effect.provide(startup.projectSettingsContext),
+			),
+		syncGlobalSetting: (tag) =>
+			syncGlobalSetting(tag).pipe(
+				Effect.provide(startup.projectSettingsContext),
+			),
 		settleIdleSessions: (idleWindowMs, now) =>
 			settleIdleSessions(
 				{
@@ -781,6 +797,7 @@ export async function createRelayStack(
 				}),
 				log,
 				getProjects: getProjectList,
+				publishGlobalSetting: () => Effect.void,
 				saveProject: saveProjectRelay,
 				persistenceDbPath,
 				...(pushMgr != null && { pushManager: pushMgr }),
@@ -823,6 +840,7 @@ export async function createRelayStack(
 		log,
 		noServer: true,
 		getProjects: getProjectList,
+		publishGlobalSetting: () => Effect.void,
 		saveProject: saveProjectRelay,
 		...(pushMgr != null && { pushManager: pushMgr }),
 		...(config.configDir != null && { configDir: config.configDir }),

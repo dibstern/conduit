@@ -11,7 +11,7 @@ import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
 } from "../daemon/config-persistence.js";
-import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -34,8 +34,6 @@ import {
 	getVariant,
 	type ModelOverride,
 	type OverridesStateTag,
-	setDefaultModel,
-	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -43,6 +41,7 @@ import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import {
 	loadRelaySettings,
+	parseDefaultModel,
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
 import {
@@ -598,11 +597,11 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
-		yield* setDefaultModel(override);
 		yield* saveRelaySettingsEffect(
 			{ defaultModel: modelSpec },
 			config.configDir,
 		);
+		yield* publishGlobalProjectSetting("defaultModel");
 
 		// Mirror the default into OpenCode's project config, except Claude-harness
 		// ids: OpenCode can't resolve them, so every prompt sent without a model
@@ -618,14 +617,6 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 
 		const { variant: validVariant, variants: availableVariants } =
 			yield* savedVariantFor(override);
-		yield* setDefaultVariant(validVariant);
-
-		yield* publishProjectSetting({
-			_tag: "defaultModel",
-			model,
-			provider,
-			variant: validVariant,
-		});
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
 		return {
@@ -652,14 +643,12 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 		if (sessionId) {
 			yield* selectSessionVariant(sessionId, variant);
 			yield* applyLiveSessionSettings(sessionId);
-		} else {
-			yield* setDefaultVariant(variant);
 		}
 
 		// Resolve active model
 		const activeModel = sessionId
 			? yield* getModel(sessionId)
-			: yield* getDefaultModel();
+			: parseDefaultModel(loadRelaySettings(config.configDir).defaultModel);
 
 		// Persist variant preference
 		if (activeModel) {
@@ -670,16 +659,17 @@ export const switchVariantForSession = (input: SwitchVariantInput) =>
 			);
 		}
 
-		const availableVariants = yield* loadVariantsForModel(activeModel);
-		if (!sessionId) {
-			yield* publishProjectSetting({
-				_tag: "defaultModel",
-				...(activeModel
-					? { model: activeModel.modelID, provider: activeModel.providerID }
-					: {}),
-				variant,
-			});
+		// A session's saved preference also changes the global default variant
+		// when it uses the current default model.
+		if (
+			!sessionId ||
+			(activeModel &&
+				loadRelaySettings(config.configDir).defaultModel ===
+					`${activeModel.providerID}/${activeModel.modelID}`)
+		) {
+			yield* publishGlobalProjectSetting("defaultModel");
 		}
+		const availableVariants = yield* loadVariantsForModel(activeModel);
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched variant to: ${variant || "default"}`,
 		);

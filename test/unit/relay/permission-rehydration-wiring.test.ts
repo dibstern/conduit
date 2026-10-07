@@ -212,6 +212,7 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			configDir: persistenceDir,
 			slug: "test-perm-rehydrate",
 			persistenceDbPath: join(persistenceDir, "events.db"),
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
 

@@ -2035,6 +2035,17 @@ export const ProjectSettingSchema = Schema.Union(
 	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
+/** Persisted settings shared by all projects; live facts stay per relay. */
+export type GlobalProjectSetting = Extract<
+	ProjectSetting,
+	{
+		readonly _tag:
+			| "defaultModel"
+			| "defaultPermissionMode"
+			| "visibility"
+			| "claudeSettings";
+	}
+>;
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 

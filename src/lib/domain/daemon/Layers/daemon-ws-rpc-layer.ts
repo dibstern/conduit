@@ -117,6 +117,15 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) => {
+				if (event._tag === "GlobalSettingChanged")
+					return Effect.gen(function* () {
+						for (const project of yield* allProjects) {
+							if (project.slug === event.originSlug) continue;
+							const relay = yield* cache.peek(project.slug);
+							if (Option.isSome(relay))
+								yield* relay.value.syncGlobalSetting(event.tag);
+						}
+					}).pipe(Effect.provide(context));
 				if (event._tag === "DaemonSessionsChanged") sessionsRevision++;
 				const list =
 					event._tag === "RestartAvailabilityChanged" ||

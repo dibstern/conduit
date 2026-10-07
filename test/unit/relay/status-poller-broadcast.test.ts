@@ -258,6 +258,7 @@ async function createTestHarness(): Promise<TestHarness> {
 
 	const relay = await createProjectRelay({
 		persistenceDbPath: dbPath,
+		publishGlobalSetting: () => Effect.void,
 		httpServer: relayServer,
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
 		projectDir: process.cwd(),

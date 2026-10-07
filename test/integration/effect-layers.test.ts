@@ -63,6 +63,8 @@ const composedLayer = Layer.mergeAll(
 			attach: () => () => {},
 			wsHandler: {},
 			rpcWsHandler: {},
+			syncGlobalSetting: () => Effect.void,
+			refreshGlobalDefaults: () => Effect.void,
 			stop: () => {},
 		}),
 	),

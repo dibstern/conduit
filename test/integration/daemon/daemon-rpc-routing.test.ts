@@ -143,6 +143,8 @@ describe("daemon shared RPC routing", () => {
 							) => wsHandler.attach(ws, options),
 							wsHandler,
 							rpcWsHandler,
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							stop: async () => {
 								await wsHandler.drain();
 								await rpcWsHandler.drain();
@@ -444,6 +446,8 @@ describe("daemon shared RPC routing", () => {
 							attach: () => () => {},
 							wsHandler: {},
 							rpcWsHandler,
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							stop: async () => {
 								await rpcWsHandler.drain();
 								await runtime.dispose();

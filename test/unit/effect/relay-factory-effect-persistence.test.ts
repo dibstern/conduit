@@ -66,6 +66,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			mkdirSync(projectDir);
 			const server = createServer();
 			createProjectRelayMock.mockResolvedValue({
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
 				stop: vi.fn(async () => undefined),
 			});
 
@@ -130,6 +132,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			mkdirSync(projectDir);
 			const server = createServer();
 			createProjectRelayMock.mockResolvedValue({
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
 				stop: vi.fn(async () => undefined),
 			});
 
@@ -254,6 +258,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		mkdirSync(projectDir);
 		const server = createServer();
 		createProjectRelayMock.mockResolvedValue({
+			syncGlobalSetting: () => Effect.void,
+			refreshGlobalDefaults: () => Effect.void,
 			stop: vi.fn(async () => undefined),
 		});
 
@@ -382,6 +388,8 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			})),
 		};
 		createProjectRelayMock.mockResolvedValue({
+			syncGlobalSetting: () => Effect.void,
+			refreshGlobalDefaults: () => Effect.void,
 			stop: vi.fn(async () => undefined),
 		});
 
@@ -538,9 +546,13 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			const secondStop = vi.fn(async () => undefined);
 			createProjectRelayMock
 				.mockResolvedValueOnce({
+					syncGlobalSetting: () => Effect.void,
+					refreshGlobalDefaults: () => Effect.void,
 					stop: firstStop,
 				})
 				.mockResolvedValueOnce({
+					syncGlobalSetting: () => Effect.void,
+					refreshGlobalDefaults: () => Effect.void,
 					stop: secondStop,
 				});
 

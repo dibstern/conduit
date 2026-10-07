@@ -47,6 +47,8 @@ describe("Full Layer composition", () => {
 				attach: () => () => {},
 				wsHandler: {},
 				rpcWsHandler: {},
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
 				stop: () => {},
 			}),
 		),
