@@ -1,0 +1,25 @@
+{
+	"provisional": true,
+	"provisional_note": "PROVISIONAL: constructed from SDKControlGetUsageResponse in SDK 0.3.289 sdk.d.ts. Replace with the real usage control capture per ADR-0002.",
+	"session": {
+		"total_cost_usd": 0,
+		"total_api_duration_ms": 0,
+		"total_duration_ms": 0,
+		"total_lines_added": 0,
+		"total_lines_removed": 0,
+		"model_usage": {}
+	},
+	"subscription_type": "max",
+	"rate_limits_available": true,
+	"rate_limits": {
+		"five_hour": {
+			"utilization": 12,
+			"resets_at": "2026-10-08T04:00:00Z"
+		},
+		"seven_day": {
+			"utilization": 37,
+			"resets_at": "2026-10-12T04:00:00Z"
+		}
+	},
+	"behaviors": null
+}

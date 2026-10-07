@@ -30,8 +30,14 @@ import type {
 	WebSocketHandlerTag,
 } from "./services.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
-import { OverridesStateTag } from "./session-overrides-state.js";
+import {
+	clearProcessingTimeout,
+	OverridesStateTag,
+	PROCESSING_TIMEOUT_DURATION,
+	startProcessingTimeout,
+} from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
+import { makeFailTurn } from "./turn-failure.js";
 
 export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
 
@@ -40,6 +46,8 @@ export interface ProviderTurnServiceSendInput {
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly text: string;
+	/** Hidden resumption of the original request, with no new user message. */
+	readonly continuation?: { readonly cutOffMessageId: string };
 	readonly images?: readonly string[];
 	readonly model?: {
 		readonly providerID: string;
@@ -147,7 +155,29 @@ const makeProviderTurnService = Effect.gen(function* () {
 				Effect.zipRight(prepareTurnSession(input)),
 				Effect.provide(providedContext),
 			),
-		sendTurn: (input) => sendTurn(input).pipe(Effect.provide(providedContext)),
+		sendTurn: (input) =>
+			Effect.gen(function* () {
+				if (input.continuation) {
+					const failTurn = yield* makeFailTurn;
+					yield* startProcessingTimeout(
+						input.sessionId,
+						PROCESSING_TIMEOUT_DURATION,
+						() =>
+							failTurn(
+								input.sessionId,
+								"The continuation received no response. Try again.",
+								"PROCESSING_TIMEOUT",
+							),
+					);
+				}
+				yield* sendTurn(input).pipe(
+					Effect.onError(() =>
+						input.continuation
+							? clearProcessingTimeout(input.sessionId)
+							: Effect.void,
+					),
+				);
+			}).pipe(Effect.provide(providedContext)),
 		interruptTurn: (input) =>
 			Effect.gen(function* () {
 				const stop = yield* Deferred.make<void>();

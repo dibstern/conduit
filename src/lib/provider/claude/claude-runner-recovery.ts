@@ -94,6 +94,7 @@ export const recoverClaudeRunnerCommands = (
 									configDir: input.configDir,
 									agent: input.agent,
 									userMessageId: input.userMessageId,
+									continuation: input.continuation,
 									modelContextWindow:
 										input.contextWindow === "1m" ? 1000000 : undefined,
 								}).pipe(

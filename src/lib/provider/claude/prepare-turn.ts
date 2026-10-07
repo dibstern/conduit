@@ -18,6 +18,12 @@ export class HandoffTooLarge extends Data.TaggedError("HandoffTooLarge")<{
 	readonly budget: number;
 }> {}
 
+export class ContinuationNotReady extends Data.TaggedError(
+	"ContinuationNotReady",
+)<{
+	readonly reason: string;
+}> {}
+
 interface PrepareTurnOptions {
 	readonly liveSession?: ProviderNativeSession | undefined;
 	readonly configDir?: string | undefined;
@@ -25,6 +31,7 @@ interface PrepareTurnOptions {
 	readonly modelContextWindow?: number | undefined;
 	readonly agent?: string | undefined;
 	readonly userMessageId?: string | undefined;
+	readonly continuation?: boolean | undefined;
 }
 
 export interface PreparedTurn {
@@ -111,11 +118,19 @@ function planTurn(input: {
 	readonly messages?: readonly MessageWithParts[];
 	readonly userText: string;
 	readonly options: PrepareTurnOptions;
-}): PreparedTurn | HandoffTooLarge | { readonly _tag: "ReadHistory" } {
+}):
+	| PreparedTurn
+	| HandoffTooLarge
+	| ContinuationNotReady
+	| { readonly _tag: "ReadHistory" } {
 	const { nativeThread, options, userText } = input;
+	if (options.continuation && !input.limitRecovery?.cutOffMessageId)
+		return new ContinuationNotReady({
+			reason: "The cut-off request is no longer open.",
+		});
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
-		input.limitRecovery?.cutOffMessageId && userText
+		!options.continuation && input.limitRecovery?.cutOffMessageId && userText
 			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
 			: "";
 	const live = options.liveSession;
@@ -129,7 +144,9 @@ function planTurn(input: {
 			options.configDir ??
 			(sameLiveAccount ? live?.configDir : undefined) ??
 			nativeThread?.configDir,
-		prompt: `${note}${userText}`,
+		prompt: options.continuation
+			? "Continue where you left off."
+			: `${note}${userText}`,
 	};
 	// No recorded agent means a thread from before agents were recorded: resume it.
 	const matchingReceipt =
@@ -145,11 +162,17 @@ function planTurn(input: {
 		sameLiveAgent && live?.resumeSessionId !== nativeThread?.resumeSessionId
 			? live?.resumeSessionId
 			: undefined;
-	const resumeSessionId =
-		matchingReceipt?.resumeSessionId ?? liveResumeSessionId;
+	const resumeSessionId = options.continuation
+		? (nativeThread?.resumeSessionId ??
+			(sameLiveAccount ? live?.resumeSessionId : undefined))
+		: (matchingReceipt?.resumeSessionId ?? liveResumeSessionId);
+	if (options.continuation && !resumeSessionId)
+		return new ContinuationNotReady({
+			reason: "The cut-off request has no native session to resume.",
+		});
 	const requiresFreshSession =
 		sameLiveAccount && (!sameLiveAgent || !live?.resumeSessionId);
-	if (resumeSessionId && !requiresFreshSession) {
+	if (resumeSessionId && (options.continuation || !requiresFreshSession)) {
 		return {
 			...base,
 			nativeThread:
@@ -299,7 +322,11 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 					// text belongs only at the end of the SDK prompt, outside the handoff.
 					plan = planTurn({ ...input, messages });
 				}
-				if (plan instanceof HandoffTooLarge) return yield* plan;
+				if (
+					plan instanceof HandoffTooLarge ||
+					plan instanceof ContinuationNotReady
+				)
+					return yield* plan;
 				if ("_tag" in plan)
 					return yield* Effect.die("prepareTurn did not resolve history");
 				return plan;

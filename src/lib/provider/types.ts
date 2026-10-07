@@ -180,6 +180,8 @@ export interface SendTurnInput {
 	readonly commandId?: string;
 	/** Persisted user-message owner for process-runner failure events. */
 	readonly userMessageId?: string;
+	/** Resume an open cut-off with a hidden control prompt on its native thread. */
+	readonly continuation?: boolean;
 	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
 	readonly commandAttempt?: number;
 	readonly sessionId: string;

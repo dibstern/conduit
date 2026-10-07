@@ -392,6 +392,15 @@ export interface DismissCutOffRpcInput {
 	readonly originId?: string;
 }
 
+export interface ContinueSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly expectedInstanceId: string;
+	readonly at?: number;
+	readonly originId?: string;
+}
+
 export interface SwitchVariantRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -1241,6 +1250,17 @@ export async function dismissCutOffRpc(
 			client.DismissCutOff(input).pipe(Effect.asVoid),
 		),
 	);
+}
+
+export async function continueSessionRpc(
+	input: ContinueSessionRpcInput,
+): Promise<void> {
+	const result = await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.ContinueSession(input).pipe(Effect.asVoid, Effect.either),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
 }
 
 export async function switchVariantRpc(

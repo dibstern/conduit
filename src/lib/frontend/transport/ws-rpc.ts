@@ -6,6 +6,7 @@ export {
 	type ClaudeSettingsResponse,
 	ClosePty,
 	type CommandInfo,
+	ContinueSession,
 	CreatePty,
 	CreateSession,
 	type CreateSessionResponse,

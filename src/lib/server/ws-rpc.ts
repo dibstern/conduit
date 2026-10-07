@@ -46,6 +46,7 @@ export {
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
+	ContinueSession,
 	CreatePty,
 	CreateSession,
 	type CreateSessionResponse,

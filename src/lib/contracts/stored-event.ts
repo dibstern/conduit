@@ -1,4 +1,8 @@
 import { Schema } from "effect";
+import {
+	type ContinuationReason,
+	ContinuationReasonSchema,
+} from "./limit-recovery.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
 export type EventId = typeof EventId.Type;
@@ -73,6 +77,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.handoff_delivered",
 	"session.usage_limited",
 	"session.cut_off_dismissed",
+	"session.resumed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -425,6 +430,11 @@ export interface SessionCutOffDismissedPayload {
 	readonly cutOffMessageId: string;
 }
 
+export interface SessionResumedPayload {
+	readonly reason: ContinuationReason;
+	readonly instanceId: string;
+}
+
 /**
  * Everything the approval card shows rides the asked event: the approvals
  * subscription serves the card from the pending_approvals row, which keeps
@@ -514,6 +524,7 @@ export interface EventPayloadMap {
 	"session.handoff_delivered": SessionHandoffDeliveredPayload;
 	"session.usage_limited": SessionUsageLimitedPayload;
 	"session.cut_off_dismissed": SessionCutOffDismissedPayload;
+	"session.resumed": SessionResumedPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -967,6 +978,11 @@ const SessionCutOffDismissedPayloadSchema = Schema.Struct({
 	cutOffMessageId: Schema.String,
 });
 
+const SessionResumedPayloadSchema = Schema.Struct({
+	reason: ContinuationReasonSchema,
+	instanceId: Schema.String,
+});
+
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
@@ -1197,6 +1213,10 @@ const SessionCutOffDismissedEventSchema = eventEnvelope(
 	"session.cut_off_dismissed",
 	SessionCutOffDismissedPayloadSchema,
 );
+const SessionResumedEventSchema = eventEnvelope(
+	"session.resumed",
+	SessionResumedPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -1259,6 +1279,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionHandoffDeliveredEventSchema,
 	SessionUsageLimitedEventSchema,
 	SessionCutOffDismissedEventSchema,
+	SessionResumedEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,

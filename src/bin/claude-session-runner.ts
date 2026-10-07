@@ -44,6 +44,7 @@ import type {
 	ClaudeRunnerUpgradeState,
 } from "../lib/provider/claude/claude-runner-upgrade.js";
 import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
+import { loadClaudeSdkTestModule } from "../lib/provider/claude/claude-sdk-module.js";
 import { buildClaudeFlagSettings } from "../lib/provider/claude/claude-sdk-settings.js";
 import type {
 	ClaudeSessionFailure,
@@ -70,27 +71,13 @@ const main = Effect.gen(function* () {
 		return yield* Effect.die(
 			"Claude runner requires a socket path and parent IPC",
 		);
-	const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
 	let queryFactory: ClaudeSessionRunnerDeps["queryFactory"];
 	let subagentSdk: ClaudeSessionRunnerDeps["subagentSdk"];
 	let testSubagentPollTimeoutMs: number | undefined;
 	let settingsResolver: typeof sdkResolveSettings | undefined =
 		sdkResolveSettings;
-	if (process.env["NODE_ENV"] === "test" && testModule) {
-		const module = yield* Effect.tryPromise(
-			() =>
-				import(testModule) as Promise<{
-					claudeSdk: {
-						query: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]>;
-					};
-					claudeSubagentSdk?: ClaudeSessionRunnerDeps["subagentSdk"];
-					resolveSettings?: typeof sdkResolveSettings;
-				}>,
-		);
-		if (typeof module.claudeSdk?.query !== "function")
-			return yield* Effect.die(
-				"Process test module must export a Claude query factory",
-			);
+	const module = yield* loadClaudeSdkTestModule;
+	if (module) {
 		queryFactory = module.claudeSdk.query;
 		subagentSdk = module.claudeSubagentSdk;
 		const pollTimeout = Number(

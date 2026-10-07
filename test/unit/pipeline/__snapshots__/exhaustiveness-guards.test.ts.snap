@@ -27,6 +27,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.provider_cleanup_failed",
   "session.read",
   "session.renamed",
+  "session.resumed",
   "session.settled",
   "session.snoozed",
   "session.status",

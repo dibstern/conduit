@@ -390,6 +390,7 @@ export class ProviderSideEffectReactor {
 									configDir: payload.configDir,
 									agent: payload.agent,
 									userMessageId: payload.userMessageId,
+									continuation: payload.continuation,
 									modelContextWindow:
 										payload.contextWindow === "1m" ? 1000000 : undefined,
 								}).pipe(

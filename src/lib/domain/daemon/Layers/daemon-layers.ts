@@ -114,6 +114,7 @@ import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
+import { QuotaCheckLive } from "./quota-check-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -772,7 +773,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(withOpenCodeInstances),
+		Layer.provideMerge(
+			QuotaCheckLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
+		),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(

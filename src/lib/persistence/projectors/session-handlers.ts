@@ -105,6 +105,7 @@ type SessionHandledType =
 	| "session.goal_changed"
 	| "session.usage_limited"
 	| "session.cut_off_dismissed"
+	| "session.resumed"
 	| "turn.completed"
 	| "turn.error"
 	| "permission.asked"
@@ -409,6 +410,12 @@ export const sessionHandlers: {
 		{
 			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.cutOffMessageId'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.cutOffMessageId') = ?",
 			params: [event.createdAt, event.sessionId, event.data.cutOffMessageId],
+		},
+	],
+	"session.resumed": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = json_set(limit_recovery, '$.continued', json('true')), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
+			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
 	],
 

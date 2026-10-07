@@ -406,9 +406,11 @@ const prepareEngineTurnInput = (
 			);
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
-		const userMessageId = isClaudeDriver(driver) ? randomUUID() : undefined;
+		const userMessageId = isClaudeDriver(driver)
+			? (resolvedInput.continuation?.cutOffMessageId ?? randomUUID())
+			: undefined;
 
-		yield* isClaudeDriver(driver)
+		yield* isClaudeDriver(driver) && !resolvedInput.continuation
 			? maybePersistClaudeUserMessage({
 					sessionId: resolvedInput.sessionId,
 					text: resolvedInput.text,
@@ -442,6 +444,7 @@ const prepareEngineTurnInput = (
 			turnId: randomUUID(),
 			...(userMessageId ? { userMessageId } : {}),
 			prompt: resolvedInput.text,
+			...(resolvedInput.continuation ? { continuation: true } : {}),
 			history: [],
 			providerState,
 			instanceId: providerId,

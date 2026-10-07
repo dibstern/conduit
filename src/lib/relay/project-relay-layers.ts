@@ -2,11 +2,19 @@ import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, ManagedRuntime, Option, Stream } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveConfiguredInstances,
+} from "../daemon/config-persistence.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
 import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeQuotaCheck,
+	QuotaCheckTag,
+} from "../domain/daemon/Services/quota-check.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -73,6 +81,7 @@ import {
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
+import { makeClaudeUsageProbe } from "../provider/claude/claude-usage-probe.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
@@ -207,6 +216,36 @@ export function createProjectRelayLayers({
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
+	const sharedQuotaCheck = config.quotaCheck;
+	const quotaCheckLayer = sharedQuotaCheck
+		? Layer.sync(QuotaCheckTag, () => sharedQuotaCheck)
+		: Layer.scoped(
+				QuotaCheckTag,
+				makeQuotaCheck({
+					instances: Effect.sync(() => {
+						const saved = loadDaemonConfig(config.configDir);
+						return saved
+							? resolveConfiguredInstances(saved)
+									.filter((instance) => instance.driver === "claude")
+									.map((instance) => {
+										const configDir =
+											instance.configDir ?? saved.claudeConfigDir;
+										return {
+											id: instance.id,
+											...(configDir === undefined ? {} : { configDir }),
+										};
+									})
+							: [{ id: "claude" }];
+					}),
+					probe: makeClaudeUsageProbe({
+						queryFactory: claudeSdk.query,
+						cwd: config.projectDir,
+						...(config.shellEnv
+							? { shellEnv: config.shellEnv(config.projectDir) }
+							: {}),
+					}),
+				}),
+			);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
@@ -370,6 +409,7 @@ export function createProjectRelayLayers({
 	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
+		quotaCheckLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
 		openCodeApiLayer,

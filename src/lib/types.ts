@@ -151,6 +151,8 @@ export interface ProjectRelayConfig {
 	opencodeAuth?: { username: string; password: string };
 	/** Daemon-owned OpenCode Instances module shared by project relays. */
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
+	/** Fresh quota decisions shared by every relay in this daemon. */
+	quotaCheck?: import("./domain/daemon/Services/quota-check.js").QuotaCheck;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;
 	/** Project working directory */

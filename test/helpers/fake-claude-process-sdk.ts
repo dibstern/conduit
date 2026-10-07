@@ -10,6 +10,8 @@ import { dirname, join } from "node:path";
 import type {
 	ResolvedSettings,
 	ResolveSettingsOptions,
+	SDKControlGetUsageResponse,
+	SDKControlInitializeResponse,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -30,8 +32,20 @@ import {
 	provisionalRejectedLimit,
 	provisionalUsageLimitTurn,
 } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
+import {
+	provisionalRejectedLimitWithoutReset,
+	provisionalUsageLimitTurnWithoutReset,
+} from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn-no-reset.js";
+
+type QuotaBehavior = "available" | "limited" | "fail" | "hang" | "unavailable";
 
 export type ProcessMark =
+	| {
+			kind: "usage-probe";
+			configDir: string | undefined;
+			queryId: string;
+			behavior: QuotaBehavior;
+	  }
 	| {
 			kind: "mcp-tools";
 			prompt: string;
@@ -428,36 +442,51 @@ function query(params: {
 	});
 	// Like the SDK, query construction starts initialization without input. The
 	// public system/init message remains a first-prompt event, not readiness.
-	const initialization = new Promise<Record<string, never>>((done, fail) => {
-		rejectInitialization = fail;
-		if (holdNext)
-			mark({
-				kind: "initialization-held",
-				queryId,
-				at: process.hrtime.bigint().toString(),
-			});
-		const finish = () => {
-			if (initializationFinished) return;
-			if (
-				holdNext &&
-				proof &&
-				!existsSync(join(dirname(proof), "release-held-initialization"))
-			) {
-				initializationTimer = setTimeout(finish, 20);
-				return;
-			}
-			initializationFinished = true;
-			mark({
-				kind: fails ? "initialization-failed" : "initialization-ready",
-				queryId,
-				at: process.hrtime.bigint().toString(),
-			});
-			if (fails) fail(new Error("Synthetic Claude initialization failure"));
-			else done({});
-		};
-		if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
-		else finish();
-	});
+	const initialization = new Promise<SDKControlInitializeResponse>(
+		(done, fail) => {
+			rejectInitialization = fail;
+			if (holdNext)
+				mark({
+					kind: "initialization-held",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+			const finish = () => {
+				if (initializationFinished) return;
+				if (
+					holdNext &&
+					proof &&
+					!existsSync(join(dirname(proof), "release-held-initialization"))
+				) {
+					initializationTimer = setTimeout(finish, 20);
+					return;
+				}
+				initializationFinished = true;
+				mark({
+					kind: fails ? "initialization-failed" : "initialization-ready",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				if (fails) fail(new Error("Synthetic Claude initialization failure"));
+				else
+					done({
+						commands: [],
+						agents: [],
+						models: [],
+						output_style: "default",
+						available_output_styles: ["default"],
+						account: {
+							email: "process-test@example.test",
+							subscriptionType: "max",
+							tokenSource: "oauth",
+							apiProvider: "firstParty",
+						},
+					});
+			};
+			if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
+			else finish();
+		},
+	);
 	// A caller may attach the readiness barrier on the next tick.
 	void initialization.catch(() => {});
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
@@ -646,7 +675,10 @@ function query(params: {
 				}
 			}
 			if (request.startsWith("usage-limit-account-1")) {
-				const fixture = provisionalUsageLimitTurn(sessionId, input);
+				const noReset = request.startsWith("usage-limit-account-1-no-reset");
+				const fixture = noReset
+					? provisionalUsageLimitTurnWithoutReset(sessionId, input)
+					: provisionalUsageLimitTurn(sessionId, input);
 				if (proof)
 					writeFileSync(
 						join(dirname(proof), `provisional-limit-native-${sessionId}.json`),
@@ -661,8 +693,34 @@ function query(params: {
 					if (closed) return;
 				}
 				for (let repeat = 0; repeat < 4; repeat++)
-					yield provisionalRejectedLimit(sessionId);
+					yield noReset
+						? provisionalRejectedLimitWithoutReset(sessionId)
+						: provisionalRejectedLimit(sessionId);
 				mark({ kind: "usage-limit", phase: "repeated", sessionId, prompt });
+				continue;
+			}
+			if (
+				request === "Continue where you left off." &&
+				proof &&
+				existsSync(join(dirname(proof), "hold-continuation"))
+			) {
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-continuation")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
+			if (
+				request === "Continue where you left off." &&
+				proof &&
+				existsSync(join(dirname(proof), "limit-continuation"))
+			) {
+				yield provisionalRejectedLimitWithoutReset(sessionId);
+				const fixture = provisionalUsageLimitTurnWithoutReset(sessionId, input);
+				yield* fixture.events.filter((event) => event.type === "result");
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
 				continue;
 			}
 			const messageId = randomUUID();
@@ -1153,6 +1211,56 @@ function query(params: {
 			return: () => messages.return(undefined),
 		}),
 		initializationResult: () => initialization,
+		usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
+			async (): Promise<SDKControlGetUsageResponse> => {
+				const configDir =
+					params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+					process.env["CLAUDE_CONFIG_DIR"];
+				const marker = configDir
+					? join(configDir, "conduit-test-quota")
+					: undefined;
+				const selected =
+					marker && existsSync(marker)
+						? readFileSync(marker, "utf8").trim()
+						: "available";
+				const behavior: QuotaBehavior =
+					selected === "limited" ||
+					selected === "fail" ||
+					selected === "hang" ||
+					selected === "unavailable"
+						? selected
+						: "available";
+				mark({ kind: "usage-probe", configDir, queryId, behavior });
+				if (behavior === "unavailable")
+					throw new Error("Not logged in. Please run /login");
+				if (behavior === "fail")
+					throw new Error("Synthetic usage control failure");
+				if (behavior === "hang") {
+					while (!closed && !params.options?.abortController?.signal.aborted)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					throw new Error("Usage control query closed");
+				}
+				return {
+					session: {
+						total_cost_usd: 0,
+						total_api_duration_ms: 0,
+						total_duration_ms: 0,
+						total_lines_added: 0,
+						total_lines_removed: 0,
+						model_usage: {},
+					},
+					subscription_type: "max",
+					rate_limits_available: true,
+					rate_limits: {
+						five_hour: { utilization: 12, resets_at: null },
+						seven_day: {
+							utilization: behavior === "limited" ? 100 : 37,
+							resets_at: null,
+						},
+					},
+					behaviors: null,
+				};
+			},
 		close: () => {
 			if (closed) return;
 			closed = true;

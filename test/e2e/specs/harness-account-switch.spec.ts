@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -291,6 +291,308 @@ for (const dismiss of [false, true]) {
 			}
 		},
 	);
+}
+
+// Failures: retry adds a user bubble, loses the native resume ID, caches a
+// refusal, blocks on an inconclusive probe, appends events before a gate, or
+// ignores a fresh limit before the resumed turn produces a reply.
+for (const decision of [
+	"available",
+	"relapsed",
+	"fail",
+	"hang",
+	"limited",
+	"unavailable",
+	"busy",
+	"stale",
+	"scheduled",
+] as const) {
+	test(`Try again through RPC: ${decision}`, async ({ harness }, testInfo) => {
+		test.setTimeout(120_000);
+		const artifacts = resolve(
+			"test-results/account-switch",
+			`${testInfo.project.name}-continue-${decision}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		const browser = await harness.connect();
+		const configDir = mkdtempSync(join(harness.root, "retry-account-"));
+		const { addedInstanceId } = await Effect.runPromise(
+			browser.rpc.AddInstance({
+				name: "Retry account",
+				driver: "claude",
+				configDir,
+			}),
+		);
+		if (!addedInstanceId) throw new Error("No retry account ID");
+		const instanceId = Schema.decodeUnknownSync(
+			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+		)(addedInstanceId);
+		const directory = mkdtempSync(join(harness.root, "retry-project-"));
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+		);
+		if (!projectSlug) throw new Error("No retry project slug");
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				originId: browser.originId,
+				instanceId,
+				model: { modelId: "harness", providerId: "claude" },
+			}),
+		);
+		const observed: { sequence: number; session: SessionInfo }[] = [];
+		const subscription = Effect.runFork(
+			Stream.runForEach(
+				browser.rpc.SubscribeShell({ projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
+			),
+		);
+		const snapshot = () =>
+			Effect.runPromise(
+				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+					Stream.take(1),
+					Stream.runCollect,
+					Effect.map((envelopes) => Array.from(envelopes)[0]),
+				),
+			);
+		const latest = () =>
+			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
+		const cutOffText =
+			"usage-limit-account-1-no-reset: finish the original request";
+		const evidence: Record<string, unknown> = {};
+		try {
+			// Release background duplicates before taking stable gate snapshots.
+			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+			await Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug,
+					sessionId,
+					text: cutOffText,
+					commandId: `cut-off-${decision}`,
+					originId: browser.originId,
+				}),
+			);
+			await expect
+				.poll(() => latest()?.limitRecovery)
+				.toEqual({
+					instanceId,
+					rateLimitType: "seven_day",
+					cutOffMessageId: expect.any(String),
+					rearms: 0,
+					continued: false,
+				});
+			await expect.poll(() => latest()?.status).toBe("idle");
+			const cutOffMessageId = latest()?.limitRecovery?.cutOffMessageId;
+			if (!cutOffMessageId) throw new Error("No open cut-off");
+			await expect
+				.poll(() =>
+					harness.marks.some(
+						(mark) => mark.kind === "usage-limit" && mark.phase === "repeated",
+					),
+				)
+				.toBe(true);
+			const native = harness.marks.find(
+				(mark) => mark.kind === "usage-limit" && mark.phase === "limited",
+			);
+			if (native?.kind !== "usage-limit")
+				throw new Error("No native cut-off session");
+			if (decision === "busy") {
+				await Effect.runPromise(
+					browser.rpc.SendMessage({
+						projectSlug,
+						sessionId,
+						text: "upgrade-long-turn",
+						commandId: "held-turn",
+						originId: browser.originId,
+					}),
+				);
+				await expect.poll(() => latest()?.status).toBe("busy");
+				await expect
+					.poll(() =>
+						harness.marks.some(
+							(mark) =>
+								mark.kind === "emit" &&
+								mark.prompt.endsWith("upgrade-long-turn"),
+						),
+					)
+					.toBe(true);
+				const heldDelta = harness.marks.find(
+					(mark) =>
+						mark.kind === "emit" && mark.prompt.endsWith("upgrade-long-turn"),
+				);
+				if (heldDelta?.kind !== "emit") throw new Error("No held turn delta");
+				// Its first delta must be committed before comparing gate snapshots.
+				await expect
+					.poll(async () =>
+						JSON.stringify(
+							(
+								await Effect.runPromise(
+									browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+								)
+							).messages,
+						),
+					)
+					.toContain(heldDelta.text);
+			}
+			writeFileSync(
+				join(configDir, "conduit-test-quota"),
+				["fail", "hang", "limited", "unavailable"].includes(decision)
+					? decision
+					: "available",
+			);
+			writeFileSync(join(harness.root, "hold-continuation"), "hold");
+			if (decision === "relapsed")
+				writeFileSync(join(harness.root, "limit-continuation"), "limit");
+			const before = await snapshot();
+			const started = Date.now();
+			const result = await Effect.runPromise(
+				browser.rpc
+					.ContinueSession({
+						projectSlug,
+						sessionId,
+						instanceId,
+						expectedInstanceId:
+							decision === "stale" ? "stale-account" : instanceId,
+						...(decision === "scheduled" ? { at: Date.now() + 60_000 } : {}),
+						originId: browser.originId,
+					})
+					.pipe(Effect.either),
+			);
+			evidence["before"] = before;
+			evidence["result"] = result;
+			evidence["elapsedMs"] = Date.now() - started;
+			if (!["busy", "stale", "scheduled", "unavailable"].includes(decision))
+				await expect
+					.poll(() =>
+						harness.marks.find(
+							(mark) =>
+								mark.kind === "usage-probe" && mark.configDir === configDir,
+						),
+					)
+					.toMatchObject({
+						behavior: ["fail", "hang", "limited"].includes(decision)
+							? decision
+							: "available",
+					});
+			const refusal = {
+				limited: "AccountUnavailable",
+				unavailable: "AccountUnavailable",
+				busy: "SessionBusy",
+				stale: "StaleSwitch",
+				scheduled: "WsRpcError",
+			};
+			if (decision in refusal) {
+				expect(result._tag).toBe("Left");
+				if (result._tag !== "Left") throw new Error("Expected refusal");
+				expect(result.left._tag).toBe(
+					refusal[decision as keyof typeof refusal],
+				);
+				const after = await snapshot();
+				expect(after).toEqual(before);
+				evidence["after"] = after;
+				expect(
+					harness
+						.claudeOptions()
+						.some((call) => call.prompt === "Continue where you left off."),
+				).toBe(false);
+			} else {
+				expect(result._tag).toBe("Right");
+				if (decision === "hang")
+					expect(Date.now() - started).toBeGreaterThanOrEqual(4_900);
+				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(true);
+				expect(latest()?.limitRecovery?.cutOffMessageId).toBe(cutOffMessageId);
+				await expect
+					.poll(() =>
+						harness
+							.claudeOptions()
+							.find((call) => call.prompt === "Continue where you left off."),
+					)
+					.toMatchObject({ configDir });
+				await expect
+					.poll(() =>
+						harness.marks.find(
+							(mark) =>
+								mark.kind === "enqueue" &&
+								mark.prompt === "Continue where you left off.",
+						),
+					)
+					.toBeDefined();
+				const resumed = harness.marks.find(
+					(mark) =>
+						mark.kind === "enqueue" &&
+						mark.prompt === "Continue where you left off.",
+				);
+				if (resumed?.kind !== "enqueue")
+					throw new Error("No continuation query enqueue");
+				const query = harness.marks.find(
+					(mark) => mark.kind === "query" && mark.queryId === resumed.queryId,
+				);
+				expect(query).toMatchObject({ sessionId: native.sessionId });
+				const resumeId = harness
+					.claudeOptions()
+					.find(
+						(call) => call.prompt === "Continue where you left off.",
+					)?.resumeId;
+				// A live query keeps its native ID without another SDK resume launch.
+				if (resumeId != null) expect(resumeId).toBe(native.sessionId);
+				evidence["nativeQuery"] = query;
+				const history = await Effect.runPromise(
+					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				);
+				evidence["historyBeforeReply"] = history;
+				expect(
+					JSON.stringify(
+						history.messages.filter((message) => message.role === "user"),
+					),
+				).not.toContain("Continue where you left off.");
+				evidence["continued"] = await snapshot();
+				writeFileSync(join(harness.root, "release-continuation"), "release");
+				if (decision === "relapsed")
+					await expect
+						.poll(() => latest()?.limitRecovery)
+						.toEqual({
+							instanceId,
+							rateLimitType: "seven_day",
+							cutOffMessageId,
+							rearms: 0,
+							continued: false,
+						});
+				else await expect.poll(() => latest()?.limitRecovery).toBeNull();
+				await expect.poll(() => latest()?.status).toBe("idle");
+				evidence["afterReply"] = await snapshot();
+			}
+		} finally {
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			writeFileSync(join(harness.root, "release-continuation"), "release");
+			writeFileSync(
+				join(artifacts, "continuation-rpc.json"),
+				JSON.stringify(evidence, null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "sdk-calls.json"),
+				JSON.stringify(harness.claudeOptions(), null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "sdk-marks.json"),
+				JSON.stringify(harness.marks, null, 2),
+			);
+			writeFileSync(
+				join(artifacts, "client-session-rows.json"),
+				JSON.stringify(observed, null, 2),
+			);
+			await Effect.runPromise(Fiber.interrupt(subscription));
+		}
+	});
 }
 
 test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh native session", async ({

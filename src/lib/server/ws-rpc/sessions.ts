@@ -1,4 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import {
+	type ContinuationError,
+	ContinuationErrorSchema,
+} from "../../contracts/limit-recovery.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
@@ -171,6 +175,27 @@ export const sessionsHandlers = {
 		).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catchAll(mapRpcFailure("DismissCutOff")),
+		),
+	ContinueSession: (request) =>
+		Effect.gen(function* () {
+			if (request.at !== undefined)
+				return yield* new WsRpcError({
+					message: "Scheduled continuation is not supported yet.",
+				});
+			const continuation = yield* ContinuationTag;
+			yield* continuation.requestContinuation(request.sessionId, {
+				instanceId: request.instanceId,
+				expectedInstanceId: request.expectedInstanceId,
+				reason: "user",
+			});
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WsRpcError | ContinuationError> =>
+					Schema.is(ContinuationErrorSchema)(error)
+						? Effect.fail(error)
+						: mapRpcFailure("ContinueSession")(error),
+			),
 		),
 	UnsnoozeSession: (request) =>
 		unsnoozeSessionForClient({
@@ -379,6 +404,7 @@ export const sessionsHandlers = {
 	| "SnoozeSession"
 	| "UnsnoozeSession"
 	| "DismissCutOff"
+	| "ContinueSession"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
 	| "MarkSessionSeen"

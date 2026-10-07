@@ -20,15 +20,68 @@ import type {
 	PromptQueueController,
 	Query,
 	Options as SDKOptions,
+	SDKUserMessage,
 } from "./types.js";
 
-export interface WarmedClaudeQuery {
-	readonly query: Query;
+export interface EmptyClaudeQuery<Q extends { close(): void }> {
+	readonly query: Q;
 	readonly promptQueue: PromptQueueController;
 	readonly options: SDKOptions;
 	readonly abortController: AbortController;
+}
+
+export interface WarmedClaudeQuery extends EmptyClaudeQuery<Query> {
 	bindContext(context: ClaudeSessionContext): void;
 }
+
+/** Shared idle launch path: no prompt is enqueued until a real turn adopts it. */
+export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
+	queryFactory: (params: {
+		prompt: AsyncIterable<SDKUserMessage>;
+		options?: SDKOptions;
+	}) => Q,
+	makeOptions: (abortController: AbortController) => SDKOptions,
+	prepareQuery?: () => Promise<void>,
+): Effect.Effect<EmptyClaudeQuery<Q>, ClaudeAdapterError> =>
+	Effect.gen(function* () {
+		if (prepareQuery)
+			yield* Effect.tryPromise({
+				try: prepareQuery,
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "prepareQuery", cause }),
+			});
+		const promptQueue = yield* makeEffectPromptQueue();
+		const abortController = new AbortController();
+		return yield* Effect.try({
+			try: () => {
+				const options = makeOptions(abortController);
+				return {
+					promptQueue,
+					abortController,
+					options,
+					query: queryFactory({ prompt: promptQueue, options }),
+				};
+			},
+			catch: (cause) =>
+				new ClaudeBoundaryError({ operation: "preWarm", cause }),
+		}).pipe(
+			Effect.onError(() =>
+				promptQueue
+					.close()
+					.pipe(Effect.andThen(Effect.sync(() => abortController.abort()))),
+			),
+		);
+	});
+
+export const closeClaudeEmptyQuery = <Q extends { close(): void }>(
+	resource: EmptyClaudeQuery<Q>,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		// A stopped SDK iterator can already have shut down its queue.
+		yield* Effect.exit(resource.promptQueue.close());
+		resource.abortController.abort();
+		yield* Effect.try(() => resource.query.close()).pipe(Effect.ignore);
+	});
 
 interface PendingWarmedQuery {
 	readonly resource: WarmedClaudeQuery;
@@ -127,14 +180,7 @@ export const makeClaudeWarmedQueryOwner = (
 		const pending = new Map<string, PendingWarmedQuery>();
 		let closing = false;
 		const close = (entry: PendingWarmedQuery) =>
-			Effect.gen(function* () {
-				// A stopped SDK iterator can already have shut down its queue.
-				yield* Effect.exit(entry.resource.promptQueue.close());
-				entry.resource.abortController.abort();
-				yield* Effect.try(() => entry.resource.query.close()).pipe(
-					Effect.ignore,
-				);
-			});
+			closeClaudeEmptyQuery(entry.resource);
 		const discardEntry = (sessionId: string, entry: PendingWarmedQuery) =>
 			Effect.gen(function* () {
 				if (pending.get(sessionId) !== entry) return;
@@ -168,17 +214,6 @@ export const makeClaudeWarmedQueryOwner = (
 								);
 							const existing = pending.get(input.sessionId);
 							if (existing) return existing;
-							if (prepareQuery)
-								yield* Effect.tryPromise({
-									try: prepareQuery,
-									catch: (cause) =>
-										new ClaudeBoundaryError({
-											operation: "prepareQuery",
-											cause,
-										}),
-								});
-							const promptQueue = yield* makeEffectPromptQueue();
-							const abortController = new AbortController();
 							let inheritedSettings: string | undefined;
 							let context: ClaudeSessionContext | undefined;
 							const canUseTool: CanUseTool = async (...args) =>
@@ -188,8 +223,9 @@ export const makeClaudeWarmedQueryOwner = (
 											behavior: "deny",
 											message: "Claude session is not ready",
 										};
-							const resource = yield* Effect.try({
-								try: () => {
+							const empty = yield* makeClaudeEmptyQuery(
+								queryFactory,
+								(abortController) => {
 									const options = buildClaudeQueryOptions(
 										input,
 										abortController,
@@ -198,29 +234,16 @@ export const makeClaudeWarmedQueryOwner = (
 										shellEnv,
 									);
 									inheritedSettings = inheritedSettingsFingerprint(options);
-									return {
-										promptQueue,
-										abortController,
-										options,
-										query: queryFactory({ prompt: promptQueue, options }),
-										bindContext: (ctx: ClaudeSessionContext) => {
-											context = ctx;
-										},
-									};
+									return options;
 								},
-								catch: (cause) =>
-									new ClaudeBoundaryError({ operation: "preWarm", cause }),
-							}).pipe(
-								Effect.onError(() =>
-									promptQueue
-										.close()
-										.pipe(
-											Effect.andThen(
-												Effect.sync(() => abortController.abort()),
-											),
-										),
-								),
+								prepareQuery,
 							);
+							const resource: WarmedClaudeQuery = {
+								...empty,
+								bindContext: (ctx) => {
+									context = ctx;
+								},
+							};
 							const created: PendingWarmedQuery = {
 								resource,
 								inheritedSettings,

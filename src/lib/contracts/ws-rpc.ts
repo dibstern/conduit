@@ -21,6 +21,7 @@ import {
 	ClaudeSettingsTrustBoundaryError,
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
+import { ContinuationErrorSchema } from "./limit-recovery.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 import { StoredEventSchema } from "./stored-event.js";
 
@@ -1338,6 +1339,22 @@ export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
 	},
 ) {}
 
+export class ContinueSession extends Schema.TaggedRequest<ContinueSession>()(
+	"ContinueSession",
+	{
+		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			expectedInstanceId: NonEmptyString,
+			at: Schema.optional(Schema.Number),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
 	"UnsnoozeSession",
 	{
@@ -1794,6 +1811,7 @@ export const WsRpcRequest = Schema.Union(
 	SnoozeSession,
 	UnsnoozeSession,
 	DismissCutOff,
+	ContinueSession,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -2168,6 +2186,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SnoozeSession),
 	Rpc.fromTaggedRequest(UnsnoozeSession),
 	Rpc.fromTaggedRequest(DismissCutOff),
+	Rpc.fromTaggedRequest(ContinueSession),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),
