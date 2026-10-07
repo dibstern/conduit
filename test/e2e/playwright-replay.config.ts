@@ -21,8 +21,8 @@ export default defineConfig({
 		"multi-instance.spec.ts",
 		// playwright-notification-nav.config.ts: Vite preview with a mocked WebSocket.
 		"notification-session-nav.spec.ts",
-		// playwright-notification-reducer.config.ts: Vite preview with a mocked WebSocket.
-		"notification-reducer-indicators.spec.ts",
+		// playwright-notification-indicators.config.ts: Vite preview with a mocked WebSocket.
+		"notification-indicators.spec.ts",
 		// playwright-project-scope.config.ts: Vite preview with a mocked WebSocket.
 		"project-scope.spec.ts",
 		// playwright-question-flow.config.ts: Vite preview with a mocked WebSocket.

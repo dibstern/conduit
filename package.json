@@ -51,7 +51,7 @@
 		"test:e2e:debug": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-replay.config.ts --debug",
 		"test:multi-instance": "pnpm exec playwright test --config test/e2e/playwright-multi-instance.config.ts",
 		"test:notification-nav": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-notification-nav.config.ts",
-		"test:notification-reducer": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-notification-reducer.config.ts",
+		"test:notification-indicators": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-notification-indicators.config.ts",
 		"test:project-scope": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-project-scope.config.ts",
 		"test:question-flow": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-question-flow.config.ts",
 		"test:subagent-e2e": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-subagent.config.ts",

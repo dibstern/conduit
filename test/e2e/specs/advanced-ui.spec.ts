@@ -156,9 +156,15 @@ test.describe("File History Panel", () => {
 		// Send prompt to trigger file operations
 		await app.sendMessage("Read a file");
 
-		// This prompt triggers a tool call with permission — approve it
-		await perm.waitForCard();
-		await perm.clickAllow();
+		// The recorded turn asks twice, to read the file and then to edit it.
+		const allow = perm.cards.getByRole("button", {
+			name: "Allow",
+			exact: true,
+		});
+		for (let asked = 0; asked < 2; asked++) {
+			await allow.first().click();
+			await expect(allow).toHaveCount(0);
+		}
 
 		await chat.waitForStreamingComplete();
 
