@@ -2025,6 +2025,7 @@ describe("handleAskUserResponse", () => {
 			const completeRecoveredQuestion = vi.fn(() => Effect.void);
 			const sendTurn = vi.fn(() => Effect.void);
 			const turns: ProviderTurnService = {
+				holdUserTurnsForAccountSwitch: () => Effect.void,
 				completeRecoveredQuestion,
 				prepareTurnSession: ({ sessionId }) => Effect.succeed(sessionId),
 				sendTurn,
@@ -2855,6 +2856,7 @@ describe("sendMessageToSession", () => {
 						});
 					if (snoozed) yield* service.snoozeSession("s1", null);
 					const provider: ProviderTurnService = {
+						holdUserTurnsForAccountSwitch: () => Effect.void,
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 						sendTurn: () =>
 							Effect.gen(function* () {
@@ -2904,6 +2906,7 @@ describe("sendMessageToSession", () => {
 		sendTurn: ProviderTurnService["sendTurn"] = () => Effect.void,
 	) {
 		const providerTurnService: ProviderTurnService = {
+			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession,
 			sendTurn,
 			interruptTurn: vi.fn(() => Effect.void),
@@ -2924,6 +2927,7 @@ describe("sendMessageToSession", () => {
 	it.effect("sends the message when unsnooze bookkeeping fails", () => {
 		const sendTurn = vi.fn(() => Effect.void);
 		const provider: ProviderTurnService = {
+			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn,
 			interruptTurn: () => Effect.void,
@@ -3218,6 +3222,7 @@ describe("sendMessageToSession", () => {
 describe("cancelSessionById", () => {
 	it.effect("delegates cancellation to ProviderTurnService", () => {
 		const providerTurnService: ProviderTurnService = {
+			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: vi.fn((input) => Effect.succeed(input.sessionId)),
 			sendTurn: vi.fn(() => Effect.void),
 			interruptTurn: vi.fn(() => Effect.void),

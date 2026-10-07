@@ -1,15 +1,22 @@
+import { SqlClient } from "@effect/sql";
 import { Effect, Schema } from "effect";
 import {
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
+import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
-import { ContinuationTag } from "../../domain/relay/Services/continuation.js";
+import { QuotaCheckTag } from "../../domain/daemon/Services/quota-check.js";
+import {
+	ContinuationTag,
+	previewContinuation,
+} from "../../domain/relay/Services/continuation.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
+import { InstanceManagementServiceTag } from "../../domain/relay/Services/instance-management-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
@@ -201,6 +208,72 @@ export const sessionsHandlers = {
 			Effect.as({ ok: true as const }),
 			Effect.catchAll(mapRpcFailure("CancelContinuation")),
 		),
+	PreviewContinuation: (request) =>
+		previewContinuation(request.sessionId, request.instanceId).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WsRpcError | ContinuationError> =>
+					Schema.is(ContinuationErrorSchema)(error)
+						? Effect.fail(error)
+						: mapRpcFailure("PreviewContinuation")(error),
+			),
+		),
+	QuotaForAccounts: (_request) =>
+		Effect.gen(function* () {
+			const quota = yield* QuotaCheckTag;
+			const management = yield* Effect.serviceOption(
+				InstanceManagementServiceTag,
+			);
+			const config = yield* ConfigTag;
+			const instances =
+				management._tag === "Some"
+					? yield* management.value.list()
+					: (loadDaemonConfig(config.configDir)?.instances ?? []);
+			const accounts = yield* Effect.forEach(
+				instances.filter((instance) => instance.driver === "claude"),
+				(instance) =>
+					quota
+						.check(instance.id)
+						.pipe(Effect.map((quota) => ({ instanceId: instance.id, quota }))),
+				{ concurrency: 8 },
+			);
+			return { accounts };
+		}).pipe(Effect.catchAll(mapRpcFailure("QuotaForAccounts"))),
+	GetContinuationHandoff: (request) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			// Sequence bounds distinguish later switches to the same account and
+			// select its first completed handoff, including a retry after a crash.
+			const [row] = yield* sql<{
+				event_id: string;
+				created_at: number;
+				data: string;
+			}>`
+				WITH resume AS (
+					SELECT sequence FROM events WHERE session_id = ${request.sessionId}
+					AND type = 'session.resumed' AND created_at = ${request.at}
+					AND json_extract(data, '$.instanceId') = ${request.instanceId}
+					ORDER BY sequence DESC LIMIT 1
+				)
+				SELECT event_id, created_at, data FROM events
+				WHERE session_id = ${request.sessionId} AND type = 'session.handoff_delivered'
+				AND json_extract(data, '$.instanceId') = ${request.instanceId}
+				AND sequence > (SELECT sequence FROM resume)
+				AND sequence < COALESCE((SELECT MIN(sequence) FROM events WHERE session_id = ${request.sessionId} AND type = 'session.resumed' AND sequence > (SELECT sequence FROM resume)), 9223372036854775807)
+				ORDER BY sequence ASC LIMIT 1`;
+			if (!row) return { handoff: null };
+			const data = yield* Schema.decodeUnknown(
+				Schema.parseJson(SessionHandoffDeliveredPayloadSchema),
+			)(row.data);
+			return {
+				handoff: {
+					...data,
+					firstMessageIncluded: data.firstMessageIncluded ?? false,
+					eventId: row.event_id,
+					at: row.created_at,
+					instanceId: request.instanceId,
+				},
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("GetContinuationHandoff"))),
 	UnsnoozeSession: (request) =>
 		unsnoozeSessionForClient({
 			clientId: request.originId ?? "rpc",
@@ -410,6 +483,9 @@ export const sessionsHandlers = {
 	| "DismissCutOff"
 	| "ContinueSession"
 	| "CancelContinuation"
+	| "PreviewContinuation"
+	| "QuotaForAccounts"
+	| "GetContinuationHandoff"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
 	| "MarkSessionSeen"

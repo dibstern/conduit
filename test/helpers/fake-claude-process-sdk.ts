@@ -37,7 +37,13 @@ import {
 	provisionalUsageLimitTurnWithoutReset,
 } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn-no-reset.js";
 
-type QuotaBehavior = "available" | "limited" | "fail" | "hang" | "unavailable";
+type QuotaBehavior =
+	| "available"
+	| "limited"
+	| "fail"
+	| "hang"
+	| "unavailable"
+	| "plan-unavailable";
 
 // Unix seconds supplied by the harness; the same marker drives intake and quota.
 function injectedResetAt(configDir: string | undefined): number | undefined {
@@ -49,6 +55,13 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| { kind: "stop-held"; queryId: string }
+	| {
+			kind: "handoff-first-turn-died";
+			prompt: string;
+			queryId: string;
+			sessionId: string;
+	  }
 	| {
 			kind: "usage-probe";
 			configDir: string | undefined;
@@ -683,7 +696,42 @@ function query(params: {
 					await client.close();
 				}
 			}
-			if (request.startsWith("usage-limit-account-1")) {
+			const accountConfigDir =
+				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+				process.env["CLAUDE_CONFIG_DIR"];
+			const switchMarker = accountConfigDir
+				? join(accountConfigDir, "conduit-test-switch-turn")
+				: undefined;
+			const switchTurn =
+				prompt.includes("[Conduit context handoff]") &&
+				switchMarker &&
+				existsSync(switchMarker)
+					? readFileSync(switchMarker, "utf8").trim()
+					: undefined;
+			if (switchTurn === "die-once" && switchMarker) {
+				writeFileSync(switchMarker, "hold");
+				mark({ kind: "handoff-first-turn-died", prompt, queryId, sessionId });
+				process.exit(86);
+			}
+			if (switchTurn === "hold" && proof) {
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-switch-turn")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
+			if (switchTurn === "limited") {
+				yield provisionalRejectedLimitWithoutReset(sessionId);
+				yield* provisionalUsageLimitTurnWithoutReset(
+					sessionId,
+					input,
+				).events.filter((event) => event.type === "result");
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				continue;
+			}
+			if (!switchTurn && request.startsWith("usage-limit-account-1")) {
 				const noReset = request.startsWith("usage-limit-account-1-no-reset");
 				const resetsAt = noReset
 					? undefined
@@ -1252,7 +1300,8 @@ function query(params: {
 					selected === "limited" ||
 					selected === "fail" ||
 					selected === "hang" ||
-					selected === "unavailable"
+					selected === "unavailable" ||
+					selected === "plan-unavailable"
 						? selected
 						: "available";
 				mark({ kind: "usage-probe", configDir, queryId, behavior });
@@ -1275,17 +1324,20 @@ function query(params: {
 						model_usage: {},
 					},
 					subscription_type: "max",
-					rate_limits_available: true,
-					rate_limits: {
-						five_hour: { utilization: 12, resets_at: null },
-						seven_day: {
-							utilization: behavior === "limited" ? 100 : 37,
-							resets_at:
-								resetsAt === undefined
-									? null
-									: new Date(resetsAt * 1000).toISOString(),
-						},
-					},
+					rate_limits_available: behavior !== "plan-unavailable",
+					rate_limits:
+						behavior === "plan-unavailable"
+							? null
+							: {
+									five_hour: { utilization: 12, resets_at: null },
+									seven_day: {
+										utilization: behavior === "limited" ? 100 : 37,
+										resets_at:
+											resetsAt === undefined
+												? null
+												: new Date(resetsAt * 1000).toISOString(),
+									},
+								},
 					behaviors: null,
 				};
 			},
@@ -1305,7 +1357,23 @@ function query(params: {
 				at: process.hrtime.bigint().toString(),
 			});
 		},
-		interrupt: async () => {},
+		interrupt: async () => {
+			const configDir =
+				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+				process.env["CLAUDE_CONFIG_DIR"];
+			if (
+				proof &&
+				configDir &&
+				existsSync(join(configDir, "conduit-test-hold-stop"))
+			) {
+				mark({ kind: "stop-held", queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-switch-stop")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+			}
+		},
 		setModel: async (model?: string) => {
 			liveModel = model;
 			mark({

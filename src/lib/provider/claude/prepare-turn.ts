@@ -1,6 +1,11 @@
+import { SqlClient } from "@effect/sql";
 import { Data, Effect, Schema } from "effect";
-import type { LimitRecovery } from "../../contracts/limit-recovery.js";
-import { LimitRecoverySchema } from "../../contracts/limit-recovery.js";
+import {
+	type HandoffSummary,
+	HandoffTooLarge,
+	type LimitRecovery,
+	LimitRecoverySchema,
+} from "../../contracts/limit-recovery.js";
 import {
 	type NativeThread,
 	ProviderStateEffectTag,
@@ -14,9 +19,7 @@ import { toolOutputText } from "../../persistence/session-history-adapter.js";
 import type { ProviderNativeSession } from "../types.js";
 import { THREAD_READ_QUALIFIED_NAME } from "./types.js";
 
-export class HandoffTooLarge extends Data.TaggedError("HandoffTooLarge")<{
-	readonly budget: number;
-}> {}
+export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
 
 export class ContinuationNotReady extends Data.TaggedError(
 	"ContinuationNotReady",
@@ -38,11 +41,7 @@ export interface PreparedTurn {
 	readonly resumeSessionId?: string;
 	readonly configDir: string | undefined;
 	readonly prompt: string;
-	readonly handoff?: {
-		readonly included: number;
-		readonly omitted: number;
-		readonly tokens: number;
-	};
+	readonly handoff?: HandoffSummary;
 	readonly nativeThread?: NativeThread;
 }
 
@@ -113,6 +112,7 @@ function planTurn(input: {
 	readonly sessionId: string;
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
+	readonly hasAccountSwitch: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
 	readonly messages?: readonly MessageWithParts[];
@@ -130,7 +130,7 @@ function planTurn(input: {
 		});
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
-		!options.continuation && input.limitRecovery?.cutOffMessageId && userText
+		input.limitRecovery?.cutOffMessageId && userText
 			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
 			: "";
 	const live = options.liveSession;
@@ -144,9 +144,7 @@ function planTurn(input: {
 			options.configDir ??
 			(sameLiveAccount ? live?.configDir : undefined) ??
 			nativeThread?.configDir,
-		prompt: options.continuation
-			? "Continue where you left off."
-			: `${note}${userText}`,
+		prompt: `${note}${userText}`,
 	};
 	// No recorded agent means a thread from before agents were recorded: resume it.
 	const matchingReceipt =
@@ -158,15 +156,20 @@ function planTurn(input: {
 	// A live first turn may be interrupted before a receipt exists. The runner
 	// reports facts; this planner still chooses the account, agent, and cursor.
 	// Warming under another agent does not change the old cursor's recorded agent.
+	// A switched account without a receipt must repeat its first handoff.
 	const liveResumeSessionId =
-		sameLiveAgent && live?.resumeSessionId !== nativeThread?.resumeSessionId
+		sameLiveAgent &&
+		live?.resumeSessionId !== nativeThread?.resumeSessionId &&
+		(nativeThread !== undefined || !input.hasAccountSwitch)
 			? live?.resumeSessionId
 			: undefined;
+	// A same-account continuation can retain its cut-off before its first receipt.
+	const sameLimitAccount = input.limitRecovery?.instanceId === input.instanceId;
 	const resumeSessionId = options.continuation
 		? (nativeThread?.resumeSessionId ??
-			(sameLiveAccount ? live?.resumeSessionId : undefined))
+			(sameLimitAccount && sameLiveAccount ? live?.resumeSessionId : undefined))
 		: (matchingReceipt?.resumeSessionId ?? liveResumeSessionId);
-	if (options.continuation && !resumeSessionId)
+	if (options.continuation && sameLimitAccount && !resumeSessionId)
 		return new ContinuationNotReady({
 			reason: "The cut-off request has no native session to resume.",
 		});
@@ -175,6 +178,9 @@ function planTurn(input: {
 	if (resumeSessionId && (options.continuation || !requiresFreshSession)) {
 		return {
 			...base,
+			prompt: options.continuation
+				? "Continue where you left off."
+				: base.prompt,
 			nativeThread:
 				nativeThread?.resumeSessionId === resumeSessionId
 					? nativeThread
@@ -193,8 +199,17 @@ function planTurn(input: {
 	);
 	// Queued later prompts must not become history for this request. The caller
 	// supplies only the current event's identity; the planner chooses its history.
+	const nextUserIndex = input.messages.findIndex(
+		(message, index) => index > currentIndex && message.role === "user",
+	);
 	const messages =
-		currentIndex < 0 ? input.messages : input.messages.slice(0, currentIndex);
+		currentIndex < 0
+			? input.messages
+			: options.continuation
+				? input.messages
+						.slice(0, nextUserIndex < 0 ? undefined : nextUserIndex)
+						.filter((message) => message.id !== options.userMessageId)
+				: input.messages.slice(0, currentIndex);
 	if (messages.length === 0) return base;
 	const window = options.modelContextWindow ?? 128000;
 	const cap = Math.max(1024, Math.min(64000, options.tokenCap ?? 16000));
@@ -252,7 +267,10 @@ function planTurn(input: {
 	}
 	add(latestUser);
 	add(latestAssistant);
-	add(candidates.findIndex((message) => message.role === "user"));
+	const firstUserIndex = candidates.findIndex(
+		(message) => message.role === "user",
+	);
+	add(firstUserIndex);
 	for (let index = candidates.length - 1; index >= 0; index--) add(index);
 	const included = selected.size;
 	const omitted = messages.length - included;
@@ -266,7 +284,12 @@ function planTurn(input: {
 	return {
 		...base,
 		prompt: `${note}${hidden}\n\n${userText}`,
-		handoff: { included, omitted, tokens: Buffer.byteLength(hidden) },
+		handoff: {
+			included,
+			omitted,
+			firstMessageIncluded: selected.has(firstUserIndex),
+			tokens: Buffer.byteLength(hidden),
+		},
 	};
 }
 
@@ -275,6 +298,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 	Effect.gen(function* () {
 		const state = yield* ProviderStateEffectTag;
 		const read = yield* ReadQueryEffectTag;
+		const sql = yield* SqlClient.SqlClient;
 		const configuredCap = Number(
 			process.env["CONDUIT_CONTEXT_HANDOFF_TOKEN_CAP"] ?? 16000,
 		);
@@ -290,11 +314,20 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 				const providerState = nativeThread
 					? yield* state.getState(sessionId)
 					: {};
+				const accountSwitches = nativeThread
+					? []
+					: yield* sql<{ switched: number }>`
+						SELECT 1 AS switched FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
+							AND json_extract(data, '$.newProvider') = ${instanceId}
+							AND json_extract(data, '$.oldProvider') <> ${instanceId}
+						LIMIT 1`;
 				const session = yield* read.getSession(sessionId);
 				const input = {
 					sessionId,
 					instanceId,
 					nativeThread,
+					hasAccountSwitch: accountSwitches.length > 0,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
 					limitRecovery:
 						session?.limit_recovery == null
@@ -320,7 +353,32 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 					}
 					// The current user event is already committed by the send path. Its
 					// text belongs only at the end of the SDK prompt, outside the handoff.
-					plan = planTurn({ ...input, messages });
+					const cutOffMessageId = options.continuation
+						? input.limitRecovery?.cutOffMessageId
+						: undefined;
+					const cutOffMessage = cutOffMessageId
+						? messages.find(
+								(message) =>
+									message.id === cutOffMessageId && message.role === "user",
+							)
+						: undefined;
+					if (options.continuation && !cutOffMessage)
+						return yield* new ContinuationNotReady({
+							reason: "The cut-off request is no longer available.",
+						});
+					plan = planTurn({
+						...input,
+						messages,
+						...(cutOffMessage
+							? {
+									userText: historicalMessageText(cutOffMessage),
+									options: {
+										...budgetOptions,
+										userMessageId: cutOffMessage.id,
+									},
+								}
+							: {}),
+					});
 				}
 				if (
 					plan instanceof HandoffTooLarge ||

@@ -6,6 +6,7 @@ import {
 	type ContinuationError,
 	type ContinuationReason,
 	DriverMismatch,
+	type HandoffSummary,
 	type LimitRecovery,
 	LimitRecoverySchema,
 	SessionBusy,
@@ -13,8 +14,10 @@ import {
 } from "../../../contracts/limit-recovery.js";
 import {
 	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
+import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
 	type CommitAndSignalFailure,
 	type CommitAndSignalProject,
@@ -29,12 +32,14 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../persistence/events.js";
+import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
 import { QuotaCheckTag } from "../../daemon/Services/quota-check.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { ConfigTag } from "./services.js";
+import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import { applySessionCommand } from "./session-command.js";
 import {
 	getAgent,
 	getContextWindow,
@@ -49,6 +54,49 @@ type UsageLimitedEvent = Extract<
 	CanonicalEvent,
 	{ readonly type: "session.usage_limited" }
 >;
+
+/** The confirmation uses the same planner as delivery, without a live runner. */
+export const previewContinuation = (sessionId: string, instanceId: string) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const read = yield* ReadQueryEffectTag;
+		const session = yield* read.getSession(sessionId);
+		const daemonConfig = loadDaemonConfig(config.configDir);
+		if (!session)
+			return yield* new StaleSwitch({
+				sessionId,
+				expectedInstanceId: instanceId,
+			});
+		if (
+			resolveProviderRoutingDriver(daemonConfig, instanceId) !== "claude" ||
+			resolveProviderRoutingDriver(daemonConfig, session.provider) !== "claude"
+		)
+			return yield* new DriverMismatch({ sessionId, instanceId });
+		const recovery =
+			session.limit_recovery === null
+				? null
+				: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
+						session.limit_recovery,
+					);
+		const contextWindow = yield* getContextWindow(sessionId);
+		const prepare = yield* makePrepareTurn({
+			configDir: resolveClaudeInstanceConfigDir(daemonConfig, instanceId),
+			agent: yield* getAgent(sessionId),
+			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
+			continuation:
+				instanceId !== session.provider && !!recovery?.cutOffMessageId,
+		});
+		const prepared = yield* prepare(sessionId, instanceId);
+		return (
+			prepared.handoff ??
+			({
+				included: 0,
+				omitted: 0,
+				firstMessageIncluded: false,
+				tokens: 0,
+			} satisfies HandoffSummary)
+		);
+	});
 
 export interface Continuation {
 	readonly requestContinuation: (
@@ -65,12 +113,21 @@ export interface Continuation {
 		| ContinuationError
 		| CommitAndSignalFailure
 		| ReadQueryEffectError
+		| Effect.Effect.Error<ReturnType<typeof previewContinuation>>
+		| Effect.Effect.Error<ReturnType<typeof applySessionCommand>>
+		| Effect.Effect.Error<ReturnType<typeof preWarmSession>>
+		| Effect.Effect.Error<
+				ReturnType<OrchestrationEngineTag["Type"]["dispatchEffect"]>
+		  >
 		| Effect.Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>,
 		| ConfigTag
 		| QuotaCheckTag
 		| ProviderTurnServiceTag
 		| OverridesStateTag
 		| ReadQueryEffectTag
+		| Effect.Effect.Context<ReturnType<typeof previewContinuation>>
+		| Effect.Effect.Context<ReturnType<typeof applySessionCommand>>
+		| Effect.Effect.Context<ReturnType<typeof preWarmSession>>
 	>;
 	/** The supplied projector joins runner intake's existing claimed transaction. */
 	readonly intakeLimit: (
@@ -180,11 +237,7 @@ export const makeContinuation = Effect.gen(function* () {
 							sessionId,
 							instanceId: options.instanceId,
 						});
-					if (
-						!session ||
-						session.provider !== options.expectedInstanceId ||
-						session.provider !== options.instanceId
-					)
+					if (!session || session.provider !== options.expectedInstanceId)
 						return yield* new StaleSwitch({
 							sessionId,
 							expectedInstanceId: options.expectedInstanceId,
@@ -231,7 +284,10 @@ export const makeContinuation = Effect.gen(function* () {
 											),
 										)
 									: undefined;
-							const cutOffMessageId = yield* commit.write((project) =>
+							const turns = yield* ProviderTurnServiceTag;
+							if (options.instanceId !== options.expectedInstanceId)
+								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
+							const continued = yield* commit.write((project) =>
 								Effect.gen(function* () {
 									// A probe can take five seconds; selection and turn state must
 									// still agree when the continuation is committed.
@@ -266,10 +322,17 @@ export const makeContinuation = Effect.gen(function* () {
 											return;
 										}
 									}
+									const switched = session.provider !== options.instanceId;
 									// Dismiss or a reply may have closed it while the probe ran.
-									if (!recovery?.cutOffMessageId) return;
+									if (!switched && !recovery?.cutOffMessageId) return;
 									if (options.at !== undefined) {
-										if (recovery.instanceId !== options.instanceId) return;
+										// A schedule resumes the limited account; it never switches.
+										if (
+											switched ||
+											!recovery?.cutOffMessageId ||
+											recovery.instanceId !== options.instanceId
+										)
+											return;
 										yield* project(
 											yield* store.appendBatch([
 												canonicalEvent(
@@ -292,6 +355,7 @@ export const makeContinuation = Effect.gen(function* () {
 									}
 									if (
 										due &&
+										recovery &&
 										(decision?._tag === "Limited" ||
 											decision?._tag === "Unavailable")
 									) {
@@ -313,24 +377,78 @@ export const makeContinuation = Effect.gen(function* () {
 										yield* project(yield* store.appendBatch([event]));
 										return;
 									}
-									yield* project(
-										yield* store.appendBatch([
-											canonicalEvent(
-												"session.resumed",
-												sessionId,
-												{
+									if (switched) {
+										// Complete every refusal decision before any canonical write.
+										yield* previewContinuation(sessionId, options.instanceId);
+										yield* applySessionCommand(
+											{
+												type: "session.provider_changed",
+												data: {
+													sessionId,
+													oldProvider: session.provider,
+													newProvider: options.instanceId,
 													reason: options.reason,
-													instanceId: options.instanceId,
 												},
-												{ provider: "claude" },
-											),
-										]),
-									);
-									return recovery.cutOffMessageId;
+											},
+											{ project },
+										);
+									} else
+										yield* project(
+											yield* store.appendBatch([
+												canonicalEvent(
+													"session.resumed",
+													sessionId,
+													{
+														reason: options.reason,
+														instanceId: options.instanceId,
+													},
+													{ provider: "claude" },
+												),
+											]),
+										);
+									return {
+										cutOffMessageId: recovery?.cutOffMessageId,
+										switched,
+										previousInstanceId: session.provider,
+									};
 								}),
 							);
-							if (!cutOffMessageId) return;
-							const turns = yield* ProviderTurnServiceTag;
+							if (!continued) return;
+							if (continued.switched) {
+								const engine = yield* OrchestrationEngineTag;
+								// The durable binding is projected by provider_changed; replace
+								// the engine's transient binding from the previous send too.
+								yield* Effect.sync(() =>
+									engine.bindSession(sessionId, options.instanceId),
+								);
+								yield* engine.dispatchEffect({
+									type: "end_session",
+									commandId: randomUUID(),
+									sessionId,
+									targetProviderId: continued.previousInstanceId,
+								});
+								yield* preWarmSession(sessionId).pipe(
+									Effect.catchAll((error) =>
+										Effect.flatMap(LoggerTag, (log) =>
+											Effect.sync(() =>
+												log.warn(
+													`Could not warm switched session ${sessionId}`,
+													error,
+												),
+											),
+										),
+									),
+								);
+								yield* commit([
+									canonicalEvent(
+										"session.resumed",
+										sessionId,
+										{ reason: options.reason, instanceId: options.instanceId },
+										{ provider: "claude" },
+									),
+								]);
+							}
+							if (!continued.cutOffMessageId) return;
 							const model = yield* getModel(sessionId);
 							const agent = yield* getAgent(sessionId);
 							const variant = yield* getVariant(sessionId);
@@ -340,14 +458,14 @@ export const makeContinuation = Effect.gen(function* () {
 								commandId: randomUUID(),
 								sessionId,
 								text: "",
-								continuation: { cutOffMessageId },
+								continuation: { cutOffMessageId: continued.cutOffMessageId },
 								modelUserSelected: yield* isModelUserSelected(sessionId),
 								...(model ? { model } : {}),
 								...(agent ? { agent } : {}),
 								...(variant ? { variant } : {}),
 								...(contextWindow ? { contextWindow } : {}),
 							});
-						}),
+						}).pipe(Effect.scoped),
 					),
 				() => Effect.sync(() => requesting.delete(sessionId)),
 			);

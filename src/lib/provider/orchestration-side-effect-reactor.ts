@@ -435,7 +435,10 @@ export class ProviderSideEffectReactor {
 					yield* this.options
 						.persistHandoffDelivered(
 							payload.sessionId,
-							result.handoff,
+							{
+								...result.handoff,
+								instanceId: payload.instanceId ?? row.provider_id,
+							},
 							row.command_id,
 						)
 						.pipe(Effect.mapError(storeFailure("handoffDelivered")));

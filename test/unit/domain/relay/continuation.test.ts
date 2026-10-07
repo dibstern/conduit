@@ -7,15 +7,31 @@ import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
+import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import { makeContinuation } from "../../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../../src/lib/domain/relay/Services/services.js";
 import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../../src/lib/provider/provider-registry.js";
+import {
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+} from "../../../helpers/mock-factories.js";
 
 // Failure modes and agreed seams are recorded in the account-switch report.
 it("records one limit per user turn, closes only the cut-off on Dismiss, and clears recovery on a reply", async () => {
@@ -198,6 +214,7 @@ for (const scenario of [
 	it(`continuation gate: ${scenario.name}`, async () => {
 		let probes = 0;
 		let dispatches = 0;
+		const registry = new ProviderRegistry();
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -254,6 +271,19 @@ for (const scenario of [
 				expect(dispatches).toBe(0);
 				expect(yield* store.readAllBySession("s1")).toEqual(before);
 			}).pipe(
+				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Effect.provideService(LoggerTag, makeMockLogger()),
+				Effect.provideService(
+					OrchestrationEngineTag,
+					new OrchestrationEngine({ registry }),
+				),
+				Effect.provideService(ProviderRegistryTag, registry),
+				Effect.provideService(AgentServiceTag, {
+					getActiveAgent: () => Effect.succeed(undefined),
+					listAgents: () => Effect.die("A refusal must not discover agents"),
+					switchAgent: () => Effect.die("A refusal must not change agents"),
+				}),
+				Effect.provide(AlertsLive),
 				Effect.provideService(ConfigTag, {
 					httpServer: createServer(),
 					projectDir: "/tmp",
@@ -263,6 +293,7 @@ for (const scenario of [
 					publishGlobalSetting: () => Effect.void,
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
+					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 					sendTurn: () =>
 						Effect.sync(() => {

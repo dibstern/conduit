@@ -455,6 +455,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				DismissCutOff: () => Effect.succeed({ ok: true as const }),
 				ContinueSession: () => Effect.succeed({ ok: true as const }),
 				CancelContinuation: () => Effect.succeed({ ok: true as const }),
+				PreviewContinuation: () =>
+					Effect.succeed({
+						included: 0,
+						omitted: 0,
+						firstMessageIncluded: false,
+						tokens: 0,
+					}),
+				QuotaForAccounts: () => Effect.succeed({ accounts: [] }),
+				GetContinuationHandoff: () => Effect.succeed({ handoff: null }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

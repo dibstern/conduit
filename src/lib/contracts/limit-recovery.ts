@@ -51,7 +51,16 @@ export class DriverMismatch extends Schema.TaggedError<DriverMismatch>()(
 	},
 ) {
 	get message() {
-		return "Continuation requires the session's Claude account.";
+		return "Continue this session on another Claude account.";
+	}
+}
+
+export class HandoffTooLarge extends Schema.TaggedError<HandoffTooLarge>()(
+	"HandoffTooLarge",
+	{ budget: Schema.Number },
+) {
+	get message() {
+		return "The conversation handoff does not fit this session's context window. Shorten the request or choose a larger context window before switching.";
 	}
 }
 
@@ -60,6 +69,7 @@ export const ContinuationErrorSchema = Schema.Union(
 	StaleSwitch,
 	AccountUnavailable,
 	DriverMismatch,
+	HandoffTooLarge,
 );
 export type ContinuationError = typeof ContinuationErrorSchema.Type;
 
@@ -103,3 +113,35 @@ export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 	autoSwitch: false,
 	order: [],
 };
+
+export const HandoffSummarySchema = Schema.Struct({
+	included: Schema.NonNegativeInt,
+	omitted: Schema.NonNegativeInt,
+	firstMessageIncluded: Schema.Boolean,
+	tokens: Schema.NonNegativeInt,
+});
+export type HandoffSummary = typeof HandoffSummarySchema.Type;
+
+export const QuotaWindowSchema = Schema.Struct({
+	utilization: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
+	/** Unix seconds, matching session limitRecovery. */
+	resetsAt: Schema.optional(Schema.Number),
+});
+
+export const QuotaCheckResultSchema = Schema.Union(
+	Schema.Struct({
+		_tag: Schema.Literal("Available"),
+		/** Highest measured utilization percent across the plan windows. */
+		utilization: Schema.optional(Schema.Number),
+		fiveHour: Schema.optional(QuotaWindowSchema),
+		sevenDay: Schema.optional(QuotaWindowSchema),
+	}),
+	Schema.Struct({
+		_tag: Schema.Literal("Limited"),
+		rateLimitType: Schema.String,
+		resetsAt: Schema.optional(Schema.Number),
+	}),
+	Schema.Struct({ _tag: Schema.Literal("Unavailable"), reason: Schema.String }),
+	Schema.Struct({ _tag: Schema.Literal("Unknown") }),
+);
+export type QuotaCheckResult = typeof QuotaCheckResultSchema.Type;

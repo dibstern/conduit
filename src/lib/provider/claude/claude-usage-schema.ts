@@ -1,4 +1,10 @@
 import { Either, Schema } from "effect";
+import type {
+	QuotaCheckResult,
+	QuotaWindowSchema,
+} from "../../contracts/limit-recovery.js";
+
+export type { QuotaCheckResult } from "../../contracts/limit-recovery.js";
 
 const UsageWindowSchema = Schema.Struct({
 	utilization: Schema.NullOr(
@@ -21,25 +27,7 @@ export const ClaudeUsageResponseSchema = Schema.Struct({
 	),
 });
 
-export interface QuotaWindow {
-	readonly utilization: number;
-	/** Unix seconds, matching session limitRecovery. */
-	readonly resetsAt?: number;
-}
-
-export type QuotaCheckResult =
-	| {
-			readonly _tag: "Available";
-			readonly fiveHour?: QuotaWindow;
-			readonly sevenDay?: QuotaWindow;
-	  }
-	| {
-			readonly _tag: "Limited";
-			readonly rateLimitType: string;
-			readonly resetsAt?: number;
-	  }
-	| { readonly _tag: "Unavailable"; readonly reason: string }
-	| { readonly _tag: "Unknown" };
+export type QuotaWindow = typeof QuotaWindowSchema.Type;
 
 export function decodeClaudeUsage(response: unknown): QuotaCheckResult {
 	const decoded = Schema.decodeUnknownEither(ClaudeUsageResponseSchema)(
@@ -82,6 +70,10 @@ export function decodeClaudeUsage(response: unknown): QuotaCheckResult {
 	if (!fiveHour && !sevenDay) return { _tag: "Unknown" };
 	return {
 		_tag: "Available",
+		utilization: Math.max(
+			fiveHour?.utilization ?? 0,
+			sevenDay?.utilization ?? 0,
+		),
 		...(fiveHour ? { fiveHour } : {}),
 		...(sevenDay ? { sevenDay } : {}),
 	};

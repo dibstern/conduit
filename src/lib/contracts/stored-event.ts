@@ -351,6 +351,7 @@ export interface SessionProviderChangedPayload {
 	readonly sessionId: string;
 	readonly oldProvider: string;
 	readonly newProvider: string;
+	readonly reason?: ContinuationReason;
 }
 
 export interface SessionDeletedPayload {
@@ -418,6 +419,8 @@ export interface SessionHandoffDeliveredPayload {
 	readonly included: number;
 	readonly omitted: number;
 	readonly tokens: number;
+	readonly firstMessageIncluded?: boolean;
+	readonly instanceId?: string;
 }
 
 export interface SessionUsageLimitedPayload {
@@ -936,6 +939,7 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	oldProvider: Schema.String,
 	newProvider: Schema.String,
+	reason: Schema.optionalWith(ContinuationReasonSchema, { exact: true }),
 });
 
 const SessionDeletedPayloadSchema = Schema.Struct({
@@ -973,10 +977,12 @@ const SessionContextWindowChangedPayloadSchema = Schema.Struct({
 	contextWindow: Schema.String,
 });
 
-const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
+export const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
 	included: Schema.NonNegativeInt,
 	omitted: Schema.NonNegativeInt,
 	tokens: Schema.NonNegativeInt,
+	firstMessageIncluded: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	instanceId: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 export const SessionUsageLimitedPayloadSchema = Schema.Struct({

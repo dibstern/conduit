@@ -140,6 +140,7 @@ const withHandlerStack = async (
 		Layer.succeed(AgentServiceTag, makeMockAgentService()),
 		NoopProviderRuntimeIngestionLive,
 		Layer.succeed(ProviderTurnServiceTag, {
+			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,
 			interruptTurn: () => Effect.void,

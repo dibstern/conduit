@@ -1458,6 +1458,7 @@ describe("SessionManagerService", () => {
 					text: "ok",
 				}).pipe(
 					Effect.provideService(ProviderTurnServiceTag, {
+						holdUserTurnsForAccountSwitch: () => Effect.void,
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 						sendTurn: () => Effect.void,
 						interruptTurn: () => Effect.void,

@@ -1,3 +1,8 @@
+// Failure modes: lost first message or cut-off request; missing still-open note;
+// replaying a cut-off twice; a switched account using an uncompleted native ID;
+// discarding a same-account live cursor before its first completion receipt;
+// missing an interrupted handoff when neither account has a completed receipt;
+// unfit wrapper, wrong counts, reordered/truncated history, leaked private parts.
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import fc from "fast-check";
@@ -122,6 +127,16 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 							userMessageId: "current",
 						});
 						const plan = yield* prepare("s1", "personal", text);
+						if (cutOff === "open") {
+							const continuation = yield* makePrepareTurn({
+								continuation: true,
+							});
+							const switched = yield* continuation("s1", "work");
+							expect(switched.resumeSessionId).toBeUndefined();
+							expect(switched.prompt).toContain("[Conduit still-open note]");
+							expect(switched.prompt.endsWith("Earlier request")).toBe(true);
+							expect(switched.prompt.match(/Earlier request/g)).toHaveLength(1);
+						}
 						expect(
 							plan.prompt.startsWith(
 								"[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n",
@@ -296,6 +311,7 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 							expect(plan.handoff).toEqual({
 								included: selected.length,
 								omitted: messages.length - selected.length,
+								firstMessageIncluded: true,
 								tokens: Buffer.byteLength(hidden),
 							});
 							expect(hidden).toContain(
@@ -350,18 +366,49 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 						expect(
 							(yield* otherAccount("s1", "work", current)).resumeSessionId,
 						).toBeUndefined();
-						yield* state.saveUpdates("s1", [
-							{
-								key: "nativeThread:personal",
-								value: JSON.stringify({
-									resumeSessionId: "native-personal",
-									configDir: "/accounts/personal",
-									firstSequence: 0,
-									deliveredThrough: 0,
+						yield* runner.projectBatch(
+							yield* store.appendBatch([
+								canonicalEvent("session.provider_changed", "s1", {
+									sessionId: "s1",
+									oldProvider: "personal",
+									newProvider: "work",
 								}),
+							]),
+						);
+						const interruptedHandoff = yield* prepare({
+							liveSession: {
+								instanceId: "work",
+								configDir: "/accounts/work",
+								resumeSessionId: "live-interrupted-handoff",
 							},
-							{ key: "claudeAgent:personal", value: "" },
-						]);
+						});
+						for (const sourceReceipt of [false, true]) {
+							if (sourceReceipt)
+								yield* state.saveUpdates("s1", [
+									{
+										key: "nativeThread:personal",
+										value: JSON.stringify({
+											resumeSessionId: "native-personal",
+											configDir: "/accounts/personal",
+											firstSequence: 0,
+											deliveredThrough: 0,
+										}),
+									},
+									{ key: "claudeAgent:personal", value: "" },
+								]);
+							const repeated = yield* interruptedHandoff("s1", "work", current);
+							expect(repeated.resumeSessionId).toBeUndefined();
+							expect(repeated.configDir).toBe("/accounts/work");
+							if (messages.length > 0) {
+								expect(repeated.handoff).toMatchObject({
+									firstMessageIncluded: true,
+								});
+								expect(repeated.prompt).toContain(messages[0]?.text);
+								expect(repeated.prompt).toContain("[Conduit context handoff]");
+								expect(repeated.prompt.endsWith(`\n\n${current}`)).toBe(true);
+							}
+						}
+						expect(yield* state.nativeThread("s1", "work")).toBeUndefined();
 						const resume = yield* prepare({
 							liveSession,
 							modelContextWindow: 1,

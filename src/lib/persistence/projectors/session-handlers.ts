@@ -352,6 +352,10 @@ export const sessionHandlers: {
 				sql: "UPDATE sessions SET provider = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.newProvider, event.createdAt, event.data.sessionId],
 			},
+			{
+				sql: "UPDATE sessions SET limit_recovery = CASE WHEN json_extract(limit_recovery, '$.cutOffMessageId') IS NULL THEN NULL ELSE json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt') END WHERE id = ? AND limit_recovery IS NOT NULL",
+				params: [event.data.sessionId],
+			},
 		];
 	},
 
@@ -416,7 +420,7 @@ export const sessionHandlers: {
 	],
 	"session.resumed": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?",
+			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ? AND provider = ? AND limit_recovery IS NOT NULL",
 			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
 		{

@@ -1680,3 +1680,464 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		);
 	}
 });
+
+// Failures: preview writes or delivers; a refusal changes the session; a switch
+// keeps the old runner/config; the cut-off is replayed without its still-open
+// note; an interrupted first handoff becomes a receipt; an unknown quota blocks;
+// deferred handoff is sent before the next user message; a receipt links to the
+// wrong continuation; a concurrent send crosses runner teardown; identity,
+// title, settings, or transcript are lost.
+for (const behavior of [
+	"available",
+	"unavailable",
+	"die-once",
+	"fail",
+	"hang",
+	"plan-unavailable",
+	"no-cut-off",
+	"send-during-switch",
+	"limited",
+	"too-large",
+] as const) {
+	const scenario =
+		behavior === "unavailable"
+			? 9
+			: behavior === "die-once"
+				? 10
+				: behavior === "fail" || behavior === "hang"
+					? 13
+					: behavior === "plan-unavailable"
+						? 14
+						: 2;
+	test(`scenario ${scenario}: manual account switch through RPC (${behavior})`, async ({
+		harness,
+	}, testInfo) => {
+		test.setTimeout(120_000);
+		const hasCutOff =
+			behavior !== "no-cut-off" && behavior !== "send-during-switch";
+		const artifacts = resolve(
+			"test-results/account-switch",
+			`${testInfo.project.name}-switch-${behavior}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		const browser = await harness.connect();
+		const accounts: { id: string; configDir: string }[] = [];
+		for (const name of ["Account 1", "Account 2"]) {
+			const configDir = mkdtempSync(join(harness.root, "switch-account-"));
+			const { addedInstanceId } = await Effect.runPromise(
+				browser.rpc.AddInstance({ name, driver: "claude", configDir }),
+			);
+			if (!addedInstanceId) throw new Error(`No instance ID for ${name}`);
+			accounts.push({ id: addedInstanceId, configDir });
+		}
+		const [source, target] = accounts;
+		if (!source || !target) throw new Error("Two accounts are required");
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({
+				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
+				instanceId: source.id,
+			}),
+		);
+		if (!projectSlug) throw new Error("No switch project slug");
+		// Project RPCs reset config persistence's debounce. Wait on disk once,
+		// without retrying CreateSession or issuing another project RPC.
+		await expect
+			.poll(() => {
+				const file = join(harness.configDir, "daemon.json");
+				if (!existsSync(file)) return false;
+				const config: { instances?: { id: string }[] } = JSON.parse(
+					readFileSync(file, "utf8"),
+				);
+				return accounts.every((account) =>
+					config.instances?.some((instance) => instance.id === account.id),
+				);
+			})
+			.toBe(true);
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				instanceId: Schema.decodeUnknownSync(
+					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				)(source.id),
+				model: { modelId: "harness", providerId: "claude" },
+				originId: browser.originId,
+			}),
+		);
+		const observed: { sequence: number; session: SessionInfo }[] = [];
+		const subscription = Effect.runFork(
+			Stream.runForEach(
+				browser.rpc.SubscribeShell({ projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
+			),
+		);
+		const latest = () =>
+			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
+		const snapshot = () =>
+			Effect.runPromise(
+				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+					Stream.take(1),
+					Stream.runCollect,
+					Effect.map((envelopes) => Array.from(envelopes)[0]),
+				),
+			);
+		const send = (text: string, commandId: string) =>
+			Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug,
+					sessionId,
+					text,
+					commandId,
+					originId: browser.originId,
+				}),
+			);
+		const first = `manual-switch-first-request-${behavior}`;
+		const cutOff = `usage-limit-account-1-no-reset: finish the original request${behavior === "too-large" ? "x".repeat(150_000) : ""}`;
+		const evidence: Record<string, unknown> = {};
+		try {
+			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+			await send(first, `first-${behavior}`);
+			await expect
+				.poll(() => JSON.stringify(harness.marks))
+				.toContain(`done(${first})`);
+			await expect.poll(() => latest()?.status).toBe("idle");
+			await Effect.runPromise(
+				browser.rpc.RenameSession({
+					projectSlug,
+					sessionId,
+					title: "Keep my session title",
+				}),
+			);
+			if (hasCutOff) {
+				await send(cutOff, `cut-off-${behavior}`);
+				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(false);
+				await expect.poll(() => latest()?.status).toBe("idle");
+				await expect
+					.poll(() =>
+						harness.marks.some(
+							(mark) =>
+								mark.kind === "usage-limit" && mark.phase === "repeated",
+						),
+					)
+					.toBe(true);
+			}
+			const before = await snapshot();
+			const historyBefore = await Effect.runPromise(
+				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.GetAgents({ projectSlug, sessionId }),
+				),
+			).toMatchObject({ instanceId: source.id });
+			const callsBefore = harness.claudeOptions().length;
+			const preview = await Effect.runPromise(
+				browser.rpc
+					.PreviewContinuation({
+						projectSlug,
+						sessionId,
+						instanceId: target.id,
+						originId: browser.originId,
+					})
+					.pipe(Effect.either),
+			);
+			evidence["preview"] = preview;
+			expect(await snapshot()).toEqual(before);
+			expect(harness.claudeOptions()).toHaveLength(callsBefore);
+			if (behavior === "too-large") {
+				expect(preview).toMatchObject({
+					_tag: "Left",
+					left: { _tag: "HandoffTooLarge", message: expect.any(String) },
+				});
+			} else {
+				expect(preview._tag).toBe("Right");
+				if (preview._tag !== "Right") throw new Error("Preview failed");
+				expect(preview.right).toMatchObject({
+					included: expect.any(Number),
+					omitted: expect.any(Number),
+					firstMessageIncluded: true,
+					tokens: expect.any(Number),
+				});
+				expect(preview.right.included).toBeGreaterThanOrEqual(2);
+				expect(preview.right.included + preview.right.omitted).toBe(
+					historyBefore.messages.length - (hasCutOff ? 1 : 0),
+				);
+				expect(preview.right.tokens).toBeGreaterThan(0);
+			}
+			writeFileSync(
+				join(target.configDir, "conduit-test-quota"),
+				["fail", "hang", "unavailable", "limited", "plan-unavailable"].includes(
+					behavior,
+				)
+					? behavior
+					: "available",
+			);
+			writeFileSync(
+				join(target.configDir, "conduit-test-switch-turn"),
+				behavior === "die-once"
+					? "die-once"
+					: behavior === "fail" || behavior === "hang"
+						? "limited"
+						: "hold",
+			);
+			const quotas = await Effect.runPromise(
+				browser.rpc.QuotaForAccounts({
+					projectSlug,
+					originId: browser.originId,
+				}),
+			);
+			evidence["quotas"] = quotas;
+			const quota = quotas.accounts.find(
+				(account) => account.instanceId === target.id,
+			)?.quota;
+			expect(quota?._tag).toBe(
+				["fail", "hang", "plan-unavailable"].includes(behavior)
+					? "Unknown"
+					: behavior === "unavailable"
+						? "Unavailable"
+						: behavior === "limited"
+							? "Limited"
+							: "Available",
+			);
+			if (quota?._tag === "Available") expect(quota.utilization).toBe(37);
+			if (behavior === "send-during-switch")
+				writeFileSync(join(source.configDir, "conduit-test-hold-stop"), "hold");
+			const switching = Effect.runPromise(
+				browser.rpc
+					.ContinueSession({
+						projectSlug,
+						sessionId,
+						instanceId: target.id,
+						expectedInstanceId: source.id,
+						originId: browser.originId,
+					})
+					.pipe(Effect.either),
+			);
+			let queuedSend: Promise<unknown> | undefined;
+			if (behavior === "send-during-switch") {
+				await expect
+					.poll(() => harness.marks.some((mark) => mark.kind === "stop-held"))
+					.toBe(true);
+				queuedSend = send(
+					"Next user message after switching.",
+					"send-during-stop",
+				);
+				queuedSend.catch((error) => {
+					evidence["queuedSendError"] = String(error);
+				});
+				expect(
+					await Promise.race([
+						queuedSend.then(() => true),
+						new Promise<boolean>((done) => setTimeout(() => done(false), 200)),
+					]),
+				).toBe(false);
+				expect(harness.claudeOptions()).toHaveLength(callsBefore);
+				expect(latest()?.resumes ?? []).toHaveLength(0);
+				evidence["heldStop"] = await snapshot();
+				writeFileSync(join(harness.root, "release-switch-stop"), "release");
+			}
+			const result = await switching;
+			evidence["result"] = result;
+			if (["unavailable", "limited", "too-large"].includes(behavior)) {
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag:
+							behavior === "too-large"
+								? "HandoffTooLarge"
+								: "AccountUnavailable",
+						message: expect.any(String),
+					},
+				});
+				expect(await snapshot()).toEqual(before);
+				expect(
+					await Effect.runPromise(
+						browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+					),
+				).toEqual(historyBefore);
+				expect(harness.claudeOptions()).toHaveLength(callsBefore);
+				return;
+			}
+			expect(result._tag).toBe("Right");
+			expect(
+				await Effect.runPromise(
+					browser.rpc.GetAgents({ projectSlug, sessionId }),
+				),
+			).toMatchObject({ instanceId: target.id });
+			await expect.poll(() => latest()?.resumes?.length).toBe(1);
+			const resume = latest()?.resumes?.[0];
+			if (!resume) throw new Error("No durable continuation entry");
+			expect(resume).toMatchObject({
+				reason: "user",
+				instanceId: target.id,
+				at: expect.any(Number),
+			});
+			expect(latest()).toMatchObject({
+				id: sessionId,
+				title: "Keep my session title",
+			});
+			const receipt = () =>
+				Effect.runPromise(
+					browser.rpc.GetContinuationHandoff({
+						projectSlug,
+						sessionId,
+						instanceId: target.id,
+						at: resume.at,
+						originId: browser.originId,
+					}),
+				);
+			expect(await receipt()).toEqual({ handoff: null });
+			if (!hasCutOff) {
+				if (queuedSend) await queuedSend;
+				else {
+					expect(harness.claudeOptions()).toHaveLength(callsBefore);
+					await send("Next user message after switching.", "deferred-handoff");
+				}
+			} else if (
+				behavior !== "die-once" &&
+				behavior !== "fail" &&
+				behavior !== "hang"
+			) {
+				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(true);
+			}
+			await expect
+				.poll(() =>
+					harness
+						.claudeOptions()
+						.filter((call) => call.configDir === target.configDir),
+				)
+				.toHaveLength(1);
+			const switched = harness
+				.claudeOptions()
+				.find((call) => call.configDir === target.configDir);
+			const original = harness
+				.claudeOptions()
+				.find((call) => call.prompt === first);
+			expect(switched?.pid).not.toBe(original?.pid);
+			expect(switched?.resumeId).toBeNull();
+			expect(switched?.prompt).toContain(handoffMarker);
+			expect(switched?.prompt).toContain(first);
+			if (hasCutOff) {
+				expect(switched?.prompt).toContain("[Conduit still-open note]");
+				expect(switched?.prompt).toContain(
+					"some of its work may already be done",
+				);
+				expect(switched?.prompt?.endsWith(cutOff)).toBe(true);
+			}
+			if (behavior === "fail" || behavior === "hang") {
+				await expect
+					.poll(() => latest()?.limitRecovery)
+					.toMatchObject({
+						instanceId: target.id,
+						continued: false,
+						cutOffMessageId: historyBefore.messages
+							.filter((message) => message.role === "user")
+							.at(-1)?.id,
+					});
+				await expect.poll(() => latest()?.status).toBe("idle");
+				expect(latest()?.resumes).toHaveLength(1);
+				expect(await receipt()).toEqual({ handoff: null });
+			} else {
+				if (behavior === "die-once") {
+					await expect
+						.poll(() =>
+							harness.marks.some(
+								(mark) => mark.kind === "handoff-first-turn-died",
+							),
+						)
+						.toBe(true);
+					await expect.poll(() => latest()?.status).toBe("idle");
+					expect(await receipt()).toEqual({ handoff: null });
+					await send("Recover the interrupted handoff.", "repeat-full-handoff");
+					await expect
+						.poll(() =>
+							harness
+								.claudeOptions()
+								.filter((call) => call.configDir === target.configDir),
+						)
+						.toHaveLength(2);
+					const repeated = harness
+						.claudeOptions()
+						.filter((call) => call.configDir === target.configDir)[1];
+					expect(repeated?.resumeId).toBeNull();
+					expect(repeated?.pid).not.toBe(switched?.pid);
+					expect(repeated?.prompt).toContain(first);
+					expect(repeated?.prompt).toContain(cutOff);
+					expect(repeated?.prompt).toContain(handoffMarker);
+				}
+				writeFileSync(join(harness.root, "release-switch-turn"), "release");
+				await expect
+					.poll(async () => (await receipt()).handoff)
+					.toMatchObject({
+						instanceId: target.id,
+						included: expect.any(Number),
+						omitted: expect.any(Number),
+						firstMessageIncluded: true,
+						tokens: expect.any(Number),
+						eventId: expect.any(String),
+						at: expect.any(Number),
+					});
+				if (behavior !== "die-once" && preview._tag === "Right") {
+					const delivered = (await receipt()).handoff;
+					expect(delivered).toMatchObject(preview.right);
+				}
+				await expect.poll(() => latest()?.limitRecovery).toBeNull();
+				await expect.poll(() => latest()?.status).toBe("idle");
+				const delivered = await receipt();
+				const reconnected = await harness.connect();
+				try {
+					expect(
+						await Effect.runPromise(
+							reconnected.rpc.GetContinuationHandoff({
+								projectSlug,
+								sessionId,
+								instanceId: target.id,
+								at: resume.at,
+							}),
+						),
+					).toEqual(delivered);
+				} finally {
+					await reconnected.close();
+				}
+			}
+			expect(latest()).toMatchObject({
+				id: sessionId,
+				title: "Keep my session title",
+			});
+			const historyAfter = await Effect.runPromise(
+				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+			);
+			// A continuation updates turn timing while preserving the user message.
+			for (const message of historyBefore.messages.filter(
+				(message) => message.role === "user",
+			)) {
+				const { turnTiming: _turnTiming, ...originalMessage } = message;
+				expect(historyAfter.messages).toContainEqual(
+					expect.objectContaining(originalMessage),
+				);
+			}
+			evidence["receipt"] = await receipt();
+		} finally {
+			writeFileSync(join(harness.root, "release-switch-stop"), "release");
+			writeFileSync(join(harness.root, "release-switch-turn"), "release");
+			evidence["observed"] = observed;
+			evidence["sdkCalls"] = harness.claudeOptions();
+			evidence["sdkMarks"] = harness.marks;
+			writeFileSync(
+				join(artifacts, "switch-rpc.json"),
+				JSON.stringify(evidence, null, 2),
+			);
+			await Effect.runPromise(Fiber.interrupt(subscription));
+			await browser.close();
+		}
+	});
+}

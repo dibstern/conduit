@@ -76,10 +76,19 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 			if (stored !== undefined) {
 				return yield* Schema.decodeUnknown(NativeThreadSchema)(stored);
 			}
-			// Legacy keys belong to the instance turns route to: the active
-			// binding, else the session's projected provider.
+			// Once per-account receipts exist, legacy keys cannot prove delivery to
+			// an account with no receipt, especially after a provider change.
+			if (
+				Object.keys(state).some((key) => key.startsWith(NATIVE_THREAD_PREFIX))
+			)
+				return undefined;
+			// Legacy keys belong to the account before its first switch, otherwise
+			// the active binding or the session's projected provider.
 			const [owner] = yield* sql<{ provider: string | null }>`
 				SELECT COALESCE(
+					(SELECT json_extract(data, '$.oldProvider') FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
+						ORDER BY sequence ASC LIMIT 1),
 					(SELECT provider FROM session_providers
 						WHERE session_id = ${sessionId} AND status = 'active'
 						ORDER BY activated_at DESC, id DESC LIMIT 1),

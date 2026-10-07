@@ -19,6 +19,7 @@ export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
 import type {
 	ClaudeSettingsResponse,
+	ContinuationHandoffResponse,
 	CreateSessionResponse,
 	DetectProxyResponse,
 	FindFoldersResponse,
@@ -37,7 +38,9 @@ import type {
 	PermissionDecision,
 	PermissionPersistScope,
 	PermissionUpdateDestination,
+	PreviewContinuationResponse,
 	ProjectMutationResponse,
+	QuotaForAccountsResponse,
 	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
 	RewindSessionResponse,
@@ -406,6 +409,23 @@ export interface CancelContinuationRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+}
+
+export interface PreviewContinuationRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly originId?: string;
+}
+
+export interface QuotaForAccountsRpcInput {
+	readonly projectSlug: string;
+	readonly originId?: string;
+}
+
+export interface GetContinuationHandoffRpcInput
+	extends PreviewContinuationRpcInput {
+	readonly at: number;
 }
 
 export interface SwitchVariantRpcInput {
@@ -1294,6 +1314,36 @@ export async function cancelContinuationRpc(
 	await runTransportEffect(
 		callControl(input.projectSlug, (client) =>
 			client.CancelContinuation(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
+export async function previewContinuationRpc(
+	input: PreviewContinuationRpcInput,
+): Promise<PreviewContinuationResponse> {
+	const result = await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.PreviewContinuation(input).pipe(Effect.either),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
+export async function quotaForAccountsRpc(
+	input: QuotaForAccountsRpcInput,
+): Promise<QuotaForAccountsResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.QuotaForAccounts(input)),
+	);
+}
+
+export async function getContinuationHandoffRpc(
+	input: GetContinuationHandoffRpcInput,
+): Promise<ContinuationHandoffResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.GetContinuationHandoff(input),
 		),
 	);
 }

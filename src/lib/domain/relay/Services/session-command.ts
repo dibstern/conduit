@@ -17,7 +17,10 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignalProject,
+	makeCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import {
@@ -76,6 +79,7 @@ type SessionCommandType =
 	| "session.auto_settle_set"
 	| "session.unsnoozed"
 	| "session.deleted"
+	| "session.provider_changed"
 	| "session.forked";
 
 export type SessionCommand = {
@@ -101,6 +105,8 @@ export interface SessionUpstreamAdapter {
 }
 
 export interface ApplySessionCommandOptions {
+	/** Join a caller's canonical commit, without publishing before that commit. */
+	readonly project?: CommitAndSignalProject;
 	/**
 	 * Override the provider adapter while retaining the canonical
 	 * append/project/sync pipeline. SessionManager uses this to fold its richer
@@ -139,6 +145,7 @@ export const openCodeUpstreamAdapter = (
 			case "session.snoozed":
 			case "session.auto_settle_set":
 			case "session.unsnoozed":
+			case "session.provider_changed":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
@@ -216,13 +223,18 @@ export const applySessionCommand = (
 				: row?.provider;
 
 		if (appendProvider !== undefined) {
-			yield* commitAndSignal([
+			const events = [
 				canonicalEvent(command.type, sessionId, command.data, {
 					provider: appendProvider,
 					createdAt: Date.now(),
 					metadata: { source: "relay" },
 				}),
-			]).pipe(
+			];
+			yield* (
+				options.project
+					? Effect.flatMap(eventStore.appendBatch(events), options.project)
+					: commitAndSignal(events)
+			).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({

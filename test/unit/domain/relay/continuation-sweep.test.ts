@@ -10,9 +10,16 @@ import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
+import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import { makeContinuation } from "../../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../../src/lib/domain/relay/Services/services.js";
 import {
 	makeOverridesStateLive,
 	startProcessingTimeout,
@@ -22,6 +29,15 @@ import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/even
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../../src/lib/provider/provider-registry.js";
+import {
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+} from "../../../helpers/mock-factories.js";
 
 const seed = (at = 10) =>
 	Effect.gen(function* () {
@@ -62,6 +78,26 @@ const config = {
 	configDir: "/tmp/conduit-eon2-no-config",
 	persistenceDbPath: ":memory:",
 	publishGlobalSetting: () => Effect.void,
+};
+
+// An account switch needs these; the sweep only resumes the limited account.
+const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
+	const registry = new ProviderRegistry();
+	return effect.pipe(
+		Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
+		Effect.provideService(LoggerTag, makeMockLogger()),
+		Effect.provideService(
+			OrchestrationEngineTag,
+			new OrchestrationEngine({ registry }),
+		),
+		Effect.provideService(ProviderRegistryTag, registry),
+		Effect.provideService(AgentServiceTag, {
+			getActiveAgent: () => Effect.succeed(undefined),
+			listAgents: () => Effect.die("The sweep never switches agents"),
+			switchAgent: () => Effect.die("The sweep never switches agents"),
+		}),
+		Effect.provide(AlertsLive),
+	);
 };
 
 for (const scenario of [
@@ -220,6 +256,7 @@ for (const scenario of [
 					pickFailover: () => Effect.succeed(undefined),
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
+					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 					sendTurn: () =>
 						Effect.sync(() => {
@@ -227,6 +264,7 @@ for (const scenario of [
 						}),
 					interruptTurn: () => Effect.void,
 				}),
+				withSwitchServices,
 				Effect.provide(makeOverridesStateLive()),
 				Effect.provide(makePersistenceEffectLayer(":memory:")),
 			),
@@ -275,6 +313,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 				pickFailover: () => Effect.succeed(undefined),
 			}),
 			Effect.provideService(ProviderTurnServiceTag, {
+				holdUserTurnsForAccountSwitch: () => Effect.void,
 				prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 				sendTurn: (input) =>
 					Effect.sync(() => {
@@ -282,6 +321,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 					}),
 				interruptTurn: () => Effect.void,
 			}),
+			withSwitchServices,
 			Effect.provide(makeOverridesStateLive()),
 			Effect.provide(makePersistenceEffectLayer(":memory:")),
 		),
@@ -346,10 +386,12 @@ for (const freshReset of [42, undefined]) {
 					pickFailover: () => Effect.succeed(undefined),
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
+					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 					sendTurn: () => Effect.die("Limited must never dispatch"),
 					interruptTurn: () => Effect.void,
 				}),
+				withSwitchServices,
 				Effect.provide(makeOverridesStateLive()),
 				Effect.provide(makePersistenceEffectLayer(":memory:")),
 			),

@@ -1,5 +1,5 @@
 import type { SqlClient } from "@effect/sql";
-import { Context, Deferred, Effect, FiberMap, Layer } from "effect";
+import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -74,6 +74,10 @@ export interface ProviderTurnServiceInterruptInput {
 }
 
 export interface ProviderTurnService {
+	/** Hold new user turns until account mutation and runner replacement finish. */
+	readonly holdUserTurnsForAccountSwitch: (
+		sessionId: string,
+	) => Effect.Effect<void, never, Scope.Scope>;
 	readonly completeRecoveredQuestion?: (
 		question: PendingQuestion,
 		result: string | null,
@@ -138,14 +142,32 @@ const makeProviderTurnService = Effect.gen(function* () {
 	// the button press. A prompt sent before they go out would be ended by
 	// them, so a new prompt waits for the session's Stop to finish first.
 	const stopping = new Map<string, Deferred.Deferred<void>>();
+	const accountSwitches = new Map<string, Deferred.Deferred<void>>();
 	const awaitStop = (sessionId: string) =>
-		Effect.suspend(() => {
+		Effect.gen(function* () {
 			const stop = stopping.get(sessionId);
-			return stop
-				? Deferred.await(stop).pipe(Effect.timeout("5 seconds"), Effect.ignore)
-				: Effect.void;
+			if (stop)
+				yield* Deferred.await(stop).pipe(
+					Effect.timeout("5 seconds"),
+					Effect.ignore,
+				);
+			// A switch can begin while this send awaits an earlier Stop.
+			const switching = accountSwitches.get(sessionId);
+			if (switching) yield* Deferred.await(switching);
 		});
 	const service: ProviderTurnService = {
+		holdUserTurnsForAccountSwitch: (sessionId) =>
+			Effect.acquireRelease(
+				Effect.gen(function* () {
+					const hold = yield* Deferred.make<void>();
+					accountSwitches.set(sessionId, hold);
+					return hold;
+				}),
+				(hold) =>
+					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
+						Effect.zipRight(Deferred.succeed(hold, undefined)),
+					),
+			).pipe(Effect.asVoid),
 		completeRecoveredQuestion: (question, result, answers) =>
 			completeRecoveredQuestion(question, result, answers).pipe(
 				Effect.provide(providedContext),
@@ -157,6 +179,9 @@ const makeProviderTurnService = Effect.gen(function* () {
 			),
 		sendTurn: (input) =>
 			Effect.gen(function* () {
+				// A user may already have prepared before the switch acquired its
+				// hold. Wait again before routing; the switch's own turn owns the hold.
+				if (!input.continuation) yield* awaitStop(input.sessionId);
 				if (input.continuation) {
 					const failTurn = yield* makeFailTurn;
 					yield* startProcessingTimeout(

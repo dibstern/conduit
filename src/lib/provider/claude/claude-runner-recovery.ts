@@ -159,7 +159,7 @@ export const recoverClaudeRunnerCommands = (
 						) {
 							yield* deps.persistHandoffDelivered(
 								sessionId,
-								result.handoff,
+								{ ...result.handoff, instanceId },
 								row.command_id,
 							);
 						}

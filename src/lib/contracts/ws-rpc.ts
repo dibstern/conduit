@@ -23,6 +23,8 @@ import {
 } from "./claude-settings.js";
 import {
 	ContinuationErrorSchema,
+	HandoffSummarySchema,
+	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
 } from "./limit-recovery.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
@@ -1394,6 +1396,74 @@ export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>
 	},
 ) {}
 
+export type PreviewContinuationResponse = typeof HandoffSummarySchema.Type;
+
+export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuation>()(
+	"PreviewContinuation",
+	{
+		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
+		success: HandoffSummarySchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export const QuotaForAccountsResponseSchema = Schema.Struct({
+	accounts: Schema.Array(
+		Schema.Struct({
+			instanceId: NonEmptyString,
+			quota: QuotaCheckResultSchema,
+		}),
+	),
+});
+export type QuotaForAccountsResponse =
+	typeof QuotaForAccountsResponseSchema.Type;
+
+export class QuotaForAccounts extends Schema.TaggedRequest<QuotaForAccounts>()(
+	"QuotaForAccounts",
+	{
+		failure: WsRpcError,
+		success: QuotaForAccountsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export const ContinuationHandoffResponseSchema = Schema.Struct({
+	handoff: Schema.NullOr(
+		Schema.Struct({
+			...HandoffSummarySchema.fields,
+			eventId: NonEmptyString,
+			instanceId: NonEmptyString,
+			at: Schema.Number,
+		}),
+	),
+});
+export type ContinuationHandoffResponse =
+	typeof ContinuationHandoffResponseSchema.Type;
+
+/** Link the first completed handoff to a durable resumes entry, including reload. */
+export class GetContinuationHandoff extends Schema.TaggedRequest<GetContinuationHandoff>()(
+	"GetContinuationHandoff",
+	{
+		failure: WsRpcError,
+		success: ContinuationHandoffResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			at: Schema.Number,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
 	"UnsnoozeSession",
 	{
@@ -1852,6 +1922,9 @@ export const WsRpcRequest = Schema.Union(
 	DismissCutOff,
 	ContinueSession,
 	CancelContinuation,
+	PreviewContinuation,
+	QuotaForAccounts,
+	GetContinuationHandoff,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -2230,6 +2303,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(DismissCutOff),
 	Rpc.fromTaggedRequest(ContinueSession),
 	Rpc.fromTaggedRequest(CancelContinuation),
+	Rpc.fromTaggedRequest(PreviewContinuation),
+	Rpc.fromTaggedRequest(QuotaForAccounts),
+	Rpc.fromTaggedRequest(GetContinuationHandoff),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),
