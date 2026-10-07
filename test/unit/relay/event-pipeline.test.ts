@@ -85,9 +85,7 @@ describe("shouldCache", () => {
 			"delta",
 			"thinking_start",
 			"thinking_delta",
-			"thinking_stop",
 			"tool_start",
-			"tool_executing",
 			"tool_result",
 			"result",
 			"done",
@@ -98,7 +96,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat event types", () => {
-		const nonCacheable = ["session_list"] as const;
+		const nonCacheable = ["message_removed"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}
@@ -207,26 +205,18 @@ function makeDeps(): PipelineDeps & {
 		clearProcessingTimeout: ReturnType<typeof vi.fn>;
 		resetProcessingTimeout: ReturnType<typeof vi.fn>;
 	};
-	wsHandler: { broadcastPerSessionEvent: ReturnType<typeof vi.fn> };
 	log: ReturnType<typeof createSilentLogger> & {
-		debug: ReturnType<typeof vi.fn>;
-		verbose: ReturnType<typeof vi.fn>;
 		info: ReturnType<typeof vi.fn>;
 	};
 } {
-	const debugSpy = vi.fn();
-	const verboseSpy = vi.fn();
 	const infoSpy = vi.fn();
 	return {
 		processingTimeouts: {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},
-		wsHandler: { broadcastPerSessionEvent: vi.fn() },
 		log: {
 			...createSilentLogger(),
-			debug: debugSpy,
-			verbose: verboseSpy,
 			info: infoSpy,
 		},
 	};
@@ -277,29 +267,7 @@ describe("applyPipelineResult", () => {
 	// messageCache removed in Task 50.5 — applyPipelineResult no longer records
 	// events; the cache field on PipelineResult is now consumed by the SSE wiring layer.
 
-	it("firehoses per-session event when route action is send", () => {
-		const deps = makeDeps();
-		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result: PipelineResult = {
-			msg,
-			fullContent: undefined,
-			route: { action: "send", sessionId: "ses_abc" },
-			cache: true,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"ses_abc",
-			msg,
-		);
-		expect(deps.log.debug).not.toHaveBeenCalled();
-	});
-
-	it("firehoses per-session event even when route action is drop (no viewers)", () => {
-		// Phase 0b: the route field is now a "has-viewers?" signal for
-		// cross-session notification decisions. Delivery is no longer gated
-		// by viewers — every client on the project receives the event.
+	it("logs the routing decision when a session has no viewers", () => {
 		const deps = makeDeps();
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result: PipelineResult = {
@@ -311,13 +279,6 @@ describe("applyPipelineResult", () => {
 			source: "sse",
 		};
 		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"ses_abc",
-			msg,
-		);
-		// The drop reason is still logged as the "no active viewers" signal
-		// — used by downstream notification routing to publish cross-session
-		// alerts.
 		expect(deps.log.info).toHaveBeenCalledWith(
 			"no viewers for session ses_abc — delta (sse)",
 		);

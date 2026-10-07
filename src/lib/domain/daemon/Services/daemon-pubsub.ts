@@ -24,7 +24,6 @@ export type DaemonEvent = Data.TaggedEnum<{
 	// Session lifecycle events (used by relay wiring Layers)
 	SessionCreated: { readonly sessionId: string };
 	SessionDeleted: { readonly sessionId: string };
-	RelayBroadcast: { readonly message: unknown };
 	ConfigChanged: Record<never, never>;
 	// The daemon's instance or project list changed (conduit-test-ni8.14).
 	InstancesChanged: Record<never, never>;
@@ -86,9 +85,6 @@ export const publishSessionCreated = (sessionId: string) =>
 
 export const publishSessionDeleted = (sessionId: string) =>
 	publish(DaemonEvent.SessionDeleted({ sessionId }));
-
-export const publishRelayBroadcast = (message: unknown) =>
-	publish(DaemonEvent.RelayBroadcast({ message }));
 
 export const publishConfigChanged = publish(DaemonEvent.ConfigChanged());
 

@@ -21,12 +21,7 @@ import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
-import {
-	ConfigTag,
-	LoggerTag,
-	OrchestrationEngineTag,
-	WebSocketHandlerTag,
-} from "./services.js";
+import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
@@ -107,19 +102,6 @@ export function isClaudeDriver(driver: ProviderDriverKind): boolean {
 	return driver === CLAUDE_PROVIDER_ID;
 }
 
-function targetSessionForRelayMessage(
-	msg: unknown,
-	fallbackSessionId: string,
-): string {
-	if (msg == null || typeof msg !== "object" || !("sessionId" in msg)) {
-		return fallbackSessionId;
-	}
-	const sessionId = (msg as { readonly sessionId?: unknown }).sessionId;
-	return typeof sessionId === "string" && sessionId.length > 0
-		? sessionId
-		: fallbackSessionId;
-}
-
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -178,7 +160,6 @@ const maybePersistClaudeUserMessage = (input: {
 
 const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
 		const runTimeout = Runtime.runFork(runtime);
@@ -188,11 +169,6 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
-			send: (msg) =>
-				wsHandler.sendToSession(
-					targetSessionForRelayMessage(msg, sessionId),
-					msg,
-				),
 			clearTimeout: () => {
 				runTimeout(clearProcessingTimeout(sessionId));
 			},

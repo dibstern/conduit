@@ -7,7 +7,7 @@ import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { SessionDetail, SessionStatus } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { HistoryMessage } from "../shared-types.js";
-import type { RelayMessage, SessionInfo } from "../types.js";
+import type { SessionInfo } from "../types.js";
 import { toSessionInfoList } from "./session-info-list.js";
 
 /** Fetch enough sessions to initialize the complete local session count. */
@@ -28,10 +28,6 @@ export interface SessionManagerOptions {
 }
 
 export interface SessionManagerEvents {
-	/** Broadcast this message to all connected clients */
-	broadcast: [RelayMessage];
-	/** Send to a specific client */
-	send: [{ clientId: string; message: RelayMessage }];
 	/** Session created or deleted (discriminated payload) */
 	session_lifecycle: [
 		| { type: "created"; sessionId: string }
@@ -185,7 +181,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.emit("session_lifecycle", { type: "created", sessionId: session.id });
 
 		if (!opts?.silent) {
-			await this.broadcastSessionList();
+			await this.listSessions({ roots: true });
 		}
 
 		return session;
@@ -224,14 +220,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		this.emit("session_lifecycle", { type: "deleted", sessionId });
 
 		if (!opts?.silent) {
-			await this.broadcastSessionList();
+			await this.listSessions({ roots: true });
 		}
 	}
 
 	/** Rename a session */
 	async renameSession(sessionId: string, title: string): Promise<void> {
 		await this.client.session.update(sessionId, { title });
-		await this.broadcastSessionList();
+		await this.listSessions({ roots: true });
 	}
 
 	/** Search sessions by query */
@@ -320,29 +316,5 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	/** Get the last-message-at map (for passing to toSessionInfoList). */
 	getLastMessageAtMap(): ReadonlyMap<string, number> {
 		return this.lastMessageAt;
-	}
-
-	/**
-	 * Send the roots-only session list.
-	 * Used by all broadcast/unicast send points.
-	 */
-	async sendSessionLists(
-		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
-		options?: { statuses?: Record<string, SessionStatus> | undefined },
-	): Promise<void> {
-		const roots = await this.listSessions({
-			roots: true,
-			statuses: options?.statuses,
-		});
-		send({ type: "session_list", sessions: roots, roots: true });
-	}
-
-	private async broadcastSessionList(): Promise<void> {
-		const roots = await this.listSessions({ roots: true });
-		this.emit("broadcast", {
-			type: "session_list",
-			sessions: roots,
-			roots: true,
-		});
 	}
 }

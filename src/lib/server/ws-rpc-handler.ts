@@ -20,7 +20,6 @@ import {
 	type AttachDaemonProject,
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
-	type ReattachDaemonViewSession,
 	type ResolveRpcContext,
 	type RpcSubscriptionScopeTag,
 	WsRpcGroup,
@@ -158,7 +157,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
-	reattachViewSession?: ReattachDaemonViewSession,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 	attachProject?: AttachDaemonProject,
 ) =>
@@ -174,7 +172,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
-			reattachViewSession,
 			attachProject,
 		);
 		const handler = new WsRpcWebSocketHandler(undefined, {

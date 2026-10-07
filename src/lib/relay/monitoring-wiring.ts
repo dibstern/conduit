@@ -6,7 +6,6 @@
 
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Runtime } from "effect";
-import type { Alert } from "../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
@@ -25,7 +24,6 @@ import {
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { RelayMessage } from "../shared-types.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
 	applyPipelineResult,
@@ -68,10 +66,7 @@ interface SSEConnectionHealthLike {
 }
 
 interface MonitoringWsHandlerLike {
-	broadcast(msg: RelayMessage): void;
-	sendToSession(sessionId: string, msg: RelayMessage): void;
 	getClientsForSession(sessionId: string): string[];
-	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
 }
 
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
@@ -125,8 +120,6 @@ export interface MonitoringWiringDeps {
 	sseLog: Logger;
 	pipelineLog: Logger;
 	state?: MonitoringWiringStateAccess;
-	/** Sync wiring only; the Effect wiring publishes to AlertsTag. */
-	publishAlert: (alert: Alert) => void;
 }
 
 export interface MonitoringWiringStateAccess {
@@ -153,7 +146,7 @@ export interface MonitoringWiringResult {
 
 export type EffectMonitoringWiringDeps = Omit<
 	MonitoringWiringDeps,
-	"sessionService" | "processingTimeouts" | "statusPoller" | "publishAlert"
+	"sessionService" | "processingTimeouts" | "statusPoller"
 >;
 
 export type EffectMonitoringWiringResult = Omit<
@@ -431,7 +424,6 @@ export function wireMonitoring(
 	// Shared pipeline deps (used by status poller + message poller)
 	const pipelineDeps: PipelineDeps = {
 		processingTimeouts,
-		wsHandler,
 		log: pipelineLog,
 	};
 
@@ -487,7 +479,6 @@ export function wireMonitoring(
 					sessionId,
 				});
 			}
-			if (notification.alert) deps.publishAlert(notification.alert);
 		},
 		clearProcessingTimeout: (sessionId) =>
 			processingTimeouts.clearProcessingTimeout(sessionId),
@@ -615,7 +606,6 @@ export const wireMonitoringEffect = (
 		};
 		const doneDeliveredByPrimary = new Set<string>();
 		const pipelineDeps: Omit<PipelineDeps, "processingTimeouts"> = {
-			wsHandler,
 			log: pipelineLog,
 		};
 

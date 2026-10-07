@@ -245,7 +245,7 @@ describe("daemon project readiness and socket routing", () => {
 		}
 	});
 
-	it("WS upgrade on a path other than /ws or /rpc destroys socket", async () => {
+	it("WS upgrade on a path other than /rpc destroys socket", async () => {
 		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 

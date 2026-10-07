@@ -4,7 +4,6 @@
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
 
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -21,6 +20,7 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Cause,
+	Context,
 	Data,
 	Effect,
 	Exit,
@@ -29,11 +29,11 @@ import {
 	ManagedRuntime,
 	Schedule,
 } from "effect";
-import { WebSocketServer } from "ws";
 import { AuthManager } from "../auth.js";
 import { type GlobalProjectSetting, WsRpcError } from "../contracts/ws-rpc.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
+	ProjectSettingsTag,
 	refreshGlobalDefaults,
 	syncGlobalSetting,
 } from "../domain/relay/Services/project-settings.js";
@@ -539,7 +539,6 @@ export async function createProjectRelay(
 	const backgroundLiveness = makeSessionBackgroundLiveness((sessionId) =>
 		announceBackgroundWork?.(sessionId),
 	);
-	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
@@ -576,7 +575,6 @@ export async function createProjectRelay(
 	const startup = await startProjectRelay({
 		config,
 		log,
-		wsLog,
 		sseLog,
 		statusLog,
 		pollerLog,
@@ -622,7 +620,10 @@ export async function createProjectRelay(
 	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {
 		return {
 			...statusSnapshot.getSnapshot(),
-			clients: wsHandler.getClientCount(),
+			clients: Context.get(
+				startup.projectSettingsContext,
+				ProjectSettingsTag,
+			).browsers.count(),
 			sse: sseStream.getHealth(),
 		};
 	};
@@ -747,7 +748,7 @@ export async function createRelayStack(
 	// Assign to a fresh const so TypeScript narrows to non-null in closures.
 	const httpServer = maybeServer;
 
-	// The server owns browser upgrades and attaches /ws sockets to the initial relay.
+	// The server owns browser RPC upgrades.
 	// This matches the daemon pattern and allows dynamic project addition.
 
 	const relays = new Map<string, ProjectRelay>();
@@ -900,7 +901,6 @@ export async function createRelayStack(
 		getIsProcessing: () => relay.getStatusSnapshot().isProcessing,
 	});
 
-	// Owns /ws upgrades and attaches sockets to the initial relay.
 	// /rpc uses per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
@@ -927,14 +927,6 @@ export async function createRelayStack(
 		),
 	);
 
-	const wss = new WebSocketServer({
-		noServer: true,
-		maxPayload: 50 * 1024 * 1024,
-		perMessageDeflate: {
-			serverMaxWindowBits: 10,
-			zlibDeflateOptions: { level: 1 },
-		},
-	});
 	httpServer.on("upgrade", (req, socket, head) => {
 		// Auth check (mirrors server.ts private checkAuth)
 		const auth = server.getAuth();
@@ -956,23 +948,6 @@ export async function createRelayStack(
 			}
 		}
 
-		// Route /ws → initial relay
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			wss.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const requestedClientId = params.get("client") ?? "";
-				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
-					? requestedClientId
-					: randomBytes(8).toString("hex");
-				const requestedSessionId = params.get("session") || undefined;
-				relay.wsHandler.attach(ws, {
-					clientId,
-					...(requestedSessionId != null && { requestedSessionId }),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			rpcRuntime
 				.runFork(
@@ -1029,8 +1004,6 @@ export async function createRelayStack(
 				}
 			}
 			relays.clear();
-			for (const ws of wss.clients) ws.terminate();
-			await new Promise<void>((resolve) => wss.close(() => resolve()));
 			await server.stop();
 		},
 	};

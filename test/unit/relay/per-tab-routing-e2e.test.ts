@@ -1,10 +1,9 @@
 // E2E: Per-Tab Session Routing (Mock OpenCode)
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
-// real WebSocket clients to verify SSE events route only to session viewers.
+// RPC clients to verify SSE events reach session-detail subscribers.
 //
 // No real OpenCode required — runs in CI without external dependencies.
 
-import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
@@ -16,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -265,24 +263,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	});
 
-	const browserSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			browserSockets.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const clientId = params.get("client");
-				const requestedSessionId = params.get("session");
-				relay.wsHandler.attach(ws, {
-					clientId:
-						clientId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientId)
-							? clientId
-							: randomBytes(8).toString("hex"),
-					...(requestedSessionId != null ? { requestedSessionId } : {}),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			relay.rpcWsHandler.handleUpgrade(req, socket, head);
 			return;
@@ -305,23 +286,16 @@ async function createTestHarness(): Promise<TestHarness> {
 		mock,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}/ws`;
+			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-project`;
 			if (opts?.session) {
-				url += `?session=${encodeURIComponent(opts.session)}`;
+				url += `&session=${encodeURIComponent(opts.session)}`;
 			}
 			const client = new TestWsClient(url);
 			await client.waitForOpen();
 			return client;
 		},
 		async stop() {
-			try {
-				await relay.stop();
-			} finally {
-				for (const ws of browserSockets.clients) ws.terminate();
-				await new Promise<void>((resolve) =>
-					browserSockets.close(() => resolve()),
-				);
-			}
+			await relay.stop();
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 			rmSync(persistenceDir, { recursive: true, force: true });
@@ -333,7 +307,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	let harness: TestHarness;
 
 	beforeAll(async () => {
-		// Client init also discovers Claude capabilities; keep the relay off the live SDK.
+		// Keep capability discovery off the live Claude SDK.
 		__setProbeOverrideForTesting(async () => ({
 			models: [],
 			commands: [],
@@ -357,7 +331,6 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		expect(client.getReceivedOfType("family")).toContainEqual(
 			expect.objectContaining({ _tag: "snapshot" }),
 		);
-		expect(client.getReceivedOfType("session_family")).toEqual([]);
 
 		await client.close();
 	});
@@ -433,14 +406,14 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client2.close();
 	});
 
-	it("client connecting with ?session= gets that session metadata first", async () => {
+	it("client requesting a session gets that family snapshot first", async () => {
 		// First, ensure the global active session is sess-A (the default)
 		const setupClient = await harness.connectClient();
 		await setupClient.waitForInitialState();
 		await setupClient.viewSession("sess-A");
 		await setupClient.close();
 
-		// Now connect a NEW client requesting sess-B via query param
+		// The RPC client follows sess-B before selecting its initial session.
 		const client = await harness.connectClient({ session: "sess-B" });
 		await client.waitForInitialState();
 

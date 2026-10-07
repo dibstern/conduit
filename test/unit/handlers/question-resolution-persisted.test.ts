@@ -72,17 +72,10 @@ const QUESTION = "que-1";
 
 const makeWsHandler = () => ({
 	attach: vi.fn(() => () => {}),
-	broadcast: vi.fn(),
-	sendTo: vi.fn(),
 	setClientSession: vi.fn(),
 	getClientSession: vi.fn(() => SESSION),
 	getClientsForSession: vi.fn(() => ["client-1"]),
 	registerSessionViewer: vi.fn(() => () => {}),
-	sendToSession: vi.fn(),
-	broadcastPerSessionEvent: vi.fn(),
-	markClientBootstrapped: vi.fn(),
-	getClientCount: vi.fn(() => 1),
-	getClientIds: vi.fn(() => ["client-1"]),
 	handleUpgrade: vi.fn(),
 	close: vi.fn(),
 	drain: vi.fn(async () => undefined),

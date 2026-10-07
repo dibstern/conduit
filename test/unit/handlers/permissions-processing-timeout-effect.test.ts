@@ -38,17 +38,10 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 function makeWsHandler() {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => "session-1"),
 		getClientsForSession: vi.fn(() => ["client-1"]),
 		registerSessionViewer: vi.fn(() => () => {}),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 1),
-		getClientIds: vi.fn(() => ["client-1"]),
 		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),

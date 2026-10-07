@@ -38,8 +38,6 @@ function fakeRelay(
 ): Relay {
 	return {
 		slug,
-		attach: () => () => {},
-		wsHandler: {},
 		rpcWsHandler: {} as Relay["rpcWsHandler"],
 		syncGlobalSetting: () => Effect.void,
 		refreshGlobalDefaults: () => Effect.void,

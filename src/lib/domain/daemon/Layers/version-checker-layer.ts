@@ -1,5 +1,5 @@
 // Pure Effect replacement for the VersionChecker class.
-// Periodically checks for newer versions and broadcasts update notifications.
+// Periodically checks for newer versions and retains the latest known version.
 // Background fiber is fork-scoped — automatically interrupted on scope close.
 //
 // Defines its own Tag that will coexist with the one in services.ts until
@@ -10,11 +10,6 @@ import { Context, type Duration, Effect, Layer, Ref, Schedule } from "effect";
 export interface VersionCheckerConfig {
 	getCurrentVersion: () => string;
 	fetchLatestVersion: () => Effect.Effect<string | null>;
-	broadcast: (msg: {
-		type: string;
-		current: string;
-		latest: string;
-	}) => Effect.Effect<void>;
 	checkInterval: Duration.DurationInput;
 }
 
@@ -57,11 +52,6 @@ export const VersionCheckerLive = (config: VersionCheckerConfig) =>
 					const current = config.getCurrentVersion();
 					if (latest !== prev && isNewerVersion(current, latest)) {
 						yield* Ref.set(latestKnown, latest);
-						yield* config.broadcast({
-							type: "version_update",
-							current,
-							latest,
-						});
 					}
 				}
 			});

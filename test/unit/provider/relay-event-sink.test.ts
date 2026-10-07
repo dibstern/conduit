@@ -6,14 +6,12 @@ import type {
 	ProviderRuntimeEventType,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PersistenceError } from "../../../src/lib/persistence/errors.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
 } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
 
 function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
@@ -33,57 +31,11 @@ function makeEvent<T extends ProviderRuntimeEventType>(
 	};
 }
 
-describe("createRelayEventSink — translation", () => {
-	it("maps text.delta → delta RelayMessage", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("text.delta", {
-					messageId: "msg_1",
-					partId: "part_1",
-					text: "Hello",
-				}),
-			),
-		);
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-			partId: "part_1",
-		});
-	});
-
-	it("tags translated child-session events with the canonical event session", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "parent", send });
-		const event = {
-			...makeEvent("text.delta", {
-				messageId: "msg_child",
-				partId: "part_child",
-				text: "Child text",
-			}),
-			sessionId: "child",
-		};
-
-		await Effect.runPromise(sink.push(event));
-
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "child",
-			text: "Child text",
-			messageId: "msg_child",
-			partId: "part_child",
-		});
-	});
-
-	it("maps turn.completed → result + done(0)", async () => {
-		const send = vi.fn();
+describe("createRelayEventSink — processing timeouts", () => {
+	it("clears timeout on turn.completed", async () => {
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 		});
 		await Effect.runPromise(
@@ -96,18 +48,13 @@ describe("createRelayEventSink — translation", () => {
 				}),
 			),
 		);
-		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(calls.some((m) => m.type === "result")).toBe(true);
-		expect(calls.some((m) => m.type === "done" && m.code === 0)).toBe(true);
 		expect(clearTimeout).toHaveBeenCalled();
 	});
 
-	it("maps turn.error → error + done(1)", async () => {
-		const send = vi.fn();
+	it("clears timeout on turn.error", async () => {
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 		});
 		await Effect.runPromise(
@@ -119,22 +66,16 @@ describe("createRelayEventSink — translation", () => {
 				}),
 			),
 		);
-		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(calls).toContainEqual(
-			expect.objectContaining({ type: "done", code: 1, error: "boom" }),
-		);
 		expect(clearTimeout).toHaveBeenCalled();
 	});
 
 	// A retry is transient status on the shell row (C1), not a relay message;
 	// it must still keep the turn alive while the SDK retries.
-	it("keeps session.status:retry off the relay without ending the turn", async () => {
-		const send = vi.fn();
+	it("keeps the turn alive while the SDK retries", async () => {
 		const clearTimeout = vi.fn();
 		const resetTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 			resetTimeout,
 		});
@@ -147,7 +88,6 @@ describe("createRelayEventSink — translation", () => {
 				}),
 			),
 		);
-		expect(send).not.toHaveBeenCalled();
 		// A retry is NON-terminal — must NOT clear the processing timeout.
 		expect(clearTimeout).not.toHaveBeenCalled();
 		// It DOES reset the timeout (activity observed).
@@ -164,7 +104,6 @@ describe("createRelayEventSink — translation", () => {
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send: vi.fn(),
 			clearTimeout,
 			resetTimeout,
 		});
@@ -186,11 +125,9 @@ describe("createRelayEventSink — translation", () => {
 	});
 
 	it("clears timeout on non-RETRY errors", async () => {
-		const send = vi.fn();
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 		});
 		await Effect.runPromise(
@@ -206,11 +143,9 @@ describe("createRelayEventSink — translation", () => {
 	});
 
 	it("does not clear timeout on idle/busy session.status", async () => {
-		const send = vi.fn();
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 		});
 		await Effect.runPromise(
@@ -223,61 +158,12 @@ describe("createRelayEventSink — translation", () => {
 				makeEvent("session.status", { sessionId: "ses-1", status: "busy" }),
 			),
 		);
-		expect(send).not.toHaveBeenCalled();
 		expect(clearTimeout).not.toHaveBeenCalled();
-	});
-
-	it("maps tool.started → tool_start + tool_executing", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("tool.started", {
-					messageId: "msg_1",
-					partId: "part_1",
-					toolName: "Bash",
-					callId: "call_1",
-					input: { tool: "Bash", command: "ls" },
-				}),
-			),
-		);
-		const calls = send.mock.calls.map((c) => c[0] as RelayMessage);
-		expect(calls[0]).toMatchObject({
-			type: "tool_start",
-			id: "call_1",
-			name: "Bash",
-		});
-		expect(calls[1]).toMatchObject({
-			type: "tool_executing",
-			id: "call_1",
-			name: "Bash",
-		});
-	});
-
-	it("maps thinking.delta → thinking_delta", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("thinking.delta", {
-					messageId: "msg_1",
-					partId: "part_1",
-					text: "pondering",
-				}),
-			),
-		);
-		expect(send).toHaveBeenCalledWith({
-			type: "thinking_delta",
-			sessionId: "ses-1",
-			text: "pondering",
-			messageId: "msg_1",
-		});
 	});
 });
 
 describe("createRelayEventSink — persistence", () => {
 	it("delegates provider output to ProviderRuntimeIngestion when provided", async () => {
-		const send = vi.fn();
 		const persistEvent = vi.fn(() => Effect.void);
 		const event = makeEvent("text.delta", {
 			messageId: "msg_1",
@@ -289,20 +175,16 @@ describe("createRelayEventSink — persistence", () => {
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			persist: { persistEvent },
 			ingestion,
 		});
 
 		await Effect.runPromise(sink.push(event));
-
 		expect(ingestion.ingest).toHaveBeenCalledWith(event);
 		expect(persistEvent).not.toHaveBeenCalled();
-		expect(send).not.toHaveBeenCalled();
 	});
 
 	it("returns ProviderRuntimeIngestion failures in the Effect error channel", async () => {
-		const send = vi.fn();
 		const event = makeEvent("text.delta", {
 			messageId: "msg_1",
 			partId: "part_1",
@@ -311,7 +193,6 @@ describe("createRelayEventSink — persistence", () => {
 		const ingestionError = new SqlError({ message: "ingestion failed" });
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			ingestion: {
 				ingest: vi.fn(() => Effect.fail(ingestionError)),
 			},
@@ -323,16 +204,13 @@ describe("createRelayEventSink — persistence", () => {
 		if (result._tag === "Left") {
 			expect(result.left).toBe(ingestionError);
 		}
-		expect(send).not.toHaveBeenCalled();
 	});
 
 	it("runs Effect persistence when persist deps are provided", async () => {
-		const send = vi.fn();
 		const persistEvent = vi.fn(() => Effect.void);
 
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			persist: { persistEvent },
 		});
 
@@ -356,84 +234,15 @@ describe("createRelayEventSink — persistence", () => {
 				}),
 			}),
 		);
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-			partId: "part_1",
-		});
 	});
 
-	it("still sends to WebSocket when persist is not provided", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("text.delta", {
-					messageId: "msg_1",
-					partId: "part_1",
-					text: "Hello",
-				}),
-			),
-		);
-
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-			partId: "part_1",
-		});
-	});
-
-	it("continues sending to WebSocket even if Effect persistence fails", async () => {
-		const send = vi.fn();
-		const persistEvent = vi.fn(() =>
-			Effect.fail(
-				new PersistenceError({ code: "WRITE_FAILED", message: "disk full" }),
-			),
-		);
-
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			send,
-			persist: { persistEvent },
-		});
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("text.delta", {
-					messageId: "msg_1",
-					partId: "part_1",
-					text: "Hello",
-				}),
-			),
-		);
-
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-			partId: "part_1",
-		});
-	});
-
-	it("runs Effect-native persistence programs before sending to WebSocket", async () => {
-		const order: string[] = [];
-		const send = vi.fn(() => {
-			order.push("send");
-		});
+	it("runs Effect-native persistence programs", async () => {
 		const persisted: string[] = [];
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			persist: {
 				persistEvent: (event) =>
 					Effect.sync(() => {
-						order.push("persist");
 						persisted.push(event.type);
 					}),
 			},
@@ -450,23 +259,13 @@ describe("createRelayEventSink — persistence", () => {
 		);
 
 		expect(persisted).toEqual(["text.delta"]);
-		expect(order).toEqual(["persist", "send"]);
-		expect(send).toHaveBeenCalledWith({
-			type: "delta",
-			sessionId: "ses-1",
-			text: "Hello",
-			messageId: "msg_1",
-			partId: "part_1",
-		});
 	});
 
 	it("uses batch persistence for runtime events that map to multiple domain events", async () => {
-		const send = vi.fn();
 		const persistEvent = vi.fn(() => Effect.void);
 		const persistEvents = vi.fn(() => Effect.void);
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			persist: { persistEvent, persistEvents },
 		});
 
@@ -491,8 +290,7 @@ describe("createRelayEventSink — persistence", () => {
 
 describe("createRelayEventSink — permission/question", () => {
 	it("rejects permission and question requests with a typed error when the pending interaction port is missing", async () => {
-		const send = vi.fn();
-		const sink = createRelayEventSink({ sessionId: "ses-1", send });
+		const sink = createRelayEventSink({ sessionId: "ses-1" });
 
 		const permissionResult = await Effect.runPromise(
 			Effect.either(
@@ -537,12 +335,9 @@ describe("createRelayEventSink — permission/question", () => {
 				sessionId: "ses-1",
 			} satisfies Partial<MissingPendingInteractions>,
 		});
-
-		expect(send).not.toHaveBeenCalled();
 	});
 
 	it("resolves when resolvePermission is called", async () => {
-		const send = vi.fn();
 		let resolvePermission:
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
 			| undefined;
@@ -574,7 +369,6 @@ describe("createRelayEventSink — permission/question", () => {
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			pendingInteractions,
 		});
 		const pending = Effect.runPromise(
@@ -601,7 +395,6 @@ describe("createRelayEventSink — permission/question", () => {
 	});
 
 	it("tracks permission and question replay state through the pending interaction port", async () => {
-		const send = vi.fn();
 		let resolvePermission:
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
 			| undefined;
@@ -646,7 +439,6 @@ describe("createRelayEventSink — permission/question", () => {
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			pendingInteractions,
 		});
 
@@ -715,7 +507,6 @@ describe("createRelayEventSink — permission/question", () => {
 		// The turn is blocked on the human, so the 2-minute no-activity timeout
 		// must not be running: restarting it fires a bogus PROCESSING_TIMEOUT
 		// while the question is still on screen.
-		const send = vi.fn();
 		const clearTimeout = vi.fn();
 		const resetTimeout = vi.fn();
 		const pendingInteractions = {
@@ -730,7 +521,6 @@ describe("createRelayEventSink — permission/question", () => {
 		};
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			clearTimeout,
 			resetTimeout,
 			pendingInteractions,
@@ -808,11 +598,9 @@ describe("createRelayEventSink — permission delegation", () => {
 		{ toolName: "Bash" },
 		{ toolName: "mcp__foo__bar" },
 	])("surfaces the ask for tool=$toolName", async ({ toolName }) => {
-		const send = vi.fn();
 		const { beginPermissionRequest, port } = makePendingInteractions();
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			pendingInteractions: port,
 		});
 
@@ -838,7 +626,6 @@ describe("createRelayEventSink — permission delegation", () => {
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
 			providerId: "claude",
-			send: vi.fn(),
 			persist: { persistEvent: () => Effect.void, persistEvents },
 			...(port ? { pendingInteractions: port } : {}),
 		});
@@ -946,7 +733,6 @@ describe("createRelayEventSink — permission delegation", () => {
 	it("fails closed when an ask arrives with no interaction port", async () => {
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send: vi.fn(),
 		});
 
 		// Previously "full" short-circuited to allow here. With the SDK owning
@@ -955,59 +741,5 @@ describe("createRelayEventSink — permission delegation", () => {
 		await expect(
 			Effect.runPromise(sink.requestPermission(request)),
 		).rejects.toThrow();
-	});
-});
-
-describe("createRelayEventSink — thinking lifecycle", () => {
-	it("translates full thinking lifecycle to relay messages with messageId", async () => {
-		const sent: RelayMessage[] = [];
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			send: (msg) => sent.push(msg),
-		});
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("thinking.start", {
-					messageId: "msg-1",
-					partId: "part-1",
-				}),
-			),
-		);
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("thinking.delta", {
-					messageId: "msg-1",
-					partId: "part-1",
-					text: "Let me think...",
-				}),
-			),
-		);
-
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("thinking.end", {
-					messageId: "msg-1",
-					partId: "part-1",
-				}),
-			),
-		);
-
-		const types = sent.map((m) => m.type);
-		expect(types).toContain("thinking_start");
-		expect(types).toContain("thinking_delta");
-		expect(types).toContain("thinking_stop");
-
-		// No tool_result should appear for thinking lifecycle
-		expect(types).not.toContain("tool_result");
-
-		// Verify messageId propagates through to relay messages
-		const start = sent.find((m) => m.type === "thinking_start");
-		const delta = sent.find((m) => m.type === "thinking_delta");
-		const stop = sent.find((m) => m.type === "thinking_stop");
-		expect((start as Record<string, unknown>)["messageId"]).toBe("msg-1");
-		expect((delta as Record<string, unknown>)["messageId"]).toBe("msg-1");
-		expect((stop as Record<string, unknown>)["messageId"]).toBe("msg-1");
 	});
 });

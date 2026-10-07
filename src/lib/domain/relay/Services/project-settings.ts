@@ -49,8 +49,16 @@ const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
 
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
-	/** Keep an older reload from publishing after a newer one on this relay. */
+	/** Keep an older read from publishing after a newer one on this relay. */
 	readonly globalSync: Effect.Semaphore;
+	/**
+	 * Open subscriptions: each tab holds one for its attached project.
+	 * Read synchronously by the relay status snapshot, like its own counts.
+	 */
+	readonly browsers: {
+		readonly count: () => number;
+		readonly add: (delta: number) => Effect.Effect<number>;
+	};
 	/** Counts publications; it orders envelopes and is not a resume cursor. */
 	readonly revision: Ref.Ref<number>;
 	/** The latest of each live fact, which has no other home to read from. */
@@ -68,6 +76,13 @@ export const ProjectSettingsLive: Layer.Layer<ProjectSettingsTag> =
 		Effect.all({
 			changes: PubSub.unbounded<ProjectSettingChange>(),
 			globalSync: Effect.makeSemaphore(1),
+			browsers: Effect.sync(() => {
+				let count = 0;
+				return {
+					count: () => count,
+					add: (delta: number) => Effect.sync(() => (count += delta)),
+				};
+			}),
 			revision: Ref.make(0),
 			live: Ref.make<LiveProjectFacts>({}),
 		}),
@@ -176,7 +191,17 @@ export const subscribeProjectSettings = (): Stream.Stream<
 > =>
 	Stream.unwrapScoped(
 		Effect.gen(function* () {
-			const { changes, revision } = yield* ProjectSettingsTag;
+			const { changes, revision, globalSync, browsers } =
+				yield* ProjectSettingsTag;
+			// Count this tab before subscribing: its own join reaches it through
+			// the snapshot, and every other open tab through the stream.
+			const countBrowser = (delta: number) =>
+				globalSync.withPermits(1)(
+					Effect.flatMap(browsers.add(delta), (count) =>
+						publishProjectSetting({ _tag: "clientCount", count }),
+					),
+				);
+			yield* Effect.acquireRelease(countBrowser(1), () => countBrowser(-1));
 			const dequeue = yield* PubSub.subscribe(changes);
 			const rows = yield* readProjectSettings;
 			const head: readonly ProjectSettingsEnvelope[] = [

@@ -23,12 +23,9 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
-import type { WebSocket } from "ws";
 import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
-import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
-import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
 import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
@@ -50,10 +47,6 @@ export interface Relay {
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
-	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
-	wsHandler: {
-		broadcast?: (message: RelayMessage) => void;
-	};
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;

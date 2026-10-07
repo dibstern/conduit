@@ -135,8 +135,6 @@ const relayWithSnapshot = (
 	snapshot: RelayStatusSnapshot,
 ): Relay => ({
 	slug,
-	attach: () => () => {},
-	wsHandler: {},
 	rpcWsHandler: {},
 	syncGlobalSetting: () => Effect.void,
 	refreshGlobalDefaults: () => Effect.void,
@@ -201,9 +199,9 @@ const makeDaemonRouterLayer = (
 		),
 		Layer.provideMerge(
 			Layer.succeed(PushManagerTag, {
+				broadcast: () => Effect.void,
 				subscribe: () => Effect.void,
 				unsubscribe: () => Effect.void,
-				broadcast: () => Effect.void,
 				getPublicKey: Effect.succeed(
 					options.pushManager?.getPublicKey() ?? undefined,
 				),

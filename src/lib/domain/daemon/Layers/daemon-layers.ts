@@ -71,7 +71,6 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
-import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	ManagedOpenCodeLifecycleLive,
@@ -433,8 +432,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.settleIdleSessions(idleWindowMs, now),
-						attach: (ws, options) => relay.wsHandler.attach(ws, options),
-						wsHandler: relay.wsHandler,
 						rpcWsHandler: relay.rpcWsHandler,
 						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
@@ -660,7 +657,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			),
 		),
 		DaemonEventBusLive,
-		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),

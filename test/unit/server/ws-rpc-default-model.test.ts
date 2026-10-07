@@ -74,8 +74,6 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 					modelID: "gpt-4",
 				});
 				expect(yield* getDefaultVariant()).toBe("fast");
-				// Tabs follow the default through SubscribeProjectSettings.
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

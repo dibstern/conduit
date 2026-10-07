@@ -50,12 +50,10 @@ import {
 import type { parseDefaultModel, RelaySettings } from "./relay-settings.js";
 import { RelayCreationAbortedError } from "./relay-stack.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
-import { wireRelayWebSocketCallbacksEffect } from "./websocket-callback-wiring.js";
 
 interface StartupInputs {
 	config: ProjectRelayConfig;
 	log: Logger;
-	wsLog: Logger;
 	sseLog: Logger;
 	statusLog: Logger;
 	pollerLog: Logger;
@@ -271,21 +269,13 @@ type AcquiredStartupServices = Effect.Effect.Success<
 	ReturnType<typeof acquireStartupServices>
 >;
 
-function wireStartupCallbacks(
-	inputs: StartupInputs,
-	services: AcquiredStartupServices,
-) {
-	const { wsLog } = inputs;
-	const { orchestration, sseStream, wsHandler } = services;
+function wireStartupCallbacks(services: AcquiredStartupServices) {
+	const { orchestration, sseStream } = services;
 	return Effect.gen(function* () {
 		yield* Effect.sync(() => {
 			orchestration.wireSSEToInstance((event, handler) => {
 				sseStream.on(event, handler);
 			});
-		});
-		yield* wireRelayWebSocketCallbacksEffect({
-			wsHandler,
-			log: wsLog,
 		});
 	});
 }
@@ -424,7 +414,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 		return await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const services = yield* acquireStartupServices(inputs);
-				yield* wireStartupCallbacks(inputs, services);
+				yield* wireStartupCallbacks(services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
 				const { stopMonitoring } = monitoring;
 				yield* startSseConsumers(inputs, services, monitoring).pipe(

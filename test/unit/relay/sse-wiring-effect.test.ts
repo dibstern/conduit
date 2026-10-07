@@ -105,11 +105,6 @@ describe("handleSSEEventEffect", () => {
 				),
 			),
 		);
-
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"session-1",
-			translated,
-		);
 	});
 
 	it("records message activity through SessionManagerServiceTag", async () => {

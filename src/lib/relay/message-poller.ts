@@ -1,6 +1,6 @@
 // Diff/synthesize logic for converting REST message snapshots into relay
 // events. These functions compare current messages against previous state and
-// emit synthetic RelayMessages (delta, tool_start, tool_executing, tool_result,
+// emit synthetic RelayMessages (delta, tool_start, tool_result,
 // thinking_*, result, done, etc.).
 //
 // Used by the message poller implementation and tested independently.
@@ -21,12 +21,12 @@ export interface PartSnapshot {
 	text: string;
 	/** For tool parts: last-seen status */
 	toolStatus?: string;
-	/** For tool parts: whether we emitted tool_executing */
-	emittedExecuting: boolean;
+	/** Tool progress already counted as activity. */
+	runningObserved?: boolean;
+	/** Reasoning completion already counted as activity. */
+	reasoningEnded?: boolean;
 	/** For tool parts: whether we emitted tool_result */
 	emittedResult: boolean;
-	/** For reasoning parts: whether we emitted thinking_stop */
-	emittedStop: boolean;
 	/** Tool name (mapped) */
 	toolName?: string;
 	/** Tool callID or part id */
@@ -51,7 +51,7 @@ export function synthesizeTextPart(
 	events: UntaggedRelayMessage[],
 	messageId: string,
 	deltaType: "delta" | "thinking_delta",
-): void {
+): boolean {
 	const currentText = (part["text"] as string) ?? "";
 	const prevLength = snap.textLength;
 
@@ -70,29 +70,17 @@ export function synthesizeTextPart(
 		}
 	}
 
-	// Check if reasoning is done (has end time)
-	if (deltaType === "thinking_delta" && !snap.emittedStop) {
-		const time = part["time"] as { start?: number; end?: number } | undefined;
-		if (
-			time?.end !== undefined &&
-			time.end !== null &&
-			currentText.length > 0
-		) {
-			// Emit thinking_stop when the reasoning part is complete:
-			// - First pass (prevLength === 0): part already finished, emit immediately.
-			//   Without this, thinking_stop is deferred to the next poll cycle because
-			//   the old condition (snap.textLength > 0) is always false on first pass.
-			// - Subsequent passes: only emit when text has settled (no new content),
-			//   to avoid premature stop while the part is still streaming.
-			if (prevLength === 0 || currentText.length === prevLength) {
-				events.push({ type: "thinking_stop", messageId });
-				snap.emittedStop = true;
-			}
-		}
-	}
-
+	const time = part["time"] as { end?: number } | undefined;
+	const reasoningEnded =
+		deltaType === "thinking_delta" &&
+		!snap.reasoningEnded &&
+		time?.end != null &&
+		currentText.length > 0 &&
+		(prevLength === 0 || currentText.length === prevLength);
+	if (reasoningEnded) snap.reasoningEnded = true;
 	snap.textLength = currentText.length;
 	snap.text = currentText;
+	return reasoningEnded;
 }
 
 /**
@@ -104,7 +92,7 @@ export function synthesizeToolPart(
 	prev: PartSnapshot | null,
 	events: UntaggedRelayMessage[],
 	messageId: string,
-): void {
+): boolean {
 	const state = part["state"] as
 		| {
 				status?: string;
@@ -115,7 +103,10 @@ export function synthesizeToolPart(
 		  }
 		| undefined;
 	const status = state?.status;
-	const metadata = state?.metadata;
+	const runningObserved =
+		!snap.runningObserved &&
+		(status === "running" || status === "completed" || status === "error");
+	if (runningObserved) snap.runningObserved = true;
 	const toolName = mapToolName((part["tool"] as string) ?? "");
 	const callID = (part["callID"] as string) ?? part.id;
 
@@ -126,7 +117,6 @@ export function synthesizeToolPart(
 	}
 
 	const isNew = !prev;
-	const prevStatus = prev?.toolStatus;
 
 	// New tool part with pending status → tool_start
 	if (isNew && (status === "pending" || status === "running")) {
@@ -138,28 +128,9 @@ export function synthesizeToolPart(
 		});
 	}
 
-	// Transition to running → tool_executing (only once)
-	if (status === "running" && !snap.emittedExecuting) {
-		// If we missed the pending state, emit tool_start first
-		if (isNew || (!prev?.emittedExecuting && prevStatus !== "pending")) {
-			if (!isNew || status !== "running") {
-				// Already emitted tool_start above for new parts
-			}
-		}
-		events.push({
-			type: "tool_executing",
-			id: callID,
-			name: toolName,
-			input: state?.input as Record<string, unknown> | undefined,
-			...(metadata != null && { metadata }),
-			messageId,
-		});
-		snap.emittedExecuting = true;
-	}
-
 	// Transition to completed/error → tool_result (only once)
 	if ((status === "completed" || status === "error") && !snap.emittedResult) {
-		// If we missed previous states, emit tool_start + tool_executing first
+		// If we missed previous states, emit tool_start first
 		if (!prev) {
 			events.push({
 				type: "tool_start",
@@ -167,17 +138,6 @@ export function synthesizeToolPart(
 				name: toolName,
 				messageId,
 			});
-		}
-		if (!snap.emittedExecuting) {
-			events.push({
-				type: "tool_executing",
-				id: callID,
-				name: toolName,
-				input: state?.input as Record<string, unknown> | undefined,
-				...(metadata != null && { metadata }),
-				messageId,
-			});
-			snap.emittedExecuting = true;
 		}
 
 		const isError = status === "error";
@@ -192,6 +152,7 @@ export function synthesizeToolPart(
 		});
 		snap.emittedResult = true;
 	}
+	return runningObserved;
 }
 
 /**
@@ -201,8 +162,13 @@ export function synthesizePartEvents(
 	part: { id: string; type: string; [key: string]: unknown },
 	prev: PartSnapshot | null,
 	messageId: string,
-): { events: UntaggedRelayMessage[]; snapshot: PartSnapshot } {
+): {
+	events: UntaggedRelayMessage[];
+	snapshot: PartSnapshot;
+	hasActivity: boolean;
+} {
 	const events: UntaggedRelayMessage[] = [];
+	let hasActivity = false;
 	const partType = part.type;
 
 	// Build current snapshot
@@ -211,9 +177,9 @@ export function synthesizePartEvents(
 		textLength: prev?.textLength ?? 0,
 		text: prev?.text ?? "",
 		...(prev?.toolStatus != null && { toolStatus: prev.toolStatus }),
-		emittedExecuting: prev?.emittedExecuting ?? false,
+		runningObserved: prev?.runningObserved ?? false,
+		reasoningEnded: prev?.reasoningEnded ?? false,
 		emittedResult: prev?.emittedResult ?? false,
-		emittedStop: prev?.emittedStop ?? false,
 		...(prev?.toolName != null && { toolName: prev.toolName }),
 		...(prev?.callID != null && { callID: prev.callID }),
 	};
@@ -221,14 +187,20 @@ export function synthesizePartEvents(
 	if (partType === "text") {
 		synthesizeTextPart(part, snap, events, messageId, "delta");
 	} else if (partType === "reasoning") {
-		synthesizeTextPart(part, snap, events, messageId, "thinking_delta");
+		hasActivity = synthesizeTextPart(
+			part,
+			snap,
+			events,
+			messageId,
+			"thinking_delta",
+		);
 	} else if (partType === "tool") {
-		synthesizeToolPart(part, snap, prev, events, messageId);
+		hasActivity = synthesizeToolPart(part, snap, prev, events, messageId);
 	}
 	// Other part types (step_start, step_finish, snapshot, agent) are skipped
 	// — they have no visual representation in the relay UI.
 
-	return { events, snapshot: snap };
+	return { events, snapshot: snap, hasActivity };
 }
 
 /** Extract text from a user message's parts. */
@@ -292,8 +264,10 @@ export function diffAndSynthesize(
 ): {
 	events: UntaggedRelayMessage[];
 	newSnapshot: Map<string, MessageSnapshot>;
+	hasActivity: boolean;
 } {
 	const events: UntaggedRelayMessage[] = [];
+	let hasActivity = false;
 	const newSnapshot = new Map<string, MessageSnapshot>();
 
 	for (const msg of messages) {
@@ -331,6 +305,7 @@ export function diffAndSynthesize(
 				const prevPart = prevMsg?.parts.get(partId);
 
 				const synthesized = synthesizePartEvents(part, prevPart ?? null, msgId);
+				hasActivity ||= synthesized.hasActivity;
 				events.push(...synthesized.events);
 				msgSnap.parts.set(partId, synthesized.snapshot);
 			}
@@ -348,7 +323,7 @@ export function diffAndSynthesize(
 		newSnapshot.set(msgId, msgSnap);
 	}
 
-	return { events, newSnapshot };
+	return { events, newSnapshot, hasActivity };
 }
 
 /**
@@ -379,24 +354,18 @@ export function buildSeedSnapshot(
 				type: partType,
 				textLength: 0,
 				text: "",
-				emittedExecuting: false,
+				runningObserved: false,
+				reasoningEnded: false,
 				emittedResult: false,
-				emittedStop: false,
 			};
 
 			if (partType === "text" || partType === "reasoning") {
 				const text = (part["text"] as string) ?? "";
 				snap.textLength = text.length;
 				snap.text = text;
-				// For reasoning parts, mark thinking_stop as already emitted if
-				// the part has an end time (it's already completed)
 				if (partType === "reasoning") {
-					const time = part["time"] as
-						| { start?: number; end?: number }
-						| undefined;
-					if (time?.end !== undefined && time.end !== null) {
-						snap.emittedStop = true;
-					}
+					const time = part["time"] as { end?: number } | undefined;
+					snap.reasoningEnded = time?.end != null;
 				}
 			} else if (partType === "tool") {
 				const state = part["state"] as
@@ -419,7 +388,7 @@ export function buildSeedSnapshot(
 					status === "completed" ||
 					status === "error"
 				) {
-					snap.emittedExecuting = true;
+					snap.runningObserved = true;
 				}
 				if (status === "completed" || status === "error") {
 					snap.emittedResult = true;

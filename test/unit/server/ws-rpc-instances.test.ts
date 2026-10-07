@@ -95,7 +95,6 @@ describe("WsRpcServerLayer instance management", () => {
 				}),
 			).toEqual({ projectSlug: "proj-1", instances: [instance] });
 			expect(removeInstance).toHaveBeenCalledWith("inst-1");
-			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

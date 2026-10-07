@@ -807,7 +807,7 @@ describe("ProviderTurnService", () => {
 					}),
 				),
 			});
-			const { layer, wsHandler } = serviceLayer({
+			const { layer } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -866,10 +866,6 @@ describe("ProviderTurnService", () => {
 						type: "text.delta",
 						sessionId: "session-1",
 					}),
-				);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "delta", text: "hello" }),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1188,7 +1184,7 @@ describe("ProviderTurnService", () => {
 					),
 				),
 			});
-			const { layer, log, wsHandler, ingestion } = serviceLayer({
+			const { layer, log, ingestion } = serviceLayer({
 				engine,
 				providerState,
 			});
@@ -1210,10 +1206,6 @@ describe("ProviderTurnService", () => {
 					expect.arrayContaining([
 						expect.objectContaining({ type: "turn.error" }),
 					]),
-				);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done", code: 1 }),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1267,7 +1259,7 @@ describe("ProviderTurnService", () => {
 				providerId: "opencode",
 				result: completedTurn({ status: "interrupted" }),
 			});
-			const { layer, wsHandler, ingestion } = serviceLayer({ engine });
+			const { layer, ingestion } = serviceLayer({ engine });
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(
@@ -1278,10 +1270,6 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done" }),
-				);
 				expect(ingestion.ingestBatch).not.toHaveBeenCalledWith(
 					expect.arrayContaining([
 						expect.objectContaining({ type: "turn.error" }),
@@ -1353,7 +1341,7 @@ describe("ProviderTurnService", () => {
 			);
 			const persist = makePersistService(vi.fn(() => Effect.void));
 			const titleService = makeTitleService();
-			const { layer, wsHandler } = serviceLayer({
+			const { layer } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -1395,10 +1383,6 @@ describe("ProviderTurnService", () => {
 						),
 					);
 				}
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "delta" }),
-				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1484,14 +1468,14 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"uses OpenCode abort for an unbound session, clears processing timeout, and broadcasts done",
+		"uses OpenCode abort for an unbound session and clears processing timeout",
 		() => {
 			const api = partialFake<OpenCodeAPI>({
 				session: partialFake<OpenCodeAPI["session"]>({
 					abort: vi.fn(async () => undefined),
 				}),
 			});
-			const { layer, wsHandler } = serviceLayer({ api });
+			const { layer } = serviceLayer({ api });
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(
@@ -1503,11 +1487,6 @@ describe("ProviderTurnService", () => {
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 				expect(api.session.abort).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1833,7 +1812,7 @@ describe("ProviderTurnService", () => {
 					}),
 					dispatchEffect,
 				} as unknown as OrchestrationEngine;
-				const { layer, wsHandler, ingestion } = serviceLayer({ engine });
+				const { layer, ingestion } = serviceLayer({ engine });
 
 				yield* Effect.gen(function* () {
 					yield* sendTurn();
@@ -1842,11 +1821,6 @@ describe("ProviderTurnService", () => {
 
 				yield* Deferred.succeed(releaseSend, undefined);
 				yield* flushDispatch();
-
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done" }),
-				);
 				expect(ingestion.ingestBatch).not.toHaveBeenCalledWith(
 					expect.arrayContaining([
 						expect.objectContaining({ type: "turn.error" }),

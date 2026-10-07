@@ -10,7 +10,7 @@ import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
 import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
-import type { ProjectRelayConfig, RelayMessage } from "../types.js";
+import type { ProjectRelayConfig } from "../types.js";
 
 /** Instance management capability group — only available in daemon mode. */
 export interface InstanceManagementDeps {
@@ -53,13 +53,10 @@ export interface ProjectManagementDeps {
 
 export interface HandlerDeps {
 	wsHandler: {
-		broadcast: (msg: RelayMessage) => void;
-		sendTo: (clientId: string, msg: RelayMessage) => void;
 		// Per-tab session tracking
 		setClientSession: (clientId: string, sessionId: string) => void;
 		getClientSession: (clientId: string) => string | undefined;
 		getClientsForSession: (sessionId: string) => string[];
-		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 	};
 	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;

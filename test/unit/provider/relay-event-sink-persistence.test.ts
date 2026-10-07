@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -40,10 +40,8 @@ describe("RelayEventSink Effect persistence integration", () => {
 				yield* runner.projectEvent(creation);
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const send = vi.fn();
 				const sink = createRelayEventSink({
 					sessionId: "s1",
-					send,
 					persist,
 				});
 
@@ -63,7 +61,6 @@ describe("RelayEventSink Effect persistence integration", () => {
 				const messages = yield* readQuery.getSessionMessagesWithParts("s1");
 				expect(messages.length).toBeGreaterThanOrEqual(1);
 				expect(messages.find((m) => m.role === "assistant")).toBeDefined();
-				expect(send).toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -83,10 +80,8 @@ describe("RelayEventSink Effect persistence integration", () => {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
 				const eventStore = yield* EventStoreEffectTag;
-				const send = vi.fn();
 				const sink = createRelayEventSink({
 					sessionId: "s-claude",
-					send,
 					persist,
 				});
 

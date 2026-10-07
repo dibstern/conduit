@@ -145,7 +145,6 @@ export function translateToolPartUpdated(
 	const status = part.state?.status;
 	const toolName = mapToolName(part.tool ?? "");
 	const callID = part.callID ?? partID;
-	const metadata = part.state?.metadata;
 
 	if (isNew && status === "pending") {
 		return {
@@ -156,35 +155,11 @@ export function translateToolPartUpdated(
 		};
 	}
 
-	// Part first seen as "running" (skipped "pending") — emit both tool_start
-	// and tool_executing so the frontend creates and activates the tool card.
-	// Matches message-poller behaviour which handles the same case.
 	if (isNew && status === "running") {
-		return [
-			{
-				type: "tool_start",
-				id: callID,
-				name: toolName,
-				...(messageId != null && { messageId }),
-			},
-			{
-				type: "tool_executing",
-				id: callID,
-				name: toolName,
-				input: part.state?.input as Record<string, unknown> | undefined,
-				...(metadata != null && { metadata }),
-				...(messageId != null && { messageId }),
-			},
-		];
-	}
-
-	if (status === "running") {
 		return {
-			type: "tool_executing",
+			type: "tool_start",
 			id: callID,
 			name: toolName,
-			input: part.state?.input as Record<string, unknown> | undefined,
-			...(metadata != null && { metadata }),
 			...(messageId != null && { messageId }),
 		};
 	}
@@ -222,10 +197,6 @@ export function translateReasoningPartUpdated(
 
 	if (isNew) {
 		return { type: "thinking_start", ...(messageId != null && { messageId }) };
-	}
-
-	if (part.time?.end !== undefined && part.time.end !== null) {
-		return { type: "thinking_stop", ...(messageId != null && { messageId }) };
 	}
 
 	return null;
@@ -312,13 +283,12 @@ export function translateSessionStatus(
 	const { properties: props } = event;
 	const statusType = props.status?.type;
 
-	// Produce a done event directly for idle status so it flows through
-	// the normal event pipeline (cache + immediate WebSocket delivery).
+	// Produce an internal completion signal for timeout and notification handling.
 	// The monitoring chain also synthesizes done via notifySSEIdle → poller →
 	// reducer, but that path is unreliable: it misses transitions when the
 	// session completes faster than the poll interval, or when multiple turns
 	// complete within a single busy period.  Direct translation ensures the
-	// browser receives done promptly for every idle transition.
+	// notifications are processed promptly for every idle transition.
 	if (statusType === "idle") {
 		return { type: "done", code: 0 };
 	}

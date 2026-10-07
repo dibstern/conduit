@@ -157,11 +157,6 @@ describe("Leaf service Layers", () => {
 			config: {
 				getCurrentVersion: () => string;
 				fetchLatestVersion: () => Effect.Effect<string | null>;
-				broadcast: (msg: {
-					type: string;
-					current: string;
-					latest: string;
-				}) => Effect.Effect<void>;
 				checkInterval: Duration.DurationInput;
 			},
 			body: (
@@ -181,72 +176,59 @@ describe("Leaf service Layers", () => {
 				yield* Scope.close(scope, Exit.void);
 			});
 
-		it.scoped("detects newer version and broadcasts", () => {
-			const broadcast = vi.fn().mockReturnValue(Effect.succeed(undefined));
+		it.scoped("detects newer version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed("2.0.0")),
-					broadcast,
 					checkInterval: Duration.hours(1),
 				},
 				(svc) =>
 					Effect.gen(function* () {
 						const latest = yield* svc.getLatestKnown();
 						expect(latest).toBe("2.0.0");
-						expect(broadcast).toHaveBeenCalledWith({
-							type: "version_update",
-							current: "1.0.0",
-							latest: "2.0.0",
-						});
 					}),
 			);
 		});
 
-		it.scoped("does not broadcast when version is same", () => {
-			const broadcast = vi.fn().mockReturnValue(Effect.succeed(undefined));
+		it.scoped("ignores the same version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed("1.0.0")),
-					broadcast,
 					checkInterval: Duration.hours(1),
 				},
-				() =>
-					Effect.sync(() => {
-						expect(broadcast).not.toHaveBeenCalled();
+				(svc) =>
+					Effect.gen(function* () {
+						expect(yield* svc.getLatestKnown()).toBeNull();
 					}),
 			);
 		});
 
-		it.scoped("does not broadcast when fetched version is older", () => {
-			const broadcast = vi.fn().mockReturnValue(Effect.succeed(undefined));
+		it.scoped("ignores an older version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "2.0.0",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed("1.0.0")),
-					broadcast,
 					checkInterval: Duration.hours(1),
 				},
-				() =>
-					Effect.sync(() => {
-						expect(broadcast).not.toHaveBeenCalled();
+				(svc) =>
+					Effect.gen(function* () {
+						expect(yield* svc.getLatestKnown()).toBeNull();
 					}),
 			);
 		});
 
-		it.scoped("does not broadcast when fetch returns null", () => {
-			const broadcast = vi.fn().mockReturnValue(Effect.succeed(undefined));
+		it.scoped("ignores an unavailable version", () => {
 			return withVersionChecker(
 				{
 					getCurrentVersion: () => "1.0.0",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed(null)),
-					broadcast,
 					checkInterval: Duration.hours(1),
 				},
-				() =>
-					Effect.sync(() => {
-						expect(broadcast).not.toHaveBeenCalled();
+				(svc) =>
+					Effect.gen(function* () {
+						expect(yield* svc.getLatestKnown()).toBeNull();
 					}),
 			);
 		});
@@ -256,7 +238,6 @@ describe("Leaf service Layers", () => {
 				{
 					getCurrentVersion: () => "3.5.1",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed(null)),
-					broadcast: vi.fn().mockReturnValue(Effect.succeed(undefined)),
 					checkInterval: Duration.hours(1),
 				},
 				(svc) =>
@@ -272,7 +253,6 @@ describe("Leaf service Layers", () => {
 				const layer = VersionCheckerLive({
 					getCurrentVersion: () => "1.0.0",
 					fetchLatestVersion: vi.fn().mockReturnValue(Effect.succeed("2.0.0")),
-					broadcast: vi.fn().mockReturnValue(Effect.succeed(undefined)),
 					checkInterval: Duration.millis(50),
 				});
 

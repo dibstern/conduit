@@ -112,11 +112,9 @@ pnpm test:e2e:live
 
 ### Updating Recorded Fixtures
 
-Run this when the WebSocket protocol or server behavior changes and recorded fixtures need refreshing.
-
-```bash
-pnpm test:record-snapshots
-```
+The recorder (`pnpm test:record-snapshots`) spoke the retired `/ws` relay protocol and was removed
+with it. The committed fixtures still replay through the E2E mock, which projects their legacy
+messages into RPC. Until an `/rpc` recorder exists, edit fixtures by hand.
 
 ### Daemon E2E
 

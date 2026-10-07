@@ -161,22 +161,12 @@ function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
 ): WebSocketHandlerShape {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => undefined),
 		getClientsForSession: vi.fn(() => []),
 		registerSessionViewer: vi.fn(() => () => {}),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
 		...overrides,
 	};
 }
@@ -409,10 +399,7 @@ describe("GetProjects", () => {
 });
 
 describe("reloadProviderSessionForClient", () => {
-	it.effect("reloads provider session and refreshes models/commands", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-42"),
-		});
+	it.effect("reloads the provider session", () => {
 		const log = mockLogger();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
@@ -432,7 +419,6 @@ describe("reloadProviderSessionForClient", () => {
 		const config = mockConfig();
 
 		const layer = Layer.mergeAll(
-			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 			openCodeModelAndSettingsLayer(client),
@@ -455,12 +441,6 @@ describe("reloadProviderSessionForClient", () => {
 						sessionId: "session-42",
 					}),
 				);
-
-				// Should have sent provider_session_reloaded
-				expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-					type: "provider_session_reloaded",
-					sessionId: "session-42",
-				});
 			}),
 		);
 	});
@@ -1202,7 +1182,6 @@ function mockSessionManager(
 			messages: [],
 			hasMore: false,
 		})),
-		sendSessionLists: vi.fn(async () => {}),
 		recordMessageActivity: vi.fn(),
 		...overrides,
 	});
@@ -1372,7 +1351,6 @@ describe("handleForkSession", () => {
 				});
 				expect(establishOpenCodeSession).not.toHaveBeenCalled();
 				expect(setForkEntry).not.toHaveBeenCalled();
-				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 			});
 		},
@@ -1414,8 +1392,6 @@ describe("handleForkSession", () => {
 				Effect.tap((exit) => {
 					expect(Exit.isFailure(exit)).toBe(true);
 					expect(setForkEntry).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
-					expect(ws.sendTo).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -1449,12 +1425,9 @@ describe("handleForkSession", () => {
 	);
 
 	it.effect(
-		"broadcasts the persisted fork boundary instead of recomputing metadata",
+		"returns the persisted fork boundary without recomputing metadata",
 		() => {
 			const legacySetForkEntry = vi.fn();
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
-			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
 			});
@@ -1515,8 +1488,6 @@ describe("handleForkSession", () => {
 						forkPointTimestamp: 456,
 					});
 					expect(ws.setClientSession).not.toHaveBeenCalled();
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -1623,8 +1594,6 @@ describe("setDefaultPermissionModeForRelay", () => {
 				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
 				expect(yield* getDefaultPermissionMode()).toBe("auto");
 				expect(yield* getPermissionMode("session-1")).toBe("full");
-				// Peers hear it through SubscribeProjectSettings, not a broadcast.
-				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalledWith(
 					"client=client-1 Set default permission mode to: auto",
 				);
@@ -1951,60 +1920,9 @@ describe("handlePermissionResponse", () => {
 		);
 	});
 
-	it.effect("does nothing when bridge returns null", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const log = mockLogger();
-		const client = makeHandlerOpenCodeAPI({
-			permission: { reply: vi.fn(async () => {}) },
-		});
-		const config = mockConfig();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(ConfigTag, config),
-			PendingInteractionServiceLive,
-			PendingSendOwnershipLive,
-		);
-
-		return handlePermissionResponse("client-1", {
-			requestId: "perm-1" as PermissionId,
-			decision: "allow",
-		}).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.broadcast).not.toHaveBeenCalled();
-			}),
-		);
-	});
 });
 
 describe("handleQuestionReject", () => {
-	it.effect("does nothing when toolId is empty", () => {
-		const ws = mockWsHandler();
-		const log = mockLogger();
-		const client = makeHandlerOpenCodeAPI();
-		const sessionManagerService = makeMockSessionManagerService();
-
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, log),
-			Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-			makeOverridesStateLive(),
-		);
-
-		return handleQuestionReject("client-1", { toolId: "" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.broadcast).not.toHaveBeenCalled();
-			}),
-		);
-	});
-
 	it.effect("rejects question via REST API", () => {
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -2258,19 +2176,15 @@ describe("handleAskUserResponse", () => {
 
 describe("handleNewSession", () => {
 	it.effect(
-		"creates and switches through SessionManagerService without pushing a family",
+		"creates and switches through SessionManagerService",
 		() => {
 			const ws = mockWsHandler();
 			const log = mockLogger();
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
-			});
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
 			});
 			const sessionMgr = mockSessionManager({
 				createSession: legacyCreateSession,
-				sendSessionLists: legacySendSessionLists,
 			});
 			const serviceCreateSession = vi.fn(() =>
 				Effect.succeed({
@@ -2303,12 +2217,6 @@ describe("handleNewSession", () => {
 						"client-1",
 						"new-session-1",
 					);
-					expect(ws.sendTo).not.toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({ type: "session_family" }),
-					);
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
@@ -2447,10 +2355,6 @@ describe("handleNewSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(ws.sendTo).not.toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({ type: "session_family" }),
-					);
 					expect(startPolling).not.toHaveBeenCalled();
 				}),
 			);
@@ -2604,8 +2508,6 @@ describe("handleDeleteSession", () => {
 					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
 					expect(listSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).not.toHaveBeenCalled();
-					expect(ws.sendTo).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
 				}),
 			);
@@ -2613,15 +2515,12 @@ describe("handleDeleteSession", () => {
 	);
 
 	it.effect(
-		"deletes through SessionManagerService and broadcasts the deletion",
+		"deletes through SessionManagerService",
 		() => {
 			const ws = mockWsHandler({
 				getClientsForSession: vi.fn(() => []),
 			});
 			const log = mockLogger();
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy sendSessionLists should not be used");
-			});
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
 			});
@@ -2633,7 +2532,6 @@ describe("handleDeleteSession", () => {
 			const sessionMgr = mockSessionManager({
 				deleteSession: legacyDeleteSession,
 				listSessions: legacyListSessions,
-				sendSessionLists: legacySendSessionLists,
 			});
 			const sessionManagerService = makeMockSessionManagerService({
 				deleteSession: serviceDeleteSession,
@@ -2656,8 +2554,6 @@ describe("handleDeleteSession", () => {
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
 					);
@@ -2724,8 +2620,6 @@ describe("renameSessionForClient", () => {
 					expect(renameSession).toHaveBeenCalledWith("session-1", "New Title");
 					expect(legacyRenameSession).not.toHaveBeenCalled();
 					expect(calls).toEqual(["rename"]);
-					expect(ws.sendTo).not.toHaveBeenCalled();
-					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalled();
 				}),
 			);
@@ -2989,7 +2883,6 @@ describe("sendMessageToSession", () => {
 						text: "Continue",
 						commandId: "cmd1",
 					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
-					expect(ws.broadcast).not.toHaveBeenCalled();
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
@@ -3320,66 +3213,6 @@ describe("sendMessageToSession", () => {
 		},
 	);
 
-	it.effect(
-		"omits originId when preparing the turn changes the session id",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
-			const layer = makeLayer(
-				ws,
-				vi.fn(() => Effect.succeed("session-new")),
-			);
-
-			return sendMessageToSession({
-				clientId: "client-1",
-				sessionId: "session-old",
-				text: "first message",
-				originId: "origin-1",
-				commandId: "command-1",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "user_message",
-						sessionId: "session-new",
-						text: "first message",
-					});
-				}),
-			);
-		},
-	);
-
-	it.effect(
-		"preserves originId when preparing the turn keeps the session id",
-		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
-			const layer = makeLayer(
-				ws,
-				vi.fn((input) => Effect.succeed(input.sessionId)),
-			);
-
-			return sendMessageToSession({
-				clientId: "client-1",
-				sessionId: "session-1",
-				text: "next message",
-				originId: "origin-1",
-				commandId: "command-2",
-			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(ws.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "user_message",
-						sessionId: "session-1",
-						text: "next message",
-						originId: "origin-1",
-					});
-				}),
-			);
-		},
-	);
 });
 
 describe("cancelSessionById", () => {
@@ -3439,7 +3272,7 @@ describe("rewindSessionToMessage", () => {
 });
 
 describe("handleMessage", () => {
-	it.effect("logs, without a browser error, when no active session", () => {
+	it.effect("logs when no active session", () => {
 		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
@@ -3469,39 +3302,6 @@ describe("handleMessage", () => {
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("no active session"),
 				);
-				expect(ws.sendTo).not.toHaveBeenCalled();
-			}),
-		);
-	});
-
-	it.effect("does nothing when text is empty", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
-		const log = mockLogger();
-		const sessionManagerService = makeMockSessionManagerService();
-		const config = mockConfig();
-		const client = makeHandlerOpenCodeAPI();
-
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-				Layer.succeed(ConfigTag, config),
-				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
-				makeOverridesStateLive(),
-			),
-		);
-
-		return handleMessage("client-1", { text: "" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(ws.sendTo).not.toHaveBeenCalled();
-				expect(ws.sendToSession).not.toHaveBeenCalled();
 			}),
 		);
 	});
@@ -3823,7 +3623,6 @@ describe("handleMessage", () => {
 
 				expect(listSessions).not.toHaveBeenCalled();
 				expect(renameSession).not.toHaveBeenCalled();
-				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
@@ -4213,7 +4012,6 @@ describe("markSessionSeenForClient", () => {
 						expect.stringContaining("session-1"),
 						failure,
 					);
-					expect(ws.broadcast).not.toHaveBeenCalled();
 				}),
 			);
 		},

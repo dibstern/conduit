@@ -57,7 +57,11 @@ export type StatusPollerShape = Pick<
 export interface PollerManagerShape {
 	on(
 		event: "events",
-		callback: (messages: RelayMessage[], sessionId: string) => void,
+		callback: (
+			messages: RelayMessage[],
+			sessionId: string,
+			hasActivity?: boolean,
+		) => void,
 	): void;
 	isPolling(sessionId: string): boolean;
 	startPolling(sessionId: string, seedMessages?: Message[]): void;
@@ -108,11 +112,6 @@ export interface SessionManagerShape {
 	initialize(title?: string): Promise<string>;
 	recordMessageActivity(sessionId: string, timestamp?: number): void;
 	addToParentMap(childId: string, parentId: string): void;
-
-	sendSessionLists(
-		send: (msg: Extract<RelayMessage, { type: "session_list" }>) => void,
-		options?: { statuses?: Record<string, SessionStatus> | undefined },
-	): Promise<void>;
 }
 
 // Core Tags (always present)

@@ -133,7 +133,7 @@ export interface QuestionAskedEvent extends SSEEventBase {
 		}>;
 		/** Tool context: links this question to the tool_use that triggered it.
 		 *  callID is the toolu_ ID from the LLM provider; matches the id field
-		 *  in tool_start / tool_executing relay messages. */
+		 *  in tool activity relay messages. */
 		tool?: { callID?: string; messageID?: string };
 	};
 }

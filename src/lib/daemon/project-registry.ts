@@ -4,7 +4,7 @@
 
 import { Data } from "effect";
 import type { ProjectRelay } from "../relay/relay-stack.js";
-import type { RelayMessage, StoredProject } from "../types.js";
+import type { StoredProject } from "../types.js";
 
 export interface ProjectRegistering {
 	readonly status: "registering";
@@ -249,13 +249,6 @@ export class ProjectRegistry {
 	}
 
 	// Cross-relay operations (D4)
-
-	/** Broadcast a message to all connected browser clients across all ready relays. */
-	broadcastToAll(message: RelayMessage): void {
-		for (const [, entry] of this.readyEntries()) {
-			entry.relay.wsHandler.broadcast(message);
-		}
-	}
 
 	/**
 	 * Retained for call-site compatibility. Storage pressure is now owned by

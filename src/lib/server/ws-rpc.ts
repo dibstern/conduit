@@ -28,7 +28,6 @@ import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wir
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
-import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -321,12 +320,6 @@ export type ResolveRpcContext = (
 	WsRpcError
 >;
 
-export type ReattachDaemonViewSession = (payload: {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly sessionId?: string;
-}) => Effect.Effect<boolean, WsRpcError>;
-
 export type AttachDaemonProject = (payload: {
 	readonly originId: string;
 	readonly projectSlug?: string | undefined;
@@ -381,7 +374,6 @@ export const makeRoutedWsRpcServerLayer = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
-	reattachViewSession?: ReattachDaemonViewSession,
 	attachProject?: AttachDaemonProject,
 ) => {
 	const routeHandler =
@@ -428,22 +420,6 @@ export const makeRoutedWsRpcServerLayer = (
 		>;
 	};
 	if (attachProject) handlers.AttachProject = attachProject;
-	if (reattachViewSession) {
-		const routeViewSession = routeHandler(unaryHandlers.ViewSession);
-		handlers.ViewSession = (
-			payload: Parameters<(typeof unaryHandlers)["ViewSession"]>[0],
-		) =>
-			reattachViewSession(payload).pipe(
-				Effect.flatMap((reattached) =>
-					reattached
-						? Effect.succeed({
-								ok: true as const,
-								draft: getSessionInputDraft(payload.sessionId),
-							})
-						: routeViewSession(payload),
-				),
-			);
-	}
 	const routeStream = <
 		A,
 		E,

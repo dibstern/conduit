@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -195,7 +194,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	let mock: MockOpenCode;
 	let relay: ProjectRelay;
 	let relayServer: Server;
-	let wss: WebSocketServer;
 	let persistenceDir: string;
 
 	beforeAll(async () => {
@@ -214,14 +212,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 			persistenceDbPath: join(persistenceDir, "events.db"),
 			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
-		});
-
-		// Relays never own upgrades; the caller attaches sockets, as the daemon does.
-		wss = new WebSocketServer({ noServer: true });
-		relayServer.on("upgrade", (req, socket, head) => {
-			wss.handleUpgrade(req, socket, head, (ws) => {
-				relay.wsHandler.attach(ws, { clientId: "perm-rehydrate-client" });
-			});
 		});
 
 		// Relay startup makes no OpenCode requests; the first use opens the stream.
@@ -245,7 +235,6 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 
 	afterAll(async () => {
 		if (relay) await relay.stop();
-		if (wss) await new Promise<void>((r) => wss.close(() => r()));
 		if (relayServer)
 			await new Promise<void>((r) => relayServer.close(() => r()));
 		if (mock) await mock.close();

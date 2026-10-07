@@ -47,17 +47,15 @@ export interface SendMessageToSessionInput {
 	readonly images?: readonly string[];
 	readonly originId?: string;
 	readonly commandId: string;
-	readonly excludeClientId?: string;
 }
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const ownership = yield* PendingSendOwnershipTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
-		const { clientId, text, images, originId, excludeClientId } = input;
+		const { clientId, text, images, originId } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
@@ -106,19 +104,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		// Clear the input draft
 		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
 		clearSessionInputDraft(activeId);
-
-		// Send user_message to OTHER clients viewing this session
-		const targets = wsHandler.getClientsForSession(activeId);
-		for (const targetId of targets) {
-			if (targetId !== excludeClientId) {
-				wsHandler.sendTo(targetId, {
-					type: "user_message",
-					sessionId: activeId,
-					text,
-					...(originId && originalActiveId === activeId ? { originId } : {}),
-				});
-			}
-		}
 
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
@@ -189,7 +174,6 @@ export const handleMessage = (
 			text: payload.text,
 			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
-			excludeClientId: clientId,
 		});
 	});
 

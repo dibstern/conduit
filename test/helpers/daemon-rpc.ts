@@ -22,7 +22,6 @@ import {
 	type DaemonStateTag,
 	makeDaemonStateLive,
 } from "../../src/lib/domain/daemon/Services/daemon-state.js";
-import { DaemonWsClientRegistryLive } from "../../src/lib/domain/daemon/Services/daemon-ws-client-registry.js";
 import { InstanceHealthCheckLive } from "../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -50,7 +49,6 @@ export const makeDaemonRpcTestLayer = (
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,
 		InstanceHealthCheckLive,
-		DaemonWsClientRegistryLive,
 		DaemonConfigRefLive({
 			...makeDaemonConfigFromOptions({ port: 0 }),
 			...options.config,

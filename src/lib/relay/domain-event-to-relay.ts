@@ -1,7 +1,6 @@
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { UntaggedRelayMessage } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
-import { isRecord } from "../utils.js";
 
 export type DomainEventRelayTranslation =
 	| {
@@ -35,50 +34,17 @@ export function translateDomainEventToRelay(
 			});
 
 		case "thinking.end":
-			return emit({ type: "thinking_stop", messageId: event.data.messageId });
+		case "tool.running":
+			return silent("canonical event is delivered through RPC projections");
 
 		case "tool.started": {
-			const { toolName, callId, input, messageId } = event.data;
-			return emit(
-				{ type: "tool_start", id: callId, name: toolName, messageId },
-				{
-					type: "tool_executing",
-					id: callId,
-					name: toolName,
-					input: isRecord(input) ? input : undefined,
-					messageId,
-				},
-			);
-		}
-
-		case "tool.running": {
-			const { partId, messageId, metadata, input, callId, toolName } =
-				event.data;
-			// Refreshed input (args streamed after tool.started, e.g. skill):
-			// anchor to callId — the id tool_start registered the tool under.
-			if (isRecord(input)) {
-				return emit({
-					type: "tool_executing",
-					id: callId ?? partId,
-					name: toolName ?? "Task",
-					input,
-					...(metadata ? { metadata } : {}),
-					messageId,
-				});
-			}
-			if (metadata) {
-				return emit({
-					type: "tool_executing",
-					id: partId,
-					name: "Task",
-					input: undefined,
-					metadata,
-					messageId,
-				});
-			}
-			return silent(
-				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
-			);
+			const { toolName, callId, messageId } = event.data;
+			return emit({
+				type: "tool_start",
+				id: callId,
+				name: toolName,
+				messageId,
+			});
 		}
 
 		case "tool.input_updated":
@@ -126,8 +92,8 @@ export function translateDomainEventToRelay(
 		}
 
 		case "turn.error": {
-			// The transcript projects the notice; the failed `done` idles the
-			// composer and carries the reason for the alert.
+			// The transcript projects the notice; the failed completion carries
+			// the reason for the alert.
 			const { error } = event.data;
 			return emit({
 				type: "done",
@@ -196,7 +162,7 @@ export function translateDomainEventToRelay(
 			return silent("persistence-only event; no UI surface in relay");
 
 		case "session.goal_changed":
-			return emit({ type: "session.goal_changed", ...event.data });
+			return silent("delivered as the shell row's goalState");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; it does, as the session's shell row (ni8.12).

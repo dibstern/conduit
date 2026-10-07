@@ -1,37 +1,17 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import {
-	handleDeleteSession,
-	handleNewSession,
-	handleViewSession,
-} from "../../../src/lib/handlers/session.js";
+import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import {
 	makeMockOpenCodeAPI,
-	makeMockSessionManagerService,
 	makeMockSessionManagerShape,
-	makeRecordingWebSocketHandler,
+	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
-	type RecordedWebSocketCall,
 } from "../../helpers/mock-factories.js";
 
-const snapshotPath = join(
-	dirname(fileURLToPath(import.meta.url)),
-	"../../snapshots/handlers/sessions.json",
-);
-
-const readSnapshots = (): Record<string, RecordedWebSocketCall[]> =>
-	JSON.parse(readFileSync(snapshotPath, "utf-8")) as Record<
-		string,
-		RecordedWebSocketCall[]
-	>;
-
-describe("session handler wire snapshots", () => {
-	it("keeps the ViewSession metadata envelopes stable without OpenCode model lookup", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+describe("ViewSession handler", () => {
+	it("does not query OpenCode session models", async () => {
+		const wsHandler = makeMockWebSocketHandler();
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "get").mockRejectedValue(
 			new Error("ViewSession metadata must not query OpenCode session models"),
@@ -44,7 +24,6 @@ describe("session handler wire snapshots", () => {
 				hasMore: false,
 				total: 0,
 			})),
-			sendSessionLists: vi.fn(async () => undefined),
 		});
 
 		await Effect.runPromise(
@@ -54,51 +33,5 @@ describe("session handler wire snapshots", () => {
 		);
 
 		expect(api.session.get).not.toHaveBeenCalled();
-		expect(calls).toEqual(readSnapshots()["view_session_metadata_success"]);
-	});
-
-	it("keeps the CreateSession metadata envelopes stable", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
-		const sessionManagerService = makeMockSessionManagerService({
-			createSession: vi.fn(() =>
-				Effect.succeed({
-					id: "new-session",
-					projectID: "project-1",
-					directory: "/tmp/project",
-					title: "New Session",
-					version: "1.0.0",
-					time: { created: 300, updated: 300 },
-				}),
-			),
-		});
-
-		await Effect.runPromise(
-			handleNewSession("client-1", {}).pipe(
-				Effect.provide(
-					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-				),
-			),
-		);
-
-		expect(calls).toEqual(readSnapshots()["new_session_success"]);
-	});
-
-	it("keeps DeleteSession off the legacy wire; the shell feed announces it", async () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler({
-			getClientsForSession: vi.fn(() => []),
-		});
-		const sessionManagerService = makeMockSessionManagerService({
-			deleteSession: vi.fn(() => Effect.succeed(true)),
-		});
-
-		await Effect.runPromise(
-			handleDeleteSession("client-1", { sessionId: "deleted-session" }).pipe(
-				Effect.provide(
-					makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-				),
-			),
-		);
-
-		expect(calls).toEqual(readSnapshots()["delete_session_success"]);
 	});
 });

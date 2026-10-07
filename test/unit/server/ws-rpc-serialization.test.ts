@@ -14,10 +14,7 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	PermissionId,
-	RelayMessageSchema,
-} from "../../../src/lib/shared-types.js";
+import { PermissionId } from "../../../src/lib/shared-types.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 
 const session = {
@@ -245,27 +242,6 @@ const resolvedSettings = {
 	},
 } as const;
 
-// session_list is still a legacy broadcast, not a shipped RPC. This test-only
-// method carries its actual contract through the same JSON serialization seam.
-const SessionListProbe = Rpc.make("SessionListProbe", {
-	success: RelayMessageSchema,
-});
-const sessionList = {
-	type: "session_list",
-	sessions: [
-		{
-			...session,
-			pendingQuestionCount: 2,
-			pendingPermissionCount: 1,
-			unread: true,
-			attention: "needs-approval",
-		},
-		{ id: "minimal", title: "Minimal", status: "retry" },
-	],
-	roots: true,
-	search: true,
-} as const;
-
 const todoEnvelopes = [
 	{
 		_tag: "snapshot",
@@ -415,7 +391,6 @@ const group = RpcGroup.make(
 	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
 	Rpc.fromTaggedRequest(Contracts.ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(Contracts.RewindSession),
-	SessionListProbe,
 );
 const handlers = group.toLayer({
 	SubscribeApprovals: (payload) => {
@@ -424,7 +399,6 @@ const handlers = group.toLayer({
 			Stream.fromIterable(approvalEnvelopes).pipe(Stream.rechunk(1)),
 		);
 	},
-	SessionListProbe: () => Effect.succeed(sessionList),
 	RewindSession: (payload) => {
 		expect(payload).toEqual({
 			_tag: "RewindSession",
@@ -711,17 +685,6 @@ it("RewindSession preserves the changed response target identifiers", async () =
 					sessionId: "session-1",
 					messageId: "provider-message-1",
 				});
-			}),
-		).pipe(Effect.timeout("3 seconds")),
-	);
-});
-
-it("session_list keeps notification state and required status on sessions", async () => {
-	await Effect.runPromise(
-		Effect.scoped(
-			Effect.gen(function* () {
-				const { client } = yield* connect;
-				expect(yield* client.SessionListProbe()).toEqual(sessionList);
 			}),
 		).pipe(Effect.timeout("3 seconds")),
 	);

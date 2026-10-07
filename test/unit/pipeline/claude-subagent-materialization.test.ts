@@ -208,7 +208,6 @@ describe("Claude subagent materialization pipeline", () => {
 					});
 					const relaySink = createRelayEventSink({
 						sessionId: parentSessionId,
-						send: vi.fn(),
 						persist: { persistEvent: appendProject },
 					});
 
@@ -521,7 +520,6 @@ describe("Claude subagent materialization pipeline", () => {
 					});
 					const relaySink = createRelayEventSink({
 						sessionId: parentSessionId,
-						send: vi.fn(),
 						persist: { persistEvent: appendProject },
 					});
 

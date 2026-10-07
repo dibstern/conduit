@@ -21,7 +21,6 @@ export const makeRecoveredClaudeEventSink = (options: {
 	return createRelayEventSink({
 		sessionId,
 		providerId: "claude",
-		send: () => {},
 		ingestion: {
 			ingest: (event) =>
 				Effect.gen(function* () {

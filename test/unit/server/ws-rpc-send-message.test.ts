@@ -10,7 +10,6 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockSessionManagerService,
-	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -83,9 +82,6 @@ describe("WsRpcServerLayer SendMessage", () => {
 		const dispatchEffect = vi.fn(() => Effect.never);
 		const engine = withDispatchEffect({ dispatchEffect });
 		const recordMessageActivity = vi.fn(() => Effect.void);
-		const { wsHandler, calls } = makeRecordingWebSocketHandler({
-			getClientsForSession: vi.fn(() => ["tab-a", "tab-b"]),
-		});
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -111,26 +107,6 @@ describe("WsRpcServerLayer SendMessage", () => {
 					}),
 				}),
 			);
-			expect(calls).toContainEqual({
-				channel: "sendTo",
-				clientId: "tab-a",
-				message: {
-					type: "user_message",
-					sessionId: "session-1",
-					text: "hello",
-					originId: "browser-tab-a",
-				},
-			});
-			expect(calls).toContainEqual({
-				channel: "sendTo",
-				clientId: "tab-b",
-				message: {
-					type: "user_message",
-					sessionId: "session-1",
-					text: "hello",
-					originId: "browser-tab-a",
-				},
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -139,7 +115,6 @@ describe("WsRpcServerLayer SendMessage", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
-							wsHandler,
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
 							}),

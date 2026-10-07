@@ -26,10 +26,7 @@ import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
-import {
-	type RelayMessage,
-	WS_PROTOCOL_VERSION,
-} from "../../../shared-types.js";
+import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import {
@@ -47,7 +44,6 @@ import {
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
-import { DaemonWsClientRegistryTag } from "../Services/daemon-ws-client-registry.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance,
@@ -89,7 +85,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
-			| DaemonWsClientRegistryTag
 			| ConfigPersistenceTag
 			| RelayCacheTag
 			| InstanceManagerStateTag
@@ -101,7 +96,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 		>();
 		const bus = yield* DaemonEventBusTag;
-		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
@@ -144,21 +138,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							if (subscriber.list === list)
 								Queue.unsafeOffer(subscriber.changed, undefined);
 					});
-				return event._tag === "RelayBroadcast"
-					? Effect.gen(function* () {
-							yield* daemonWsClients.broadcastUnattached(
-								event.message as RelayMessage,
-							);
-							for (const project of yield* allProjects) {
-								const relay = yield* cache.peek(project.slug);
-								if (Option.isSome(relay)) {
-									relay.value.wsHandler.broadcast?.(
-										event.message as RelayMessage,
-									);
-								}
-							}
-						}).pipe(Effect.provide(context))
-					: Effect.void;
+				return Effect.void;
 			}),
 			Effect.forkScoped,
 		);
@@ -170,7 +150,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
-				| DaemonWsClientRegistryTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| InstanceManagerStateTag

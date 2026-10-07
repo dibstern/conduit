@@ -8,7 +8,6 @@ import type {
 	SessionDetail,
 } from "../../../src/lib/instance/sdk-types.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
 
 const SEED = 42;
 const NUM_RUNS = 50;
@@ -241,24 +240,15 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	});
 
 	describe("P2: Create session (AC1)", () => {
-		it("property: creates session and broadcasts list", async () => {
+		it("property: creates session", async () => {
 			await fc.assert(
 				fc.asyncProperty(arbSessionTitle, async (title) => {
 					const client = createMockClient([]);
 					const mgr = new SessionManager({ client });
 
-					const broadcasts: RelayMessage[] = [];
-					mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
 					const session = await mgr.createSession(title);
 
 					expect(session.id).toBeTruthy();
-
-					// Only root rows are broadcast.
-					expect(broadcasts.length).toBe(1);
-					const broadcast = broadcasts[0];
-					assert.exists(broadcast, "expected broadcast");
-					expect(broadcast.type).toBe("session_list");
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -414,9 +404,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const lifecycleEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => lifecycleEvents.push(ev));
 
-			const broadcasts: RelayMessage[] = [];
-			mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
 			await mgr.deleteSession("ses_b");
 
 			// Should emit session_lifecycle with type "deleted"
@@ -425,8 +412,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					(e) => e.type === "deleted" && e.sessionId === "ses_b",
 				),
 			).toBe(true);
-			// Should broadcast session_list
-			expect(broadcasts.some((m) => m.type === "session_list")).toBe(true);
 			// Session should be removed
 			expect(client._sessions.find((s) => s.id === "ses_b")).toBeUndefined();
 		});
@@ -474,7 +459,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	});
 
 	describe("P6: Rename session (AC5)", () => {
-		it("property: rename updates title and broadcasts list", async () => {
+		it("property: rename updates title", async () => {
 			await fc.assert(
 				fc.asyncProperty(arbSessionTitle, async (newTitle) => {
 					const sessions: MockSession[] = [
@@ -487,9 +472,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					const client = createMockClient(sessions);
 					const mgr = new SessionManager({ client });
 
-					const broadcasts: RelayMessage[] = [];
-					mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
 					await mgr.renameSession("ses_r", newTitle);
 
 					// Title updated in mock
@@ -498,7 +480,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 					expect(session.title).toBe(newTitle);
 
 					// Broadcasts session_list
-					expect(broadcasts.some((m) => m.type === "session_list")).toBe(true);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS },
 			);
@@ -643,9 +624,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const client = createMockClient([]);
 			const mgr = new SessionManager({ client });
 
-			const broadcasts: RelayMessage[] = [];
-			mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
 			// Create two sessions
 			const s1 = await mgr.createSession("First");
 			const s2 = await mgr.createSession("Second");
@@ -675,19 +653,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	});
 
 	describe("P10: Silent option for createSession and deleteSession", () => {
-		it("createSession with { silent: true } does NOT emit broadcast events", async () => {
-			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
-
-			const broadcasts: RelayMessage[] = [];
-			mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
-			await mgr.createSession("Silent", { silent: true });
-
-			// No broadcasts at all.
-			expect(broadcasts.length).toBe(0);
-		});
-
 		it("createSession with { silent: true } still emits session_lifecycle", async () => {
 			const client = createMockClient([]);
 			const mgr = new SessionManager({ client });
@@ -703,44 +668,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			assert.exists(changedEvent, "expected session-change event");
 			expect(changedEvent.sessionId).toBe(session.id);
 			expect(changedEvent.type).toBe("created");
-		});
-
-		it("createSession without opts still broadcasts list (backward compatible)", async () => {
-			await fc.assert(
-				fc.asyncProperty(arbSessionTitle, async (title) => {
-					const client = createMockClient([]);
-					const mgr = new SessionManager({ client });
-
-					const broadcasts: RelayMessage[] = [];
-					mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
-					await mgr.createSession(title);
-
-					// Only root rows are broadcast.
-					expect(broadcasts.length).toBe(1);
-					const broadcast = broadcasts[0];
-					assert.exists(broadcast, "expected broadcast");
-					expect(broadcast.type).toBe("session_list");
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS },
-			);
-		});
-
-		it("deleteSession with { silent: true } does NOT broadcast session_list", async () => {
-			const sessions: MockSession[] = [
-				{ id: "ses_a", title: "A", time: { created: 1000, updated: 1000 } },
-				{ id: "ses_b", title: "B", time: { created: 2000, updated: 3000 } },
-			];
-			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
-
-			const broadcasts: RelayMessage[] = [];
-			mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
-			await mgr.deleteSession("ses_b", { silent: true });
-
-			// Should NOT broadcast anything
-			expect(broadcasts.length).toBe(0);
 		});
 
 		it("deleteSession with { silent: true } still emits session_lifecycle", async () => {
@@ -762,22 +689,6 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			assert.exists(changedEvent, "expected session-change event");
 			expect(changedEvent.sessionId).toBe("ses_b");
 			expect(changedEvent.type).toBe("deleted");
-		});
-
-		it("deleteSession without opts still broadcasts session_list (backward compatible)", async () => {
-			const sessions: MockSession[] = [
-				{ id: "ses_a", title: "A", time: { created: 1000, updated: 1000 } },
-				{ id: "ses_b", title: "B", time: { created: 2000, updated: 3000 } },
-			];
-			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
-
-			const broadcasts: RelayMessage[] = [];
-			mgr.on("broadcast", (msg) => broadcasts.push(msg));
-
-			await mgr.deleteSession("ses_b");
-
-			expect(broadcasts.some((m) => m.type === "session_list")).toBe(true);
 		});
 	});
 

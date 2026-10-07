@@ -122,10 +122,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-new",
 			);
-			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-				"browser-tab-a",
-				expect.objectContaining({ type: "session_family" }),
-			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -160,10 +156,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-1",
 			);
-			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-				"browser-tab-a",
-				expect.objectContaining({ type: "session_family" }),
-			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -176,9 +168,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(true));
-		const wsHandler = makeMockWebSocketHandler({
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
 		});
@@ -194,24 +183,18 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
-			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);
 	});
 
-	it.effect("returns ok for a coalesced delete without rebroadcasting", () => {
+	it.effect("returns ok for a coalesced delete", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(false));
-		const wsHandler = makeMockWebSocketHandler({
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
 		});
@@ -227,14 +210,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
-			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);
@@ -306,7 +286,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(
 				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked'`,
 			).toEqual([{ type: "session.created" }]);
-			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,

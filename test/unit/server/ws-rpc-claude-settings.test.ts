@@ -95,7 +95,6 @@ describe("WsRpcServerLayer Claude settings", () => {
 					}
 				}
 				expect(loadRelaySettings(configDir).claudeSettings).toBeUndefined();
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 				rmSync(configDir, { recursive: true, force: true });
 			}).pipe(
 				Effect.scoped,

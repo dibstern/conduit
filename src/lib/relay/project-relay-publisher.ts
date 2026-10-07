@@ -11,10 +11,7 @@ import { sendPushForEventEffect } from "./sse-wiring.js";
 export const publishProviderRelayMessage = (
 	msg: RelayMessage,
 	deps: {
-		wsHandler: Pick<
-			WebSocketHandlerShape,
-			"sendToSession" | "getClientsForSession"
-		>;
+		wsHandler: Pick<WebSocketHandlerShape, "getClientsForSession">;
 		pushManager?: Pick<PushNotificationSender, "sendToAll">;
 		log: Logger;
 		slug: string;
@@ -22,7 +19,6 @@ export const publishProviderRelayMessage = (
 ) =>
 	Effect.gen(function* () {
 		const sessionId = "sessionId" in msg ? msg.sessionId : undefined;
-		deps.wsHandler.sendToSession(sessionId ?? "", msg);
 		if (msg.type !== "done" || !sessionId) return;
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<{

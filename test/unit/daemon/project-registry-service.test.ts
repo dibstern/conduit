@@ -3,18 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Queue } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
-import {
-	DaemonEventBusLive,
-	subscribeToDaemonEvents,
-} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
 	addWithoutRelay,
 	allProjects,
-	broadcastToAll,
 	evictOldestSessions,
 	isStarting,
 	makeProjectRegistryLive,
@@ -171,20 +167,6 @@ describe("explicit project registration", () => {
 			expect(yield* allProjects).toEqual([added.project]);
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});
-});
-
-describe("broadcastToAll", () => {
-	it.scoped("publishes a RelayBroadcast event to the event bus", () =>
-		Effect.gen(function* () {
-			const sub = yield* subscribeToDaemonEvents;
-			yield* broadcastToAll({ type: "test", data: 42 });
-			const event = yield* Queue.take(sub);
-			expect(event._tag).toBe("RelayBroadcast");
-			if (event._tag === "RelayBroadcast") {
-				expect(event.message).toEqual({ type: "test", data: 42 });
-			}
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
 });
 
 describe("waitForRelay", () => {

@@ -1,6 +1,6 @@
 // Extracted from relay-stack.ts: the pipeline that takes SSE events from
-// OpenCode, translates them, filters by session, records to cache, broadcasts
-// to browser clients, and sends push notifications.
+// OpenCode, persists them, maintains timeouts, and publishes alerts and push
+// notifications using RPC viewer presence.
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
@@ -51,6 +51,7 @@ import {
 	hasInfoWithSessionID,
 	hasPartWithSessionID,
 	hasSessionID,
+	isPartUpdatedEvent,
 	isPermissionRepliedEvent,
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
@@ -85,15 +86,7 @@ export interface SSEWiringDeps {
 	translator: Translator;
 	readonly providerInstanceId: string;
 	wsHandler: {
-		broadcast: (msg: RelayMessage) => void;
-		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 		getClientsForSession: (sessionId: string) => string[];
-		/**
-		 * Project-scoped per-session event firehose. Pipeline
-		 * routing uses this (via `applyPipelineResultEffect`) so per-session chat
-		 * events reach every client on `/p/<slug>` regardless of viewed session.
-		 */
-		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
 	};
 	pushManager?: PushNotificationSender;
 	log: Logger;
@@ -587,6 +580,22 @@ const handleSSEEventAfterPendingEffect = (
 		const translateResult = translator.translate(event, {
 			sessionId: eventSessionId,
 		});
+		// These part updates still count as progress even though they no
+		// longer produce an internal relay message.
+		if (
+			eventSessionId &&
+			(!translateResult.ok || translateResult.messages.length === 0) &&
+			isPartUpdatedEvent(event) &&
+			((event.properties.part?.type === "tool" &&
+				event.properties.part.state?.status === "running") ||
+				(event.properties.part?.type === "reasoning" &&
+					event.properties.part.time?.end != null))
+		) {
+			yield* resetProcessingTimeout(
+				eventSessionId,
+				PROCESSING_TIMEOUT_DURATION,
+			);
+		}
 		if (!translateResult.ok) {
 			if (!translateResult.reason.startsWith("unhandled event type")) {
 				yield* Effect.sync(() =>
@@ -612,7 +621,6 @@ const handleSSEEventAfterPendingEffect = (
 			msg = pipeResult.msg;
 
 			yield* applyPipelineResultEffect(pipeResult, targetSessionId, {
-				wsHandler,
 				log: pipelineLog,
 			});
 

@@ -495,7 +495,6 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 	const sink = createRelayEventSink({
 		sessionId: "session",
 		providerId: "claude",
-		send: () => {},
 		ingestion: f.ingestion,
 		pendingInteractions: {
 			beginPermissionRequest: () =>

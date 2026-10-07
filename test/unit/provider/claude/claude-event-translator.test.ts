@@ -704,7 +704,6 @@ describe("ClaudeEventTranslator", () => {
 			);
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-contract",
-				send: vi.fn(),
 				persist: {
 					persistEvent: (event) =>
 						Effect.promise(() =>
@@ -869,7 +868,6 @@ describe("ClaudeEventTranslator", () => {
 			);
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-thinking-snapshot",
-				send: vi.fn(),
 				persist: {
 					persistEvent: (event) =>
 						Effect.promise(() =>
@@ -948,10 +946,8 @@ describe("ClaudeEventTranslator", () => {
 					Date.now(),
 				],
 			);
-			const send = vi.fn();
 			const relaySink = createRelayEventSink({
 				sessionId: "sess-context-window",
-				send,
 				persist: {
 					persistEvent: (event) =>
 						Effect.promise(() =>
@@ -1014,13 +1010,6 @@ describe("ClaudeEventTranslator", () => {
 				uuid: "00000000-0000-0000-0000-000000000208",
 				session_id: "sdk-sess-context-window",
 			} as unknown as SDKMessage);
-
-			expect(send).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "result",
-					usage: expect.objectContaining({ context_window: 1_000_000 }),
-				}),
-			);
 
 			const rows = await harness.sessionMessagesWithParts(
 				"sess-context-window",

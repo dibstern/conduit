@@ -46,7 +46,10 @@ export interface MessagePollerOptions {
 }
 
 /** Callback signature for the "events" broadcast event. */
-export type MessagePollerEventsCallback = (messages: RelayMessage[]) => void;
+export type MessagePollerEventsCallback = (
+	messages: RelayMessage[],
+	hasActivity?: boolean,
+) => void;
 
 export class MessagePoller {
 	private readonly client: Pick<OpenCodeAPI, "session">;
@@ -270,15 +273,18 @@ export class MessagePoller {
 				return; // Skip this cycle — snapshot is now current
 			}
 
-			const events = this.doDiffAndSynthesize(sessionId, messages);
+			const { events, hasActivity } = this.doDiffAndSynthesize(
+				sessionId,
+				messages,
+			);
 
-			if (events.length > 0) {
+			if (events.length > 0 || hasActivity) {
 				this.lastContentAt = Date.now();
 				this.log.info(
 					`SYNTHESIZED session=${sessionId.slice(0, 12)} events=${events.length} types=[${events.map((e) => e.type).join(",")}]`,
 				);
 				for (const cb of this.eventsCallbacks) {
-					cb(events);
+					cb(events, hasActivity);
 				}
 			}
 		} catch (err) {
@@ -299,15 +305,18 @@ export class MessagePoller {
 	private doDiffAndSynthesize(
 		sessionId: string,
 		messages: Message[],
-	): RelayMessage[] {
-		const { events, newSnapshot } = diffAndSynthesize(
+	): { events: RelayMessage[]; hasActivity: boolean } {
+		const { events, newSnapshot, hasActivity } = diffAndSynthesize(
 			this.previousSnapshot,
 			messages,
 			this.resolveOrigin,
 		);
 		this.previousSnapshot = newSnapshot;
 		// Tag all synthesized events with the active session's ID
-		return events.map((e) => tagWithSessionId(e, sessionId));
+		return {
+			events: events.map((e) => tagWithSessionId(e, sessionId)),
+			hasActivity,
+		};
 	}
 
 	/** Track a fire-and-forget promise for drain. */
@@ -321,6 +330,7 @@ export class MessagePoller {
 export type PollerManagerEventsCallback = (
 	messages: RelayMessage[],
 	sessionId: string,
+	hasActivity?: boolean,
 ) => void;
 
 export interface MessagePollerManagerOptions {
@@ -378,9 +388,9 @@ export class MessagePollerManager {
 			log: this.log,
 			hasViewers: () => this.hasViewers(sessionId),
 		});
-		poller.on("events", (events) => {
+		poller.on("events", (events, hasActivity) => {
 			for (const cb of this.eventsCallbacks) {
-				cb(events, sessionId);
+				cb(events, sessionId, hasActivity);
 			}
 		});
 		poller.startPolling(sessionId, seedMessages);

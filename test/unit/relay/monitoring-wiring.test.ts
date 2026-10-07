@@ -46,7 +46,6 @@ function createHarness(
 	parentMap = new Map<string, string>(),
 	providers = new Map<string, string>(),
 ) {
-	const broadcastPerSessionEvent = vi.fn();
 	const clearProcessingTimeout = vi.fn();
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: []) => void) | undefined;
@@ -58,18 +57,13 @@ function createHarness(
 	);
 	const startPolling = vi.fn();
 	const getClientsForSession = vi.fn((_sessionId: string): string[] => []);
-	const broadcast = vi.fn();
-	const publishAlert = vi.fn<(alert: Alert) => void>();
 
 	const result = wireMonitoring({
 		client: {
 			session: { messages },
 		},
 		wsHandler: {
-			broadcast,
-			sendToSession: vi.fn(),
 			getClientsForSession,
-			broadcastPerSessionEvent,
 		},
 		sessionService: {
 			refreshSessionLineage: vi.fn(async () => {}),
@@ -110,13 +104,9 @@ function createHarness(
 		statusLog: createSilentLogger(),
 		sseLog: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
-		publishAlert,
 	});
 
 	return {
-		broadcast,
-		publishAlert,
-		broadcastPerSessionEvent,
 		clearProcessingTimeout,
 		result,
 		messages,
@@ -129,21 +119,9 @@ function createHarness(
 	};
 }
 
-it("broadcasts a synthetic root done when its session has no viewer", async () => {
-	const harness = createHarness();
-	harness.result.setMonitoringState({
-		sessions: new Map([
-			["root", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
-		]),
-	});
-	await harness.emitStatus({ root: { type: "idle" } });
-	expect(harness.publishAlert).toHaveBeenCalledWith(
-		expect.objectContaining({ _tag: "alert", kind: "done", sessionId: "root" }),
-	);
-});
-
-it("uses the busy cycle to identify anonymous poller broadcasts", async () => {
-	const harness = createHarness();
+it("uses the busy cycle to identify anonymous poller alerts", async () => {
+	const harness = await createEffectHarness();
+	const alertIds: string[] = [];
 	for (const busySince of [101, 202]) {
 		harness.result.setMonitoringState({
 			sessions: new Map([
@@ -153,11 +131,15 @@ it("uses the busy cycle to identify anonymous poller broadcasts", async () => {
 				],
 			]),
 		});
-		await harness.emitStatus({ root: { type: "idle" } });
+		harness.emitStatus({ root: { type: "idle" } });
+		await flushPromises();
+		alertIds.push(...harness.alerts().map((alert) => alert.alertId));
 	}
-	expect(
-		harness.publishAlert.mock.calls.map(([alert]) => alert.alertId),
-	).toEqual(['["root","poller",101,"done"]', '["root","poller",202,"done"]']);
+	expect(alertIds).toEqual([
+		'["root","poller",101,"done"]',
+		'["root","poller",202,"done"]',
+	]);
+	harness.result.stopMonitoring();
 });
 
 it("defers parent completion and synthetic done until its last busy child finishes", async () => {
@@ -173,10 +155,6 @@ it("defers parent completion and synthetic done until its last busy child finish
 	expect(
 		harness.result.getMonitoringState().sessions.get("parent")?.phase,
 	).not.toBe("idle");
-	expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalledWith(
-		"parent",
-		expect.objectContaining({ type: "done" }),
-	);
 	expect(harness.clearProcessingTimeout).not.toHaveBeenCalledWith("parent");
 	await harness.emitStatus({
 		parent: { type: "idle" },
@@ -186,11 +164,6 @@ it("defers parent completion and synthetic done until its last busy child finish
 		parent: { type: "idle" },
 		child: { type: "idle" },
 	});
-	expect(
-		harness.broadcastPerSessionEvent.mock.calls.filter(
-			([id, event]) => id === "parent" && event.type === "done",
-		),
-	).toHaveLength(1);
 });
 
 describe("wireMonitoring shutdown", () => {
@@ -215,15 +188,13 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("legacy wiring clears Claude idle state without emitting a done", async () => {
+	it("synchronous wiring clears Claude idle state", async () => {
 		const harness = createHarness(new Map(), new Map([["claude-1", "claude"]]));
 		await harness.emitStatus({ "claude-1": { type: "busy" } });
 		await harness.emitStatus({ "claude-1": { type: "busy" } });
 		await harness.emitStatus({ "claude-1": { type: "idle" } });
 		expect(harness.messages).not.toHaveBeenCalled();
 		expect(harness.clearProcessingTimeout).toHaveBeenCalledWith("claude-1");
-		expect(harness.broadcastPerSessionEvent).not.toHaveBeenCalled();
-		expect(harness.publishAlert).not.toHaveBeenCalled();
 		harness.result.stopMonitoring();
 	});
 
@@ -307,13 +278,13 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("handles later ticks while an earlier broadcast is pending", async () => {
-		let releaseBroadcast: (() => void) | undefined;
-		const broadcast = new Promise<void>((resolve) => {
-			releaseBroadcast = resolve;
+	it("handles later ticks while an earlier lineage refresh is pending", async () => {
+		let releaseRefresh: (() => void) | undefined;
+		const lineageRefresh = new Promise<void>((resolve) => {
+			releaseRefresh = resolve;
 		});
 		const harness = await createEffectHarness(() =>
-			Effect.promise(() => broadcast),
+			Effect.promise(() => lineageRefresh),
 		);
 		harness.result.setMonitoringState({
 			sessions: new Map([
@@ -325,15 +296,15 @@ describe("wireMonitoring shutdown", () => {
 		harness.emitStatus({ s1: { type: "idle" } });
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.delivered).toEqual(["done"]);
-		releaseBroadcast?.();
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		releaseRefresh?.();
 		await flushPromises();
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts()).toEqual([]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
 		harness.result.stopMonitoring();
 	});
 
-	it("drops a pending seed after a later idle tick and delivers done once", async () => {
+	it("drops a pending seed after a later idle tick and publishes one completion alert", async () => {
 		const harness = await createEffectHarness();
 		harness.result.setMonitoringState({
 			sessions: new Map([
@@ -350,14 +321,14 @@ describe("wireMonitoring shutdown", () => {
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:s1"]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		harness.emitStatus({ s1: { type: "idle" } });
 		await flushPromises();
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts()).toEqual([]);
 		harness.result.stopMonitoring();
 	});
 
-	it("production wiring broadcasts a synthetic root done without a viewer", async () => {
+	it("production wiring publishes a synthetic completion alert without a viewer", async () => {
 		const harness = await createEffectHarness();
 		harness.result.setMonitoringState({
 			sessions: new Map([
@@ -536,9 +507,9 @@ describe("wireMonitoring shutdown", () => {
 		}
 	});
 
-	it("stops B and broadcasts its completion while A's seed never resolves", async () => {
-		const broadcast = vi.fn(() => Effect.void);
-		const harness = await createEffectHarness(broadcast);
+	it("stops B and publishes its completion alert while A's seed never resolves", async () => {
+		const refreshSessionLineage = vi.fn(() => Effect.void);
+		const harness = await createEffectHarness(refreshSessionLineage);
 		harness.result.setMonitoringState({
 			sessions: new Map([
 				["A", { phase: "busy-sse-covered", busySince: 0, lastSSEAt: 0 }],
@@ -551,8 +522,8 @@ describe("wireMonitoring shutdown", () => {
 		harness.emitStatus({ A: { type: "busy" }, B: { type: "idle" } }, true);
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:B"]);
-		expect(harness.delivered).toEqual(["done"]);
-		expect(broadcast).toHaveBeenCalledOnce();
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		expect(refreshSessionLineage).toHaveBeenCalledOnce();
 		expect(harness.result.getMonitoringState().sessions.has("B")).toBe(false);
 		harness.result.stopMonitoring();
 	});
@@ -569,7 +540,7 @@ describe("wireMonitoring shutdown", () => {
 		await flushPromises();
 		expect(harness.messages).toHaveBeenCalledWith("A");
 		expect(harness.pollerEvents).toEqual(["stop:B"]);
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		harness.result.stopMonitoring();
 	});
 
@@ -578,10 +549,10 @@ describe("wireMonitoring shutdown", () => {
 		const first = new Promise<void>((resolve) => {
 			releaseFirst = resolve;
 		});
-		const broadcast = vi
+		const refreshSessionLineage = vi
 			.fn(() => Effect.void)
 			.mockImplementationOnce(() => Effect.promise(() => first));
-		const harness = await createEffectHarness(broadcast);
+		const harness = await createEffectHarness(refreshSessionLineage);
 		harness.result.setMonitoringState({
 			sessions: new Map([
 				["s1", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
@@ -592,7 +563,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.emitStatus({ s1: { type: "idle" } }, true);
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		releaseFirst?.();
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:s1"]);
@@ -634,7 +605,6 @@ describe("wireMonitoring shutdown", () => {
 			harness.emitStatus({ "claude-1": { type: "busy" } });
 			await flushPromises();
 			expect(harness.messages).not.toHaveBeenCalled();
-			expect(harness.delivered).toEqual([]);
 			expect(harness.startPolling).not.toHaveBeenCalled();
 			if (!harness.runtime) throw new Error("Missing test runtime");
 			await harness.runtime.runPromise(
@@ -647,7 +617,6 @@ describe("wireMonitoring shutdown", () => {
 			).toBe(true);
 			harness.emitStatus({ "claude-1": { type: "idle" } });
 			await flushPromises();
-			expect(harness.delivered).toEqual([]);
 			expect(harness.alerts()).toEqual([]);
 			expect(pushManager.sendToAll).not.toHaveBeenCalled();
 			expect(
@@ -692,7 +661,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.emitStatus({});
 		await flushPromises();
 		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.delivered).toEqual(["done"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		// The next cycle can start while the old cycle's request is pending.
 		harness.messages.mockResolvedValueOnce([]);
 		harness.emitStatus({ s1: { type: "busy" } });
@@ -722,7 +691,6 @@ async function createEffectHarness(
 			}),
 	);
 	const pollerEvents: string[] = [];
-	const delivered: string[] = [];
 	const startPolling = vi.fn((id: string) => {
 		pollerEvents.push(`start:${id}`);
 	});
@@ -784,12 +752,7 @@ async function createEffectHarness(
 	const monitoring = wireMonitoringEffect({
 		client: { session: { messages } },
 		wsHandler: {
-			broadcast: vi.fn(),
-			sendToSession: () => {},
 			getClientsForSession,
-			broadcastPerSessionEvent: (_id, message) => {
-				if (message.type === "done") delivered.push("done");
-			},
 		},
 		pollerManager: {
 			startPolling,
@@ -844,7 +807,6 @@ async function createEffectHarness(
 		startPolling,
 		getClientsForSession,
 		pollerEvents,
-		delivered,
 		resolveMessages: () => resolveMessages?.([]),
 		emitStatus: (
 			statuses: Record<string, { type: "busy" | "idle" }>,

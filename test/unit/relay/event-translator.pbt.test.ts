@@ -7,9 +7,9 @@
 //     → Source: AC3
 // P3: translatePartDelta never throws, returns delta or thinking_delta or null
 //     → Source: AC1, AC6
-// P4: Tool lifecycle: pending→tool_start, running→tool_executing, completed→tool_result(ok), error→tool_result(err)
+// P4: Tool lifecycle: pending/running→tool_start, completed→tool_result(ok), error→tool_result(err)
 //     → Source: AC2 (tool call lifecycle)
-// P5: Reasoning lifecycle: new→thinking_start, delta→thinking_delta, end→thinking_stop
+// P5: Reasoning lifecycle: new→thinking_start, delta→thinking_delta
 //     → Source: AC6 (reasoning/thinking blocks)
 // P6: Unknown event types produce null (never throw)
 //     → Source: AC13
@@ -52,7 +52,6 @@ import {
 	messageUpdatedEvent,
 	partDeltaEvent,
 	sessionStatusEvent,
-	timestamp,
 	unknownEvent,
 	unknownToolName,
 } from "../../helpers/arbitraries.js";
@@ -142,7 +141,7 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 
 	describe("P4: Tool lifecycle status → correct message type (AC2)", () => {
 		// translateToolPartUpdated may return a single message, an array
-		// (e.g. [tool_start, tool_executing] for first-seen running tools),
+		// (e.g. [thinking_start, thinking_delta] for first-seen reasoning),
 		// or null. This helper normalises to an array for uniform assertions.
 		function asArray(
 			result: ReturnType<typeof translateToolPartUpdated>,
@@ -169,31 +168,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 						if (first.type === "tool_start") {
 							expect(first.name).toBe(mapToolName(tool));
 						}
-					}
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-
-		it("property: running → tool_executing", () => {
-			fc.assert(
-				fc.property(idString, anyToolName, (partID, tool) => {
-					const msgs = asArray(
-						translateToolPartUpdated(
-							partID,
-							{
-								type: "tool",
-								tool,
-								state: { status: "running", input: { cmd: "test" } },
-							},
-							false,
-						),
-					);
-					if (msgs.length > 0) {
-						// Last message should be tool_executing (may be preceded by tool_start)
-						const last = msgs.at(-1);
-						assert.exists(last, "expected final message");
-						expect(last.type).toBe("tool_executing");
 					}
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
@@ -282,82 +256,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 		});
 	});
 
-	describe("tool_executing forwards metadata from part state", () => {
-		function asArray(
-			result: ReturnType<typeof translateToolPartUpdated>,
-			// biome-ignore lint/suspicious/noExplicitAny: test helper — union return includes null
-		): any[] {
-			if (result == null) return [];
-			return Array.isArray(result) ? result : [result];
-		}
-
-		it("forwards metadata when present on running tool", () => {
-			const meta = { sessionId: "ses_abc123" };
-			const msgs = asArray(
-				translateToolPartUpdated(
-					"part-1",
-					{
-						type: "tool",
-						tool: "task",
-						state: {
-							status: "running",
-							input: { prompt: "test" },
-							metadata: meta,
-						},
-					},
-					false,
-				),
-			);
-			expect(msgs).toHaveLength(1);
-			const msg = msgs[0];
-			assert.exists(msg, "expected message");
-			expect(msg.type).toBe("tool_executing");
-			if (msg.type === "tool_executing") {
-				expect(msg.metadata).toEqual(meta);
-			}
-		});
-
-		it("forwards metadata when first seen as running (isNew)", () => {
-			const meta = { sessionId: "ses_xyz789" };
-			const msgs = asArray(
-				translateToolPartUpdated(
-					"part-2",
-					{
-						type: "tool",
-						tool: "task",
-						state: { status: "running", input: {}, metadata: meta },
-					},
-					true, // isNew — emits [tool_start, tool_executing]
-				),
-			);
-			expect(msgs).toHaveLength(2);
-			expect(msgs[0]?.type).toBe("tool_start");
-			expect(msgs[1]?.type).toBe("tool_executing");
-			if (msgs[1]?.type === "tool_executing") {
-				expect(msgs[1]?.metadata).toEqual(meta);
-			}
-		});
-
-		it("omits metadata field when not present on part state", () => {
-			const msgs = asArray(
-				translateToolPartUpdated(
-					"part-3",
-					{
-						type: "tool",
-						tool: "task",
-						state: { status: "running", input: {} },
-					},
-					false,
-				),
-			);
-			expect(msgs).toHaveLength(1);
-			const first = msgs[0];
-			if (first?.type === "tool_executing") {
-				expect(first).not.toHaveProperty("metadata");
-			}
-		});
-	});
-
 	describe("P5: Reasoning lifecycle (AC6)", () => {
 		it("property: new reasoning part → thinking_start", () => {
 			fc.assert(
@@ -369,19 +267,6 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 					expect(result).toMatchObject({ type: "thinking_start" });
 				}),
 				{ seed: SEED, numRuns: 10, endOnFailure: true },
-			);
-		});
-
-		it("property: reasoning part with time.end → thinking_stop", () => {
-			fc.assert(
-				fc.property(timestamp, (endTime) => {
-					const result = translateReasoningPartUpdated(
-						{ type: "reasoning", time: { end: endTime } },
-						false,
-					);
-					expect(result).toMatchObject({ type: "thinking_stop" });
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
 		});
 

@@ -3,14 +3,13 @@ import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider
 import { formatErrorDetail } from "../../../errors.js";
 import { createEventId } from "../../../persistence/events.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
-import { LoggerTag, WebSocketHandlerTag } from "./services.js";
+import { LoggerTag } from "./services.js";
 
 /**
  * End a turn that Conduit itself failed: a send that never reached the
  * provider, or a turn that went silent past its timeout. The failure is a
  * canonical `turn.error`, so the transcript shows it and keeps it across a
- * reload, and the relay sends the failed `done` that idles the composer. The
- * idle status settles the shell row, the client's busy signal.
+ * reload. The idle status settles the shell row, the client's busy signal.
  *
  * Only for failures Conduit owns. A provider that fails a turn it was handed
  * records its own `turn.error`, so calling this too would show it twice.
@@ -20,7 +19,6 @@ import { LoggerTag, WebSocketHandlerTag } from "./services.js";
  */
 export const makeFailTurn = Effect.gen(function* () {
 	const ingestion = yield* ProviderRuntimeIngestionTag;
-	const wsHandler = yield* WebSocketHandlerTag;
 	const log = yield* LoggerTag;
 	return (
 		sessionId: string,
@@ -56,11 +54,6 @@ export const makeFailTurn = Effect.gen(function* () {
 						log.warn(
 							`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,
 						);
-						wsHandler.sendToSession(sessionId, {
-							type: "done",
-							sessionId,
-							code: 1,
-						});
 					}),
 				),
 			);

@@ -12,7 +12,6 @@ import {
 	type SSEWiringDeps,
 	type wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
-import { TRUNCATION_THRESHOLD } from "../../../src/lib/relay/truncate-content.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
@@ -82,9 +81,7 @@ describe("shouldCache", () => {
 			"delta",
 			"thinking_start",
 			"thinking_delta",
-			"thinking_stop",
 			"tool_start",
-			"tool_executing",
 			"tool_result",
 			"result",
 			"done",
@@ -95,7 +92,7 @@ describe("shouldCache", () => {
 	});
 
 	it("returns false for non-chat types", async () => {
-		const nonCacheable = ["session_list"] as const;
+		const nonCacheable = ["message_removed"] as const;
 		for (const type of nonCacheable) {
 			expect(shouldCache(type)).toBe(false);
 		}
@@ -103,7 +100,7 @@ describe("shouldCache", () => {
 });
 
 describe("handleSSEEventEffect", () => {
-	it("translates and firehoses events to every client on the project (Phase 0b)", async () => {
+	it("translates events with the upstream session ID", async () => {
 		const deps = createMockSSEWiringDeps();
 		const translated: RelayMessage = {
 			type: "delta",
@@ -124,73 +121,6 @@ describe("handleSSEEventEffect", () => {
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
 		});
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
-		// sendToSession no longer used for chat events — only for viewer-scoped
-		// status routing (handled elsewhere).
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
-		// Cross-session alert only fires when no viewers — mock has c1 viewing.
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
-	it("firehoses events regardless of which session they belong to (Phase 0b)", async () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "other-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"other-session",
-			translated,
-		);
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
-	it("firehoses events even when no clients are actively viewing the session (Phase 0b)", async () => {
-		// Phase 0b: delivery is no longer viewer-gated. The event goes to all
-		// connected clients. The frontend dispatcher handles routing into the
-		// correct per-session slot.
-		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: { sessionID: "other-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		// Event still fires on the firehose — the "no viewers" signal only
-		// controls cross-session alert fallback (not tested here
-		// because delta is not notification-worthy).
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"other-session",
-			translated,
-		);
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
 	});
 
 	it.each([
@@ -335,132 +265,6 @@ describe("handleSSEEventEffect", () => {
 		).toHaveBeenCalledWith("perm-1");
 	});
 
-	it("does not record non-cacheable events to cache", async () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "message_removed",
-			sessionId: "active-session",
-			messageId: "m1",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.removed",
-			properties: { sessionID: "active-session", messageID: "m1" },
-		};
-		await runSSEEvent(deps, event);
-
-		// Non-cacheable events still firehose via Phase 0b.
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
-	});
-
-	it("routes user_message events normally (echo suppression removed in Task 50.5)", async () => {
-		const deps = createMockSSEWiringDeps();
-
-		const translated: RelayMessage = {
-			type: "user_message",
-			sessionId: "s1",
-			text: "Hello world",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.created",
-			properties: { sessionID: "active-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		// user_message events are firehosed normally — no suppression.
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
-	});
-
-	it("does nothing when translator returns not ok", async () => {
-		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: false,
-			reason: "mock skip",
-		});
-
-		const event: OpenCodeEvent = {
-			type: "unknown.event",
-			properties: {},
-		};
-		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
-	it("handles array of translated messages", async () => {
-		const deps = createMockSSEWiringDeps();
-		const messages: RelayMessage[] = [
-			{ type: "tool_start", sessionId: "s1", id: "call-1", name: "Bash" },
-			{
-				type: "tool_executing",
-				sessionId: "s1",
-				id: "call-1",
-				name: "Bash",
-				input: { command: "ls" },
-			},
-		];
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages,
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.updated",
-			properties: { sessionID: "active-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledTimes(2);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			messages[0],
-		);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			messages[1],
-		);
-	});
-
-	it("does not route events with no sessionID", async () => {
-		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
-			type: "delta",
-			sessionId: "s1",
-			text: "hello",
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.delta",
-			properties: {}, // no sessionID
-		};
-		await runSSEEvent(deps, event);
-
-		// No sessionID means we can't attribute the event — Phase 0b firehose
-		// is keyed on sessionId, so missing-id events are dropped.
-		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
-		expect(deps.wsHandler.sendToSession).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-
 	it("sends push notification for permission.asked", async () => {
 		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
 			sendToAll: vi
@@ -521,7 +325,7 @@ describe("handleSSEEventEffect", () => {
 		});
 	});
 
-	it("keeps anonymous done status hints on the UI channel", async () => {
+	it("does not send push for anonymous done status hints", async () => {
 		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
 			sendToAll: vi
 				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
@@ -543,11 +347,6 @@ describe("handleSSEEventEffect", () => {
 			properties: { sessionID: "active-session" },
 		};
 		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			expect.objectContaining({ type: "done", code: 0 }),
-		);
 		expect(mockPush?.sendToAll).not.toHaveBeenCalled();
 	});
 
@@ -738,10 +537,6 @@ describe("wireSSEConsumerEffect", () => {
 		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
 			sessionId: "active-session",
 		});
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
 	});
 
 	it("forwards a schema-valid event without a decode warning (conduit-test-8g7)", async () => {
@@ -863,71 +658,6 @@ describe("wireSSEConsumerEffect", () => {
 				status,
 			});
 		}
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
-	});
-});
-
-describe("handleSSEEventEffect – tool_result truncation", () => {
-	it("truncates tool_result over threshold before sending and caching", async () => {
-		const deps = createMockSSEWiringDeps();
-		const largeContent = "x".repeat(TRUNCATION_THRESHOLD + 1000);
-		const translated: RelayMessage = {
-			type: "tool_result",
-			sessionId: "s1",
-			id: "tool-1",
-			content: largeContent,
-			is_error: false,
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.updated",
-			properties: { sessionID: "active-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		// broadcastPerSessionEvent should receive truncated content under Phase 0b
-		const call = vi.mocked(deps.wsHandler.broadcastPerSessionEvent).mock
-			.calls[0];
-		assert.exists(call, "expected per-session broadcast");
-		const sendArg = call[1];
-		expect(sendArg.type).toBe("tool_result");
-		if (sendArg.type === "tool_result") {
-			expect(sendArg.content.length).toBeLessThan(largeContent.length);
-			expect(sendArg.isTruncated).toBe(true);
-			expect(sendArg.fullContentLength).toBe(largeContent.length);
-		}
-	});
-
-	it("passes through tool_result under threshold unchanged", async () => {
-		const deps = createMockSSEWiringDeps();
-		const smallContent = "short result";
-		const translated: RelayMessage = {
-			type: "tool_result",
-			sessionId: "s1",
-			id: "tool-3",
-			content: smallContent,
-			is_error: false,
-		};
-		vi.mocked(deps.translator.translate).mockReturnValue({
-			ok: true,
-			messages: [translated],
-		});
-
-		const event: OpenCodeEvent = {
-			type: "message.part.updated",
-			properties: { sessionID: "active-session" },
-		};
-		await runSSEEvent(deps, event);
-
-		// broadcastPerSessionEvent should receive original message unchanged.
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"active-session",
-			translated,
-		);
 	});
 });
 
@@ -936,7 +666,7 @@ describe("handleSSEEventEffect – tool_result truncation", () => {
 // (SubscribeAlerts) so clients on other sessions can fire sound/browser alerts.
 
 // Notification routing through resolveNotifications (F2 wiring)
-// Verifies that handleSSEEventEffect gates push and cross-session broadcast through
+// Verifies that handleSSEEventEffect gates push and alert publication through
 // resolveNotifications() — not inline logic. These tests exercise the REAL
 // wiring path, not the policy function in isolation.
 
@@ -1047,7 +777,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		expect(mockPush.sendToAll).not.toHaveBeenCalled();
 	});
 
-	it("does NOT broadcast cross-session notification for subagent done", async () => {
+	it("does NOT publish a completion alert for a subagent", async () => {
 		const deps = createMockSSEWiringDeps({});
 		const services = makeSSETestServices();
 		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
@@ -1177,9 +907,9 @@ describe("alert published for dropped notification-worthy events", () => {
 		]);
 	});
 
-	it("does NOT publish an alert when done is sent (has viewers)", async () => {
+	it("does NOT publish an alert when the session has viewers", async () => {
 		const deps = createMockSSEWiringDeps();
-		// Has viewers — event is sent normally
+		// An RPC viewer suppresses the completion alert.
 		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
 		const translated: RelayMessage = {
 			type: "done",
@@ -1196,7 +926,6 @@ describe("alert published for dropped notification-worthy events", () => {
 			type: "session.status",
 			properties: { sessionID: "my-session" },
 		};
-		// The event was sent to the session's viewer, so no alert.
 		expect(await runSSEEvent(deps, event)).toEqual([]);
 	});
 
@@ -1218,6 +947,5 @@ describe("alert published for dropped notification-worthy events", () => {
 			properties: { sessionID: "other-session" },
 		};
 		expect(await runSSEEvent(deps, event)).toEqual([]);
-		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 });

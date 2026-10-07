@@ -13,10 +13,7 @@ import {
 	selectSessionVariant,
 } from "../domain/relay/Services/session-model-settings.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
-import {
-	ReadQueryEffectTag,
-	sessionGoalState,
-} from "../persistence/effect/read-query-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
@@ -39,22 +36,6 @@ interface ForkSessionPayload {
 	readonly sessionId?: string;
 	readonly messageId?: string;
 }
-
-/**
- * Send the session goal to a client. It is supplementary to the transcript and
- * selection RPCs; pending permissions and questions come from the approvals
- * subscription (ni8.9), the family from SubscribeSessionFamily (ni8.28).
- */
-const sendSessionMetadata = (clientId: string, id: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const readQuery = yield* ReadQueryEffectTag;
-		const row = yield* readQuery.getSession(id);
-		wsHandler.sendTo(clientId, {
-			type: "session.goal_changed",
-			...(row ? sessionGoalState(row) : { sessionId: id, goal: null }),
-		});
-	});
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -108,9 +89,6 @@ export const viewSessionForClient = ({
 		// No read state here: a switch also fires on restore, reload and
 		// reconnect. The browser reports a user's sidebar pick through
 		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
-
-		// Run metadata send as a forked fiber — non-blocking
-		yield* Effect.either(sendSessionMetadata(clientId, id));
 
 		log.info(`client=${clientId} Viewing: ${id}`);
 		return { draft: getSessionInputDraft(id) };

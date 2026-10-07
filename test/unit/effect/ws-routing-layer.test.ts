@@ -1,20 +1,10 @@
-import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	Option,
-	Ref,
-	Scope,
-} from "effect";
+import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, vi } from "vitest";
-import { WebSocket, WebSocketServer } from "ws";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -22,7 +12,6 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { DaemonWsClientRegistryTag } from "../../../src/lib/domain/daemon/Services/daemon-ws-client-registry.js";
 import {
 	getEntry,
 	makeProjectRegistryLive,
@@ -72,7 +61,6 @@ const makeRequest = (
 	}) as IncomingMessage;
 
 const makeWebSocketRelay = (): WebSocketRelay => ({
-	attach: vi.fn(() => () => {}),
 	rpcWsHandler: {},
 });
 
@@ -158,7 +146,6 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
-				attach: relay.attach,
 				wsHandler: {},
 				rpcWsHandler: relay.rpcWsHandler,
 				syncGlobalSetting: () => Effect.void,
@@ -176,7 +163,7 @@ describe("WebSocketRelayRouterLive", () => {
 			const second = yield* router.waitForRelay("test-project", 10);
 
 			expect(first).toBe(second);
-			expect(first.attach).toBe(relay.attach);
+			expect(first.rpcWsHandler).toBe(relay.rpcWsHandler);
 			expect(factory).toHaveBeenCalledTimes(1);
 			expect(factory.mock.calls[0]?.[0]).toBe("test-project");
 		}).pipe(Effect.provide(Layer.fresh(layer)));
@@ -186,7 +173,6 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
-				attach: vi.fn(() => () => {}),
 				wsHandler: {},
 				rpcWsHandler: {},
 				syncGlobalSetting: () => Effect.void,
@@ -242,39 +228,37 @@ describe("WebSocketRelayRouterLive", () => {
 
 describe("WebSocketRoutingLive", () => {
 	it.scoped.each([
-		{ query: "?p=older", projects: true, fails: false, expected: "older" },
-		{ query: "?p=missing", projects: true, fails: false, expected: "recent" },
-		{ query: "", projects: true, fails: false, expected: "recent" },
+		{ hint: "older", projects: true, fails: false, expected: "older" },
+		{ hint: "missing", projects: true, fails: false, expected: "recent" },
+		{ hint: undefined, projects: true, fails: false, expected: "recent" },
 		{
-			query: "?session=missing&p=older",
+			hint: "older",
+			sessionId: "missing",
 			projects: true,
 			fails: false,
 			expected: "older",
 		},
-		{ query: "", projects: false, fails: false, expected: null },
-		{ query: "?p=older", projects: true, fails: true, expected: null },
+		{ hint: "older", projects: false, fails: false, expected: null },
+		{ hint: "older", projects: true, fails: true, expected: null },
 	])(
-		"selects a daemon attachment for $query (projects=$projects, fails=$fails)",
+		"AttachProject resolves hint $hint (session $sessionId, fails=$fails) to $expected",
 		(scenario) =>
 			Effect.gen(function* () {
+				const routing = vi.spyOn(
+					wsRpcHandlerModule,
+					"makeRoutedWsRpcWebSocketHandler",
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => routing.mockRestore()),
+				);
 				const relay = makeWebSocketRelay();
-				const context = yield* Layer.build(
+				yield* Layer.build(
 					makeLayer(createServer(), {
 						relay,
 						projects: scenario.projects
 							? [
-									{
-										slug: "older",
-										title: "Older",
-										folders: ["/nonexistent/conduit-older"],
-										lastUsed: 1,
-									},
-									{
-										slug: "recent",
-										title: "Recent",
-										folders: ["/nonexistent/conduit-recent"],
-										lastUsed: 2,
-									},
+									{ ...project, slug: "older", lastUsed: 1 },
+									{ ...project, slug: "recent", lastUsed: 2 },
 								]
 							: [],
 						waitForRelay: (slug) =>
@@ -288,253 +272,33 @@ describe("WebSocketRoutingLive", () => {
 								: Effect.succeed(relay),
 					}),
 				);
-				const registry = yield* DaemonWsClientRegistryTag.pipe(
-					Effect.provide(context),
-				);
-				const socket = Object.assign(new EventEmitter(), {
-					readyState: WebSocket.OPEN,
-					send: vi.fn(),
-					close: vi.fn(),
-				});
-				registry.server.emit(
-					"connection",
-					socket,
-					makeRequest(`/ws${scenario.query}`),
-				);
-				yield* Effect.yieldNow();
-				yield* waitForAssertion(() => {
-					if (scenario.expected) {
-						expect(relay.attach).toHaveBeenCalledTimes(1);
-						expect(relay.attach).toHaveBeenCalledWith(
-							socket,
-							expect.objectContaining({ skipDefaultSession: true }),
-						);
-						expect(
-							vi.mocked(relay.attach).mock.calls[0]?.[1].requestedSessionId,
-						).toBeUndefined();
-					} else {
-						expect(relay.attach).not.toHaveBeenCalled();
-					}
-				});
-				expect(socket.send).not.toHaveBeenCalled();
-				expect(socket.close).not.toHaveBeenCalled();
-			}),
-	);
-
-	it.scoped.each([
-		{ hint: "older", projects: true, expected: "older" },
-		{ hint: "missing", projects: true, expected: "recent" },
-		{ hint: undefined, projects: true, expected: "recent" },
-		{ hint: "older", sessionId: "missing", projects: true, expected: "older" },
-		{ hint: "older", projects: false, expected: null },
-	])(
-		"AttachProject resolves hint $hint (session $sessionId) to $expected",
-		(scenario) =>
-			Effect.gen(function* () {
-				const routing = vi.spyOn(
-					wsRpcHandlerModule,
-					"makeRoutedWsRpcWebSocketHandler",
-				);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => routing.mockRestore()),
-				);
-				yield* Layer.build(
-					makeLayer(createServer(), {
-						projects: scenario.projects
-							? [
-									{ ...project, slug: "older", lastUsed: 1 },
-									{ ...project, slug: "recent", lastUsed: 2 },
-								]
-							: [],
-					}),
-				);
-				const attachProject = routing.mock.calls.at(-1)?.[5];
+				const attachProject = routing.mock.calls.at(-1)?.[4];
 				if (!attachProject) {
 					return yield* Effect.fail(
 						new Error("Missing daemon attachProject handler"),
 					);
 				}
-				expect(
-					yield* attachProject({
+				const result = yield* Effect.either(
+					attachProject({
 						originId: "unregistered",
 						...(scenario.hint ? { projectSlug: scenario.hint } : {}),
 						...(scenario.sessionId ? { sessionId: scenario.sessionId } : {}),
 					}),
-				).toEqual({ projectSlug: scenario.expected });
-			}),
-	);
-
-	it.scoped.each([
-		{ initial: "project-a", originId: "browser", reattaches: true },
-		{ initial: null, originId: "browser", reattaches: true },
-		{ initial: "project-b", originId: "browser", reattaches: false },
-		{ initial: "project-a", originId: "unknown", reattaches: false },
-	])(
-		"reattaching from $initial for $originId reattaches=$reattaches without requesting a session",
-		(scenario) =>
-			Effect.gen(function* () {
-				const routing = vi.spyOn(
-					wsRpcHandlerModule,
-					"makeRoutedWsRpcWebSocketHandler",
 				);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => routing.mockRestore()),
-				);
-				const calls: string[] = [];
-				const detach = vi.fn(() => calls.push("detach"));
-				const relay = makeWebSocketRelay();
-				vi.mocked(relay.attach).mockImplementation(() => {
-					calls.push("attach");
-					return detach;
-				});
-				const context = yield* Layer.build(
-					makeLayer(createServer(), {
-						relay,
-						projects: scenario.initial
-							? [{ ...project, slug: scenario.initial }]
-							: [],
-					}),
-				);
-				const registry = yield* DaemonWsClientRegistryTag.pipe(
-					Effect.provide(context),
-				);
-				const socket = Object.assign(new EventEmitter(), {
-					readyState: WebSocket.OPEN,
-					send: vi.fn(),
-					close: vi.fn(),
-				});
-				registry.server.emit(
-					"connection",
-					socket,
-					makeRequest("/ws?client=browser"),
-				);
-				yield* Effect.yieldNow();
-				if (scenario.initial) {
-					yield* waitForAssertion(() =>
-						expect(relay.attach).toHaveBeenCalledTimes(1),
-					);
-				}
-				calls.length = 0;
-				vi.mocked(relay.attach).mockClear();
-				socket.send.mockClear();
-				const reattach = routing.mock.calls.at(-1)?.[3];
-				if (!reattach) {
-					return yield* Effect.fail(
-						new Error("Missing daemon reattach handler"),
-					);
-				}
-				expect(
-					yield* reattach({
-						projectSlug: "project-b",
-						originId: scenario.originId,
-					}),
-				).toBe(scenario.reattaches);
-				if (scenario.reattaches) {
-					expect(calls).toEqual([
-						...(scenario.initial ? ["detach"] : []),
-						"attach",
-					]);
-					expect(socket.send).not.toHaveBeenCalled();
-					expect(relay.attach).toHaveBeenCalledWith(socket, {
-						clientId: "browser",
-						skipDefaultSession: true,
-					});
-					const entry = yield* registry.get("browser");
-					expect(Option.isSome(entry) && entry.value.slug).toBe("project-b");
+				if (scenario.fails) {
+					expect(result._tag).toBe("Left");
+					if (result._tag === "Left") {
+						expect(result.left).toBeInstanceOf(WsRpcError);
+						expect(result.left.message).toContain(
+							'Project "older" unavailable',
+						);
+					}
 				} else {
-					expect(calls).toEqual([]);
+					expect(result._tag).toBe("Right");
+					if (result._tag === "Right") {
+						expect(result.right).toEqual({ projectSlug: scenario.expected });
+					}
 				}
-				expect(socket.close).not.toHaveBeenCalled();
-			}),
-	);
-
-	it.scoped.each(["new-project", "original-project", "replacement-socket"])(
-		"ignores a slow attachment superseded by %s",
-		(scenario) =>
-			Effect.gen(function* () {
-				const routing = vi.spyOn(
-					wsRpcHandlerModule,
-					"makeRoutedWsRpcWebSocketHandler",
-				);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => routing.mockRestore()),
-				);
-				const pendingRelay = yield* Deferred.make<WebSocketRelay>();
-				const relay = makeWebSocketRelay();
-				const waitForRelay = vi.fn((slug: string) =>
-					slug === "project-b"
-						? Deferred.await(pendingRelay)
-						: Effect.succeed(relay),
-				);
-				const context = yield* Layer.build(
-					makeLayer(createServer(), {
-						relay,
-						projects: [{ ...project, slug: "project-a" }],
-						waitForRelay,
-					}),
-				);
-				const registry = yield* DaemonWsClientRegistryTag.pipe(
-					Effect.provide(context),
-				);
-				const socket = Object.assign(new EventEmitter(), {
-					readyState: WebSocket.OPEN,
-					send: vi.fn(),
-					close: vi.fn(),
-				});
-				registry.server.emit(
-					"connection",
-					socket,
-					makeRequest("/ws?client=browser"),
-				);
-				yield* waitForAssertion(() =>
-					expect(relay.attach).toHaveBeenCalledTimes(1),
-				);
-				const reattach = routing.mock.calls.at(-1)?.[3];
-				if (!reattach)
-					return yield* Effect.fail(
-						new Error("Missing daemon reattach handler"),
-					);
-				const pending = yield* reattach({
-					projectSlug: "project-b",
-					sessionId: "session-b",
-					originId: "browser",
-				}).pipe(Effect.forkScoped);
-				yield* waitForAssertion(() =>
-					expect(waitForRelay).toHaveBeenCalledWith(
-						"project-b",
-						expect.any(Number),
-					),
-				);
-				if (scenario === "replacement-socket") {
-					const replacement = Object.assign(new EventEmitter(), {
-						readyState: WebSocket.OPEN,
-						send: vi.fn(),
-						close: vi.fn(),
-					});
-					registry.server.emit(
-						"connection",
-						replacement,
-						makeRequest("/ws?client=browser"),
-					);
-					yield* waitForAssertion(() =>
-						expect(relay.attach).toHaveBeenCalledTimes(2),
-					);
-				} else {
-					yield* reattach({
-						projectSlug: scenario === "new-project" ? "project-c" : "project-a",
-						originId: "browser",
-					});
-				}
-				const attachments = vi.mocked(relay.attach).mock.calls.length;
-				yield* Deferred.succeed(pendingRelay, relay);
-				// True marks a stale ViewSession as handled instead of falling
-				// through to the old project's relay handler.
-				expect(yield* Fiber.join(pending)).toBe(true);
-				expect(relay.attach).toHaveBeenCalledTimes(attachments);
-				const entry = yield* registry.get("browser");
-				expect(Option.isSome(entry) && entry.value.slug).toBe(
-					scenario === "new-project" ? "project-c" : "project-a",
-				);
 			}),
 	);
 
@@ -542,6 +306,8 @@ describe("WebSocketRoutingLive", () => {
 		"/invalid",
 		"/rpc/",
 		"/rpc-extra",
+		"/ws",
+		"/ws?client=browser",
 		"/ws/",
 		"/ws-extra",
 		"/p/test-project/ws",
@@ -562,13 +328,12 @@ describe("WebSocketRoutingLive", () => {
 				yield* waitForAssertion(() => {
 					expect(socket.destroy).toHaveBeenCalled();
 					expect(ensureRelayStarted).not.toHaveBeenCalled();
-					expect(relay.attach).not.toHaveBeenCalled();
 				});
 			}).pipe(Effect.provide(Layer.fresh(layer)));
 		}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser", "/ws", "/ws?client=browser"])(
+	it.scoped.each(["/rpc", "/rpc?client=browser"])(
 		"rejects unauthenticated %s upgrades before relay startup",
 		(path) =>
 			Effect.gen(function* () {
@@ -587,7 +352,6 @@ describe("WebSocketRoutingLive", () => {
 					yield* waitForAssertion(() => {
 						expect(socket.destroy).toHaveBeenCalled();
 						expect(ensureRelayStarted).not.toHaveBeenCalled();
-						expect(relay.attach).not.toHaveBeenCalled();
 					});
 				}).pipe(Effect.provide(Layer.fresh(layer)));
 			}),
@@ -606,7 +370,7 @@ describe("WebSocketRoutingLive", () => {
 		}),
 	);
 
-	it.scoped.each(["/rpc", "/rpc?client=browser", "/ws", "/ws?client=browser"])(
+	it.scoped.each(["/rpc", "/rpc?client=browser"])(
 		"destroys %s sockets while daemon shutdown is in progress",
 		(path) =>
 			Effect.gen(function* () {
@@ -629,7 +393,6 @@ describe("WebSocketRoutingLive", () => {
 						expect(socket.destroy).toHaveBeenCalled();
 						expect(ensureRelayStarted).not.toHaveBeenCalled();
 						expect(touchLastUsed).not.toHaveBeenCalled();
-						expect(relay.attach).not.toHaveBeenCalled();
 					});
 				}).pipe(Effect.provide(Layer.fresh(layer)));
 			}),
@@ -656,38 +419,6 @@ describe("WebSocketRoutingLive", () => {
 					expect(upgrade).toHaveBeenCalledWith(req, socket, expect.any(Buffer)),
 				);
 				expect(ensureRelayStarted).not.toHaveBeenCalled();
-				expect(relay.attach).not.toHaveBeenCalled();
-				expect(socket.destroy).not.toHaveBeenCalled();
-			}),
-	);
-
-	it.scoped.each(["/ws", "/ws?client=browser"])(
-		"accepts daemon event socket %s without resolving a project before upgrade",
-		(path) =>
-			Effect.gen(function* () {
-				const upgrade = vi
-					.spyOn(WebSocketServer.prototype, "handleUpgrade")
-					.mockImplementation(() => {});
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => upgrade.mockRestore()),
-				);
-				const server = createServer();
-				const ensureRelayStarted = vi.fn();
-				const relay = makeWebSocketRelay();
-				yield* Layer.build(makeLayer(server, { relay, ensureRelayStarted }));
-				const req = makeRequest(path);
-				const socket = makeSocket();
-				server.emit("upgrade", req, socket, Buffer.alloc(0));
-				yield* waitForAssertion(() =>
-					expect(upgrade).toHaveBeenCalledWith(
-						req,
-						socket,
-						expect.any(Buffer),
-						expect.any(Function),
-					),
-				);
-				expect(ensureRelayStarted).not.toHaveBeenCalled();
-				expect(relay.attach).not.toHaveBeenCalled();
 				expect(socket.destroy).not.toHaveBeenCalled();
 			}),
 	);

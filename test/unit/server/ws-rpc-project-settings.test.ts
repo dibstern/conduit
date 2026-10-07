@@ -98,6 +98,11 @@ describe("SubscribeProjectSettings", () => {
 			const { client, subscribe } = yield* open;
 			const tabA = yield* subscribe;
 			const tabB = yield* subscribe;
+			// The second tab's arrival is itself news to the first.
+			expect(yield* Queue.take(tabA.q)).toMatchObject({
+				_tag: "upsert",
+				item: { _tag: "clientCount", count: 2 },
+			});
 
 			yield* client.SetHiddenEntries({
 				projectSlug: "project",

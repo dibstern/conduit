@@ -563,32 +563,11 @@ const ThinkingDeltaSchema = Schema.Struct({
 	messageId: Schema.optional(Schema.String),
 });
 
-const ThinkingStopSchema = Schema.Struct({
-	type: Schema.Literal("thinking_stop"),
-	sessionId: Schema.String,
-	messageId: Schema.optional(Schema.String),
-});
-
 const ToolStartSchema = Schema.Struct({
 	type: Schema.Literal("tool_start"),
 	sessionId: Schema.String,
 	id: Schema.String,
 	name: Schema.String,
-	messageId: Schema.optional(Schema.String),
-});
-
-const ToolExecutingSchema = Schema.Struct({
-	type: Schema.Literal("tool_executing"),
-	sessionId: Schema.String,
-	id: Schema.String,
-	name: Schema.String,
-	input: Schema.Union(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-		Schema.Undefined,
-	),
-	metadata: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
 	messageId: Schema.optional(Schema.String),
 });
 
@@ -601,13 +580,6 @@ const ToolResultSchema = Schema.Struct({
 	isTruncated: Schema.optional(Schema.Boolean),
 	fullContentLength: Schema.optional(Schema.Number),
 	messageId: Schema.optional(Schema.String),
-});
-
-const ToolContentSchema = Schema.Struct({
-	type: Schema.Literal("tool_content"),
-	sessionId: Schema.String,
-	toolId: Schema.String,
-	content: Schema.String,
 });
 
 // What the approvals subscription serves (ni8.9): the pending permission
@@ -662,28 +634,6 @@ const DoneSchema = Schema.Struct({
 	error: Schema.optional(Schema.String),
 });
 
-const SessionListSchema = Schema.Struct({
-	type: Schema.Literal("session_list"),
-	sessions: Schema.Array(SessionInfoSchema),
-	roots: Schema.Boolean,
-	search: Schema.optional(Schema.Boolean),
-	// No notification map beside the sessions: ni8.23 made the three badge facts
-	// columns on the session row itself, derived server-side.
-});
-
-const SessionForkedSchema = Schema.Struct({
-	type: Schema.Literal("session_forked"),
-	sessionId: Schema.String,
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	parentId: Schema.String,
-	parentTitle: Schema.String,
-});
-
-const DaemonSessionsChangedSchema = Schema.Struct({
-	type: Schema.Literal("daemon_sessions_changed"),
-});
-
 const PartRemovedSchema = Schema.Struct({
 	type: Schema.Literal("part_removed"),
 	sessionId: Schema.String,
@@ -705,45 +655,9 @@ const UserMessageSchema = Schema.Struct({
 	originId: Schema.optional(Schema.String),
 });
 
-const SessionDeletedSchema = Schema.Struct({
-	type: Schema.Literal("session_deleted"),
-	sessionId: Schema.String,
-});
-
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 4;
-
-const ProtocolVersionSchema = Schema.Struct({
-	type: Schema.Literal("protocol_version"),
-	version: Schema.Number,
-	buildId: Schema.optional(Schema.String),
-});
-
-const ServerUpdateSchema = Schema.Struct({
-	type: Schema.Literal("server_update"),
-	restartAvailable: Schema.Boolean,
-});
-
-const InstanceUpdateSchema = Schema.Struct({
-	type: Schema.Literal("instance_update"),
-	instanceId: Schema.String,
-	name: Schema.optional(Schema.String),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	port: Schema.optional(Schema.Number),
-});
-
-const ProviderSessionReloadedSchema = Schema.Struct({
-	type: Schema.Literal("provider_session_reloaded"),
-	sessionId: Schema.String,
-});
-
-const SessionGoalChangedSchema = Schema.Struct({
-	type: Schema.Literal("session.goal_changed"),
-	...SessionGoalChangedPayloadSchema.fields,
-});
+export const WS_PROTOCOL_VERSION = 5;
 
 // -- Combined RelayMessage schema union --
 
@@ -752,35 +666,17 @@ export const RelayMessageSchema = Schema.Union(
 	DeltaSchema,
 	ThinkingStartSchema,
 	ThinkingDeltaSchema,
-	ThinkingStopSchema,
 	// Tools
 	ToolStartSchema,
-	ToolExecutingSchema,
 	ToolResultSchema,
-	ToolContentSchema,
-	// Permissions / Questions
 	// Session lifecycle
 	ResultSchema,
 	DoneSchema,
-	SessionListSchema,
-	SessionForkedSchema,
-	// Projects
-	DaemonSessionsChangedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
 	// Cache / Replay
 	UserMessageSchema,
-	// Session deletion
-	SessionDeletedSchema,
-	// Misc
-	ProtocolVersionSchema,
-	ServerUpdateSchema,
-	// Instance Management
-	InstanceUpdateSchema,
-	// Provider session reload
-	ProviderSessionReloadedSchema,
-	SessionGoalChangedSchema,
 );
 
 export type RelayMessage = typeof RelayMessageSchema.Type;
@@ -796,21 +692,16 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 // sessionId) from global events (which never do).
 
 export type PerSessionEventType =
-	| "session.goal_changed"
 	| "delta"
 	| "thinking_start"
 	| "thinking_delta"
-	| "thinking_stop"
 	| "tool_start"
-	| "tool_executing"
 	| "tool_result"
-	| "tool_content"
 	| "result"
 	| "done"
 	| "user_message"
 	| "part_removed"
-	| "message_removed"
-	| "provider_session_reloaded";
+	| "message_removed";
 
 export type PerSessionEvent = Extract<
 	RelayMessage,
@@ -823,7 +714,7 @@ export type GlobalRelayEvent = Exclude<
 
 // Untagged events (translator output before sessionId tagging)
 // The SSE translator and message poller produce events without sessionId.
-// These are tagged with sessionId at emission sites before broadcast.
+// These are tagged with sessionId before internal activity and notification handling.
 
 /**
  * A RelayMessage variant that may be missing sessionId.

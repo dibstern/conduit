@@ -7,14 +7,10 @@ import {
 	EnvelopeSchema,
 	SessionInfoSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
 import * as mockupState from "../../e2e/fixtures/mockup-state.js";
 
-// The e2e and acceptance runs replay canned relay traffic into the real
-// frontend, which decodes every message through RelayMessageSchema. A fixture
-// that predates the single session wire type (ni8.5 T-1) therefore fails at the
-// boundary rather than in a test, and the run reports a missing session instead
-// of a stale fixture. Decode them here, where the failure names the file.
+// Historical relay fixtures are converted into RPC shell snapshots by the E2E
+// mock. Validate their session rows against that surviving wire contract.
 
 const fixturesDir = fileURLToPath(
 	new URL("../../e2e/fixtures", import.meta.url),
@@ -42,13 +38,12 @@ const messagesOfType = (
 	return record["type"] === type ? [record, ...nested] : nested;
 };
 
-const decode = Schema.decodeUnknownEither(RelayMessageSchema);
 const decodeShell = Schema.decodeUnknownEither(
 	EnvelopeSchema(SessionInfoSchema),
 );
 
 const expectDecodable = (
-	messages: readonly unknown[],
+	messages: readonly Record<string, unknown>[],
 	source: string,
 ): void => {
 	expect(
@@ -56,7 +51,11 @@ const expectDecodable = (
 		`${source} has no session_list message`,
 	).toBeGreaterThan(0);
 	for (const message of messages) {
-		const result = decode(message);
+		const result = decodeShell({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: message["sessions"],
+		});
 		if (Either.isLeft(result)) {
 			throw new Error(`${source}: ${String(result.left)}`);
 		}

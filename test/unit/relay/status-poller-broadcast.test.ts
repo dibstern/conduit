@@ -1,8 +1,6 @@
-// Verifies that when the status poller detects a busy→idle transition, the
-// relay sends `{ type: "done" }` to browser clients viewing that session.
-// Busy itself reaches clients only as the session's shell row (ni8.35).
+// Verifies that status-poller transitions reach RPC subscribers through the
+// session's shell row.
 
-import { randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
 import {
 	createServer,
@@ -13,7 +11,6 @@ import {
 import { dirname } from "node:path";
 import { Effect, Ref } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -275,24 +272,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		refreshSessionGit,
 	});
 
-	const browserSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			browserSockets.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const clientId = params.get("client");
-				const requestedSessionId = params.get("session");
-				relay.wsHandler.attach(ws, {
-					clientId:
-						clientId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientId)
-							? clientId
-							: randomBytes(8).toString("hex"),
-					...(requestedSessionId != null ? { requestedSessionId } : {}),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			relay.rpcWsHandler.handleUpgrade(req, socket, head);
 			return;
@@ -316,23 +296,16 @@ async function createTestHarness(): Promise<TestHarness> {
 		refreshSessionGit,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}/ws`;
+			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-status-poller`;
 			if (opts?.session) {
-				url += `?session=${encodeURIComponent(opts.session)}`;
+				url += `&session=${encodeURIComponent(opts.session)}`;
 			}
 			const client = new TestWsClient(url);
 			await client.waitForOpen();
 			return client;
 		},
 		async stop() {
-			try {
-				await relay.stop();
-			} finally {
-				for (const ws of browserSockets.clients) ws.terminate();
-				await new Promise<void>((resolve) =>
-					browserSockets.close(() => resolve()),
-				);
-			}
+			await relay.stop();
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 			rmSync(dirname(dbPath), { recursive: true, force: true });
@@ -340,7 +313,7 @@ async function createTestHarness(): Promise<TestHarness> {
 	};
 }
 
-describe("Status poller → browser done transitions", () => {
+describe("Status poller → browser shell transitions", () => {
 	let harness: TestHarness;
 	const publishStatus = (sessionId: string, status: "busy" | "idle") => {
 		harness.mock.sessionStatuses[sessionId] = { type: status };

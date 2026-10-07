@@ -241,18 +241,14 @@ describe("OpenCodeTerminalServiceLive", () => {
 				expect(events).toEqual(["publish:upsert"]);
 				expect(api.pty.create).not.toHaveBeenCalled();
 				expect(connectPtyUpstream).not.toHaveBeenCalled();
-				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);
 
 	it.effect(
-		"fails typed, sending nothing, when local terminal creation fails",
+		"fails typed without publishing when local terminal creation fails",
 		() => {
-			const sent: unknown[] = [];
-			const wsHandler = makeMockWebSocketHandler({
-				sendTo: vi.fn((_clientId, message) => sent.push(message)),
-			});
+			const wsHandler = makeMockWebSocketHandler();
 			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			const events = published(ptyManager);
 			const localPty: LocalPtyService = {
@@ -282,7 +278,6 @@ describe("OpenCodeTerminalServiceLive", () => {
 
 				expect(error).toMatchObject({ operation: "create" });
 				expect(events).toEqual([]);
-				expect(sent).toEqual([]);
 			}).pipe(Effect.provide(layer));
 		},
 	);

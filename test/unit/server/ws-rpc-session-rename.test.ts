@@ -6,13 +6,11 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockSessionManagerService,
-	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
 describe("WsRpcServerLayer RenameSession", () => {
-	it.effect("renames a session without sending to any client", () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+	it.effect("renames a session", () => {
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession: vi.fn(() => Effect.void),
 		});
@@ -32,21 +30,17 @@ describe("WsRpcServerLayer RenameSession", () => {
 				"root-1",
 				"Renamed Root",
 			);
-			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);
 	});
 
-	it.effect("marks a session unread without sending to any client", () => {
-		const { wsHandler, calls } = makeRecordingWebSocketHandler();
+	it.effect("marks a session unread", () => {
 		const sessionManagerService = makeMockSessionManagerService({
 			markSessionUnread: vi.fn(() => Effect.void),
 		});
@@ -63,14 +57,11 @@ describe("WsRpcServerLayer RenameSession", () => {
 			expect(sessionManagerService.markSessionUnread).toHaveBeenCalledWith(
 				"root-1",
 			);
-			expect(calls).toEqual([]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = process.cwd();
 
 const HANDLER_FILES = [
-	"src/lib/bridges/client-init.ts",
 	"src/lib/handlers/context-window.ts",
 	"src/lib/handlers/model.ts",
 	"src/lib/handlers/prompt.ts",

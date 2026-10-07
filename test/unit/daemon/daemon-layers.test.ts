@@ -104,8 +104,6 @@ describe("daemon-layers", () => {
 				makeRelayCacheLive((slug) =>
 					Effect.succeed({
 						slug,
-						attach: () => () => {},
-						wsHandler: {},
 						rpcWsHandler: {},
 						syncGlobalSetting: () => Effect.void,
 						refreshGlobalDefaults: () => Effect.void,

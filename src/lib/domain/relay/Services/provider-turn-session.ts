@@ -205,7 +205,6 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const abortResult = yield* Effect.either(
 			Effect.tryPromise(() => client.session.abort(input.sessionId)),
 		);
@@ -215,17 +214,11 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 				formatErrorDetail(abortResult.left),
 			);
 		}
-		wsHandler.sendToSession(input.sessionId, {
-			type: "done",
-			sessionId: input.sessionId,
-			code: 1,
-		});
 	});
 
 export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const config = yield* ConfigTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
 		const ownership = yield* PendingSendOwnershipTag;
@@ -248,11 +241,6 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Cannot resolve provider instance for interrupt routing: ${providerId}`,
 			);
-			wsHandler.sendToSession(input.sessionId, {
-				type: "done",
-				sessionId: input.sessionId,
-				code: 1,
-			});
 			return;
 		}
 		if (!isProviderTurnInterruptProvider(driver)) {
@@ -273,9 +261,4 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 				formatErrorDetail(interruptResult.left),
 			);
 		}
-		wsHandler.sendToSession(input.sessionId, {
-			type: "done",
-			sessionId: input.sessionId,
-			code: 1,
-		});
 	});
