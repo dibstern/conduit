@@ -14,6 +14,7 @@
  */
 
 import type { Effect } from "effect";
+import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
@@ -83,11 +84,7 @@ export type SDKSystemLike = Extract<
 	{ type: "system" }
 >;
 
-/**
- * Stored in a session's `provider_state` under the `claude` namespace.
- * Written on every turn completion, read on session reopen to resume the
- * SDK session in place.
- */
+/** Cursor metadata for the live SDK query. Durable resume state uses NativeThread. */
 export interface ClaudeResumeCursor {
 	readonly resumeSessionId?: string;
 	readonly lastAssistantUuid?: string;
@@ -162,6 +159,8 @@ export interface ClaudeSubagentLivePoller {
  */
 export interface ClaudeSessionContext {
 	readonly sessionId: string;
+	readonly instanceId?: string;
+	readonly nativeThread?: NativeThread | undefined;
 	readonly workspaceRoot: string;
 	goalTracker?: ClaudeGoalTracker;
 	cumulativeTokens?: number;

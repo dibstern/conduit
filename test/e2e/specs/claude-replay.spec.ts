@@ -3,6 +3,7 @@
 // The replay fixture fails the test unless exactly the planned turns are sent.
 
 import { DatabaseSync } from "node:sqlite";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -86,20 +87,15 @@ test.describe("Claude replay lane", () => {
 			const parentPath = new URL(page.url()).pathname;
 			// The SDK resume cursor commits after the completed-turn event.
 			await expect
-				.poll(() => {
-					const db = new DatabaseSync(harness.eventsDbPath ?? "", {
-						readOnly: true,
-					});
-					try {
-						return db
-							.prepare(
-								"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
+				.poll(
+					async () =>
+						(
+							await readNativeThread(
+								harness.eventsDbPath ?? "",
+								parentPath.split("/").at(-1) ?? "",
 							)
-							.get(parentPath.split("/").at(-1) ?? "")?.["value"];
-					} finally {
-						db.close();
-					}
-				})
+						)?.resumeSessionId,
+				)
 				.toBeTruthy();
 			await page.getByTestId("session-bar-title-menu").click();
 			await page.getByTestId("session-ctx-fork").click();

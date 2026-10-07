@@ -1,5 +1,6 @@
-import type { SqlClient } from "@effect/sql";
+import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
@@ -190,8 +191,16 @@ const settleClaudeRunnerCommand = (
 				const retryAt = retryable
 					? now + Math.min(1000 * 2 ** row.attempt_count, 30_000)
 					: null;
-				for (const update of result?.providerStateUpdates ?? [])
-					yield* sql`INSERT INTO provider_state (session_id, key, value) VALUES (${sessionId}, ${update.key}, ${String(update.value)}) ON CONFLICT(session_id, key) DO UPDATE SET value = excluded.value`;
+				const providerState = yield* makeProviderStateEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				);
+				yield* providerState.saveUpdates(
+					sessionId,
+					(result?.providerStateUpdates ?? []).map(({ key, value }) => ({
+						key,
+						value: String(value),
+					})),
+				);
 				yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
 				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE command_id = ${commandId}`;
 			}),

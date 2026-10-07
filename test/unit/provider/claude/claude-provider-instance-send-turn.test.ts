@@ -2054,7 +2054,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("resume uses SDK resume option when providerState has resumeSessionId", async () => {
+	it("resume uses the native thread's SDK session", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
@@ -2066,7 +2066,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-resume",
-			providerState: { resumeSessionId: "prev-sdk-session-123" },
+			nativeThread: {
+				configDir: "/claude/resume",
+				resumeSessionId: "prev-sdk-session-123",
+				firstSequence: 12,
+				deliveredThrough: 40,
+			},
 		});
 
 		await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3686,7 +3691,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-stale-resume",
 			eventSink: sink,
-			providerState: { resumeSessionId: "stale-sdk-session-xyz" },
+			nativeThread: {
+				resumeSessionId: "stale-sdk-session-xyz",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3745,7 +3754,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-not-found-resume",
 			eventSink: sink,
-			providerState: { resumeSessionId: "dead-sdk-session-abc" },
+			nativeThread: {
+				resumeSessionId: "dead-sdk-session-abc",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3803,7 +3816,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-unrelated-err",
 			eventSink: sink,
-			providerState: { resumeSessionId: "valid-sdk-session-123" },
+			nativeThread: {
+				resumeSessionId: "valid-sdk-session-123",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3859,7 +3876,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const sink = createMockEventSink();
-		// No resumeSessionId in providerState
+		// No native thread has been saved.
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-no-cursor",
 			eventSink: sink,

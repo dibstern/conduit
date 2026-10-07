@@ -1530,17 +1530,20 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				// endSession, shutdown) leaves it in sessions with a closed prompt
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
-				const providerState =
+				const nativeThread =
 					existingCtx.resumeSessionId != null
 						? {
-								...input.providerState,
+								firstSequence: input.nativeThread?.firstSequence ?? 0,
+								deliveredThrough: input.nativeThread?.deliveredThrough ?? 0,
+								configDir:
+									input.nativeThread?.configDir ?? existingCtx.configDir,
 								resumeSessionId: existingCtx.resumeSessionId,
 							}
-						: input.providerState;
+						: input.nativeThread;
 				yield* this.removeSessionEffect(sessionId);
 				return yield* this.createSessionAndSendTurnEffect({
 					...input,
-					providerState,
+					nativeThread,
 				});
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, sessionId)) {
@@ -1660,6 +1663,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const resumeSessionId = options.resume;
 				const context = {
 					sessionId,
+					instanceId: input.instanceId ?? "claude",
+					nativeThread: input.nativeThread,
 					workspaceRoot: input.workspaceRoot,
 					...(input.configDir !== undefined
 						? { configDir: input.configDir }
@@ -2063,8 +2068,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
 			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
 
-			const providerState = { ...input.providerState };
-			delete providerState["resumeSessionId"];
 			const sinkId = this.sinkId(input.eventSink);
 			const history =
 				sinkId && this.sinkBindings.get(sinkId)?.historyOnDemand
@@ -2083,9 +2086,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				transcript.length > 0
 					? `${transcript}\n\n${input.prompt}`
 					: input.prompt;
+			const configDir = input.configDir ?? input.nativeThread?.configDir;
 			return yield* this.createSessionAndSendTurnEffect({
 				...input,
-				providerState,
+				...(configDir !== undefined ? { configDir } : {}),
+				nativeThread: undefined,
 				prompt,
 			});
 		});

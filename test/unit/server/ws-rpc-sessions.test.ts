@@ -600,11 +600,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 					fork_point_message_id: "api-first",
 				});
 				expect(
-					(yield* providerState.getState(result.sessionId))["resumeSessionId"],
-				).toBe("sdk-fork");
-				expect(
-					(yield* providerState.getState(result.sessionId))["claudeConfigDir"],
-				).toBe(claudeConfigDir);
+					yield* providerState.nativeThread(result.sessionId, "my-claude"),
+				).toMatchObject({
+					resumeSessionId: "sdk-fork",
+					configDir: claudeConfigDir,
+				});
 				expect(api.session.fork).not.toHaveBeenCalled();
 				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
 					dir: "/project",

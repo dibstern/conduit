@@ -377,7 +377,7 @@ describe("subscribeShell", () => {
 						"sdk-parent",
 						expect.objectContaining({ upToMessageId: "transcript-boundary" }),
 					);
-					expect(yield* state.getState(child.id)).toMatchObject({
+					expect(yield* state.nativeThread(child.id, "claude")).toMatchObject({
 						resumeSessionId: "sdk-child",
 					});
 					expect(api.session.fork).not.toHaveBeenCalled();

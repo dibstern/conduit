@@ -239,6 +239,7 @@ const makePersistService = (
 const makeProviderState = (
 	overrides?: Partial<ProviderStateEffect>,
 ): ProviderStateEffect => ({
+	nativeThread: vi.fn(() => Effect.succeed(undefined)),
 	getState: vi.fn(() => Effect.succeed({})),
 	saveUpdates: vi.fn(() => Effect.void),
 	clearState: vi.fn(() => Effect.void),
@@ -797,7 +798,13 @@ describe("ProviderTurnService", () => {
 				),
 			};
 			const providerState = makeProviderState({
-				getState: vi.fn(() => Effect.succeed({ resumeSessionId: "prev" })),
+				nativeThread: vi.fn(() =>
+					Effect.succeed({
+						resumeSessionId: "prev",
+						firstSequence: 3,
+						deliveredThrough: 8,
+					}),
+				),
 			});
 			const { layer, wsHandler } = serviceLayer({
 				engine,
@@ -823,6 +830,10 @@ describe("ProviderTurnService", () => {
 				);
 				expect(events).toEqual(["persist", "title"]);
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
+				expect(providerState.nativeThread).toHaveBeenCalledWith(
+					"session-1",
+					"claude",
+				);
 				expect(command).toMatchObject({
 					type: "send_turn",
 					commandId: "cmd-send-1",
@@ -831,7 +842,12 @@ describe("ProviderTurnService", () => {
 						sessionId: "session-1",
 						prompt: "current prompt",
 						history: [],
-						providerState: { resumeSessionId: "prev" },
+						instanceId: "claude",
+						nativeThread: {
+							resumeSessionId: "prev",
+							firstSequence: 3,
+							deliveredThrough: 8,
+						},
 						workspaceRoot: MOCK_PROJECT_DIR,
 						model: {
 							providerId: "claude",
@@ -1157,7 +1173,16 @@ describe("ProviderTurnService", () => {
 			const engine = makeEngine({
 				providerId: "claude",
 				result: completedTurn({
-					providerStateUpdates: [{ key: "resumeSessionId", value: "next" }],
+					providerStateUpdates: [
+						{
+							key: "nativeThread:claude",
+							value: JSON.stringify({
+								resumeSessionId: "next",
+								firstSequence: 3,
+								deliveredThrough: 8,
+							}),
+						},
+					],
 				}),
 			});
 			const providerState = makeProviderState({
@@ -1179,7 +1204,11 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(providerState.saveUpdates).toHaveBeenCalledWith("session-1", [
-					{ key: "resumeSessionId", value: "next" },
+					{
+						key: "nativeThread:claude",
+						value:
+							'{"resumeSessionId":"next","firstSequence":3,"deliveredThrough":8}',
+					},
 				]);
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("Non-fatal provider state persistence error"),

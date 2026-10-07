@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect } from "effect";
+import { Context, Data, Effect, Schema } from "effect";
 
 export class ProviderStateEffectError extends Data.TaggedError(
 	"ProviderStateEffectError",
@@ -14,7 +14,36 @@ export interface ProviderStateEffectUpdate {
 	readonly value: string;
 }
 
+export interface NativeThread {
+	readonly configDir?: string | undefined;
+	readonly resumeSessionId: string;
+	readonly firstSequence: number;
+	readonly deliveredThrough: number;
+}
+
+const NativeThreadSchema = Schema.parseJson(
+	Schema.Struct({
+		configDir: Schema.optional(Schema.String),
+		resumeSessionId: Schema.String,
+		firstSequence: Schema.NonNegativeInt,
+		deliveredThrough: Schema.NonNegativeInt,
+	}),
+);
+
+const NATIVE_THREAD_PREFIX = "nativeThread:";
+
+export const nativeThreadKey = (instanceId: string): string =>
+	`${NATIVE_THREAD_PREFIX}${instanceId}`;
+
 export interface ProviderStateEffect {
+	readonly nativeThread: (
+		sessionId: string,
+		instanceId: string,
+	) => Effect.Effect<
+		NativeThread | undefined,
+		ProviderStateEffectError | SqlError
+	>;
+
 	readonly getState: (
 		sessionId: string,
 	) => Effect.Effect<
@@ -39,6 +68,46 @@ export class ProviderStateEffectTag extends Context.Tag("ProviderStateEffect")<
 
 export const makeProviderStateEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+
+	const nativeThread = (sessionId: string, instanceId: string) =>
+		Effect.gen(function* () {
+			const state = yield* getState(sessionId);
+			const stored = state[nativeThreadKey(instanceId)];
+			if (stored !== undefined) {
+				return yield* Schema.decodeUnknown(NativeThreadSchema)(stored);
+			}
+			// Legacy keys belong to the instance turns route to: the active
+			// binding, else the session's projected provider.
+			const [owner] = yield* sql<{ provider: string | null }>`
+				SELECT COALESCE(
+					(SELECT provider FROM session_providers
+						WHERE session_id = ${sessionId} AND status = 'active'
+						ORDER BY activated_at DESC, id DESC LIMIT 1),
+					(SELECT provider FROM sessions WHERE id = ${sessionId})
+				) AS provider`;
+			if (owner?.provider !== instanceId) return undefined;
+			const resumeSessionId = state["resumeSessionId"];
+			if (!resumeSessionId) return undefined;
+			const [bounds] = yield* sql<{
+				firstSequence: number;
+				deliveredThrough: number;
+			}>`SELECT COALESCE(MIN(sequence), 0) AS firstSequence,
+				COALESCE(MAX(sequence), 0) AS deliveredThrough
+				FROM events WHERE session_id = ${sessionId}`;
+			return {
+				...(state["claudeConfigDir"] !== undefined
+					? { configDir: state["claudeConfigDir"] }
+					: {}),
+				resumeSessionId,
+				firstSequence: bounds?.firstSequence ?? 0,
+				deliveredThrough: bounds?.deliveredThrough ?? 0,
+			} satisfies NativeThread;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ProviderStateEffectError({ operation: "nativeThread", cause }),
+			),
+		);
 
 	const getState = (
 		sessionId: string,
@@ -73,15 +142,41 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 
 		return sql
 			.withTransaction(
-				Effect.forEach(
-					updates,
-					(update) =>
-						sql`
+				Effect.gen(function* () {
+					for (const update of updates) {
+						let value = update.value;
+						if (update.key.startsWith(NATIVE_THREAD_PREFIX)) {
+							const thread =
+								yield* Schema.decodeUnknown(NativeThreadSchema)(value);
+							const [bounds] = yield* sql<{
+								firstSequence: number;
+								deliveredThrough: number;
+							}>`SELECT COALESCE(MIN(sequence), 0) AS firstSequence,
+								COALESCE(MAX(sequence), 0) AS deliveredThrough
+								FROM events WHERE session_id = ${sessionId}`;
+							// The adapter's completion and its SDK cursor share one receipt.
+							// Zero marks a new thread before its first persisted receipt.
+							value = JSON.stringify({
+								...thread,
+								firstSequence:
+									thread.firstSequence || bounds?.firstSequence || 0,
+								deliveredThrough: bounds?.deliveredThrough ?? 0,
+							});
+						}
+						yield* sql`
 							INSERT INTO provider_state (session_id, key, value)
-							VALUES (${sessionId}, ${update.key}, ${update.value})
-							ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value`,
-					{ discard: true },
-				),
+							VALUES (${sessionId}, ${update.key}, ${value})
+							ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value`;
+					}
+					if (
+						updates.some((update) =>
+							update.key.startsWith(NATIVE_THREAD_PREFIX),
+						)
+					) {
+						yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
+							AND key IN ('resumeSessionId', 'claudeConfigDir')`;
+					}
+				}),
 			)
 			.pipe(
 				Effect.mapError((e) =>
@@ -111,6 +206,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 		);
 
 	return {
+		nativeThread,
 		getState,
 		saveUpdates,
 		clearState,

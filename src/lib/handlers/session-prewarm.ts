@@ -49,6 +49,10 @@ export const preWarmSession = (sessionId: string) =>
 		const contextWindow = yield* getContextWindow(sessionId);
 		const configDir = resolveClaudeInstanceConfigDir(daemonConfig, providerId);
 		const state = yield* providerState.getState(sessionId);
+		const nativeThread = yield* providerState.nativeThread(
+			sessionId,
+			providerId,
+		);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.
 		if (
@@ -61,6 +65,8 @@ export const preWarmSession = (sessionId: string) =>
 			sessionId,
 			...folders,
 			providerState: state,
+			instanceId: providerId,
+			...(nativeThread ? { nativeThread } : {}),
 			...(model
 				? { model: { providerId: model.providerID, modelId: model.modelID } }
 				: {}),

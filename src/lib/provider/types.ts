@@ -6,6 +6,7 @@
 import type { Effect, Scope } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../contracts/stored-event.js";
+import type { NativeThread } from "../persistence/effect/provider-state-effect.js";
 import type {
 	ProviderPermissionUpdate,
 	SessionPermissionMode,
@@ -182,6 +183,8 @@ export interface SendTurnInput {
 	readonly prompt: string;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
+	readonly instanceId?: string;
+	readonly nativeThread?: NativeThread | undefined;
 	/**
 	 * Optional shared model selection. OpenCode may omit the model from its
 	 * provider request. Claude's relay path infers a catalog model, and its
@@ -212,6 +215,8 @@ export type PreWarmSessionInput = Pick<
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
+	| "instanceId"
+	| "nativeThread"
 	| "model"
 	| "configDir"
 	| "permissionMode"

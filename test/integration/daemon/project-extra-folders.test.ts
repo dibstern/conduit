@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ClaudeTraceName } from "../../e2e/helpers/claude-trace-replayer.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const MARKER = "CONDUIT-EXTRA-FOLDER-MARKER-7f3a";
@@ -223,7 +224,7 @@ describe("Claude project extra folders through the built daemon", () => {
 			// Completion can arrive while SaveProject replaces the relay, before
 			// this browser reconnects. The durable turn survives that WS gap.
 			await vi.waitFor(
-				() => {
+				async () => {
 					const turns = db
 						.prepare(
 							"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
@@ -234,12 +235,9 @@ describe("Claude project extra folders through the built daemon", () => {
 							"SELECT type, data FROM events WHERE session_id = ? AND type IN ('turn.error', 'turn.interrupted') ORDER BY sequence",
 						)
 						.all(sessionId);
-					const cursor = db
-						.prepare(
-							"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
-						)
-						.get(sessionId) as { value: string } | undefined;
-					resumeSessionId = cursor?.value;
+					resumeSessionId = (
+						await readNativeThread(fixture.projectStorePath(), sessionId)
+					)?.resumeSessionId;
 					evidence["turnsBeforeNextSend"] = turns;
 					evidence["turnErrorsBeforeNextSend"] = errors;
 					evidence["resumeSessionIdBeforeNextSend"] = resumeSessionId;

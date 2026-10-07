@@ -381,6 +381,7 @@ const resolveClaudeModel = (
 
 const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
+	providerId: string,
 	driver: ProviderDriverKind,
 	claudeConfigDir: string | undefined,
 ) =>
@@ -420,6 +421,12 @@ const prepareEngineTurnInput = (
 		const providerState = yield* providerStateEffect.getState(
 			resolvedInput.sessionId,
 		);
+		const nativeThread = isClaudeDriver(driver)
+			? yield* providerStateEffect.nativeThread(
+					resolvedInput.sessionId,
+					providerId,
+				)
+			: undefined;
 		const eventSink = yield* makeEventSink(resolvedInput.sessionId, driver);
 		const imageList =
 			resolvedInput.images && resolvedInput.images.length > 0
@@ -443,6 +450,8 @@ const prepareEngineTurnInput = (
 			prompt: resolvedInput.text,
 			history: [],
 			providerState,
+			instanceId: providerId,
+			...(nativeThread ? { nativeThread } : {}),
 			...(sendModel && resolvedInput.model
 				? {
 						model: {
@@ -565,6 +574,7 @@ const sendViaEngine = (
 		if (!resolvedInput) return;
 		const sendTurnInput = yield* prepareEngineTurnInput(
 			resolvedInput,
+			providerId,
 			driver,
 			claudeConfigDir,
 		).pipe(

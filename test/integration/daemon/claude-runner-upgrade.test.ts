@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -1172,7 +1173,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await pending;
 		await vi.waitFor(
-			() => {
+			async () => {
 				const state = persisted(harness, sessionId);
 				expect(state.commands.map((command) => command.status)).toEqual([
 					"failed",
@@ -1181,7 +1182,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.interrupted"),
 				).toHaveLength(1);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId"),
+					await readNativeThread(harness.projectStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1302,7 +1303,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			}),
 		);
 		await vi.waitFor(
-			() => {
+			async () => {
 				expect(
 					sdkProof(harness).filter((mark) => mark.kind === "resume-rejected"),
 				).toEqual([
@@ -1319,7 +1320,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					"failed",
 				]);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId"),
+					await readNativeThread(harness.projectStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1364,7 +1365,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 				),
 			).toHaveLength(1);
 		await vi.waitFor(
-			() => {
+			async () => {
 				const state = persisted(harness, sessionId);
 				expect(state.commands.map(({ status }) => status)).toEqual([
 					"failed",
@@ -1375,8 +1376,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.completed"),
 				).toHaveLength(1);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId")
-						?.value,
+					(await readNativeThread(harness.projectStorePath(), sessionId))
+						?.resumeSessionId,
 				).toBe(fresh.sessionId);
 			},
 			{ timeout: 10_000 },

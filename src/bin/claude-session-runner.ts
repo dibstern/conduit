@@ -550,15 +550,16 @@ const main = Effect.gen(function* () {
 						message.command.type === "send-turn" &&
 						frozenSnapshot &&
 						resumeSessionId &&
-						typeof message.command.input.providerState["resumeSessionId"] !==
-							"string"
+						!message.command.input.nativeThread
 							? {
 									...message.command,
 									input: {
 										...message.command.input,
-										providerState: {
-											...message.command.input.providerState,
+										nativeThread: {
+											configDir: message.command.input.configDir,
 											resumeSessionId,
+											firstSequence: 0,
+											deliveredThrough: 0,
 										},
 									},
 								}
@@ -600,6 +601,10 @@ const main = Effect.gen(function* () {
 							workspaceRoot: input.workspaceRoot,
 							extraFolders: input.extraFolders ?? [],
 							providerState: input.providerState,
+							...(input.instanceId ? { instanceId: input.instanceId } : {}),
+							...(input.nativeThread
+								? { nativeThread: input.nativeThread }
+								: {}),
 							...(input.model ? { model: input.model } : {}),
 							...(input.configDir ? { configDir: input.configDir } : {}),
 							...(input.permissionMode
@@ -667,12 +672,7 @@ const main = Effect.gen(function* () {
 										command.claudeSettingsOverrides,
 									),
 									env: makeClaudeSdkEnv({
-										configDir:
-											input.configDir ??
-											(typeof input.providerState["claudeConfigDir"] ===
-											"string"
-												? input.providerState["claudeConfigDir"]
-												: undefined),
+										configDir: input.configDir ?? input.nativeThread?.configDir,
 										baseEnv: shellEnv,
 									}),
 								};
@@ -851,11 +851,6 @@ const main = Effect.gen(function* () {
 											commandId: message.commandId,
 											...(result ? { result } : {}),
 										});
-										const resumed = result?.providerStateUpdates.find(
-											(update) => update.key === "resumeSessionId",
-										);
-										if (typeof resumed?.value === "string")
-											resumeSessionId = resumed.value;
 										reportUpgradeState();
 										connection?.write({
 											type: "command-reply",

@@ -1,4 +1,5 @@
 import { Deferred, Effect, HashMap, Ref } from "effect";
+import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
 import type { SendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
@@ -174,14 +175,18 @@ export function sdkResultToTurnResult(
 				}
 			: {}),
 		providerStateUpdates: [
-			...(ctx.configDir
-				? [{ key: "claudeConfigDir", value: ctx.configDir }]
-				: []),
 			...(ctx.resumeSessionId
 				? [
 						{
-							key: "resumeSessionId",
-							value: ctx.resumeSessionId,
+							key: nativeThreadKey(ctx.instanceId ?? "claude"),
+							value: JSON.stringify({
+								...(ctx.configDir !== undefined
+									? { configDir: ctx.configDir }
+									: {}),
+								resumeSessionId: ctx.resumeSessionId,
+								firstSequence: ctx.nativeThread?.firstSequence ?? 0,
+								deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,
+							}),
 						},
 					]
 				: []),

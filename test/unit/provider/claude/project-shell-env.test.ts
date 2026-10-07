@@ -148,9 +148,15 @@ describe("project shell environment", () => {
 			expect(
 				queryFactory.mock.calls[0]?.[0]?.options?.env?.["CLAUDE_CONFIG_DIR"],
 			).toBe(configDir);
+		const nativeThread = {
+			configDir,
+			resumeSessionId: "sdk-session-1",
+			firstSequence: 0,
+			deliveredThrough: 0,
+		};
 		expect(result.providerStateUpdates).toContainEqual({
-			key: "claudeConfigDir",
-			value: configDir,
+			key: "nativeThread:claude",
+			value: JSON.stringify(nativeThread),
 		});
 		env.register(project, {
 			overrides: { CLAUDE_CONFIG_DIR: join(home, "refreshed-profile") },
@@ -164,6 +170,7 @@ describe("project shell environment", () => {
 		await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
+				nativeThread,
 				providerState: Object.fromEntries(
 					result.providerStateUpdates.map(({ key, value }) => [key, value]),
 				),
@@ -183,18 +190,15 @@ describe("project shell environment", () => {
 			namedInstance.sendTurnEffect({
 				...input,
 				configDir: namedConfigDir,
-				providerState: {
-					resumeSessionId: "sdk-session-1",
-					claudeConfigDir: configDir,
-				},
+				nativeThread,
 			}),
 		);
 		expect(
 			queryFactory.mock.calls[2]?.[0]?.options?.env?.["CLAUDE_CONFIG_DIR"],
 		).toBe(namedConfigDir);
 		expect(namedResult.providerStateUpdates).toContainEqual({
-			key: "claudeConfigDir",
-			value: namedConfigDir,
+			key: "nativeThread:claude",
+			value: JSON.stringify({ ...nativeThread, configDir: namedConfigDir }),
 		});
 	});
 

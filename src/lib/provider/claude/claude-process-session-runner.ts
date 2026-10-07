@@ -877,12 +877,20 @@ export const makeProcessClaudeSessionRunner = (
 								...(variant ? { variant } : {}),
 								...(permissionMode ? { permissionMode } : {}),
 							}),
-							providerState: {
-								...snapshot.input.providerState,
-								...(state.resumeSessionId
-									? { resumeSessionId: state.resumeSessionId }
-									: {}),
-							},
+							...(state.resumeSessionId
+								? {
+										nativeThread: {
+											configDir:
+												snapshot.input.nativeThread?.configDir ??
+												snapshot.input.configDir,
+											firstSequence:
+												snapshot.input.nativeThread?.firstSequence ?? 0,
+											deliveredThrough:
+												snapshot.input.nativeThread?.deliveredThrough ?? 0,
+											resumeSessionId: state.resumeSessionId,
+										},
+									}
+								: {}),
 						},
 						claudeSettingsOverrides: snapshot.claudeSettingsOverrides,
 						shellEnv: snapshot.options.env ?? {},
@@ -1463,12 +1471,18 @@ export const makeProcessClaudeSessionRunner = (
 									input: {
 										...command.input,
 										history: [],
-										providerState: latestResumeSessionId
+										nativeThread: latestResumeSessionId
 											? {
-													...command.input.providerState,
+													configDir:
+														command.input.nativeThread?.configDir ??
+														command.input.configDir,
+													firstSequence:
+														command.input.nativeThread?.firstSequence ?? 0,
+													deliveredThrough:
+														command.input.nativeThread?.deliveredThrough ?? 0,
 													resumeSessionId: latestResumeSessionId,
 												}
-											: command.input.providerState,
+											: command.input.nativeThread,
 									},
 									...(entry.upgrade.state?.frozen
 										? {

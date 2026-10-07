@@ -135,7 +135,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 					tokens: { input: 0, output: 0 },
 					durationMs: 0,
 					providerStateUpdates: [
-						{ key: "resumeSessionId", value: "sdk-session-next" },
+						{
+							key: "nativeThread:claude",
+							value: JSON.stringify({
+								resumeSessionId: "sdk-session-next",
+								firstSequence: 0,
+								deliveredThrough: 0,
+							}),
+						},
 					],
 				})),
 			});
@@ -190,8 +197,11 @@ describe("handleMessage with Effect provider state persistence", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
-							providerState: {
+							instanceId: "claude",
+							nativeThread: {
 								resumeSessionId: "sdk-session-prev",
+								firstSequence: expect.any(Number),
+								deliveredThrough: expect.any(Number),
 							},
 						}),
 					}),
@@ -201,13 +211,17 @@ describe("handleMessage with Effect provider state persistence", () => {
 				const updated = yield* Effect.promise(() =>
 					vi.waitFor(async () => {
 						const state = await Effect.runPromise(
-							providerState.getState("session-provider-state"),
+							providerState.nativeThread("session-provider-state", "claude"),
 						);
-						expect(state["resumeSessionId"]).toBe("sdk-session-next");
+						expect(state?.resumeSessionId).toBe("sdk-session-next");
 						return state;
 					}),
 				);
-				expect(updated).toEqual({ resumeSessionId: "sdk-session-next" });
+				expect(updated).toEqual({
+					resumeSessionId: "sdk-session-next",
+					firstSequence: expect.any(Number),
+					deliveredThrough: expect.any(Number),
+				});
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(

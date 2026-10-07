@@ -1,8 +1,12 @@
-import type { SqlClient } from "@effect/sql";
+import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderStateEffect,
+	type ProviderStateEffectError,
+} from "../persistence/effect/provider-state-effect.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
@@ -138,7 +142,7 @@ function clampPollDuration(
 
 const storeFailure =
 	(operation: string) =>
-	(cause: SqlError): ProviderCommandStoreFailure =>
+	(cause: SqlError | ProviderStateEffectError): ProviderCommandStoreFailure =>
 		new ProviderCommandStoreFailure({
 			operation,
 			code: "provider_command_store_failure",
@@ -353,6 +357,7 @@ export class ProviderSideEffectReactor {
 		| UnknownProviderCommandEffect
 		| ProviderNotRegistered
 		| ProviderInstanceFailure
+		| ProviderCommandStoreFailure
 	> {
 		return Effect.gen(this, function* () {
 			const driver = this.options.resolveProviderDriver
@@ -367,11 +372,27 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
+				const nativeThread =
+					driver === "claude" && payload.nativeThread === undefined
+						? yield* makeProviderStateEffect.pipe(
+								Effect.flatMap((state) =>
+									state.nativeThread(payload.sessionId, row.provider_id),
+								),
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.mapError(storeFailure("nativeThread")),
+							)
+						: payload.nativeThread;
 				return yield* instance.sendTurnEffect({
 					...payload,
 					history: payload.history ?? [],
 					commandId: row.command_id,
-					...(driver === "claude" ? { commandAttempt } : {}),
+					...(driver === "claude"
+						? {
+								commandAttempt,
+								instanceId: payload.instanceId ?? row.provider_id,
+								nativeThread,
+							}
+						: {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});

@@ -4,6 +4,7 @@
 // replay committed traces, OpenCode REST/SSE replays a real capture.
 
 import { DatabaseSync } from "node:sqlite";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -83,12 +84,8 @@ test.describe("Claude Side Thread started mid-turn", () => {
 		await app.sendMessage(parentPrompt);
 		await expect(chat.assistantMessages).toHaveText([/pong/i]);
 		await chat.waitForStreamingComplete();
-		const sdkParentId = () =>
-			query(
-				db,
-				"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
-				parentId,
-			)[0]?.["value"];
+		const sdkParentId = async () =>
+			(await readNativeThread(db, parentId))?.resumeSessionId;
 		await expect.poll(sdkParentId).toBeTruthy();
 		const firstTurnEnd = sessionEvents(db, parentId).find(
 			(event) => event.type === "turn.completed",
@@ -118,14 +115,14 @@ test.describe("Claude Side Thread started mid-turn", () => {
 		await chat.waitForStreamingComplete();
 
 		// The SDK fork cut lands on the last transcript entry of turn one.
-		const parentTranscript = replayer.transcript(String(sdkParentId()));
+		const parentTranscript = replayer.transcript(String(await sdkParentId()));
 		const secondPrompt = parentTranscript.findIndex(
 			(entry, index) => index > 0 && entry.type === "user",
 		);
 		expect(secondPrompt).toBeGreaterThan(0);
 		expect(replayer.forks).toEqual([
 			{
-				parentSessionId: sdkParentId(),
+				parentSessionId: await sdkParentId(),
 				sessionId: sideId,
 				upToMessageId: parentTranscript[secondPrompt - 1]?.uuid,
 			},

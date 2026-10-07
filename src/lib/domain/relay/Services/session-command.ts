@@ -20,7 +20,10 @@ import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
+import {
+	nativeThreadKey,
+	ProviderStateEffectTag,
+} from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import {
 	canonicalEvent,
@@ -583,15 +586,18 @@ export const forkSession = (
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
-		const parentState = yield* state.getState(parentSessionId);
+		const parentThread = yield* state.nativeThread(
+			parentSessionId,
+			parent.provider,
+		);
 		const claudeConfigDir =
-			parentState["claudeConfigDir"] ??
+			parentThread?.configDir ??
 			resolveClaudeInstanceConfigDir(
 				loadDaemonConfig(config.value.configDir),
 				parent.provider,
 			) ??
 			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
-		const providerSessionId = parentState["resumeSessionId"];
+		const providerSessionId = parentThread?.resumeSessionId;
 		if (!providerSessionId) {
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
@@ -695,10 +701,17 @@ export const forkSession = (
 				]);
 				yield* project(stored);
 				yield* state.saveUpdates(forked.sdkSessionId, [
-					{ key: "resumeSessionId", value: forked.sdkSessionId },
-					...(claudeConfigDir !== undefined
-						? [{ key: "claudeConfigDir", value: claudeConfigDir }]
-						: []),
+					{
+						key: nativeThreadKey(parent.provider),
+						value: JSON.stringify({
+							...(claudeConfigDir !== undefined
+								? { configDir: claudeConfigDir }
+								: {}),
+							resumeSessionId: forked.sdkSessionId,
+							firstSequence: stored[0]?.sequence ?? 0,
+							deliveredThrough: stored.at(-1)?.sequence ?? 0,
+						}),
+					},
 				]);
 				// Plan applies before the row is announced, so no send can reach the
 				// Side Thread first.

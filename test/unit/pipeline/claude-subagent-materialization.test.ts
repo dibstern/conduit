@@ -307,7 +307,11 @@ describe("Claude subagent materialization pipeline", () => {
 							sessionId: parentSessionId,
 							workspaceRoot: dir,
 							model: { providerId: "claude", modelId: "sonnet" },
-							providerState: { resumeSessionId: parentClaudeSessionId },
+							nativeThread: {
+								resumeSessionId: parentClaudeSessionId,
+								firstSequence: 0,
+								deliveredThrough: 0,
+							},
 							eventSink: relaySink,
 						}),
 					);
@@ -659,7 +663,11 @@ describe("Claude subagent materialization pipeline", () => {
 								sessionId: parentSessionId,
 								workspaceRoot: dir,
 								model: { providerId: "claude", modelId: "sonnet" },
-								providerState: { resumeSessionId: parentClaudeSessionId },
+								nativeThread: {
+									resumeSessionId: parentClaudeSessionId,
+									firstSequence: 0,
+									deliveredThrough: 0,
+								},
 								eventSink: relaySink,
 							}),
 						),
