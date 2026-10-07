@@ -23,14 +23,14 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 
 import SessionBar from "../../../src/lib/frontend/components/layout/SessionBar.svelte";
 import ConnectOverlay from "../../../src/lib/frontend/components/overlays/ConnectOverlay.svelte";
-import { wsState } from "../../../src/lib/frontend/stores/ws.svelte.js";
+import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 
 describe("non-focusable tooltip accessibility", () => {
 	beforeEach(() => {
-		wsState.status = "disconnected";
-		wsState.statusText = "Disconnected";
-		wsState.relayStatus = undefined;
-		wsState.relayError = undefined;
+		connectionState.status = "disconnected";
+		connectionState.statusText = "Disconnected";
+		connectionState.relayStatus = undefined;
+		connectionState.relayError = undefined;
 	});
 
 	afterEach(() => {
@@ -39,8 +39,8 @@ describe("non-focusable tooltip accessibility", () => {
 
 	it("renders the full relay error with wrapping and scrolling", () => {
 		const relayError = `ProviderError: ${"unbroken".repeat(40)}`;
-		wsState.relayStatus = "error";
-		wsState.relayError = relayError;
+		connectionState.relayStatus = "error";
+		connectionState.relayError = relayError;
 
 		render(ConnectOverlay);
 
@@ -60,8 +60,8 @@ describe("non-focusable tooltip accessibility", () => {
 		expect(status.textContent).toBe("Disconnected");
 		expect(status.querySelector(".sr-only")?.textContent).toBe("Disconnected");
 
-		wsState.status = "connected";
-		wsState.statusText = "Connected";
+		connectionState.status = "connected";
+		connectionState.statusText = "Connected";
 		await tick();
 
 		expect(status.textContent).toBe("Connected");

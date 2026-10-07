@@ -2,16 +2,15 @@
  * A WebSocket stand-in for stories of components that mount the real connection
  * lifecycle.
  *
- * Why this exists: ChatLayout calls `connect()` on
- * mount, which opens a real WebSocket. Storybook is served by a static file
- * server, so the upgrade never completes, `wsState.status` never reaches
+ * ChatLayout opens legacy and RPC WebSockets on mount. Storybook is served by a
+ * static file server, so upgrades never complete, `connectionState.status` never reaches
  * "connected", and ConnectOverlay — `fixed inset-0 bg-bg`, gated on
  * `connected && displayNone` — covers the entire viewport. Every Layout/ChatLayout
  * baseline was therefore a pixel-for-pixel copy of
  * Overlays/ConnectOverlay::Connecting: three stories, zero coverage of the
  * layout they are named after, and three green tests saying otherwise.
  *
- * Faking the socket rather than assigning `wsState.status` directly is
+ * Faking the socket rather than assigning `connectionState.status` directly is
  * deliberate. The status is set by the real `open` handler, which also resets
  * the attempt counter and clears relay state; poking the store would skip all
  * of it and leave the component in a state the app can never actually be in.
@@ -65,12 +64,27 @@ export function connectedSocket(): () => void {
 			this.listeners.get(event)?.delete(listener);
 		}
 
-		send(_data: unknown): void {}
+		send(data: unknown): void {
+			if (new URL(this.url).pathname !== "/rpc" || typeof data !== "string")
+				return;
+			const request: { _tag?: string } = JSON.parse(data);
+			if (request._tag === "Ping") {
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({ _tag: "Pong" }),
+					}),
+				);
+			}
+		}
 
 		close(): void {
 			if (this.readyState === OpenSocket.CLOSED) return;
 			this.readyState = OpenSocket.CLOSED;
-			this.emit("close");
+			this.emit(
+				"close",
+				new CloseEvent("close", { code: 1000, wasClean: true }),
+			);
 		}
 
 		private emit(event: string, payload?: unknown): void {

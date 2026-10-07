@@ -128,9 +128,16 @@ vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", async () => {
 		initSWMessageListener: vi.fn(),
 		reconcilePushActive: vi.fn(async () => {}),
 		wsSend: vi.fn(),
-		wsState: { status: "connected", statusText: "" },
 	};
 });
+
+vi.mock(
+	"../../../src/lib/frontend/transport/connection-status.svelte.js",
+	() => ({
+		getIsConnected: () => true,
+		connectionState: { status: "connected", statusText: "" },
+	}),
+);
 
 vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 	chatState: { streaming: false, processing: false, messages: [] },

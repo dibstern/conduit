@@ -24,6 +24,7 @@ import {
 	Supervisor,
 } from "effect";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
+import { connectionState } from "../../../../src/lib/frontend/transport/connection-status.svelte.js";
 import {
 	disposeRuntime,
 	runTransportEffect,
@@ -427,17 +428,20 @@ let onFrame: () => void = () => {};
 
 /**
  * The smallest WebSocket `Socket.fromWebSocket` will drive: it reads
- * `readyState`, registers listeners, sends, and closes. Opening synchronously
- * (`readyState === 1`) skips the platform's wait for the `open` event.
+ * `readyState`, registers listeners, sends, and closes.
  */
 class FakeWebSocket {
 	readonly sent: Array<string> = [];
-	readyState = 1;
+	readyState = 0;
 	closeCode: number | undefined;
 	private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
 
 	constructor(readonly url: string) {
 		fakeSockets.push(this);
+		queueMicrotask(() => {
+			this.readyState = 1;
+			this.emit("open", {});
+		});
 	}
 
 	addEventListener(type: string, handler: (event: unknown) => void): void {
@@ -458,6 +462,11 @@ class FakeWebSocket {
 	close(code?: number): void {
 		this.closeCode = code;
 		this.readyState = 3;
+		this.emit("close", { code: code ?? 1000, reason: "" });
+	}
+
+	emit(type: string, event: unknown): void {
+		for (const handler of this.listeners.get(type) ?? []) handler(event);
 	}
 }
 
@@ -511,6 +520,9 @@ describe("shared two-socket RPC client over WebSockets", () => {
 				makeWsRpcUrl(),
 				makeWsRpcUrl(),
 			]);
+			expect(connectionState.status).toBe("connected");
+			expect(connectionState.statusText).toBe("Connected");
+			expect(connectionState.attempts).toBe(0);
 			expect(fakeSockets.map((ws) => ws.closeCode)).toEqual([
 				undefined,
 				undefined,

@@ -94,12 +94,15 @@ import {
 	connect,
 	disconnect,
 	setAttachedProject,
-	wsState,
 } from "../../../src/lib/frontend/stores/ws.svelte.js";
 import {
 	clearDebugLog,
 	getDebugEvents,
 } from "../../../src/lib/frontend/stores/ws-debug.svelte.js";
+import {
+	connectionState,
+	trackControlSocket,
+} from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import { disposeRuntime } from "../../../src/lib/frontend/transport/runtime.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
@@ -139,12 +142,18 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		routerState.path = "/";
 		routerState.search = "?p=conduit";
 		attachedProjectState.slug = null;
+		connectionState.status = "";
+		connectionState.statusText = "";
+		connectionState.attempts = 0;
+		connectionState.relayStatus = undefined;
+		connectionState.relayError = undefined;
 		clearSessionState();
 		sessionState.currentId = null;
 	});
 
 	afterEach(async () => {
 		disconnect();
+		for (const socket of instances) socket.close();
 		await disposeRuntime();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
@@ -238,13 +247,13 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			}),
 		);
 		vi.stubGlobal("fetch", fetchMock);
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		expect(fetchMock).not.toHaveBeenCalled();
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
 		setAttachedProject("project-b");
 
-		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
 		expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
 			"/p/project-b/api/status",
 		);
@@ -266,17 +275,17 @@ describe("WebSocket reconnect stream lifecycle", () => {
 				}),
 			);
 		vi.stubGlobal("fetch", fetchMock);
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
 		setAttachedProject("project-a");
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
 		setAttachedProject("project-b");
-		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
 		resolveOldStatus(new Response(null, { status: 401 }));
 		// Flush the stale response handler before asserting it did not replace the new status.
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		expect(wsState.relayStatus).toBe("ready");
+		expect(connectionState.relayStatus).toBe("ready");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 		expect(fetchMock.mock.calls).toEqual([
 			["/p/project-a/api/status"],
@@ -301,7 +310,9 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 
 		attachedProjectState.slug = "conduit";
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
+		// An expired PIN session can reject the upgrade before the probe replies.
+		instances[0]?.close();
 
 		await vi.waitFor(() => expect(routerState.path).toBe("/auth"));
 		expect(getCurrentSlug()).toBe("conduit");
@@ -320,9 +331,9 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		);
 
 		attachedProjectState.slug = "conduit";
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 
-		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
 		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
@@ -344,8 +355,8 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		attachedProjectState.slug = "conduit";
-		connect();
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		resolveFirst(
 			new Response(
 				JSON.stringify({
@@ -358,7 +369,14 @@ describe("WebSocket reconnect stream lifecycle", () => {
 			),
 		);
 
-		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		instances[1]?.open();
+		expect(connectionState.status).toBe("connected");
+		expect(connectionState.attempts).toBe(0);
+		expect(connectionState.relayStatus).toBeUndefined();
+		instances[0]?.open();
+		instances[0]?.close();
+		expect(connectionState.status).toBe("connected");
 		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
@@ -385,10 +403,10 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		attachedProjectState.slug = "conduit";
-		connect();
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-		connect();
-		await vi.waitFor(() => expect(wsState.relayStatus).toBe("ready"));
+		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
+		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
 
 		bodyController.enqueue(
 			new TextEncoder().encode(
@@ -398,7 +416,7 @@ describe("WebSocket reconnect stream lifecycle", () => {
 		bodyController.close();
 		// Flush the closed stale stream before asserting it did not change relay state.
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		expect(wsState.relayError).toBeUndefined();
+		expect(connectionState.relayError).toBeUndefined();
 	});
 
 	it("disconnect cancels a scheduled reconnect", async () => {

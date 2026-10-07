@@ -29,6 +29,7 @@ import {
 	Schedule,
 	Scope,
 } from "effect";
+import { trackControlSocket } from "./connection-status.svelte.js";
 import { resumeStream } from "./resume.js";
 import { decodeSessionDetail } from "./session-detail-wire.js";
 import { WsRpcGroup } from "./ws-rpc.js";
@@ -206,11 +207,19 @@ const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
 	Schedule.union(Schedule.spaced("1 second")),
 );
 
-const connectWebSocket: WsRpcConnect = ({ url }) =>
+const connectWebSocket: WsRpcConnect = ({ url, trafficClass }) =>
 	Layer.build(
 		RpcClient.layerProtocolSocket({ retrySchedule: reconnectSchedule }).pipe(
 			Layer.provide(Socket.layerWebSocket(url)),
-			Layer.provide(Socket.layerWebSocketConstructorGlobal),
+			Layer.provide(
+				trafficClass === "control"
+					? Layer.succeed(Socket.WebSocketConstructor, (url, protocols) => {
+							const socket = new globalThis.WebSocket(url, protocols);
+							trackControlSocket(socket);
+							return socket;
+						})
+					: Socket.layerWebSocketConstructorGlobal,
+			),
 			Layer.provide(RpcSerialization.layerJson),
 		),
 	).pipe(Effect.flatMap((protocol) => Effect.provide(wsRpcClient, protocol)));

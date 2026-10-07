@@ -64,7 +64,7 @@
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
-	import { wsState } from "../../stores/ws.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
@@ -205,9 +205,9 @@
 	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
-	const statusTitle = $derived(wsState.statusText || "Connecting");
+	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
-		switch (wsState.status) {
+		switch (connectionState.status) {
 			case "connected": return "bg-success";
 			case "processing": return "bg-success animate-[pulse-dot_1.2s_ease-in-out_infinite]";
 			case "error": return "bg-error";

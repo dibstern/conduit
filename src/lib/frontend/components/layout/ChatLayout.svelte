@@ -42,12 +42,12 @@
 		disconnect,
 		onProjectAttached,
 		setAttachedProject,
-		wsState,
 		onNavigateToSession,
 		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
 	} from "../../stores/ws.svelte.js";
+	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
@@ -437,9 +437,7 @@
 
 	// Project navigation requests attachment through RPC on the existing socket.
 	// This also covers browser history and project-only links from every caller.
-	const connected = $derived(
-		wsState.status === "connected" || wsState.status === "processing",
-	);
+	const connected = $derived(getIsConnected());
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? sessionState.currentId : null;

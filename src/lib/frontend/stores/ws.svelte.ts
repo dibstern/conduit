@@ -14,12 +14,7 @@ import {
 import type { ConnectionStatus } from "../types.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { getBrowserClientId } from "./client-identity.js";
-import {
-	attachedProjectState,
-	getCurrentSessionId,
-	getCurrentSlug,
-	replaceRoute,
-} from "./router.svelte.js";
+import { getCurrentSessionId, getCurrentSlug } from "./router.svelte.js";
 import { sessionActivityBridge } from "./session-activity.svelte.js";
 import {
 	wsDebugLog,
@@ -55,7 +50,6 @@ export {
 } from "./ws-send.svelte.js";
 
 import { handleMessage } from "./ws-dispatch.js";
-import { onProjectAttached } from "./ws-listeners.js";
 import { setWsGetter } from "./ws-send.svelte.js";
 
 const log = createFrontendLogger("ws");
@@ -75,30 +69,11 @@ let _connectTimeout: ReturnType<typeof setTimeout> | null = null;
 let _reconnectDelay = RECONNECT_BASE_MS;
 let _connectionGeneration = 0;
 
-export const wsState = $state({
-	status: "" as ConnectionStatus,
-	statusText: "",
-	/** Number of connection attempts since last successful connection. */
-	attempts: 0,
-	/** Relay readiness from non-blocking status check. */
-	relayStatus: undefined as "registering" | "ready" | "error" | undefined,
-	/** Error message from relay when status is "error". */
-	relayError: undefined as string | undefined,
-});
+// Kept for legacy self-healing and debug logs until the /ws socket is retired.
+let _status: ConnectionStatus = "";
 
 // Wire up the send module's WS getter to our connection state.
 setWsGetter(() => _ws);
-
-/** Get whether the WebSocket is connected. */
-export function getIsConnected(): boolean {
-	return wsState.status === "connected" || wsState.status === "processing";
-}
-
-/** Set connection status with tooltip text. */
-function setStatus(status: ConnectionStatus, text: string): void {
-	wsState.status = status;
-	wsState.statusText = text;
-}
 
 /** Connect callbacks — called after connection established. */
 let _onConnectFn: (() => void) | null = null;
@@ -109,57 +84,10 @@ export function onConnect(fn: () => void): void {
 let _active = false;
 
 /**
- * Non-blocking relay status fetch for UI enrichment and auth recovery.
- * Does not block connection. Updates wsState.relayStatus/relayError so the
- * ConnectOverlay can show relay progress, or routes a stale auth session to PIN entry.
- */
-function fetchRelayStatus(slug: string, generation: number): void {
-	fetch(`/p/${slug}/api/status`)
-		.then((res) => {
-			if (
-				attachedProjectState.slug !== slug ||
-				generation !== _connectionGeneration
-			) {
-				return null;
-			}
-			if (res.status === 401) {
-				replaceRoute("/auth");
-				return null;
-			}
-			if (!res.ok) return null;
-			return res.json();
-		})
-		.then((data: { status?: string; error?: string } | null) => {
-			if (
-				!data ||
-				attachedProjectState.slug !== slug ||
-				generation !== _connectionGeneration
-			) {
-				return;
-			}
-			if (data.status === "registering") {
-				wsState.relayStatus = "registering";
-			} else if (data.status === "error") {
-				wsState.relayStatus = "error";
-				wsState.relayError = data.error;
-			} else if (data.status === "ready") {
-				wsState.relayStatus = "ready";
-			}
-			wsDebugLog("relay:status", wsState.status, `status=${data.status}`);
-		})
-		.catch(() => {
-			// Ignore — this is just for UI enrichment
-		});
-}
-
-onProjectAttached((slug) => fetchRelayStatus(slug, _connectionGeneration));
-
-/**
  * Establish WebSocket connection.
  *
  * Creates the WebSocket synchronously. The server's waitForRelay() handles
  * relay readiness on the upgrade path.
- * A non-blocking relay status fetch runs in parallel for UI display and auth recovery.
  */
 export function connect(): void {
 	_active = true;
@@ -187,22 +115,10 @@ export function connect(): void {
 		oldWs.close();
 	}
 
-	wsState.attempts++;
-	wsState.relayStatus = undefined;
-	wsState.relayError = undefined;
-	setStatus("connecting", "Connecting");
-	wsDebugLog(
-		"connect",
-		wsState.status,
-		`slug=${slug ?? "standalone"}, attempt=${wsState.attempts}`,
-	);
+	_status = "connecting";
+	wsDebugLog("connect", _status, `slug=${slug ?? "standalone"}`);
 
 	doConnect(slug, sessionId, generation);
-
-	// Non-blocking relay status check for auth recovery and UI enrichment.
-	if (attachedProjectState.slug) {
-		fetchRelayStatus(attachedProjectState.slug, generation);
-	}
 }
 
 /** Inner function: create the WebSocket and wire up event handlers. */
@@ -227,7 +143,7 @@ function doConnect(
 
 	const ws = new WebSocket(url);
 	_ws = ws;
-	wsDebugLog("ws:create", wsState.status, url);
+	wsDebugLog("ws:create", _status, url);
 
 	// Connect timeout — if onopen doesn't fire within CONNECT_TIMEOUT_MS,
 	// force-close and let the close handler schedule a reconnect.
@@ -235,7 +151,7 @@ function doConnect(
 		_connectTimeout = null;
 		if (_ws === ws && ws.readyState !== WebSocket.OPEN) {
 			log.warn("Connect timeout, closing");
-			wsDebugLog("timeout", wsState.status);
+			wsDebugLog("timeout", _status);
 			ws.close();
 		}
 	}, CONNECT_TIMEOUT_MS);
@@ -249,12 +165,9 @@ function doConnect(
 		}
 		// The incoming roots and family snapshots reconcile row state after
 		// reconnect. Keep the previous rows visible until they arrive.
-		setStatus("connected", "Connected");
-		wsDebugLog("ws:open", wsState.status);
+		_status = "connected";
+		wsDebugLog("ws:open", _status);
 		wsDebugResetMessageCount();
-		wsState.attempts = 0;
-		wsState.relayStatus = undefined;
-		wsState.relayError = undefined;
 		_reconnectDelay = RECONNECT_BASE_MS;
 		_onConnectFn?.();
 	});
@@ -270,8 +183,8 @@ function doConnect(
 			_connectTimeout = null;
 		}
 
-		setStatus("disconnected", "Disconnected");
-		wsDebugLog("ws:close", wsState.status);
+		_status = "disconnected";
+		wsDebugLog("ws:close", _status);
 		_ws = null;
 		sessionActivityBridge.clear();
 
@@ -289,7 +202,7 @@ function doConnect(
 		// Don't set error status here — a close event always follows.
 		// The close handler handles reconnect scheduling.
 		if (_ws !== ws || generation !== _connectionGeneration) return;
-		wsDebugLog("ws:error", wsState.status);
+		wsDebugLog("ws:error", _status);
 	});
 
 	// The stream handles JSON parsing and cleanup. Self-healing and dispatch
@@ -304,23 +217,17 @@ function doConnect(
 						if (_ws !== ws || generation !== _connectionGeneration) return;
 
 						// Self-healing: if messages arrive but status isn't connected, fix it.
-						if (
-							wsState.status !== "connected" &&
-							wsState.status !== "processing"
-						) {
-							wsDebugLog("self-heal", wsState.status);
+						if (_status !== "connected" && _status !== "processing") {
+							wsDebugLog("self-heal", _status);
 							if (_connectTimeout) {
 								clearTimeout(_connectTimeout);
 								_connectTimeout = null;
 							}
-							setStatus("connected", "Connected");
-							wsState.attempts = 0;
-							wsState.relayStatus = undefined;
-							wsState.relayError = undefined;
+							_status = "connected";
 							_reconnectDelay = RECONNECT_BASE_MS;
 						}
 
-						wsDebugLogMessage(wsState.status, msg.type, msg);
+						wsDebugLogMessage(_status, msg.type, msg);
 
 						try {
 							handleMessage(msg);
@@ -343,21 +250,17 @@ function handleProtocolError(error: WsProtocolError): void {
 		error.kind === "invalid_message" && error.messageType
 			? `${error.kind} type=${error.messageType}`
 			: error.kind;
-	wsDebugLog("protocol:error", wsState.status, detail);
+	wsDebugLog("protocol:error", _status, detail);
 	log.warn("WebSocket protocol error:", error.detail, error);
 }
 
 /** Schedule a reconnect with increasing backoff (1s -> 1.5s -> 2.25s -> ... -> 10s cap). */
 function scheduleReconnect(): void {
 	if (_reconnectTimer) return;
-	wsDebugLog(
-		"reconnect:schedule",
-		wsState.status,
-		`delay=${_reconnectDelay}ms`,
-	);
+	wsDebugLog("reconnect:schedule", _status, `delay=${_reconnectDelay}ms`);
 	_reconnectTimer = setTimeout(() => {
 		_reconnectTimer = null;
-		wsDebugLog("reconnect:fire", wsState.status);
+		wsDebugLog("reconnect:fire", _status);
 		connect();
 	}, _reconnectDelay);
 	_reconnectDelay = Math.min(_reconnectDelay * 1.5, RECONNECT_MAX_MS);
@@ -377,7 +280,7 @@ function reconnectIfStale(): void {
 	}
 	if (_ws?.readyState === WebSocket.OPEN && hasActiveStreamFiber()) return;
 
-	wsDebugLog("resume:reconnect", wsState.status);
+	wsDebugLog("resume:reconnect", _status);
 	if (_reconnectTimer) {
 		clearTimeout(_reconnectTimer);
 		_reconnectTimer = null;
@@ -394,11 +297,9 @@ if (typeof document !== "undefined") {
 /** Disconnect and stop reconnecting. */
 export function disconnect(): void {
 	sessionActivityBridge.clear();
-	wsDebugLog("disconnect", wsState.status);
+	wsDebugLog("disconnect", _status);
 	_active = false;
 	_connectionGeneration++;
-	wsState.relayStatus = undefined;
-	wsState.relayError = undefined;
 	void interruptStream();
 	if (_reconnectTimer) {
 		clearTimeout(_reconnectTimer);
@@ -413,5 +314,5 @@ export function disconnect(): void {
 		_ws = null;
 		oldWs.close();
 	}
-	setStatus("disconnected", "Disconnected");
+	_status = "disconnected";
 }

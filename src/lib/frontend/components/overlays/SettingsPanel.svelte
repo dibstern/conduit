@@ -19,7 +19,7 @@
 	import { getNotifSettings } from "../../utils/notif-settings.js";
 	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getIsConnected } from "../../stores/ws.svelte.js";
+	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { detectProxyRpc, getAutoSettleSettingRpc } from "../../transport/ws-rpc-client.js";
 
 	let { visible = false, initialTab = "notifications", onClose }:
