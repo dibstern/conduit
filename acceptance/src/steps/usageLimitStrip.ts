@@ -575,13 +575,14 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "assert an account dot colour",
 		match:
-			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (violet|teal|blue) dot$/,
+			/^the (account picker|handoff dialog|transcript divider|session bar account pill) shows (\S+) with a (violet|teal|blue) dot$/,
 		run: async ({ world, match }) => {
 			const region = world.page.getByTestId(
 				{
 					"account picker": "account-switch-picker",
 					"handoff dialog": "handoff-dialog",
 					"transcript divider": "transcript-divider",
+					"session bar account pill": "session-account-pill",
 				}[match[1] ?? ""] ?? "",
 			);
 			await expect(
@@ -712,6 +713,155 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				dividerBox.x + dividerBox.width / 2,
 				0,
 			);
+		},
+	},
+	{
+		name: "bind the project to an instance",
+		match: /^the project is bound to (\S+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
+				projects: [
+					{
+						slug: "myapp",
+						title: "myapp",
+						folders: ["/src/myapp"],
+						instanceId: match[1],
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "open the session bar account pill",
+		match: /^I open the account pill in the session bar$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("session-account-pill").click();
+			await expect(
+				world.page.getByTestId("account-switch-picker"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the session bar account pill",
+		match: /^the session bar account pill reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("session-account-pill")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "assert the session bar account pill geometry",
+		match:
+			/^the session bar account pill is (\d+)px tall with (\d+)px monospace text$/,
+		run: async ({ world, match }) => {
+			const pill = world.page.getByTestId("session-account-pill");
+			await expect(pill).toHaveCSS("height", `${match[1]}px`);
+			await expect(pill).toHaveCSS("font-size", `${match[2]}px`);
+			const { radius, font } = await pill.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					radius: parseFloat(style.borderRadius),
+					font: style.fontFamily,
+				};
+			});
+			// Fully rounded: the radius reaches at least half the height.
+			expect(radius).toBeGreaterThanOrEqual(Number(match[1]) / 2);
+			expect(font).toMatch(/mono/i);
+		},
+	},
+	{
+		name: "assert the pill sits after the segment control",
+		match:
+			/^the session bar account pill sits right after the segment control$/,
+		run: async ({ world }) => {
+			const [pill, segments] = await Promise.all([
+				world.page.getByTestId("session-account-pill").boundingBox(),
+				world.page.locator("#session-bar .session-bar-segments").boundingBox(),
+			]);
+			if (!pill || !segments) throw new Error("No pill or segment box");
+			expect(pill.x).toBeGreaterThanOrEqual(segments.x + segments.width);
+			expect(pill.x - (segments.x + segments.width)).toBeLessThan(16);
+			expect(
+				Math.abs(pill.y + pill.height / 2 - (segments.y + segments.height / 2)),
+			).toBeLessThan(2);
+		},
+	},
+	{
+		name: "assert where the picker opens",
+		match: /^the account picker opens (below the pill|as a bottom sheet)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const [picker, pill] = await Promise.all([
+				page.getByTestId("account-switch-picker").boundingBox(),
+				page.getByTestId("session-account-pill").boundingBox(),
+			]);
+			if (!picker || !pill) throw new Error("No picker or pill box");
+			if (match[1] === "below the pill") {
+				expect(picker.y).toBeGreaterThanOrEqual(pill.y + pill.height);
+				// Aligned to the pill's end edge.
+				expect(
+					Math.abs(picker.x + picker.width - (pill.x + pill.width)),
+				).toBeLessThan(2);
+				return;
+			}
+			const viewport = page.viewportSize();
+			if (!viewport) throw new Error("No viewport");
+			expect(Math.abs(picker.y + picker.height - viewport.height)).toBeLessThan(
+				2,
+			);
+			expect(picker.width).toBeGreaterThan(viewport.width - 2);
+		},
+	},
+	{
+		name: "assert the session bar shows the badge or the pill",
+		match:
+			/^the session bar shows (no account pill|no instance badge|the instance badge reading (.+))$/,
+		run: async ({ world, match }) => {
+			const bar = world.page.getByTestId("session-bar");
+			if (match[1] === "no account pill")
+				await expect(bar.getByTestId("session-account-pill")).toHaveCount(0);
+			else if (match[1] === "no instance badge")
+				await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
+			else
+				await expect(bar.getByTestId("instance-badge")).toHaveText(
+					match[2] ?? "",
+				);
+		},
+	},
+	{
+		name: "rebind the project from the instance badge",
+		match: /^I pick (.+) from the instance badge$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("session-bar")
+				.getByTestId("instance-badge")
+				.click();
+			await world.page
+				.getByTestId("instance-selector-dropdown")
+				.getByRole("menuitemradio", { name: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "assert the project binding RPC",
+		match:
+			/^the SetProjectInstance RPC (?:was not sent|binds the project to (\S+))$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			if (match[1] === undefined) {
+				expect(
+					rpc
+						.getRequests()
+						.filter((request) => request.tag === "SetProjectInstance"),
+				).toEqual([]);
+				return;
+			}
+			const request = await rpc.waitForRequest(
+				(candidate) => candidate.tag === "SetProjectInstance",
+			);
+			expect(request.payload["slug"]).toBe("myapp");
+			expect(request.payload["instanceId"]).toBe(match[1]);
 		},
 	},
 ];

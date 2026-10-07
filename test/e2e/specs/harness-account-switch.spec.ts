@@ -2617,3 +2617,170 @@ for (const behavior of [
 		}
 	});
 }
+
+// Story 16. Failures: the pill shows the project's account instead of the
+// session's, a pick rebinds the project, or the session stays on account 1.
+test("story 16: the session-bar account pill switches the session, not the project", async ({
+	page,
+	harness,
+}, testInfo) => {
+	test.setTimeout(120_000);
+	const artifacts = resolve(
+		"test-results/account-switch",
+		`${testInfo.project.name}-session-pill-${testInfo.retry}`,
+	);
+	mkdirSync(artifacts, { recursive: true });
+	const browser = await harness.connect();
+	const accounts: { id: string; configDir: string }[] = [];
+	for (const name of ["Account 1", "Account 2"]) {
+		const configDir = mkdtempSync(join(harness.root, "pill-account-"));
+		const { addedInstanceId } = await Effect.runPromise(
+			browser.rpc.AddInstance({ name, driver: "claude", configDir }),
+		);
+		if (!addedInstanceId) throw new Error(`No instance ID for ${name}`);
+		accounts.push({ id: addedInstanceId, configDir });
+	}
+	const [source, target] = accounts;
+	if (!source || !target) throw new Error("Two accounts are required");
+	const { savedSlug: projectSlug } = await Effect.runPromise(
+		browser.rpc.SaveProject({
+			folders: [mkdtempSync(join(harness.root, "pill-project-"))],
+			instanceId: source.id,
+		}),
+	);
+	if (!projectSlug) throw new Error("No pill project slug");
+	const boundInstance = async () =>
+		(await Effect.runPromise(browser.rpc.GetProjects({}))).projects.find(
+			(project) => project.slug === projectSlug,
+		)?.instanceId;
+	// Project RPCs reset config persistence's debounce. Wait on disk once,
+	// without retrying CreateSession or issuing another project RPC.
+	await expect
+		.poll(() => {
+			const file = join(harness.configDir, "daemon.json");
+			if (!existsSync(file)) return false;
+			const config: { instances?: { id: string }[] } = JSON.parse(
+				readFileSync(file, "utf8"),
+			);
+			return accounts.every((account) =>
+				config.instances?.some((instance) => instance.id === account.id),
+			);
+		})
+		.toBe(true);
+	const { sessionId } = await Effect.runPromise(
+		browser.rpc.CreateSession({
+			projectSlug,
+			instanceId: Schema.decodeUnknownSync(
+				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			)(source.id),
+			model: { modelId: "harness", providerId: "claude" },
+			originId: browser.originId,
+		}),
+	);
+	const observed: SessionInfo[] = [];
+	const subscription = Effect.runFork(
+		Stream.runForEach(browser.rpc.SubscribeShell({ projectSlug }), (envelope) =>
+			Effect.sync(() => {
+				if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+				if (envelope._tag === "upsert") observed.push(envelope.item);
+			}),
+		),
+	);
+	const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
+	const send = (text: string, commandId: string) =>
+		Effect.runPromise(
+			browser.rpc.SendMessage({
+				projectSlug,
+				sessionId,
+				text,
+				commandId,
+				originId: browser.originId,
+			}),
+		);
+	const first = "session-pill-first-request";
+	const evidence: Record<string, unknown> = {};
+	try {
+		await send(first, "pill-first");
+		await expect
+			.poll(() => JSON.stringify(harness.marks))
+			.toContain(`done(${first})`);
+		await expect.poll(() => latest()?.status).toBe("idle");
+		writeFileSync(join(target.configDir, "conduit-test-quota"), "available");
+		await new AppPage(page).goto(
+			`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+		);
+		const bar = page.getByTestId("session-bar");
+		const pill = bar.getByTestId("session-account-pill");
+		await expect(pill).toHaveText("Account 1");
+		await expect(pill).toHaveAttribute("data-account", source.id);
+		// The project's rebind control is not offered on a Claude session.
+		await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
+		await page.screenshot({ path: join(artifacts, "01-pill.png") });
+
+		await pill.click();
+		const row = page.locator(
+			`[data-testid="account-switch-option"][data-account="${target.id}"]`,
+		);
+		await expect(row.getByTestId("quota-meter-caption")).toHaveText("63% left");
+		await expect(
+			page.locator(
+				`[data-testid="account-switch-option"][data-account="${source.id}"]`,
+			),
+		).toHaveAttribute("data-disabled");
+		await page.screenshot({ path: join(artifacts, "02-picker.png") });
+		await row.click();
+		const dialog = page.getByTestId("handoff-dialog");
+		await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(
+			"Continue on Account 2?",
+		);
+		await expect(dialog.getByTestId("handoff-swap")).toContainText("Account 1");
+		await page.screenshot({ path: join(artifacts, "03-confirm.png") });
+		await dialog.getByTestId("handoff-confirm").click();
+		await expect(dialog).toHaveCount(0);
+
+		expect(
+			await Effect.runPromise(
+				browser.rpc.GetAgents({ projectSlug, sessionId }),
+			),
+		).toMatchObject({ instanceId: target.id });
+		await expect.poll(() => latest()?.resumes?.length).toBe(1);
+		expect(latest()?.resumes?.[0]).toMatchObject({
+			reason: "user",
+			instanceId: target.id,
+			from: source.id,
+		});
+		expect(await boundInstance()).toBe(source.id);
+		await expect(pill).toHaveText("Account 2");
+		await expect(pill).toHaveAttribute("data-account", target.id);
+		await page.screenshot({ path: join(artifacts, "04-switched.png") });
+
+		// The next turn runs on account 2 with the handoff; the project stays on 1.
+		await send("Next message on the new account.", "pill-next");
+		await expect
+			.poll(
+				() =>
+					harness
+						.claudeOptions()
+						.filter((call) => call.configDir === target.configDir).length,
+			)
+			.toBe(1);
+		expect(
+			harness
+				.claudeOptions()
+				.find((call) => call.configDir === target.configDir)?.prompt,
+		).toContain(handoffMarker);
+		expect(await boundInstance()).toBe(source.id);
+		evidence["resumes"] = latest()?.resumes;
+		evidence["boundInstance"] = await boundInstance();
+	} finally {
+		evidence["observed"] = observed;
+		evidence["sdkCalls"] = harness.claudeOptions();
+		evidence["sdkMarks"] = harness.marks;
+		writeFileSync(
+			join(artifacts, "session-pill-rpc.json"),
+			JSON.stringify(evidence, null, 2),
+		);
+		await Effect.runPromise(Fiber.interrupt(subscription));
+		await browser.close();
+	}
+});

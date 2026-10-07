@@ -355,5 +355,11 @@
 	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: bg-white/[0.04],font-brand,mb-3,mt-2,p-3,pb-3,pt-2,pt-2.5,py-2,rounded-lg,space-y-2,space-y-3,text-sm,tracking-wide,uppercase": "conduit-test-eon2.11 frame H list rows: instance and setup rows take a subtle border, radius 7 and Disclosure density=list (6px padding, 30px floor); the uppercase count becomes a 12px heading; the form and scan result use radius 7 and the bg-alt token instead of a raw white alpha. font-brand is still set once on #settings-panel and inherited by every section.",
 	"src/lib/frontend/components/ui/Toggle.svelte :: bg-brand-a,bg-text-dimmer,bg-transparent,border-none,font-medium,gap-3,h-4,h-5,items-center,left-0.5,mt-0.5,px-3.5,py-2.5,shadow-sm,text-sm,text-text-muted,text-xs,top-0.5,transition-[background,box-shadow],transition-transform,translate-x-4,w-4,w-9": "conduit-test-eon2.11 frame H switch: 30x17 track with a 13px knob, chip-coloured off and cyan (brand-b) with a white knob on; the row is a 600 title above a secondary description with 8px padding and a hairline. The icon slot is removed (no consumer kept one).",
 	"src/lib/frontend/components/ui/Disclosure.svelte :: py-2.5": "conduit-test-eon2.11: the roomy and split densities had only SettingsPanel consumers and are replaced by frame H's list density (p-[6px], min-h-[30px]).",
-	"src/lib/frontend/components/ui/Toggle.svelte :: transition-[background,box-shadow]": "conduit-test-eon2.11 frame H switch: the track now animates with transition-colors only; the old shadow that box-shadow animated is gone."
+	"src/lib/frontend/components/ui/Toggle.svelte :: transition-[background,box-shadow]": "conduit-test-eon2.11 frame H switch: the track now animates with transition-colors only; the old shadow that box-shadow animated is gone.",
+	"src/lib/frontend/components/input/AccountSwitch.svelte :: gap-[5px],justify-center": {
+		"movedTo": "src/lib/frontend/components/input/UsageLimitStrip.svelte",
+		"requires": "switchTrigger",
+		"reason": "conduit-test-eon2.9: AccountSwitch takes its trigger as a snippet so the session-bar account pill can share the picker and confirm. The strip's Switch account button, with its gap and phone centring, moved verbatim into UsageLimitStrip's trigger snippet."
+	},
+	"src/lib/frontend/components/input/AccountSwitch.svelte :: className,primary": "Not CSS classes: the removed `class` and `primary` props' expressions. The strip now renders its own Switch account trigger and chooses primary there."
 }

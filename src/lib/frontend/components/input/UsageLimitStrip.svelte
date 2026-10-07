@@ -95,6 +95,25 @@
 		run(cancelContinuationRpc({ projectSlug, sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
 </script>
 
+<!-- The strip's main action while limited, second to a scheduled resume. -->
+{#snippet switchAccount(primary: boolean)}
+	<AccountSwitch {sessionId} {projectSlug} account={limitRecovery.instanceId} limit={limitRecovery} side="top">
+		{#snippet trigger({ props, loading })}
+			<Button
+				{...props}
+				variant={primary ? "inverse" : "secondary"}
+				size="content"
+				iconSize={12}
+				{loading}
+				data-testid="usage-limit-switch-account"
+				class="gap-[5px] px-[10px] {primary ? 'font-semibold' : ''} {sessionViewState.compact ? 'justify-center' : ''} {geometry}"
+			>
+				Switch account{#if !sessionViewState.compact}<Icon name="chevron-down" size={12} />{/if}
+			</Button>
+		{/snippet}
+	</AccountSwitch>
+{/snippet}
+
 <Surface
 	variant={scheduledAt === undefined ? "danger" : "warning"}
 	radius="none"
@@ -111,7 +130,7 @@
 		{#if !limitRecovery.continued}
 			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
 				{#if canSwitch}
-					<AccountSwitch {limitRecovery} {sessionId} {projectSlug} primary class="px-[10px] {geometry}" />
+					{@render switchAccount(true)}
 				{/if}
 				{#if limitRecovery.resetsAt === undefined}
 					<Button variant={canSwitch ? "secondary" : "inverse"} size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class="px-[10px] {canSwitch ? '' : 'font-semibold'} {geometry}" onclick={() => continueAt()}>Try again</Button>
@@ -128,7 +147,7 @@
 		</span>
 		<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
 			{#if canSwitch}
-				<AccountSwitch {limitRecovery} {sessionId} {projectSlug} primary={false} class="px-[10px] {geometry}" />
+				{@render switchAccount(false)}
 			{/if}
 			<Button variant="ghost" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class="text-[11px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] px-[8px]' : 'h-[24px] rounded-[8px] px-[10px]'}" onclick={cancelResume}>Cancel auto-resume</Button>
 		</div>

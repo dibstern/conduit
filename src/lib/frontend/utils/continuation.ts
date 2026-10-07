@@ -1,5 +1,6 @@
 import type {
 	HandoffSummary,
+	LimitRecovery,
 	QuotaCheckResult,
 } from "../../contracts/limit-recovery.js";
 import { formatSnoozeTime } from "./format.js";
@@ -38,6 +39,11 @@ export function accountQuota(
 	return quotas === undefined
 		? undefined
 		: (quotas.get(instanceId) ?? { _tag: "Unknown" });
+}
+
+/** The quota an open limit already proves, without waiting on a check. */
+export function limitedQuota(limit: LimitRecovery): QuotaCheckResult {
+	return { _tag: "Limited", rateLimitType: limit.rateLimitType };
 }
 
 /** A limited account can't take the session; one whose quota can't be read can. */

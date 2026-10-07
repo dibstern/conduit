@@ -3,7 +3,7 @@
   the same budget the handoff itself uses, so the message count is the real one.
 
   With `confirm` it is the step before a manual switch: a swap card from the
-  limited account to the chosen one, and Switch and continue. Without it, it is
+  session's account to the chosen one, and Switch and continue. Without it, it is
   the read-only "What carried over?" behind a continuation divider, with a
   single Close. A modal on desktop, a bottom sheet with condensed rows on phones.
 -->
@@ -35,6 +35,7 @@
 		confirm?:
 			| {
 					from: string;
+					fromQuota: QuotaCheckResult | undefined;
 					quota: QuotaCheckResult | undefined;
 					/** Whether a cut-off request goes out with the handoff. */
 					cutOff: boolean;
@@ -119,7 +120,7 @@
 			<Surface variant="quiet" radius="none" data-testid="handoff-swap" class="my-[10px] flex items-center gap-[10px] rounded-[10px] px-[10px] py-[8px] {compact ? 'flex-wrap' : ''}">
 				<AccountDot instanceId={confirm.from} />
 				<span>{nameOf(confirm.from)}</span>
-				<QuotaMeter used={100} track={false} />
+				<QuotaMeter {...quotaReading(confirm.fromQuota)} track={false} />
 				<span aria-hidden="true" class="text-text-dimmer">→</span><span class="sr-only">to</span>
 				<AccountDot instanceId={to} />
 				<b class="font-semibold text-text">{nameOf(to)}</b>

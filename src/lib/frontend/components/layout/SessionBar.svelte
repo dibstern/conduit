@@ -13,8 +13,10 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The instance badge stays beside the project identity. The title menu carries
-  session verbs and global actions; the desktop overflow carries global actions.
+  The instance badge stays beside the project identity; a Claude session wears
+  its own account pill there instead, which moves the session, not the project.
+  The title menu carries session verbs and global actions; the desktop overflow
+  carries global actions.
 -->
 
 <script lang="ts">
@@ -67,6 +69,7 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
+	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
@@ -423,7 +426,11 @@
 				</Tooltip>
 			{/if}
 		</div>
-		<InstanceBadgeMenu />
+		{#if session && discoveryState.sessionProviderIds[session.id] === "claude"}
+			<SessionAccountPill {session} />
+		{:else}
+			<InstanceBadgeMenu />
+		{/if}
 	</div>
 {/snippet}
 

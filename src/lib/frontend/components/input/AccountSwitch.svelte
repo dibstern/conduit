@@ -1,44 +1,49 @@
 <!--
-  AccountSwitch — the usage-limit strip's Switch account: a picker of the
-  session's Claude accounts with each one's quota checked fresh on every open,
-  then the handoff confirm, then ContinueSession on the chosen account.
+  AccountSwitch — moves one Claude session to another account: a picker of the
+  Claude accounts with each one's quota checked fresh on every open, then the
+  handoff confirm, then ContinueSession on the chosen account. The usage-limit
+  strip's Switch account and the session bar's account pill each bring their
+  own trigger; only the session moves, never the project's binding.
 
   The account with the most quota left is pre-selected. Limited accounts and the
   session's own stay visible but can't be picked; an account whose quota can't
   be read can, and the daemon's refusal (not logged in, busy, too large) comes
-  back as an error toast with nothing changed. The strip itself leaves once the
-  switch goes out.
+  back as an error toast with nothing changed.
 -->
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import type { HandoffSummary, LimitRecovery, QuotaCheckResult } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { continueSessionRpc, previewContinuationRpc, quotaForAccountsRpc } from "../../transport/ws-rpc-client.js";
-	import { accountQuota, quotaBlocksSwitch, quotaHeadroom, quotaReading } from "../../utils/continuation.js";
+	import { accountQuota, limitedQuota, quotaBlocksSwitch, quotaHeadroom, quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
-	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
 
 	let {
-		limitRecovery,
 		sessionId,
 		projectSlug,
-		primary,
-		class: className,
+		account,
+		limit,
+		side,
+		// Menu's own trigger snippet below would shadow the prop's name.
+		trigger: switchTrigger,
 	}: {
-		limitRecovery: LimitRecovery;
 		sessionId: string;
 		projectSlug: string;
-		/** The strip's main action (limited), or second to a scheduled resume. */
-		primary: boolean;
-		/** The strip's button geometry. */
-		class: string;
+		/** The session's current account: the one it moves from. */
+		account: string;
+		/** The session's open usage limit, when it has one. */
+		limit: LimitRecovery | undefined;
+		/** Which side of the trigger the popover opens on (phones get a sheet). */
+		side: "top" | "bottom";
+		/** `loading` while the picked account's handoff preview is on its way. */
+		trigger: Snippet<[{ props: Record<string, unknown>; loading: boolean }]>;
 	} = $props();
 
 	const compact = $derived(sessionViewState.compact);
@@ -55,12 +60,12 @@
 	let previewTicket = 0;
 
 	const quotaOf = (instanceId: string) => accountQuota(quotas, instanceId);
-	const pickable = (instanceId: string) => instanceId !== limitRecovery.instanceId && !quotaBlocksSwitch(quotaOf(instanceId));
+	const pickable = (instanceId: string) => instanceId !== account && !quotaBlocksSwitch(quotaOf(instanceId));
 	const suggested = $derived.by(() => {
 		if (quotas === undefined) return undefined;
-		const candidates = accounts.filter((account) => pickable(account.id));
+		const candidates = accounts.filter((candidate) => pickable(candidate.id));
 		return candidates.reduce<(typeof candidates)[number] | undefined>(
-			(best, account) => (best === undefined || quotaHeadroom(quotaOf(account.id)) > quotaHeadroom(quotaOf(best.id)) ? account : best),
+			(best, candidate) => (best === undefined || quotaHeadroom(quotaOf(candidate.id)) > quotaHeadroom(quotaOf(best.id)) ? candidate : best),
 			undefined,
 		)?.id;
 	});
@@ -113,7 +118,7 @@
 				projectSlug,
 				sessionId,
 				instanceId,
-				expectedInstanceId: limitRecovery.instanceId,
+				expectedInstanceId: account,
 				originId: getBrowserClientId(),
 			});
 			closeConfirm();
@@ -132,41 +137,31 @@
 		if (open) void checkQuotas();
 	}}
 	presentation={compact ? "sheet" : "popover"}
-	side="top"
+	{side}
 	align="end"
 	ariaLabel="Continue this session on"
 	class={compact ? "px-[14px]" : "w-[320px] px-[10px]"}
 	data-testid="account-switch-picker"
 >
 	{#snippet trigger({ props })}
-		<Button
-			{...props}
-			variant={primary ? "inverse" : "secondary"}
-			size="content"
-			iconSize={12}
-			loading={target !== undefined && preview === undefined}
-			data-testid="usage-limit-switch-account"
-			class="gap-[5px] {primary ? 'font-semibold' : ''} {compact ? 'justify-center' : ''} {className}"
-		>
-			Switch account{#if !compact}<Icon name="chevron-down" size={12} />{/if}
-		</Button>
+		{@render switchTrigger({ props, loading: target !== undefined && preview === undefined })}
 	{/snippet}
 	<div class={compact ? "mt-[4px] mb-[6px] text-[13px] font-semibold text-text" : "my-[4px] font-mono text-[10px] text-text-dimmer"}>Continue this session on</div>
-	{#each accounts as account (account.id)}
-		{@const selected = account.id === suggested}
-		{@const quota = quotaOf(account.id)}
+	{#each accounts as option (option.id)}
+		{@const selected = option.id === suggested}
+		{@const quota = quotaOf(option.id)}
 		<MenuItem
 			density="compact"
-			disabled={!pickable(account.id)}
+			disabled={!pickable(option.id)}
 			data-testid="account-switch-option"
-			data-account={account.id}
+			data-account={option.id}
 			data-selected={selected}
 			class="rounded-[7px] {selected ? 'bg-border-chip' : ''}"
-			onselect={() => void pick(account.id)}
+			onselect={() => void pick(option.id)}
 		>
-			<AccountDot instanceId={account.id} />
-			<span class="min-w-0 truncate {selected ? 'text-text' : 'text-text-secondary'}">{account.name}</span>
-			{#if account.id === limitRecovery.instanceId}<span class="text-[11px] text-text-dimmer">current</span>{/if}
+			<AccountDot instanceId={option.id} />
+			<span class="min-w-0 truncate {selected ? 'text-text' : 'text-text-secondary'}">{option.name}</span>
+			{#if option.id === account}<span class="text-[11px] text-text-dimmer">current</span>{/if}
 			<span class="flex-1"></span>
 			<!-- A limited row's red caption says it all; a full red track would crowd its name out. -->
 			<QuotaMeter {...quotaReading(quota)} size={compact ? "sm" : "md"} track={!quotaBlocksSwitch(quota)} />
@@ -185,9 +180,10 @@
 		to={chosen}
 		summary={preview}
 		confirm={{
-			from: limitRecovery.instanceId,
+			from: account,
+			fromQuota: limit ? limitedQuota(limit) : quotaOf(account),
 			quota: quotaOf(chosen),
-			cutOff: limitRecovery.cutOffMessageId !== undefined,
+			cutOff: limit?.cutOffMessageId !== undefined,
 			busy,
 			onconfirm: () => void switchAccount(chosen),
 		}}
