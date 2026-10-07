@@ -45,10 +45,8 @@ import {
 import {
 	findSession,
 	getFilteredSessions,
-	handleSessionForked,
 	isRoutable,
 	observeSessionActivity,
-	pruneSessionLists,
 	sessionState,
 	switchToSession,
 } from "./session.svelte.js";
@@ -91,9 +89,7 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 		"user_message",
 		"part_removed",
 		"message_removed",
-		"session_forked",
 		"provider_session_reloaded",
-		"session_deleted",
 		"session.goal_changed",
 	]);
 
@@ -101,13 +97,6 @@ const PER_SESSION_EVENT_TYPES: ReadonlySet<string> =
 export function isPerSessionEvent(msg: RelayMessage): msg is PerSessionEvent {
 	return PER_SESSION_EVENT_TYPES.has(msg.type);
 }
-
-/** Per-session event types that still require global coordination in handleMessage.
- *  These are NOT routed through routePerSession. */
-const GLOBALLY_COORDINATED_TYPES: ReadonlySet<string> = new Set([
-	"session_forked",
-	"session_deleted",
-]);
 
 function isDev(): boolean {
 	return (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
@@ -172,14 +161,8 @@ function routePerSession(event: PerSessionEvent): void {
 		case "tool_content":
 			handleToolContentResponse(messages, event);
 			break;
-		case "session_forked":
-			// Handled in handleMessage — requires global toast.
-			break;
 		case "provider_session_reloaded":
 			log.debug("Provider session reloaded:", event.sessionId);
-			break;
-		case "session_deleted":
-			// Handled in handleMessage — requires global session state update.
 			break;
 	}
 }
@@ -193,54 +176,11 @@ export function handleMessage(msg: RelayMessage): void {
 	// Per-session events are routed by event.sessionId to the correct
 	// session slot.
 	if (isPerSessionEvent(msg)) {
-		// Events requiring global coordination are handled in the switch
-		// below rather than routePerSession. All other per-session events
-		// route through routePerSession.
-		if (!GLOBALLY_COORDINATED_TYPES.has(msg.type)) {
-			routePerSession(msg);
-			return;
-		}
+		routePerSession(msg);
+		return;
 	}
 
 	switch (msg.type) {
-		case "session_forked": {
-			handleSessionForked(msg);
-			const parentTitle = msg.parentTitle ?? "session";
-			showToast(`Forked from "${parentTitle}"`);
-			break;
-		}
-		case "session_deleted": {
-			const deletedId = msg.sessionId;
-			// The shell feed owns row removal and chat cleanup.
-			pruneSessionLists(deletedId);
-			const route = getCurrentRoute();
-			if (
-				(sessionState.currentId === deletedId ||
-					sessionState.currentId === null) &&
-				route.page === "chat" &&
-				route.sessionId === deletedId
-			) {
-				const survivor = getFilteredSessions().find(
-					(row) => row.id !== deletedId,
-				);
-				if (survivor)
-					switchToSession(survivor.id, survivor.projectSlug, undefined, {
-						replace: true,
-					});
-				else {
-					const activity = sessionActivity.get(deletedId);
-					if (activity) activity.replayGeneration++;
-					updateContextPercent(0);
-					clearTodoState();
-					replaceRoute("/");
-					sessionState.currentId = null;
-				}
-			}
-			break;
-		}
-
-		// Now routed through routePerSession (per-session events).
-
 		case "protocol_version":
 			handleProtocolVersion(msg.version);
 			handleBuildId(msg.buildId);

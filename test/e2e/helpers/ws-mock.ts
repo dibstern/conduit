@@ -144,8 +144,6 @@ const SESSION_SCOPED_MESSAGE_TYPES = new Set([
 	"part_removed",
 	"provider_session_reloaded",
 	"result",
-	"session_deleted",
-	"session_forked",
 	"status",
 	"thinking_delta",
 	"thinking_start",

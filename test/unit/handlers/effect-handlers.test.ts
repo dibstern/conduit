@@ -100,6 +100,7 @@ import {
 } from "../../../src/lib/handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../../src/lib/handlers/reload.js";
 import {
+	forkSessionForClient,
 	handleDeleteSession,
 	handleForkSession,
 	handleNewSession,
@@ -1369,9 +1370,7 @@ describe("handleForkSession", () => {
 				});
 				expect(establishOpenCodeSession).not.toHaveBeenCalled();
 				expect(setForkEntry).not.toHaveBeenCalled();
-				expect(ws.broadcast).toHaveBeenCalledWith(
-					expect.objectContaining({ type: "session_forked" }),
-				);
+				expect(ws.broadcast).not.toHaveBeenCalled();
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 			});
 		},
@@ -1496,27 +1495,26 @@ describe("handleForkSession", () => {
 				ws,
 			});
 
-			return handleForkSession("client-1", {
+			return forkSessionForClient({
+				clientId: "client-1",
 				sessionId: "ses-parent",
 				messageId: "msg-1",
 			}).pipe(
 				Effect.provide(layer),
-				Effect.tap(() => {
+				Effect.tap((fork) => {
 					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
 					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_forked",
-						sessionId: "ses-child",
+					expect(fork).toEqual({
+						id: "ses-child",
+						parentId: "ses-parent",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
-						parentId: "ses-parent",
-						parentTitle: "Parent Session",
 					});
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledTimes(1);
+					expect(ws.broadcast).not.toHaveBeenCalled();
 				}),
 			);
 		},
@@ -2656,11 +2654,7 @@ describe("handleDeleteSession", () => {
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(ws.broadcast).toHaveBeenCalledTimes(1);
-					expect(ws.broadcast).toHaveBeenCalledWith({
-						type: "session_deleted",
-						sessionId: "deleted-session",
-					});
+					expect(ws.broadcast).not.toHaveBeenCalled();
 					expect(legacySendSessionLists).not.toHaveBeenCalled();
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Deleted: deleted-session",
@@ -2685,10 +2679,6 @@ describe("handleDeleteSession", () => {
 			Effect.tap(() => {
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
-				expect(ws.broadcast).toHaveBeenCalledWith({
-					type: "session_deleted",
-					sessionId: "deleted-session",
-				});
 			}),
 		);
 	});

@@ -217,6 +217,18 @@ export class RpcMockControl {
 			]);
 	}
 
+	/** Delete one session row the way the server does: a `remove` naming it. */
+	removeShellRow(id: string): void {
+		this.shellRows = (this.shellRows ?? []).filter(
+			(candidate) => (candidate as { id?: string }).id !== id,
+		);
+		this.shellSequence++;
+		if (this.streams.has("SubscribeShell"))
+			this.sendChunk("SubscribeShell", [
+				{ _tag: "remove", id, sequence: this.shellSequence },
+			]);
+	}
+
 	/** Publish one project-setting fact, the way another tab's or the CLI's
 	 *  write reaches every open SubscribeProjectSettings stream. */
 	setProjectSetting(setting: ProjectSetting): void {

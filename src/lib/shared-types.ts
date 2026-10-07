@@ -804,9 +804,7 @@ export type PerSessionEventType =
 	| "user_message"
 	| "part_removed"
 	| "message_removed"
-	| "session_forked"
-	| "provider_session_reloaded"
-	| "session_deleted";
+	| "provider_session_reloaded";
 
 export type PerSessionEvent = Extract<
 	RelayMessage,

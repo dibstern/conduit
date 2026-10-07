@@ -37,7 +37,6 @@ import {
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	applySessionChange,
 	sessionSubscription,
@@ -215,23 +214,6 @@ it("forgets chat and selection when the subscription removes a session", () => {
 	expect(sessionActivity.has("gone")).toBe(false);
 	expect(sessionMessages.has("gone")).toBe(false);
 	expect(sessionState.currentId).toBeNull();
-});
-
-it("does not write a row from a fork notice", () => {
-	applySessionChange({
-		_tag: "snapshot",
-		sequence: 10,
-		rows: [{ id: "ses_original", title: "Original", status: "idle" }],
-	});
-	handleMessage({
-		type: "session_forked",
-		sessionId: "fork",
-		parentId: "ses_original",
-		parentTitle: "Original",
-	});
-
-	expect(sessionState.sessions.has("fork")).toBe(false);
-	expect(sessionState.sessions.get("ses_original")?.title).toBe("Original");
 });
 
 it("keeps the family list owned by the family feed", () => {

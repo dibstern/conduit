@@ -17,7 +17,11 @@ import {
 	handlePermissionModeInfo,
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
-import { forgetSession, sessionState } from "../stores/session.svelte.js";
+import {
+	forgetSession,
+	leaveDeletedSession,
+	sessionState,
+} from "../stores/session.svelte.js";
 import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
@@ -122,6 +126,8 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 	}
 	if (change._tag === "remove") {
 		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
+		// `remove` names a deleted session; a snapshot omission does not.
+		leaveDeletedSession(change.id);
 		forgetSession(change.id);
 	}
 	if (change._tag === "snapshot") {

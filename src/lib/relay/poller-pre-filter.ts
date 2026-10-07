@@ -6,7 +6,7 @@ import type { RelayMessage } from "../shared-types.js";
  */
 export const METADATA_TYPES: ReadonlySet<RelayMessage["type"]> = new Set<
 	RelayMessage["type"]
->(["session_list", "session_forked", "instance_update"]);
+>(["session_list", "instance_update"]);
 
 /**
  * Classifies a batch of poller events.

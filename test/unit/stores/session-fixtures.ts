@@ -2,7 +2,6 @@ import {
 	applyFamilyChange,
 	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
-	pruneSessionLists,
 	resetSessionFamily,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { applySessionChange as applyFeedChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
@@ -83,7 +82,6 @@ export function applySessionUpsert(row: SessionInfo): void {
 
 export function applySessionRemoved(id: string): void {
 	applyFeedChange({ _tag: "remove", sequence: ++sequence, id });
-	pruneSessionLists(id);
 }
 
 /** A fresh family feed: its snapshot, then `synchronized`. */

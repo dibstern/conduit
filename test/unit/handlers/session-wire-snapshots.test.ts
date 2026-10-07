@@ -83,7 +83,7 @@ describe("session handler wire snapshots", () => {
 		expect(calls).toEqual(readSnapshots()["new_session_success"]);
 	});
 
-	it("keeps the DeleteSession deleted and broadcast envelopes stable", async () => {
+	it("keeps DeleteSession off the legacy wire; the shell feed announces it", async () => {
 		const { wsHandler, calls } = makeRecordingWebSocketHandler({
 			getClientsForSession: vi.fn(() => []),
 		});

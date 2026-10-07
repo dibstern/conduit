@@ -42,8 +42,6 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
@@ -71,25 +69,11 @@ const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
 	seedSearchResults(hits);
 };
 
-const announceDeletion = () =>
-	handleMessage({
-		type: "session_deleted",
-		sessionId: "victim",
-	} as RelayMessage);
-const deleteVictim = () => {
-	announceDeletion();
-	applySessionChange({ _tag: "remove", id: "victim" });
-};
+const deleteVictim = () => applySessionChange({ _tag: "remove", id: "victim" });
 
 const sidebarIds = () => getFilteredSessions().map((s) => s.id);
 
 describe("deleted sessions leave the sidebar", () => {
-	it("keeps the row until the feed removes it", () => {
-		announceDeletion();
-		expect(sidebarIds()).toEqual(["victim", "keeper"]);
-		applySessionChange({ _tag: "remove", id: "victim" });
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
 	it("drops the session with no search active", () => {
 		deleteVictim();
 		expect(sidebarIds()).toEqual(["keeper"]);
@@ -128,12 +112,6 @@ describe("deleted sessions leave the sidebar", () => {
 			parentID: "victim",
 		} satisfies SessionInfo;
 		seedFamilySessions([VICTIM, child]);
-		handleMessage({ type: "session_deleted", sessionId: "child" });
-		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
-			"victim",
-			"child",
-		]);
-		expect(sidebarIds()).toEqual(["victim", "keeper"]);
 		applyFamilyFeedChange({ _tag: "remove", id: "child" });
 		expect(sessionState.familySessions.map((row) => row.id)).toEqual([
 			"victim",

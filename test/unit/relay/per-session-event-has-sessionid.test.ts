@@ -43,15 +43,13 @@ describe("PerSessionEvent type discriminator", () => {
 			"user_message",
 			"part_removed",
 			"message_removed",
-			"session_forked",
 			"provider_session_reloaded",
-			"session_deleted",
 		];
 		// Every per-session type is accounted for
 		expect(types.length).toBeGreaterThan(0);
 		// Verify the list matches the PerSessionEventType union by checking a known type
 		expect(types).toContain("delta");
-		expect(types).toContain("session_deleted");
+		expect(types).toContain("message_removed");
 	});
 });
 

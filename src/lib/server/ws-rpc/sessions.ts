@@ -278,6 +278,13 @@ export const sessionsHandlers = {
 					: Effect.succeed({
 							projectSlug: request.projectSlug,
 							sessionId: session.id,
+							parentId: session.parentId,
+							...(session.forkMessageId && {
+								forkMessageId: session.forkMessageId,
+							}),
+							...(session.forkPointTimestamp != null && {
+								forkPointTimestamp: session.forkPointTimestamp,
+							}),
 						}),
 			),
 			Effect.catchAll((error) =>

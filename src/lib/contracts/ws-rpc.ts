@@ -425,6 +425,10 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
+	/** Lineage for the forking tab until the fork's family row arrives. */
+	parentId: Schema.String,
+	forkMessageId: Schema.optional(Schema.String),
+	forkPointTimestamp: Schema.optional(Schema.Number),
 });
 
 export const GetAgentsResponseSchema = Schema.Struct({

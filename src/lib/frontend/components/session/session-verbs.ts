@@ -1,10 +1,6 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
-import {
-	isSessionSnoozed,
-	sessionState,
-	switchToSession,
-} from "../../stores/session.svelte.js";
+import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { confirm, showToast } from "../../stores/ui.svelte.js";
@@ -281,11 +277,7 @@ function fork(session: SessionInfo) {
 	const input = rpcInput(session);
 	if (!input) return;
 	void forkSessionRpc(input)
-		.then((response) => {
-			// The fork response selects the new session in this tab.
-			if (sessionState.currentId !== response.sessionId)
-				switchToSession(response.sessionId, response.projectSlug);
-		})
+		.then(followFork)
 		.catch(() => showToast("Failed to fork session", { variant: "error" }));
 }
 

@@ -29,13 +29,5 @@
 		}
 	],
 	"new_session_success": [],
-	"delete_session_success": [
-		{
-			"channel": "broadcast",
-			"message": {
-				"type": "session_deleted",
-				"sessionId": "deleted-session"
-			}
-		}
-	]
+	"delete_session_success": []
 }

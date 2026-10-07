@@ -201,7 +201,6 @@ export const deleteSessionForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -211,9 +210,6 @@ export const deleteSessionForClient = ({
 		const didDelete = yield* sessionManagerService.deleteSession(id);
 		if (!didDelete) return;
 
-		// Id only, no row: tabs prune the daemon-wide list and search results,
-		// which the per-project shell feed does not cover.
-		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});
 
@@ -459,9 +455,9 @@ export const forkSessionForClient = ({
 
 		yield* clearEffectOverrideSession(sessionId);
 
-		// Find the parent title for the notification
+		// The forking tab gets the lineage in its response; other tabs read it
+		// off the family row.
 		const sessions = yield* sessionManagerService.listSessions();
-		const parent = sessions.find((s) => s.id === sessionId);
 		const persistedFork = sessions.find((s) => s.id === forked.id);
 		const forkMessageId = persistedFork?.forkMessageId ?? forked.forkMessageId;
 		const forkPointTimestamp =
@@ -471,21 +467,16 @@ export const forkSessionForClient = ({
 				? forked.forkPointTimestamp
 				: undefined);
 
-		// Broadcast the fork notification
-		wsHandler.broadcast({
-			type: "session_forked",
-			sessionId: forked.id,
-			...(forkMessageId && { forkMessageId }),
-			...(forkPointTimestamp != null && { forkPointTimestamp }),
-			parentId: sessionId,
-			parentTitle: parent?.title ?? "Unknown",
-		});
-
 		log.info(
 			`client=${clientId} Forked: ${sessionId} → ${forked.id}${messageId ? ` at ${messageId}` : ""}`,
 		);
 
-		return forked;
+		return {
+			id: forked.id,
+			parentId: sessionId,
+			...(forkMessageId && { forkMessageId }),
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
+		};
 	});
 
 /** Fork a session at a specific message point (ticket 5.3). */

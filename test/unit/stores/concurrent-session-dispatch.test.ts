@@ -186,9 +186,7 @@ describe("isPerSessionEvent — runtime guard", () => {
 			"user_message",
 			"part_removed",
 			"message_removed",
-			"session_forked",
 			"provider_session_reloaded",
-			"session_deleted",
 		];
 		for (const type of perSessionTypes) {
 			const msg = { type, sessionId: "s1" } as RelayMessage;

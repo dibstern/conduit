@@ -19,7 +19,6 @@ import {
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import { applySessionRemoved, seedSessions } from "./session-fixtures.js";
 
 const replaceState = vi.fn();
@@ -56,15 +55,11 @@ describe("session deletion routes", () => {
 		},
 	];
 
-	it.each([
-		"notice first",
-		"feed first",
-	])("replaces the deleted route with the first sidebar survivor when %s", (order) => {
+	it("replaces the deleted route with the first sidebar survivor", () => {
 		seedSessions(rows);
 		sessionState.currentId = "victim";
 		routerState.path = "/s/victim";
-		if (order === "feed first") applySessionRemoved("victim");
-		handleMessage({ type: "session_deleted", sessionId: "victim" });
+		applySessionRemoved("victim");
 		expect(sessionState.currentId).toBe("first");
 		expect(routerState.path).toBe("/s/first");
 		expect(replaceState).toHaveBeenCalledTimes(1);
@@ -74,7 +69,7 @@ describe("session deletion routes", () => {
 		seedSessions(rows);
 		sessionState.currentId = "first";
 		routerState.path = "/s/first";
-		handleMessage({ type: "session_deleted", sessionId: "victim" });
+		applySessionRemoved("victim");
 		expect(sessionState.currentId).toBe("first");
 		expect(routerState.path).toBe("/s/first");
 		expect(replaceState).not.toHaveBeenCalled();
@@ -86,7 +81,7 @@ describe("session deletion routes", () => {
 		routerState.path = "/s/victim";
 		uiState.contextPercent = 75;
 		todoState.items = [{ id: "one", subject: "old", status: "pending" }];
-		handleMessage({ type: "session_deleted", sessionId: "victim" });
+		applySessionRemoved("victim");
 		expect(sessionState.currentId).toBeNull();
 		expect(routerState.path).toBe("/");
 		expect(replaceState).toHaveBeenCalledTimes(1);

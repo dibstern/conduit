@@ -194,11 +194,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
-			expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "session_deleted",
-				sessionId: "session-1",
-			});
+			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -289,6 +285,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({
 				projectSlug: "project-a",
 				sessionId: "session-forked",
+				parentId: "session-1",
+				forkMessageId: "message-1",
+				forkPointTimestamp: 9,
 			});
 			// OpenCode cuts before messageID, so the fork keeps message-1.
 			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
@@ -307,16 +306,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(
 				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked'`,
 			).toEqual([{ type: "session.created" }]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "session_forked",
-					sessionId: "session-forked",
-					parentId: "session-1",
-					parentTitle: "Original Session",
-					forkMessageId: "message-1",
-					forkPointTimestamp: 9,
-				}),
-			);
+			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
@@ -627,13 +617,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 					configDir: claudeConfigDir,
 				});
 				expect(readTranscript).toHaveBeenCalledTimes(1);
-				const forkNotice = vi
-					.mocked(wsHandler.broadcast)
-					.mock.calls.map(([message]) => message)
-					.find((message) => message.type === "session_forked");
-				expect(forkNotice).toMatchObject({
+				expect(result).toMatchObject({
 					parentId: "ses-parent",
-					sessionId: result.sessionId,
 					forkMessageId: "api-first",
 					forkPointTimestamp: expect.any(Number),
 				});
@@ -673,12 +658,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 						})),
 					})),
 				);
-				if (forkNotice?.type === "session_forked") {
-					expect(forkNotice.forkPointTimestamp).toBe(
-						parentHistory.find((message) => message.id === "api-first")
-							?.created_at,
-					);
-				}
+				expect(result.forkPointTimestamp).toBe(
+					parentHistory.find((message) => message.id === "api-first")
+						?.created_at,
+				);
 				const sql = yield* SqlClient.SqlClient;
 				const sessionCount = () =>
 					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;

@@ -105,14 +105,16 @@ describe("Integration: Session Lifecycle", () => {
 		const sessionId = switched["id"] as string;
 		client.clearReceived();
 
-		// Delete it
-		await client.deleteSession(sessionId);
-
-		const deleted = await client.waitFor("session_deleted", {
+		// Delete it: the shell feed names the deleted row, which is what moves
+		// tabs off it.
+		await client.subscribeShell();
+		const removed = client.waitFor("shell", {
 			timeout: 5000,
-			predicate: (message) => message["sessionId"] === sessionId,
+			predicate: (message) =>
+				message["_tag"] === "remove" && message["id"] === sessionId,
 		});
-		expect(deleted["sessionId"]).toBe(sessionId);
+		await client.deleteSession(sessionId);
+		await removed;
 
 		await client.close();
 	});
