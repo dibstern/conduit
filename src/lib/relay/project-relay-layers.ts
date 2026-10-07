@@ -78,6 +78,7 @@ import {
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
+import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import { makeSessionCompactions } from "../session/session-compactions.js";
 import { makeSessionRetries } from "../session/session-retries.js";
@@ -470,7 +471,10 @@ export function createProjectRelayLayers({
 		sessionLifecycleWiringLayer,
 		defaultCommandQueueLayer,
 	).pipe(Layer.provide(baseLayers));
-	const fullLayer = Layer.provideMerge(wiringLayers, fullBaseLayers);
+	const fullLayer = Layer.provideMerge(
+		RpcSubscriptionScopeLive,
+		Layer.provideMerge(wiringLayers, fullBaseLayers),
+	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {
 		runtime: relayManagedRuntime,

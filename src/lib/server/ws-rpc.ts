@@ -1,5 +1,15 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
-import { type Context, Effect, type Layer, Stream, Struct } from "effect";
+import {
+	Context,
+	Effect,
+	Fiber,
+	Layer,
+	Queue,
+	type Scope,
+	Stream,
+	Struct,
+	type Take,
+} from "effect";
 import {
 	type OpenCodeInstance,
 	type ProjectInfo,
@@ -275,10 +285,21 @@ export const wsRpcHandlers = WsRpcGroup.of({
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
 
+export class RpcSubscriptionScopeTag extends Context.Tag(
+	"RpcSubscriptionScope",
+)<RpcSubscriptionScopeTag, Scope.Scope>() {}
+
+export const RpcSubscriptionScopeLive = Layer.scoped(
+	RpcSubscriptionScopeTag,
+	Effect.scope,
+);
+
 export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<
-	Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+	Context.Context<
+		Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+	>,
 	WsRpcError
 >;
 
@@ -412,17 +433,36 @@ export const makeRoutedWsRpcServerLayer = (
 		make: () => Stream.Stream<A, E, R>,
 	) =>
 		Rpc.fork(
-			Stream.unwrap(
-				Effect.map(resolveContext(projectSlug), (context) =>
-					Stream.provideContext(make(), context).pipe(
+			Stream.unwrapScoped(
+				Effect.gen(function* () {
+					const context = yield* resolveContext(projectSlug);
+					const queue = yield* Effect.acquireRelease(
+						Queue.bounded<Take.Take<A, E>>(2),
+						Queue.shutdown,
+					);
+					// Project removal and browser cancellation both await this producer
+					// before SQLite closes. Queue shutdown ends the consumer cleanly.
+					yield* Effect.acquireRelease(
+						Stream.runIntoQueue(
+							Stream.provideContext(make(), context),
+							queue,
+						).pipe(
+							Effect.interruptible,
+							Effect.onInterrupt(() => Queue.shutdown(queue)),
+							Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
+						),
+						Fiber.interrupt,
+					);
+					return Stream.fromQueue(queue).pipe(
+						Stream.flattenTake,
 						Stream.mapError(
 							(error) =>
 								new WsRpcError({
 									message: `Subscription failed: ${String(error)}`,
 								}),
 						),
-					),
-				),
+					);
+				}),
 			),
 		);
 	return WsRpcGroup.toLayer({

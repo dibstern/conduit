@@ -33,6 +33,8 @@ import { getDefaultModel } from "../../../src/lib/domain/relay/Services/session-
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeRoutedWsRpcServerLayer,
+	RpcSubscriptionScopeLive,
+	type RpcSubscriptionScopeTag,
 	type WsRpcServerLayer,
 } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -50,10 +52,10 @@ describe("CLI and browser daemon RPC parity", () => {
 			await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
-						const context =
-							yield* Effect.context<
-								Layer.Layer.Context<typeof WsRpcServerLayer>
-							>();
+						const context = yield* Effect.context<
+							| Layer.Layer.Context<typeof WsRpcServerLayer>
+							| RpcSubscriptionScopeTag
+						>();
 						yield* Layer.build(
 							makeDaemonRpcSocketLayer(
 								socketPath,
@@ -103,7 +105,7 @@ describe("CLI and browser daemon RPC parity", () => {
 						makeTestHandlerLayer({
 							api,
 							config: makeMockConfig({ configDir: root }),
-						}),
+						}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 					),
 				),
 			);

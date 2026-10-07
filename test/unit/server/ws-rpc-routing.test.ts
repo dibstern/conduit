@@ -19,7 +19,10 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import {
+	makeRoutedWsRpcServerLayer,
+	RpcSubscriptionScopeLive,
+} from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	makeWsRpcWebSocketHandler,
@@ -37,6 +40,7 @@ describe("routed RPC server", () => {
 				const bus = makeSessionEventBusLive();
 				const context = yield* Layer.build(
 					Layer.mergeAll(
+						RpcSubscriptionScopeLive,
 						bus,
 						makePersistenceEffectLayer(":memory:", undefined, bus),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
@@ -94,6 +98,7 @@ describe("routed RPC server", () => {
 					const bus = makeSessionEventBusLive();
 					const context = yield* Layer.build(
 						Layer.mergeAll(
+							RpcSubscriptionScopeLive,
 							bus,
 							makePersistenceEffectLayer(":memory:", undefined, bus),
 							Layer.succeed(BackgroundLivenessTag, () => undefined),
@@ -235,7 +240,7 @@ describe("routed RPC server", () => {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
 						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
-					}),
+					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
@@ -288,7 +293,11 @@ describe("routed RPC server", () => {
 		"routes ViewSession normally when daemon reattachment declines",
 		() =>
 			Effect.gen(function* () {
-				const context = yield* Layer.build(makeTestHandlerLayer());
+				const context = yield* Layer.build(
+					makeTestHandlerLayer().pipe(
+						Layer.provideMerge(RpcSubscriptionScopeLive),
+					),
+				);
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const reattach = vi.fn(() => Effect.succeed(false));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
@@ -316,7 +325,7 @@ describe("routed RPC server", () => {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
 						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
-					}),
+					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
