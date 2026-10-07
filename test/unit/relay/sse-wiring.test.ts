@@ -702,8 +702,7 @@ describe("wireSSEConsumerEffect", () => {
 
 		const registeredEvents = vi.mocked(consumer.on).mock.calls.map((c) => c[0]);
 		expect(registeredEvents).toContain("connected");
-		expect(registeredEvents).toContain("disconnected");
-		expect(registeredEvents).toContain("reconnecting");
+		expect(registeredEvents).toContain("status");
 		expect(registeredEvents).toContain("error");
 		expect(registeredEvents).toContain("event");
 	});
@@ -828,19 +827,17 @@ describe("wireSSEConsumerEffect", () => {
 		connectedListener();
 		expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Connected"));
 
-		const disconnectedListener = listeners.get("disconnected");
-		assert.exists(disconnectedListener, "expected disconnected listener");
-		disconnectedListener(undefined);
-		expect(warnSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Disconnected"),
+		const statusListener = listeners.get("status");
+		assert.exists(statusListener, "expected status listener");
+		statusListener("reconnecting");
+		expect(infoSpy).toHaveBeenCalledWith(
+			expect.stringContaining("reconnecting"),
 		);
 
-		const reconnectingListener = listeners.get("reconnecting");
-		assert.exists(reconnectingListener, "expected reconnecting listener");
-		reconnectingListener({ attempt: 3, delay: 5000 });
-		expect(infoSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Reconnecting"),
-		);
+		const errorListener = listeners.get("error");
+		assert.exists(errorListener, "expected error listener");
+		errorListener(new Error("boom"));
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
 	});
 
 	it("publishes the OpenCode upstream state as a live project fact", async () => {
@@ -853,25 +850,20 @@ describe("wireSSEConsumerEffect", () => {
 			}),
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 		const latest = () =>
-			Effect.runSync(Ref.get(services.projectSettings.live)).opencodeConnection;
+			Effect.runSync(Ref.get(services.projectSettings.live))[
+				"opencodeConnection:opencode"
+			];
 
 		await wireSSEConsumerForTest(deps, consumer, services);
 
-		listeners.get("reconnecting")?.({ attempt: 1, delay: 1000 });
-		expect(latest()).toEqual({
-			_tag: "opencodeConnection",
-			status: "reconnecting",
-		});
-		listeners.get("disconnected")?.(new Error("connection lost"));
-		expect(latest()).toEqual({
-			_tag: "opencodeConnection",
-			status: "disconnected",
-		});
-		listeners.get("connected")?.();
-		expect(latest()).toEqual({
-			_tag: "opencodeConnection",
-			status: "connected",
-		});
+		for (const status of ["reconnecting", "failed", "connected"] as const) {
+			listeners.get("status")?.(status);
+			expect(latest()).toEqual({
+				_tag: "opencodeConnection",
+				instanceId: "opencode",
+				status,
+			});
+		}
 		expect(deps.wsHandler.broadcast).not.toHaveBeenCalled();
 	});
 });

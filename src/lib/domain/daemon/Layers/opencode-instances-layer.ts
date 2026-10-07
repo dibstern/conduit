@@ -14,6 +14,7 @@ import {
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveOpenCodeInstanceUrl,
@@ -24,11 +25,18 @@ import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
 import { SSEStream } from "../../../relay/sse-stream.js";
-import type { InstanceStatus, ProjectRelayConfig } from "../../../types.js";
+import type {
+	ConnectionHealth,
+	InstanceStatus,
+	ProjectRelayConfig,
+} from "../../../types.js";
+import { subscribeToDaemonEvents } from "../Services/daemon-pubsub.js";
 import {
+	getInstance,
 	getInstances,
 	getInstanceUrl,
 	getManagedOpenCodeProcessEnv,
+	scheduleRestart,
 	startInstance,
 	stopInstance,
 } from "../Services/instance-manager-service.js";
@@ -75,6 +83,14 @@ type OpenCodeProcessControl<Start, Stop> = {
 	readonly stop: (instanceId: string) => Effect.Effect<void, never, Stop>;
 	/** Instances running before any use: survivors re-adopted at startup. */
 	readonly adopted: Effect.Effect<ReadonlyArray<string>, never, Start>;
+	readonly crashes?: {
+		/** Ids of instances whose process status changed. */
+		readonly statusChanges: Stream.Stream<string, never, Start>;
+		/** Restarts a crashed managed instance with backoff; fails on giving up. */
+		readonly restart: (
+			instanceId: string,
+		) => Effect.Effect<void, unknown, Start>;
+	};
 };
 
 const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
@@ -84,15 +100,20 @@ const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
 		endpoint?.auth?.password,
 	]);
 
-type Connection = Extract<OpenCodeInstanceEvent, { _tag: "connection" }>;
-
 type InstanceStream = {
 	readonly key: string;
+	readonly managed: boolean;
 	readonly source: SSEStream;
 	readonly connected: Deferred.Deferred<void>;
 	readonly reconciler: ReturnType<typeof createOpenCodeReconciler>;
 	readonly reconcileClient: OpenCodeAPI | undefined;
-	connection: Connection;
+};
+
+const NO_STREAM_HEALTH: ConnectionHealth = {
+	connected: false,
+	lastEventAt: null,
+	reconnectCount: 0,
+	stale: false,
 };
 
 const CONNECT_TIMEOUT = "4 seconds";
@@ -151,6 +172,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			let graceTokens = 0;
 			// Completes when an instance's stop finishes; `use` waits on it.
 			const stopping = new Map<string, Deferred.Deferred<void>>();
+			// Last lifecycle state per instance; only transitions are broadcast.
+			const states = new Map<string, OpenCodeConnectionStatus>();
 			// Reconcilers report demand changes from callbacks; settled in order.
 			const demandChanged = yield* Queue.unbounded<string>();
 			const paths = new Map<string, string>();
@@ -177,6 +200,24 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			};
 			const resolveIn = (instanceId: string) =>
 				resolveEndpoint(instanceId).pipe(Effect.provide(context));
+			const setState = (
+				instanceId: string,
+				state: OpenCodeConnectionStatus,
+			) => {
+				if (states.get(instanceId) === state) return;
+				states.set(instanceId, state);
+				log.info("OpenCode instance state", { instanceId, state });
+				broadcast({
+					_tag: "connection",
+					instanceId,
+					state,
+					health:
+						streams.get(instanceId)?.source.getHealth() ?? NO_STREAM_HEALTH,
+				});
+			};
+			const hasDemand = (instanceId: string) =>
+				holds.has(instanceId) ||
+				streams.get(instanceId)?.reconciler.active() === true;
 
 			const emitToDirectory = (
 				instanceId: string,
@@ -230,6 +271,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					});
 					const stream: InstanceStream = {
 						key,
+						managed: endpoint?.managed === true,
 						source,
 						connected: yield* Deferred.make<void>(),
 						reconciler: createOpenCodeReconciler({
@@ -249,41 +291,28 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										authHeaders: sdk.authHeaders,
 									})
 								: undefined,
-						connection: {
-							_tag: "connection",
-							instanceId,
-							state: "disconnected",
-							health: source.getHealth(),
-						},
 					};
-					const setConnection = (
-						state: Connection["state"],
-						extra: Partial<Connection> = {},
-					) => {
-						stream.connection = {
-							_tag: "connection",
-							instanceId,
-							state,
-							health: source.getHealth(),
-							...extra,
-						};
-						broadcast(stream.connection);
+					// A replaced or closed stream reports nothing.
+					const current = () => streams.get(instanceId) === stream;
+					// A managed process that died is the crash rule's call; a
+					// managed one still running just reconnects unnoticed.
+					const lost = () => {
+						if (!current()) return;
+						if (hasDemand(instanceId)) setState(instanceId, "reconnecting");
+						else if (!stream.managed) setState(instanceId, "stopped");
 					};
 					source.on("connected", () => {
 						Deferred.unsafeDone(stream.connected, Exit.void);
-						setConnection("connected");
+						if (!current()) return;
+						setState(instanceId, "connected");
 						if (stream.reconcileClient)
 							void stream.reconciler.reconcile(
 								stream.reconcileClient,
 								subscribedDirectories(),
 							);
 					});
-					source.on("disconnected", (error) =>
-						setConnection("disconnected", error ? { error } : {}),
-					);
-					source.on("reconnecting", (info) =>
-						setConnection("reconnecting", info),
-					);
+					source.on("disconnected", lost);
+					source.on("reconnecting", lost);
 					source.on("event", (raw) => {
 						const decoded = decodeEnvelope(raw);
 						if (Either.isLeft(decoded)) {
@@ -325,7 +354,6 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							});
 					});
 					streams.set(instanceId, stream);
-					broadcast(stream.connection);
 					yield* source.connectEffect();
 				});
 
@@ -425,6 +453,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							.withPermits(1)(
 								Effect.sync(() => {
 									stopping.delete(instanceId);
+									setState(instanceId, "stopped");
 								}),
 							)
 							.pipe(Effect.zipRight(Deferred.done(done, Exit.void))),
@@ -522,10 +551,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				});
 
 			// Runs in the module's scope, so a caller's interruption cannot abandon
-			// a spawn that other callers joined. A failure is not cached.
+			// a spawn that other callers joined. A failure is not cached; it
+			// closes any stream still retrying the dead endpoint.
 			const start = (
 				instanceId: string,
-				control: OpenCodeProcessControl<Start, Stop>,
+				pending: "starting" | "reconnecting",
+				run: Effect.Effect<void, unknown, Start>,
 			) =>
 				Effect.suspend(() => {
 					const running = starts.get(instanceId);
@@ -534,7 +565,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						FiberId.none,
 					);
 					starts.set(instanceId, started);
-					return control.start(instanceId).pipe(
+					setState(instanceId, pending);
+					return run.pipe(
 						Effect.provide(context),
 						Effect.mapError((cause) => spawnFailed(instanceId, cause)),
 						Effect.zipRight(resolveIn(instanceId)),
@@ -544,10 +576,22 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								spawnFailed(instanceId, `status is ${endpoint?.status}`),
 						),
 						Effect.exit,
-						Effect.flatMap((exit) => {
-							starts.delete(instanceId);
-							return Deferred.done(started, Exit.asVoid(exit));
-						}),
+						Effect.flatMap((exit) =>
+							gate
+								.withPermits(1)(
+									Effect.suspend(() => {
+										starts.delete(instanceId);
+										if (Exit.isSuccess(exit)) return Effect.void;
+										// A stop that won the race already settled the state.
+										if (states.get(instanceId) !== "stopped")
+											setState(instanceId, "failed");
+										return closeStream(instanceId);
+									}),
+								)
+								.pipe(
+									Effect.zipRight(Deferred.done(started, Exit.asVoid(exit))),
+								),
+						),
 						Effect.forkIn(scope),
 						Effect.zipRight(Deferred.await(started)),
 					);
@@ -596,7 +640,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						(endpoint.status === "stopped" ||
 							(endpoint.managed && endpoint.status !== "healthy"))
 					) {
-						yield* start(instanceId, control);
+						yield* start(instanceId, "starting", control.start(instanceId));
 						endpoint = yield* resolveIn(instanceId);
 					}
 					if (!endpoint)
@@ -610,7 +654,10 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					);
 					const client = clientFor(endpoint, directory);
 					const stream = streams.get(instanceId);
-					if (stream?.connection.state === "connected") return client;
+					if (stream?.source.isConnected()) {
+						setState(instanceId, "connected");
+						return client;
+					}
 					yield* Effect.tryPromise({
 						try: () => client.app.path(),
 						catch: (cause) => cause,
@@ -639,7 +686,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						// Don't leave a stream this call opened retrying a dead server.
 						Effect.tapError(() =>
 							opened && streams.get(instanceId) === stream
-								? gate.withPermits(1)(closeStream(instanceId))
+								? gate.withPermits(1)(
+										closeStream(instanceId).pipe(
+											Effect.tap(() => setState(instanceId, "failed")),
+										),
+									)
 								: Effect.void,
 						),
 					);
@@ -663,6 +714,64 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								: Effect.void,
 						),
 					{ discard: true },
+				);
+
+			// Crash rule: a managed process that died while its stream was open
+			// restarts with backoff if it has demand; otherwise it stays stopped.
+			// Starts and stops in progress own their failures.
+			const crashes = control?.crashes;
+			if (crashes)
+				yield* crashes.statusChanges.pipe(
+					Stream.runForEach((instanceId) =>
+						Effect.gen(function* () {
+							const endpoint = yield* resolveIn(instanceId);
+							if (!endpoint?.managed || endpoint.status !== "unhealthy") return;
+							const done = yield* gate.withPermits(1)(
+								Effect.suspend(() => {
+									if (
+										!streams.has(instanceId) ||
+										stopping.has(instanceId) ||
+										starts.has(instanceId)
+									)
+										return Effect.succeed(undefined);
+									if (!hasDemand(instanceId)) {
+										log.info("OpenCode exited without demand; not restarting", {
+											instanceId,
+										});
+										return beginStop(instanceId);
+									}
+									log.warn("OpenCode exited with demand; restarting", {
+										instanceId,
+									});
+									return start(
+										instanceId,
+										"reconnecting",
+										crashes.restart(instanceId),
+									).pipe(
+										Effect.zipRight(resolveIn(instanceId)),
+										Effect.flatMap((restarted) =>
+											gate.withPermits(1)(
+												Effect.suspend(() =>
+													stopping.has(instanceId)
+														? Effect.void
+														: ensureStream(instanceId, restarted).pipe(
+																Effect.zipRight(settle(instanceId)),
+															),
+												),
+											),
+										),
+										// A failed restart already closed the stream and failed.
+										Effect.ignore,
+										Effect.forkIn(scope),
+										Effect.as(undefined),
+									);
+								}),
+							);
+							if (done) yield* finishStop(instanceId, done, true);
+						}),
+					),
+					Effect.provide(context),
+					Effect.forkIn(scope),
 				);
 
 			// Admin stop, regardless of demand. Waits out an idle stop first.
@@ -716,16 +825,17 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												),
 										);
 										const stream = streams.get(instanceId);
-										if (stream) {
+										const state = states.get(instanceId);
+										if (state)
 											subscriber.send({
-												...stream.connection,
-												health: stream.source.getHealth(),
+												_tag: "connection",
+												instanceId,
+												state,
+												health: stream?.source.getHealth() ?? NO_STREAM_HEALTH,
 											});
+										if (stream) {
 											// A late subscriber gets its own replay; others never see it.
-											if (
-												stream.connection.state === "connected" &&
-												stream.reconcileClient
-											)
+											if (stream.source.isConnected() && stream.reconcileClient)
 												void stream.reconciler.reconcile(
 													stream.reconcileClient,
 													subscriber.directories,
@@ -804,6 +914,36 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 						Effect.logWarning("OpenCode instance stop failed", cause),
 					),
 				),
+			crashes: {
+				statusChanges: Stream.unwrapScoped(
+					Effect.map(subscribeToDaemonEvents, (events) =>
+						Stream.fromQueue(events).pipe(
+							Stream.filterMap((event) =>
+								event._tag === "InstanceStatusChanged"
+									? Option.some(event.instanceId)
+									: Option.none(),
+							),
+						),
+					),
+				),
+				// Each attempt waits out the managed backoff; a failed spawn
+				// tries again until the restart limit gives up.
+				restart: (instanceId) =>
+					Effect.gen(function* () {
+						for (;;) {
+							const attempt = yield* scheduleRestart(instanceId);
+							if (!attempt)
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode instance "${instanceId}" restart limit reached`,
+									),
+								);
+							yield* Fiber.join(attempt);
+							if ((yield* getInstance(instanceId)).status !== "unhealthy")
+								return;
+						}
+					}),
+			},
 		},
 	},
 );

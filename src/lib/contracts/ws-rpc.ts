@@ -2049,6 +2049,16 @@ export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	stream: true,
 });
 
+export const OpenCodeConnectionStatusSchema = Schema.Literal(
+	"stopped",
+	"starting",
+	"connected",
+	"reconnecting",
+	"failed",
+);
+export type OpenCodeConnectionStatus =
+	typeof OpenCodeConnectionStatusSchema.Type;
+
 /**
  * One project-global setting, whole. Each member owns one slot, keyed by its
  * `_tag`, so a duplicate or late delivery is idempotent and a new fact is a new
@@ -2073,9 +2083,13 @@ export const ProjectSettingSchema = Schema.Union(
 	// Live facts the relay publishes as they change, not settings anyone writes.
 	/** Browser sockets attached to this project. */
 	Schema.TaggedStruct("clientCount", { count: Schema.Number }),
-	/** The relay's SSE stream from OpenCode, not the browser's own socket. */
+	/**
+	 * One OpenCode instance's lifecycle, not the browser's own socket. The one
+	 * member keyed by `_tag` and `instanceId`: one slot per instance.
+	 */
 	Schema.TaggedStruct("opencodeConnection", {
-		status: Schema.Literal("disconnected", "reconnecting", "connected"),
+		instanceId: Schema.String,
+		status: OpenCodeConnectionStatusSchema,
 	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;

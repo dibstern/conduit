@@ -40,6 +40,7 @@ const makeChannel = (log: Logger | undefined) => {
 		reconnecting: [],
 		error: [],
 		heartbeat: [],
+		status: [],
 	};
 	let health: ConnectionHealth = {
 		connected: false,
@@ -77,24 +78,10 @@ const makeChannel = (log: Logger | undefined) => {
 					for (const callback of callbacks.heartbeat) notify(callback);
 					break;
 				case "connection":
-					if (message.state === "connected") {
+					if (message.state === "connected")
 						for (const callback of callbacks.connected) notify(callback);
-					} else if (message.state === "disconnected") {
-						for (const callback of callbacks.disconnected)
-							notify(() => callback(message.error));
-						const error = message.error;
-						if (error)
-							for (const callback of callbacks.error)
-								notify(() => callback(error));
-					} else {
-						for (const callback of callbacks.reconnecting)
-							notify(() =>
-								callback({
-									attempt: message.attempt ?? 0,
-									delay: message.delay ?? 0,
-								}),
-							);
-					}
+					for (const callback of callbacks.status)
+						notify(() => callback(message.state));
 			}
 		},
 	};

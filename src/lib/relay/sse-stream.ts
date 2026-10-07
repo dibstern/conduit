@@ -6,6 +6,7 @@
 // swallowed. Keeps the callback-based public API for relay wiring.
 
 import { Duration, Effect, Fiber } from "effect";
+import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { ConnectionHealth } from "../types.js";
 import { calculateBackoffDelay } from "./sse-backoff.js";
@@ -40,6 +41,8 @@ export interface SSEStreamCallbacks {
 	reconnecting: (info: { attempt: number; delay: number }) => void;
 	error: (error: Error) => void;
 	heartbeat: () => void;
+	/** OpenCode instance lifecycle; only relay channels report it. */
+	status: (status: OpenCodeConnectionStatus) => void;
 }
 
 export interface SSEStreamEvents {
@@ -108,6 +111,7 @@ export class SSEStream implements SSEStreamPort {
 		reconnecting: [],
 		error: [],
 		heartbeat: [],
+		status: [],
 	};
 
 	constructor(options: SSEStreamOptions) {

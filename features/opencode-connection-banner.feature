@@ -53,23 +53,50 @@ Examples:
 Scenario: An outage without a viewed session shows no warning
   When the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner is not visible
-  When the mock relay reports OpenCode disconnected
+  When the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
 
 Scenario: A Claude session using an OpenCode project default shows no warning
   When I view the Claude session using the OpenCode project default
   And the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner is not visible
-  When the mock relay reports OpenCode disconnected
+  When the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
 
-Scenario: Disconnected warnings update and disappear when switching back to Claude
+Scenario: Failed warnings update and disappear when switching back to Claude
   When I view the Claude session
-  And the mock relay reports OpenCode disconnected
+  And the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
   When I view the OpenCode session
-  Then the OpenCode connection banner reads OpenCode server disconnected
+  Then the OpenCode connection banner reads OpenCode failed to start
   When the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner reads Reconnecting to OpenCode…
   When I view the Claude session
   Then the OpenCode connection banner is not visible
+
+Scenario: Stopped never shows a warning
+  When I view the OpenCode session
+  And the mock relay reports OpenCode reconnecting
+  Then the OpenCode connection banner reads Reconnecting to OpenCode…
+  When the mock relay reports OpenCode stopped
+  Then the OpenCode connection banner is not visible
+
+Scenario: A status for another instance shows no banner
+  When I view the OpenCode session on instance work-oc
+  And the mock relay reports OpenCode reconnecting
+  Then the OpenCode connection banner is not visible
+  When the mock relay reports OpenCode failed for instance other-oc
+  Then the OpenCode connection banner is not visible
+  When the mock relay reports OpenCode reconnecting for instance work-oc
+  Then the OpenCode connection banner reads Reconnecting to OpenCode…
+
+Scenario Outline: Starting shows a non-warning indicator
+  When I view the OpenCode session
+  And the mock relay reports OpenCode starting
+  Then the OpenCode connection banner reads Starting OpenCode…
+  And the OpenCode connection banner is not a warning
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                           | threshold |
+  | opencode-connection-banner-starting | 98        |

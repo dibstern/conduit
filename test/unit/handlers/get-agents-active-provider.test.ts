@@ -136,6 +136,7 @@ describe("GetAgents active provider", () => {
 			const reply = yield* listAgents("session-1");
 			expect(client.app.agents).not.toHaveBeenCalled();
 			expect(reply).toEqual({
+				instanceId: "claude",
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [
 					{ id: "Explore", name: "Explore", description: "Explorer" },
@@ -185,6 +186,7 @@ describe("GetAgents active provider", () => {
 				Effect.provide(agentHandlerLayer({ client, ws, engine })),
 				Effect.tap((reply) => {
 					expect(reply).toEqual({
+						instanceId: "claude",
 						providerScope: { id: "claude", name: "Claude" },
 						agents: [
 							{ id: "Any", name: "Any" },
@@ -219,6 +221,7 @@ describe("GetAgents active provider", () => {
 				Effect.tap((reply) => {
 					expect(engine.dispatchEffect).not.toHaveBeenCalled();
 					expect(reply).toEqual({
+						instanceId: "opencode",
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "build" }],
 					});
@@ -399,6 +402,7 @@ describe("GetAgents active provider", () => {
 			const reply = yield* listAgents("session-1");
 			expect(yield* getAgent("session-1")).toBeUndefined();
 			expect(reply).toEqual({
+				instanceId: "claude",
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "Explore", name: "Explore" }],
 			});

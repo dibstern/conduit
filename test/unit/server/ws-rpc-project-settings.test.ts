@@ -179,6 +179,7 @@ describe("SubscribeProjectSettings live facts", () => {
 				yield* publishProjectSetting({ _tag: "clientCount", count: 2 });
 				yield* publishProjectSetting({
 					_tag: "opencodeConnection",
+					instanceId: "opencode",
 					status: "reconnecting",
 				});
 
@@ -188,7 +189,11 @@ describe("SubscribeProjectSettings live facts", () => {
 				});
 				expect(yield* Queue.take(early.q)).toMatchObject({
 					_tag: "upsert",
-					item: { _tag: "opencodeConnection", status: "reconnecting" },
+					item: {
+						_tag: "opencodeConnection",
+						instanceId: "opencode",
+						status: "reconnecting",
+					},
 				});
 
 				const late = yield* subscribe;
@@ -196,7 +201,11 @@ describe("SubscribeProjectSettings live facts", () => {
 				expect(late.snapshot.rows).toEqual(
 					expect.arrayContaining([
 						{ _tag: "clientCount", count: 2 },
-						{ _tag: "opencodeConnection", status: "reconnecting" },
+						{
+							_tag: "opencodeConnection",
+							instanceId: "opencode",
+							status: "reconnecting",
+						},
 					]),
 				);
 			}).pipe(Effect.provide(makeLayer())),

@@ -1004,7 +1004,9 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 /**
  * Schedule a restart for an unhealthy instance with exponential backoff.
  * Rate-limited by maxRestartsPerWindow. On exceed, marks instance
- * "stopped" and publishes InstanceError via DaemonEventBusTag.
+ * "stopped" and publishes InstanceError via DaemonEventBusTag, and returns
+ * undefined; otherwise returns the fiber that waits out the backoff and
+ * starts the instance again.
  */
 export const scheduleRestart = (instanceId: string) =>
 	Effect.gen(function* () {
@@ -1018,7 +1020,7 @@ export const scheduleRestart = (instanceId: string) =>
 		const state = yield* Ref.get(stateRef);
 		const instance = HashMap.get(state.instances, instanceId);
 		if (Option.isNone(instance) || instance.value.driver === "claude") {
-			return;
+			return undefined;
 		}
 		const timestamps = Option.getOrElse(
 			HashMap.get(state.restartTimestamps, instanceId),
@@ -1044,7 +1046,7 @@ export const scheduleRestart = (instanceId: string) =>
 			yield* Effect.logWarning("Restart limit exceeded, marking stopped").pipe(
 				Effect.annotateLogs("instanceId", instanceId),
 			);
-			return;
+			return undefined;
 		}
 
 		// Record timestamp
@@ -1060,7 +1062,7 @@ export const scheduleRestart = (instanceId: string) =>
 		const backoffMs = Math.min(1000 * 2 ** recentRestarts.length, 30_000);
 
 		// Fork restart fiber
-		yield* FiberMap.run(
+		return yield* FiberMap.run(
 			fibers,
 			restartKey(instanceId),
 			Effect.gen(function* () {
@@ -1071,7 +1073,7 @@ export const scheduleRestart = (instanceId: string) =>
 				if (Option.isNone(instOpt)) return;
 				if (instOpt.value.status !== "unhealthy") return;
 				yield* restartInstance(instanceId);
-				yield* startHealthPoller(instanceId);
+				yield* startInstance(instanceId);
 			}),
 		);
 	}).pipe(

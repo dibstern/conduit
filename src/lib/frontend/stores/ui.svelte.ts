@@ -46,9 +46,11 @@ export const uiState = $state({
 
 	// Banners
 	banners: [] as BannerConfig[],
-	opencodeConnectionStatus: null as
-		| Extract<ProjectSetting, { _tag: "opencodeConnection" }>["status"]
-		| null,
+	/** Each OpenCode instance's lifecycle state, by instance id. */
+	opencodeConnections: {} as Record<
+		string,
+		Extract<ProjectSetting, { _tag: "opencodeConnection" }>["status"]
+	>,
 
 	// Rewind mode
 	rewindActive: false,
@@ -294,5 +296,5 @@ export function resetProjectUI(): void {
 	uiState.fileViewerPath = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
-	uiState.opencodeConnectionStatus = null;
+	uiState.opencodeConnections = {};
 }

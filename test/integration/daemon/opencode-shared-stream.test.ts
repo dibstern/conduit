@@ -345,27 +345,26 @@ describe("daemon shared OpenCode global stream", () => {
 		).toHaveLength(0);
 		const cursor = b.frames.length;
 		await fixture.closeOpenCodeStreams();
-		await b.waitFor(
-			(message) =>
-				message["type"] === "project_setting" &&
-				message["_tag"] === "opencodeConnection" &&
-				message["status"] === "disconnected",
-			cursor,
+		// OpenCode is still running and nothing waits on it, so the stream
+		// reconnects without warning anyone.
+		await vi.waitFor(
+			() =>
+				expect(
+					fixture
+						.opencodeStreamConnections()
+						.filter(({ action }) => action === "open"),
+				).toHaveLength(2),
+			{ timeout: 15_000, interval: 250 },
 		);
-		await b.waitFor(
-			(message) =>
-				message["type"] === "project_setting" &&
-				message["_tag"] === "opencodeConnection" &&
-				message["status"] === "reconnecting",
-			cursor,
-		);
-		await b.waitFor(
-			(message) =>
-				message["type"] === "project_setting" &&
-				message["_tag"] === "opencodeConnection" &&
-				message["status"] === "connected",
-			cursor,
-		);
+		const warnings = b.frames
+			.slice(cursor)
+			.map(({ message }) => message)
+			.filter(
+				(message) =>
+					message["_tag"] === "opencodeConnection" &&
+					message["status"] !== "connected",
+			);
+		expect(warnings).toEqual([]);
 		await b.close();
 		await removeProject(fixture, slugB);
 		// Relays never hold the stream: it follows the instance's demand and
