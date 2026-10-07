@@ -919,6 +919,236 @@ for (const decision of [
 	});
 }
 
+// Failures: automatic recovery ignores the saved order or a fresh quota limit;
+// a failed probe blocks a usable target; the target's real limit bounces back
+// to the source; the continuation loses its automatic reason or cut-off request.
+for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
+	const title = {
+		limited:
+			"scenario 5: auto-switch attempts once when the target's real turn is limited",
+		"probe-failed":
+			"scenario 13: auto-switch passes Unknown quota, then stops on the target's real limit",
+		ordered:
+			"auto-switch follows the saved account order, skips Limited quota, and records its reason",
+	};
+	test(title[scenario], async ({ page, harness }, testInfo) => {
+		test.setTimeout(120_000);
+		const artifacts = resolve(
+			"test-results/account-switch",
+			`${testInfo.project.name}-auto-switch-${scenario}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		const browser = await harness.connect();
+		const accounts: { id: string; configDir: string }[] = [];
+		for (const name of scenario === "ordered"
+			? ["Account 1", "Account 2", "Account 3"]
+			: ["Account 1", "Account 2"]) {
+			const configDir = mkdtempSync(join(harness.root, "auto-switch-account-"));
+			const { addedInstanceId } = await Effect.runPromise(
+				browser.rpc.AddInstance({ name, driver: "claude", configDir }),
+			);
+			if (!addedInstanceId) throw new Error(`No instance ID for ${name}`);
+			accounts.push({ id: addedInstanceId, configDir });
+		}
+		const [source, target, preferred] = accounts;
+		if (!source || !target) throw new Error("Two accounts are required");
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({
+				folders: [mkdtempSync(join(harness.root, "auto-switch-project-"))],
+				instanceId: source.id,
+			}),
+		);
+		if (!projectSlug) throw new Error("No auto-switch project slug");
+		const usageLimits = {
+			autoResume: false,
+			autoSwitch: true,
+			order: preferred ? [preferred.id, target.id] : [target.id, source.id],
+		};
+		expect(
+			await Effect.runPromise(
+				browser.rpc.SetUsageLimitsSetting({ usageLimits }),
+			),
+		).toEqual({ usageLimits });
+		// Wait for persistence without resetting its debounce or retrying creation.
+		await expect
+			.poll(() => {
+				const file = join(harness.configDir, "daemon.json");
+				if (!existsSync(file)) return undefined;
+				const persisted: {
+					instances?: { id: string }[];
+					usageLimits?: typeof usageLimits;
+				} = JSON.parse(readFileSync(file, "utf8"));
+				return {
+					listed: accounts.every((account) =>
+						persisted.instances?.some((instance) => instance.id === account.id),
+					),
+					usageLimits: persisted.usageLimits,
+				};
+			})
+			.toEqual({ listed: true, usageLimits });
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				instanceId: Schema.decodeUnknownSync(
+					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				)(source.id),
+				model: { modelId: "harness", providerId: "claude" },
+				originId: browser.originId,
+			}),
+		);
+		const observed: SessionInfo[] = [];
+		const subscription = Effect.runFork(
+			Stream.runForEach(
+				browser.rpc.SubscribeShell({ projectSlug }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+						if (envelope._tag === "upsert") observed.push(envelope.item);
+					}),
+			),
+		);
+		const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
+		const proofMarks = () => readProofMarks(harness.root);
+		const first = `auto-switch-first-request-${scenario}`;
+		const cutOff =
+			"usage-limit-account-1-no-reset: finish the original request";
+		const send = (text: string, commandId: string) =>
+			Effect.runPromise(
+				browser.rpc.SendMessage({
+					projectSlug,
+					sessionId,
+					text,
+					commandId,
+					originId: browser.originId,
+				}),
+			);
+		try {
+			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
+			writeFileSync(
+				join(target.configDir, "conduit-test-quota"),
+				scenario === "probe-failed" ? "fail" : "available",
+			);
+			writeFileSync(
+				join(target.configDir, "conduit-test-switch-turn"),
+				scenario === "ordered" ? "hold" : "limited",
+			);
+			if (preferred)
+				writeFileSync(
+					join(preferred.configDir, "conduit-test-quota"),
+					"limited",
+				);
+			await send(first, `first-auto-${scenario}`);
+			await expect
+				.poll(() => JSON.stringify(proofMarks()))
+				.toContain(`done(${first})`);
+			await expect.poll(() => latest()?.status).toBe("idle");
+			const before = proofMarks().length;
+			await send(cutOff, `cut-off-auto-switch-${scenario}`);
+			await expect.poll(() => latest()?.resumes?.length).toBe(1);
+			expect(latest()?.resumes?.[0]).toMatchObject({
+				instanceId: target.id,
+				reason: "auto-switch",
+				at: expect.any(Number),
+			});
+			await expect
+				.poll(() =>
+					harness
+						.claudeOptions()
+						.filter((call) => call.configDir === target.configDir),
+				)
+				.toHaveLength(1);
+			const switched = harness
+				.claudeOptions()
+				.find((call) => call.configDir === target.configDir);
+			expect(switched?.prompt).toContain(handoffMarker);
+			expect(switched?.prompt).toContain(first);
+			expect(switched?.prompt).toContain("[Conduit still-open note]");
+			expect(switched?.prompt?.endsWith(cutOff)).toBe(true);
+			expect(switched?.resumeId).toBeNull();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.GetAgents({ projectSlug, sessionId }),
+				),
+			).toMatchObject({ instanceId: target.id });
+			const probes = () =>
+				proofMarks()
+					.slice(before)
+					.filter((mark) => mark.kind === "usage-probe");
+			expect(
+				probes().filter((mark) => mark.configDir === target.configDir),
+			).toHaveLength(2);
+			if (scenario === "probe-failed")
+				expect(
+					probes().filter((mark) => mark.configDir === target.configDir),
+				).toEqual([
+					expect.objectContaining({ behavior: "fail" }),
+					expect.objectContaining({ behavior: "fail" }),
+				]);
+			if (preferred) {
+				expect(probes().map((mark) => mark.configDir)).toEqual([
+					preferred.configDir,
+					target.configDir,
+					target.configDir,
+				]);
+				expect(
+					harness
+						.claudeOptions()
+						.some((call) => call.configDir === preferred.configDir),
+				).toBe(false);
+				writeFileSync(join(harness.root, "release-switch-turn"), "release");
+				await expect.poll(() => latest()?.limitRecovery).toBeNull();
+			} else {
+				await expect
+					.poll(() => latest()?.limitRecovery)
+					.toMatchObject({
+						instanceId: target.id,
+						cutOffMessageId: expect.any(String),
+						continued: false,
+					});
+				await expect.poll(() => latest()?.status).toBe("idle");
+				await new AppPage(page).goto(
+					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+				);
+				const strip = page.getByTestId("usage-limit-strip");
+				await expect(strip).toBeVisible();
+				await expect(strip).toHaveAttribute("data-state", "limited");
+				const settled = Date.now() + 2000;
+				await expect.poll(() => Date.now()).toBeGreaterThan(settled);
+				await expect(strip).toHaveAttribute("data-state", "limited");
+				expect(latest()?.limitRecovery?.scheduledAt).toBeUndefined();
+				expect(
+					probes().some((mark) => mark.configDir === source.configDir),
+				).toBe(false);
+				await page.screenshot({ path: join(artifacts, "target-limited.png") });
+			}
+			await expect.poll(() => latest()?.status).toBe("idle");
+			expect(latest()?.resumes).toHaveLength(1);
+			expect(
+				harness
+					.claudeOptions()
+					.filter((call) => call.configDir === target.configDir),
+			).toHaveLength(1);
+		} finally {
+			writeFileSync(join(harness.root, "release-switch-turn"), "release");
+			writeFileSync(
+				join(artifacts, "auto-switch.json"),
+				JSON.stringify(
+					{
+						usageLimits,
+						observed,
+						sdkCalls: harness.claudeOptions(),
+						sdkMarks: proofMarks(),
+					},
+					null,
+					2,
+				),
+			);
+			await Effect.runPromise(Fiber.interrupt(subscription));
+			await browser.close();
+		}
+	});
+}
+
 // Failures: scheduling probes quota early; a restart loses the durable schedule;
 // cancel or Dismiss loses to the sweep; a resume changes the native account/thread
 // or adds a user bubble; still-Limited loops forever or uses the stale reset time.

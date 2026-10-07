@@ -23,6 +23,11 @@ export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
 				: yield* loadClaudeSdkTestModule;
 			const initial = yield* Ref.get(state);
 			return yield* makeQuotaCheck({
+				order: Option.isSome(config)
+					? Ref.get(config.value).pipe(
+							Effect.map((current) => current.usageLimits?.order ?? []),
+						)
+					: Effect.succeed([]),
 				instances: Effect.gen(function* () {
 					const { instances } = yield* Ref.get(accounts);
 					const fallback = Option.isSome(config)

@@ -212,7 +212,7 @@ export const makeContinuation = Effect.gen(function* () {
 			policy = false,
 		}: {
 			readonly due?: { readonly recovery: LimitRecovery; readonly now: number };
-			/** The limit policy schedules while the cut-off turn is still ending. */
+			/** Limit recovery can run while the cut-off turn is still ending. */
 			readonly policy?: boolean;
 		} = {},
 	): ReturnType<Continuation["requestContinuation"]> =>
@@ -251,6 +251,24 @@ export const makeContinuation = Effect.gen(function* () {
 								(yield* hasActiveProcessingTimeout(sessionId))))
 					)
 						return yield* new SessionBusy({ sessionId });
+					if (policy) {
+						const recovery =
+							session.limit_recovery === null
+								? null
+								: decodeRecovery(session.limit_recovery);
+						// Only the still-current cut-off may bypass the busy check.
+						// Recheck inside the commit after quota probing as well.
+						if (
+							!recovery ||
+							recovery.instanceId !== options.expectedInstanceId ||
+							!(yield* stillCutOff(sessionId, recovery))
+						)
+							return yield* new StaleSwitch({
+								sessionId,
+								expectedInstanceId: options.expectedInstanceId,
+								actualInstanceId: session.provider,
+							});
+					}
 					return session;
 				});
 			const initial = yield* checkSession();
@@ -504,8 +522,42 @@ export const makeContinuation = Effect.gen(function* () {
 				);
 			}
 		});
-	// Ticket eon2.13 supplies auto-switch; it runs before auto-resume.
-	const tryAutoSwitch = (_sessionId: string) => Effect.succeed(false);
+	const tryAutoSwitch = (sessionId: string) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			if (!loadDaemonConfig(config.configDir)?.usageLimits?.autoSwitch)
+				return false;
+			const rows = yield* sql<{
+				limit_recovery: string | null;
+			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+			const value = rows[0]?.limit_recovery;
+			const recovery = value == null ? null : decodeRecovery(value);
+			if (!recovery || recovery.continued) return false;
+			// Continuations reuse the cut-off message. Only a newer user message
+			// permits another auto-switch; event sequence survives restarts and ties.
+			const latest = yield* sql<{
+				type: string;
+				reason: string | null;
+			}>`SELECT type, json_extract(data, '$.reason') AS reason FROM events WHERE session_id = ${sessionId} AND (type = 'session.resumed' OR (type = 'message.created' AND json_extract(data, '$.role') = 'user')) ORDER BY sequence DESC LIMIT 1`;
+			if (
+				latest[0]?.type === "session.resumed" &&
+				latest[0].reason === "auto-switch"
+			)
+				return false;
+			const quota = yield* QuotaCheckTag;
+			const instanceId = yield* quota.pickFailover(recovery.instanceId);
+			if (instanceId === undefined) return false;
+			yield* requestContinuation(
+				sessionId,
+				{
+					instanceId,
+					expectedInstanceId: recovery.instanceId,
+					reason: "auto-switch",
+				},
+				{ policy: true },
+			);
+			return true;
+		});
 	const tryAutoResume = (sessionId: string) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -543,7 +595,14 @@ export const makeContinuation = Effect.gen(function* () {
 	).pipe(
 		Effect.flatMap((sessionId) =>
 			Effect.gen(function* () {
-				if (!(yield* tryAutoSwitch(sessionId))) yield* tryAutoResume(sessionId);
+				const switched = yield* tryAutoSwitch(sessionId).pipe(
+					Effect.catchAllCause((cause) =>
+						Effect.logWarning("Auto-switch refused", sessionId, cause).pipe(
+							Effect.as(false),
+						),
+					),
+				);
+				if (!switched) yield* tryAutoResume(sessionId);
 			}).pipe(
 				Effect.catchAllCause((cause) =>
 					Effect.logWarning("Usage limit policy refused", sessionId, cause),

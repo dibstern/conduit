@@ -5,9 +5,19 @@
 // Available/Unknown fails to resume; Unavailable resumes; Limited uses a stale
 // reset, omits the five-minute fallback, counts the initial schedule as a re-arm,
 // or re-arms more than three times. Replaying the sweep must not dispatch twice.
+// Limit-policy failures: auto-resume wins before auto-switch; a refusal/defect
+// skips auto-resume; disabled/empty failover switches; an automatic turn bounces
+// after service reconstruction or an assistant event; a newer user turn with
+// the same timestamp, or a later user/reset continuation, stays blocked;
+// the limited account is not excluded or the durable reason is lost.
+// A newer turn during failover selection or its gate probe is interrupted by
+// stale automation, or a newer reply still permits switching/scheduling.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, Schedule } from "effect";
 import { expect, it } from "vitest";
 import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -80,15 +90,29 @@ const config = {
 	publishGlobalSetting: () => Effect.void,
 };
 
-// An account switch needs these; the sweep only resumes the limited account.
+// Policies can switch; the sweep only resumes the limited account.
 const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-	const registry = new ProviderRegistry();
+	const registry = new ProviderRegistry([
+		{
+			providerId: "claude",
+			discoverEffect: () => Effect.die("Continuation never discovers"),
+			sendTurnEffect: () => Effect.die("Turns use ProviderTurnService"),
+			interruptTurnEffect: () => Effect.void,
+			resolvePermissionEffect: () => Effect.void,
+			resolveQuestionEffect: () => Effect.void,
+			endSessionEffect: () => Effect.void,
+			shutdownEffect: () => Effect.void,
+		},
+	]);
 	return effect.pipe(
 		Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Effect.provideService(LoggerTag, makeMockLogger()),
 		Effect.provideService(
 			OrchestrationEngineTag,
-			new OrchestrationEngine({ registry }),
+			new OrchestrationEngine({
+				registry,
+				resolveProviderDriver: () => "claude",
+			}),
 		),
 		Effect.provideService(ProviderRegistryTag, registry),
 		Effect.provideService(AgentServiceTag, {
@@ -269,6 +293,307 @@ for (const scenario of [
 				Effect.provide(makePersistenceEffectLayer(":memory:")),
 			),
 		);
+	});
+}
+
+for (const scenario of [
+	"switch-first",
+	"off",
+	"no-target",
+	"unavailable",
+	"defect",
+	"stale-during-probe",
+	"turn-during-pick",
+	"turn-during-probe",
+	"reply-during-probe",
+	"auto-turn",
+	"assistant-after-auto",
+	"new-user",
+	"user-after-auto",
+	"reset-after-auto",
+] as const) {
+	it(`limit policy: ${scenario}`, async () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-limit-policy-"));
+		writeFileSync(
+			join(configDir, "daemon.json"),
+			JSON.stringify({
+				pid: process.pid,
+				port: 0,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				dangerouslySkipPermissions: false,
+				projects: [],
+				instances: [
+					{
+						id: "target",
+						name: "Target",
+						driver: "claude",
+						port: 0,
+						managed: false,
+					},
+				],
+				usageLimits: {
+					autoSwitch: scenario !== "off",
+					autoResume: true,
+					order: ["target"],
+				},
+			}),
+		);
+		const picked: string[] = [];
+		const probed: string[] = [];
+		const dispatched: string[] = [];
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const {
+						commit,
+						sql,
+						store,
+						read,
+						continuation: initial,
+					} = yield* seed();
+					yield* initial.cancelContinuation("s1");
+					const newerTurn = commit([
+						canonicalEvent("message.created", "s1", {
+							sessionId: "s1",
+							messageId: "u2",
+							role: "user",
+						}),
+					]).pipe(
+						Effect.andThen(
+							sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`,
+						),
+					);
+					if (
+						[
+							"auto-turn",
+							"assistant-after-auto",
+							"new-user",
+							"user-after-auto",
+							"reset-after-auto",
+						].includes(scenario)
+					) {
+						yield* commit([
+							canonicalEvent(
+								"session.resumed",
+								"s1",
+								{
+									instanceId: "claude",
+									reason: "auto-switch",
+								},
+								{ createdAt: 1000 },
+							),
+						]);
+						if (scenario === "new-user" || scenario === "assistant-after-auto")
+							yield* commit([
+								canonicalEvent(
+									"message.created",
+									"s1",
+									{
+										sessionId: "s1",
+										messageId: "u2",
+										role: scenario === "new-user" ? "user" : "assistant",
+									},
+									{ createdAt: 1000 },
+								),
+							]);
+						if (
+							scenario === "user-after-auto" ||
+							scenario === "reset-after-auto"
+						)
+							yield* commit([
+								canonicalEvent(
+									"session.resumed",
+									"s1",
+									{
+										instanceId: "claude",
+										reason: scenario === "user-after-auto" ? "user" : "reset",
+									},
+									{ createdAt: 1000 },
+								),
+							]);
+						yield* commit([
+							canonicalEvent("session.usage_limited", "s1", {
+								instanceId: "claude",
+								rateLimitType: "seven_day",
+								resetsAt: 5,
+								cutOffMessageId: scenario === "new-user" ? "u2" : "u1",
+							}),
+						]);
+					}
+					// A fresh owner must derive the once-per-turn rule from persisted events.
+					const continuation = yield* makeContinuation;
+					yield* commit([
+						canonicalEvent("session.created", "barrier", {
+							sessionId: "barrier",
+							title: "Barrier",
+							provider: "target",
+						}),
+						canonicalEvent("message.created", "barrier", {
+							sessionId: "barrier",
+							messageId: "b1",
+							role: "user",
+						}),
+						canonicalEvent("session.usage_limited", "barrier", {
+							instanceId: "target",
+							rateLimitType: "seven_day",
+							resetsAt: 900,
+							cutOffMessageId: "b1",
+						}),
+					]);
+					const before = (yield* store.readAllBySession("s1")).length;
+					yield* Effect.forkScoped(
+						continuation.runLimitPolicies.pipe(
+							Effect.provideService(QuotaCheckTag, {
+								pickFailover: (excluding) =>
+									Effect.gen(function* () {
+										picked.push(excluding);
+										if (
+											excluding === "claude" &&
+											scenario === "turn-during-pick"
+										)
+											yield* newerTurn;
+										return excluding === "claude" && scenario !== "no-target"
+											? "target"
+											: undefined;
+									}).pipe(Effect.orDie),
+								check: (instanceId) =>
+									Effect.gen(function* () {
+										probed.push(instanceId);
+										if (scenario === "defect")
+											return yield* Effect.die("Probe defect");
+										if (
+											scenario === "turn-during-probe" ||
+											scenario === "reply-during-probe"
+										)
+											yield* newerTurn;
+										if (scenario === "reply-during-probe")
+											yield* commit([
+												canonicalEvent("message.created", "s1", {
+													sessionId: "s1",
+													messageId: "a2",
+													role: "assistant",
+												}),
+											]);
+										if (scenario === "stale-during-probe")
+											yield* commit([
+												canonicalEvent("session.provider_changed", "s1", {
+													sessionId: "s1",
+													oldProvider: "claude",
+													newProvider: "target",
+													reason: "user",
+												}),
+												canonicalEvent("session.usage_limited", "s1", {
+													instanceId: "target",
+													rateLimitType: "seven_day",
+													resetsAt: 5,
+													cutOffMessageId: "u1",
+												}),
+											]);
+										return scenario === "unavailable"
+											? {
+													_tag: "Unavailable" as const,
+													reason: "Not logged in",
+												}
+											: { _tag: "Unknown" as const };
+									}).pipe(Effect.orDie),
+							}),
+						),
+					);
+					yield* continuation.queueLimitPolicy("s1");
+					yield* continuation.queueLimitPolicy("barrier");
+					// The later row's schedule proves the earlier policy has finished,
+					// including paths that intentionally make no switch or dispatch.
+					yield* read.listSessionInfos().pipe(
+						Effect.repeat({
+							schedule: Schedule.spaced("5 millis"),
+							until: (rows) =>
+								rows.find((row) => row.id === "barrier")?.limitRecovery
+									?.scheduledAt === 900,
+						}),
+						Effect.timeout("2 seconds"),
+					);
+					const switched = [
+						"switch-first",
+						"new-user",
+						"user-after-auto",
+						"reset-after-auto",
+					].includes(scenario);
+					const skipped = ["off", "auto-turn", "assistant-after-auto"].includes(
+						scenario,
+					);
+					expect(picked).toEqual(
+						scenario === "off"
+							? []
+							: skipped
+								? ["target"]
+								: ["claude", "target"],
+					);
+					expect(probed).toEqual(
+						skipped ||
+							scenario === "no-target" ||
+							scenario === "turn-during-pick"
+							? []
+							: ["target"],
+					);
+					expect(dispatched).toEqual(switched ? ["s1"] : []);
+					const session = (yield* read.listSessionInfos()).find(
+						(row) => row.id === "s1",
+					);
+					expect((yield* read.getSession("s1"))?.provider).toBe(
+						switched || scenario === "stale-during-probe" ? "target" : "claude",
+					);
+					expect(session?.limitRecovery?.scheduledAt).toBe(
+						switched ||
+							scenario === "turn-during-pick" ||
+							scenario === "turn-during-probe" ||
+							scenario === "reply-during-probe"
+							? undefined
+							: 5,
+					);
+					expect(session?.limitRecovery?.continued).toBe(
+						scenario === "reply-during-probe" ? undefined : switched,
+					);
+					const events = (yield* store.readAllBySession("s1")).slice(before);
+					expect(
+						events
+							.filter((event) => event.type === "session.resumed")
+							.map((event) => event.data),
+					).toEqual(
+						switched ? [{ instanceId: "target", reason: "auto-switch" }] : [],
+					);
+					if (switched) {
+						expect(events.map((event) => event.type)).toEqual([
+							"session.provider_changed",
+							"session.resumed",
+						]);
+						expect(session?.resumes?.at(-1)).toMatchObject({
+							instanceId: "target",
+							reason: "auto-switch",
+						});
+					}
+				}).pipe(
+					Effect.scoped,
+					Effect.provideService(ConfigTag, { ...config, configDir }),
+					Effect.provideService(ProviderTurnServiceTag, {
+						holdUserTurnsForAccountSwitch: () => Effect.void,
+						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+						sendTurn: (input) =>
+							Effect.sync(() => {
+								dispatched.push(input.sessionId);
+							}),
+						interruptTurn: () => Effect.void,
+					}),
+					withSwitchServices,
+					Effect.provide(makeOverridesStateLive()),
+					Effect.provide(makePersistenceEffectLayer(":memory:")),
+				),
+			);
+		} finally {
+			rmSync(configDir, { recursive: true, force: true });
+		}
 	});
 }
 

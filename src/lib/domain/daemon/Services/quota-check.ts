@@ -21,6 +21,7 @@ export class QuotaCheckTag extends Context.Tag("QuotaCheck")<
 
 export const makeQuotaCheck = (options: {
 	readonly instances: Effect.Effect<readonly ClaudeQuotaAccount[]>;
+	readonly order?: Effect.Effect<readonly string[]>;
 	readonly probe: ClaudeUsageProbe;
 }) =>
 	Effect.gen(function* () {
@@ -79,7 +80,17 @@ export const makeQuotaCheck = (options: {
 			});
 		const pickFailover: QuotaCheck["pickFailover"] = (excluding) =>
 			Effect.gen(function* () {
-				for (const instance of yield* options.instances) {
+				const order: readonly string[] = yield* options.order ??
+					Effect.succeed([]);
+				const instances = [...(yield* options.instances)].sort((a, b) => {
+					const first = order.indexOf(a.id);
+					const second = order.indexOf(b.id);
+					return (
+						(first === -1 ? order.length : first) -
+						(second === -1 ? order.length : second)
+					);
+				});
+				for (const instance of instances) {
 					if (instance.id === excluding) continue;
 					const result = yield* check(instance.id);
 					if (result._tag !== "Limited" && result._tag !== "Unavailable")
