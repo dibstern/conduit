@@ -109,10 +109,12 @@ export const composerHandlers: StepHandler[] = [
 				(request) =>
 					request.tag === "input.submit" && request.payload["text"] === message,
 			);
-			// Stand in for the adapter placing the sent message: the browser keeps
-			// no copy of its own, so the transcript shows it only once placed.
+			// Stand in for the adapter placing the sent message (the browser keeps
+			// no copy of its own), then finish the turn the send started, as the
+			// relay's done does.
 			await relayControl.sendMessages([
 				{ type: "user_message", text: message },
+				{ type: "done", code: 0 },
 			]);
 		},
 	},
