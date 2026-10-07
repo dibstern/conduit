@@ -167,6 +167,48 @@ section.tier>p{color:var(--muted);margin:0 0 14px}
 .arow.off{opacity:.5}
 .pfoot{border-top:1px solid var(--bsub);margin:4px -10px -6px;padding:8px 10px;font-size:10.5px;color:var(--muted)}
 .heldtag{text-align:right;font:10px var(--mono);color:var(--amber);margin:-6px 2px 12px}
+/* Chrome matched to the app as of 2026-10-07 (SessionBar, Sidebar, composer baselines). */
+.sb{width:210px}
+.sbh{padding:10px 8px 6px 10px;font-size:13px}
+.sbh .ico{font-size:12px}
+.sfil{display:flex;gap:5px;align-items:center;padding:0 8px 6px}
+.sfil .pp{font-size:9.5px;border:1px solid var(--border);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.sfil .srch{flex:1;min-width:0;font-size:9.5px;color:var(--dim);border:1px solid var(--bsub);border-radius:6px;padding:2px 6px;white-space:nowrap;overflow:hidden}
+.schips{display:flex;gap:3px;padding:0 8px 6px;align-items:center;overflow:hidden}
+.schips span{font-size:8.5px;color:var(--t2);border:1px solid var(--border);border-radius:6px;padding:2px 4px;white-space:nowrap;flex:none}
+.schips .flex{border:0;padding:0;flex:1}
+.schips b{color:var(--text);font-weight:500;margin-left:3px}
+.sgrp{display:flex;justify-content:space-between;font-size:8.5px;letter-spacing:.06em;color:var(--dim);padding:4px 6px 3px}
+.srow{align-items:flex-start;padding:5px 6px;border-left:2px solid transparent}
+.srow.on{border-left-color:var(--pink)}
+.sic{width:13px;height:13px;border-radius:3px;background:var(--bg-alt);border:1px solid var(--border);flex:none;margin-top:1px}
+.sbody{flex:1;min-width:0}
+.sbody .sn{display:block}
+.sproj{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--dim);margin-top:2px}
+.sproj i{font-style:normal;font-size:6.5px;font-weight:700;color:#fff;background:var(--violet);border-radius:3px;padding:1px 2px}
+.stime{font-size:9px;color:var(--dim);white-space:nowrap}
+.sbar{height:42px}
+.btitle{font:600 12.5px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;min-width:0}
+.btitle .ico{font-size:10px}
+.seg{display:inline-flex;align-items:stretch;height:22px;border:1px solid var(--border);border-radius:7px;flex:none}
+.seg span{display:inline-flex;align-items:center;gap:4px;padding:0 7px;font:10px var(--mono);color:var(--muted);white-space:nowrap}
+.seg span+span{border-left:1px solid var(--border)}
+.seg .gd{width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.apill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;background:var(--bg-alt);border:1px solid var(--border);font:10px var(--mono);color:var(--t2);white-space:nowrap;flex:none}
+.comp{border-radius:12px;padding:6px 6px 6px 8px}
+.crow2{display:flex;align-items:center;gap:7px;min-width:0}
+.crow2 .plus{color:var(--muted);font-size:15px;flex:none;padding:0 2px}
+.crow2 .ph{flex:1;min-width:0;color:var(--dim);font:11px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctl{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--t2);white-space:nowrap;flex:none}
+.ctl .star{color:#e8835a}
+.ctl .bars{letter-spacing:-1px;color:var(--dim);font-size:9px}
+.ctl.st{flex-direction:column;gap:0;font-size:7px;letter-spacing:.04em;line-height:1.1}
+.sq{width:26px;height:26px;border-radius:8px;background:rgba(254,55,129,.35);color:#fff;display:grid;place-items:center;font-size:12px;flex:none}
+.prow1{display:flex;align-items:center;gap:6px;padding:4px 10px 2px;flex:none}
+.prow1 .back{font-size:11px;color:var(--muted);white-space:nowrap}
+.prow2{display:flex;align-items:center;gap:6px;padding:2px 10px 8px;border-bottom:1px solid var(--bsub);flex:none}
+.pf .seg span{padding:0 5px;font-size:9px}
+.pf .apill{font-size:9px;padding:0 6px;height:20px}
 .modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:560px;background:var(--bg-alt);border:1px solid var(--border);border-radius:14px;padding:16px 18px;z-index:5;font-size:11.5px;color:var(--t2)}
 .modal h4{margin:0 0 3px;font-size:14px;color:var(--text)}
 .cols{display:flex;gap:14px;margin:12px 0 4px}
@@ -221,7 +263,7 @@ section.tier>p{color:var(--muted);margin:0 0 14px}
   </table>
   <h2>Rules</h2>
   <ul>
-    <li><b>The strip replaces the in-chat error.</b> The synthetic "you've hit your limit" reply is not rendered as a message. The unanswered user message gets a small <code>held</code> tag and is re-sent by whichever recovery runs.</li>
+    <li><b>The strip replaces the in-chat error.</b> The synthetic "you've hit your limit" reply is not rendered as a message. The unanswered message is tagged <code>Cut off by usage limit</code> and stays open until Claude answers it. The limit can land mid-turn, so it is never re-sent: resume says “Continue where you left off.”, a switch hands it over with a note that some work may be done, and a new message carries a hidden note that it is still open. <u>Dismiss</u> on the tag drops it.</li>
     <li><b>The strip is the only limit UI in the chat.</b> It has no dismiss button and leaves when the session is unblocked: switched, resumed, or the reset time passes.</li>
     <li><b>A manual switch always confirms</b> with the handoff dialog (frame C), because it costs a cold prompt cache and drops reasoning. The divider's <u>What carried over?</u> reopens the same summary read-only, including after an auto-switch.</li>
     <li><b>Auto-switch guardrails:</b> at most one switch per limited turn; skip accounts known to be limited until their reset; always leave a divider; never switch in the middle of a turn.</li>
@@ -235,14 +277,15 @@ section.tier>p{color:var(--muted);margin:0 0 14px}
     <tr><td>Strip detail</td><td>Weekly limit · resets Mon 9:00 &nbsp;/&nbsp; 5-hour limit · resets 14:30 &nbsp;/&nbsp; Reset time unavailable</td></tr>
     <tr><td>Buttons</td><td>Switch account · Resume at reset · Cancel auto-resume</td></tr>
     <tr><td>Waiting strip</td><td>Resumes on work2claude at Mon 9:00 · in 2d 13h</td></tr>
-    <tr><td>Dialog</td><td>Continue on personal? · Switch and resend · Cancel</td></tr>
+    <tr><td>Cut-off tag</td><td>Cut off by usage limit · Dismiss</td></tr>
+    <tr><td>Dialog</td><td>Continue on personal? · Switch and continue · Cancel</td></tr>
     <tr><td>Dividers</td><td>Continued on personal · switched by you / auto-switch &nbsp;·&nbsp; Resumed on work2claude after reset</td></tr>
     <tr><td>Settings</td><td>Auto-resume limited sessions · Auto-switch account when limited</td></tr>
   </table>
 </section>
 <script>
-const SESS = ['Fix subagent config dir','Refactor event store','Composer redesign','Tailscale port check','Jev surfacing','Settings panel','Release notes'];
-const RAIL = '<span>☰</span><span>⌕</span><span>⎇</span><span>▤</span>';
+const SESS = [['Fix subagent config dir','2m'],['Refactor event store','1h'],['Composer redesign','3h'],['Tailscale port check','yesterday'],['Jev surfacing','2d']];
+const RAIL = '<span>⌨</span><span>‹›</span><span>⧉</span>';
 const SEND = '<span class="send">↑</span>';
 const AC = {
   work2claude:{u:100, at:'Mon 9:00', c:'var(--violet)'},
@@ -257,12 +300,12 @@ const bar = (u, w = 56) => `<span class="mbar ${u>=100?'red':u>=80?'amb':''}" st
 const q = n => lim(n) ? `<span class="v cR">limited · ${AC[n].at}</span>` : `<span class="v">${left(n)}% left</span>`;
 const dot = (n, s = 8) => `<span class="dot" style="background:${AC[n].c};width:${s}px;height:${s}px"></span>`;
 const arows = (w = 56) => NAMES.map(n => `<div class="arow ${n==='personal'?'sel':''} ${lim(n)?'off':''}">${dot(n)}<span>${n}</span>${n==='work2claude'?'<span class="cnt">current</span>':''}<span class="flex"></span>${bar(AC[n].u, w)}${q(n)}</div>`).join('');
-const sub = n => `${dot(n,6)}${n} · opus 5`;
+const sub = n => `<span class="apill">${dot(n,6)}${n}</span>`;
 
 const U1 = `<div class="ubub">Thread configDir through the subagent materializer</div><div class="atext">Done. Both read paths now pass the session's config dir through the SDK worker; typecheck is clean.</div><div class="turnf">opus 5 · 2m 14s · work2claude</div>`;
 const U2 = `<div class="ubub">Now run the provider tests and fix anything that fails</div>`;
-const HELD = U1 + U2 + `<div class="heldtag">⏸ held · re-sent when the session resumes</div>`;
-const HELDp = U2 + `<div class="heldtag">⏸ held</div>`;
+const HELD = U1 + U2 + `<div class="heldtag">⏸ Cut off by usage limit · <u>Dismiss</u></div>`;
+const HELDp = U2 + `<div class="heldtag">⏸ Cut off · <u>Dismiss</u></div>`;
 const REPLY = acc => `<div class="atext">Running <span class="mono">vitest run test/unit/provider/claude</span>: 649 passed, 0 failed.</div><div class="turnf">opus 5 · 48s · ${acc}</div>`;
 const div = (txt, link = true) => `<div class="hand">${txt}${link?' · <u>What carried over?</u>':''}</div>`;
 const divp = txt => `<div class="hand" style="margin-bottom:2px">${txt}</div><div class="hand" style="margin-top:0;justify-content:center"><u>What carried over?</u></div>`;
@@ -273,36 +316,43 @@ const WAIT = auto => `<div class="strip wait"><span class="gi">⏱</span><span><
 const WAITp = `<div class="strip wait"><span class="gi">⏱</span><span style="flex:1"><span class="ttl">Resumes Mon 9:00</span><br><span class="dimt">work2claude · in 2d 13h</span></span><div style="display:flex;gap:6px;width:100%;margin-top:6px"><span class="btn full">Switch account</span><span class="btn ghost full">Cancel auto-resume</span></div></div>`;
 
 const CARRY = `<div class="cols"><div><h5>Carries over</h5>
-  <div class="yes">Last 46 messages, word for word</div>
-  <div class="yes">Tool calls and results <i>(long output trimmed)</i></div>
-  <div class="yes">Files touched and the working directory</div>
+  <div class="yes">Last 46 messages and your first one, word for word</div>
+  <div class="yes">Command output and errors</div>
+  <div class="yes">Files touched, plans and the working directory</div>
   <div class="yes">Model, mode and session settings</div>
-  <div class="yes">Older messages <i>(Claude can read them on request)</i></div></div>
+  <div class="yes">Older or oversized messages <i>(Claude can read them on request)</i></div></div>
   <div><h5>Doesn't carry over</h5>
   <div class="no">Thinking / reasoning blocks</div>
+  <div class="no">Other tool calls, search results and diffs</div>
+  <div class="no">Attachments and images</div>
   <div class="no">Prompt cache <i>(first reply is slower and uses more quota)</i></div>
   <div class="no">Running subagents and background tasks</div></div></div>`;
 const SWAP = `<div class="swap">${dot('work2claude')}<span>work2claude</span><span class="v cR">limited</span><span class="dimt">→</span>${dot('personal')}<b style="color:var(--text)">personal</b><span class="flex"></span>${bar(23,80)}<span class="v">77% left</span></div>`;
 
 function desk(o = {}){
   return `<div class="app"><div class="appbody">
-  <aside class="sb"><div class="sbh">Sessions <span class="cnt">7</span><span class="flex"></span><span class="ico">＋</span></div>
-  <div class="sbl">${SESS.map((n,i)=>`<div class="srow ${i?'':'on'}"><span class="sdot"></span><span class="sn">${n}</span></div>`).join('')}</div></aside>
-  <main class="mn"><div class="sbar"><span class="stitle"><b>${SESS[0]}</b><span class="ssub">${o.sub||sub('work2claude')}</span></span><span class="flex"></span><span class="ico">⋯</span></div>
+  <aside class="sb"><div class="sbh">Sessions <span class="cnt">${SESS.length}</span><span class="flex"></span><span class="ico">◎</span><span class="ico">＋</span><span class="ico">◧</span></div>
+  <div class="sfil"><span class="pp">All projects ⌄</span><span class="srch">⌕ Search sessions…</span></div>
+  <div class="schips"><span>Needs you<b>0</b></span><span>Running<b>0</b></span><span>Unread<b>0</b></span><span class="flex"></span><span class="ico" style="border:0;padding:0">⇅</span></div>
+  <div class="sbl"><div class="sgrp"><span>IDLE</span><span>${SESS.length}</span></div>${SESS.map((_,i)=>srow(i)).join('')}</div></aside>
+  <main class="mn"><div class="sbar"><span class="btitle">${SESS[0][0]}<span class="ico">⌄</span></span><span class="flex"></span><span class="seg"><span>conduit · main<i class="gd"></i></span><span>✓ Settle</span></span>${o.sub||sub('work2claude')}<span class="ico">⋯</span></div>
   <div class="chat">${o.chat ?? HELD}</div>
-  <div class="cwrap">${o.ctop||''}<div class="comp"><div class="phd">Message Claude…</div>
-  <div class="crow"><span class="chip">Opus 5 · high</span><span class="flex"></span>${SEND}</div></div></div>${o.overlay||''}</main>
+  <div class="cwrap">${o.ctop||''}<div class="comp"><div class="crow2"><span class="plus">＋</span><span class="ph">Ask Claude…</span><span class="ctl"><span class="star">✳</span>Opus 5 · 1M ⌄</span><span class="ctl"><span class="bars">▂▃▅▇</span>High</span><span class="ctl">⛉ Ask</span><span class="sq">↑</span></div></div></div>${o.overlay||''}</main>
   <div class="rail">${RAIL}</div></div>${o.over||''}</div>`;
 }
+function srow(i){
+  return `<div class="srow ${i?'':'on'}"><span class="sic"></span><span class="sbody"><span class="sn">${SESS[i][0]}</span><span class="sproj"><i>CO</i>conduit</span></span><span class="stime">${SESS[i][1]}</span></div>`;
+}
 function phone(o = {}){
-  return `<div class="pf"><div class="pstat"><span>9:41</span><span>●●● ▮</span></div><div class="psb"><span class="ico" style="font-size:20px">‹</span><span class="stitle" style="flex:1"><b>${SESS[0]}</b><span class="ssub">${o.sub||sub('work2claude')}</span></span><span class="ico" style="font-size:16px">⋯</span></div>
-  <div class="chat">${o.chat ?? HELDp}</div><div class="cwrap">${o.ctop||''}<div class="comp"><div class="phd">Message Claude…</div>
-  <div class="crow"><span class="chip">Opus 5</span><span class="flex"></span>${SEND}</div></div></div>${o.overlay||''}<div class="home"></div></div>`;
+  return `<div class="pf"><div class="pstat"><span>9:41</span><span>●●● ▮</span></div>
+  <div class="prow1"><span class="back">‹ Sessions</span><span class="flex"></span><span class="seg"><span>main<i class="gd"></i></span><span>▤</span></span>${o.sub||sub('work2claude')}<span class="ico">⋯</span></div>
+  <div class="prow2"><span class="btitle" style="flex:1">${SESS[0][0]}</span><span class="ico">⌄</span></div>
+  <div class="chat">${o.chat ?? HELDp}</div><div class="cwrap">${o.ctop||''}<div class="comp"><div class="crow2"><span class="plus">＋</span><span class="ph">Ask Claude…</span><span class="ctl"><span class="star">✳</span>O5</span><span class="ctl st"><span class="bars">▂▃▅▇</span>HIGH</span><span class="ctl st">⛉<span>ASK</span></span><span class="sq">↑</span></div></div></div>${o.overlay||''}<div class="home"></div></div>`;
 }
 const sheet = (title, body) => `<div class="scrim" style="z-index:4"></div><div class="sheet" style="max-height:78%;overflow:hidden"><div style="font-weight:600;color:var(--text);margin:4px 0 6px;font-size:13px">${title}</div>${body}</div>`;
 
 const F = [
-{k:'A', name:'Limit reached', why:'The strip replaces the in-chat error message. The unanswered message is tagged held. Both recovery paths are one tap away.',
+{k:'A', name:'Limit reached', why:'The strip replaces the in-chat error message. The unanswered message is tagged as cut off. Both recovery paths are one tap away.',
  desk:()=>desk({ctop:LIMIT()}), phone:()=>phone({ctop:LIMITp}),
  notes:['Shown when auto-resume and auto-switch are both off (the default).','No ✕: the strip leaves on its own once the session is unblocked.','Phone keeps both full labels on full-width buttons.']},
 {k:'B', name:'Pick an account', why:'Switch account opens the session’s Claude accounts with quota left, with limited accounts greyed out until their reset.',
@@ -310,17 +360,17 @@ const F = [
  phone:()=>phone({ctop:LIMITp, overlay:sheet('Continue this session on', arows(40))}),
  notes:['Pre-selects the account with the most quota left.','Quota comes from the probe, so accounts show numbers before you pick.','Only Claude accounts are listed; cross-provider is out of scope.']},
 {k:'C', name:'Confirm the handoff', why:'Design 04’s dialog: before anything changes it states exactly what the new account gets and what is lost.',
- desk:()=>desk({ctop:LIMIT(), over:`<div class="scrim" style="z-index:4"></div><div class="modal"><h4>Continue on personal?</h4><div>The conversation is handed to a fresh session on this account, then your held message is re-sent.</div>${SWAP}${CARRY}<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><span class="btn ghost">Cancel</span><span class="btn pri">Switch and resend</span></div></div>`}),
- phone:()=>phone({ctop:LIMITp, overlay:sheet('Continue on personal?', `${SWAP}<div class="yes">Last 46 messages, tool results, files</div><div class="yes">Older messages on request</div><div class="no">Reasoning blocks</div><div class="no">Prompt cache (slower first reply)</div><div style="display:flex;gap:6px;margin-top:10px"><span class="btn ghost full">Cancel</span><span class="btn pri full">Switch and resend</span></div>`)}),
+ desk:()=>desk({ctop:LIMIT(), over:`<div class="scrim" style="z-index:4"></div><div class="modal"><h4>Continue on personal?</h4><div>The conversation is handed to a fresh session on this account, then Claude picks up the cut-off request.</div>${SWAP}${CARRY}<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><span class="btn ghost">Cancel</span><span class="btn pri">Switch and continue</span></div></div>`}),
+ phone:()=>phone({ctop:LIMITp, overlay:sheet('Continue on personal?', `${SWAP}<div class="yes">Last 46 messages and your first one</div><div class="yes">Command output, errors, files, plans</div><div class="yes">Older messages on request</div><div class="no">Reasoning, tool calls, diffs, attachments</div><div class="no">Prompt cache (slower first reply)</div><div style="display:flex;gap:6px;margin-top:10px"><span class="btn ghost full">Cancel</span><span class="btn pri full">Switch and continue</span></div>`)}),
  notes:['Always shown for a manual switch.','The same summary opens read-only from “What carried over?” on the divider.','“46 messages” is the real handoff budget result, not an estimate.']},
-{k:'D', name:'Switched', why:'The strip is gone; one divider records the move, and the held message runs on the new account.',
+{k:'D', name:'Switched', why:'The strip is gone; one divider records the move, and the cut-off request continues on the new account.',
  desk:()=>desk({sub:sub('personal'), chat:U1+U2+div('↪ Continued on <b>personal</b> · switched by you')+REPLY('personal')}),
  phone:()=>phone({sub:sub('personal'), chat:U2+divp('↪ <b>personal</b> · switched by you')+REPLY('personal')}),
- notes:['The header subtitle shows the session’s account.','Switching back later uses native resume plus a catch-up of what happened since.','Nothing blocks the chat after this point.']},
+ notes:['The account pill in the session bar (same style as the instance badge) shows the session’s account.','Switching back later uses native resume plus a catch-up of what happened since.','Nothing blocks the chat after this point.']},
 {k:'E', name:'Waiting for reset', why:'Resume at reset, or auto-resume, turns the strip amber with a countdown; you can still switch, or cancel.',
  desk:()=>desk({ctop:WAIT(false)}), phone:()=>phone({ctop:WAITp}),
  notes:['With auto-resume on, this is the first strip you see, with an “auto-resume is on” note.','Cancel auto-resume returns to frame A.','Survives restarts; re-checked against live quota when it fires.']},
-{k:'F', name:'Resumed at reset', why:'At reset the held message is re-sent on the same account and the strip disappears.',
+{k:'F', name:'Resumed at reset', why:'At reset Claude continues where it left off on the same account, and the strip disappears.',
  desk:()=>desk({chat:U1+U2+div('↻ Resumed on <b>work2claude</b> after reset · Mon 9:00', false)+REPLY('work2claude')}),
  phone:()=>phone({chat:U2+div('↻ Resumed after reset', false)+REPLY('work2claude')}),
  notes:['Same account, so the native resume keeps the warm history.','No handoff, so no “What carried over?” link.']},
@@ -331,7 +381,7 @@ const F = [
  notes:['Uses the new toast style (conduit-test-9xas).','At most one switch per limited turn; never into a limited account.','If every account is limited, falls back to E or A.']},
 {k:'H', name:'Settings › Claude accounts', why:'Two independent toggles, both off by default, and a drag order for auto-switch.',
  desk:()=>desk({over:`<div class="set"><nav><span>General</span><span class="on">Instances</span><span>Notifications</span><span>Display</span></nav><main><div style="font-size:13px;color:var(--text);font-weight:600">When a Claude account reaches its usage limit</div>
-   <div class="srowx"><span class="tog on"></span><span><b>Auto-resume limited sessions</b>Re-send the held message on the same account when its limit resets.</span></div>
+   <div class="srowx"><span class="tog on"></span><span><b>Auto-resume limited sessions</b>Continue the cut-off request on the same account when its limit resets.</span></div>
    <div class="srowx"><span class="tog"></span><span><b>Auto-switch account when limited</b>Move the session to the first account below that has quota. Runs before auto-resume.</span></div>
    ${NAMES.map((n,i)=>`<div class="arow" style="border:1px solid var(--bsub)"><span class="drag">⋮⋮</span><span class="v">${i+1}</span>${dot(n)}<span>${n}</span><span class="flex"></span>${bar(AC[n].u,70)}${q(n)}</div>`).join('')}</main></div>`}),
  phone:()=>phone({overlay:`<div class="set" style="flex-direction:column;padding:48px 14px 14px;gap:6px;font-size:11.5px;color:var(--t2)"><b style="color:var(--text);font-size:14px">Usage limits</b>
