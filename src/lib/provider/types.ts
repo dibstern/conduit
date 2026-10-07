@@ -203,6 +203,8 @@ export interface SendTurnInput {
 	readonly eventSink: EventSink;
 	readonly abortSignal: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;
+	/** Session rules enforce the Side Thread's mode. */
+	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
 	readonly images?: readonly string[];

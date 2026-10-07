@@ -115,8 +115,9 @@ async function wokenUntilOpened(
 	await gotoRelay(page, harness.relayBaseUrl + harness.projectUrl);
 	await expect(row(page, sessionId)).toBeVisible();
 	// Read before it is snoozed: nothing but the wake can show the badge. A
-	// pick of a session that has not woken does not touch its snooze.
-	await row(page, sessionId).click();
+	// pick of a session that has not woken does not touch its snooze. The
+	// title, not the row centre: that can land on a hover verb (e5b2819b).
+	await row(page, sessionId).locator(".session-item-title").click();
 	await expect(
 		row(page, sessionId).getByTestId("session-unread-dot"),
 	).toHaveCount(0);
@@ -143,7 +144,7 @@ async function wokenUntilOpened(
 	});
 
 	// Opening it from the sidebar clears it, and it stays cleared.
-	await row(page, sessionId).click();
+	await row(page, sessionId).locator(".session-item-title").click();
 	await expect(pill(page, sessionId)).toHaveCount(0);
 	expect(unsnoozes).toBe(1);
 	await expect

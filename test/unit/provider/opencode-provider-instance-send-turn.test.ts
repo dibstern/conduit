@@ -367,6 +367,47 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		});
 	});
 
+	it.each([
+		{
+			session: "a regular session",
+			input: { agent: "coder" },
+			expected: { agent: "plan" },
+		},
+		{
+			session: "a Side Thread with a picked agent",
+			input: { sideThread: true, agent: "coder" },
+			expected: { agent: "coder" },
+		},
+		{
+			session: "a Side Thread without a picked agent",
+			input: { sideThread: true },
+			expected: {},
+		},
+	])("respects plan agent selection for $session", async ({
+		input,
+		expected,
+	}) => {
+		const resultPromise = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ permissionMode: "plan", ...input }),
+			),
+		);
+		instance.notifyTurnCompleted("s1", {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		});
+		await resultPromise;
+
+		expect(client.session.prompt).toHaveBeenCalledExactlyOnceWith("s1", {
+			text: "Write hello world",
+			model: { providerID: "anthropic", modelID: "claude-sonnet" },
+			...expected,
+		});
+	});
+
 	it("passes variant to sendMessageAsync", async () => {
 		const input = makeSendTurnInput({ variant: "thinking" });
 

@@ -71,6 +71,12 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	).toBe("false");
 	await page.getByPlaceholder("Search sessions...").press("Escape");
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
+	// The cleared field stays focused, which raises the scope suggestions over
+	// the list (8db686cc); a second Escape puts them away.
+	const suggestions = page.getByTestId("session-scope-suggestions");
+	await expect(suggestions).toBeVisible();
+	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await expect(suggestions).toBeHidden();
 
 	await pinRow.click({ button: "right" });
 	await page.getByTestId("session-ctx-pin").click();

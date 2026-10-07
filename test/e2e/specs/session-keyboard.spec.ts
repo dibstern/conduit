@@ -80,31 +80,32 @@ test("row rename commits on Enter, ignores empty titles, and cancels on Escape",
 	const id = await rows.first().getAttribute("data-session-id");
 	if (!id) throw new Error("missing session id");
 	const row = page.locator(`#session-list [data-session-id="${id}"]`);
-	await row.dblclick();
+	// The title, not the row centre: that can land on a hover verb (e5b2819b).
+	await row.locator(".session-item-title").dblclick();
 	let input = row.getByRole("textbox", { name: "Session name" });
 	await expect(input).toBeFocused();
 	await input.fill("Renamed from row");
 	await input.press("Enter");
 	await expect(row).toContainText("Renamed from row");
-	await row.dblclick();
+	await row.locator(".session-item-title").dblclick();
 	input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("  ");
 	await input.press("Enter");
 	await expect(row).toContainText("Renamed from row");
-	await row.dblclick();
+	await row.locator(".session-item-title").dblclick();
 	input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("Discarded title");
 	await input.press("Escape");
 	await expect(row).toContainText("Renamed from row");
 
 	// The key hints are buttons too: phone keyboards have no Esc.
-	await row.dblclick();
+	await row.locator(".session-item-title").dblclick();
 	input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("Saved by tap");
 	await row.getByRole("button", { name: "Save", exact: true }).click();
 	await expect(input).toHaveCount(0);
 	await expect(row).toContainText("Saved by tap");
-	await row.dblclick();
+	await row.locator(".session-item-title").dblclick();
 	input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("Cancelled by tap");
 	await row.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -141,7 +142,7 @@ test("row rename keeps the draft through updates and offers a title that lands m
 		await expect(rowIn(other)).toContainText(title);
 	};
 
-	await row.dblclick();
+	await row.locator(".session-item-title").dblclick();
 	const input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("My half-typed dra");
 

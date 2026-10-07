@@ -18,7 +18,7 @@ import type {
 import { generateUuid } from "../utils/format.js";
 import { createFrontendLogger } from "../utils/logger.js";
 import { discoveryState } from "./discovery.svelte.js";
-import { isSessionBusy, sessionState } from "./session.svelte.js";
+import { findSession, isBusy, sessionState } from "./session.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
@@ -207,7 +207,7 @@ export function getOrCreateSessionActivity(id: string): SessionActivity {
 	if (existing) return existing;
 	const activity: SessionActivity = $state(createEmptySessionActivity());
 	// A slot opened mid-turn starts processing; the row then ends it.
-	if (isSessionBusy(id)) phaseToProcessing(activity);
+	if (isBusy(findSession(id))) phaseToProcessing(activity);
 	sessionActivity.set(id, activity);
 	return activity;
 }

@@ -238,7 +238,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
 			...(images && images.length > 0 ? { images: [...images] } : {}),
-			...(input.permissionMode === "plan"
+			...(input.permissionMode === "plan" && !input.sideThread
 				? { agent: "plan" }
 				: agent
 					? { agent }

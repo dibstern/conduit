@@ -443,19 +443,19 @@ const prepareEngineTurnInput = (
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
 		const readQuery = yield* ReadQueryEffectTag;
-		const goalRow = isClaudeDriver(driver)
-			? yield* readQuery.getSession(resolvedInput.sessionId).pipe(
-					Effect.catchAll((cause) =>
-						Effect.gen(function* () {
-							const log = yield* LoggerTag;
-							log.debug(
-								`Failed to restore goal for ${resolvedInput.sessionId}: ${cause}`,
-							);
-							return undefined;
-						}),
-					),
-				)
-			: undefined;
+		const sessionRow = yield* readQuery
+			.getSession(resolvedInput.sessionId)
+			.pipe(
+				Effect.catchAll((cause) =>
+					Effect.gen(function* () {
+						const log = yield* LoggerTag;
+						log.debug(
+							`Failed to read session ${resolvedInput.sessionId}: ${cause}`,
+						);
+						return undefined;
+					}),
+				),
+			);
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;
@@ -503,7 +503,9 @@ const prepareEngineTurnInput = (
 				: {}),
 			...folders,
 			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
-			...(goalRow ? { goalState: sessionGoalState(goalRow) } : {}),
+			...(isClaudeDriver(driver) && sessionRow
+				? { goalState: sessionGoalState(sessionRow) }
+				: {}),
 			...(isClaudeDriver(driver)
 				? {
 						cumulativeTokens: priorHistoryMetadata?.cumulativeTokens ?? 0,
@@ -512,6 +514,7 @@ const prepareEngineTurnInput = (
 			eventSink,
 			abortSignal: new AbortController().signal,
 			permissionMode: yield* getPermissionMode(resolvedInput.sessionId),
+			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
 			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
 			...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),

@@ -14,6 +14,8 @@ test.use({
 	screenshot: "off",
 });
 
+// Rows are picked by their title: the row centre can land on a hover verb
+// such as Mark read (e5b2819b).
 // Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3), and
 // the recorded session has none until its prompt replays. The replay also
 // reorders the list, so the returned row is pinned to that session.
@@ -41,7 +43,7 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 		page.locator("#session-list .session-item").first(),
 	);
 	await expect(row).toBeVisible();
-	await row.click();
+	await row.locator(".session-item-title").click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 
 	await row.click({ button: "right" });
@@ -93,7 +95,7 @@ test("marking unread before any turn end shows a dot until the next pick", async
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await gotoRelay(page, new URL("/", relayUrl).toString());
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
-	await row.click();
+	await row.locator(".session-item-title").click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 });
 
@@ -107,7 +109,7 @@ test("settling and un-settling preserve unread while the menu hides the action",
 		harness,
 		page.locator("#session-list .session-item").first(),
 	);
-	await row.click();
+	await row.locator(".session-item-title").click();
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-mark-unread").click();
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
@@ -162,7 +164,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	).find((id) => id && id !== firstId);
 	if (!secondId) throw new Error("missing second session id");
 	const firstRow = page.locator(`#session-list [data-session-id="${firstId}"]`);
-	await firstRow.click();
+	await firstRow.locator(".session-item-title").click();
 	const bar = page.getByTestId("session-bar");
 	const heightWithoutChip = (await bar.boundingBox())?.height;
 	if (heightWithoutChip == null) throw new Error("missing session bar box");

@@ -54,7 +54,7 @@ test.describe("E2E Smoke Test", () => {
 
 		await expect(
 			page.locator(
-				`#session-list .session-item.active[data-session-id="${harness.stack.initialSessionId}"]`,
+				`#session-list .session-item.active[data-session-id="${decodeURIComponent(harness.projectUrl.slice("/s/".length))}"]`,
 			),
 		).toBeVisible();
 		await expect(app.messages).toBeVisible();
