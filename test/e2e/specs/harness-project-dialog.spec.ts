@@ -223,6 +223,9 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page
 		.locator("#connect-overlay")
 		.waitFor({ state: "detached", timeout: 30_000 });
+	// Adding opened a draft; on a phone the list is behind it.
+	const back = page.getByTestId("session-bar-back");
+	if (await back.isVisible()) await back.click();
 	await expect(page.getByTestId("session-scope-chip")).toHaveText(
 		"keyboard-app",
 	);

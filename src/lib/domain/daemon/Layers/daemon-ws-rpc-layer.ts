@@ -33,7 +33,7 @@ import {
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
-	type DaemonConfigRefTag,
+	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -171,6 +171,19 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			);
 
 		const projectList = broadcastProjectList;
+		// The project every client's new session prefills: the last one added
+		// or given a session. Persisted, and sent out with the project list.
+		const rememberNewSessionProject = (slug: string) =>
+			Effect.gen(function* () {
+				const config = yield* DaemonConfigRefTag;
+				if ((yield* Ref.get(config)).newSessionProject === slug) return;
+				yield* commitDaemonRuntimeConfig((current) => ({
+					...current,
+					newSessionProject: slug,
+				}));
+				yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+				yield* requestConfigSave;
+			});
 		const instanceList = Effect.gen(function* () {
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* getInstances);
@@ -180,7 +193,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// per change.
 		const followList = <A, E>(
 			list: "instances" | "projects" | "serverStatus",
-			read: Effect.Effect<A, E, InstanceManagerStateTag | ProjectRegistryTag>,
+			read: Effect.Effect<
+				A,
+				E,
+				InstanceManagerStateTag | ProjectRegistryTag | DaemonConfigRefTag
+			>,
 		) =>
 			Stream.unwrapScoped(
 				Effect.gen(function* () {
@@ -207,7 +224,24 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			SubscribeProjects: () =>
 				followList(
 					"projects",
-					Effect.map(projectInfos, (projects) => ({ projects })),
+					Effect.gen(function* () {
+						const projects = yield* projectInfos;
+						const { newSessionProject } = yield* Ref.get(
+							yield* DaemonConfigRefTag,
+						);
+						return {
+							projects,
+							...(newSessionProject !== undefined && { newSessionProject }),
+						};
+					}),
+				),
+			sessionCreated: (projectSlug) =>
+				run(rememberNewSessionProject(projectSlug)).pipe(
+					Effect.catchAll((error) =>
+						Effect.logWarning(
+							`Could not remember the new-session project: ${error.message}`,
+						),
+					),
 				),
 			SubscribeServerStatus: () =>
 				followList(
@@ -386,6 +420,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							instanceId: request.instanceId,
 						}),
 					});
+					// Saving without a slug adds a project; its first session goes there.
+					if (request.slug === undefined)
+						yield* rememberNewSessionProject(project.slug);
 					const projects = yield* projectList;
 					return {
 						projectSlug: request.projectSlug,

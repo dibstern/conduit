@@ -2114,7 +2114,11 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 
 export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	payload: {},
-	success: Schema.Struct({ projects: Schema.Array(ProjectInfoSchema) }),
+	success: Schema.Struct({
+		projects: Schema.Array(ProjectInfoSchema),
+		/** The project a new session prefills, on every client. */
+		newSessionProject: Schema.optional(Schema.String),
+	}),
 	error: WsRpcError,
 	stream: true,
 });

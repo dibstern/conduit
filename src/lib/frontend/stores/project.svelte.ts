@@ -28,25 +28,22 @@ import { confirm } from "./ui.svelte.js";
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
+	/** The project the daemon says a new session prefills, on every client. */
+	newSessionProject: null as string | null,
 });
 
-const LAST_NEW_SESSION_PROJECT_KEY = "conduit-last-new-session-project";
-
-/** The project a draft will be created in: its own pick, else the one this
- *  device last created a session in, else the first available. A draft never
- *  inherits the project of whatever session happened to be open. */
+/** The project a draft will be created in: its own pick, else the last one
+ *  added or given a session (on any client), else the first available. A draft
+ *  never inherits the project of whatever session happened to be open. */
 export function getDraftProject(): string | null {
 	const picked = getCurrentSearchParams().get(DRAFT_PROJECT_PARAM);
 	if (picked) return picked;
 	const available = projectState.projects.filter((p) => !p.missing);
-	const last = localStorage.getItem(LAST_NEW_SESSION_PROJECT_KEY);
 	return (
-		available.find((p) => p.slug === last)?.slug ?? available[0]?.slug ?? null
+		available.find((p) => p.slug === projectState.newSessionProject)?.slug ??
+		available[0]?.slug ??
+		null
 	);
-}
-
-export function rememberNewSessionProject(slug: string): void {
-	localStorage.setItem(LAST_NEW_SESSION_PROJECT_KEY, slug);
 }
 
 /** Apply a full project list: the subscription's, or an RPC's reply. */
@@ -155,7 +152,11 @@ export function followDaemonLists(connection: string | null): void {
 					Effect.flatMap(clients.forProject(connection), ({ subscriptions }) =>
 						Effect.all(
 							[
-								follow(subscriptions.projects, applyProjectList),
+								follow(subscriptions.projects, (list) => {
+									applyProjectList(list);
+									projectState.newSessionProject =
+										list.newSessionProject ?? null;
+								}),
 								follow(subscriptions.instances, applyInstanceListResponse),
 								follow(
 									() => serverStatusFeed(subscriptions),

@@ -56,6 +56,8 @@ export interface DaemonConfig {
 	autoSettleAfterDays?: number | null;
 	/** What to do when a Claude account reaches its usage limit; absent means the defaults. */
 	usageLimits?: UsageLimitsSetting;
+	/** The project a new session prefills: the last one added or given a session. */
+	newSessionProject?: string;
 	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
 	keepAwakeCommand?: string;
 	/** Arguments for the keep-awake command override. */
@@ -182,6 +184,7 @@ export const DaemonConfigSchema = Schema.Struct({
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
 	dangerouslySkipPermissions: Schema.Boolean,
 	claudeConfigDir: Schema.optional(Schema.String),
+	newSessionProject: Schema.optional(Schema.String),
 	projects: Schema.Array(DaemonProjectSchema),
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
 });

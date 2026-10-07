@@ -147,6 +147,9 @@ const buildInitialRuntimeConfig = (
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(claudeConfigDir !== undefined && { claudeConfigDir }),
+		...(persisted?.newSessionProject !== undefined && {
+			newSessionProject: persisted.newSessionProject,
+		}),
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
 	});

@@ -131,6 +131,9 @@ for (const provider of providers) {
 			// 3. Reload: the project and its folder order persisted.
 			await page.reload();
 			await app.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
+			// Adding opened a draft; on a phone the list is behind it.
+			const back = page.getByTestId("session-bar-back");
+			if (await back.isVisible()) await back.click();
 			await expect(page.getByTestId("session-scope-chip")).toHaveText(
 				"edit-app",
 			);
