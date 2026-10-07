@@ -121,6 +121,7 @@ function materializeSubagentsAfterResultEffect(
 			parentConduitSessionId: ctx.sessionId,
 			parentClaudeSessionId,
 			workspaceRoot: ctx.workspaceRoot,
+			...(ctx.configDir !== undefined && { configDir: ctx.configDir }),
 			knownTasks: ctx.subagentTasks ?? new Map(),
 		});
 		if (ctx.stopped) return;
@@ -443,7 +444,10 @@ function pollClaudeSubagentSnapshotEffect(
 				subagentSdk.getSubagentMessages(
 					poller.parentClaudeSessionId,
 					poller.sdkSubagentId,
-					{ dir: ctx.workspaceRoot },
+					{
+						dir: ctx.workspaceRoot,
+						...(ctx.configDir !== undefined && { configDir: ctx.configDir }),
+					},
 				),
 			catch: (cause) =>
 				new ClaudeBoundaryError({ operation: "getSubagentMessages", cause }),
