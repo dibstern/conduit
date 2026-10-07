@@ -28,6 +28,10 @@ export type DaemonEvent = Data.TaggedEnum<{
 	// The daemon's instance or project list changed (conduit-test-ni8.14).
 	InstancesChanged: Record<never, never>;
 	ProjectsChanged: Record<never, never>;
+	// SubscribeServerStatus inputs (conduit-test-ni8.16.2): a new build became
+	// (un)available, or the cross-project session lists went stale.
+	RestartAvailabilityChanged: Record<never, never>;
+	DaemonSessionsChanged: Record<never, never>;
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();

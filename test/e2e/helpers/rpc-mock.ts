@@ -34,7 +34,11 @@ type RpcHandler = (
 	request: JsonRpcRequest | EffectRpcRequest,
 ) => unknown | Promise<unknown>;
 
-type DaemonListTag = "SubscribeInstances" | "SubscribeProjects";
+/** Daemon-global feeds whose latest value the mock replays to each subscriber. */
+type DaemonListTag =
+	| "SubscribeInstances"
+	| "SubscribeProjects"
+	| "SubscribeServerStatus";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
 const isSessionStream = (tag: string): boolean =>
@@ -577,7 +581,9 @@ async function handleMessage(
 	if (isEffectRpcRequest(raw)) {
 		control.record(raw.tag, raw.payload ?? {});
 		const daemonList =
-			raw.tag === "SubscribeInstances" || raw.tag === "SubscribeProjects"
+			raw.tag === "SubscribeInstances" ||
+			raw.tag === "SubscribeProjects" ||
+			raw.tag === "SubscribeServerStatus"
 				? control.initialDaemonList(raw.tag)
 				: undefined;
 		const stream =

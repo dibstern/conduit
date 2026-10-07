@@ -84,7 +84,7 @@ describe("Managed OpenCode starts on first use", () => {
 	it("spawns nothing at startup or attach, then exactly once for the first OpenCode session", async () => {
 		const fixture = start("first-use");
 		await fixture.restart();
-		// connect() returns after protocol_version and the PTY snapshot. A
+		// connect() returns after the PTY snapshot. A
 		// sessionless attach sends nothing after that (the model, effort and
 		// context window ride shell rows and GetModels since ni8.55), so the
 		// quiet window below is what covers the rest of the attach.

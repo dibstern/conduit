@@ -13,17 +13,10 @@
  *
  * Faking the socket rather than assigning `wsState.status` directly is
  * deliberate. The status is set by the real `open` handler, which also resets
- * the attempt counter, clears relay state and arms the protocol-version check;
- * poking the store would skip all of it and leave the component in a state the
- * app can never actually be in.
- *
- * The `protocol_version` frame is not garnish. On open the app arms a 10-second
- * timer that raises a "stale daemon" banner if no such frame arrives — a time
- * bomb that would make any baseline captured near it nondeterministic. Sending
- * the frame disarms it through the ordinary code path.
+ * the attempt counter and clears relay state; poking the store would skip all
+ * of it and leave the component in a state the app can never actually be in.
  */
 
-import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 import { setAttachedProject } from "../stores/ws-dispatch.js";
 
 type Listener = (event?: unknown) => void;
@@ -59,15 +52,6 @@ export function connectedSocket(): () => void {
 				// Stands in for the AttachProject reply: Storybook has no RPC server.
 				const slug = new URL(this.url).searchParams.get("p");
 				if (slug) setAttachedProject(slug);
-				this.emit(
-					"message",
-					new MessageEvent("message", {
-						data: JSON.stringify({
-							type: "protocol_version",
-							version: WS_PROTOCOL_VERSION,
-						}),
-					}),
-				);
 			}, 0);
 		}
 

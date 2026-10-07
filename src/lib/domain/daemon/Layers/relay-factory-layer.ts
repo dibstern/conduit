@@ -21,6 +21,7 @@ import {
 	Exit,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
 	Runtime,
 } from "effect";
@@ -40,7 +41,7 @@ import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
-import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
@@ -56,7 +57,6 @@ import {
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import {
 	broadcastProjectList,
-	broadcastToAll,
 	projectInfos as getEffectProjectInfos,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
@@ -201,8 +201,8 @@ export const RelayFactoryLive = (
 				);
 			const broadcastSessionListChanged = () =>
 				runCallback(
-					broadcastToAll({ type: "daemon_sessions_changed" }).pipe(
-						Effect.provideService(DaemonEventBusTag, eventBus),
+					PubSub.publish(eventBus, DaemonEvent.DaemonSessionsChanged()).pipe(
+						Effect.asVoid,
 					),
 				);
 			const publishProjectList = () =>

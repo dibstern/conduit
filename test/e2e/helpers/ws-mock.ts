@@ -33,13 +33,14 @@ const CATALOG_MESSAGE_TYPES = new Set([
 	"mock_command_catalog",
 ]);
 
-/** Mock-only inputs served over the daemon list subscriptions, never over /ws. */
+/** Mock-only inputs served over the daemon-global subscriptions, never over /ws. */
 const DAEMON_LIST_TAGS = new Map<
 	string,
-	"SubscribeProjects" | "SubscribeInstances"
+	"SubscribeProjects" | "SubscribeInstances" | "SubscribeServerStatus"
 >([
 	["project_list", "SubscribeProjects"],
 	["instance_list", "SubscribeInstances"],
+	["server_status", "SubscribeServerStatus"],
 ]);
 
 /** Deliver a list message through its subscription; false if it is not one. */

@@ -68,8 +68,11 @@ test.describe("PWA background/resume", () => {
 		ws.sendMessage({ type: "client_count", count: 7 });
 		await expect(page.locator("#client-count-badge")).toHaveText("7");
 		ws.sendMessage({
-			type: "protocol_version",
-			version: WS_PROTOCOL_VERSION + 1,
+			type: "server_status",
+			protocolVersion: WS_PROTOCOL_VERSION + 1,
+			buildId: "dev",
+			restartAvailable: false,
+			sessionsRevision: 0,
 		});
 		const banner = page.locator('[data-banner-id="stale-page"]');
 		await expect(banner).toContainText(

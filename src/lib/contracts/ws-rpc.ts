@@ -1970,6 +1970,27 @@ export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	stream: true,
 });
 
+/**
+ * The daemon's own facts (conduit-test-ni8.16.2), daemon-global like the
+ * lists above: its protocol and build, whether a newer build is ready to
+ * restart into, and a revision that moves whenever the cross-project session
+ * lists went stale. One value on subscribe, then one per change.
+ */
+export const ServerStatusSchema = Schema.Struct({
+	protocolVersion: Schema.Number,
+	buildId: Schema.String,
+	restartAvailable: Schema.Boolean,
+	sessionsRevision: Schema.Number,
+});
+export type ServerStatus = typeof ServerStatusSchema.Type;
+
+export const SubscribeServerStatus = Rpc.make("SubscribeServerStatus", {
+	payload: {},
+	success: ServerStatusSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const OpenCodeConnectionStatusSchema = Schema.Literal(
 	"stopped",
 	"starting",
@@ -2084,6 +2105,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,
+	SubscribeServerStatus,
 	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),

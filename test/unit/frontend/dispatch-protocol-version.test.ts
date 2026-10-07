@@ -1,100 +1,74 @@
-// The daemon sends protocol_version on connect. Older daemons need a restart;
-// older pages need a reload. No message within the grace window still marks
-// a daemon predating the handshake (conduit-test-l12).
+// SubscribeServerStatus carries the daemon's protocol version. Older daemons
+// need a restart; older pages need a reload. A daemon too old to know the RPC
+// answers with an unknown-tag defect, which also marks it stale
+// (conduit-test-l12, conduit-test-ni8.16.2).
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import { Effect, Fiber, Stream } from "effect";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BUILD_ID } from "../../../src/lib/build-id.js";
+import type { ServerStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 
-// Hoisted mocks (WebSocket/window needed by the ws.svelte.ts import chain)
-
-const { showBannerMock, removeBannerMock } = vi.hoisted(() => {
-	const showBannerMock = vi.fn();
-	const removeBannerMock = vi.fn();
-
-	class MockWebSocket {
-		static readonly OPEN = 1;
-		static readonly CLOSED = 3;
-		readyState = MockWebSocket.OPEN;
-		send(_data: string): void {}
-		addEventListener(_event: string, _fn: (ev?: unknown) => void): void {}
-		close(): void {
-			this.readyState = MockWebSocket.CLOSED;
-		}
-	}
-	Object.defineProperty(globalThis, "WebSocket", {
-		value: MockWebSocket,
-		writable: true,
-		configurable: true,
-	});
-	if (typeof globalThis.window === "undefined") {
-		Object.defineProperty(globalThis, "window", {
-			value: {
-				location: { protocol: "http:", host: "localhost:3000", pathname: "/" },
-				history: { pushState: () => {}, replaceState: () => {} },
-				addEventListener: () => {},
-			},
-			writable: true,
-			configurable: true,
-		});
-	}
-
-	return { showBannerMock, removeBannerMock };
-});
+const mocks = vi.hoisted(() => ({
+	showBanner: vi.fn(),
+	removeBanner: vi.fn(),
+	refreshListedSessions: vi.fn(),
+}));
 
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: vi.fn(),
-	showBanner: showBannerMock,
-	removeBanner: removeBannerMock,
-	setClientCount: vi.fn(),
-	updateContextPercent: vi.fn(),
+	showBanner: mocks.showBanner,
+	removeBanner: mocks.removeBanner,
 }));
-
-vi.mock("dompurify", () => ({
-	default: { sanitize: (html: string) => html },
+vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
+	refreshListedSessions: mocks.refreshListedSessions,
 }));
+vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
-import {
-	armProtocolVersionCheck,
-	disarmProtocolVersionCheck,
-	handleMessage,
-} from "../../../src/lib/frontend/stores/ws-dispatch.js";
+type Module =
+	typeof import("../../../src/lib/frontend/stores/server-status.js");
 
-const protocolVersionMsg = (version: number): RelayMessage => ({
-	type: "protocol_version",
-	version,
+const status = (overrides: Partial<ServerStatus> = {}): ServerStatus => ({
+	protocolVersion: WS_PROTOCOL_VERSION,
+	buildId: BUILD_ID,
+	restartAvailable: false,
+	sessionsRevision: 0,
+	...overrides,
 });
 
-describe("protocol_version dispatch", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-		showBannerMock.mockClear();
-		removeBannerMock.mockClear();
-	});
+describe("server status: protocol version", () => {
+	let server: Module;
 
-	afterEach(() => {
-		disarmProtocolVersionCheck();
-		vi.useRealTimers();
+	beforeEach(async () => {
+		vi.resetModules();
+		vi.clearAllMocks();
+		server = await import("../../../src/lib/frontend/stores/server-status.js");
 	});
 
 	it("shows the stale-daemon banner for an older daemon and clears the reload banner", () => {
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION + 1));
-		showBannerMock.mockClear();
-		removeBannerMock.mockClear();
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION - 1));
-		expect(showBannerMock).toHaveBeenCalledWith(
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION + 1 }),
+		);
+		vi.clearAllMocks();
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION - 1 }),
+		);
+		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "stale-daemon", variant: "warning" }),
 		);
-		expect(removeBannerMock).toHaveBeenCalledWith("stale-page");
+		expect(mocks.removeBanner).toHaveBeenCalledWith("stale-page");
 	});
 
 	it("shows the reload banner for a newer daemon and clears the stale-daemon banner", () => {
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION - 1));
-		showBannerMock.mockClear();
-		removeBannerMock.mockClear();
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION + 1));
-		expect(removeBannerMock).toHaveBeenCalledWith("stale-daemon");
-		expect(showBannerMock).toHaveBeenCalledWith({
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION - 1 }),
+		);
+		vi.clearAllMocks();
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION + 1 }),
+		);
+		expect(mocks.removeBanner).toHaveBeenCalledWith("stale-daemon");
+		expect(mocks.showBanner).toHaveBeenCalledWith({
 			id: "stale-page",
 			variant: "update",
 			icon: "refresh-cw",
@@ -106,31 +80,53 @@ describe("protocol_version dispatch", () => {
 	});
 
 	it("clears both version banners on matching version", () => {
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION));
-		expect(showBannerMock).not.toHaveBeenCalled();
-		expect(removeBannerMock).toHaveBeenCalledWith("stale-daemon");
-		expect(removeBannerMock).toHaveBeenCalledWith("stale-page");
+		server.applyServerStatus(status());
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+		expect(mocks.removeBanner).toHaveBeenCalledWith("stale-daemon");
+		expect(mocks.removeBanner).toHaveBeenCalledWith("stale-page");
 	});
 
-	it("shows the banner when no protocol_version arrives in the grace window", () => {
-		armProtocolVersionCheck();
-		vi.advanceTimersByTime(10_000);
-		expect(showBannerMock).toHaveBeenCalledWith(
+	it("does not re-show a dismissed reload banner when only the session revision moves", () => {
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION + 1 }),
+		);
+		vi.clearAllMocks();
+		server.applyServerStatus(
+			status({ protocolVersion: WS_PROTOCOL_VERSION + 1, sessionsRevision: 1 }),
+		);
+		expect(mocks.showBanner).not.toHaveBeenCalled();
+		expect(mocks.refreshListedSessions).toHaveBeenCalledOnce();
+	});
+
+	it("does not refresh the session lists on the first status", () => {
+		server.applyServerStatus(status({ sessionsRevision: 7 }));
+		expect(mocks.refreshListedSessions).not.toHaveBeenCalled();
+	});
+
+	it("shows the stale-daemon banner and stops retrying when the daemon does not know the RPC", async () => {
+		const fiber = Effect.runFork(
+			Stream.runDrain(
+				server.serverStatusFeed({
+					serverStatus: () =>
+						Stream.die("Unknown request tag: SubscribeServerStatus"),
+				}),
+			),
+		);
+		await Effect.runPromise(Effect.sleep(10));
+		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "stale-daemon" }),
 		);
+		expect(fiber.unsafePoll()).toBeNull();
+		await Effect.runPromise(Fiber.interrupt(fiber));
 	});
 
-	it("does not fire the absence banner when the version arrives in time", () => {
-		armProtocolVersionCheck();
-		handleMessage(protocolVersionMsg(WS_PROTOCOL_VERSION));
-		vi.advanceTimersByTime(60_000);
-		expect(showBannerMock).not.toHaveBeenCalled();
-	});
-
-	it("does not fire the absence banner after disarm (socket closed)", () => {
-		armProtocolVersionCheck();
-		disarmProtocolVersionCheck();
-		vi.advanceTimersByTime(60_000);
-		expect(showBannerMock).not.toHaveBeenCalled();
+	it("passes other failures through to the supervisor", async () => {
+		const exit = await Effect.runPromiseExit(
+			Stream.runDrain(
+				server.serverStatusFeed({ serverStatus: () => Stream.die("boom") }),
+			),
+		);
+		expect(exit._tag).toBe("Failure");
+		expect(mocks.showBanner).not.toHaveBeenCalled();
 	});
 });

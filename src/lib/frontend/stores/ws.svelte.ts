@@ -54,11 +54,7 @@ export {
 	wsSend,
 } from "./ws-send.svelte.js";
 
-import {
-	armProtocolVersionCheck,
-	disarmProtocolVersionCheck,
-	handleMessage,
-} from "./ws-dispatch.js";
+import { handleMessage } from "./ws-dispatch.js";
 import { onProjectAttached } from "./ws-listeners.js";
 import { setWsGetter } from "./ws-send.svelte.js";
 
@@ -260,7 +256,6 @@ function doConnect(
 		wsState.relayStatus = undefined;
 		wsState.relayError = undefined;
 		_reconnectDelay = RECONNECT_BASE_MS;
-		armProtocolVersionCheck();
 		_onConnectFn?.();
 	});
 
@@ -279,7 +274,6 @@ function doConnect(
 		wsDebugLog("ws:close", wsState.status);
 		_ws = null;
 		sessionActivityBridge.clear();
-		disarmProtocolVersionCheck();
 
 		// The turn is not ended here: the session's shell row rides the RPC
 		// socket, not this one, and it ends the turn when the row goes idle.

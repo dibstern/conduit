@@ -160,6 +160,10 @@ const makeSubscriptions = (
 	 */
 	instances: () => resumeStream(() => sockets.control.SubscribeInstances({})),
 	projects: () => resumeStream(() => sockets.control.SubscribeProjects({})),
+	/** The daemon's protocol, build and restart state, plus a revision that
+	 *  moves when the cross-project session lists go stale. */
+	serverStatus: (options: { readonly onTransportDrop?: () => void } = {}) =>
+		resumeStream(() => sockets.control.SubscribeServerStatus({}), options),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */

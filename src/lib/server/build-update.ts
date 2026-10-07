@@ -1,8 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, PubSub } from "effect";
 import { BUILD_ID } from "../build-id.js";
-import { DaemonWsClientRegistryTag } from "../domain/daemon/Services/daemon-ws-client-registry.js";
-import { broadcastToAll } from "../domain/daemon/Services/project-registry-service.js";
+import {
+	DaemonEvent,
+	DaemonEventBusTag,
+} from "../domain/daemon/Services/daemon-pubsub.js";
 import { isRecord } from "../utils.js";
 
 // Captured once so detection and the connection handshake use the same identity.
@@ -13,14 +15,14 @@ let restartAvailable = false;
 
 export const getRestartAvailable = (): boolean => restartAvailable;
 
-// Only the daemon starts this layer; relays read its process-wide snapshot.
+// Only the daemon starts this layer; SubscribeServerStatus reads its snapshot.
 export const ServerBuildUpdateLive = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const supervised =
 			process.env["CONDUIT_SERVICE"] === "1" ||
 			process.env["XPC_SERVICE_NAME"] === "dev.conduit.server";
 		if (!supervised || SERVER_BUILD_ID === "dev") return;
-		const daemonWsClients = yield* DaemonWsClientRegistryTag;
+		const bus = yield* DaemonEventBusTag;
 
 		const markerPath =
 			process.env["CONDUIT_BUILD_READY_PATH"] ??
@@ -54,10 +56,7 @@ export const ServerBuildUpdateLive = Layer.scopedDiscard(
 				}).pipe(Effect.orElseSucceed(() => false)));
 			if (available === restartAvailable) return;
 			restartAvailable = available;
-			const message = { type: "server_update", restartAvailable } as const;
-			// Relays reach attached browsers; the root view has no relay.
-			yield* broadcastToAll(message);
-			yield* daemonWsClients.broadcastUnattached(message);
+			yield* PubSub.publish(bus, DaemonEvent.RestartAvailabilityChanged());
 		});
 
 		yield* check;

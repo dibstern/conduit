@@ -48,13 +48,9 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				if (held) probe.__heldRpcDials++;
 				super(held ? "ws://127.0.0.1:9/rpc" : url, protocols);
 				if (String(url).includes("/ws")) {
-					this.addEventListener("message", ({ data }) => {
-						if (!probe.__holdRpc || typeof data !== "string") return;
-						const message = JSON.parse(data) as { type: string };
-						// The relay handshake: /ws reattached while /rpc stays down.
-						if (message.type === "protocol_version") {
-							probe.__wsAttachedWhileHeld = true;
-						}
+					// /ws reconnected while /rpc stays down.
+					this.addEventListener("open", () => {
+						if (probe.__holdRpc) probe.__wsAttachedWhileHeld = true;
 					});
 				}
 			}

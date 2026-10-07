@@ -16,8 +16,7 @@ import {
 	type WsConn,
 	type WsHandlerStateTag,
 } from "../domain/relay/Services/ws-handler-service.js";
-import { type RelayMessage, WS_PROTOCOL_VERSION } from "../shared-types.js";
-import { getRestartAvailable, SERVER_BUILD_ID } from "./build-update.js";
+import type { RelayMessage } from "../shared-types.js";
 import type {
 	WebSocketHandlerShape,
 	WsAttachOptions,
@@ -144,8 +143,7 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			ws.close(1001, "Server shutting down");
 			return () => {};
 		}
-		const { clientId, requestedSessionId, skipDefaultSession, skipHandshake } =
-			options;
+		const { clientId, requestedSessionId, skipDefaultSession } = options;
 		let attached = true;
 		// In-flight effects can retain this connection after detach removes the
 		// client from the relay. Revoke their access before another relay attaches.
@@ -191,25 +189,6 @@ export class EffectWsHandler implements WebSocketHandlerShape {
 			Effect.suspend(() =>
 				attached ? addClient(clientId, connection) : Effect.interrupt,
 			).pipe(
-				// Version first: client_connected listeners start the session-init
-				// flood, and the mismatch check must not trail it.
-				Effect.tap(() =>
-					skipHandshake
-						? Effect.void
-						: sendTo(clientId, {
-								type: "protocol_version",
-								version: WS_PROTOCOL_VERSION,
-								buildId: SERVER_BUILD_ID,
-							}),
-				),
-				Effect.tap(() =>
-					skipHandshake
-						? Effect.void
-						: sendTo(clientId, {
-								type: "server_update",
-								restartAvailable: getRestartAvailable(),
-							}),
-				),
 				Effect.tap((clientCount) =>
 					Effect.sync(() => {
 						this.recordClientConnected(clientId, connection);

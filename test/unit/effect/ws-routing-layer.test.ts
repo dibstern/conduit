@@ -299,7 +299,6 @@ describe("WebSocketRoutingLive", () => {
 				);
 				yield* Effect.yieldNow();
 				yield* waitForAssertion(() => {
-					expect(socket.send).toHaveBeenCalledTimes(2);
 					if (scenario.expected) {
 						expect(relay.attach).toHaveBeenCalledTimes(1);
 						expect(relay.attach).toHaveBeenCalledWith(
@@ -310,15 +309,10 @@ describe("WebSocketRoutingLive", () => {
 							vi.mocked(relay.attach).mock.calls[0]?.[1].requestedSessionId,
 						).toBeUndefined();
 					} else {
-						expect(socket.send).toHaveBeenCalledWith(
-							JSON.stringify({
-								type: "server_update",
-								restartAvailable: false,
-							}),
-						);
 						expect(relay.attach).not.toHaveBeenCalled();
 					}
 				});
+				expect(socket.send).not.toHaveBeenCalled();
 				expect(socket.close).not.toHaveBeenCalled();
 			}),
 	);
@@ -440,7 +434,6 @@ describe("WebSocketRoutingLive", () => {
 					expect(relay.attach).toHaveBeenCalledWith(socket, {
 						clientId: "browser",
 						skipDefaultSession: true,
-						skipHandshake: true,
 					});
 					const entry = yield* registry.get("browser");
 					expect(Option.isSome(entry) && entry.value.slug).toBe("project-b");

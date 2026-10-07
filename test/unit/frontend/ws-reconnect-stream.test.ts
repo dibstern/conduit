@@ -72,8 +72,6 @@ vi.mock("../../../src/lib/frontend/stores/ws-dispatch.js", async () => {
 	);
 	return {
 		handleMessage: handleMessageMock,
-		armProtocolVersionCheck: () => {},
-		disarmProtocolVersionCheck: () => {},
 		setAttachedProject: (slug: string) => {
 			attachedProjectState.slug = slug;
 			for (const listener of projectAttachedListeners) listener(slug);

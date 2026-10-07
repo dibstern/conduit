@@ -226,7 +226,7 @@ describe("RelayFactoryTag", () => {
 			expect(yield* projectInfos).toMatchObject([
 				{ slug: "git-project", git: { branch: "main", dirty: false } },
 			]);
-			yield* Queue.take(subscription); // daemon_sessions_changed
+			yield* Queue.take(subscription); // DaemonSessionsChanged
 			yield* Effect.promise(config.refreshSessionGit);
 			expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
 

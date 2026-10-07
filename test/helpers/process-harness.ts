@@ -1644,9 +1644,6 @@ export class ProcessBrowser {
 					fail(error);
 				});
 			});
-			await browser.waitFor(
-				(message) => message["type"] === "protocol_version",
-			);
 			await browser.followPtys();
 			return browser;
 		} catch (error) {

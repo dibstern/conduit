@@ -3,6 +3,7 @@ import { type Context, Effect, type Layer, Stream, Struct } from "effect";
 import {
 	type OpenCodeInstance,
 	type ProjectInfo,
+	type ServerStatus,
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
@@ -265,6 +266,10 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
 		),
+	SubscribeServerStatus: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeServerStatus requires daemon mode" }),
+		),
 	...unaryHandlers,
 });
 
@@ -328,6 +333,7 @@ export type DaemonRpcHandlers = {
 		{ readonly projects: readonly ProjectInfo[] },
 		WsRpcError
 	>;
+	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
 };
 
 export const makeRoutedWsRpcServerLayer = (
@@ -354,7 +360,12 @@ export const makeRoutedWsRpcServerLayer = (
 
 	const daemonUnaryHandlers =
 		daemonHandlers &&
-		Struct.omit(daemonHandlers, "SubscribeInstances", "SubscribeProjects");
+		Struct.omit(
+			daemonHandlers,
+			"SubscribeInstances",
+			"SubscribeProjects",
+			"SubscribeServerStatus",
+		);
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
 	const handlers = Object.fromEntries(
@@ -479,5 +490,9 @@ export const makeRoutedWsRpcServerLayer = (
 			daemonHandlers
 				? Rpc.fork(daemonHandlers.SubscribeProjects())
 				: wsRpcHandlers.SubscribeProjects(),
+		SubscribeServerStatus: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeServerStatus())
+				: wsRpcHandlers.SubscribeServerStatus(),
 	});
 };

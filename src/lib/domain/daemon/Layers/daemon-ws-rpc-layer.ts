@@ -18,10 +18,17 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
+	getRestartAvailable,
+	SERVER_BUILD_ID,
+} from "../../../server/build-update.js";
+import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
-import type { RelayMessage } from "../../../shared-types.js";
+import {
+	type RelayMessage,
+	WS_PROTOCOL_VERSION,
+} from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import {
@@ -101,19 +108,26 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
-			readonly list: "instances" | "projects";
+			readonly list: "instances" | "projects" | "serverStatus";
 			readonly changed: Queue.Queue<void>;
 		}>();
+		// Moves when the cross-project session lists went stale; a tab refetches
+		// them when it sees a new value (conduit-test-ni8.16.2).
+		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) => {
+				if (event._tag === "DaemonSessionsChanged") sessionsRevision++;
 				const list =
-					event._tag === "ProjectsChanged"
-						? "projects"
-						: event._tag === "InstancesChanged" ||
-								event._tag === "InstanceStatusChanged"
-							? "instances"
-							: undefined;
+					event._tag === "RestartAvailabilityChanged" ||
+					event._tag === "DaemonSessionsChanged"
+						? "serverStatus"
+						: event._tag === "ProjectsChanged"
+							? "projects"
+							: event._tag === "InstancesChanged" ||
+									event._tag === "InstanceStatusChanged"
+								? "instances"
+								: undefined;
 				if (list !== undefined)
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
@@ -178,7 +192,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
 		const followList = <A, E>(
-			list: "instances" | "projects",
+			list: "instances" | "projects" | "serverStatus",
 			read: Effect.Effect<A, E, InstanceManagerStateTag | ProjectRegistryTag>,
 		) =>
 			Stream.unwrapScoped(
@@ -207,6 +221,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				followList(
 					"projects",
 					Effect.map(projectInfos, (projects) => ({ projects })),
+				),
+			SubscribeServerStatus: () =>
+				followList(
+					"serverStatus",
+					Effect.sync(() => ({
+						protocolVersion: WS_PROTOCOL_VERSION,
+						buildId: SERVER_BUILD_ID,
+						restartAvailable: getRestartAvailable(),
+						sessionsRevision,
+					})),
 				),
 			GetStatus: () =>
 				run(
