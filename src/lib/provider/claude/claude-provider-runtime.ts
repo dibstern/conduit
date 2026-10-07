@@ -65,6 +65,7 @@ import type {
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCapabilities,
+	ProviderNativeSession,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -149,7 +150,6 @@ import {
 	makeClaudeWarmedQueryOwner,
 } from "./claude-warmed-query.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
-import { serializePriorConversation } from "./history-transcript.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	CanUseTool,
@@ -194,6 +194,7 @@ export interface ClaudeProviderInstanceDeps {
 		input: MaterializeClaudeSubagentsInput,
 	) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError>;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 	/** Tests can host the session engine locally; production defaults to a process. */
@@ -212,6 +213,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
 	| "readGoalStatus"
+	| "persistHandoffDelivered"
 > & {
 	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
@@ -284,6 +286,9 @@ export const makeClaudeProviderRuntime = (
 				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
 				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
+				...(deps.persistHandoffDelivered
+					? { persistHandoffDelivered: deps.persistHandoffDelivered }
+					: {}),
 			},
 			(output, sessionId?: string) =>
 				runtime
@@ -464,6 +469,7 @@ export class ClaudeProviderRuntime {
 					// failClaudeRunnerTurn logs errors; database failures still need a retry.
 					if (persistenceError) return yield* Effect.fail(persistenceError);
 				}),
+			this.deps.daemonConfigDir,
 		);
 	});
 
@@ -517,6 +523,15 @@ export class ClaudeProviderRuntime {
 						cause: cause instanceof ClaudeBoundaryError ? cause.cause : cause,
 					}),
 			),
+		);
+	}
+
+	getNativeSessionEffect(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined> {
+		return (
+			this.runner.getNativeSessionEffect?.(sessionId) ??
+			Effect.succeed(undefined)
 		);
 	}
 
@@ -925,7 +940,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			readonly sessionId: string;
 			readonly finished: Deferred.Deferred<void>;
 			readonly claudeSettingsOverrides: Settings | undefined;
-			readonly historyOnDemand: boolean;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -983,6 +997,23 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
+	getNativeSessionEffect(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined> {
+		return getSession(this.stateRef, sessionId).pipe(
+			Effect.map((ctx) =>
+				ctx
+					? {
+							instanceId: ctx.instanceId ?? "claude",
+							configDir: ctx.configDir,
+							agent: ctx.currentAgent,
+							resumeSessionId: ctx.resumeSessionId,
+						}
+					: undefined,
+			),
+		);
+	}
+
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -1018,7 +1049,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						command.input.sessionId,
 						finished,
 						command.claudeSettingsOverrides,
-						command.historyOnDemand ?? false,
 					);
 					const controller = this.sinkBindings.get(
 						command.sinkId,
@@ -1031,6 +1061,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						eventSink,
 						abortSignal: controller.signal,
 					}).pipe(
+						Effect.map((result) =>
+							result.status === "completed" && command.input.handoff
+								? { ...result, handoff: command.input.handoff }
+								: result,
+						),
 						Effect.ensuring(Deferred.succeed(finished, undefined)),
 						Effect.ensuring(this.releaseSinkEffect(eventSink)),
 					);
@@ -1193,7 +1228,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		sessionId: string,
 		finished: Deferred.Deferred<void>,
 		claudeSettingsOverrides: Settings | undefined,
-		historyOnDemand: boolean,
 	): EventSink {
 		const permissions = new Map<
 			string,
@@ -1306,7 +1340,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			sessionId,
 			finished,
 			claudeSettingsOverrides,
-			historyOnDemand,
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -1530,28 +1563,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				// endSession, shutdown) leaves it in sessions with a closed prompt
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
-				const nativeThread =
-					existingCtx.resumeSessionId != null
-						? {
-								firstSequence: input.nativeThread?.firstSequence ?? 0,
-								deliveredThrough: input.nativeThread?.deliveredThrough ?? 0,
-								configDir:
-									input.nativeThread?.configDir ?? existingCtx.configDir,
-								resumeSessionId: existingCtx.resumeSessionId,
-							}
-						: input.nativeThread;
 				yield* this.removeSessionEffect(sessionId);
-				return yield* this.createSessionAndSendTurnEffect({
-					...input,
-					nativeThread,
-				});
+				return yield* this.createSessionAndSendTurnEffect(input);
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
 				}
-				return yield* this.restartSessionForAgentChangeEffect(
+				return yield* this.restartSessionEffect(
 					existingCtx,
 					input,
+					"Claude agent changed",
+				);
+			} else if (
+				existingCtx &&
+				input.startFreshNativeSession &&
+				!(yield* hasPendingTurn(this.stateRef, sessionId))
+			) {
+				return yield* this.restartSessionEffect(
+					existingCtx,
+					input,
+					"Server requested a fresh Claude session",
 				);
 			} else if (
 				existingCtx &&
@@ -1925,7 +1956,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				if (yield* hasPendingTurn(this.stateRef, ctx.sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(ctx, input);
 				}
-				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
+				return yield* this.restartSessionEffect(
+					ctx,
+					input,
+					"Claude agent changed",
+				);
 			}
 
 			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
@@ -2060,39 +2095,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		};
 	}
 
-	private restartSessionForAgentChangeEffect(
+	private restartSessionEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
+		reason: string,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
-			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
-
-			const sinkId = this.sinkId(input.eventSink);
-			const history =
-				sinkId && this.sinkBindings.get(sinkId)?.historyOnDemand
-					? ((yield* this.emit({ type: "read-turn-history", sinkId }).pipe(
-							Effect.mapError(
-								(cause) =>
-									new ClaudeBoundaryError({
-										operation: "readTurnHistory",
-										cause,
-									}),
-							),
-						)).history ?? [])
-					: input.history;
-			const transcript = serializePriorConversation(history);
-			const prompt =
-				transcript.length > 0
-					? `${transcript}\n\n${input.prompt}`
-					: input.prompt;
-			const configDir = input.configDir ?? input.nativeThread?.configDir;
-			return yield* this.createSessionAndSendTurnEffect({
-				...input,
-				...(configDir !== undefined ? { configDir } : {}),
-				nativeThread: undefined,
-				prompt,
-			});
+			yield* this.disposeSessionEffect(ctx, reason);
+			return yield* this.createSessionAndSendTurnEffect(input);
 		});
 	}
 

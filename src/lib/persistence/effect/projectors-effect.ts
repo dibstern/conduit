@@ -702,7 +702,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				return yield* closeThinking(event.data.messageId);
+				const closed = yield* closeThinking(event.data.messageId);
+				const interrupted = yield* sql<{ id: string }>`UPDATE messages
+					SET finish = 'interrupted' WHERE id = ${event.data.messageId}
+						OR id IN (SELECT user_message_id FROM turns
+							WHERE session_id = ${event.sessionId} AND state IN ('pending', 'running'))
+					RETURNING id`;
+				return [...new Set([...closed, ...ids(interrupted)])];
 			}
 
 			if (isEventType(event, "session.compaction")) {
@@ -1364,6 +1370,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	// canonical vocabulary only so historical stores still decode.
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
+	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",

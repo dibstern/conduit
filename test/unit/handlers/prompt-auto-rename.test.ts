@@ -38,6 +38,7 @@ const makeEngine = (providerId: "claude" | "opencode") =>
 const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
+	persistHandoffDelivered: vi.fn(() => Effect.void),
 	persistEvent: vi.fn(() => Effect.void),
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,

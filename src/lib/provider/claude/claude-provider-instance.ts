@@ -7,6 +7,7 @@ import type {
 	ProviderCapabilities,
 	ProviderDriver,
 	ProviderInstance,
+	ProviderNativeSession,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -38,6 +39,12 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return this.runtime.sendTurnEffect(input);
+	}
+
+	getNativeSessionEffect(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined> {
+		return this.runtime.getNativeSessionEffect(sessionId);
 	}
 
 	preWarmSessionEffect(

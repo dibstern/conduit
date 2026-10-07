@@ -69,6 +69,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.variant_changed": ["sessionId", "variant"],
 	"session.context_window_changed": ["sessionId", "contextWindow"],
 	"session.goal_changed": ["sessionId", "goal"],
+	"session.handoff_delivered": ["included", "omitted", "tokens"],
 	"message.created": ["messageId", "role", "sessionId"],
 	"message.removed": ["messageId"],
 	"message.part.removed": ["messageId", "partId"],

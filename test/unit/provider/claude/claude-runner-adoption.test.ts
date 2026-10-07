@@ -8,7 +8,6 @@ import {
 } from "node:fs";
 import { createServer, type Server, Socket } from "node:net";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Deferred, Effect, Either, Fiber } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,13 +21,7 @@ vi.mock("../../../../src/lib/env.js", async (importOriginal) => ({
 }));
 
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
-import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
-import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
-import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
-import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { makeProcessClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-process-session-runner.js";
-import * as runnerConnection from "../../../../src/lib/provider/claude/claude-runner-connection.js";
 import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
 	type ClaudeRunnerMessage,
@@ -41,11 +34,6 @@ import {
 	runnerPidAlive,
 } from "../../../../src/lib/provider/claude/claude-runner-registry.js";
 import type { ClaudeSessionOutput } from "../../../../src/lib/provider/claude/claude-session-runner.js";
-import {
-	makeMessageCreatedEvent,
-	makeSessionCreatedEvent,
-	makeTextDelta,
-} from "../../../helpers/persistence-factories.js";
 
 const observations: Record<string, unknown>[] = [];
 const servers: Server[] = [];
@@ -98,8 +86,6 @@ async function runnerSocket(options: {
 	readonly rejections: number;
 	readonly child?: ChildProcess;
 	readonly onReject?: (socket: Socket) => void;
-	readonly historyOnly?: boolean;
-	readonly noBindings?: boolean;
 }) {
 	const workspaceRoot = join(config.root, `project-${++cases}`);
 	const runnerId = "abcdefabcdef";
@@ -119,10 +105,6 @@ async function runnerSocket(options: {
 	});
 	const attempts: Array<{ at: number; filesIntact: boolean }> = [];
 	const commands: ClaudeRunnerMessage[] = [];
-	const historyReply = await Effect.runPromise(
-		Deferred.make<Extract<ClaudeRunnerMessage, { type: "output-reply" }>>(),
-	);
-	let connection: ClaudeRunnerSocket | undefined;
 	const pending: ClaudeSessionOutput = {
 		type: "permission-request",
 		sinkId: "adoption-sink",
@@ -164,15 +146,9 @@ async function runnerSocket(options: {
 						runnerId,
 						sessionId,
 						pid,
-						bindings: options.noBindings
-							? []
-							: [{ sinkId: "adoption-sink", sessionId }],
-						pendingOutputs: options.historyOnly
-							? []
-							: [{ sequence: 0, output: pending }],
+						bindings: [{ sinkId: "adoption-sink", sessionId }],
+						pendingOutputs: [{ sequence: 0, output: pending }],
 					});
-				else if (message.type === "output-reply")
-					Deferred.unsafeDone(historyReply, Effect.succeed(message));
 				else if (message.type === "command") {
 					commands.push(message);
 					peer.write({
@@ -183,7 +159,6 @@ async function runnerSocket(options: {
 			},
 			() => {},
 		);
-		connection = peer;
 	});
 	servers.push(server);
 	await new Promise<void>((resolve, reject) => {
@@ -196,219 +171,10 @@ async function runnerSocket(options: {
 		attempts,
 		commands,
 		pending,
-		readHistory: (sinkId = "adoption-sink") =>
-			Effect.sync(() => {
-				if (!connection) throw new Error("Runner is not connected");
-				connection.write({
-					type: "output",
-					outputId: "history-request",
-					sequence: 1,
-					output: { type: "read-turn-history", sinkId },
-				});
-			}).pipe(Effect.zipRight(Deferred.await(historyReply))),
 	};
 }
 
 describe("Claude runner adoption", () => {
-	it.each([
-		"live",
-		"restored",
-		"recovered",
-		"read failure",
-		"conversion failure",
-		"missing cutoff",
-	] as const)("loads %s runner history without an outbox transcript", async (scenario) => {
-		const fixture = await runnerSocket({
-			rejections: 0,
-			historyOnly: true,
-			noBindings: scenario === "recovered",
-		});
-		const fullOutput = "untruncated tool output\n".repeat(4000);
-		let emit: Parameters<
-			typeof runnerConnection.connectClaudeRunner
-		>[0]["emit"];
-		const connect = runnerConnection.connectClaudeRunner;
-		vi.spyOn(runnerConnection, "connectClaudeRunner").mockImplementation(
-			(options) => {
-				emit = options.emit;
-				return connect(options);
-			},
-		);
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					const store = yield* EventStoreEffectTag;
-					const projections = yield* ProjectionRunnerEffectTag;
-					yield* projections.recover();
-					const readQuery = yield* ReadQueryEffectTag;
-					const sessionId = "adoption-session";
-					const append = (events: Parameters<typeof store.appendBatch>[0]) =>
-						store
-							.appendBatch(events)
-							.pipe(
-								Effect.flatMap((stored) => projections.projectBatch(stored)),
-							);
-					yield* append([
-						makeSessionCreatedEvent(sessionId, {
-							provider: "claude",
-							createdAt: 1,
-						}),
-						makeMessageCreatedEvent(sessionId, "prior-user", {
-							role: "user",
-							createdAt: 10,
-						}),
-						makeTextDelta(sessionId, "prior-user", "Earlier prompt", {
-							createdAt: 10,
-							partId: "prior-user-text",
-						}),
-						makeMessageCreatedEvent(sessionId, "prior-assistant", {
-							createdAt: 20,
-						}),
-						canonicalEvent(
-							"tool.started",
-							sessionId,
-							{
-								messageId: "prior-assistant",
-								partId: "prior-tool",
-								toolName: "Bash",
-								callId: "call-1",
-								input: { tool: "Bash", command: "cat large-file" },
-							},
-							{ provider: "claude", createdAt: 20 },
-						),
-						canonicalEvent(
-							"tool.completed",
-							sessionId,
-							{
-								messageId: "prior-assistant",
-								partId: "prior-tool",
-								result: fullOutput,
-								duration: 1,
-							},
-							{ provider: "claude", createdAt: 21 },
-						),
-					]);
-					const historyRead = vi.spyOn(
-						readQuery,
-						"getSessionMessagesWithParts",
-					);
-					yield* append([
-						makeMessageCreatedEvent(sessionId, "current-user", {
-							role: "user",
-							createdAt: 30,
-						}),
-						makeTextDelta(sessionId, "current-user", "Current prompt", {
-							createdAt: 30,
-							partId: "current-user-text",
-						}),
-						canonicalEvent(
-							"message.created",
-							sessionId,
-							{
-								sessionId,
-								messageId: "current-assistant",
-								role: "assistant",
-								parentID: "current-user",
-							},
-							{ provider: "claude", createdAt: 31 },
-						),
-						makeTextDelta(
-							sessionId,
-							"current-assistant",
-							"Exclude this reply",
-							{ createdAt: 31, partId: "current-assistant-text" },
-						),
-						makeMessageCreatedEvent(sessionId, "aaa-later-user", {
-							role: "user",
-							createdAt: 32,
-						}),
-						makeTextDelta(
-							sessionId,
-							"aaa-later-user",
-							"Exclude this later prompt",
-							{ createdAt: 32, partId: "aaa-later-user-text" },
-						),
-						makeMessageCreatedEvent(sessionId, "later-assistant", {
-							createdAt: 33,
-						}),
-					]);
-					const input = {
-						sessionId,
-						turnId: "current-turn",
-						userMessageId: "current-user",
-						prompt: "Current prompt",
-						history: [],
-						providerState: {},
-						workspaceRoot: fixture.workspaceRoot,
-						extraFolders: [],
-						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-					};
-					yield* sql`INSERT INTO provider_command_outbox (
-						request_sequence, command_id, project_key, session_id, provider_id,
-						effect_type, payload_json, status, requested_at, updated_at
-					) VALUES (1, 'adoption-sink', 'project', ${sessionId}, 'claude',
-						'send_turn', ${JSON.stringify({ ...input, history: undefined })}, ${scenario === "recovered" ? "running" : "completed"}, 30, 30)`;
-					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
-						() => Effect.succeed({}),
-					);
-					yield* runner.recoverEffect;
-					if (scenario === "live")
-						yield* runner.executeEffect({
-							type: "send-turn",
-							sinkId: "adoption-sink",
-							aborted: false,
-							input,
-						});
-					expect(historyRead).not.toHaveBeenCalled();
-					if (scenario === "read failure") yield* sql`DROP TABLE message_parts`;
-					if (scenario === "conversion failure")
-						yield* sql`UPDATE messages SET rest_payload = '{' WHERE id = 'prior-assistant'`;
-					if (scenario === "missing cutoff")
-						yield* sql`DELETE FROM messages WHERE id = 'current-user'`;
-					if (
-						scenario !== "live" &&
-						scenario !== "restored" &&
-						scenario !== "recovered"
-					) {
-						if (!emit) throw new Error("Missing runner history handler");
-						const failure = yield* Effect.either(
-							emit(
-								{ type: "read-turn-history", sinkId: "adoption-sink" },
-								sessionId,
-							),
-						);
-						expect(failure).toMatchObject({
-							_tag: "Left",
-							left: {
-								operation: "read-turn-history",
-								message: "Claude turn history is no longer available",
-							},
-						});
-						return;
-					}
-					const reply = yield* fixture.readHistory(
-						scenario === "recovered" ? "adoption-sink:0" : "adoption-sink",
-					);
-					expect(reply.failure).toBeUndefined();
-					expect(reply.result?.history?.map((message) => message.id)).toEqual([
-						"prior-user",
-						"prior-assistant",
-					]);
-					expect(reply.result?.history?.[1]?.parts?.[0]).toMatchObject({
-						state: { output: fullOutput },
-					});
-					observations.push({
-						case: `${scenario} history`,
-						messages: reply.result?.history?.map((message) => message.id),
-						toolOutputBytes: fullOutput.length,
-					});
-				}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
-			),
-		);
-	});
-
 	it.each([
 		"EPERM",
 		"EACCES",

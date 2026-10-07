@@ -96,8 +96,16 @@ async function settled(
 			expect(commands.map((command) => command.status)).toEqual(
 				Array.from({ length: turns }, () => "completed"),
 			);
-			expect(events.at(-1)?.type).toBe("session.status");
-			expect(events.at(-1)?.data).toMatchObject({ status: "idle" });
+			// The handoff receipt is recorded once the turn has settled.
+			const last = events
+				.map((event) => event.type)
+				.lastIndexOf("session.status");
+			expect(events[last]?.data).toMatchObject({ status: "idle" });
+			expect(
+				events
+					.slice(last + 1)
+					.filter((event) => event.type !== "session.handoff_delivered"),
+			).toEqual([]);
 		},
 		{ timeout: 5000 },
 	);
@@ -245,7 +253,7 @@ describe("Claude session process runner", () => {
 		});
 	}, 60_000);
 
-	it("preserves the full history on an agent change in the default runner", async () => {
+	it("preserves history in a hidden handoff on an agent change in the default runner", async () => {
 		const harness = await ProcessHarness.start();
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -254,7 +262,7 @@ describe("Claude session process runner", () => {
 		await settled(harness, sessionId, 1);
 		await browser.switchAgent(sessionId, "reviewer");
 		const turn = await browser.send(sessionId, "after-agent-change");
-		expect(turn.chunks.join("")).toContain("history-before-agent-change");
+		expect(turn.chunks).toEqual(responseChunks("after-agent-change"));
 		await settled(harness, sessionId, 2);
 		const events = persisted(harness, sessionId).events;
 		const prompts = harness.marks
@@ -263,7 +271,27 @@ describe("Claude session process runner", () => {
 		expect(prompts).toHaveLength(2);
 		expect(prompts[0]).toBe("history-before-agent-change");
 		expect(prompts[1]).toContain("history-before-agent-change");
-		expect(prompts[1]).toContain("after-agent-change");
+		expect(prompts[1]).toContain(
+			responseChunks("history-before-agent-change").join(""),
+		);
+		expect(prompts[1]?.startsWith("[Conduit context handoff]")).toBe(true);
+		expect(
+			prompts[1]?.endsWith(
+				"[End conduit context handoff]\n\nafter-agent-change",
+			),
+		).toBe(true);
+		const queries = harness.marks.filter((mark) => mark.kind === "query");
+		expect(queries).toHaveLength(2);
+		const changedQuery = queries[1];
+		if (!changedQuery) throw new Error("Missing changed-agent SDK query");
+		const changedOptions: unknown = JSON.parse(changedQuery.optionsJson);
+		expect(changedOptions).not.toHaveProperty("resume");
+		expect(queries[1]?.sessionId).not.toBe(queries[0]?.sessionId);
+		expect(
+			(await browser.history(sessionId))
+				.filter((message) => message.role === "user")
+				.map((message) => message.text),
+		).toEqual(["history-before-agent-change", "after-agent-change"]);
 		expect(
 			harness.marks.filter((mark) => mark.kind === "runner-started"),
 		).toHaveLength(1);
@@ -272,7 +300,12 @@ describe("Claude session process runner", () => {
 		writeFileSync(
 			"test-results/process-harness/85kb-8-agent-change-events.json",
 			JSON.stringify(
-				{ events, normalized: normalize(events, harness.root), prompts },
+				{
+					events,
+					normalized: normalize(events, harness.root),
+					prompts,
+					queries,
+				},
 				null,
 				2,
 			),

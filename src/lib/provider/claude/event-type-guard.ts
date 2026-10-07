@@ -51,6 +51,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.forked", // Fork lineage is recorded by the relay, not the Claude event translator
 	"session.provider_changed", // Provider switching is a relay-level concept
 	"session.provider_cleanup_failed", // Relay-owned cleanup diagnostic
+	"session.handoff_delivered", // Server-owned handoff completion receipt; adapters do not emit it
 	"session.model_changed", // Relay-owned model settings, appended by the relay's session settings module
 	"session.variant_changed", // Same
 	"session.context_window_changed", // Same

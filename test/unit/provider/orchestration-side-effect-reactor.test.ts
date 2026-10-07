@@ -79,10 +79,21 @@ describe("ProviderSideEffectReactor", () => {
 			const sendTurn = vi.fn((_input: SendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
+			const getNativeSession = vi.fn((_sessionId: string) =>
+				Effect.succeed({
+					instanceId: "claude",
+					resumeSessionId: "live-interrupted-cursor",
+				}),
+			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
 				sql,
-				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				registry: new ProviderRegistry([
+					{
+						...makeProvider(sendTurn),
+						getNativeSessionEffect: getNativeSession,
+					},
+				]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
 			});
 
@@ -91,11 +102,14 @@ describe("ProviderSideEffectReactor", () => {
 			yield* reactor.drain();
 
 			expect(sendTurn).toHaveBeenCalledTimes(1);
+			expect(getNativeSession).toHaveBeenCalledExactlyOnceWith("session-1");
 			expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
 				sessionId: "session-1",
 				turnId: "turn-1",
 				prompt: "hello",
 				workspaceRoot: "/repo",
+				resumeSessionId: "live-interrupted-cursor",
+				startFreshNativeSession: false,
 			});
 			expect(
 				(yield* sql.unsafe<{ status: string; attempt_count: number }>(

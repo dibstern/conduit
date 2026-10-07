@@ -65,6 +65,7 @@ describe("WsRpcServerLayer SendMessage", () => {
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
 							claudeEventPersistEffect: {
+								persistHandoffDelivered: () => Effect.void,
 								persistEvent: () => Effect.void,
 								persistEvents: () => Effect.void,
 								persistUserMessage: () => Effect.void,

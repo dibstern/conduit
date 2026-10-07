@@ -171,6 +171,7 @@ describe("project shell environment", () => {
 			resumed.sendTurnEffect({
 				...input,
 				nativeThread,
+				resumeSessionId: nativeThread.resumeSessionId,
 				providerState: Object.fromEntries(
 					result.providerStateUpdates.map(({ key, value }) => [key, value]),
 				),
@@ -191,6 +192,7 @@ describe("project shell environment", () => {
 				...input,
 				configDir: namedConfigDir,
 				nativeThread,
+				resumeSessionId: nativeThread.resumeSessionId,
 			}),
 		);
 		expect(

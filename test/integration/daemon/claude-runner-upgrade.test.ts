@@ -1330,20 +1330,25 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sessionId,
 		).providerState;
 		const retried = "invalidated-resume-fresh-send";
+		const retrySuffix = `[End conduit context handoff]\n\n${retried}`;
 		const retry = browser.send(sessionId, retried).catch(() => undefined);
 		await vi.waitFor(
 			() =>
 				expect(
 					sdkProof(harness).some(
-						(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+						(mark) =>
+							mark.kind === "enqueue" && mark.prompt.endsWith(retrySuffix),
 					),
 				).toBe(true),
 			{ timeout: 10_000 },
 		);
 		const enqueue = sdkProof(harness).find(
-			(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+			(mark) => mark.kind === "enqueue" && mark.prompt.endsWith(retrySuffix),
 		);
 		if (enqueue?.kind !== "enqueue") throw new Error("Missing retry enqueue");
+		expect(enqueue.prompt.startsWith("[Conduit context handoff]")).toBe(true);
+		expect(enqueue.prompt).toContain(interrupted);
+		expect(enqueue.prompt).toContain(rejected);
 		const actualQueryId = enqueue.queryId;
 		const fresh = sdkProof(harness).find(
 			(mark) => mark.kind === "query" && mark.queryId === actualQueryId,
@@ -1353,6 +1358,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["freshClaudeSessionId"] = fresh.sessionId;
 		details["replacement"] = replacement;
 		expect(fresh.sessionId).not.toBe(original.sessionId);
+		const freshOptions: unknown = JSON.parse(fresh.optionsJson);
+		expect(freshOptions).not.toHaveProperty("resume");
 		expect(fresh.pid).toBe(replacement.pid);
 		expect((await retry)?.chunks).toEqual(responseChunks(retried));
 		expect(
@@ -1361,7 +1368,11 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		for (const prompt of [interrupted, rejected, retried])
 			expect(
 				sdkProof(harness).filter(
-					(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+					(mark) =>
+						mark.kind === "enqueue" &&
+						(prompt === retried
+							? mark.prompt.endsWith(retrySuffix)
+							: mark.prompt === prompt),
 				),
 			).toHaveLength(1);
 		await vi.waitFor(

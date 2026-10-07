@@ -1816,7 +1816,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}
 	});
 
-	it("injects prior conversation transcript into the restarted agent query", async () => {
+	it("sends the server-prepared handoff prompt verbatim when the agent changes", async () => {
 		const oldQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
 				string,
@@ -1851,80 +1851,48 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 
+		const preparedPrompt =
+			"Earlier investigation found the config bug.\n\nApply the same fix to the other file.";
+		const handoff = { included: 2, omitted: 1, tokens: 29 };
 		const secondResult = await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
 					turnId: "turn-2",
-					prompt: "Apply the same fix to the other file.",
+					prompt: preparedPrompt,
+					handoff,
 					agent: "Plan",
 					eventSink: sink,
-					history: [
-						{
-							role: "user",
-							content: "Find the config bug.",
-							parts: [{ type: "text", text: "Find the config bug." }],
-						},
-						{
-							role: "assistant",
-							content: "I will inspect the file.",
-							parts: [
-								{ type: "text", text: "I will inspect the file." },
-								{
-									type: "tool_use",
-									id: "toolu_1",
-									name: "Read",
-									input: { file_path: "/tmp/config.ts" },
-								},
-								{
-									type: "tool_result",
-									tool_use_id: "toolu_1",
-									content: "export const broken = true;",
-								},
-							],
-						},
-					],
 				}),
 			),
 		);
 
 		expect(secondResult.status).toBe("completed");
+		expect(secondResult.handoff).toEqual(handoff);
 		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
 		const promptText = await readFirstPromptText(
 			queryFactorySpy.mock.calls[1]?.[0],
 		);
 
-		expect(promptText.startsWith("<prior-conversation-transcript>")).toBe(true);
-		expect(promptText).toContain(
-			"The following is the conversation history before you took over this session.",
-		);
-		expect(promptText).toContain("[user]\nFind the config bug.");
-		expect(promptText).toContain("[assistant]\nI will inspect the file.");
-		expect(promptText).toContain("[tool-call:Read id=toolu_1]");
-		expect(promptText).toContain('{"file_path":"/tmp/config.ts"}');
-		expect(promptText).toContain(
-			"[tool-result id=toolu_1]\nexport const broken = true;",
-		);
-		expect(promptText.indexOf("[user]")).toBeLessThan(
-			promptText.indexOf("[assistant]"),
-		);
-		expect(promptText.indexOf("[tool-call:Read id=toolu_1]")).toBeLessThan(
-			promptText.indexOf("[tool-result id=toolu_1]"),
-		);
-		expect(
-			promptText.endsWith("\n\nApply the same fix to the other file."),
-		).toBe(true);
+		expect(promptText).toBe(preparedPrompt);
+		expect(promptText).not.toContain("[tool-call:");
+		expect(promptText).not.toContain("[tool-result");
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("does not rewrite the restarted agent query when history is empty", async () => {
-		const oldQuery = createMockQuery([
-			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
-				string,
-				unknown
-			>),
-		]);
+	it("restarts an idle query when the server requires a fresh native session", async () => {
+		let releaseOldQuery: (() => void) | undefined;
+		const oldQueryFinished = new Promise<void>((resolve) => {
+			releaseOldQuery = resolve;
+		});
+		const oldQuery = createQueryFromGenerator(
+			(async function* () {
+				yield makeSuccessResult({ session_id: "sdk-session-1" });
+				await oldQueryFinished;
+			})(),
+		);
+		vi.mocked(oldQuery.close).mockImplementation(() => releaseOldQuery?.());
 		const newQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-2" } as Record<
 				string,
@@ -1958,9 +1926,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-agent-no-history",
 					turnId: "turn-2",
 					prompt: "Fresh agent prompt.",
-					agent: "Plan",
+					agent: "Explore",
+					startFreshNativeSession: true,
 					eventSink: sink,
-					history: [],
 				}),
 			),
 		);
@@ -1969,6 +1937,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			queryFactorySpy.mock.calls[1]?.[0],
 		);
 		expect(promptText).toBe("Fresh agent prompt.");
+		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
+		expect(oldQuery.close).toHaveBeenCalledOnce();
+		expect(queryFactorySpy.mock.calls[1]?.[0]?.options.resume).toBeUndefined();
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
@@ -2054,7 +2025,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("resume uses the native thread's SDK session", async () => {
+	it("resume uses the server-resolved SDK session", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
@@ -2066,9 +2037,10 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-resume",
+			resumeSessionId: "prev-sdk-session-123",
 			nativeThread: {
 				configDir: "/claude/resume",
-				resumeSessionId: "prev-sdk-session-123",
+				resumeSessionId: "legacy-native-thread-session",
 				firstSequence: 12,
 				deliveredThrough: 40,
 			},
@@ -3582,7 +3554,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(eventTypes).toContain("turn.error");
 	});
 
-	it("sendTurn evicts stopped session and creates fresh query", async () => {
+	it("sendTurn evicts stopped session and uses the server-resolved resume cursor", async () => {
 		const result1 = makeSuccessResult();
 		const result2 = makeSuccessResult({ total_cost_usd: 0.09 } as Record<
 			string,
@@ -3632,6 +3604,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			sessionId: "session-evict",
 			turnId: "turn-2",
 			prompt: "Second",
+			resumeSessionId: "server-resolved-resume",
 			eventSink: sink,
 		});
 		const r2 = await Effect.runPromise(instance.sendTurnEffect(input2));
@@ -3644,7 +3617,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			(queryFactorySpy.mock.calls[1]?.[0]?.options as Record<string, unknown>)[
 				"resume"
 			],
-		).toBe("sdk-resume-after-stop");
+		).toBe("server-resolved-resume");
 	});
 
 	it("clears resumeSessionId when stream error matches 'Invalid session'", async () => {
@@ -3691,6 +3664,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-stale-resume",
 			eventSink: sink,
+			resumeSessionId: "stale-sdk-session-xyz",
 			nativeThread: {
 				resumeSessionId: "stale-sdk-session-xyz",
 				firstSequence: 3,
@@ -3754,6 +3728,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-not-found-resume",
 			eventSink: sink,
+			resumeSessionId: "dead-sdk-session-abc",
 			nativeThread: {
 				resumeSessionId: "dead-sdk-session-abc",
 				firstSequence: 3,
@@ -3816,6 +3791,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-unrelated-err",
 			eventSink: sink,
+			resumeSessionId: "valid-sdk-session-123",
 			nativeThread: {
 				resumeSessionId: "valid-sdk-session-123",
 				firstSequence: 3,

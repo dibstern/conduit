@@ -1,12 +1,17 @@
 import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import {
 	makeProviderStateEffect,
-	type ProviderStateEffectError,
+	ProviderStateEffectTag,
 } from "../persistence/effect/provider-state-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../persistence/effect/read-query-effect.js";
+import { makePrepareTurn } from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
@@ -112,6 +117,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
@@ -142,7 +148,7 @@ function clampPollDuration(
 
 const storeFailure =
 	(operation: string) =>
-	(cause: SqlError | ProviderStateEffectError): ProviderCommandStoreFailure =>
+	(cause: unknown): ProviderCommandStoreFailure =>
 		new ProviderCommandStoreFailure({
 			operation,
 			code: "provider_command_store_failure",
@@ -372,17 +378,35 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				const nativeThread =
-					driver === "claude" && payload.nativeThread === undefined
-						? yield* makeProviderStateEffect.pipe(
-								Effect.flatMap((state) =>
-									state.nativeThread(payload.sessionId, row.provider_id),
-								),
+				const prepared =
+					driver === "claude"
+						? yield* Effect.gen(function* () {
+								const state = yield* makeProviderStateEffect;
+								const read = yield* makeReadQueryEffect;
+								const prepareTurn = yield* makePrepareTurn({
+									liveSession: yield* instance.getNativeSessionEffect?.(
+										payload.sessionId,
+									) ?? Effect.succeed(undefined),
+									configDir: payload.configDir,
+									agent: payload.agent,
+									userMessageId: payload.userMessageId,
+									modelContextWindow:
+										payload.contextWindow === "1m" ? 1000000 : undefined,
+								}).pipe(
+									Effect.provideService(ProviderStateEffectTag, state),
+									Effect.provideService(ReadQueryEffectTag, read),
+								);
+								return yield* prepareTurn(
+									payload.sessionId,
+									row.provider_id,
+									payload.prompt,
+								);
+							}).pipe(
 								Effect.provideService(SqlClient.SqlClient, this.options.sql),
-								Effect.mapError(storeFailure("nativeThread")),
+								Effect.mapError(storeFailure("prepareTurn")),
 							)
-						: payload.nativeThread;
-				return yield* instance.sendTurnEffect({
+						: undefined;
+				const result = yield* instance.sendTurnEffect({
 					...payload,
 					history: payload.history ?? [],
 					commandId: row.command_id,
@@ -390,12 +414,51 @@ export class ProviderSideEffectReactor {
 						? {
 								commandAttempt,
 								instanceId: payload.instanceId ?? row.provider_id,
-								nativeThread,
+								prompt: prepared?.prompt ?? payload.prompt,
+								configDir: prepared?.configDir,
+								resumeSessionId: prepared?.resumeSessionId,
+								startFreshNativeSession:
+									prepared?.resumeSessionId === undefined,
+								nativeThread: prepared?.nativeThread,
+								...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
 							}
 						: {}),
 					eventSink: this.makeReactorEventSink(interactions),
 					abortSignal: new AbortController().signal,
 				});
+				if (
+					result.status === "completed" &&
+					result.handoff &&
+					this.options.persistHandoffDelivered
+				) {
+					yield* this.options
+						.persistHandoffDelivered(
+							payload.sessionId,
+							result.handoff,
+							row.command_id,
+						)
+						.pipe(Effect.mapError(storeFailure("handoffDelivered")));
+				}
+				if (
+					driver === "claude" &&
+					result.status === "completed" &&
+					result.providerStateUpdates?.length
+				) {
+					yield* makeProviderStateEffect.pipe(
+						Effect.flatMap((state) =>
+							state.saveUpdates(
+								payload.sessionId,
+								result.providerStateUpdates.map((update) => ({
+									key: update.key,
+									value: String(update.value),
+								})),
+							),
+						),
+						Effect.provideService(SqlClient.SqlClient, this.options.sql),
+						Effect.mapError(storeFailure("saveProviderState")),
+					);
+				}
+				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
 				yield* instance.interruptTurnEffect(row.session_id);

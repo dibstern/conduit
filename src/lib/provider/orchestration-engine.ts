@@ -10,6 +10,7 @@ import { Data, Deferred, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	CommandFingerprintMismatch,
@@ -148,6 +149,7 @@ export interface DurableCommandStoreOptions {
 	 * exactly as the inline path did. Absent in narrow unit tests (no-op sink).
 	 */
 	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 }
 
 export interface OrchestrationEngineOptions {
@@ -233,6 +235,9 @@ export class OrchestrationEngine {
 					sql: durable.sql,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					...(durable.persistHandoffDelivered
+						? { persistHandoffDelivered: durable.persistHandoffDelivered }
+						: {}),
 					nowMs: durable.now,
 					...(this.resolveProviderDriver
 						? { resolveProviderDriver: this.resolveProviderDriver }

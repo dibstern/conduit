@@ -263,8 +263,7 @@ export const connectClaudeRunner = (options: {
 											if (sequence <= acknowledged) {
 												if (
 													options.receipts &&
-													(message.output.type === "read-turn-history" ||
-														message.output.type === "materialize-subagents")
+													message.output.type === "materialize-subagents"
 												)
 													return yield* options.receipts
 														.replyAt(options.runnerId, sequence)
@@ -336,7 +335,6 @@ export const connectClaudeRunner = (options: {
 													yield* Deferred.await(committed);
 												else if (
 													!receipt.consumed ||
-													result.history !== undefined ||
 													result.children !== undefined
 												)
 													yield* options.receipts

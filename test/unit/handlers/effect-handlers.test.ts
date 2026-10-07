@@ -306,6 +306,7 @@ function mockConfig(
 const persistentHandlerPersistence = Layer.merge(
 	makePersistenceEffectLayer(":memory:"),
 	Layer.succeed(ClaudeEventPersistEffectTag, {
+		persistHandoffDelivered: () => Effect.void,
 		persistEvent: () => Effect.void,
 		persistEvents: () => Effect.void,
 		persistUserMessage: () => Effect.void,

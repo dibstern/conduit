@@ -105,6 +105,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		const explicitlyReclassified: readonly string[] = [
 			"session.deleted",
 			"session.provider_cleanup_failed",
+			"session.handoff_delivered",
 			"session.forked",
 			"session.permission_mode_changed",
 			"session.model_changed",

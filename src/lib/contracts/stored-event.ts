@@ -70,6 +70,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.variant_changed",
 	"session.context_window_changed",
 	"session.goal_changed",
+	"session.handoff_delivered",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -404,6 +405,12 @@ export const SessionGoalChangedPayloadSchema = Schema.Struct({
 export type SessionGoalChangedPayload =
 	typeof SessionGoalChangedPayloadSchema.Type;
 
+export interface SessionHandoffDeliveredPayload {
+	readonly included: number;
+	readonly omitted: number;
+	readonly tokens: number;
+}
+
 /**
  * Everything the approval card shows rides the asked event: the approvals
  * subscription serves the card from the pending_approvals row, which keeps
@@ -490,6 +497,7 @@ export interface EventPayloadMap {
 	"session.variant_changed": SessionVariantChangedPayload;
 	"session.context_window_changed": SessionContextWindowChangedPayload;
 	"session.goal_changed": SessionGoalChangedPayload;
+	"session.handoff_delivered": SessionHandoffDeliveredPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -926,6 +934,12 @@ const SessionContextWindowChangedPayloadSchema = Schema.Struct({
 	contextWindow: Schema.String,
 });
 
+const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
+	included: Schema.NonNegativeInt,
+	omitted: Schema.NonNegativeInt,
+	tokens: Schema.NonNegativeInt,
+});
+
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
 /** The optional card fields of a permission.asked payload (ni8.9). */
@@ -1144,6 +1158,10 @@ const SessionGoalChangedEventSchema = eventEnvelope(
 	"session.goal_changed",
 	SessionGoalChangedPayloadSchema,
 );
+const SessionHandoffDeliveredEventSchema = eventEnvelope(
+	"session.handoff_delivered",
+	SessionHandoffDeliveredPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -1161,7 +1179,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// Canonical Event Schema (Union of all 40 event types)
+// Canonical Event Schema (Union of all canonical event types)
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -1203,6 +1221,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionVariantChangedEventSchema,
 	SessionContextWindowChangedEventSchema,
 	SessionGoalChangedEventSchema,
+	SessionHandoffDeliveredEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,

@@ -4,11 +4,11 @@ import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-a
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type {
-	HistoryMessage,
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
 	PreWarmSessionInput,
+	ProviderNativeSession,
 	QuestionRequest,
 	SendTurnInput,
 	TurnResult,
@@ -37,7 +37,6 @@ export type ClaudeSessionCommand =
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
-			readonly historyOnDemand?: boolean;
 			readonly input: ClaudeSessionTurn;
 	  }
 	| {
@@ -122,7 +121,6 @@ export type ClaudeSessionOutput =
 					readonly recoverQuestions: boolean;
 			  }
 			| { readonly type: "release-sink" }
-			| { readonly type: "read-turn-history" }
 			| {
 					readonly type: "materialize-subagents";
 					readonly input: {
@@ -155,7 +153,6 @@ export type ClaudeSessionOutput =
 /** Plain-data reply to an output operation; events and notifications return {}. */
 export interface ClaudeSessionOutputReply {
 	readonly children?: readonly MaterializedClaudeSubagent[];
-	readonly history?: readonly HistoryMessage[];
 }
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
@@ -176,6 +173,9 @@ export interface ClaudeSessionRunner {
 	getResumeSessionIdEffect?(
 		sessionId: string,
 	): Effect.Effect<string | null | undefined>;
+	getNativeSessionEffect?(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined>;
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;

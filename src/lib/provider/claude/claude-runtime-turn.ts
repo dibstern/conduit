@@ -175,7 +175,7 @@ export function sdkResultToTurnResult(
 				}
 			: {}),
 		providerStateUpdates: [
-			...(ctx.resumeSessionId
+			...(isSuccess && ctx.resumeSessionId
 				? [
 						{
 							key: nativeThreadKey(ctx.instanceId ?? "claude"),
@@ -187,6 +187,14 @@ export function sdkResultToTurnResult(
 								firstSequence: ctx.nativeThread?.firstSequence ?? 0,
 								deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,
 							}),
+						},
+					]
+				: []),
+			...(isSuccess
+				? [
+						{
+							key: `claudeAgent:${ctx.instanceId ?? "claude"}`,
+							value: ctx.currentAgent ?? "",
 						},
 					]
 				: []),

@@ -45,7 +45,10 @@ import {
 	stopManagedOpenCode,
 } from "../../src/lib/instance/managed-opencode-process.js";
 import { projectStorageDir } from "../../src/lib/persistence/project-storage.js";
-import type { ModelInfo } from "../../src/lib/provider/types.js";
+import type {
+	ModelInfo,
+	ProviderAgentInfo,
+} from "../../src/lib/provider/types.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
@@ -187,6 +190,7 @@ export class ProcessHarness {
 		},
 		private readonly claudeCaptureDir?: string,
 		realOpenCode?: string,
+		capabilityAgents?: readonly ProviderAgentInfo[],
 	) {
 		this.root = mkdtempSync(rootPrefix);
 		this.projectDir = join(this.root, "process-test");
@@ -217,10 +221,14 @@ export class ProcessHarness {
 		}
 		if (blockCapabilitiesProbe)
 			writeFileSync(join(this.root, "capabilities-probe-gated"), "hold");
-		if (capabilityModels)
+		if (capabilityModels || capabilityAgents)
 			writeFileSync(
 				join(this.root, "capabilities-probe-result.json"),
-				JSON.stringify({ models: capabilityModels, agents: [], commands: [] }),
+				JSON.stringify({
+					models: capabilityModels ?? [],
+					agents: capabilityAgents ?? [],
+					commands: [],
+				}),
 			);
 		if (shellEnvProof)
 			writeFileSync(
@@ -410,6 +418,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
+			capabilityAgents?: readonly ProviderAgentInfo[];
 			restartProof?: boolean;
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
@@ -457,6 +466,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.claudeReplay,
 			options.claudeCaptureDir,
 			options.realOpenCode,
+			options.capabilityAgents,
 		);
 	}
 
@@ -649,6 +659,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
+						this.root,
+						"claude-options.jsonl",
+					),
 					...(this.claudeCaptureDir
 						? { CONDUIT_CLAUDE_SDK_CAPTURE: this.claudeCaptureDir }
 						: {}),
@@ -659,10 +673,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 								),
 								CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS: String(
 									this.claudeReplay.delayMs ?? 0,
-								),
-								CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
-									this.root,
-									"claude-options.jsonl",
 								),
 							}
 						: {}),
@@ -1031,6 +1041,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 	claudeOptions(): readonly {
 		pid: number;
 		options: Record<string, unknown>;
+		prompt?: string;
+		configDir?: string | null;
+		resumeId?: string | null;
 	}[] {
 		const file = join(this.root, "claude-options.jsonl");
 		if (!existsSync(file)) return [];
@@ -1042,6 +1055,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 					JSON.parse(line) as {
 						pid: number;
 						options: Record<string, unknown>;
+						prompt?: string;
+						configDir?: string | null;
+						resumeId?: string | null;
 					},
 			);
 	}

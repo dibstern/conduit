@@ -229,6 +229,7 @@ const makeReadQuery = (
 const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
+	persistHandoffDelivered: vi.fn(() => Effect.void),
 	persistEvent: vi.fn(() => Effect.void),
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
@@ -830,10 +831,7 @@ describe("ProviderTurnService", () => {
 				);
 				expect(events).toEqual(["persist", "title"]);
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
-				expect(providerState.nativeThread).toHaveBeenCalledWith(
-					"session-1",
-					"claude",
-				);
+				expect(providerState.nativeThread).not.toHaveBeenCalled();
 				expect(command).toMatchObject({
 					type: "send_turn",
 					commandId: "cmd-send-1",
@@ -843,11 +841,6 @@ describe("ProviderTurnService", () => {
 						prompt: "current prompt",
 						history: [],
 						instanceId: "claude",
-						nativeThread: {
-							resumeSessionId: "prev",
-							firstSequence: 3,
-							deliveredThrough: 8,
-						},
 						workspaceRoot: MOCK_PROJECT_DIR,
 						model: {
 							providerId: "claude",

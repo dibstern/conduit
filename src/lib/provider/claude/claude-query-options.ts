@@ -21,7 +21,7 @@ export function buildClaudeQueryOptions(
 		throw new ClaudeRuntimeError({
 			message: "Claude model is required before query creation",
 		});
-	const resumeSessionId = input.nativeThread?.resumeSessionId;
+	const resumeSessionId = input.resumeSessionId;
 	// Older durable commands and launch snapshots predate extra folders.
 	const extraFolders = input.extraFolders ?? [];
 	return validateOptionsJsonShape({

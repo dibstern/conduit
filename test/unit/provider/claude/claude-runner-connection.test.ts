@@ -463,16 +463,19 @@ it("replays a retained frame after one transient ingestion failure and continues
 
 it("keeps a replacement attachment's cached reply when a stale data request finishes", async () => {
 	const f = await fixture();
+	const children = [
+		{ sdkSubagentId: "replacement-sdk", childSessionId: "replacement-child" },
+	];
 	await f.runtime.runPromise(f.receipts.attach("runner", "old"));
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	await f.runtime.runPromise(
-		f.receipts.acknowledge("runner", 1, { history: [] }, "replacement"),
+		f.receipts.acknowledge("runner", 1, { children }, "replacement"),
 	);
 	await f.runtime.runPromise(
 		f.receipts.acknowledge("runner", 1, { children: [] }, "old"),
 	);
 	expect(await f.runtime.runPromise(f.receipts.replyAt("runner", 1))).toEqual({
-		history: [],
+		children,
 	});
 });
 
@@ -563,14 +566,14 @@ it("migrates a legacy cursor while retaining its sequence and cached reply", asy
 		f.sql`CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}')`,
 	);
 	await f.runtime.runPromise(
-		f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, result_json) VALUES ('runner', 7, '{"history":[]}')`,
+		f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, result_json) VALUES ('runner', 7, '{"children":[]}')`,
 	);
 	const migrated = await f.runtime.runPromise(
 		makeClaudeRunnerReceiptStore(f.sql),
 	);
 	expect(
 		await f.runtime.runPromise(migrated.attach("runner", "replacement")),
-	).toEqual({ sequence: 7, result: { history: [] } });
+	).toEqual({ sequence: 7, result: { children: [] } });
 	expect(
 		await f.runtime.runPromise(
 			f.sql<{

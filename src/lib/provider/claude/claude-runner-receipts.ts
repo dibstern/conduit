@@ -87,8 +87,7 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 			AND sequence BETWEEN ${sequence - 1} AND ${sequence}
 			RETURNING sequence`.pipe(Effect.map((rows) => rows.length > 0));
 				// A single statement commits atomically without extra transaction calls.
-				if (result.history === undefined && result.children === undefined)
-					return commit.pipe(Effect.asVoid);
+				if (result.children === undefined) return commit.pipe(Effect.asVoid);
 				return sql.withTransaction(
 					Effect.gen(function* () {
 						if (!(yield* commit)) return;

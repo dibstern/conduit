@@ -7,14 +7,9 @@ import { SqlClient } from "@effect/sql";
 import { Cause, Deferred, Effect, Exit, FiberSet } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
-import {
-	makeReadQueryEffect,
-	ReadQueryEffectTag,
-} from "../../persistence/effect/read-query-effect.js";
-import { messageRowsToHistory } from "../../persistence/session-history-adapter.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
-import type { TurnResult } from "../types.js";
+import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import { connectClaudeRunner } from "./claude-runner-connection.js";
 import {
@@ -266,15 +261,6 @@ export const makeProcessClaudeSessionRunner = (
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const readQuery =
-			readQueryOption._tag === "Some"
-				? readQueryOption.value
-				: sql
-					? yield* makeReadQueryEffect.pipe(
-							Effect.provideService(SqlClient.SqlClient, sql),
-						)
-					: undefined;
 		const receipts = sql
 			? yield* makeClaudeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
@@ -293,44 +279,6 @@ export const makeProcessClaudeSessionRunner = (
 				completed: Deferred.Deferred<void> | undefined;
 			}
 		>();
-		const loadClaudeHistory = (binding: {
-			readonly sessionId: string;
-			readonly userMessageId?: string;
-		}) =>
-			Effect.gen(function* () {
-				if (!readQuery || !binding.userMessageId)
-					return yield* Effect.fail(new Error("Missing Claude history cutoff"));
-				const rows = yield* readQuery.getSessionMessagesWithParts(
-					binding.sessionId,
-				);
-				const cutoff = rows.find(
-					(row) => row.id === binding.userMessageId && row.role === "user",
-				);
-				if (!cutoff)
-					return yield* Effect.fail(
-						new Error("Missing Claude history user message"),
-					);
-				const priorRows = rows.filter(
-					(row) => row.created_at < cutoff.created_at,
-				);
-				return yield* Effect.try(() => ({
-					history: messageRowsToHistory(priorRows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages,
-				}));
-			}).pipe(
-				Effect.catchAll((cause) => {
-					log.warn(
-						`Failed to load prior Claude history for ${binding.sessionId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return Effect.fail(
-						claudeRunnerFailure(
-							"read-turn-history",
-							"Claude turn history is no longer available",
-						),
-					);
-				}),
-			);
 		let closing = false;
 		const upgradeMark = (
 			sessionId: string,
@@ -525,15 +473,6 @@ export const makeProcessClaudeSessionRunner = (
 										},
 									}
 								: received;
-						if (output.type === "read-turn-history")
-							return binding
-								? loadClaudeHistory(binding)
-								: Effect.fail(
-										claudeRunnerFailure(
-											output.type,
-											"Claude turn history is no longer available",
-										),
-									);
 						if (output.type === "release-sink" && binding?.pending) {
 							binding.releaseRequested = true;
 							return Effect.succeed({});
@@ -549,8 +488,7 @@ export const makeProcessClaudeSessionRunner = (
 						);
 					});
 					return received.type === "materialize-subagents" ||
-						received.type === "ensure-subagent-session" ||
-						received.type === "read-turn-history"
+						received.type === "ensure-subagent-session"
 						? operation
 						: entry.outputs.withPermits(1)(operation);
 				},
@@ -668,7 +606,9 @@ export const makeProcessClaudeSessionRunner = (
 					if (binding) binding.accepted = true;
 				},
 				onUpgradeState: (state) => {
-					entry.upgrade.state = { ...entry.upgrade.state, ...state };
+					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+					// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
+					entry.upgrade.state = { ...state, ...(snapshot ? { snapshot } : {}) };
 					upgrade(sessionId, entry);
 				},
 				onIdleExit: () => {
@@ -879,16 +819,7 @@ export const makeProcessClaudeSessionRunner = (
 							}),
 							...(state.resumeSessionId
 								? {
-										nativeThread: {
-											configDir:
-												snapshot.input.nativeThread?.configDir ??
-												snapshot.input.configDir,
-											firstSequence:
-												snapshot.input.nativeThread?.firstSequence ?? 0,
-											deliveredThrough:
-												snapshot.input.nativeThread?.deliveredThrough ?? 0,
-											resumeSessionId: state.resumeSessionId,
-										},
+										resumeSessionId: state.resumeSessionId,
 									}
 								: {}),
 						},
@@ -1133,6 +1064,7 @@ export const makeProcessClaudeSessionRunner = (
 									},
 									() => closing,
 									deps,
+									runner.getNativeSessionEffect(registration.sessionId),
 								).pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("recover runner commands", cause),
@@ -1237,6 +1169,33 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				}
 			});
+			getNativeSessionEffect(
+				sessionId: string,
+			): Effect.Effect<ProviderNativeSession | undefined> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					const state = entry?.upgrade.state;
+					const snapshot = state?.snapshot;
+					if (
+						!entry ||
+						entry.failure ||
+						entry.stopping ||
+						entry.idleExiting ||
+						entry.ending > 0 ||
+						!snapshot
+					)
+						return undefined;
+					return {
+						instanceId: snapshot.input.instanceId ?? "claude",
+						configDir:
+							snapshot.options.env?.["CLAUDE_CONFIG_DIR"] ??
+							snapshot.input.configDir,
+						agent: snapshot.input.agent,
+						resumeSessionId: state?.resumeSessionId,
+					};
+				});
+			}
+
 			executeEffect(
 				command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 			): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -1268,7 +1227,6 @@ export const makeProcessClaudeSessionRunner = (
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
-				let latestResumeSessionId: string | undefined;
 				return Effect.gen(function* () {
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
@@ -1426,9 +1384,6 @@ export const makeProcessClaudeSessionRunner = (
 									),
 									Effect.uninterruptible,
 								);
-							latestResumeSessionId =
-								retiring.upgrade.state?.resumeSessionId ??
-								latestResumeSessionId;
 						}
 						// Old cleanup is session-wide. Finish it before a replacement
 						// can register interactions or publish a new busy status.
@@ -1438,9 +1393,6 @@ export const makeProcessClaudeSessionRunner = (
 									? selection.admission
 									: entry.drained,
 							);
-						if (entry && draining)
-							latestResumeSessionId =
-								entry.upgrade.state?.resumeSessionId ?? latestResumeSessionId;
 					} while (draining);
 					if (!entry) return;
 					child = entry;
@@ -1465,25 +1417,6 @@ export const makeProcessClaudeSessionRunner = (
 						command.type === "send-turn"
 							? {
 									...command,
-									// Only an agent switch consumes history. Keep it server-side
-									// until requested rather than serializing it on every warm send.
-									historyOnDemand: true,
-									input: {
-										...command.input,
-										history: [],
-										nativeThread: latestResumeSessionId
-											? {
-													configDir:
-														command.input.nativeThread?.configDir ??
-														command.input.configDir,
-													firstSequence:
-														command.input.nativeThread?.firstSequence ?? 0,
-													deliveredThrough:
-														command.input.nativeThread?.deliveredThrough ?? 0,
-													resumeSessionId: latestResumeSessionId,
-												}
-											: command.input.nativeThread,
-									},
 									...(entry.upgrade.state?.frozen
 										? {
 												claudeSettingsOverrides:
@@ -1585,9 +1518,6 @@ export const makeProcessClaudeSessionRunner = (
 					Effect.ensuring(
 						Effect.sync(() => {
 							if (!admitted) return;
-							latestResumeSessionId =
-								admitted.upgrade.state?.resumeSessionId ??
-								latestResumeSessionId;
 							admitted.commandsInFlight--;
 							upgrade(admittedSessionId, admitted);
 							admitted = undefined;

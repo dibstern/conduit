@@ -141,8 +141,23 @@ export type ProcessMark =
 	  }
 	| { kind: "runner-spawned"; pid: number; socketPath: string };
 
+function currentRequest(prompt: string): string {
+	const end = "[End conduit context handoff]\n\n";
+	const boundary = prompt.indexOf(end);
+	return prompt.startsWith("[Conduit context handoff]") && boundary >= 0
+		? prompt.slice(boundary + end.length)
+		: prompt;
+}
+
 export function responseChunks(prompt: string): string[] {
-	return [`Echo(${prompt}): `, `stream(${prompt}) `, `done(${prompt}).`];
+	const visiblePrompt = currentRequest(prompt);
+	if (visiblePrompt === "approval-account-switch-history")
+		return ["OMIT-THIS-ASSISTANT-CONTEXT ".repeat(900), "\nHistory complete."];
+	return [
+		`Echo(${visiblePrompt}): `,
+		`stream(${visiblePrompt}) `,
+		`done(${visiblePrompt}).`,
+	];
 }
 
 function mark(message: ProcessMark): void {
@@ -417,6 +432,32 @@ function query(params: {
 							.filter((block) => block.type === "text")
 							.map((block) => block.text)
 							.join("");
+			const request = currentRequest(prompt);
+			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
+			if (optionsFile) {
+				const seen = new WeakSet<object>();
+				const record = JSON.stringify(
+					{
+						pid: process.pid,
+						prompt,
+						configDir:
+							params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+							process.env["CLAUDE_CONFIG_DIR"] ??
+							null,
+						resumeId: params.options?.resume ?? null,
+						options: params.options ?? {},
+					},
+					(_key, value: unknown) => {
+						if (typeof value === "bigint") return value.toString();
+						if (typeof value === "object" && value !== null) {
+							if (seen.has(value)) return undefined;
+							seen.add(value);
+						}
+						return value;
+					},
+				);
+				appendFileSync(optionsFile, `${record}\n`);
+			}
 			mark({
 				kind: "enqueue",
 				prompt,
@@ -441,7 +482,7 @@ function query(params: {
 				readFileSync(rejectedResume, "utf8") === params.options.resume
 			)
 				rejectedPrompt = prompt;
-			if (prompt === "fail-before-assistant-restart") {
+			if (request === "fail-before-assistant-restart") {
 				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 				if (!proof) throw new Error("Missing pre-assistant failure gate");
 				mark({ kind: "pre-assistant-held", prompt, queryId });
@@ -485,13 +526,13 @@ function query(params: {
 				content_block: { type: "text", text: "" },
 			});
 			for (const [index, text] of responseChunks(prompt).entries()) {
-				if (prompt === "upgrade-long-turn" && index === 1 && proof) {
+				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
 					while (!existsSync(release) && !closed)
 						await new Promise<void>((done) => setTimeout(done, 20));
 					if (closed) return;
 				}
-				if (prompt.startsWith("restart-"))
+				if (request.startsWith("restart-"))
 					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {
 					type: "content_block_delta",
@@ -507,7 +548,7 @@ function query(params: {
 				yield event;
 			}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
-			if (prompt.startsWith("stall-"))
+			if (request.startsWith("stall-"))
 				await new Promise<void>((done) => {
 					params.options?.abortController?.signal.addEventListener(
 						"abort",
@@ -515,7 +556,7 @@ function query(params: {
 						{ once: true },
 					);
 				});
-			if (prompt.startsWith("question-")) {
+			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
 				await params.options.canUseTool(
@@ -540,29 +581,33 @@ function query(params: {
 					},
 				);
 			}
-			if (prompt.startsWith("approval-")) {
+			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();
-				const toolInput = { command: "printf harness-approved" };
+				const handoffHistory = request === "approval-account-switch-history";
+				const toolName = handoffHistory ? "Read" : "Bash";
+				const toolInput = handoffHistory
+					? { file_path: "/account-switch-general-result.txt" }
+					: { command: "printf harness-approved" };
 				yield stream(sessionId, {
 					type: "content_block_start",
 					index: 1,
 					content_block: {
 						type: "tool_use",
 						id: toolUseID,
-						name: "Bash",
+						name: toolName,
 						input: toolInput,
 					},
 				});
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
-				const approval = await params.options.canUseTool("Bash", toolInput, {
+				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:
 						params.options.abortController?.signal ??
 						new AbortController().signal,
 					toolUseID,
 					requestId: randomUUID(),
-					...(prompt === "approval-restart"
+					...(request === "approval-restart"
 						? {
 								suggestions: [
 									{
@@ -602,7 +647,9 @@ function query(params: {
 								tool_use_id: toolUseID,
 								content:
 									approval.behavior === "allow"
-										? "harness-approved"
+										? handoffHistory
+											? "ACCOUNT-SWITCH-GENERAL-TOOL-RESULT"
+											: "harness-approved"
 										: "harness-denied",
 								is_error: approval.behavior !== "allow",
 							},
@@ -611,13 +658,13 @@ function query(params: {
 				} as unknown as SDKMessage;
 			}
 			if (
-				prompt.startsWith("failure-") ||
-				prompt.startsWith("approval-failure-")
+				request.startsWith("failure-") ||
+				request.startsWith("approval-failure-")
 			)
 				throw new Error("Harness adapter failure");
 			if (
-				prompt === "upgrade-background-work" ||
-				prompt.startsWith("notification-parent-turn")
+				request === "upgrade-background-work" ||
+				request.startsWith("notification-parent-turn")
 			) {
 				mark({
 					kind: "background-work",
@@ -636,12 +683,12 @@ function query(params: {
 							task_id: "upgrade-background-task",
 							task_type: "local_bash",
 							description: "Live background task",
-							ambient: prompt === "notification-parent-turn-during-warm",
+							ambient: request === "notification-parent-turn-during-warm",
 						},
 					],
 				} as unknown as SDKMessage;
 			}
-			if (prompt === "review-subagent-finalizer") {
+			if (request === "review-subagent-finalizer") {
 				yield {
 					type: "system",
 					subtype: "task_started",
@@ -677,7 +724,7 @@ function query(params: {
 					content: [{ type: "text", text: responseChunks(prompt).join("") }],
 				},
 			} as unknown as SDKMessage;
-			if (prompt === "terminal-replay-interrupt") {
+			if (request === "terminal-replay-interrupt") {
 				mark({ kind: "assistant-held", prompt, queryId });
 				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
 				return;
@@ -703,7 +750,7 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
-			if (prompt === "restart-background-work") {
+			if (request === "restart-background-work") {
 				yield {
 					type: "system",
 					subtype: "background_tasks_changed",
@@ -749,7 +796,7 @@ function query(params: {
 					} as unknown as SDKMessage;
 				}
 			}
-			if (prompt === "upgrade-background-work" && proof) {
+			if (request === "upgrade-background-work" && proof) {
 				const release = join(dirname(proof), "release-upgrade-background");
 				while (!existsSync(release) && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
@@ -769,7 +816,7 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 			}
-			if (prompt.startsWith("notification-parent-turn") && proof) {
+			if (request.startsWith("notification-parent-turn") && proof) {
 				const release = join(dirname(proof), "release-notification-parent");
 				while (!existsSync(release) && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
@@ -808,7 +855,7 @@ function query(params: {
 					"Notification parent finished.",
 				]) {
 					const beforeSnapshot =
-						prompt === "notification-parent-turn-before-snapshot";
+						request === "notification-parent-turn-before-snapshot";
 					parentMessageId = beforeSnapshot
 						? `msg_${randomUUID()}`
 						: randomUUID();
@@ -912,7 +959,7 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 			}
-			if (prompt === "ambient-idle") {
+			if (request === "ambient-idle") {
 				while (!closed) {
 					await new Promise<void>((done) => setTimeout(done, 50));
 					yield {

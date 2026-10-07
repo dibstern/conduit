@@ -865,6 +865,24 @@ describe("built-dist Claude runner lifecycle", () => {
 			cursor,
 		);
 		await failed;
+		const enqueue = harness.marks.find(
+			(mark) =>
+				mark.kind === "enqueue" &&
+				mark.prompt.endsWith(
+					"[End conduit context handoff]\n\napproval-overlap-recovery",
+				),
+		);
+		expect(enqueue?.kind).toBe("enqueue");
+		if (enqueue?.kind !== "enqueue")
+			throw new Error("Missing replacement SDK prompt");
+		expect(enqueue.prompt).toContain("approval-overlap-crash");
+		const query = harness.marks.find(
+			(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+		);
+		if (query?.kind !== "query")
+			throw new Error("Missing replacement SDK query");
+		const queryOptions: unknown = JSON.parse(query.optionsJson);
+		expect(queryOptions).not.toHaveProperty("resume");
 		const active = snapshot(harness, sessionId);
 		expect(active.session).toEqual({ status: "busy" });
 		expect(

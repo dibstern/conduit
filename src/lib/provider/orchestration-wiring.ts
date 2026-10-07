@@ -189,6 +189,7 @@ const createOrchestrationComponentsEffect = (
 			prepareShellEnv = (projectDir) => resolver.waitUntilReady(projectDir);
 		}
 		const claudeInstance = yield* ClaudeDriver.create({
+			persistHandoffDelivered: persist.persistHandoffDelivered,
 			shellEnv,
 			...(prepareShellEnv ? { prepareShellEnv } : {}),
 			...(options.onBackgroundTask
@@ -229,6 +230,7 @@ const createOrchestrationComponentsEffect = (
 			now: () => Date.now(),
 			generateId: () => `disp_${randomUUID()}`,
 			ingestion,
+			persistHandoffDelivered: persist.persistHandoffDelivered,
 		};
 		const engine = new OrchestrationEngine({
 			registry,

@@ -1,33 +1,47 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
-import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
-import type { TurnResult } from "../types.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../daemon/config-persistence.js";
+import {
+	makeProviderStateEffect,
+	ProviderStateEffectTag,
+} from "../../persistence/effect/provider-state-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../persistence/effect/read-query-effect.js";
+import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
 	type ClaudeRunnerSocket,
+	claudeRunnerFailure,
 	claudeRunnerSinkId,
 } from "./claude-runner-protocol.js";
 import type {
 	ClaudeSessionFailure,
 	ClaudeSessionTurn,
 } from "./claude-session-runner.js";
+import { makePrepareTurn } from "./prepare-turn.js";
 
 const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 	sql<{
 		session_id: string;
+		provider_id: string;
 		command_id: string;
 		payload_json: string;
 		user_message_id: string | null;
 		attempt_count: number;
 		assistant_message_id: string | null;
 		state: string | null;
-	}>`SELECT outbox.session_id, outbox.command_id, outbox.payload_json,
+	}>`SELECT outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
 		json_extract(outbox.payload_json, '$.userMessageId') AS user_message_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
-		WHERE outbox.provider_id = 'claude' AND outbox.status = 'running' AND outbox.effect_type = 'send_turn'
+		WHERE outbox.status = 'running' AND outbox.effect_type = 'send_turn'
 			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
 		ORDER BY outbox.request_sequence`;
 
@@ -42,71 +56,122 @@ export const recoverClaudeRunnerCommands = (
 	) => Effect.Effect<void>,
 	closing: () => boolean,
 	deps: ClaudeSessionRunnerDeps,
+	liveSession: Effect.Effect<
+		ProviderNativeSession | undefined
+	> = Effect.succeed(undefined),
 ) =>
 	Effect.gen(function* () {
+		const config = loadDaemonConfig(deps.daemonConfigDir);
 		const rows = yield* runningClaudeCommands(sql, sessionId);
-		return rows.map((row) => {
-			const sinkId = claudeRunnerSinkId(row.command_id, row.attempt_count);
-			const input = {
-				...(JSON.parse(row.payload_json) as ClaudeSessionTurn),
-				commandId: row.command_id,
-				commandAttempt: row.attempt_count,
-			};
-			return {
-				sinkId,
-				input,
-				messageId: row.assistant_message_id ?? "",
-				terminal:
-					row.state !== null &&
-					row.state !== "pending" &&
-					row.state !== "running",
-				wait: connection
-					.commandEffect(
-						row.command_id,
-						{
-							type: "send-turn",
-							sinkId,
-							aborted: false,
-							historyOnDemand: true,
-							shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
-								...process.env,
-							},
-							claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
-							input: { ...input, history: [] },
-						},
-						row.attempt_count,
-					)
-					.pipe(
-						Effect.matchEffect({
-							onSuccess: (result) =>
-								closing()
-									? Effect.void
-									: settleClaudeRunnerCommand(
-											sql,
-											sessionId,
-											row.command_id,
-											row.attempt_count,
-											result,
-										),
-							onFailure: (failure) =>
-								closing()
-									? Effect.void
-									: failTurn(sinkId, failure).pipe(
-											Effect.andThen(
-												settleClaudeRunnerCommand(
-													sql,
-													sessionId,
-													row.command_id,
-													row.attempt_count,
-													undefined,
-													failure,
-												),
-											),
-										),
-						}),
-					),
-			};
-		});
+		return rows
+			.filter(
+				(row) =>
+					resolveProviderRoutingDriver(config, row.provider_id) === "claude",
+			)
+			.map((row) => {
+				const sinkId = claudeRunnerSinkId(row.command_id, row.attempt_count);
+				const input = {
+					...(JSON.parse(row.payload_json) as ClaudeSessionTurn),
+					commandId: row.command_id,
+					commandAttempt: row.attempt_count,
+				};
+				const instanceId = input.instanceId ?? row.provider_id;
+				return {
+					sinkId,
+					input,
+					messageId: row.assistant_message_id ?? "",
+					terminal:
+						row.state !== null &&
+						row.state !== "pending" &&
+						row.state !== "running",
+					wait: Effect.gen(function* () {
+						const execution = yield* Effect.either(
+							Effect.gen(function* () {
+								const state = yield* makeProviderStateEffect;
+								const read = yield* makeReadQueryEffect;
+								const prepareTurn = yield* makePrepareTurn({
+									liveSession: yield* liveSession,
+									configDir: input.configDir,
+									agent: input.agent,
+									userMessageId: input.userMessageId,
+									modelContextWindow:
+										input.contextWindow === "1m" ? 1000000 : undefined,
+								}).pipe(
+									Effect.provideService(ProviderStateEffectTag, state),
+									Effect.provideService(ReadQueryEffectTag, read),
+								);
+								const prepared = yield* prepareTurn(
+									sessionId,
+									instanceId,
+									input.prompt,
+								);
+								return yield* connection.commandEffect(
+									row.command_id,
+									{
+										type: "send-turn",
+										sinkId,
+										aborted: false,
+										shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
+											...process.env,
+										},
+										claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
+										input: {
+											...input,
+											instanceId,
+											prompt: prepared.prompt,
+											configDir: prepared.configDir,
+											resumeSessionId: prepared.resumeSessionId,
+											startFreshNativeSession:
+												prepared.resumeSessionId === undefined,
+											nativeThread: prepared.nativeThread,
+											...(prepared.handoff
+												? { handoff: prepared.handoff }
+												: {}),
+										},
+									},
+									row.attempt_count,
+								);
+							}).pipe(
+								Effect.provideService(SqlClient.SqlClient, sql),
+								Effect.mapError((cause) =>
+									claudeRunnerFailure("recover turn", cause),
+								),
+							),
+						);
+						if (closing()) return;
+						if (execution._tag === "Left") {
+							yield* failTurn(sinkId, execution.left);
+							return yield* settleClaudeRunnerCommand(
+								sql,
+								sessionId,
+								row.command_id,
+								row.attempt_count,
+								undefined,
+								execution.left,
+							);
+						}
+						const result = execution.right;
+						if (
+							result?.status === "completed" &&
+							result.handoff &&
+							deps.persistHandoffDelivered
+						) {
+							yield* deps.persistHandoffDelivered(
+								sessionId,
+								result.handoff,
+								row.command_id,
+							);
+						}
+						yield* settleClaudeRunnerCommand(
+							sql,
+							sessionId,
+							row.command_id,
+							row.attempt_count,
+							result,
+						);
+					}),
+				};
+			});
 	});
 
 /** Live sessions have already reattached their admitted commands during adoption. */
@@ -123,9 +188,13 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 		},
 		failure: ClaudeSessionFailure,
 	) => Effect.Effect<void, E>,
+	daemonConfigDir?: string,
 ) =>
 	Effect.gen(function* () {
+		const config = loadDaemonConfig(daemonConfigDir);
 		for (const row of yield* runningClaudeCommands(sql)) {
+			if (resolveProviderRoutingDriver(config, row.provider_id) !== "claude")
+				continue;
 			// Candidates and retiring runners also own their session's admissions.
 			if (claimedSessions.has(row.session_id)) continue;
 			const failure: ClaudeSessionFailure = {
@@ -191,16 +260,18 @@ const settleClaudeRunnerCommand = (
 				const retryAt = retryable
 					? now + Math.min(1000 * 2 ** row.attempt_count, 30_000)
 					: null;
-				const providerState = yield* makeProviderStateEffect.pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-				);
-				yield* providerState.saveUpdates(
-					sessionId,
-					(result?.providerStateUpdates ?? []).map(({ key, value }) => ({
-						key,
-						value: String(value),
-					})),
-				);
+				if (succeeded && result?.providerStateUpdates.length) {
+					const providerState = yield* makeProviderStateEffect.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					yield* providerState.saveUpdates(
+						sessionId,
+						result.providerStateUpdates.map(({ key, value }) => ({
+							key,
+							value: String(value),
+						})),
+					);
+				}
 				yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
 				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE command_id = ${commandId}`;
 			}),

@@ -199,11 +199,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						providerId: "claude",
 						input: expect.objectContaining({
 							instanceId: "claude",
-							nativeThread: {
-								resumeSessionId: "sdk-session-prev",
-								firstSequence: expect.any(Number),
-								deliveredThrough: expect.any(Number),
-							},
+							providerState: { resumeSessionId: "sdk-session-prev" },
 						}),
 					}),
 				);

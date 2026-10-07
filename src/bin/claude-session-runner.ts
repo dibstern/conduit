@@ -544,26 +544,7 @@ const main = Effect.gen(function* () {
 					role = undefined;
 					register();
 				} else if (message.type === "command" && runner) {
-					// An interrupted first turn can leave the durable cursor unset.
-					// Match the resumed warm query before the runtime selects it.
-					const command =
-						message.command.type === "send-turn" &&
-						frozenSnapshot &&
-						resumeSessionId &&
-						!message.command.input.nativeThread
-							? {
-									...message.command,
-									input: {
-										...message.command.input,
-										nativeThread: {
-											configDir: message.command.input.configDir,
-											resumeSessionId,
-											firstSequence: 0,
-											deliveredThrough: 0,
-										},
-									},
-								}
-							: message.command;
+					const command = message.command;
 					if (exiting) {
 						peer.write({
 							type: "command-reply",
@@ -605,6 +586,7 @@ const main = Effect.gen(function* () {
 							...(input.nativeThread
 								? { nativeThread: input.nativeThread }
 								: {}),
+							resumeSessionId: input.resumeSessionId,
 							...(input.model ? { model: input.model } : {}),
 							...(input.configDir ? { configDir: input.configDir } : {}),
 							...(input.permissionMode

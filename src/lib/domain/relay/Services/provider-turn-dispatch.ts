@@ -421,12 +421,6 @@ const prepareEngineTurnInput = (
 		const providerState = yield* providerStateEffect.getState(
 			resolvedInput.sessionId,
 		);
-		const nativeThread = isClaudeDriver(driver)
-			? yield* providerStateEffect.nativeThread(
-					resolvedInput.sessionId,
-					providerId,
-				)
-			: undefined;
 		const eventSink = yield* makeEventSink(resolvedInput.sessionId, driver);
 		const imageList =
 			resolvedInput.images && resolvedInput.images.length > 0
@@ -451,7 +445,6 @@ const prepareEngineTurnInput = (
 			history: [],
 			providerState,
 			instanceId: providerId,
-			...(nativeThread ? { nativeThread } : {}),
 			...(sendModel && resolvedInput.model
 				? {
 						model: {
