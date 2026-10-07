@@ -35,6 +35,9 @@ importers:
       '@effect/sql-sqlite-node':
         specifier: 0.52.0
         version: 0.52.0(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(supports-color@7.2.0)(zod@4.3.6)
       '@opencode-ai/sdk':
         specifier: 1.18.34
         version: 1.18.34
@@ -83,6 +86,9 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.19.0
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.4.4

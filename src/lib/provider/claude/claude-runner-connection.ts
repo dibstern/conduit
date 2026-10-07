@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { Cause, Deferred, Effect } from "effect";
+import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
 	CLAUDE_RUNNER_PROTOCOL_VERSION,
@@ -20,6 +21,7 @@ import type {
 	ClaudeSessionOutput,
 	ClaudeSessionOutputReply,
 } from "./claude-session-runner.js";
+import { makeClaudeThreadRead } from "./claude-thread-read.js";
 
 type ReceiptStore = Effect.Effect.Success<
 	ReturnType<typeof makeClaudeRunnerReceiptStore>
@@ -52,6 +54,13 @@ export const connectClaudeRunner = (options: {
 }) =>
 	Effect.gen(function* () {
 		const outputLock = yield* Effect.makeSemaphore(1);
+		const readQuery = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const readThread =
+			readQuery._tag === "Some"
+				? yield* makeClaudeThreadRead.pipe(
+						Effect.provideService(ReadQueryEffectTag, readQuery.value),
+					)
+				: undefined;
 		const attachmentId = randomUUID();
 		let acknowledged = 0;
 		let lastReply: ClaudeSessionOutputReply = {};
@@ -211,6 +220,35 @@ export const connectClaudeRunner = (options: {
 														: {}),
 												});
 												finish(Effect.succeed(connection));
+											}),
+									}),
+								),
+							);
+						} else if (message.type === "thread-read" && greeted) {
+							options.runFork(
+								(readThread
+									? readThread(options.sessionId, message.input)
+									: Effect.succeed({
+											code: "ServerUnavailable",
+											message: "Conduit history is unavailable.",
+										})
+								).pipe(
+									Effect.matchCause({
+										onFailure: () =>
+											connection.write({
+												type: "thread-read-reply",
+												requestId: message.requestId,
+												result: {
+													code: "ServerUnavailable",
+													message:
+														"Conduit could not read this session's history.",
+												},
+											}),
+										onSuccess: (result) =>
+											connection.write({
+												type: "thread-read-reply",
+												requestId: message.requestId,
+												result,
 											}),
 									}),
 								),

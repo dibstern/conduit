@@ -268,6 +268,13 @@ export class TranscriptPageCursorNotFoundError extends Data.TaggedError(
 	readonly before: string;
 }> {}
 
+interface SessionTranscriptPageOptions {
+	readonly before?: string;
+	readonly limit: number;
+	/** Read from the oldest message, or inclusively from the supplied cursor. */
+	readonly forward?: { readonly from?: string };
+}
+
 export interface ReadQueryEffect {
 	readonly getToolContent: (
 		toolId: string,
@@ -374,7 +381,7 @@ export interface ReadQueryEffect {
 	>;
 	readonly readSessionTranscriptPage: (
 		sessionId: string,
-		options: { readonly before?: string; readonly limit: number },
+		options: SessionTranscriptPageOptions,
 	) => Effect.Effect<
 		{
 			readonly messages: MessageWithParts[];
@@ -1056,7 +1063,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const readSessionTranscriptPage = (
 		sessionId: string,
-		options: { readonly before?: string; readonly limit: number },
+		options: SessionTranscriptPageOptions,
 	): Effect.Effect<
 		{
 			readonly messages: MessageWithParts[];
@@ -1069,25 +1076,28 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
+					const forward = options.forward !== undefined;
+					const cursorId = forward ? options.forward?.from : options.before;
 					const cursor =
-						options.before !== undefined
+						cursorId !== undefined
 							? (yield* sql<{ created_at: number; id: string }>`
 									SELECT created_at, id FROM messages
-									WHERE session_id = ${sessionId} AND id = ${options.before}`)[0]
+									WHERE session_id = ${sessionId} AND id = ${cursorId}`)[0]
 							: undefined;
-					if (options.before !== undefined && !cursor) {
+					if (cursorId !== undefined && !cursor) {
 						return yield* new TranscriptPageCursorNotFoundError({
 							sessionId,
-							before: options.before,
+							before: cursorId,
 						});
 					}
 					// The first page reaches back to the newest prompt, or further to
 					// the prompt still running, which a prompt queued behind it would
 					// otherwise push off the page. A turn left running before a later
 					// one settled is a crash leftover and is ignored.
-					const [anchor] = cursor
-						? []
-						: yield* sql<{ created_at: number; id: string }>`
+					const [anchor] =
+						forward || cursor
+							? []
+							: yield* sql<{ created_at: number; id: string }>`
 								SELECT created_at, id FROM messages
 								WHERE session_id = ${sessionId} AND role = 'user'
 								ORDER BY id IS (
@@ -1099,8 +1109,24 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									ORDER BY requested_at ASC, rowid ASC LIMIT 1
 								) DESC, created_at DESC, id DESC
 								LIMIT 1`;
-					const rows = cursor
+					const rows = forward
 						? yield* sql<MessageWithTurnModelRow>`
+								SELECT messages.*,
+									turns.requested_model AS turn_requested_model,
+									turns.expected_model AS turn_expected_model,
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
+								FROM messages
+								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
+								WHERE messages.session_id = ${sessionId}
+									AND (${cursor?.id ?? null} IS NULL
+										OR messages.created_at > ${cursor?.created_at ?? null}
+										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id >= ${cursor?.id ?? null}))
+								ORDER BY messages.created_at ASC, messages.id ASC
+								LIMIT ${options.limit + 1}`
+						: cursor
+							? yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
@@ -1114,7 +1140,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT ${options.limit + 1}`
-						: yield* sql<MessageWithTurnModelRow>`
+							: yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
@@ -1132,13 +1158,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										AND (m.created_at > ${anchor?.created_at ?? null}
 											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
 								)`;
-					const pageLimit = cursor
-						? options.limit
-						: Math.max(
-								options.limit,
-								rows.findIndex((message) => message.id === anchor?.id) + 1,
-							);
-					const page = rows.slice(0, pageLimit).reverse();
+					const pageLimit =
+						forward || cursor
+							? options.limit
+							: Math.max(
+									options.limit,
+									rows.findIndex((message) => message.id === anchor?.id) + 1,
+								);
+					const page = rows.slice(0, pageLimit);
+					if (!forward) page.reverse();
 					const parts = page.length
 						? yield* sql<MessagePartRow>`
 								SELECT * FROM message_parts

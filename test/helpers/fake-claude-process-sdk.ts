@@ -6,6 +6,12 @@ import type {
 	ResolveSettingsOptions,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+	type CallToolResult,
+	CallToolResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
@@ -16,6 +22,20 @@ import type {
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 
 export type ProcessMark =
+	| {
+			kind: "mcp-tools";
+			prompt: string;
+			serverKey: string;
+			serverName: string;
+			toolNames: string[];
+	  }
+	| {
+			kind: "mcp-tool-call";
+			prompt: string;
+			toolName: string;
+			arguments: Record<string, unknown>;
+			result: CallToolResult;
+	  }
 	| {
 			kind:
 				| "runner-hello-pending"
@@ -153,6 +173,8 @@ export function responseChunks(prompt: string): string[] {
 	const visiblePrompt = currentRequest(prompt);
 	if (visiblePrompt === "approval-account-switch-history")
 		return ["OMIT-THIS-ASSISTANT-CONTEXT ".repeat(900), "\nHistory complete."];
+	if (visiblePrompt.startsWith("approval-thread-read-history-"))
+		return [`OMIT-${visiblePrompt} `.repeat(900), "\nHistory complete."];
 	return [
 		`Echo(${visiblePrompt}): `,
 		`stream(${visiblePrompt}) `,
@@ -360,6 +382,7 @@ function query(params: {
 					([key]) => !["abortController", "canUseTool", "resume"].includes(key),
 				),
 			),
+			(key, value: unknown) => (key === "instance" ? undefined : value),
 		),
 		options: {
 			...(params.options?.model ? { model: params.options.model } : {}),
@@ -447,7 +470,8 @@ function query(params: {
 						resumeId: params.options?.resume ?? null,
 						options: params.options ?? {},
 					},
-					(_key, value: unknown) => {
+					(key, value: unknown) => {
+						if (key === "instance") return undefined;
 						if (typeof value === "bigint") return value.toString();
 						if (typeof value === "object" && value !== null) {
 							if (seen.has(value)) return undefined;
@@ -514,6 +538,94 @@ function query(params: {
 					skills: [],
 					plugins: [],
 				} as unknown as SDKMessage;
+			}
+			if (request === "thread-read-omitted-history") {
+				const serverKey = "conduit";
+				const server = params.options?.mcpServers?.[serverKey];
+				if (server?.type !== "sdk")
+					throw new Error("The thread reader MCP server was not registered");
+				const client = new Client({
+					name: "fake-claude-sdk",
+					version: "1.0.0",
+				});
+				const [clientTransport, serverTransport] =
+					InMemoryTransport.createLinkedPair();
+				await server.instance.connect(serverTransport);
+				try {
+					await client.connect(clientTransport);
+					const { tools } = await client.listTools();
+					mark({
+						kind: "mcp-tools",
+						prompt,
+						serverKey,
+						serverName: server.name,
+						toolNames: tools.map(({ name }) => `mcp__${serverKey}__${name}`),
+					});
+					const tool = tools.find(({ name }) => name === "conduit_thread_read");
+					if (!tool)
+						throw new Error("The thread reader MCP tool was not listed");
+					let args: { cursor?: string; textOffset?: number; limit: number } = {
+						limit: 1,
+					};
+					let reachedEnd = false;
+					for (let index = 0; index < 32; index++) {
+						const result = CallToolResultSchema.parse(
+							await client.callTool({ name: tool.name, arguments: args }),
+						);
+						mark({
+							kind: "mcp-tool-call",
+							prompt,
+							toolName: `mcp__${serverKey}__${tool.name}`,
+							arguments: args,
+							result,
+						});
+						const page: unknown = JSON.parse(
+							result.content
+								.filter((block) => block.type === "text")
+								.map((block) => block.text)
+								.join(""),
+						);
+						if (
+							!page ||
+							typeof page !== "object" ||
+							!("items" in page) ||
+							!Array.isArray(page.items)
+						)
+							throw new Error(
+								"The thread reader returned an invalid history page",
+							);
+						if (
+							!("nextCursor" in page) ||
+							typeof page.nextCursor !== "string"
+						) {
+							reachedEnd = true;
+							break;
+						}
+						args = {
+							cursor: page.nextCursor,
+							...("nextTextOffset" in page &&
+							typeof page.nextTextOffset === "number"
+								? { textOffset: page.nextTextOffset }
+								: {}),
+							limit: 1,
+						};
+					}
+					if (!reachedEnd)
+						throw new Error("The thread reader did not finish paging");
+					const invalid = { cursor: "invalid-thread-cursor", limit: 1 };
+					const result = CallToolResultSchema.parse(
+						await client.callTool({ name: tool.name, arguments: invalid }),
+					);
+					mark({
+						kind: "mcp-tool-call",
+						prompt,
+						toolName: `mcp__${serverKey}__${tool.name}`,
+						arguments: invalid,
+						result,
+					});
+				} finally {
+					await client.close();
+				}
 			}
 			const messageId = randomUUID();
 			yield stream(sessionId, {
@@ -583,7 +695,9 @@ function query(params: {
 			}
 			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();
-				const handoffHistory = request === "approval-account-switch-history";
+				const handoffHistory =
+					request === "approval-account-switch-history" ||
+					request.startsWith("approval-thread-read-history-");
 				const toolName = handoffHistory ? "Read" : "Bash";
 				const toolInput = handoffHistory
 					? { file_path: "/account-switch-general-result.txt" }

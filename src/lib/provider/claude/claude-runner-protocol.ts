@@ -12,6 +12,7 @@ import type {
 	ClaudeSessionOutput,
 	ClaudeSessionOutputReply,
 } from "./claude-session-runner.js";
+import type { ClaudeThreadReadInput, ClaudeThreadReadResult } from "./types.js";
 
 export const CLAUDE_RUNNER_PROTOCOL_VERSION = 5;
 
@@ -58,6 +59,12 @@ export interface ClaudeRunnerHello {
 
 type ClaudeRunnerReply =
 	| {
+			readonly type: "thread-read-reply";
+			readonly requestId: string;
+			readonly result: ClaudeThreadReadResult;
+			readonly failure?: ClaudeSessionFailure;
+	  }
+	| {
 			readonly type: "upgrade-reply";
 			readonly requestId: string;
 			readonly result: boolean;
@@ -79,6 +86,11 @@ type ClaudeRunnerReply =
 
 export type ClaudeRunnerMessage =
 	| ClaudeRunnerHello
+	| {
+			readonly type: "thread-read";
+			readonly requestId: string;
+			readonly input: ClaudeThreadReadInput;
+	  }
 	| { readonly type: "upgrade-state"; readonly state: ClaudeRunnerUpgradeState }
 	| {
 			readonly type: "upgrade-retire";
@@ -188,14 +200,17 @@ export class ClaudeRunnerSocket {
 				if (
 					message.type === "command-reply" ||
 					message.type === "output-reply" ||
-					message.type === "upgrade-reply"
+					message.type === "upgrade-reply" ||
+					message.type === "thread-read-reply"
 				) {
 					const key =
-						message.type === "upgrade-reply"
-							? `upgrade:${message.requestId}`
-							: message.type === "command-reply"
-								? `command:${message.commandId}`
-								: `output:${message.outputId}`;
+						message.type === "thread-read-reply"
+							? `thread-read:${message.requestId}`
+							: message.type === "upgrade-reply"
+								? `upgrade:${message.requestId}`
+								: message.type === "command-reply"
+									? `command:${message.commandId}`
+									: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -268,6 +283,17 @@ export class ClaudeRunnerSocket {
 			type: "output",
 			outputId,
 			output,
+		});
+	}
+
+	threadReadEffect(
+		input: ClaudeThreadReadInput,
+	): Effect.Effect<ClaudeThreadReadResult, ClaudeSessionFailure> {
+		const requestId = randomUUID();
+		return this.requestEffect(`thread-read:${requestId}`, {
+			type: "thread-read",
+			requestId,
+			input,
 		});
 	}
 

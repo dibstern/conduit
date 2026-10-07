@@ -21,6 +21,30 @@ import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
+export const THREAD_READ_MCP_SERVER = "conduit";
+export const THREAD_READ_TOOL_NAME = "conduit_thread_read";
+export const THREAD_READ_QUALIFIED_NAME = `mcp__${THREAD_READ_MCP_SERVER}__${THREAD_READ_TOOL_NAME}`;
+
+export interface ClaudeThreadReadInput {
+	readonly cursor?: string | undefined;
+	readonly textOffset?: number | undefined;
+	readonly limit?: number | undefined;
+}
+
+export type ClaudeThreadReadResult =
+	| {
+			readonly items: readonly {
+				readonly id: string;
+				readonly role: string;
+				readonly text: string;
+				readonly textOffset: number;
+				readonly interrupted: boolean;
+			}[];
+			readonly nextCursor?: string;
+			readonly nextTextOffset?: number;
+	  }
+	| { readonly code: string; readonly message: string };
+
 // Imported from the real Claude Agent SDK and re-exported so that internal
 // modules can import from "./types.js" without depending on the SDK directly.
 
