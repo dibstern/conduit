@@ -425,12 +425,13 @@ async function connectAndView(
 }
 
 // These scenarios mutate SQLite without publishing a read-model advance or
-// a turn event. An actual completion alert fences the monitoring effects;
-// a fresh family snapshot then verifies the resulting status through RPC.
+// a turn event, so a live feed never sees the change. The viewed session's
+// completion alert is suppressed by its viewer, so it cannot fence either;
+// fresh family snapshots until the row reads idle are the fence.
 async function waitForIdle(
 	harness: TestHarness,
 	client: TestWsClient,
-	options: { timeout?: number; completionAlert?: boolean } = {},
+	options: { timeout?: number } = {},
 ): Promise<void> {
 	const timeout = options.timeout ?? 3000;
 	const sessionId = client.getActiveSessionId();
@@ -442,33 +443,26 @@ async function waitForIdle(
 					getCurrentStatuses,
 				);
 			expect(statuses[sessionId]?.type).toBe("idle");
+			const snapshot = await client.rpcCall((rpc) =>
+				rpc
+					.SubscribeSessionFamily({
+						projectSlug: `test-sse-gating-${harness.relayPort}`,
+						sessionId,
+					})
+					.pipe(
+						Stream.filter((envelope) => envelope._tag === "snapshot"),
+						Stream.runHead,
+						Effect.flatten,
+					),
+			);
+			if (snapshot._tag !== "snapshot")
+				throw new Error("Missing family snapshot");
+			expect(snapshot.rows.find((row) => row.id === sessionId)).toMatchObject({
+				status: "idle",
+			});
 		},
-		{ timeout, interval: 10 },
+		{ timeout, interval: 20 },
 	);
-	if (options.completionAlert !== false)
-		await client.waitFor("alerts", {
-			timeout,
-			predicate: (message) =>
-				message["_tag"] === "alert" &&
-				message["kind"] === "done" &&
-				message["sessionId"] === sessionId,
-		});
-	const snapshot = await client.rpcCall((rpc) =>
-		rpc
-			.SubscribeSessionFamily({
-				projectSlug: `test-sse-gating-${harness.relayPort}`,
-				sessionId,
-			})
-			.pipe(
-				Stream.filter((envelope) => envelope._tag === "snapshot"),
-				Stream.runHead,
-				Effect.flatten,
-			),
-	);
-	if (snapshot._tag !== "snapshot") throw new Error("Missing family snapshot");
-	expect(snapshot.rows.find((row) => row.id === sessionId)).toMatchObject({
-		status: "idle",
-	});
 }
 
 /** Helper: reset harness state for the next test within a shared describe. */
@@ -1037,7 +1031,7 @@ describe("Group 5: Notifications", () => {
 		// Viewer completion has no RPC outcome; retain the no-alert assertion
 		// while checking the available family state.
 		harness.mock.sessionStatuses["sess-1"] = { type: "idle" };
-		await waitForIdle(harness, client, { completionAlert: false });
+		await waitForIdle(harness, client);
 
 		// A session with an active viewer should not receive a cross-session alert.
 		await waitForStatusPollCycles(harness.mock);
