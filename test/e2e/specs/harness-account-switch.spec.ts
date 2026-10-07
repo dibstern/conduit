@@ -1699,9 +1699,13 @@ for (const behavior of [
 	"send-during-switch",
 	"limited",
 	"too-large",
+	"fork-before",
+	"fork-after",
+	"fork-uncovered",
 ] as const) {
-	const scenario =
-		behavior === "unavailable"
+	const scenario = behavior.startsWith("fork-")
+		? 11
+		: behavior === "unavailable"
 			? 9
 			: behavior === "die-once"
 				? 10
@@ -1721,7 +1725,10 @@ for (const behavior of [
 	}, testInfo) => {
 		test.setTimeout(120_000);
 		const hasCutOff =
-			behavior !== "no-cut-off" && behavior !== "send-during-switch";
+			behavior !== "no-cut-off" &&
+			behavior !== "send-during-switch" &&
+			behavior !== "fork-before" &&
+			behavior !== "fork-after";
 		const mobile = testInfo.project.name === "mobile";
 		const strip = page.getByTestId("usage-limit-strip");
 		const artifacts = resolve(
@@ -1733,6 +1740,8 @@ for (const behavior of [
 		const accounts: { id: string; configDir: string }[] = [];
 		for (const name of ["Account 1", "Account 2"]) {
 			const configDir = mkdtempSync(join(harness.root, "switch-account-"));
+			if (behavior.startsWith("fork-"))
+				writeFileSync(join(configDir, "conduit-test-record-forks"), "record");
 			const { addedInstanceId } = await Effect.runPromise(
 				browser.rpc.AddInstance({ name, driver: "claude", configDir }),
 			);
@@ -1812,6 +1821,7 @@ for (const behavior of [
 		const first = `manual-switch-first-request-${behavior}`;
 		const cutOff = `usage-limit-account-1-no-reset: finish the original request${behavior === "too-large" ? "x".repeat(150_000) : ""}`;
 		const evidence: Record<string, unknown> = {};
+		const proofMarks = () => readProofMarks(harness.root);
 		try {
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			await send(first, `first-${behavior}`);
@@ -1827,6 +1837,14 @@ for (const behavior of [
 				}),
 			);
 			if (hasCutOff) {
+				if (behavior === "fork-uncovered") {
+					const oversized = `OVERSIZED-FORK-HISTORY-${"x".repeat(20_000)}`;
+					await send(oversized, "oversized-fork-history");
+					await expect
+						.poll(() => JSON.stringify(proofMarks()))
+						.toContain(`done(${oversized})`);
+					await expect.poll(() => latest()?.status).toBe("idle");
+				}
 				await send(cutOff, `cut-off-${behavior}`);
 				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(false);
 				await expect.poll(() => latest()?.status).toBe("idle");
@@ -1904,7 +1922,7 @@ for (const behavior of [
 			);
 			writeFileSync(
 				join(target.configDir, "conduit-test-switch-turn"),
-				behavior === "die-once"
+				behavior === "die-once" || behavior === "fork-uncovered"
 					? "die-once"
 					: behavior === "fail" || behavior === "hang"
 						? "limited"
@@ -2073,6 +2091,7 @@ for (const behavior of [
 				}
 			} else if (
 				behavior !== "die-once" &&
+				behavior !== "fork-uncovered" &&
 				behavior !== "fail" &&
 				behavior !== "hang"
 			) {
@@ -2092,6 +2111,133 @@ for (const behavior of [
 				.claudeOptions()
 				.find((call) => call.prompt === first);
 			expect(switched?.pid).not.toBe(original?.pid);
+			const verifyFork = async (historyAfter: typeof historyBefore) => {
+				// Coverage must include both receipt bounds. While account 2's
+				// repeated handoff is held, its user message follows account 1's
+				// receipt and has no account 2 receipt yet.
+				const point =
+					behavior === "fork-before"
+						? historyBefore.messages.find(
+								(message) => message.role === "assistant",
+							)
+						: behavior === "fork-after"
+							? historyAfter.messages
+									.filter((message) => message.role === "assistant")
+									.at(-1)
+							: historyAfter.messages
+									.filter((message) => message.role === "user")
+									.at(-1);
+				if (!point) throw new Error("No fork point");
+				const parentEnqueue = proofMarks().find(
+					(mark) =>
+						mark.kind === "enqueue" &&
+						mark.prompt ===
+							(behavior === "fork-before" ? first : switched?.prompt),
+				);
+				const nativeParent = proofMarks().find(
+					(mark) =>
+						mark.kind === "query" &&
+						parentEnqueue?.kind === "enqueue" &&
+						mark.queryId === parentEnqueue.queryId,
+				);
+				if (behavior !== "fork-uncovered" && nativeParent?.kind !== "query")
+					throw new Error("No native parent query");
+				const fork = await Effect.runPromise(
+					browser.rpc.ForkSession({
+						projectSlug,
+						sessionId,
+						messageId: point.id,
+						originId: browser.originId,
+					}),
+				);
+				expect(fork.parentId).toBe(sessionId);
+				expect(fork.forkMessageId).toBe(point.id);
+				const expectedAccount = behavior === "fork-before" ? source : target;
+				expect(
+					await Effect.runPromise(
+						browser.rpc.GetAgents({ projectSlug, sessionId: fork.sessionId }),
+					),
+				).toMatchObject({ instanceId: expectedAccount.id });
+				const forkHistory = await Effect.runPromise(
+					browser.rpc.LoadMoreHistory({
+						projectSlug,
+						sessionId: fork.sessionId,
+					}),
+				);
+				const expectedHistory = historyAfter.messages.slice(
+					0,
+					historyAfter.messages.findIndex(
+						(message) => message.id === point.id,
+					) + 1,
+				);
+				expect(
+					forkHistory.messages.map((message) => [message.role, message.text]),
+				).toEqual(
+					expectedHistory.map((message) => [message.role, message.text]),
+				);
+				const nativeForks = proofMarks().filter(
+					(mark) => mark.kind === "native-fork",
+				);
+				if (behavior === "fork-uncovered") expect(nativeForks).toHaveLength(0);
+				else
+					expect(nativeForks).toEqual([
+						expect.objectContaining({
+							parentSessionId:
+								nativeParent?.kind === "query"
+									? nativeParent.sessionId
+									: undefined,
+							sessionId: fork.sessionId,
+							configDir: expectedAccount.configDir,
+							upToMessageId: point.id,
+						}),
+					]);
+				const forkPrompt = `Continue the ${behavior} fork.`;
+				await Effect.runPromise(
+					browser.rpc.SendMessage({
+						projectSlug,
+						sessionId: fork.sessionId,
+						text: forkPrompt,
+						commandId: `continue-${behavior}`,
+						originId: browser.originId,
+					}),
+				);
+				await expect
+					.poll(() =>
+						harness
+							.claudeOptions()
+							.find((call) => call.prompt?.endsWith(forkPrompt)),
+					)
+					.toBeDefined();
+				const call = harness
+					.claudeOptions()
+					.find((call) => call.prompt?.endsWith(forkPrompt));
+				expect(call?.configDir).toBe(expectedAccount.configDir);
+				if (behavior === "fork-uncovered") {
+					expect(call?.resumeId).toBeNull();
+					expect(call?.prompt).toContain(handoffMarker);
+					expect(call?.prompt).toContain(first);
+					expect(call?.prompt).toContain(cutOff);
+					expect(call?.prompt).not.toContain("OVERSIZED-FORK-HISTORY");
+					expect(call?.prompt).toContain(point.text);
+					const hidden = call?.prompt?.split(
+						"[End conduit context handoff]",
+					)[0];
+					expect(
+						Buffer.byteLength(`${hidden}[End conduit context handoff]`),
+					).toBeLessThanOrEqual(16_000);
+					expect(call?.prompt).toMatch(/omitted [1-9]\d* messages/);
+				} else {
+					expect(call?.resumeId).toBe(fork.sessionId);
+					expect(call?.prompt).toBe(forkPrompt);
+				}
+				evidence["fork"] = {
+					fork,
+					point,
+					history: forkHistory,
+					call,
+					nativeForks,
+				};
+			};
 			expect(switched?.resumeId).toBeNull();
 			expect(switched?.prompt).toContain(handoffMarker);
 			expect(switched?.prompt).toContain(first);
@@ -2120,7 +2266,7 @@ for (const behavior of [
 					handoff: { instanceId: target.id, firstMessageIncluded: true },
 				});
 			} else {
-				if (behavior === "die-once") {
+				if (behavior === "die-once" || behavior === "fork-uncovered") {
 					await expect
 						.poll(() =>
 							harness.marks.some(
@@ -2147,6 +2293,12 @@ for (const behavior of [
 					expect(repeated?.prompt).toContain(cutOff);
 					expect(repeated?.prompt).toContain(handoffMarker);
 				}
+				if (behavior === "fork-uncovered")
+					await verifyFork(
+						await Effect.runPromise(
+							browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+						),
+					);
 				writeFileSync(join(harness.root, "release-switch-turn"), "release");
 				await expect
 					.poll(async () => (await receipt()).handoff)
@@ -2159,7 +2311,11 @@ for (const behavior of [
 						eventId: expect.any(String),
 						at: expect.any(Number),
 					});
-				if (behavior !== "die-once" && preview._tag === "Right") {
+				if (
+					behavior !== "die-once" &&
+					behavior !== "fork-uncovered" &&
+					preview._tag === "Right"
+				) {
 					const delivered = (await receipt()).handoff;
 					expect(delivered).toMatchObject(preview.right);
 				}
@@ -2219,6 +2375,8 @@ for (const behavior of [
 				);
 			}
 			evidence["receipt"] = await receipt();
+			if (behavior === "fork-before" || behavior === "fork-after")
+				await verifyFork(historyAfter);
 		} finally {
 			writeFileSync(join(harness.root, "release-switch-stop"), "release");
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");

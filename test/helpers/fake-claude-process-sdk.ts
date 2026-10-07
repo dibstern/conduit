@@ -12,6 +12,7 @@ import type {
 	ResolveSettingsOptions,
 	SDKControlGetUsageResponse,
 	SDKControlInitializeResponse,
+	SessionMessage,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -55,6 +56,13 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| {
+			kind: "native-fork";
+			parentSessionId: string;
+			sessionId: string;
+			configDir: string | undefined;
+			upToMessageId: string | undefined;
+	  }
 	| { kind: "stop-held"; queryId: string }
 	| {
 			kind: "handoff-first-turn-died";
@@ -364,11 +372,40 @@ export const claudeSubagentSdk: ClaudeSubagentSdk = {
 
 let initializationAttempts = 0;
 
+function readNativeTranscript(
+	sessionId: string,
+	configDir: string | undefined,
+): SessionMessage[] {
+	if (!configDir)
+		throw new Error("A native transcript requires an account config dir");
+	return readFileSync(
+		join(configDir, `conduit-test-transcript-${sessionId}.ndjson`),
+		"utf8",
+	)
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as SessionMessage);
+}
+
+function recordNativeMessage(
+	entry: SessionMessage,
+	configDir: string | undefined,
+): void {
+	if (configDir && existsSync(join(configDir, "conduit-test-record-forks")))
+		appendFileSync(
+			join(configDir, `conduit-test-transcript-${entry.session_id}.ndjson`),
+			`${JSON.stringify(entry)}\n`,
+		);
+}
+
 function query(params: {
 	prompt: AsyncIterable<SDKUserMessage>;
 	options?: Options;
 }): Query {
 	const sessionId = params.options?.resume ?? randomUUID();
+	const accountConfigDir =
+		params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+		process.env["CLAUDE_CONFIG_DIR"];
 	const queryId = randomUUID();
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
@@ -525,6 +562,18 @@ function query(params: {
 							.map((block) => block.text)
 							.join("");
 			const request = currentRequest(prompt);
+			const userUuid = input.uuid ?? randomUUID();
+			recordNativeMessage(
+				{
+					type: "user",
+					uuid: userUuid,
+					session_id: sessionId,
+					message: { ...input.message, id: userUuid },
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+				accountConfigDir,
+			);
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
 				const seen = new WeakSet<object>();
@@ -696,9 +745,6 @@ function query(params: {
 					await client.close();
 				}
 			}
-			const accountConfigDir =
-				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
-				process.env["CLAUDE_CONFIG_DIR"];
 			const switchMarker = accountConfigDir
 				? join(accountConfigDir, "conduit-test-switch-turn")
 				: undefined;
@@ -995,6 +1041,21 @@ function query(params: {
 					summary: "Task complete; transcript catch-up pending",
 				} as unknown as SDKMessage;
 			}
+			recordNativeMessage(
+				{
+					type: "assistant",
+					uuid: messageId,
+					session_id: sessionId,
+					message: {
+						id: messageId,
+						role: "assistant",
+						content: [{ type: "text", text: responseChunks(prompt).join("") }],
+					},
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+				accountConfigDir,
+			);
 			yield {
 				type: "assistant",
 				uuid: messageId,
@@ -1406,11 +1467,36 @@ function query(params: {
 export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
 	fork: {
-		readTranscript: async () => {
-			throw new Error("Process harness does not replay Claude forks");
+		readTranscript: async (sessionId, options) => {
+			return readNativeTranscript(sessionId, options.configDir);
 		},
-		forkSession: async () => {
-			throw new Error("Process harness does not replay Claude forks");
+		forkSession: async (parentSessionId, options) => {
+			const transcript = readNativeTranscript(
+				parentSessionId,
+				options.configDir,
+			);
+			const end =
+				options.upToMessageId === undefined
+					? transcript.length - 1
+					: transcript.findIndex(
+							(entry) => entry.uuid === options.upToMessageId,
+						);
+			if (end < 0) throw new Error("Native fork boundary was not found");
+			const sessionId = randomUUID();
+			for (const entry of transcript.slice(0, end + 1)) {
+				recordNativeMessage(
+					{ ...entry, session_id: sessionId },
+					options.configDir,
+				);
+			}
+			mark({
+				kind: "native-fork",
+				parentSessionId,
+				sessionId,
+				configDir: options.configDir,
+				upToMessageId: options.upToMessageId,
+			});
+			return { sessionId };
 		},
 	},
 	titleQuery: async function* () {

@@ -157,14 +157,20 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 						if (update.key.startsWith(NATIVE_THREAD_PREFIX)) {
 							const thread =
 								yield* Schema.decodeUnknown(NativeThreadSchema)(value);
+							const instanceId = update.key.slice(NATIVE_THREAD_PREFIX.length);
 							const [bounds] = yield* sql<{
 								firstSequence: number;
 								deliveredThrough: number;
-							}>`SELECT COALESCE(MIN(sequence), 0) AS firstSequence,
+							}>`SELECT COALESCE(
+								(SELECT MAX(sequence) FROM events
+									WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
+										AND json_extract(data, '$.newProvider') = ${instanceId}),
+								MIN(sequence), 0) AS firstSequence,
 								COALESCE(MAX(sequence), 0) AS deliveredThrough
 								FROM events WHERE session_id = ${sessionId}`;
 							// The adapter's completion and its SDK cursor share one receipt.
 							// Zero marks a new thread before its first persisted receipt.
+							// A switched thread begins at its handoff, not the parent's origin.
 							value = JSON.stringify({
 								...thread,
 								firstSequence:
