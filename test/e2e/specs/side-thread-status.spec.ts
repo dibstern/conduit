@@ -3,6 +3,11 @@ import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
 import type {
+	OpenCodeMessage,
+	OpenCodeSession,
+} from "../../../src/lib/contracts/providers/opencode-sdk.js";
+import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../src/lib/shared-types.js";
@@ -341,6 +346,301 @@ test.describe("OpenCode Side Thread status", () => {
 		} finally {
 			release();
 		}
+	});
+});
+
+test.describe("OpenCode child family idle", () => {
+	test.use({ recording: "chat-simple" });
+	test.describe.configure({ timeout: 90_000 });
+
+	test("a completed child leaves Working when its held family idle arrives", async ({
+		page,
+		harness,
+		mockServer,
+		relayUrl,
+	}, testInfo) => {
+		const pushes = watchPushes(page);
+		const family: Envelope<SessionInfo>[] = [];
+		const shell: Envelope<SessionInfo>[] = [];
+		page.on("websocket", (socket) => {
+			if (new URL(socket.url()).pathname !== "/rpc") return;
+			const subscriptions = new Map<string, string>();
+			socket.on("framesent", ({ payload }) => {
+				const frame = JSON.parse(String(payload)) as {
+					_tag?: string;
+					id?: string;
+					tag?: string;
+				};
+				if (
+					frame._tag === "Request" &&
+					frame.id !== undefined &&
+					(frame.tag === "SubscribeSessionFamily" ||
+						frame.tag === "SubscribeShell")
+				)
+					subscriptions.set(frame.id, frame.tag);
+			});
+			socket.on("framereceived", ({ payload }) => {
+				const frame = JSON.parse(String(payload)) as {
+					_tag?: string;
+					requestId?: string;
+					values?: Envelope<SessionInfo>[];
+				};
+				if (frame._tag !== "Chunk" || !frame.requestId || !frame.values) return;
+				const tag = subscriptions.get(frame.requestId);
+				if (tag === "SubscribeSessionFamily") family.push(...frame.values);
+				if (tag === "SubscribeShell") shell.push(...frame.values);
+			});
+		});
+
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+		const parentId = await completedParent(app, chat, harness, relayUrl);
+		const childId = "ses_family_idle_child";
+		const messageId = "msg_family_idle_completed";
+		const answer = "Child completed before idle.";
+		const created = Date.now();
+		const child = {
+			id: childId,
+			parentID: parentId,
+			title: "Child with held idle",
+			projectID: "e2e-replay",
+			directory: process.cwd(),
+			version: "1.17.18",
+			time: { created, updated: created },
+		} satisfies OpenCodeSession;
+		const assistant = {
+			id: messageId,
+			sessionID: childId,
+			role: "assistant",
+			parentID: "msg_family_idle_user",
+			modelID: "claude-sonnet-4-5",
+			providerID: "anthropic",
+			mode: "build",
+			path: { cwd: process.cwd(), root: process.cwd() },
+			cost: 0,
+			tokens: {
+				input: 1,
+				output: 1,
+				reasoning: 0,
+				cache: { read: 0, write: 0 },
+			},
+			time: { created },
+		} satisfies OpenCodeMessage;
+		mockServer.setExactResponse("GET", `/session/${childId}`, 200, child);
+		mockServer.setExactResponse("GET", `/session/${childId}/message`, 200, []);
+		await expect
+			.poll(() =>
+				mockServer.diagnostics.some(({ event }) => event === "sse_connect"),
+			)
+			.toBe(true);
+		mockServer.injectSSEEvents([
+			{ type: "session.created", properties: { info: child } },
+			{
+				type: "session.status",
+				properties: { sessionID: childId, status: { type: "busy" } },
+			},
+		]);
+		await expect
+			.poll(() =>
+				storedFacts(harness.eventsDbPath).sessions.find(
+					(row) => row["id"] === childId,
+				),
+			)
+			.toMatchObject({ status: "busy", parent_id: parentId });
+		await app.goto(`${harness.relayBaseUrl}/s/${childId}`);
+		await expect(chat.stopBtn).toBeVisible();
+		mockServer.injectSSEEvents([
+			{
+				type: "message.updated",
+				properties: { sessionID: childId, info: assistant },
+			},
+			{
+				type: "message.part.updated",
+				properties: {
+					sessionID: childId,
+					part: {
+						id: "prt_family_idle_answer",
+						messageID: messageId,
+						sessionID: childId,
+						type: "text",
+						text: answer,
+						time: { start: created, end: created + 1 },
+					},
+				},
+			},
+			{
+				type: "message.updated",
+				properties: {
+					sessionID: childId,
+					info: {
+						...assistant,
+						finish: "stop",
+						time: { ...assistant.time, completed: created + 1 },
+					} satisfies OpenCodeMessage,
+				},
+			},
+		]);
+		await expect
+			.poll(() =>
+				pushes.relay.some(
+					(message) =>
+						message.type === "result" &&
+						message.sessionId === childId &&
+						message.messageId === messageId,
+				),
+			)
+			.toBe(true);
+		await expect
+			.poll(() =>
+				storedFacts(harness.eventsDbPath).events.some(
+					(row) =>
+						row["session_id"] === childId && row["type"] === "turn.completed",
+				),
+			)
+			.toBe(true);
+
+		// Reopening creates a fresh activity slot. The child's own busy family
+		// snapshot must seed Working with its completed transcript already loaded.
+		// OpenCode translates idle to done; drop only that child's late
+		// terminal notification so the real /rpc family feed has to clear it.
+		const suppressedDone: RelayMessage[] = [];
+		const delivered: RelayMessage[] = [];
+		await page.routeWebSocket(
+			(url) => url.pathname === "/ws",
+			(socket) => {
+				const server = socket.connectToServer();
+				server.onMessage((payload) => {
+					const message = JSON.parse(String(payload)) as RelayMessage;
+					if (message.type === "done" && message.sessionId === childId) {
+						suppressedDone.push(message);
+						return;
+					}
+					delivered.push(message);
+					socket.send(payload);
+				});
+			},
+		);
+		const familyBeforeOpen = family.length;
+		const shellBeforeOpen = shell.length;
+		await app.goto(`${harness.relayBaseUrl}/s/${childId}`);
+		await expect
+			.poll(() =>
+				family
+					.slice(familyBeforeOpen)
+					.some(
+						(envelope) =>
+							envelope._tag === "snapshot" &&
+							envelope.rows.some(
+								(row) => row.id === childId && row.status === "busy",
+							),
+					),
+			)
+			.toBe(true);
+		const busySnapshot = family
+			.slice(familyBeforeOpen)
+			.find(
+				(envelope) =>
+					envelope._tag === "snapshot" &&
+					envelope.rows.some(
+						(row) => row.id === childId && row.status === "busy",
+					),
+			);
+		if (busySnapshot?._tag !== "snapshot")
+			throw new Error("Missing busy family snapshot");
+		await expect
+			.poll(() =>
+				shell
+					.slice(shellBeforeOpen)
+					.some((envelope) => envelope._tag === "snapshot"),
+			)
+			.toBe(true);
+		expect(
+			shell
+				.slice(shellBeforeOpen)
+				.flatMap((envelope) =>
+					envelope._tag === "snapshot" ? envelope.rows : [],
+				)
+				.some((row) => row.id === childId),
+		).toBe(false);
+		await expect(
+			page.locator(`#session-list [data-session-id="${childId}"]`),
+		).toHaveCount(0);
+		await expect(chat.assistantMessages.last()).toContainText(answer);
+		await expect(chat.stopBtn).toBeVisible();
+		await expect(page.getByTestId("composer-status-header")).toContainText(
+			"Working",
+		);
+
+		// Only idle crosses this gate. No completion or text is released.
+		const familyBeforeIdle = family.length;
+		const completionsBeforeIdle = storedFacts(
+			harness.eventsDbPath,
+		).events.filter(
+			(row) =>
+				row["session_id"] === childId && row["type"] === "turn.completed",
+		).length;
+		mockServer.injectSSEEvents([
+			{
+				type: "session.status",
+				properties: { sessionID: childId, status: { type: "idle" } },
+			},
+		]);
+		await expect
+			.poll(() =>
+				family
+					.slice(familyBeforeIdle)
+					.some(
+						(envelope) =>
+							envelope._tag === "upsert" &&
+							envelope.sequence > busySnapshot.sequence &&
+							envelope.item.id === childId &&
+							envelope.item.status === "idle",
+					),
+			)
+			.toBe(true);
+		await expect.poll(() => suppressedDone.length).toBeGreaterThan(0);
+		await expect(chat.stopBtn).toBeHidden();
+		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
+		await expect(page).toHaveURL(new RegExp(`/s/${childId}(?:\\?|$)`));
+		expect(
+			delivered.filter(
+				(message) => message.type === "done" && message.sessionId === childId,
+			),
+		).toEqual([]);
+		expect(
+			storedFacts(harness.eventsDbPath).events.filter(
+				(row) =>
+					row["session_id"] === childId && row["type"] === "turn.completed",
+			),
+		).toHaveLength(completionsBeforeIdle);
+		await attachEvidence(
+			testInfo,
+			page,
+			harness,
+			pushes,
+			"child-family-idle-cleared-working",
+		);
+		const evidence = testInfo.outputPath("child-family-idle-feed.json");
+		await writeFile(
+			evidence,
+			JSON.stringify(
+				{
+					childId,
+					completionsBeforeIdle,
+					busySnapshot,
+					family: family.slice(familyBeforeOpen),
+					shell: shell.slice(shellBeforeOpen),
+					delivered,
+					suppressedDone,
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("child-family-idle-feed", {
+			path: evidence,
+			contentType: "application/json",
+		});
 	});
 });
 

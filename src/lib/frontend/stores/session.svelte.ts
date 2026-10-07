@@ -3,6 +3,7 @@
 
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
 import {
+	isBusy,
 	resetSessionSubscription,
 	sessionSubscription,
 } from "../transport/session-subscription.svelte.js";
@@ -60,6 +61,10 @@ import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { updateContextPercent } from "./ui.svelte.js";
 import { setAttachedProject } from "./ws-dispatch.js";
+
+// Re-exported so chat.svelte.ts need not import the subscription directly,
+// which would load it ahead of this store and leave its rows undefined.
+export { isBusy };
 
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
@@ -501,20 +506,24 @@ function getSessionDate(session: SessionInfo): Date {
 export function applyFamilyChange(change: Change<SessionInfo>): void {
 	const next = reduce(familyApplied, change, (row) => row.id);
 	if (next === familyApplied) return;
+	const previousRows = familyApplied.rows;
 	// A child is not a shell row, so its settings follow the family feed.
 	const currentId = clientSession.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
-	const previous = viewed && familyApplied.rows.get(viewed.id);
+	const previous = viewed && previousRows.get(viewed.id);
 	if (viewed?.parentID && viewed !== previous)
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
 	// A child has no shell row, so its family row is the only status it has.
-	for (const row of next.rows.values()) {
-		if (
-			!serverSessions.has(row.id) &&
-			(row.status === "busy" || row.status === "retry")
-		)
-			followSessionBusy(row.id, true);
+	if (change._tag === "snapshot") {
+		for (const row of next.rows.values()) {
+			if (!serverSessions.has(row.id)) followSessionBusy(row.id, isBusy(row));
+		}
+	}
+	if (change._tag === "upsert" && !serverSessions.has(change.item.id)) {
+		const busy = isBusy(change.item);
+		if (busy !== isBusy(previousRows.get(change.item.id)))
+			followSessionBusy(change.item.id, busy);
 	}
 }
 

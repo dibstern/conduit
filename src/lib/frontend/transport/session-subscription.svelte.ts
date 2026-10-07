@@ -38,7 +38,7 @@ export type ShellEnvelope = Stream.Stream.Success<
 
 const identify = (session: SessionInfo): string => session.id;
 
-const isBusy = (row: SessionInfo | undefined): boolean =>
+export const isBusy = (row: Pick<SessionInfo, "status"> | undefined): boolean =>
 	row?.status === "busy" || row?.status === "retry";
 
 // `$state.raw`, not `$state`: the applier replaces the state whole and never
