@@ -255,6 +255,7 @@ export async function replayClaudeRunnerFileSettings(
 	fileSettings: ClaudeRunnerFileSettings | undefined,
 	options: Options,
 	resolver: typeof resolveSettings,
+	candidate: boolean,
 ): Promise<Pick<Options, "settings" | "settingSources">> {
 	if (!fileSettings?.fingerprint)
 		throw new ClaudeRuntimeError({
@@ -269,17 +270,20 @@ export async function replayClaudeRunnerFileSettings(
 			settingSources: [],
 		};
 	const current = await captureClaudeRunnerFileSettings(options, resolver);
-	if (
+	const unchanged =
 		current.fingerprint === fileSettings.fingerprint &&
-		isDeepStrictEqual(current.resolved, fileSettings.resolved)
-	)
+		isDeepStrictEqual(current.resolved, fileSettings.resolved);
+	const canReplay = fileSettings.replayable && current.replayable;
+	// Once switched there is no old runner to retain, so read changed files
+	// natively, like a runner that was never upgraded.
+	if (unchanged || (!canReplay && !candidate))
 		return {
 			...(options.settings !== undefined ? { settings: options.settings } : {}),
 			...(options.settingSources
 				? { settingSources: options.settingSources }
 				: {}),
 		};
-	if (!fileSettings.replayable || !current.replayable)
+	if (!canReplay)
 		throw new ClaudeRuntimeError({
 			message:
 				"Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery; retaining the old runner",

@@ -18,20 +18,34 @@ describe("Integration: Initial State on Connect", () => {
 		if (harness) await harness.stop();
 	});
 
-	it("sends the initial session family on connect", async () => {
+	it("serves the viewed session family over SubscribeSessionFamily", async () => {
 		const client = await harness.connectWsClient();
-		await client.waitFor("session_family");
-		expect(client.getActiveSessionId()).toBeTruthy();
+		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		expect(sessionId).toBeTruthy();
+		const snapshot = await client.waitFor("family", {
+			predicate: (msg) =>
+				msg["_tag"] === "snapshot" && msg["familyOf"] === sessionId,
+		});
+		expect(snapshot["rows"]).toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: sessionId })]),
+		);
 		await client.close();
 	});
 
-	it("sends the viewed session family on connect", async () => {
+	it("never pushes a session_family message", async () => {
 		const client = await harness.connectWsClient();
-		const msg = await client.waitFor("session_family");
-		expect(Array.isArray(msg["sessions"])).toBe(true);
-		expect((msg["sessions"] as Array<{ id: string }>).length).toBeGreaterThan(
-			0,
-		);
+		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		if (!sessionId) throw new Error("expected an active session");
+		await client.renameSession(sessionId, "Renamed for the family feed");
+		await client.waitFor("family", {
+			predicate: (msg) =>
+				msg["_tag"] === "upsert" &&
+				(msg["item"] as { title?: string }).title ===
+					"Renamed for the family feed",
+		});
+		expect(client.getReceivedOfType("session_family")).toEqual([]);
 		await client.close();
 	});
 
@@ -63,8 +77,9 @@ describe("Integration: Initial State on Connect", () => {
 		const client2 = await harness.connectWsClient();
 		await client2.waitForInitialState();
 
-		const types2 = client2.getReceived().map((m) => m.type);
-		expect(types2).toContain("session_family");
+		expect(client2.getReceivedOfType("family").map((m) => m["_tag"])).toContain(
+			"snapshot",
+		);
 
 		await client1.close();
 		await client2.close();

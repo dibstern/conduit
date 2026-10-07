@@ -1,7 +1,7 @@
 // Verifies that multiple WebSocket clients can connect simultaneously and
 // that broadcasts, state changes, and disconnect isolation work correctly.
 
-import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -25,17 +25,20 @@ describe("Integration: Multi-Client", () => {
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		const list1 = client1.getReceivedOfType("session_family");
-		const list2 = client2.getReceivedOfType("session_family");
-
-		expect(list1.length).toBeGreaterThan(0);
-		expect(list2.length).toBeGreaterThan(0);
-		const firstList = list1[0];
-		const secondList = list2[0];
-		assert.exists(firstList, "expected the first client session family");
-		assert.exists(secondList, "expected the second client session family");
-		expect(Array.isArray(firstList["sessions"])).toBe(true);
-		expect(Array.isArray(secondList["sessions"])).toBe(true);
+		for (const client of [client1, client2]) {
+			const sessionId = client.getActiveSessionId();
+			if (!sessionId) throw new Error("expected an active session");
+			expect(
+				client
+					.getReceivedOfType("family")
+					.find((msg) => msg["_tag"] === "snapshot"),
+			).toMatchObject({
+				familyOf: sessionId,
+				rows: expect.arrayContaining([
+					expect.objectContaining({ id: sessionId }),
+				]),
+			});
+		}
 
 		await client1.close();
 		await client2.close();

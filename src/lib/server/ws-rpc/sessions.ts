@@ -299,8 +299,10 @@ export const sessionsHandlers = {
 			const session = yield* forkSession(request.parentSessionId, {
 				side: { title: request.title },
 			});
+			// Refresh now rather than on the next projection burst: the side
+			// thread's first turn must not read as activity on its parent.
 			const sessionManager = yield* SessionManagerServiceTag;
-			yield* sessionManager.pushViewerFamilies();
+			yield* sessionManager.refreshSessionLineage();
 			return { sessionId: session.id };
 		}).pipe(
 			Effect.catchTag("SessionCommandError", (error) =>

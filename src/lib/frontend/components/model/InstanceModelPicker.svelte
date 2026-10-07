@@ -37,7 +37,7 @@
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getAgentsRpc,
@@ -191,10 +191,11 @@
 
 	const visibleAgents = $derived(getVisibleAgents());
 	const activeAgent = $derived(getActiveAgent() ?? visibleAgents[0]);
-	// An OpenCode session in Plan approvals always runs the plan agent.
+	// Regular OpenCode Plan sessions lock the agent; Side Threads use session rules.
 	const planLocked = $derived(
 		selectedDriver === "opencode" &&
 			!!sessionState.currentId &&
+			!findSession(sessionState.currentId)?.sideThread &&
 			discoveryState.permissionMode === "plan",
 	);
 

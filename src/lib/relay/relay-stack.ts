@@ -613,8 +613,6 @@ export async function createProjectRelay(
 							settled: true,
 							automatic: true,
 						}),
-					broadcastSessionList: () =>
-						startup.sessionManagerService.pushViewerFamilies(),
 				},
 				idleWindowMs,
 				now,

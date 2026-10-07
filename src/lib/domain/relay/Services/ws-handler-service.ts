@@ -63,8 +63,6 @@ export interface ClientState {
 	 * Flushed in order when `markClientBootstrapped` is called.
 	 */
 	bootstrapQueue: readonly string[];
-	/** The serialized `session_family` this client last received. */
-	lastFamily?: string;
 }
 
 /** Tag for the mutable client→ClientState HashMap Ref in the Effect Context. */
@@ -207,36 +205,10 @@ export const broadcast = (message: RelayMessage) =>
 export const sendTo = (clientId: string, message: RelayMessage) =>
 	Effect.gen(function* () {
 		const ref = yield* WsHandlerStateTag;
-		yield* deliver(ref, clientId, message.type, serializeMessage(message));
+		const entry = HashMap.get(yield* Ref.get(ref), clientId);
+		if (Option.isSome(entry))
+			yield* safeSend(entry.value.ws, serializeMessage(message));
 	}).pipe(Effect.annotateLogs("clientId", clientId));
-
-/**
- * Send serialized data to one client, skipping a `session_family` identical to
- * the one it already holds. A workflow family can run to hundreds of KB, and
- * every session lifecycle event re-pushes it to each viewer, mostly unchanged.
- * The record is checked and updated atomically; the send itself follows, so two
- * concurrent sends of different families could in theory arrive out of order
- * relative to the record.
- */
-const deliver = (
-	ref: Ref.Ref<HashMap.HashMap<string, ClientState>>,
-	clientId: string,
-	type: RelayMessage["type"],
-	data: string,
-) =>
-	Effect.gen(function* () {
-		const ws = yield* Ref.modify(ref, (map) => {
-			const entry = HashMap.get(map, clientId);
-			if (Option.isNone(entry)) return [undefined, map] as const;
-			if (type !== "session_family") return [entry.value.ws, map] as const;
-			if (entry.value.lastFamily === data) return [undefined, map] as const;
-			return [
-				entry.value.ws,
-				HashMap.set(map, clientId, { ...entry.value, lastFamily: data }),
-			] as const;
-		});
-		if (ws) yield* safeSend(ws, data);
-	});
 
 /**
  * Associate a client with a session (called on session switch / ViewSession).
@@ -293,10 +265,8 @@ export const sendToSession = (sessionId: string, message: RelayMessage) =>
 		const ref = yield* WsHandlerStateTag;
 		const map = yield* Ref.get(ref);
 		const data = serializeMessage(message);
-		for (const [clientId, state] of map) {
-			if (state.sessionId === sessionId) {
-				yield* deliver(ref, clientId, message.type, data);
-			}
+		for (const [_clientId, state] of map) {
+			if (state.sessionId === sessionId) yield* safeSend(state.ws, data);
 		}
 	});
 

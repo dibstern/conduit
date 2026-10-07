@@ -92,31 +92,17 @@ describe("Integration: Per-Tab Sessions", () => {
 		await client2.viewSession(a["id"] as string);
 
 		// Renaming the viewed session refreshes both viewers' family.
+		const sessionId = a["id"] as string;
+		await client1.subscribeFamily(sessionId);
+		await client2.subscribeFamily(sessionId);
 		client1.clearReceived();
 		client2.clearReceived();
-		const sessionId = a["id"] as string;
 		await client1.renameSession(sessionId, "Renamed for both tabs");
 
-		const containsRenamed = (m: Record<string, unknown>) => {
-			const sessions = m["sessions"] as
-				| Array<{ id: string; title?: string }>
-				| undefined;
-			return (
-				Array.isArray(sessions) &&
-				sessions.some(
-					(s) => s.id === sessionId && s.title === "Renamed for both tabs",
-				)
-			);
-		};
-		const list1 = await client1.waitFor("session_family", {
-			predicate: containsRenamed,
-		});
-		const list2 = await client2.waitFor("session_family", {
-			predicate: containsRenamed,
-		});
-
-		expect(Array.isArray(list1["sessions"])).toBe(true);
-		expect(Array.isArray(list2["sessions"])).toBe(true);
+		const renamed = (s: { id: string; title?: string }) =>
+			s.id === sessionId && s.title === "Renamed for both tabs";
+		await client1.waitForFamilyRows(sessionId, renamed);
+		await client2.waitForFamilyRows(sessionId, renamed);
 
 		await client1.close();
 		await client2.close();

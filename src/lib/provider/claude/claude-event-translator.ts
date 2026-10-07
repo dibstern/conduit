@@ -1399,9 +1399,12 @@ export class ClaudeEventTranslator {
 				// `init` echoes the outbound id (`claude-opus-5[1m]`); the API reports
 				// the bare one (`claude-opus-5`). Comparing identities keeps a 1M
 				// window from looking like a model change on every turn.
+				// `<synthetic>` marks a reply Claude Code wrote itself (quota
+				// exhausted, unsupported slash command): no model served it.
 				const servedBy = message.message.model;
 				if (
 					typeof servedBy === "string" &&
+					servedBy !== "<synthetic>" &&
 					(ctx.reportedApiModelId === undefined ||
 						!isSameModelIdentity(servedBy, ctx.reportedApiModelId))
 				) {

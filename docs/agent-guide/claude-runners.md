@@ -153,7 +153,9 @@ unreadable files, global configuration files, and filesystem customization or
 instruction assets prevent this fallback. The old runner keeps serving and the upgrade is deferred; security
 settings are never promoted to the flag tier or filesystem discovery silently
 removed. This conservative limitation remains until the SDK supports replaying
-the original source tiers.
+the original source tiers. After the switch there is no old runner to keep, so
+an upgraded runner that must recreate its query after such a change reads the
+files natively, as a runner that was never upgraded does.
 
 Multi-folder sessions also defer upgrades when ordinary settings files change:
 `claude-runner-settings.ts` refuses settings replay when `additionalDirectories`

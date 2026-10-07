@@ -1530,6 +1530,76 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 	}, 40_000);
 
+	it("regression: recreating an upgraded query rereads changed settings when replay is impossible", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("unreplayable-file-settings-recreation");
+		// Project instructions make replay impossible, as in any real repository.
+		writeFileSync(join(harness.projectDir, "CLAUDE.md"), "Project rules.\n");
+		const settingsFile = join(harness.root, "claude/settings.json");
+		writeFileSync(settingsFile, JSON.stringify({ autoCompactEnabled: false }));
+		const sessionId = await initial.createSession("Unreplayable settings");
+		details["sessionId"] = sessionId;
+		const before = "unreplayable-before-switch";
+		await initial.send(sessionId, before);
+		const old = runnerFor(harness, sessionId);
+		await completed(harness, sessionId, [before]);
+		await harness.kill();
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const replacement = await upgraded(harness, sessionId, old.pid);
+		const warmed = queryFor(harness, replacement.pid);
+		// The user edits settings after the switch, e.g. saving a default effort.
+		writeFileSync(settingsFile, JSON.stringify({ autoCompactEnabled: true }));
+		const interrupted = "stall-unreplayable-recreate";
+		const pending = browser.send(sessionId, interrupted).catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).find(
+						(mark) => mark.kind === "enqueue" && mark.prompt === interrupted,
+					),
+				).toMatchObject({ queryId: warmed.queryId }),
+			{ timeout: 10_000 },
+		);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({
+				projectSlug: "process-test",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		await pending;
+		const after = "unreplayable-after-query-recreation";
+		expect((await browser.send(sessionId, after)).chunks).toEqual(
+			responseChunks(after),
+		);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === after,
+		);
+		if (enqueue?.kind !== "enqueue")
+			throw new Error("Missing recreated query enqueue");
+		const recreated = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+		);
+		if (recreated?.kind !== "query")
+			throw new Error("Missing recreated SDK query");
+		expect(recreated.queryId).not.toBe(warmed.queryId);
+		expect(recreated.pid).toBe(replacement.pid);
+		// Like a runner that was never upgraded, the new query reads the files natively.
+		expect(JSON.parse(recreated.optionsJson)["settingSources"]).toEqual([
+			"user",
+			"project",
+			"local",
+		]);
+		expect(JSON.parse(recreated.effectiveSettingsJson)).toMatchObject({
+			autoCompactEnabled: true,
+		});
+		details["actualRecreatedQuery"] = recreated;
+	}, 40_000);
+
 	it("merge regression: live controls invalidate a replacement still warming", async () => {
 		const {
 			harness,

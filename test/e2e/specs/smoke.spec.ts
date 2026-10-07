@@ -99,9 +99,8 @@ test.describe("E2E Smoke Test", () => {
 		expect(
 			receivedFrames.filter(
 				(frame) =>
-					(frame["type"] === "session_switched" &&
-						frame["sessionId"] === unknownId) ||
-					(frame["type"] === "session_family" && frame["rootId"] === unknownId),
+					frame["type"] === "session_switched" &&
+					frame["sessionId"] === unknownId,
 			),
 		).toEqual([]);
 	});
