@@ -40,7 +40,7 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			setClientCount(setting.count);
 			break;
 		case "opencodeConnection":
-			uiState.opencodeConnectionStatus = setting.status;
+			uiState.opencodeConnections[setting.instanceId] = setting.status;
 			break;
 	}
 };

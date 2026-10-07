@@ -6,7 +6,10 @@ import {
 	resolveInstanceDriver,
 } from "../../daemon/config-persistence.js";
 import { AgentServiceTag } from "../../domain/relay/Services/agent-service.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	OrchestrationEngineTag,
+} from "../../domain/relay/Services/services.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -38,11 +41,19 @@ export const modelsHandlers = {
 				instanceId,
 				instanceDriver,
 			);
+			// A session's agents come from the instance it is bound to.
+			const resultInstanceId =
+				result.instanceId ??
+				(request.sessionId === undefined
+					? undefined
+					: yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+							request.sessionId,
+						));
 			return {
 				projectSlug: request.projectSlug,
-				...(result.instanceId === undefined
+				...(resultInstanceId === undefined
 					? {}
-					: { instanceId: result.instanceId }),
+					: { instanceId: resultInstanceId }),
 				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null

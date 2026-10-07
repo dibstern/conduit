@@ -70,7 +70,7 @@ vi.mock("dompurify", () => ({
 
 // Mock ui.svelte.js to capture showBanner/removeBanner calls
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
-	uiState: { opencodeConnectionStatus: null },
+	uiState: { opencodeConnections: {} },
 	showToast: showToastMock,
 	showBanner: showBannerMock,
 	removeBanner: removeBannerMock,
@@ -115,7 +115,7 @@ beforeEach(() => {
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
-	uiState.opencodeConnectionStatus = null;
+	uiState.opencodeConnections = {};
 });
 
 afterEach(() => {

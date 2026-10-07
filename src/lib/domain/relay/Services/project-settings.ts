@@ -33,9 +33,14 @@ type LiveProjectFact = Extract<
 	ProjectSetting,
 	{ readonly _tag: "clientCount" | "opencodeConnection" }
 >;
-type LiveProjectFacts = Partial<
-	Record<LiveProjectFact["_tag"], LiveProjectFact>
->;
+/** OpenCode connections are kept per instance. */
+type LiveProjectFacts = {
+	readonly clientCount?: Extract<LiveProjectFact, { _tag: "clientCount" }>;
+	readonly [instance: `opencodeConnection:${string}`]: Extract<
+		LiveProjectFact,
+		{ _tag: "opencodeConnection" }
+	>;
+};
 const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
 	setting._tag === "clientCount" || setting._tag === "opencodeConnection";
 
@@ -67,10 +72,11 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 	Effect.gen(function* () {
 		const { changes, revision, live } = yield* ProjectSettingsTag;
 		if (isLiveFact(setting))
-			yield* Ref.update(live, (facts) => ({
-				...facts,
-				[setting._tag]: setting,
-			}));
+			yield* Ref.update(live, (facts) =>
+				setting._tag === "clientCount"
+					? { ...facts, clientCount: setting }
+					: { ...facts, [`opencodeConnection:${setting.instanceId}`]: setting },
+			);
 		const sequence = yield* Ref.updateAndGet(revision, (n) => n + 1);
 		yield* PubSub.publish(changes, {
 			_tag: "upsert" as const,

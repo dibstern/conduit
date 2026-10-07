@@ -6,6 +6,7 @@ import {
 	type Scope,
 	type Stream,
 } from "effect";
+import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type { ConnectionHealth } from "../../../types.js";
 
@@ -16,11 +17,9 @@ export type OpenCodeInstanceEvent = {
 	| { readonly _tag: "event"; readonly payload: unknown }
 	| { readonly _tag: "heartbeat" }
 	| {
+			/** Lifecycle transition; repeats are never emitted. */
 			readonly _tag: "connection";
-			readonly state: "connected" | "disconnected" | "reconnecting";
-			readonly error?: Error;
-			readonly attempt?: number;
-			readonly delay?: number;
+			readonly state: OpenCodeConnectionStatus;
 	  }
 );
 

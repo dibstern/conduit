@@ -19,9 +19,11 @@ import {
 } from "./rpc-mock.js";
 
 const OPENCODE_CONNECTION_STATES = [
-	"disconnected",
-	"reconnecting",
+	"stopped",
+	"starting",
 	"connected",
+	"reconnecting",
+	"failed",
 ] as const;
 
 /** Mock-only inputs served over GetModels/GetAgents/GetCommands, never over /ws. */
@@ -352,6 +354,7 @@ export class WsMockControl {
 			if (status)
 				sendMockProjectSetting(this.page, {
 					_tag: "opencodeConnection",
+					instanceId: "opencode",
 					status,
 				});
 			return;

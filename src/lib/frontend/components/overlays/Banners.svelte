@@ -49,14 +49,27 @@
 		const banners = instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : [...uiState.banners];
 		const sessionId = sessionState.currentId;
 		const providerId = sessionId ? discoveryState.sessionProviderIds[sessionId] : undefined;
-		const status = uiState.opencodeConnectionStatus;
-		if (providerId === "opencode" && (status === "reconnecting" || status === "disconnected")) {
+		// Only the viewed session's own instance matters; an unbound OpenCode
+		// session runs on the project's default instance.
+		const status =
+			sessionId && providerId === "opencode"
+				? uiState.opencodeConnections[discoveryState.sessionInstanceIds[sessionId] ?? "opencode"]
+				: undefined;
+		if (status === "starting") {
+			banners.push({
+				id: "opencode-connection-status",
+				variant: "info",
+				icon: "loader",
+				text: "Starting OpenCode\u2026",
+				dismissible: false,
+			});
+		} else if (status === "reconnecting" || status === "failed") {
 			banners.push({
 				id: "opencode-connection-status",
 				variant: "warning",
 				icon: "alert-triangle",
-				text: status === "reconnecting" ? "Reconnecting to OpenCode\u2026" : "OpenCode server disconnected",
-				summary: status === "reconnecting" ? "OpenCode reconnecting\u2026" : "OpenCode disconnected",
+				text: status === "reconnecting" ? "Reconnecting to OpenCode\u2026" : "OpenCode failed to start",
+				summary: status === "reconnecting" ? "OpenCode reconnecting\u2026" : "OpenCode failed",
 				dismissible: false,
 			});
 		}
@@ -74,6 +87,8 @@
 				return "text-error";
 			case "warning":
 				return "text-warning";
+			case "info":
+				return "text-text-muted";
 			default:
 				return assertNever(variant);
 		}
@@ -103,6 +118,8 @@
 				return "bg-error/10 border-error/30";
 			case "warning":
 				return "bg-warning-bg border-warning/30";
+			case "info":
+				return "bg-bg-alt border-border";
 			default:
 				return assertNever(variant);
 		}
@@ -115,6 +132,7 @@
 			<div
 				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)} {bannerTone(banner.variant)}"
 				data-banner-id={banner.id}
+				data-banner-variant={banner.variant}
 			>
 				<span class="banner-icon shrink-0">
 					<Icon name={banner.icon} size={14} />

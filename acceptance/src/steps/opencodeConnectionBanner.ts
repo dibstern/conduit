@@ -28,7 +28,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "view a provider session",
 		match:
-			/^I view the (Claude|OpenCode) session( using the OpenCode project default)?$/,
+			/^I view the (Claude|OpenCode) session( using the OpenCode project default| on instance (\S+))?$/,
 		run: async ({ world, match }) => {
 			const name = match[1] ?? "";
 			const sessionId = `sess-banner-${name.toLowerCase()}`;
@@ -45,6 +45,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			});
 			rpc.setResponse("GetAgents", {
 				projectSlug: "myapp",
+				...(match[3] ? { instanceId: match[3] } : {}),
 				providerScope: { id: claude ? "claude" : "opencode", name },
 				agents: [],
 			});
@@ -62,7 +63,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "report OpenCode connection status",
 		match:
-			/^the mock relay reports OpenCode (reconnecting|disconnected|connected)$/,
+			/^the mock relay reports OpenCode (stopped|starting|connected|reconnecting|failed)(?: for instance (\S+))?$/,
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			// These facts ride the project-settings stream, which opens only once
@@ -73,7 +74,13 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			);
 			rpc.setProjectSetting({
 				_tag: "opencodeConnection",
-				status: match[1] as "reconnecting" | "disconnected" | "connected",
+				instanceId: match[2] ?? "opencode",
+				status: match[1] as
+					| "stopped"
+					| "starting"
+					| "connected"
+					| "reconnecting"
+					| "failed",
 			});
 			// A later fact on the same stream confirms dispatch has finished,
 			// so an absent-banner assertion cannot pass before the status arrives.
@@ -90,6 +97,15 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator('[data-banner-id="opencode-connection-status"]'),
 			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert OpenCode connection banner is not a warning",
+		match: /^the OpenCode connection banner is not a warning$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.locator('[data-banner-id="opencode-connection-status"]'),
+			).toHaveAttribute("data-banner-variant", "info");
 		},
 	},
 	{

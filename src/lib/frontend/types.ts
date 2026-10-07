@@ -309,7 +309,8 @@ export type BannerVariant =
 	| "onboarding"
 	| "skip-permissions"
 	| "error"
-	| "warning";
+	| "warning"
+	| "info";
 
 export interface BannerConfig {
 	id: string;
