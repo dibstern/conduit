@@ -77,7 +77,7 @@ function switchSetting(
 			undo();
 			const reason =
 				error instanceof Error ? error.message : "the daemon rejected it.";
-			showToast(`${failure}: ${reason}`, { variant: "warn" });
+			showToast({ title: failure, body: reason, variant: "warn" });
 		})
 		.finally(() => {
 			pending[setting] -= 1;

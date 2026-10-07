@@ -24,10 +24,8 @@ describe("Toast", () => {
 			action: { label: "Undo", run },
 		});
 		render(Toast);
-		const toast = screen.getByRole("status");
-		expect(toast.classList.contains("bg-inverse-bg")).toBe(true);
-		expect(toast.classList.contains("text-inverse-text")).toBe(true);
 		const action = screen.getByTestId("toast-action");
+		expect(action.dataset["kind"]).toBe("primary");
 		expect(action.tagName).toBe("BUTTON");
 		expect(action.textContent?.trim()).toBe("Undo");
 		await fireEvent.click(action);
@@ -40,9 +38,30 @@ describe("Toast", () => {
 		showToast("Saved");
 		render(Toast);
 		expect(screen.queryByTestId("toast-action")).toBeNull();
-		expect(screen.getByRole("status").classList.contains("bg-bg-alt")).toBe(
-			true,
-		);
+		expect(screen.getByRole("status").textContent?.trim()).toBe("Saved");
+	});
+
+	it("puts a dismiss action last and closes the toast without running anything", async () => {
+		showToast({
+			title: "Switched to personal",
+			body: "personal has 77% of its week left.",
+			emphasis: "personal",
+			actions: [
+				{ label: "Later", kind: "dismiss" },
+				{ label: "Undo", run: vi.fn(), kind: "primary" },
+			],
+		});
+		render(Toast);
+		expect(screen.getByText("personal", { selector: "b" })).toBeTruthy();
+		const actions = screen.getAllByTestId("toast-action");
+		expect(actions.map((action) => action.textContent?.trim())).toEqual([
+			"Undo",
+			"Later",
+		]);
+		const later = actions[1];
+		if (!later) throw new Error("expected the Later action");
+		await fireEvent.click(later);
+		expect(uiState.toasts).toEqual([]);
 	});
 
 	beforeEach(() => {
@@ -58,7 +77,8 @@ describe("Toast", () => {
 		await renderToasts([
 			{
 				id: "error-toast",
-				message: "Failed to send message",
+				title: "Failed to send message",
+				actions: [],
 				variant: "error",
 				duration: 7000,
 			},
@@ -75,7 +95,8 @@ describe("Toast", () => {
 		await renderToasts([
 			{
 				id: "warn-toast",
-				message: "Message queued — sending shortly",
+				title: "Message queued — sending shortly",
+				actions: [],
 				variant: "warn",
 				duration: 7000,
 			},

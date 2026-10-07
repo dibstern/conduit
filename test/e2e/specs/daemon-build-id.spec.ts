@@ -231,7 +231,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	const draft = "Unsent draft typed immediately before a build mismatch";
 	await input.fill("Earlier unsent draft");
 	await expect(
-		page.getByText("Conduit was updated. Saving your draft and reloading…"),
+		page.getByText("Saving your draft and reloading…"),
 	).toBeVisible();
 	await page.waitForFunction(
 		() => navigator.serviceWorker.controller?.scriptURL.endsWith("/sw.js"),

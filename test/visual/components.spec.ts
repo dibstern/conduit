@@ -76,8 +76,11 @@ const LIGHT_STORY_IDS = new Set([
 	"layout-sessionbar--overflow-menu-open",
 	"input-commandmenu--open",
 	"session-shortcutsheet--default",
-	// Toast uses the inverse palette; settings uses a blurred overlay surface.
+	// Toast cards wear the inverse primary button and an accent emphasis;
+	// settings uses a blurred overlay surface.
 	"overlays-toast--default-toast",
+	"overlays-toast--warn-with-all-actions",
+	"overlays-toast--error-with-all-actions",
 	"overlays-settingspanel--default",
 	// Terminal output consumes the JS-side theme palette as well as CSS tokens.
 	"terminal-terminaltab--with-output",

@@ -177,7 +177,9 @@ function handleBuildId(serverBuildId: string): void {
 	}
 	buildReloadPending = true;
 	inputSyncState.reloadPending = true;
-	showToast("Conduit was updated. Saving your draft and reloading…", {
+	showToast({
+		title: "Conduit was updated",
+		body: "Saving your draft and reloading…",
 		duration: 1_000,
 	});
 	void (async () => {

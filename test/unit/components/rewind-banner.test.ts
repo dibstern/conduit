@@ -96,7 +96,7 @@ describe("RewindBanner", () => {
 			messageId: "provider-assistant-1",
 		});
 		await waitFor(() => expect(chatState.messages).toEqual([]));
-		expect(uiState.toasts.map((toast) => toast.message)).toEqual([
+		expect(uiState.toasts.map((toast) => toast.title)).toEqual([
 			"Rewound conversation & files",
 		]);
 	});
@@ -113,7 +113,7 @@ describe("RewindBanner", () => {
 		expect(uiState.toasts).toEqual([
 			expect.objectContaining({
 				variant: "warn",
-				message: expect.stringContaining("yet"),
+				title: expect.stringContaining("yet"),
 			}),
 		]);
 	});
@@ -126,7 +126,7 @@ describe("RewindBanner", () => {
 			expect(uiState.toasts).toEqual([
 				expect.objectContaining({
 					variant: "warn",
-					message: expect.stringContaining("Could not rewind"),
+					title: expect.stringContaining("Could not rewind"),
 				}),
 			]),
 		);
@@ -161,7 +161,7 @@ describe("RewindBanner", () => {
 			expect(uiState.toasts).toEqual([
 				expect.objectContaining({
 					variant: "warn",
-					message: expect.stringContaining("changed"),
+					title: expect.stringContaining("changed"),
 				}),
 			]),
 		);
@@ -208,7 +208,7 @@ describe("RewindBanner", () => {
 				"before",
 			]),
 		);
-		expect(uiState.toasts.map((toast) => toast.message)).toEqual([
+		expect(uiState.toasts.map((toast) => toast.title)).toEqual([
 			"Rewound conversation & files",
 		]);
 	});

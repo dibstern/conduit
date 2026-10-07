@@ -1,7 +1,7 @@
 // Global UI state: sidebar, modals, toasts, scroll, rewind, plan mode, banners.
 
 import type { ProjectSetting } from "../transport/ws-rpc.js";
-import type { BannerConfig, PanelId, Toast, ToastVariant } from "../types.js";
+import type { BannerConfig, PanelId, Toast, ToastCard } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
@@ -137,20 +137,38 @@ export function setSnoozedShelfOpen(open: boolean): void {
 	}
 }
 
+type ToastShorthandOptions = Pick<ToastCard, "duration" | "variant"> & {
+	action?: { label: string; run: () => void };
+};
+
+/**
+ * Show a toast card. The one-line form is shorthand for a card with only a
+ * title, its inline `action` becoming the card's primary action.
+ */
 export function showToast(
 	message: string,
-	options?: {
-		duration?: number;
-		variant?: ToastVariant;
-		action?: Toast["action"];
-	},
+	options?: ToastShorthandOptions,
+): void;
+export function showToast(card: ToastCard): void;
+export function showToast(
+	input: string | ToastCard,
+	options: ToastShorthandOptions = {},
 ): void {
+	const { action, ...rest } = options;
+	const card: ToastCard =
+		typeof input === "string"
+			? {
+					...rest,
+					title: input,
+					...(action ? { actions: [{ ...action, kind: "primary" }] } : {}),
+				}
+			: input;
 	const toast: Toast = {
+		...card,
 		id: generateUuid(),
-		message,
-		variant: options?.variant ?? "default",
-		duration: options?.duration ?? 7000,
-		...(options?.action ? { action: options.action } : {}),
+		actions: card.actions ?? [],
+		variant: card.variant ?? "default",
+		duration: card.duration ?? 7000,
 	};
 	uiState.toasts = [...uiState.toasts, toast];
 

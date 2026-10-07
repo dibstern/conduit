@@ -42,6 +42,9 @@ type Story = StoryObj<typeof meta>;
 export const Primary: Story = {
 	args: { variant: "primary", children: label("Save changes") },
 };
+export const Inverse: Story = {
+	args: { variant: "inverse", children: label("Switch and resend") },
+};
 export const Secondary: Story = {
 	args: { variant: "secondary", children: label("Cancel") },
 };

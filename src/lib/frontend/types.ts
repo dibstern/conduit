@@ -298,12 +298,36 @@ export interface Turn {
 
 export type ToastVariant = "default" | "warn" | "error";
 
+/**
+ * One button in a toast's action row. `primary` is the filled call to action,
+ * `secondary` a ghost beside it, and `dismiss` a ghost pushed to the far right
+ * ("Later"). Every action closes its toast once it has run, so a dismiss needs
+ * no `run` of its own.
+ */
+export type ToastAction =
+	| { kind: "primary" | "secondary"; label: string; run: () => void }
+	| { kind: "dismiss"; label: string; run?: () => void };
+
+/** What `showToast` takes: a titled card. */
+export interface ToastCard {
+	title: string;
+	/** One line of secondary text under the title. */
+	body?: string;
+	/** A term inside `body` to emphasise; its first occurrence is highlighted. */
+	emphasis?: string;
+	actions?: readonly ToastAction[];
+	variant?: ToastVariant;
+	duration?: number;
+}
+
 export interface Toast {
 	id: string;
-	message: string;
+	title: string;
+	body?: string;
+	emphasis?: string;
+	actions: readonly ToastAction[];
 	variant: ToastVariant;
 	duration: number;
-	action?: { label: string; run: () => void };
 }
 
 export type BannerVariant =

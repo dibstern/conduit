@@ -42,7 +42,9 @@ export const applyAlert = (alert: Alert): void => {
 	if (!failed) return;
 	const content = notificationContent(syntheticMsg);
 	if (content)
-		showToast(content.title + (content.body ? ` — ${content.body}` : ""), {
+		showToast({
+			title: content.title,
+			...(content.body ? { body: content.body } : {}),
 			variant: "warn",
 		});
 };

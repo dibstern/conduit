@@ -17,6 +17,7 @@
 
 export type ButtonVariant =
 	| "primary"
+	| "inverse"
 	| "secondary"
 	| "ghost"
 	| "ghost-accent"
@@ -197,6 +198,17 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		chrome: "bg-accent",
 		tone: "text-bg",
 		hoverFill: "hover:bg-accent-hover",
+	},
+	/**
+	 * A neutral filled call to action, for a surface where the accent would
+	 * shout: a toast's primary action. It wears the inverse pair, the tokens
+	 * the theme reserves for deliberately inverted surfaces, so it reads as
+	 * "the one to press" in both themes without borrowing a status colour.
+	 */
+	inverse: {
+		chrome: "bg-inverse-bg",
+		tone: "text-inverse-text",
+		hoverFill: "hover:bg-inverse-bg/85",
 	},
 	secondary: {
 		chrome: "border border-border",

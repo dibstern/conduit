@@ -39,8 +39,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
 	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
 		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
-	"overlays-notificationstack--toasts-only | overlays-toast--multiple-toasts":
-		"both stories render NotificationStack with the same three toast messages and variants; only the toast ids differ, and those are iteration keys",
 
 	// Verified legitimate (conduit-test-de3.35.9.3). For these three the
 	// identical bytes are the assertion, not a hole in one.

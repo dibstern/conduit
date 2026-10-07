@@ -89,16 +89,24 @@ function setupAttention(opts: {
 export const ToastsOnly: Story = {
 	beforeEach: () => {
 		setToasts([
-			{ id: "t1", message: "File saved", variant: "default", duration: 999999 },
+			{
+				id: "t1",
+				title: "File saved",
+				actions: [],
+				variant: "default",
+				duration: 999999,
+			},
 			{
 				id: "t2",
-				message: "Connection lost",
+				title: "Connection lost",
+				actions: [],
 				variant: "warn",
 				duration: 999999,
 			},
 			{
 				id: "t3",
-				message: "Failed to reconnect",
+				title: "Failed to reconnect",
+				actions: [],
 				variant: "error",
 				duration: 999999,
 			},
@@ -111,7 +119,8 @@ export const ErrorToast: Story = {
 		setToasts([
 			{
 				id: "error-toast",
-				message: "Failed to load sessions",
+				title: "Failed to load sessions",
+				actions: [],
 				variant: "error",
 				duration: 999999,
 			},
@@ -151,14 +160,22 @@ export const Combined: Story = {
 		setToasts([
 			{
 				id: "t1",
-				message: "Copied to clipboard",
+				title: "Copied to clipboard",
+				actions: [],
 				variant: "default",
 				duration: 999999,
 			},
-			{ id: "t2", message: "Rate limited", variant: "warn", duration: 999999 },
+			{
+				id: "t2",
+				title: "Rate limited",
+				actions: [],
+				variant: "warn",
+				duration: 999999,
+			},
 			{
 				id: "t3",
-				message: "Failed to send message",
+				title: "Failed to send message",
+				actions: [],
 				variant: "error",
 				duration: 999999,
 			},
