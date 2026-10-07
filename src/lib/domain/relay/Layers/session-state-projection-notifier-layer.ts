@@ -71,7 +71,12 @@ export const makeSessionStateProjectionNotifierLive = (
 			return {
 				sessionStateProjected: (sessionId, eventType) =>
 					Effect.gen(function* () {
-						if (eventType === "turn.completed" || eventType === "turn.error") {
+						if (
+							eventType === "turn.completed" ||
+							eventType === "turn.error" ||
+							eventType === "turn.interrupted" ||
+							eventType === "session.status"
+						) {
 							yield* Effect.forkDaemon(
 								Effect.tryPromise(() => refreshSessionGit()).pipe(
 									Effect.catchAllCause((cause) =>

@@ -55,7 +55,7 @@ import {
 	sessionState,
 	switchToSession,
 } from "./session.svelte.js";
-import { refreshSessionList } from "./session-list.svelte.js";
+import { refreshListedSessions } from "./session-list.svelte.js";
 import {
 	refreshSessionSkills,
 	sessionSkillsState,
@@ -258,7 +258,7 @@ export function handleMessage(msg: RelayMessage): void {
 			handleServerUpdate(msg.restartAvailable);
 			break;
 		case "daemon_sessions_changed":
-			void refreshSessionList();
+			void refreshListedSessions();
 			break;
 
 		default:
