@@ -345,6 +345,39 @@ interface SessionTranscriptPageOptions {
 	readonly previewTools?: boolean;
 }
 
+interface TranscriptListingOptions {
+	/** The page's oldest message; omitted, the whole session. */
+	readonly from?: string;
+	/** The version the page was read at. */
+	readonly since: number;
+}
+
+interface TranscriptWindow {
+	readonly messages: MessageWithParts[];
+	readonly version: number;
+	readonly removed?: readonly {
+		readonly id: string;
+		readonly version: number;
+	}[];
+	readonly removedParts?: readonly {
+		readonly messageId: string;
+		readonly partId: string;
+		readonly version: number;
+	}[];
+	/** With listing options whose `from` still exists. */
+	readonly listing?: {
+		readonly messages: readonly {
+			readonly id: string;
+			readonly version: number;
+		}[];
+		readonly parts: readonly {
+			readonly messageId: string;
+			readonly partId: string;
+			readonly version: number;
+		}[];
+	};
+}
+
 export interface ReadQueryEffect {
 	/** The named tools of one session exactly as stored; unknown ids are left out. */
 	readonly readToolDetails: (
@@ -490,6 +523,8 @@ export interface ReadQueryEffect {
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
+		/** Also list every sidebar row, for a resume checksum. */
+		readonly listing?: boolean;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -513,6 +548,8 @@ export interface ReadQueryEffect {
 			 * opening before it may have missed removals.
 			 */
 			readonly removedSince?: number;
+			/** With `listing`: each sidebar row's id and version, no bodies. */
+			readonly listing?: readonly (readonly [id: string, version: number])[];
 		},
 		ReadQueryEffectError | SqlError
 	>;
@@ -525,26 +562,17 @@ export interface ReadQueryEffect {
 	 * when its own version is inside it. Removed messages and removed parts
 	 * come back separately. Tool outputs come back as the browser opens them
 	 * (`previewTools`).
+	 *
+	 * `listing` also lists, by id and version and in the same transaction, the
+	 * messages and parts a client holding a page from `from` and every change
+	 * past `since` holds: those of messages at or after `from` (the whole
+	 * session without one), and any that moved past `since`.
 	 */
 	readonly readSessionTranscript: (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
-	) => Effect.Effect<
-		{
-			readonly messages: MessageWithParts[];
-			readonly version: number;
-			readonly removed?: readonly {
-				readonly id: string;
-				readonly version: number;
-			}[];
-			readonly removedParts?: readonly {
-				readonly messageId: string;
-				readonly partId: string;
-				readonly version: number;
-			}[];
-		},
-		ReadQueryEffectError | SqlError
-	>;
+		listing?: TranscriptListingOptions,
+	) => Effect.Effect<TranscriptWindow, ReadQueryEffectError | SqlError>;
 
 	/**
 	 * One session's todo list: the items its newest completed TodoWrite left
@@ -1406,6 +1434,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
+		readonly listing?: boolean;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -1419,6 +1448,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly deleted: boolean;
 			}[];
 			readonly removedSince?: number;
+			readonly listing?: readonly (readonly [id: string, version: number])[];
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1475,6 +1505,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									(yield* sql<{ version: number }>`
 										SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
 										?.version ?? 0,
+							}),
+							...(range?.listing === true && {
+								listing: (yield* sql<{ session_id: string; version: number }>`
+									SELECT session_id, version FROM session_sidebar
+									WHERE row IS NOT NULL`).map(
+									({ session_id, version }) => [session_id, version] as const,
+								),
 							}),
 						};
 					}
@@ -1578,28 +1615,46 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const readSessionTranscript = (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
-	): Effect.Effect<
-		{
-			readonly messages: MessageWithParts[];
-			readonly version: number;
-			readonly removed?: readonly {
-				readonly id: string;
-				readonly version: number;
-			}[];
-			readonly removedParts?: readonly {
-				readonly messageId: string;
-				readonly partId: string;
-				readonly version: number;
-			}[];
-		},
-		ReadQueryEffectError | SqlError
-	> =>
+		listing?: TranscriptListingOptions,
+	): Effect.Effect<TranscriptWindow, ReadQueryEffectError | SqlError> =>
 		sql
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const from =
+						listing?.from === undefined
+							? undefined
+							: (yield* sql<{ created_at: number; id: string }>`
+									SELECT created_at, id FROM messages
+									WHERE session_id = ${sessionId} AND id = ${listing.from}`)[0];
+					// Ids and versions only, from the page's first message on, and
+					// whatever moved past the page's version wherever it sits.
+					const listed =
+						listing === undefined || (listing.from !== undefined && !from)
+							? undefined
+							: {
+									messages: yield* sql<{ id: string; version: number }>`
+										SELECT id, version FROM messages
+										WHERE session_id = ${sessionId}
+										AND (version > ${listing.since}
+											OR ${from?.id ?? null} IS NULL
+											OR created_at > ${from?.created_at ?? null}
+											OR (created_at = ${from?.created_at ?? null} AND id >= ${from?.id ?? null}))`,
+									parts: yield* sql<{
+										messageId: string;
+										partId: string;
+										version: number;
+									}>`
+										SELECT mp.message_id AS messageId, mp.id AS partId, mp.version
+										FROM message_parts mp JOIN messages m ON m.id = mp.message_id
+										WHERE m.session_id = ${sessionId}
+										AND (mp.version > ${listing.since}
+											OR ${from?.id ?? null} IS NULL
+											OR m.created_at > ${from?.created_at ?? null}
+											OR (m.created_at = ${from?.created_at ?? null} AND m.id >= ${from?.id ?? null}))`,
+								};
 					// A part write stamps its message too, so a message is never older
 					// than its parts: every message with a part in the window is past
 					// the floor. Its own version may be past the ceiling; it then
@@ -1663,6 +1718,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						version,
 						...(removed === undefined ? {} : { removed }),
 						...(removedParts === undefined ? {} : { removedParts }),
+						...(listed === undefined ? {} : { listing: listed }),
 					};
 				}),
 			)

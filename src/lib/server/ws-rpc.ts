@@ -202,11 +202,14 @@ const subscribeSessionDetailWithPresence = (
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
-			subscribeShell(
-				request.resumeFromSequence === undefined
+			subscribeShell({
+				...(request.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: request.resumeFromSequence },
-			).pipe(
+					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+			}).pipe(
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -237,6 +240,9 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
 			}).pipe(
 				(stream) =>
 					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
@@ -495,11 +501,14 @@ export const makeRoutedWsRpcServerLayer = (
 		...handlers,
 		SubscribeShell: (request) =>
 			routeStream(request.projectSlug, () =>
-				subscribeShell(
-					request.resumeFromSequence === undefined
+				subscribeShell({
+					...(request.resumeFromSequence === undefined
 						? {}
-						: { resumeFromSequence: request.resumeFromSequence },
-				),
+						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+				}),
 			),
 		SubscribeApprovals: (request) =>
 			routeStream(request.projectSlug, () =>
@@ -516,6 +525,9 @@ export const makeRoutedWsRpcServerLayer = (
 					...(request.resumeFromSequence === undefined
 						? {}
 						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
 				});
 				return request.textSuffixes === true
 					? encodeSessionDetail(source)

@@ -128,8 +128,19 @@ export const reduce = <T>(
 
 		case "snapshot": {
 			const sequence = change.sequence;
-			if (state.floor !== undefined && sequence <= state.floor) return state;
 			const rows = new Map(change.rows.map((item) => [identify(item), item]));
+			// The server's sequences only grow, so a snapshot below anything we
+			// hold is the server gone back, a restored store. The server wins
+			// (conduit-test-y7eo.9): take it whole. One at what we hold is a
+			// corrective re-read, and is merged below like any other.
+			const held = Math.max(state.floor ?? -1, ...state.versions.values());
+			if (sequence < held)
+				return {
+					rows,
+					versions: new Map(),
+					floor: sequence,
+					settled: state.settled,
+				};
 			// A delayed snapshot covers only its own sequence. Keep newer live
 			// rows and tombstones, while replacing everything the snapshot covers.
 			const versions = new Map<string, number>();

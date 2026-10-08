@@ -65,6 +65,16 @@
 // A detail suffix length mismatch is different: its buffer is untrustworthy,
 // so it explicitly requests a cold snapshot and discards the resume cursor.
 //
+// **A resume is checked, and the server wins** (conduit-test-y7eo.9). A
+// subscription given a ledger records, for every row it delivers, the version
+// that row moved at, starting from its last snapshot (whose rows all count at
+// the snapshot's sequence), and a resume names that snapshot as its base. The
+// server ends a catch-up against a base with the checksum of the set it holds;
+// a ledger that disagrees is a view that has drifted, however it happened, so
+// it is logged and treated as the suffix mismatch is: discard the cursor, take
+// a cold snapshot. The `synchronized` that failed the check is not delivered;
+// the snapshot's own is.
+//
 // **What is worth re-issuing.** `RpcClientError` — the transport's own error,
 // raised for a dead socket or an undecodable frame — is protocol class and is
 // re-issued; it says nothing about whether the subscription is servable. So is a
@@ -95,15 +105,51 @@ import type { RpcClientError } from "@effect/rpc/RpcClientError";
 import {
 	Cause,
 	Chunk,
+	Data,
 	Duration,
 	Effect,
 	HashSet,
 	Option,
 	Ref,
+	Schema,
 	Stream,
 } from "effect";
-import type { WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	digestRows,
+	type ResumeBase,
+	ResumeChecksum,
+	type WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import type { DetailLengthMismatch } from "./session-detail-wire.js";
+
+declare global {
+	/**
+	 * Test seam: the next change a checked subscription delivers that this
+	 * matches is dropped, as a lost frame would be, while the cursor still
+	 * moves past it. Cleared once it drops one.
+	 */
+	var __conduitDropChange: ((envelope: object) => boolean) | undefined;
+}
+
+/**
+ * What a checked subscription holds: the base its last snapshot began, and
+ * each row since applied, by id, at the version it moved at. Owned by the
+ * caller, so a subscription opened again from a cursor it kept is checked too.
+ */
+export interface ResumeLedger {
+	base: ResumeBase | undefined;
+	readonly rows: Map<string, number>;
+}
+
+export const makeResumeLedger = (): ResumeLedger => ({
+	base: undefined,
+	rows: new Map(),
+});
+
+/** The server's checksum of a resumed set disagrees with the ledger's. */
+class ResumeChecksumMismatch extends Data.TaggedError(
+	"ResumeChecksumMismatch",
+) {}
 
 /**
  * How far the consumer has provably got. `open` is the sequence currently being
@@ -223,6 +269,68 @@ const advance = (cursor: Cursor, envelope: object): Step => {
 	return { cursor: closing ? settled(opened) : opened, deliver: true };
 };
 
+/**
+ * Fold one delivered envelope into the ledger, and check a `synchronized`
+ * that carries the server's checksum against it.
+ */
+const record = (
+	ledger: ResumeLedger,
+	envelope: object,
+): Effect.Effect<void, ResumeChecksumMismatch> => {
+	const sequence = sequenceOf(envelope);
+	switch (tagOf(envelope)) {
+		case "snapshot": {
+			if (sequence === undefined) return Effect.void;
+			ledger.base = {
+				sequence,
+				...("cursor" in envelope && typeof envelope.cursor === "string"
+					? { cursor: envelope.cursor }
+					: {}),
+			};
+			ledger.rows.clear();
+			const rows: readonly unknown[] =
+				"rows" in envelope && Array.isArray(envelope.rows) ? envelope.rows : [];
+			for (const row of rows) {
+				const id = subjectOf(payloadOf({ item: row }));
+				if (id !== undefined) ledger.rows.set(id, sequence);
+			}
+			return Effect.void;
+		}
+		case "upsert": {
+			const id = subjectOf(payloadOf(envelope));
+			if (id !== undefined && sequence !== undefined)
+				ledger.rows.set(id, sequence);
+			return Effect.void;
+		}
+		case "remove": {
+			if (!("id" in envelope) || typeof envelope.id !== "string")
+				return Effect.void;
+			ledger.rows.delete(envelope.id);
+			// A removed message takes its parts, each named `["<its id>",…`.
+			const parts = `${JSON.stringify([envelope.id]).slice(0, -1)},`;
+			for (const id of ledger.rows.keys())
+				if (id.startsWith(parts)) ledger.rows.delete(id);
+			return Effect.void;
+		}
+		case "synchronized": {
+			const checksum = "checksum" in envelope ? envelope.checksum : undefined;
+			if (ledger.base === undefined || !Schema.is(ResumeChecksum)(checksum))
+				return Effect.void;
+			const held = digestRows(ledger.rows, ledger.base.sequence);
+			if (held.hash === checksum.hash && held.rows === checksum.rows)
+				return Effect.void;
+			console.warn("[resume] checksum mismatch, taking a fresh snapshot", {
+				base: ledger.base,
+				server: { hash: checksum.hash, rows: checksum.rows },
+				client: held,
+			});
+			return Effect.fail(new ResumeChecksumMismatch());
+		}
+		default:
+			return Effect.void;
+	}
+};
+
 const reissueDelay = (failures: number): Duration.Duration =>
 	Duration.millis(Math.min(50 * 2 ** (failures - 1), 1000));
 
@@ -249,15 +357,18 @@ const unsubscribed = Effect.map(
  *
  * `issue` is called with the sequence to resume from — `undefined` on the first
  * attempt unless `from` is given, and again on a drop that completed nothing, so
- * a subscription that never got a snapshot still asks for one.
+ * a subscription that never got a snapshot still asks for one. With a `ledger`
+ * it is also given the base a resume is checked against.
  */
 export const resumeStream = <A extends object>(
 	issue: (
 		resumeFromSequence: number | undefined,
+		resumeBase?: ResumeBase,
 	) => Stream.Stream<A, WsRpcError | RpcClientError | DetailLengthMismatch>,
 	options: {
 		readonly from?: number | undefined;
 		readonly onTransportDrop?: () => void;
+		readonly ledger?: ResumeLedger;
 	} = {},
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
@@ -268,19 +379,37 @@ export const resumeStream = <A extends object>(
 				seen: nothingSeen,
 			});
 			const failures = yield* Ref.make(0);
+			const ledger = options.ledger;
 
 			const attempt = (): Stream.Stream<A, WsRpcError> =>
 				Stream.unwrap(
-					Effect.map(Ref.get(cursor), (at) => issue(at.closed)),
+					Effect.map(Ref.get(cursor), (at) =>
+						at.closed === undefined || ledger?.base === undefined
+							? issue(at.closed)
+							: issue(at.closed, ledger.base),
+					),
 				).pipe(
 					Stream.filterEffect((envelope) =>
-						Effect.zipRight(
-							Ref.set(failures, 0),
-							Ref.modify(cursor, (from) => {
+						Effect.gen(function* () {
+							yield* Ref.set(failures, 0);
+							const deliver = yield* Ref.modify(cursor, (from) => {
 								const step = advance(from, envelope);
 								return [step.deliver, step.cursor];
-							}),
-						),
+							});
+							if (!deliver || ledger === undefined) return deliver;
+							const tag = tagOf(envelope);
+							const drop = globalThis.__conduitDropChange;
+							if (
+								drop !== undefined &&
+								(tag === "upsert" || tag === "remove") &&
+								drop(envelope)
+							) {
+								globalThis.__conduitDropChange = undefined;
+								return false;
+							}
+							yield* record(ledger, envelope);
+							return true;
+						}),
 					),
 					Stream.catchAllCause((cause): Stream.Stream<A, WsRpcError> => {
 						// A defect is nobody's contract, and it decides before anything
@@ -289,13 +418,16 @@ export const resumeStream = <A extends object>(
 						if (Chunk.isNonEmpty(Cause.defects(cause)))
 							return Stream.failCause(Cause.flatMap(cause, Cause.die));
 
-						// A suffix can only be decoded against the exact sent prefix.
+						// A suffix can only be decoded against the exact sent prefix,
+						// and a view the server's checksum disowns cannot be resumed.
 						// Ask the existing cold-start path for whole rows, even if the
-						// cursor claims they were delivered before the buffer was lost.
+						// cursor claims they were delivered.
 						if (
 							Chunk.some(
 								Cause.failures(cause),
-								(failure) => failure._tag === "DetailLengthMismatch",
+								(failure) =>
+									failure._tag === "DetailLengthMismatch" ||
+									failure._tag === "ResumeChecksumMismatch",
 							)
 						) {
 							return Stream.unwrap(
@@ -303,7 +435,14 @@ export const resumeStream = <A extends object>(
 									closed: undefined,
 									open: undefined,
 									seen: nothingSeen,
-								}).pipe(Effect.as(reissue())),
+								}).pipe(
+									Effect.tap(() => {
+										if (ledger === undefined) return;
+										ledger.base = undefined;
+										ledger.rows.clear();
+									}),
+									Effect.as(reissue()),
+								),
 							);
 						}
 

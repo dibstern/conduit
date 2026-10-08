@@ -30,7 +30,7 @@ import {
 	Scope,
 } from "effect";
 import { trackControlSocket } from "./connection-status.svelte.js";
-import { resumeStream } from "./resume.js";
+import { makeResumeLedger, type ResumeLedger, resumeStream } from "./resume.js";
 import { decodeSessionDetail } from "./session-detail-wire.js";
 import { WsRpcGroup } from "./ws-rpc.js";
 
@@ -63,6 +63,7 @@ export type WsRpcClient = Effect.Effect.Success<typeof wsRpcClient>;
 const makeSubscriptions = (
 	projectSlug: string,
 	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
+	ledgers = new Map<string, ResumeLedger>(),
 ) => ({
 	/** The session list. Low-rate, so it rides the control socket. */
 	shell: (
@@ -72,12 +73,14 @@ const makeSubscriptions = (
 		} = {},
 	) =>
 		resumeStream(
-			(resumeFromSequence) =>
+			(resumeFromSequence, resumeBase) =>
 				sockets.control.SubscribeShell({
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+					...(resumeBase === undefined ? {} : { resumeBase }),
 				}),
 			{
+				ledger: makeResumeLedger(),
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { from: options.resumeFromSequence }),
@@ -100,19 +103,30 @@ const makeSubscriptions = (
 	sessionDetail: (options: {
 		readonly sessionId: string;
 		readonly resumeFromSequence?: number;
-	}) =>
-		resumeStream(
-			(resumeFromSequence) =>
+	}) => {
+		// A view resumed from its high-water mark is checked against what the
+		// last subscription applied to it. Each subscription folds into its own
+		// copy, so two open at once cannot interleave into one ledger.
+		const held = ledgers.get(options.sessionId);
+		const ledger: ResumeLedger =
+			options.resumeFromSequence === undefined || held === undefined
+				? makeResumeLedger()
+				: { base: held.base, rows: new Map(held.rows) };
+		ledgers.set(options.sessionId, ledger);
+		return resumeStream(
+			(resumeFromSequence, resumeBase) =>
 				sockets.stream
 					.SubscribeSessionDetail({
 						projectSlug,
 						sessionId: options.sessionId,
 						textSuffixes: true,
 						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+						...(resumeBase === undefined ? {} : { resumeBase }),
 					})
 					.pipe(decodeSessionDetail),
-			{ from: options.resumeFromSequence },
-		),
+			{ from: options.resumeFromSequence, ledger },
+		);
+	},
 	/** One session's todo list. Low-rate, so it rides the control socket. */
 	todos: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>

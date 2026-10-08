@@ -42,6 +42,51 @@ import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
+/**
+ * What a resuming client's changes were applied on top of: its last snapshot's
+ * version and, for a paged source, that page's cursor (conduit-test-y7eo.9).
+ */
+export const ResumeBase = Schema.Struct({
+	sequence: Schema.Number,
+	cursor: Schema.optional(NonEmptyString),
+});
+export type ResumeBase = typeof ResumeBase.Type;
+
+/**
+ * A subscription's base set after a catch-up, as {@link digestRows} of the ids
+ * and versions it holds, and how many rows that is. Only the server
+ * subscription helper makes one; a client checks it against its own digest of
+ * what it applied.
+ */
+export const ResumeChecksum = Schema.Struct({
+	hash: Schema.NonNegativeInt,
+	rows: Schema.NonNegativeInt,
+}).pipe(Schema.brand("ResumeChecksum"));
+export type ResumeChecksum = typeof ResumeChecksum.Type;
+
+/**
+ * The digest both ends compute over `[id, version]` rows: a sum of 32-bit
+ * FNV-1a hashes, so row order does not matter. A row that has not moved since
+ * the base counts at the base's version, which is all a snapshot tells the
+ * client.
+ */
+export const digestRows = (
+	rows: Iterable<readonly [id: string, version: number]>,
+	base: number,
+): { readonly hash: number; readonly rows: number } => {
+	let hash = 0;
+	let count = 0;
+	for (const [id, version] of rows) {
+		const key = `${id}\u0000${Math.max(version, base)}`;
+		let row = 0x811c9dc5;
+		for (let index = 0; index < key.length; index++)
+			row = Math.imul(row ^ key.charCodeAt(index), 0x01000193);
+		hash = (hash + (row >>> 0)) >>> 0;
+		count += 1;
+	}
+	return { hash, rows: count };
+};
+
 export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 	Schema.Union(
 		Schema.Struct({
@@ -51,7 +96,11 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			hasMore: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(NonEmptyString),
 		}),
-		Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+		Schema.Struct({
+			_tag: Schema.Literal("synchronized"),
+			/** After a catch-up against the client's `resumeBase`. */
+			checksum: Schema.optional(ResumeChecksum),
+		}),
 		Schema.Struct({
 			_tag: Schema.Literal("upsert"),
 			item: itemSchema,
@@ -2157,6 +2206,7 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
 		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
+		resumeBase: Schema.optional(ResumeBase),
 	},
 	success: EnvelopeSchema(SessionInfoSchema),
 	error: WsRpcError,
@@ -2168,6 +2218,7 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
+		resumeBase: Schema.optional(ResumeBase),
 		// Only clients that decode textSuffix may opt into compressed live parts.
 		textSuffixes: Schema.optional(Schema.Boolean),
 	},

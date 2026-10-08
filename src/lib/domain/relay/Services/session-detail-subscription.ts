@@ -22,6 +22,7 @@ import type {
 } from "../../../contracts/tool-wire.js";
 import {
 	PartRemovalId,
+	type ResumeBase,
 	type SessionDetailItemSchema,
 } from "../../../contracts/ws-rpc.js";
 import {
@@ -113,6 +114,12 @@ const messageRowGroups = (
 		];
 	});
 
+/** The most messages a first page holds; a catch-up past it is a snapshot. */
+const PAGE_MESSAGES = 50;
+
+const partRowId = (messageId: string, partId: string) =>
+	Schema.encodeSync(PartRemovalId)([messageId, partId]);
+
 export type SessionDetailSubscriptionError =
 	| ReadQueryEffectError
 	| SqlError
@@ -131,6 +138,7 @@ export type SessionDetailSubscriptionError =
 export const subscribeSessionDetail = (options: {
 	readonly sessionId: string;
 	readonly resumeFromSequence?: number;
+	readonly resumeBase?: ResumeBase;
 }): Stream.Stream<
 	Envelope<SessionDetailItem>,
 	SessionDetailSubscriptionError,
@@ -169,7 +177,7 @@ export const subscribeSessionDetail = (options: {
 				source: {
 					name: `session-detail/${options.sessionId}`,
 					shareReads: true,
-					read: (range) =>
+					read: (range, base) =>
 						Effect.gen(function* () {
 							// Pending inputs and the inbox state ride the same window as
 							// the transcript, bounded by the version its read reports. A
@@ -233,7 +241,7 @@ export const subscribeSessionDetail = (options: {
 							if (range === undefined) {
 								const page = yield* readQuery.readSessionTranscriptPage(
 									options.sessionId,
-									{ limit: 50, previewTools: true },
+									{ limit: PAGE_MESSAGES, previewTools: true },
 								);
 								const groups = messageRowGroups(page.messages, () => true);
 								// The page also ends where its frame would pass the budget,
@@ -252,6 +260,14 @@ export const subscribeSessionDetail = (options: {
 							const window = yield* readQuery.readSessionTranscript(
 								options.sessionId,
 								range,
+								base === undefined
+									? undefined
+									: {
+											since: base.sequence,
+											...(base.cursor === undefined
+												? {}
+												: { from: base.cursor }),
+										},
 							);
 							const heldRows = yield* held(range.through ?? window.version);
 							return {
@@ -268,13 +284,26 @@ export const subscribeSessionDetail = (options: {
 								removed: [
 									...(window.removed ?? []),
 									...(window.removedParts ?? []).map(
-										({ messageId, partId, version }) => ({
-											id: Schema.encodeSync(PartRemovalId)([messageId, partId]),
+										({ messageId, partId: part, version }) => ({
+											id: partRowId(messageId, part),
 											version,
 										}),
 									),
 									...heldRows.removed,
 								],
+								...(window.listing === undefined
+									? {}
+									: {
+											listing: [
+												...window.listing.messages.map(
+													({ id, version }) => [id, version] as const,
+												),
+												...window.listing.parts.map(
+													({ messageId, partId: part, version }) =>
+														[partRowId(messageId, part), version] as const,
+												),
+											],
+										}),
 							};
 						}),
 					// A message is stored against the session that owns it — a subagent
@@ -284,11 +313,27 @@ export const subscribeSessionDetail = (options: {
 						moved: advance.sessionIds.includes(options.sessionId),
 						removed: [],
 					}),
+					// A catch-up is held to the first page's budget: past it, the
+					// page itself is the smaller answer.
+					fitsCatchUp: (rows) =>
+						new Set(
+							rows.flatMap(({ item }) =>
+								item._tag === "part"
+									? [item.messageId]
+									: item._tag === "message"
+										? [item.message.id]
+										: [],
+							),
+						).size <= PAGE_MESSAGES &&
+						newestRowsWithin(rows, PAGE_FRAME_BUDGET).length === rows.length,
 					resume: "catchUp",
 				},
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: options.resumeFromSequence }),
+				...(options.resumeBase === undefined
+					? {}
+					: { resumeBase: options.resumeBase }),
 			});
 		}),
 	);

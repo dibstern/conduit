@@ -37,7 +37,12 @@ import {
 	Stream,
 } from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
-import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
+import {
+	digestRows,
+	type EnvelopeSchema,
+	type ResumeBase,
+	ResumeChecksum,
+} from "../../../contracts/ws-rpc.js";
 import type { SessionEventBus } from "./session-event-bus.js";
 
 /**
@@ -102,8 +107,13 @@ export interface SubscriptionSource<T, E = never> {
 	 * through. Omit `range` for a base read; a source may bound that base and
 	 * return page information for snapshots. Rows and version must be read
 	 * coherently: the version is what the subscriber will resume from.
+	 *
+	 * A resume read is also given the client's `base`, if it sent one.
 	 */
-	readonly read: (range?: VersionRange) => Effect.Effect<
+	readonly read: (
+		range?: VersionRange,
+		base?: ResumeBase,
+	) => Effect.Effect<
 		{
 			readonly rows: readonly VersionedRow<T>[];
 			readonly version: number;
@@ -124,9 +134,22 @@ export interface SubscriptionSource<T, E = never> {
 			 * from above `version` (a reset or restored store), is rebased.
 			 */
 			readonly removedSince?: number;
+			/**
+			 * Read with a `base` only: the id and version of every row in the
+			 * set that base began, as it stands at `version`, in the same
+			 * transaction and without reading a row's body. Absent when the
+			 * source cannot place that base, such as a page cursor that is
+			 * gone; the resume then gets a snapshot.
+			 */
+			readonly listing?: Iterable<readonly [id: string, version: number]>;
 		},
 		E
 	>;
+	/**
+	 * Whether a catch-up of these rows is within what a snapshot would send.
+	 * Past it the snapshot is both cheaper and certain, so it is sent instead.
+	 */
+	readonly fitsCatchUp?: (rows: readonly VersionedRow<T>[]) => boolean;
 	/** Route one advance. Called for every advance; must not touch the store. */
 	readonly route: (advance: ReadModelAdvance) => AdvanceRoute;
 	/**
@@ -212,6 +235,13 @@ const deltaEnvelopes = <T>(
  *   envelope; the client already holds one.
  * - Resume, `rebase` source: a fresh `snapshot` → `synchronized` → live.
  *
+ * The server wins a resume it cannot trust: a cursor behind the tombstones or
+ * ahead of the store, a catch-up larger than a snapshot, or a `resumeBase` the
+ * source cannot place each get a snapshot. A catch-up against a `resumeBase`
+ * ends in a `synchronized` carrying the {@link ResumeChecksum} of the base set,
+ * so the client can find out that what it holds is not what the server does
+ * (conduit-test-y7eo.9).
+ *
  * The advance subscription is acquired BEFORE the base read, so an advance
  * published during that read is buffered rather than lost. It does not need a
  * filter afterwards: the base carries the version it was read at, and an
@@ -224,12 +254,18 @@ export const stream = <T, E = never>(options: {
 	readonly source: SubscriptionSource<T, E>;
 	readonly bus: SessionEventBus;
 	readonly resumeFromSequence?: number;
+	/** What the resuming client holds its changes on top of. */
+	readonly resumeBase?: ResumeBase;
 }): Stream.Stream<Envelope<T>, E> =>
 	Stream.unwrapScoped(
 		Effect.gen(function* () {
 			// Buffers from this instant.
 			const advances = yield* options.bus.subscribeAdvances();
-			const read = (kind: ReadModelRead["kind"], range?: VersionRange) =>
+			const read = (
+				kind: ReadModelRead["kind"],
+				range?: VersionRange,
+				base?: ResumeBase,
+			) =>
 				Effect.suspend(() => {
 					if (readModelReads.hasSubscribers)
 						readModelReads.publish({
@@ -237,7 +273,7 @@ export const stream = <T, E = never>(options: {
 							kind,
 							...(range === undefined ? {} : { range }),
 						} satisfies ReadModelRead);
-					return options.source.read(range);
+					return options.source.read(range, base);
 				});
 			type SourceRead = Effect.Effect.Success<ReturnType<typeof read>>;
 			const name = options.source.name;
@@ -303,17 +339,28 @@ export const stream = <T, E = never>(options: {
 			};
 
 			const after = options.resumeFromSequence;
+			const resumeBase = after === undefined ? undefined : options.resumeBase;
 			const resumed =
 				after !== undefined && options.source.resume === "catchUp"
-					? yield* read("resume", { after })
+					? yield* read("resume", { after }, resumeBase)
 					: undefined;
 			// Tombstones cannot cover a cursor older than they are, or one the
-			// store never reached: those get a fresh base instead.
+			// store never reached, and a catch-up past a snapshot's size is
+			// worse than one: those get a fresh base instead. So does a base the
+			// source cannot list, which could not be checked.
 			const catchUp =
 				resumed !== undefined &&
 				after !== undefined &&
 				after >= (resumed.removedSince ?? after) &&
-				after <= resumed.version;
+				after <= resumed.version &&
+				(options.source.fitsCatchUp?.(resumed.rows) ?? true) &&
+				(resumeBase === undefined || resumed.listing !== undefined);
+			const checksum =
+				catchUp && resumeBase !== undefined && resumed.listing !== undefined
+					? ResumeChecksum.make(
+							digestRows(resumed.listing, resumeBase.sequence),
+						)
+					: undefined;
 			const base = catchUp ? resumed : yield* read("base");
 			// The counter the base was read at, not the newest row in it: what the
 			// live arm must not re-read, and what a resuming client resumes from.
@@ -331,7 +378,10 @@ export const stream = <T, E = never>(options: {
 							...(base.cursor === undefined ? {} : { cursor: base.cursor }),
 						},
 					];
-			opening.push({ _tag: "synchronized" as const });
+			opening.push({
+				_tag: "synchronized" as const,
+				...(checksum === undefined ? {} : { checksum }),
+			});
 
 			// A chunk is every advance already queued, so a burst costs one read.
 			const live = Stream.mapChunksEffect(
