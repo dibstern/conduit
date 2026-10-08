@@ -24,6 +24,7 @@ const detail: ToolDetail = {
 
 const serve = (
 	details: (
+		sessionId: string,
 		ids: readonly string[],
 	) => Effect.Effect<readonly ToolDetail[], ToolContentServiceError>,
 ) =>
@@ -38,16 +39,17 @@ const serve = (
 
 describe("WsRpcServerLayer GetToolDetails", () => {
 	it.effect("returns each known tool's full detail in one response", () => {
-		const details = vi.fn((ids: readonly string[]) =>
+		const details = vi.fn((_sessionId: string, ids: readonly string[]) =>
 			Effect.succeed(ids.includes("tool-1") ? [detail] : []),
 		);
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.GetToolDetails({
 				projectSlug: "project-a",
+				sessionId: "session-a",
 				toolIds: [ToolCallId.make("tool-1"), ToolCallId.make("missing")],
 			});
-			expect(details).toHaveBeenCalledWith(["tool-1", "missing"]);
+			expect(details).toHaveBeenCalledWith("session-a", ["tool-1", "missing"]);
 			expect(result).toEqual({ projectSlug: "project-a", tools: [detail] });
 		}).pipe(Effect.scoped, Effect.provide(serve(details)));
 	});
@@ -58,6 +60,7 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 			const result = yield* Effect.either(
 				client.GetToolDetails({
 					projectSlug: "project-a",
+					sessionId: "session-a",
 					toolIds: [ToolCallId.make("tool-1")],
 				}),
 			);
@@ -65,10 +68,11 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
-				serve((toolIds) =>
+				serve((sessionId, toolIds) =>
 					Effect.fail(
 						new ToolContentServiceError({
 							operation: "details",
+							sessionId,
 							toolIds,
 							cause: "db gone",
 						}),

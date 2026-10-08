@@ -1,6 +1,7 @@
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
+import { SUBAGENT_TOOL_NAMES } from "../../contracts/tool-wire.js";
 import {
 	endsOpenCodeTurn,
 	mapToolName,
@@ -19,7 +20,6 @@ import type {
 	UserMessage,
 } from "../types.js";
 import { extractDisplayText, generateUuid } from "./format.js";
-import { SUBAGENT_TOOL_NAMES } from "./subagent-tools.js";
 import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience

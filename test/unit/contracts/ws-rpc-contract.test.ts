@@ -1211,6 +1211,7 @@ describe("browser WebSocket RPC contract", () => {
 
 				const toolDetails = yield* client.GetToolDetails({
 					projectSlug: "demo",
+					sessionId: "session-1",
 					toolIds: [ToolCallId.make("tool-1")],
 				});
 				expect(toolDetails).toEqual({
@@ -1619,6 +1620,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			new GetToolDetails({
 				projectSlug: "demo",
+				sessionId: "session-1",
 				toolIds: [ToolCallId.make("tool-1")],
 			})._tag,
 		).toBe("GetToolDetails");

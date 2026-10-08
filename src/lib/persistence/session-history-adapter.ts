@@ -42,6 +42,10 @@ function snapshotRowToHistory(
 			"state" in part && typeof part.state === "object" && part.state !== null
 				? part.state
 				: undefined;
+		const metadata =
+			state && "metadata" in state && typeof state.metadata === "object"
+				? browserMetadata(state.metadata ?? undefined)
+				: undefined;
 		return {
 			...part,
 			id: part.id,
@@ -51,6 +55,7 @@ function snapshotRowToHistory(
 				: {
 						state: {
 							...state,
+							metadata,
 							...projectTool({
 								name:
 									"tool" in part && typeof part.tool === "string"
@@ -89,12 +94,34 @@ export interface HistoryResult {
 	total?: number;
 }
 
-const KNOWN_TOOL_STATUSES = new Set<string>([
-	"pending",
-	"running",
-	"completed",
-	"error",
+/** Stored tool statuses as the browser knows them. The projector stores a tool
+ *  that has only been announced as "started": not yet running, so pending. */
+const TOOL_STATUSES = new Map<string, ToolStatus>([
+	["started", "pending"],
+	["pending", "pending"],
+	["running", "running"],
+	["completed", "completed"],
+	["error", "error"],
 ]);
+
+/** The tool metadata the browser reads: a subagent's session and a settled
+ *  status. Everything else stays on the server — an OpenCode edit's metadata
+ *  alone holds the whole file twice over. */
+const BROWSER_METADATA_KEYS = ["status", "childSessionId", "sessionId"];
+
+function browserMetadata(
+	metadata: object | undefined,
+): Record<string, string> | undefined {
+	if (metadata === undefined) return undefined;
+	const kept = Object.fromEntries(
+		Object.entries(metadata).filter(
+			(entry): entry is [string, string] =>
+				BROWSER_METADATA_KEYS.includes(entry[0]) &&
+				typeof entry[1] === "string",
+		),
+	);
+	return Object.keys(kept).length > 0 ? kept : undefined;
+}
 
 function parseObjectJson(value: string): Record<string, unknown> | undefined {
 	try {
@@ -183,13 +210,13 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 				outputBytes: row.result_bytes,
 			}),
 		};
-		if (row.status != null && KNOWN_TOOL_STATUSES.has(row.status)) {
-			stateObj["status"] = row.status as ToolStatus;
-		}
-		if (row.metadata != null) {
-			const metadata = parseObjectJson(row.metadata);
-			if (metadata) stateObj["metadata"] = metadata;
-		}
+		const status =
+			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
+		if (status) stateObj["status"] = status;
+		const metadata = browserMetadata(
+			row.metadata == null ? undefined : parseObjectJson(row.metadata),
+		);
+		if (metadata) stateObj["metadata"] = metadata;
 		if (Object.keys(stateObj).length > 0) {
 			state = stateObj;
 		}

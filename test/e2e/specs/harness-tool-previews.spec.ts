@@ -24,6 +24,7 @@ import {
 	endOf,
 	LONG_ASSISTANT_TEXT,
 	LONG_COMMAND,
+	LONG_FILE_CONTENT,
 	LONG_QUESTION,
 	LONG_RESULT,
 	LONG_SUBAGENT_OUTPUT,
@@ -38,6 +39,7 @@ const PREVIEW_CODE_POINTS = 2_000;
 const SEEDED = "previews-seeded";
 const BASH_ID = `${SEEDED}-bash`;
 const TASK_ID = `${SEEDED}-task`;
+const WRITE_ID = `${SEEDED}-write`;
 
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
@@ -117,6 +119,11 @@ const seed = (filename: string) =>
 						LONG_SUBAGENT_OUTPUT,
 					),
 					...tool(
+						WRITE_ID,
+						{ tool: "Write", filePath: "notes.md", content: LONG_FILE_CONTENT },
+						"File written",
+					),
+					...tool(
 						BASH_ID,
 						{ tool: "Bash", command: LONG_COMMAND },
 						LONG_RESULT,
@@ -177,7 +184,11 @@ const toolsIn = (value: unknown): WireTool[] => {
  * GetToolDetails request once `failNextDetails` is set.
  */
 const watchRpc = async (page: Page) => {
-	const control = { frames: [] as Frame[], failNextDetails: false };
+	const control = {
+		frames: [] as Frame[],
+		failNextDetails: false,
+		detailRequests: 0,
+	};
 	await page.routeWebSocket(
 		(url) => url.pathname === "/rpc",
 		(socket) => {
@@ -200,6 +211,7 @@ const watchRpc = async (page: Page) => {
 							"tag" in item &&
 							item.tag === "GetToolDetails",
 					);
+				if (request) control.detailRequests++;
 				if (!request || !control.failNextDetails) return server.send(message);
 				control.failNextDetails = false;
 				socket.send(
@@ -276,16 +288,6 @@ test("tools open as previews and expand to full detail", async ({
 	const questionSession = await driver.createSession("Long question");
 	const toolSession = await driver.createSession("Long live tool");
 	await send(questionSession, "question-long-options");
-	// Open nothing until the question is pending, so the page reads it settled.
-	await expect
-		.poll(() =>
-			harness.marks.some(
-				(mark) =>
-					mark.kind === "question-asked" &&
-					mark.prompt.includes("question-long-options"),
-			),
-		)
-		.toBe(true);
 
 	const { viewport, isMobile, hasTouch } = testInfo.project.use;
 	const context = await browser.newContext({
@@ -341,10 +343,20 @@ test("tools open as previews and expand to full detail", async ({
 		text: [...LONG_RESULT].slice(0, PREVIEW_CODE_POINTS).join(""),
 		fullBytes: bytes(LONG_RESULT),
 	});
+	// A cut the card never shows (a written file's content) loads nothing.
+	const write = lastTool(rpc.frames, ({ callID }) => callID === WRITE_ID);
+	expect(write?.state?.input?._tag).toBe("preview");
+	const writeRow = await expandTool(page, toolRow(page, WRITE_ID));
+	await expect(writeRow.locator(".tool-result")).toContainText("File written");
+	await expect(writeRow.locator(".tool-full-detail")).toHaveCount(0);
+	expect(rpc.detailRequests).toBe(0);
+
 	const detailsBefore = detailResponses(rpc.frames).length;
 	rpc.failNextDetails = true;
 	const bashRow = await expandTool(page, toolRow(page, BASH_ID));
-	await expect(bashRow).toContainText("Couldn't load the full output.");
+	await expect(bashRow).toContainText(
+		"Couldn't load the full command and output.",
+	);
 	await expect(bashRow.locator(".tool-result")).not.toContainText(
 		endOf("result"),
 	);
@@ -354,6 +366,8 @@ test("tools open as previews and expand to full detail", async ({
 		endOf("argument"),
 	);
 	await expect(bashRow.locator(".tool-full-detail")).toHaveCount(0);
+	// The failed load and the retry: nothing else asked.
+	expect(rpc.detailRequests).toBe(2);
 	const [detail] = detailResponses(rpc.frames).slice(detailsBefore);
 	expect(detail).toBeDefined();
 

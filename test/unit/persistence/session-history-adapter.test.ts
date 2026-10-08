@@ -252,36 +252,90 @@ describe("messageRowsToHistory", () => {
 		expect(part?.state?.input).toEqual({ _tag: "whole", value: "not-json" });
 	});
 
-	it("carries tool metadata into history part state", () => {
+	// An OpenCode edit's metadata holds the whole file twice over (diff,
+	// filediff.before/after); none of it may reach the browser, row or snapshot.
+	it("ships no tool metadata the browser does not read", () => {
+		const file = "x".repeat(300_000);
+		const metadata = {
+			diff: file,
+			filediff: { before: file, after: file },
+			providerTaskId: "task-1",
+			childSessionId: "claude-subagent-abc",
+			status: "completed",
+		};
+		const edit = {
+			tool: "edit",
+			callID: "c1",
+			state: {
+				status: "completed",
+				input: { filePath: "/a", oldString: "a", newString: "b" },
+				output: "Edit applied successfully.",
+				metadata,
+				title: "a",
+			},
+		};
 		const rows: MessageWithParts[] = [
 			makeMessageWithParts("m1", {
+				role: "assistant",
 				parts: [
 					makePartRow("p1", "m1", {
 						type: "tool",
-						tool_name: "Task",
-						input: JSON.stringify({
-							tool: "Task",
-							description: "Audit",
-							prompt: "Go",
-						}),
-						status: "running",
-						metadata: JSON.stringify({
-							childSessionId: "claude-subagent-abc",
-							providerTaskId: "task-1",
-						}),
+						tool_name: "edit",
+						call_id: "c1",
+						status: "completed",
+						metadata: JSON.stringify(metadata),
+					}),
+					makePartRow("p2", "m1", {
+						type: "tool",
+						tool_name: "edit",
+						metadata: JSON.stringify({ diff: file }),
+					}),
+				],
+			}),
+			makeMessageWithParts("m2", {
+				role: "assistant",
+				rest_payload: JSON.stringify({
+					id: "m2",
+					role: "assistant",
+					parts: [{ id: "p3", type: "tool", ...edit }],
+				}),
+			}),
+		];
+
+		const [row, snapshot] = messageRowsToHistory(rows, {
+			pageSize: 50,
+		}).messages;
+		const kept = {
+			childSessionId: "claude-subagent-abc",
+			status: "completed",
+		};
+		expect(row?.parts?.[0]?.state?.["metadata"]).toEqual(kept);
+		expect(row?.parts?.[1]).not.toHaveProperty("state");
+		expect(snapshot?.parts?.[0]?.state?.["metadata"]).toEqual(kept);
+		expect(snapshot?.parts?.[0]?.state?.["title"]).toBe("a");
+		expect(JSON.stringify([row, snapshot]).length).toBeLessThan(2_000);
+	});
+
+	// The projector stores an announced tool as "started"; read as nothing, the
+	// browser would show a pending question as already answered.
+	it("reads a started tool as pending", () => {
+		const rows: MessageWithParts[] = [
+			makeMessageWithParts("m1", {
+				role: "assistant",
+				parts: [
+					makePartRow("p1", "m1", {
+						type: "tool",
+						tool_name: "AskUserQuestion",
+						call_id: "q1",
+						input: JSON.stringify({ questions: [] }),
+						status: "started",
 					}),
 				],
 			}),
 		];
 
-		const result = messageRowsToHistory(rows, { pageSize: 50 });
-		const [msg] = result.messages;
-		const [part] = msg?.parts ?? [];
-
-		expect(part?.state?.["metadata"]).toEqual({
-			childSessionId: "claude-subagent-abc",
-			providerTaskId: "task-1",
-		});
+		const [message] = messageRowsToHistory(rows, { pageSize: 50 }).messages;
+		expect(message?.parts?.[0]?.state?.status).toBe("pending");
 	});
 
 	it("lifts file metadata to top-level file part fields", () => {

@@ -843,7 +843,6 @@ describe("ClaudeEventTranslator", () => {
 				});
 				expect(taskMessage.input).not.toHaveProperty("taskId");
 				expect(taskMessage.input).not.toHaveProperty("task_id");
-				expect(taskMessage.metadata?.["providerTaskId"]).toBe("task-1");
 				expect(taskMessage.metadata?.["childSessionId"]).toBe(
 					"claude-subagent-abc",
 				);

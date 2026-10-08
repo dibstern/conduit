@@ -70,7 +70,6 @@ export type ProcessMark =
 			upToMessageId: string | undefined;
 	  }
 	| { kind: "stop-held"; queryId: string }
-	| { kind: "question-asked"; prompt: string }
 	| {
 			kind: "handoff-first-turn-died";
 			prompt: string;
@@ -978,7 +977,6 @@ function query(params: {
 					});
 					yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				}
-				mark({ kind: "question-asked", prompt });
 				await params.options.canUseTool("AskUserQuestion", questionInput, {
 					signal:
 						params.options.abortController?.signal ??

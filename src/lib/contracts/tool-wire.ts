@@ -5,6 +5,10 @@
 
 import { Schema } from "effect";
 
+/** Tools that hand work to a subagent (Claude's Task and Agent, OpenCode's
+ *  task): their reply is the point, and their run outlives the turn. */
+export const SUBAGENT_TOOL_NAMES = ["Task", "task", "Agent"] as const;
+
 /** A length in Unicode code points: the unit the preview budget counts. */
 export const CodePoints = Schema.NonNegativeInt.pipe(
 	Schema.brand("CodePoints"),

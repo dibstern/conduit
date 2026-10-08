@@ -346,8 +346,9 @@ interface SessionTranscriptPageOptions {
 }
 
 export interface ReadQueryEffect {
-	/** The named tools exactly as stored; unknown ids are left out. */
+	/** The named tools of one session exactly as stored; unknown ids are left out. */
 	readonly readToolDetails: (
+		sessionId: string,
 		toolIds: readonly string[],
 	) => Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError>;
 
@@ -804,24 +805,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		ORDER BY message_id, sort_order`;
 
 	const readToolDetails = (
+		sessionId: string,
 		toolIds: readonly string[],
 	): Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
 			if (toolIds.length === 0) return [];
+			// The browser names a tool by its call id, or by its part id when it
+			// has none; a fork repeats its parent's call ids in another session.
 			const rows = yield* sql<{
-				call_id: string;
+				tool_id: string;
 				input: string | null;
 				output: string | null;
 				version: number;
 			}>`
-				SELECT mp.call_id, mp.input, ${toolOutput} AS output, messages.version
+				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
+					${toolOutput} AS output, messages.version
 				FROM message_parts mp
 				JOIN messages ON messages.id = mp.message_id
-				WHERE mp.call_id IN ${sql.in(toolIds)} AND mp.call_id IS NOT NULL
-					AND mp.type = 'tool'`;
+				WHERE (mp.call_id IN ${sql.in(toolIds)}
+						OR (mp.call_id IS NULL AND mp.id IN ${sql.in(toolIds)}))
+					AND mp.type = 'tool' AND messages.session_id = ${sessionId}
+				ORDER BY messages.created_at, mp.sort_order`;
 			return rows.map((row) =>
 				toolDetail({
-					toolId: row.call_id,
+					toolId: row.tool_id,
 					version: row.version,
 					input: row.input,
 					output: row.output,

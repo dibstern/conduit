@@ -6,13 +6,16 @@ export class ToolContentServiceError extends Data.TaggedError(
 	"ToolContentServiceError",
 )<{
 	readonly operation: "details";
+	readonly sessionId: string;
 	readonly toolIds: readonly string[];
 	readonly cause: unknown;
 }> {}
 
 export interface ToolContentService {
-	/** Full input and output of each known tool; unknown ids are left out. */
+	/** Full input and output of each of the session's tools; unknown ids are
+	 *  left out. */
 	readonly details: (
+		sessionId: string,
 		toolIds: readonly string[],
 	) => Effect.Effect<readonly ToolDetail[], ToolContentServiceError>;
 }
@@ -31,12 +34,13 @@ export const ToolContentServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		return {
-			details: (toolIds) =>
-				readQuery.readToolDetails(toolIds).pipe(
+			details: (sessionId, toolIds) =>
+				readQuery.readToolDetails(sessionId, toolIds).pipe(
 					Effect.mapError(
 						(cause) =>
 							new ToolContentServiceError({
 								operation: "details",
+								sessionId,
 								toolIds,
 								cause,
 							}),

@@ -35,3 +35,5 @@ export const LONG_THINKING = long("thinking", 2_500);
 export const LONG_ASSISTANT_TEXT = long("assistant", 2_500);
 export const LONG_SUBAGENT_PROMPT = long("subagent-prompt", 2_500);
 export const LONG_SUBAGENT_OUTPUT = long("subagent-output", 3_000);
+/** A written file's content: cut, but no card shows it. */
+export const LONG_FILE_CONTENT = long("file-content", 2_500);

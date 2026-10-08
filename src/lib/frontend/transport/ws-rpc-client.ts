@@ -265,6 +265,7 @@ export interface GetFileContentRpcInput {
 
 export interface GetToolDetailsRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId: string;
 	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 

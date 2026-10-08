@@ -1658,6 +1658,7 @@ export class GetToolDetails extends Schema.TaggedRequest<GetToolDetails>()(
 		success: GetToolDetailsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
 			toolIds: Schema.NonEmptyArray(ToolCallId),
 		},
 	},

@@ -7,18 +7,15 @@
 // status when loaded from history (history-logic), mark their row in the activity
 // log with a rail (turns/ActivityRow), and render the subagent card when one is
 // handed back to the transcript (ToolItem). Keep the name check in ONE place so a
-// new call site can't forget a variant.
+// new call site can't forget a variant; the names are shared with the server,
+// which never cuts these tools' content.
 
-/** Canonical ("Task"/"Agent") plus the legacy lowercase ("task") names the
- *  frontend uses for subagent tools. */
-export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
-	"Task",
-	"task",
-	"Agent",
-]);
+import { SUBAGENT_TOOL_NAMES } from "../../contracts/tool-wire.js";
+
+const subagentToolNames: ReadonlySet<string> = new Set(SUBAGENT_TOOL_NAMES);
 
 export function isSubagentToolName(name: string): boolean {
-	return SUBAGENT_TOOL_NAMES.has(name);
+	return subagentToolNames.has(name);
 }
 
 /** The session a subagent tool spawned, or null when it cannot be pinned down.

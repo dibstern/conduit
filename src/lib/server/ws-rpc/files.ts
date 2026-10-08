@@ -85,7 +85,7 @@ export const filesHandlers = {
 			const toolContent = yield* ToolContentServiceTag;
 			return {
 				projectSlug: request.projectSlug,
-				tools: yield* toolContent.details(request.toolIds),
+				tools: yield* toolContent.details(request.sessionId, request.toolIds),
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("GetToolDetails"))),
 	GetSkillContent: (request) =>

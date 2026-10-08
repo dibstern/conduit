@@ -21,6 +21,9 @@
 //    so a page and a snapshot show different previews of the same field.
 // 8. The full-detail form differs from the stored part: input re-shaped,
 //    output re-decoded or cut, an emoji mangled.
+// 9. The full-detail read finds the wrong tool or none: a fork's copy of the
+//    same call id from another session, or nothing for a part stored without
+//    a call id, which the browser names by its part id.
 
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
@@ -326,7 +329,10 @@ describe("transcript query and detail read", () => {
 					}),
 					completed("m1", "write-1", result),
 				]);
-				const details = yield* readQuery.readToolDetails(["write-1", "nope"]);
+				const details = yield* readQuery.readToolDetails(SESSION, [
+					"write-1",
+					"nope",
+				]);
 				const stored = yield* sql<{
 					input: string;
 				}>`SELECT input FROM message_parts WHERE call_id = 'write-1'`;
@@ -342,5 +348,74 @@ describe("transcript query and detail read", () => {
 			},
 		]);
 		expect(details[0]?.input?.value).toMatchObject({ content });
+	});
+
+	it("serves the tool of the session asking, by part id when it has no call id (9)", async () => {
+		const FORK = "s-fork";
+		const inFork = <T extends CanonicalEventType>(
+			type: T,
+			data: EventPayloadMap[T],
+		) => canonicalEvent(type, FORK, data, { provider: "claude", createdAt: 1 });
+		const { parent, fork } = await run(({ commit, readQuery, sql }) =>
+			Effect.gen(function* () {
+				yield* commit([
+					event("session.created", {
+						sessionId: SESSION,
+						title: "parent",
+						provider: "claude",
+						providerSessionId: SESSION,
+					}),
+					event("message.created", {
+						messageId: "m1",
+						role: "assistant",
+						sessionId: SESSION,
+					}),
+					...toolEvents("m1", "dup-1", "Bash", {
+						tool: "Bash",
+						command: "in parent",
+					}),
+					inFork("session.created", {
+						sessionId: FORK,
+						title: "fork",
+						provider: "claude",
+						providerSessionId: FORK,
+					}),
+					inFork("message.created", {
+						messageId: "m2",
+						role: "assistant",
+						sessionId: FORK,
+					}),
+					inFork("tool.started", {
+						messageId: "m2",
+						partId: "dup-1-fork",
+						toolName: "Bash",
+						callId: "dup-1",
+						input: { tool: "Bash", command: "in fork" },
+					}),
+				]);
+				// A backfilled OpenCode part may carry no callID; the browser
+				// then names the tool by its part id.
+				yield* sql`INSERT INTO message_parts
+					(id, message_id, type, tool_name, call_id, input, result, sort_order, created_at, updated_at)
+					VALUES ('legacy-1', 'm1', 'tool', 'bash', NULL, '{"command":"legacy"}', '"legacy out"', 9, 1, 1)`;
+				return {
+					parent: yield* readQuery.readToolDetails(SESSION, [
+						"dup-1",
+						"legacy-1",
+					]),
+					fork: yield* readQuery.readToolDetails(FORK, ["dup-1", "legacy-1"]),
+				};
+			}),
+		);
+		expect(
+			parent.map(({ toolId, input }) => ({ toolId, value: input?.value })),
+		).toEqual([
+			{ toolId: "dup-1", value: { tool: "Bash", command: "in parent" } },
+			{ toolId: "legacy-1", value: { command: "legacy" } },
+		]);
+		expect(parent[1]?.output).toEqual({ _tag: "whole", text: "legacy out" });
+		expect(fork.map(({ toolId, input }) => [toolId, input?.value])).toEqual([
+			["dup-1", { tool: "Bash", command: "in fork" }],
+		]);
 	});
 });

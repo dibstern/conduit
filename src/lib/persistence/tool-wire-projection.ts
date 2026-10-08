@@ -11,6 +11,7 @@
 import {
 	CodePoints,
 	MessageVersion,
+	SUBAGENT_TOOL_NAMES,
 	ToolCallId,
 	type ToolDetail,
 	type ToolInput,
@@ -26,9 +27,7 @@ export const PREVIEW_CODE_POINTS = CodePoints.make(2_000);
 export const NEVER_CUT_TOOL_NAMES = [
 	"AskUserQuestion",
 	"question",
-	"Task",
-	"task",
-	"Agent",
+	...SUBAGENT_TOOL_NAMES,
 ] as const;
 
 const neverCut: ReadonlySet<string> = new Set(NEVER_CUT_TOOL_NAMES);

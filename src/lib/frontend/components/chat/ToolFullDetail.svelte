@@ -1,20 +1,27 @@
 <!-- An expanded tool, in full. The transcript carries long inputs and outputs as -->
-<!-- previews; showing one loads the rest through GetToolDetails, and a failed    -->
-<!-- load says so with a retry rather than passing the preview off as the whole.  -->
+<!-- previews; when the card shows a cut one, it loads the rest through           -->
+<!-- GetToolDetails, and a failed load says so with a retry rather than passing   -->
+<!-- the preview off as the whole.                                                -->
 <script lang="ts">
 	import { type Snippet, untrack } from "svelte";
 	import { ToolCallId, type ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
 	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getToolDetailsRpc } from "../../transport/ws-rpc-client.js";
+	import { toolCommand } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
 	async function loadFromServer(toolId: string): Promise<ToolDetail | undefined> {
 		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return undefined;
-		const { tools } = await getToolDetailsRpc({ projectSlug, toolIds: [ToolCallId.make(toolId)] });
-		return tools[0];
+		const sessionId = getCurrentSessionId();
+		if (!projectSlug || !sessionId) return undefined;
+		const { tools } = await getToolDetailsRpc({
+			projectSlug,
+			sessionId,
+			toolIds: [ToolCallId.make(toolId)],
+		});
+		return tools.find((tool) => tool.toolId === toolId);
 	}
 
 	let {
@@ -33,8 +40,22 @@
 	let failed = $state(false);
 	let attempt = $state(0);
 
+	// The cards show a tool's result and a shell command; a cut elsewhere in the
+	// input (a written file's content) is nothing to load.
+	const cut = $derived.by(() => {
+		const output = message.preview?.resultBytes !== undefined;
+		const command =
+			toolCommand(message) !== undefined &&
+			(message.preview?.inputCuts ?? []).some(
+				({ path }) => path.length === 1 && path[0] === "command",
+			);
+		if (output && command) return "command and output";
+		if (output) return "output";
+		return command ? "command" : undefined;
+	});
+
 	// Load again when the tool moves on, not each time the same state is re-sent.
-	const loadKey = $derived(message.preview ? `${message.id}:${message.status}` : undefined);
+	const loadKey = $derived(cut ? `${message.id}:${message.status}` : undefined);
 
 	$effect(() => {
 		void attempt;
@@ -67,10 +88,10 @@
 </script>
 
 {@render children(full ?? message)}
-{#if message.preview && !full}
+{#if cut && !full}
 	<div class="tool-full-detail flex items-center gap-2 text-xs text-text-dimmer {className}">
 		{#if failed}
-			<span>Couldn't load the full output.</span>
+			<span>Couldn't load the full {cut}.</span>
 			<Button
 				variant="accent-soft"
 				size="content"
@@ -80,7 +101,7 @@
 				Retry
 			</Button>
 		{:else}
-			<span>Loading full output…</span>
+			<span>Loading full {cut}…</span>
 		{/if}
 	</div>
 {/if}
