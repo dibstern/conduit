@@ -154,6 +154,7 @@ const makeLayer = (options: {
 													{
 														id: `session-${range.after + 1}`,
 														version: range.after + 1,
+														deleted: true,
 													},
 												],
 											},
@@ -236,8 +237,8 @@ const deltas = (member: Member) =>
 	member === "SubscribeShell"
 		? [
 				// Each removal is its family's tombstone, at the advance's version.
-				{ _tag: "remove", id: "session-1", sequence: 1 },
-				{ _tag: "remove", id: "session-2", sequence: 2 },
+				{ _tag: "remove", id: "session-1", sequence: 1, deleted: true },
+				{ _tag: "remove", id: "session-2", sequence: 2, deleted: true },
 			]
 		: [1, 2].map((version) => ({
 				_tag: "upsert",

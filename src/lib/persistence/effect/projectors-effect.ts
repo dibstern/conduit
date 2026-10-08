@@ -276,7 +276,11 @@ export const makeSessionProjector = (): EffectProjector => ({
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId)));
 			const touch = yield* stampSessions(written, ctx.version);
-			return { ...touch, sidebar: [...touch.stamped, ...left] };
+			// A removed session, child or root, leaves a deleted tombstone.
+			return {
+				...touch,
+				sidebar: [...touch.stamped, ...touch.removed, ...left],
+			};
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError

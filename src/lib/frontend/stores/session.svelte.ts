@@ -234,7 +234,7 @@ export const sessionState = {
 let selectionGeneration = 0;
 
 /**
- * A session was deleted (the shell feed named it removed). Prune the
+ * A session was deleted (the shell feed marked its remove deleted). Prune the
  * cross-project and search reads the feed does not cover, and move off it if
  * it is on screen. Runs before `forgetSession` clears the selection; a row
  * that merely left a snapshot is not deleted and must not come through here.
@@ -522,8 +522,8 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
 	// The shell feed carries roots only, so a child's family row is the only
-	// status it has. Key on parentID, not shell membership: a fork leaves the
-	// root set without a shell remove, so its stale shell row never updates.
+	// status it has. Key on parentID, not shell membership: a root that gains a
+	// parent leaves the shell, and its family row is the one kept current.
 	if (change._tag === "snapshot") {
 		for (const row of next.rows.values()) {
 			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));

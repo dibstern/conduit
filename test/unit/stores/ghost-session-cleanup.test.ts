@@ -92,7 +92,11 @@ describe("clearSessionChatState wired to the shell feed", () => {
 		expect(sessionActivity.has("deleted-session")).toBe(true);
 		expect(sessionMessages.has("deleted-session")).toBe(true);
 
-		applySessionChange({ _tag: "remove", id: "deleted-session" });
+		applySessionChange({
+			_tag: "remove",
+			id: "deleted-session",
+			deleted: true,
+		});
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has("deleted-session")).toBe(false);
 		expect(sessionMessages.has("deleted-session")).toBe(false);
@@ -104,7 +108,7 @@ describe("clearSessionChatState wired to the shell feed", () => {
 		const activitySizeBefore = sessionActivity.size;
 		const messagesSizeBefore = sessionMessages.size;
 
-		applySessionChange({ _tag: "remove", id: "nonexistent" });
+		applySessionChange({ _tag: "remove", id: "nonexistent", deleted: true });
 
 		expect(sessionActivity.size).toBe(activitySizeBefore);
 		expect(sessionMessages.size).toBe(messagesSizeBefore);
@@ -237,7 +241,7 @@ describe("active-session teardown", () => {
 		]);
 		getOrCreateSessionSlot(activeId);
 
-		applySessionChange({ _tag: "remove", id: activeId });
+		applySessionChange({ _tag: "remove", id: activeId, deleted: true });
 
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has(activeId)).toBe(false);

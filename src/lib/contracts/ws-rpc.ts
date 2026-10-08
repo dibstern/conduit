@@ -51,6 +51,8 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			_tag: Schema.Literal("remove"),
 			id: Schema.String,
 			sequence: Schema.Number,
+			/** The item itself is gone, not only out of this collection. */
+			deleted: Schema.optional(Schema.Boolean),
 		}),
 	);
 

@@ -90,7 +90,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
 			yield* refreshSidebar(["child"], 2);
 			const after = yield* reader.readSessionList({ after: 1 });
-			expect(after).toEqual({ rows: [], version: 2, removed: [] });
+			expect(after).toEqual({
+				rows: [],
+				version: 2,
+				removed: [],
+				removedSince: 0,
+			});
 		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 

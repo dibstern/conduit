@@ -37,7 +37,9 @@ export type FamilyMember = Pick<
  * that gained a parent, names the family it left. A candidate that is not a
  * top-level session now leaves a tombstone, its row with no content at this
  * version, so a device resuming from before sees it go (conduit-test-y7eo.3).
- * Rows that did not visibly change are left as they are.
+ * A named session that no longer exists, child or root, leaves one marked
+ * deleted, and one that exists again is no longer. Rows that did not visibly
+ * change are left as they are.
  */
 export const refreshSidebar = (
 	sessionIds: readonly string[],
@@ -47,6 +49,18 @@ export const refreshSidebar = (
 		if (sessionIds.length === 0) return;
 		const sql = yield* SqlClient.SqlClient;
 		const ids = JSON.stringify(sessionIds);
+		// Re-created: still out of the list until it is a root again, but not gone.
+		yield* sql`
+			UPDATE session_sidebar SET deleted = 0, version = ${version}
+			WHERE deleted = 1 AND session_id IN (SELECT id FROM sessions
+				WHERE id IN (SELECT value FROM json_each(${ids})))`;
+		yield* sql`
+			INSERT INTO session_sidebar (session_id, version, last_activity, row, deleted)
+			SELECT value, ${version}, 0, NULL, 1 FROM json_each(${ids})
+			WHERE value NOT IN (SELECT id FROM sessions)
+			ON CONFLICT (session_id) DO UPDATE SET
+				version = excluded.version, row = NULL, deleted = 1
+			WHERE deleted = 0`;
 		const candidates = yield* sql<{ root_id: string }>`
 			SELECT root_id FROM sessions
 			WHERE id IN (SELECT value FROM json_each(${ids}))

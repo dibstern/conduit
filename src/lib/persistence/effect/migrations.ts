@@ -1044,13 +1044,21 @@ export const effectMigrationEntries = {
 		"resumes",
 		readMigrationSql(SESSIONS_RESUMES_MIGRATION),
 	),
-	// Stores each session's top-level parent, then fills the sidebar table from
-	// it: one pass over every family, at the version the store is at.
+	// Stores each session's top-level parent and creates the sidebar table.
 	"0038_session_sidebar": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (columns.some((column) => column.name === "root_id")) return;
 		yield* executeSqlStatements(readMigrationSql(SESSION_SIDEBAR_MIGRATION));
+	}),
+	// Then fills it, once its schema is final, since the upkeep writes today's
+	// columns: one pass over every family, at the version the store is at. A
+	// store already filled by an earlier build keeps every row it holds.
+	"0039_session_sidebar_tombstones": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
+		);
 		const roots = yield* sql<{ id: string }>`
 			SELECT id FROM sessions WHERE parent_id IS NULL`;
 		const [counter] = yield* sql<{ value: number }>`
@@ -1060,9 +1068,6 @@ export const effectMigrationEntries = {
 			counter?.value ?? 0,
 		);
 	}),
-	"0039_session_sidebar_tombstones": executeSqlStatements(
-		readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
-	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

@@ -268,7 +268,7 @@ describe("deleting the session being viewed", () => {
 
 			// The server deletes it. Deleting the last session leaves no other to
 			// switch us to, so nothing else moves the selection.
-			applySessionChange({ _tag: "remove", id: "ses_doomed" });
+			applySessionChange({ _tag: "remove", id: "ses_doomed", deleted: true });
 			expect(sessionState.sessions.has("ses_doomed")).toBe(false);
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 

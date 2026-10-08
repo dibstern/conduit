@@ -134,8 +134,9 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			followSessionRetry(change.item.id, change.item.retrying);
 		followSessionResumes(change.item, previous);
 	}
-	if (change._tag === "remove") {
-		// `remove` names a deleted session; a snapshot omission does not.
+	// A root that gained a parent only leaves the list; one that is gone, or a
+	// child that is, comes marked deleted, live or on catch-up.
+	if (change._tag === "remove" && change.deleted === true) {
 		leaveDeletedSession(change.id);
 		forgetSession(change.id);
 	}

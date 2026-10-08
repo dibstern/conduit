@@ -109,11 +109,21 @@ export interface SubscriptionSource<T, E = never> {
 			readonly version: number;
 			readonly hasMore?: boolean;
 			readonly cursor?: string;
-			/** Tombstones in a ranged read; a base snapshot represents absence directly. */
+			/**
+			 * Tombstones in a ranged read; a base snapshot represents absence
+			 * directly. `deleted` marks an item that is gone, not only out of
+			 * this collection.
+			 */
 			readonly removed?: readonly {
 				readonly id: string;
 				readonly version: number;
+				readonly deleted?: boolean;
 			}[];
+			/**
+			 * The oldest cursor the tombstones cover. A resume from below it, or
+			 * from above `version` (a reset or restored store), is rebased.
+			 */
+			readonly removedSince?: number;
 		},
 		E
 	>;
@@ -168,13 +178,18 @@ interface LatestWindow {
 
 const deltaEnvelopes = <T>(
 	rows: readonly VersionedRow<T>[],
-	removed: readonly { readonly id: string; readonly version: number }[],
+	removed: readonly {
+		readonly id: string;
+		readonly version: number;
+		readonly deleted?: boolean;
+	}[],
 ): Envelope<T>[] =>
 	[
-		...removed.map(({ id, version }) => ({
+		...removed.map(({ id, version, deleted }) => ({
 			_tag: "remove" as const,
 			id,
 			sequence: version,
+			...(deleted === true ? { deleted } : {}),
 		})),
 		...rows.map(({ item, version }) => ({
 			_tag: "upsert" as const,
@@ -287,12 +302,19 @@ export const stream = <T, E = never>(options: {
 				);
 			};
 
+			const after = options.resumeFromSequence;
+			const resumed =
+				after !== undefined && options.source.resume === "catchUp"
+					? yield* read("resume", { after })
+					: undefined;
+			// Tombstones cannot cover a cursor older than they are, or one the
+			// store never reached: those get a fresh base instead.
 			const catchUp =
-				options.resumeFromSequence !== undefined &&
-				options.source.resume === "catchUp";
-			const base = yield* catchUp
-				? read("resume", { after: options.resumeFromSequence })
-				: read("base");
+				resumed !== undefined &&
+				after !== undefined &&
+				after >= (resumed.removedSince ?? after) &&
+				after <= resumed.version;
+			const base = catchUp ? resumed : yield* read("base");
 			// The counter the base was read at, not the newest row in it: what the
 			// live arm must not re-read, and what a resuming client resumes from.
 			const seen = yield* Ref.make(base.version);

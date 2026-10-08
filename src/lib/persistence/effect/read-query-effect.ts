@@ -478,13 +478,20 @@ export interface ReadQueryEffect {
 			readonly version: number;
 			/**
 			 * Families that left the sidebar inside a range with an `after`, each
-			 * at the version it left. A read without one is a base, which shows
-			 * absence by leaving them out.
+			 * at the version it left, and sessions deleted there, children too,
+			 * marked `deleted`. A read without one is a base, which shows absence
+			 * by leaving them out.
 			 */
 			readonly removed?: readonly {
 				readonly id: string;
 				readonly version: number;
+				readonly deleted: boolean;
 			}[];
+			/**
+			 * With `removed`: the version tombstones were first kept at. A range
+			 * opening before it may have missed removals.
+			 */
+			readonly removedSince?: number;
 		},
 		ReadQueryEffectError | SqlError
 	>;
@@ -1270,7 +1277,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			readonly removed?: readonly {
 				readonly id: string;
 				readonly version: number;
+				readonly deleted: boolean;
 			}[];
+			readonly removedSince?: number;
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1289,8 +1298,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							session_id: string;
 							version: number;
 							row: string | null;
+							deleted: number;
 						}>`
-							SELECT session_id, version, row FROM session_sidebar
+							SELECT session_id, version, row, deleted FROM session_sidebar
 							WHERE version > ${floor} AND version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
@@ -1309,9 +1319,19 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							...(ranged && {
 								removed: stored.flatMap((stamp) =>
 									stamp.row === null
-										? [{ id: stamp.session_id, version: stamp.version }]
+										? [
+												{
+													id: stamp.session_id,
+													version: stamp.version,
+													deleted: stamp.deleted === 1,
+												},
+											]
 										: [],
 								),
+								removedSince:
+									(yield* sql<{ version: number }>`
+										SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
+										?.version ?? 0,
 							}),
 						};
 					}

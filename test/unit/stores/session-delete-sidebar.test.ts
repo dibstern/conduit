@@ -69,7 +69,8 @@ const searchFor = (query: string, hits: (typeof VICTIM)[]) => {
 	seedSearchResults(hits);
 };
 
-const deleteVictim = () => applySessionChange({ _tag: "remove", id: "victim" });
+const deleteVictim = () =>
+	applySessionChange({ _tag: "remove", id: "victim", deleted: true });
 
 const sidebarIds = () => getFilteredSessions().map((s) => s.id);
 

@@ -49,6 +49,24 @@
 // 20. A base read returns tombstones (absence is the removal there), or a
 //     tombstone is reported in a range it did not move in.
 // 21. A rebuild after a restart forgets tombstones a device has not yet seen.
+//
+// Deleted, or only gone from the top level (review of conduit-test-y7eo.3):
+// 22. A tombstone does not say whether its session was deleted, so a client
+//     leaves a fork it is viewing when the fork gains its parent, or stays on
+//     a session another device deleted.
+// 23. A deleted child leaves no tombstone (it never had a row), so a device
+//     away while it was deleted is never told.
+// 24. A session deleted and then re-created still reads as deleted, so a
+//     device resuming from before both leaves a session that exists.
+// 25. A resume from before tombstones were kept (a store upgraded under the
+//     device) or from past the store's version (a store reset or restored) is
+//     caught up rather than rebased, and keeps rows that are gone.
+// 26. The model re-creates a session whose model parent is missing: the
+//     upsert re-checks the dangling parent and the foreign key fails
+//     (conduit-test-yeby).
+// 27. A rebuild deletes a session the store kept (an orphan write is no
+//     event, so the replay takes it with its old parent) and no device is
+//     told, or the oracle judges deletion by the model, which still has it.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,6 +150,8 @@ const QUIET = new Set<Command["kind"]>([
 type Item = Omit<SessionInfo, "updatedAt">;
 interface Shown {
 	readonly item: Item;
+	/** The item without background work, which can hide a stored change. */
+	readonly stored: string;
 	readonly updatedAt: SessionInfo["updatedAt"];
 	readonly version: number;
 }
@@ -159,6 +179,8 @@ const scenario = (store: Store) => {
 	let devices: {
 		readonly version: number;
 		readonly items: Map<string, Item>;
+		/** Every session that existed, children included. */
+		readonly sessions: ReadonlySet<string>;
 	}[] = [];
 
 	const event = <T extends CanonicalEventType>(
@@ -177,8 +199,9 @@ const scenario = (store: Store) => {
 			yield* commitAndSignal(events, { publish: false });
 		});
 
-	// No event can name a missing parent while foreign keys are on. A write
-	// with them off can, as the fork-lineage import does during migration.
+	// No event can name a missing parent while foreign keys are on, and the
+	// fork-lineage import skips one. This writes one anyway, with them off, so
+	// a store that holds an orphan is proven not to loop or show it.
 	const orphan = (id: string, parent: string) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -215,10 +238,13 @@ const scenario = (store: Store) => {
 		switch (command.kind) {
 			case "create": {
 				const { id, parent } = command;
-				// The parent must exist (a foreign key), but may close a cycle.
-				if (parent !== undefined && !parents.has(parent)) return undefined;
+				// The parent must exist (a foreign key), but may close a cycle. A
+				// re-create without one keeps the stored parent, which the upsert
+				// checks again, so an orphan cannot be re-created (yeby).
+				const next = parent ?? parents.get(id);
+				if (next !== undefined && !parents.has(next)) return undefined;
 				const message = `${id}-m${messages++}`;
-				parents.set(id, parent ?? parents.get(id));
+				parents.set(id, next);
 				return run(
 					commit([
 						event("session.created", id, {
@@ -415,7 +441,16 @@ const scenario = (store: Store) => {
 			after: readVersion,
 			backgroundOf,
 		});
-		return { sidebar, oracle, delta };
+		const stored = yield* readQuery.readSessionList();
+		return { sidebar, oracle, delta, stored };
+	});
+
+	// The sessions in the store, not the model: a rebuild replays the events,
+	// and an orphan write is none, so the replay deletes what it left behind.
+	const storedIds = Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{ id: string }>`SELECT id FROM sessions`;
+		return new Set(rows.map((row) => row.id));
 	});
 
 	/** A device that held `from` applies the catch-up past it: removes, rows. */
@@ -426,13 +461,28 @@ const scenario = (store: Store) => {
 				after: from.version,
 				backgroundOf,
 			});
+			const exists = yield* storedIds;
+			expect(caught.removedSince, "tombstones cover it").toBeLessThanOrEqual(
+				from.version,
+			);
 			const items = new Map(from.items);
-			for (const { id, version } of caught.removed ?? []) {
+			for (const { id, version, deleted } of caught.removed ?? []) {
 				expect(version, `${id} left inside the range`).toBeGreaterThan(
 					from.version,
 				);
+				expect(deleted, `${id} deleted`).toBe(!exists.has(id));
 				items.delete(id);
 			}
+			// Every session that is gone since, child or root, is told as deleted.
+			const deleted = new Set(
+				(caught.removed ?? []).flatMap(({ id, deleted }) =>
+					deleted ? [id] : [],
+				),
+			);
+			expect(
+				[...from.sessions].filter((id) => !exists.has(id) && !deleted.has(id)),
+				"deleted without a tombstone",
+			).toEqual([]);
 			for (const { item } of caught.rows) items.set(item.id, visible(item));
 			return Object.fromEntries(items);
 		});
@@ -440,7 +490,7 @@ const scenario = (store: Store) => {
 	/** Check the sidebar against the full computation and the last read. */
 	const check = (command: Command | undefined) =>
 		Effect.gen(function* () {
-			const { sidebar, oracle, delta } = yield* read;
+			const { sidebar, oracle, delta, stored } = yield* read;
 			expect(byId(sidebar.rows.map(({ item }) => visible(item)))).toEqual(
 				byId(oracle.map(visible)),
 			);
@@ -451,10 +501,18 @@ const scenario = (store: Store) => {
 			const oracleUpdatedAt = new Map(
 				oracle.map((item) => [item.id, item.updatedAt]),
 			);
+			const storedItems = new Map(
+				stored.rows.map(({ item }) => [item.id, JSON.stringify(visible(item))]),
+			);
 			const next = new Map(
 				sidebar.rows.map(({ item, version }) => [
 					item.id,
-					{ item: visible(item), updatedAt: item.updatedAt, version },
+					{
+						item: visible(item),
+						stored: storedItems.get(item.id) ?? "",
+						updatedAt: item.updatedAt,
+						version,
+					},
 				]),
 			);
 			for (const [id, now] of next) {
@@ -463,9 +521,11 @@ const scenario = (store: Store) => {
 					expect(now.version).toBeGreaterThan(readVersion);
 					continue;
 				}
+				// Background work shown as attention can hide a change underneath
+				// (an unread child), which still moves the row.
 				const changed =
 					JSON.stringify(byId([before.item])) !==
-					JSON.stringify(byId([now.item]));
+						JSON.stringify(byId([now.item])) || before.stored !== now.stored;
 				if (changed) {
 					expect(now.version, `${id} changed`).toBeGreaterThan(before.version);
 					expect(now.updatedAt).toBe(oracleUpdatedAt.get(id));
@@ -511,6 +571,7 @@ const scenario = (store: Store) => {
 			devices.push({
 				version: sidebar.version,
 				items: new Map(Object.entries(now)),
+				sessions: yield* storedIds,
 			});
 			shown = next;
 			readVersion = sidebar.version;
@@ -553,6 +614,7 @@ const scenario = (store: Store) => {
 					SELECT id, root_id FROM sessions ORDER BY id`;
 				const kept = yield* roots;
 				yield* sql`DROP TABLE session_sidebar`;
+				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
 				// The tombstone migration rebuilds the table the backfill creates.
@@ -680,6 +742,58 @@ describe("sidebar table against the full computation", () => {
 			{ numRuns: 60 },
 		);
 	}, 120_000);
+
+	it("tells a resuming device of deleted children, and of a re-created session that is not a root", async () => {
+		// The last check resumes the first device, which held d, and a middle
+		// one, which held b and c.
+		const shown = await run([
+			root("d"),
+			root("a"),
+			child("b", "a"),
+			child("c", "b"),
+			{ kind: "delete", id: "b" },
+			{ kind: "delete", id: "d" },
+			child("d", "a"),
+		]);
+		expect([...shown.keys()]).toEqual(["a"]);
+	});
+
+	it("moves a row whose stored change background work hides", async () => {
+		// Found by 36,000 property runs: the root's attention shows "working",
+		// so its child turning unread changes the stored row and nothing seen.
+		await run([
+			root("c"),
+			child("b", "c", { fork: true }),
+			{ kind: "background", id: "c", work: "working" },
+			{ kind: "unread", id: "b" },
+		]);
+	});
+
+	it("tells a device of an orphan the replay deletes with its old parent", async () => {
+		// Found by 36,000 property runs: the orphan write is no event, so the
+		// rebuild deletes d with e, and the device that held d must learn it.
+		await run(
+			[
+				root("e"),
+				child("d", "e"),
+				{ kind: "orphan", id: "d", parent: "a" },
+				{ kind: "delete", id: "e" },
+			],
+			{ rebuild: true },
+		);
+	});
+
+	it("does not re-create an orphan, whose stored parent is missing (yeby)", async () => {
+		// The shrunk sequences that failed the foreign key on the re-create.
+		await run([
+			root("a"),
+			{ kind: "background", id: "a" },
+			{ kind: "orphan", id: "a", parent: "a" },
+			{ kind: "orphan", id: "a", parent: "e" },
+			root("a"),
+		]);
+		await run([root("b"), { kind: "orphan", id: "b", parent: "a" }, root("b")]);
+	});
 
 	it("shows no orphan or parent cycle, as the full list does not, and backfills them alike", async () => {
 		const shown = await run(
@@ -926,6 +1040,7 @@ describe("sidebar table on the 10k-session fixture", () => {
 				const sql = yield* SqlClient.SqlClient;
 				// Back to the store as the previous release left it.
 				yield* sql`DROP TABLE session_sidebar`;
+				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;

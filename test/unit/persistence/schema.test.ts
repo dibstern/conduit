@@ -43,6 +43,7 @@ describe("Schema Migration", () => {
 				"session_goal_checks",
 				"session_providers",
 				"session_sidebar",
+				"session_sidebar_horizon",
 				"sessions",
 				"tool_content",
 				"turns",

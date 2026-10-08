@@ -1478,7 +1478,13 @@ describe("ReadQueryEffect session list reads", () => {
 			// moved comes back identical to the base's, the one that did not is
 			// absent.
 			const moved = yield* readQuery.readSessionList({ after: 6 });
-			expect(moved).toEqual({ rows: [base.rows[0]], version: 7, removed: [] });
+			// Tombstones are kept from the migration on, so every cursor is covered.
+			expect(moved).toEqual({
+				rows: [base.rows[0]],
+				version: 7,
+				removed: [],
+				removedSince: 0,
+			});
 
 			// A subscriber current through the counter is caught up.
 			expect((yield* readQuery.readSessionList({ after: 7 })).rows).toEqual([]);
@@ -1490,7 +1496,12 @@ describe("ReadQueryEffect session list reads", () => {
 				after: 6,
 				through: 6,
 			});
-			expect(bounded).toEqual({ rows: [], version: 7, removed: [] });
+			expect(bounded).toEqual({
+				rows: [],
+				version: 7,
+				removed: [],
+				removedSince: 0,
+			});
 		}).pipe(Effect.provide(testLayer)),
 	);
 	it.effect("carries the same shape into the snapshot and the re-query", () =>

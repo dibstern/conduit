@@ -11,10 +11,13 @@
 //
 // Removals come from the same scan. A family that leaves the sidebar (its root
 // deleted, or given a parent) keeps a tombstone at the version it left
-// (conduit-test-y7eo.3), so a ranged read returns it as a `remove`.
+// (conduit-test-y7eo.3), so a ranged read returns it as a `remove`. A deleted
+// session, child included, leaves one marked `deleted`, which is what tells a
+// device to leave it; a root given a parent only drops out of the list.
 //
 // Resume is therefore a CATCH-UP: a reconnecting device is sent the families
-// that moved or left past its cursor, not the whole list again.
+// that moved or left past its cursor, not the whole list again. A cursor from
+// before the tombstones began, or past the current version, gets a snapshot.
 
 import { channel } from "node:diagnostics_channel";
 import type { SqlError } from "@effect/sql/SqlError";

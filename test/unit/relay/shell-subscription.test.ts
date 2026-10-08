@@ -311,11 +311,15 @@ describe("subscribeShell", () => {
 						parentID: "parent",
 						forkMessageId: "fork-point",
 					});
-					// The child leaves the sidebar as it joins its parent's family.
-					expect(yield* takeN(q, 2)).toMatchObject([
-						{ _tag: "remove", id: "child" },
-						{ _tag: "upsert", item: { id: "parent" } },
-					]);
+					// The child leaves the sidebar as it joins its parent's family,
+					// and is not deleted: a device viewing it stays there.
+					const [removal, upsert] = yield* takeN(q, 2);
+					expect(removal).toMatchObject({ _tag: "remove", id: "child" });
+					expect(removal).not.toHaveProperty("deleted");
+					expect(upsert).toMatchObject({
+						_tag: "upsert",
+						item: { id: "parent" },
+					});
 				}).pipe(
 					Effect.provide(
 						Layer.merge(makeShellTestLayer(), makeSessionManagerStateLive()),
@@ -723,7 +727,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"resume after a parent deletion catches up on its family's tombstone",
+		"resume after a parent deletion is told both it and its child are deleted",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -734,13 +738,17 @@ describe("subscribeShell", () => {
 				const cursor = yield* readModelVersion;
 				yield* deleteSession("shell-parent");
 				const { q } = yield* openShell({ resumeFromSequence: cursor });
-				expect(yield* takeN(q, 2)).toEqual([
-					{
-						_tag: "remove",
-						id: "shell-parent",
-						sequence: yield* readModelVersion,
-					},
-					{ _tag: "synchronized" },
+				const sequence = yield* readModelVersion;
+				const [first, second, last] = yield* takeN(q, 3);
+				expect(last).toEqual({ _tag: "synchronized" });
+				// A device viewing the child, away while it went, must leave it too.
+				expect(
+					[first, second].sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
+					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -779,6 +787,7 @@ describe("subscribeShell", () => {
 					_tag: "remove",
 					id: "shell-c",
 					sequence: yield* readModelVersion,
+					deleted: true,
 				});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
@@ -907,6 +916,7 @@ describe("subscribeShell", () => {
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "remove") throw new Error("expected remove");
 				expect(delta.id).toBe(SID);
+				expect(delta.deleted).toBe(true);
 				// A deleted row leaves no version behind (§8), so the removal carries
 				// the advance's own version — the number the client resumes from.
 				expect(delta.sequence).toBe(yield* readModelVersion);
@@ -944,7 +954,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"deleting a parent emits remove(parent) live, and nothing for its child",
+		"deleting a parent emits remove(parent) and remove(child) live, both deleted",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -965,13 +975,18 @@ describe("subscribeShell", () => {
 				// every removed row alongside the parent.
 				yield* deleteSession("shell-parent");
 
-				// The sidebar shows families, so the child never had a row of its
-				// own: the family's tombstone is the one removal.
-				expect(yield* Queue.take(q)).toEqual({
-					_tag: "remove",
-					id: "shell-parent",
-					sequence: yield* readModelVersion,
-				});
+				// The child never had a row of its own, but a device viewing it
+				// must leave it: each deleted session is told, at the one version.
+				const sequence = yield* readModelVersion;
+				const removals = yield* takeN(q, 2);
+				expect(
+					removals.sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
+					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
+				]);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(
 				Effect.provide(
@@ -982,6 +997,38 @@ describe("subscribeShell", () => {
 					),
 				),
 			),
+	);
+
+	it.scoped(
+		"a cursor the tombstones do not cover gets a snapshot, not a catch-up",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-a")]);
+				const before = yield* readModelVersion;
+				yield* commit([sessionCreated("shell-b")]);
+				const version = yield* readModelVersion;
+				// The store was upgraded after the device last read: removals before
+				// that left nothing behind.
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE session_sidebar_horizon SET version = ${version}`;
+				// And a cursor the store never reached: it was reset or restored.
+				for (const resumeFromSequence of [before, version + 100]) {
+					const { q } = yield* openShell({ resumeFromSequence });
+					const [snapshot, synchronized] = yield* takeN(q, 2);
+					if (snapshot?._tag !== "snapshot")
+						throw new Error("expected snapshot");
+					expect(snapshot.sequence).toBe(version);
+					expect(snapshot.rows.map(({ id }) => id).sort()).toEqual([
+						"shell-a",
+						"shell-b",
+					]);
+					expect(synchronized).toEqual({ _tag: "synchronized" });
+				}
+				// A covered cursor is still caught up.
+				const { q } = yield* openShell({ resumeFromSequence: version });
+				expect(yield* takeN(q, 1)).toEqual([{ _tag: "synchronized" }]);
+			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
 	it.scoped(
