@@ -222,8 +222,14 @@ describe("messageRowsToHistory", () => {
 			callID: "c1",
 		});
 		expect(toolPart?.state?.status).toBe("completed");
-		expect(toolPart?.state?.input).toEqual({ command: "ls" });
-		expect(toolPart?.state?.output).toBe("file.txt");
+		expect(toolPart?.state?.input).toEqual({
+			_tag: "whole",
+			value: { command: "ls" },
+		});
+		expect(toolPart?.state?.output).toEqual({
+			_tag: "whole",
+			text: "file.txt",
+		});
 	});
 
 	it("handles invalid JSON in tool input gracefully", () => {
@@ -243,7 +249,7 @@ describe("messageRowsToHistory", () => {
 		const [msg] = result.messages;
 		const [part] = msg?.parts ?? [];
 		// Invalid JSON falls back to the raw string
-		expect(part?.state?.input).toBe("not-json");
+		expect(part?.state?.input).toEqual({ _tag: "whole", value: "not-json" });
 	});
 
 	it("carries tool metadata into history part state", () => {

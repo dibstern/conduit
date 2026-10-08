@@ -195,7 +195,7 @@ const makeReadQuery = (
 	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"] = () =>
 		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 ): ReadQueryEffect => ({
-	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),

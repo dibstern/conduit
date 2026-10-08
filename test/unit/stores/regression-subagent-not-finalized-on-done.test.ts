@@ -57,10 +57,13 @@ function projectTool(name: "Task" | "Read") {
 						callID: "call",
 						state: {
 							status: "running",
-							input:
-								name === "Task"
-									? { subagent_type: "explore" }
-									: { path: "foo.ts" },
+							input: {
+								_tag: "whole",
+								value:
+									name === "Task"
+										? { subagent_type: "explore" }
+										: { path: "foo.ts" },
+							},
 						},
 					},
 				],

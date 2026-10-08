@@ -3,6 +3,7 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
+import type { ToolCallId } from "../../contracts/tool-wire.js";
 import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
@@ -32,7 +33,7 @@ import type {
 	GetFileTreeResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
-	GetToolContentResponse,
+	GetToolDetailsResponse,
 	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
@@ -262,9 +263,9 @@ export interface GetFileContentRpcInput {
 	readonly path: string;
 }
 
-export interface GetToolContentRpcInput {
+export interface GetToolDetailsRpcInput {
 	readonly projectSlug: string;
-	readonly toolId: string;
+	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 
 export interface GetSkillContentRpcInput {
@@ -724,8 +725,8 @@ const callGetFileList = (input: GetFileListRpcInput) =>
 const callGetFileContent = (input: GetFileContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetFileContent(input));
 
-const callGetToolContent = (input: GetToolContentRpcInput) =>
-	callControl(input.projectSlug, (client) => client.GetToolContent(input));
+const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
+	callControl(input.projectSlug, (client) => client.GetToolDetails(input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSkillContent(input));
@@ -1149,10 +1150,10 @@ export async function getFileContentRpc(
 	return await runTransportEffect(callGetFileContent(input));
 }
 
-export async function getToolContentRpc(
-	input: GetToolContentRpcInput,
-): Promise<GetToolContentResponse> {
-	return await runTransportEffect(callGetToolContent(input));
+export async function getToolDetailsRpc(
+	input: GetToolDetailsRpcInput,
+): Promise<GetToolDetailsResponse> {
+	return await runTransportEffect(callGetToolDetails(input));
 }
 
 export async function getSkillContentRpc(

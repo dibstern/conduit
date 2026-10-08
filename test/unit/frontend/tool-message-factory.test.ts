@@ -2,6 +2,7 @@
 // Used by both history-logic.ts (REST history) and tool-registry.ts (SSE lifecycle).
 
 import { describe, expect, it } from "vitest";
+import { Utf8Bytes } from "../../../src/lib/contracts/tool-wire.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import {
 	createToolMessage,
@@ -74,22 +75,20 @@ describe("createToolMessage", () => {
 		});
 	});
 
-	it("creates a ToolMessage with truncation fields", () => {
+	it("creates a ToolMessage carrying its preview", () => {
 		const init: ToolMessageInit = {
 			uuid: "uuid-4",
 			id: "call-4",
 			name: "Read",
 			status: "completed",
 			result: "truncated...",
-			isTruncated: true,
-			fullContentLength: 50000,
+			preview: { resultBytes: Utf8Bytes.make(50000) },
 		};
 		const result = createToolMessage(init);
 
 		expect(result).toMatchObject({
 			type: "tool",
-			isTruncated: true,
-			fullContentLength: 50000,
+			preview: { resultBytes: 50000 },
 		});
 	});
 

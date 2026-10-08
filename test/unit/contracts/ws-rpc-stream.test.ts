@@ -96,7 +96,7 @@ const makeLayer = (options: {
 			Layer.mergeAll(
 				makeSessionManagerStateLive(),
 				Layer.succeed(ReadQueryEffectTag, {
-					getToolContent: () => Effect.succeed(undefined),
+					readToolDetails: () => Effect.succeed([]),
 					getSessionStatus: () => Effect.succeed(undefined),
 					getSession: () => Effect.succeed(undefined),
 					getGoalDetails: () =>

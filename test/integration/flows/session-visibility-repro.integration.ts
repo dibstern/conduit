@@ -42,7 +42,9 @@ type DifferentialPart = {
 	mime?: string | undefined;
 	filename?: string | undefined;
 	url?: string | undefined;
-	state?: { metadata?: Record<string, unknown> } | undefined;
+	state?:
+		| { metadata?: Record<string, unknown>; readonly [key: string]: unknown }
+		| undefined;
 };
 
 type DifferentialMessage = {

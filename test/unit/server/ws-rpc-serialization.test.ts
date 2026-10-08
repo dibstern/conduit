@@ -81,8 +81,11 @@ const detailEnvelopes = [
 						tool: "Bash",
 						state: {
 							status: "completed",
-							input: { command: "pwd", nested: { flag: true } },
-							output: "/repo\n",
+							input: {
+								_tag: "whole" as const,
+								value: { command: "pwd", nested: { flag: true } },
+							},
+							output: { _tag: "whole" as const, text: "/repo\n" },
 						},
 					},
 				],
@@ -578,8 +581,11 @@ it("SubscribeSessionDetail preserves transcript, model identity and stored tool 
 				expect(upserted.map((message) => message.id)).toEqual(["message-1"]);
 				expect(upserted[0]?.parts?.[1]?.state).toEqual({
 					status: "completed",
-					input: { command: "pwd", nested: { flag: true } },
-					output: "/repo\n",
+					input: {
+						_tag: "whole",
+						value: { command: "pwd", nested: { flag: true } },
+					},
+					output: { _tag: "whole", text: "/repo\n" },
 				});
 				expect(Array.from(result)).toEqual(detailEnvelopes);
 				expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(

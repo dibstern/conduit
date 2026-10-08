@@ -118,6 +118,8 @@ export interface MessagePartRow {
 	created_at: number;
 	updated_at: number;
 	rest_payload?: string | null;
+	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	result_bytes?: number | null;
 }
 
 export interface MessageWithParts extends MessageRow {

@@ -39,6 +39,7 @@ import {
 	STEER_BLOCKERS,
 	StoredEventSchema,
 } from "./stored-event.js";
+import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -233,7 +234,13 @@ const HistoryMessagePartSchema = Schema.Struct({
 	text: Schema.optional(Schema.String),
 	renderedHtml: Schema.optional(Schema.String),
 	state: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		Schema.Struct(
+			{
+				input: Schema.optionalWith(ToolInput, { exact: true }),
+				output: Schema.optionalWith(ToolText, { exact: true }),
+			},
+			Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		),
 	),
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
@@ -713,10 +720,9 @@ export const GetFileContentResponseSchema = Schema.Struct({
 	binary: Schema.optional(Schema.Boolean),
 });
 
-export const GetToolContentResponseSchema = Schema.Struct({
+export const GetToolDetailsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	toolId: Schema.String,
-	content: Schema.String,
+	tools: Schema.Array(ToolDetail),
 });
 
 export const GetSkillContentResponseSchema = Schema.Struct({
@@ -767,7 +773,7 @@ export type GetFileTreeResponse = typeof GetFileTreeResponseSchema.Type;
 export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
-export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
+export type GetToolDetailsResponse = typeof GetToolDetailsResponseSchema.Type;
 export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
 export type GetSessionSkillsResponse =
 	typeof GetSessionSkillsResponseSchema.Type;
@@ -1645,14 +1651,14 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 	},
 ) {}
 
-export class GetToolContent extends Schema.TaggedRequest<GetToolContent>()(
-	"GetToolContent",
+export class GetToolDetails extends Schema.TaggedRequest<GetToolDetails>()(
+	"GetToolDetails",
 	{
 		failure: WsRpcError,
-		success: GetToolContentResponseSchema,
+		success: GetToolDetailsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			toolId: NonEmptyString,
+			toolIds: Schema.NonEmptyArray(ToolCallId),
 		},
 	},
 ) {}
@@ -2073,7 +2079,7 @@ export const WsRpcRequest = Schema.Union(
 	GetFileTree,
 	GetFileList,
 	GetFileContent,
-	GetToolContent,
+	GetToolDetails,
 	GetSkillContent,
 	GetSessionSkills,
 	GetModels,
@@ -2465,7 +2471,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileTree),
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),
-	Rpc.fromTaggedRequest(GetToolContent),
+	Rpc.fromTaggedRequest(GetToolDetails),
 	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetSessionSkills),
 	Rpc.fromTaggedRequest(GetModels),

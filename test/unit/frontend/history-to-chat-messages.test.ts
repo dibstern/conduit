@@ -130,7 +130,10 @@ describe("historyToChatMessages: assistant text", () => {
 					type: "tool",
 					tool: "read",
 					callID: "call-1",
-					state: { status: "completed", output: "file content" },
+					state: {
+						status: "completed",
+						output: { _tag: "whole", text: "file content" },
+					},
 				},
 				{ id: "p3", type: "text", text: "Here is the content." },
 			]),
@@ -213,8 +216,8 @@ describe("historyToChatMessages: tool calls", () => {
 					callID: "call-1",
 					state: {
 						status: "completed",
-						input: { path: "/foo.ts" },
-						output: "file contents here",
+						input: { _tag: "whole", value: { path: "/foo.ts" } },
+						output: { _tag: "whole", text: "file contents here" },
 					},
 				},
 				{ id: "p2", type: "text", text: "Here is the file." },
@@ -270,7 +273,7 @@ describe("historyToChatMessages: tool calls", () => {
 					id: "p1",
 					type: "tool",
 					tool: "Write",
-					state: { status: "completed", output: "ok" },
+					state: { status: "completed", output: { _tag: "whole", text: "ok" } },
 				},
 			]),
 		];
@@ -293,8 +296,11 @@ describe("historyToChatMessages: tool calls", () => {
 					callID: "call-1",
 					state: {
 						status: "completed",
-						input: { filePath: "/repo/src/foo.ts", offset: 10 },
-						output: "file contents here",
+						input: {
+							_tag: "whole",
+							value: { filePath: "/repo/src/foo.ts", offset: 10 },
+						},
+						output: { _tag: "whole", text: "file contents here" },
 					},
 				},
 			]),
@@ -321,7 +327,7 @@ describe("historyToChatMessages: tool calls", () => {
 					callID: "call-1",
 					state: {
 						status: "completed",
-						output: "file contents",
+						output: { _tag: "whole", text: "file contents" },
 					},
 				},
 			]),
@@ -340,14 +346,20 @@ describe("historyToChatMessages: tool calls", () => {
 					type: "tool",
 					tool: "Read",
 					callID: "c1",
-					state: { status: "completed", output: "content A" },
+					state: {
+						status: "completed",
+						output: { _tag: "whole", text: "content A" },
+					},
 				},
 				{
 					id: "p2",
 					type: "tool",
 					tool: "Read",
 					callID: "c2",
-					state: { status: "completed", output: "content B" },
+					state: {
+						status: "completed",
+						output: { _tag: "whole", text: "content B" },
+					},
 				},
 				{ id: "p3", type: "text", text: "Both files read." },
 			]),
@@ -416,7 +428,10 @@ describe("historyToChatMessages: part ordering", () => {
 						type: "tool",
 						tool: "Read",
 						callID: "c1",
-						state: { status: "completed", output: "file content" },
+						state: {
+							status: "completed",
+							output: { _tag: "whole", text: "file content" },
+						},
 					},
 					{ id: "p5", type: "text", text: "Here it is." },
 					{ id: "p6", type: "step-finish" },
@@ -475,7 +490,10 @@ describe("historyToChatMessages: multi-turn conversation", () => {
 						type: "tool",
 						tool: "Read",
 						callID: "c1",
-						state: { status: "completed", output: "code here" },
+						state: {
+							status: "completed",
+							output: { _tag: "whole", text: "code here" },
+						},
 					},
 					{ id: "p5", type: "text", text: "Here is your code." },
 				],
@@ -556,8 +574,14 @@ describe("historyToChatMessages: edge cases", () => {
 					callID: "call_1",
 					state: {
 						status: "completed" as const,
-						input: { description: "test subagent", subagent_type: "general" },
-						output: "task_id: ses_child001\n\n<task_result>done</task_result>",
+						input: {
+							_tag: "whole",
+							value: { description: "test subagent", subagent_type: "general" },
+						},
+						output: {
+							_tag: "whole",
+							text: "task_id: ses_child001\n\n<task_result>done</task_result>",
+						},
 						metadata: meta,
 					},
 				},
@@ -582,12 +606,15 @@ describe("historyToChatMessages: edge cases", () => {
 					state: {
 						status: "completed" as const,
 						input: {
-							tool: "Task",
-							description: "Audit Claude provider",
-							prompt: "Find SDK mapping gaps",
-							subagentType: "explore",
+							_tag: "whole",
+							value: {
+								tool: "Task",
+								description: "Audit Claude provider",
+								prompt: "Find SDK mapping gaps",
+								subagentType: "explore",
+							},
 						},
-						output: "done",
+						output: { _tag: "whole", text: "done" },
 						metadata: { childSessionId: "claude-subagent-abc" },
 					},
 				},
@@ -612,7 +639,7 @@ describe("historyToChatMessages: edge cases", () => {
 					callID: "call_2",
 					state: {
 						status: "completed" as const,
-						output: "file contents",
+						output: { _tag: "whole", text: "file contents" },
 					},
 				},
 			]),

@@ -787,7 +787,7 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSession: vi.fn(() =>
 					Effect.succeed({
@@ -2277,7 +2277,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSession: vi.fn(() =>
 					Effect.succeed({
@@ -2375,7 +2375,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
 				getSession: vi.fn(() =>
 					Effect.succeed({
@@ -2665,7 +2665,7 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
-			getToolContent: vi.fn(() => Effect.succeed(undefined)),
+			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSession: vi.fn(() =>
 				Effect.succeed({
@@ -3211,7 +3211,7 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
@@ -3445,7 +3445,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSession: vi.fn(() =>
 					Effect.succeed({

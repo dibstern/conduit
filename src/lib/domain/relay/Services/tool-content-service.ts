@@ -1,29 +1,26 @@
 import { Context, Data, Effect, Layer } from "effect";
+import type { ToolDetail } from "../../../contracts/tool-wire.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 
 export class ToolContentServiceError extends Data.TaggedError(
 	"ToolContentServiceError",
 )<{
-	readonly operation: "get";
-	readonly toolId: string;
+	readonly operation: "details";
+	readonly toolIds: readonly string[];
 	readonly cause: unknown;
 }> {}
 
 export interface ToolContentService {
-	readonly get: (
-		toolId: string,
-	) => Effect.Effect<string | undefined, ToolContentServiceError>;
+	/** Full input and output of each known tool; unknown ids are left out. */
+	readonly details: (
+		toolIds: readonly string[],
+	) => Effect.Effect<readonly ToolDetail[], ToolContentServiceError>;
 }
 
 export class ToolContentServiceTag extends Context.Tag("ToolContentService")<
 	ToolContentServiceTag,
 	ToolContentService
 >() {}
-
-const toError =
-	(toolId: string) =>
-	(cause: unknown): ToolContentServiceError =>
-		new ToolContentServiceError({ operation: "get", toolId, cause });
 
 export const ToolContentServiceLive: Layer.Layer<
 	ToolContentServiceTag,
@@ -34,13 +31,22 @@ export const ToolContentServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		return {
-			get: (toolId) =>
-				readQuery.getToolContent(toolId).pipe(Effect.mapError(toError(toolId))),
+			details: (toolIds) =>
+				readQuery.readToolDetails(toolIds).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ToolContentServiceError({
+								operation: "details",
+								toolIds,
+								cause,
+							}),
+					),
+				),
 		} satisfies ToolContentService;
 	}),
 );
 
 export const ToolContentServiceNoop: Layer.Layer<ToolContentServiceTag> =
 	Layer.succeed(ToolContentServiceTag, {
-		get: () => Effect.succeed(undefined),
+		details: () => Effect.succeed([]),
 	});

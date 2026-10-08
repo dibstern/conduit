@@ -64,6 +64,15 @@ const STREAMS = 3;
 // Two devices share a stream, and every device holds the sidebar.
 const WATCHED_STREAM: readonly number[] = [0, 0, 1];
 const SETTLE_MS = 2_000;
+// Fixed ceilings, in encoded bytes, for the frames tool previews shape
+// (conduit-test-y7eo.6), each a little over what it measured: the heavy first
+// page 279,833 (2,030,012 before previews), a live update 4,945 to 5,516, and
+// a detail response 46,608, which carries the whole result by design.
+const TOOL_PREVIEW_LIMITS = {
+	heavyFirstPageBytes: 300_000,
+	liveToolUpdateBytes: 8_000,
+	detailResponseBytes: 50_000,
+};
 
 // Totals and size spread for one window of frames, per socket path.
 const wire = (frames: readonly Frame[]) => {
@@ -218,6 +227,8 @@ test("opens the heavy session after a restart under load", async ({
 	await driver.close();
 
 	const frames: Frame[] = [];
+	// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
+	let pinned: { bytes: number; payload: string }[] | undefined;
 	const pages: Page[] = [];
 	for (let device = 0; device < DEVICES; device++) {
 		const context = await browser.newContext({
@@ -230,15 +241,24 @@ test("opens the heavy session after a restart under load", async ({
 			const path = new URL(socket.url()).pathname;
 			const record =
 				(direction: Frame["direction"]) =>
-				({ payload }: { payload: string | Buffer }) =>
+				({ payload }: { payload: string | Buffer }) => {
+					const bytes = Buffer.byteLength(payload);
 					frames.push({
 						device,
 						socket: path,
 						direction,
 						at: Date.now(),
-						bytes: Buffer.byteLength(payload),
+						bytes,
 						head: payload.toString().slice(0, 120),
 					});
+					if (
+						pinned &&
+						device === DEVICES - 1 &&
+						direction === "received" &&
+						path === "/rpc"
+					)
+						pinned.push({ bytes, payload: payload.toString() });
+				};
 			socket.on("framereceived", record("received"));
 			socket.on("framesent", record("sent"));
 		});
@@ -286,6 +306,7 @@ test("opens the heavy session after a restart under load", async ({
 	// time it in the page to the frame that first shows the newest reply.
 	await expect(heavyRow).toBeVisible({ timeout: 30_000 });
 	const clickAt = Date.now();
+	pinned = [];
 	const openMs = await opener.evaluate(
 		async ({ id, text }) => {
 			const started = performance.now();
@@ -308,6 +329,13 @@ test("opens the heavy session after a restart under load", async ({
 		{ id: HEAVY_SESSION_ID, text: HEAVY_FINAL_TEXT },
 	);
 	const visibleAt = Date.now();
+	const heavyFirstPageBytes = Math.max(
+		0,
+		...pinned
+			.filter(({ payload }) => payload.includes(HEAVY_FINAL_TEXT))
+			.map(({ bytes }) => bytes),
+	);
+	pinned = undefined;
 	await expect(
 		opener.locator(".msg-assistant").filter({ hasText: HEAVY_FINAL_TEXT }),
 	).toBeVisible();
@@ -315,6 +343,56 @@ test("opens the heavy session after a restart under load", async ({
 	const restartTo = Date.now();
 
 	const restarted = await serverMetrics(restartMetrics);
+
+	// Encoded sizes tool previews keep small (conduit-test-y7eo.6): the heavy
+	// session's first page above, then one live update of a Bash call with a
+	// long command and result, and that call's full detail when expanded.
+	pinned = [];
+	const toolDriver = await harness.connect(
+		undefined,
+		undefined,
+		undefined,
+		false,
+	);
+	const toolSession = await toolDriver.createSession("Long tool");
+	await new AppPage(opener).goto(
+		`${harness.baseUrl}/s/${toolSession}?p=process-test`,
+	);
+	await Effect.runPromise(
+		toolDriver.rpc.input.submit({
+			projectSlug: "process-test",
+			sessionId: toolSession,
+			originId: toolDriver.originId,
+			inputId: randomUUID(),
+			delivery: "queue",
+			text: "tool-long-pinned",
+		}),
+	);
+	const completedTool = () =>
+		pinned?.find(
+			({ payload }) =>
+				payload.includes('"tool":"Bash"') &&
+				payload.includes('"status":"completed"'),
+		);
+	await expect.poll(() => completedTool()?.bytes).toBeGreaterThan(0);
+	const toggle = opener.locator(".turn-activity-toggle").last();
+	await expect(toggle).toHaveAttribute("aria-expanded", "false");
+	await toggle.click();
+	const toolRow = opener.locator(".tool-item").last();
+	await toolRow.locator("button").first().click();
+	// Every call waits seconds on a server this loaded.
+	await expect(toolRow).toContainText("END-OF-result", { timeout: 30_000 });
+	const toolPreviews = {
+		heavyFirstPageBytes,
+		liveToolUpdateBytes: completedTool()?.bytes ?? 0,
+		detailResponseBytes:
+			pinned.find(({ payload }) => payload.includes('"tools":[{"toolId"'))
+				?.bytes ?? 0,
+		limits: TOOL_PREVIEW_LIMITS,
+	};
+	pinned = undefined;
+	await toolDriver.close();
+
 	const report = {
 		schema: 1,
 		project: testInfo.project.name,
@@ -361,6 +439,7 @@ test("opens the heavy session after a restart under load", async ({
 				),
 			},
 		},
+		toolPreviews,
 		server: {
 			warm: serverWindow(warmStart, warm, warmFrom, warmTo),
 			restart: serverWindow(undefined, restarted, stoppedAt, restartTo),
@@ -396,5 +475,10 @@ test("opens the heavy session after a restart under load", async ({
 	expect(afterRestart.bySource["shell"]?.reads).not.toHaveProperty("base");
 	expect(afterRestart.bySource["shell"]?.reads["resume"]).toBe(DEVICES);
 	expect(afterRestart.sidebarReads.rows).toBeLessThan(fixture.families);
+	for (const [name, limit] of Object.entries(TOOL_PREVIEW_LIMITS)) {
+		const bytes = toolPreviews[name as keyof typeof TOOL_PREVIEW_LIMITS];
+		expect(bytes, name).toBeGreaterThan(0);
+		expect(bytes, name).toBeLessThanOrEqual(limit);
+	}
 	for (const page of pages) await page.context().close();
 });

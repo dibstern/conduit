@@ -540,38 +540,6 @@ function flushAndFinalizeAssistant(
 	return finalizedMessageId;
 }
 
-/** Replace a truncated tool result with the full content returned by RPC. */
-export function applyToolContentResponse(response: {
-	readonly projectSlug?: string;
-	readonly toolId: string;
-	readonly content: string;
-	readonly sessionId?: string;
-}): void {
-	const sessionId = response.sessionId ?? sessionState.currentId;
-	if (sessionId == null) return;
-	const messages = getOrCreateSessionSlot(sessionId).messages;
-	const currentMsgs = [...getMessages(messages)];
-	const found = findMessage(
-		currentMsgs,
-		"tool",
-		(m) => m.id === response.toolId,
-	);
-	if (!found) return;
-	setMessages(
-		messages,
-		currentMsgs.map((m, i) => {
-			if (i !== found.index) return m;
-			const updated: ToolMessage = {
-				...found.message,
-				result: response.content,
-				isTruncated: false,
-			};
-			delete updated.fullContentLength;
-			return updated;
-		}),
-	);
-}
-
 export function getMessages(messages?: SessionMessages): ChatMessage[] {
 	return messages?.messages ?? [];
 }

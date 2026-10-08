@@ -96,9 +96,6 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 								...(isToolStatus(state["status"])
 									? { status: state["status"] }
 									: {}),
-								...(typeof state["output"] === "string"
-									? { output: state["output"] }
-									: {}),
 								...(typeof state["error"] === "string"
 									? { error: state["error"] }
 									: {}),

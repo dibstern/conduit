@@ -26,7 +26,7 @@
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { partStyle } from "./activity-style.js";
 	import SkillDoc from "./SkillDoc.svelte";
-	import ToolOutputMore from "./ToolOutputMore.svelte";
+	import ToolFullDetail from "./ToolFullDetail.svelte";
 
 	let {
 		part,
@@ -110,10 +110,14 @@
 		{#if expanded && isSkill}
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
 		{:else if expanded && (part.result || command)}
-			<div
-				class="tool-result ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {part.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
-			>{#if command}<span class="text-text-muted">$ {command}</span>{#if part.result}{"\n\n"}{/if}{/if}{part.result ?? ""}</div>
-			<ToolOutputMore message={part} class="ml-7 mr-1 mb-1" />
+			<ToolFullDetail message={part} class="ml-7 mr-1 mb-1">
+				{#snippet children(tool)}
+					{@const fullCommand = toolCommand(tool)}
+					<div
+						class="tool-result ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {tool.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
+					>{#if fullCommand}<span class="text-text-muted">$ {fullCommand}</span>{#if tool.result}{"\n\n"}{/if}{/if}{tool.result ?? ""}</div>
+				{/snippet}
+			</ToolFullDetail>
 		{/if}
 	</div>
 {:else if part.type === "thinking"}

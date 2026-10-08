@@ -1,5 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
+import type { Fragment } from "@effect/sql/Statement";
 import { Context, Data, Effect, Schema } from "effect";
 import {
 	LimitRecoverySchema,
@@ -12,6 +13,7 @@ import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
+import type { ToolDetail } from "../../contracts/tool-wire.js";
 import type {
 	GoalDetails,
 	SessionTodos,
@@ -34,12 +36,14 @@ import type {
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
 import { sessionFamilyWindowQuery } from "../session-family-query.js";
-import {
-	messageRowsToHistory,
-	toolOutputText,
-} from "../session-history-adapter.js";
+import { messageRowsToHistory } from "../session-history-adapter.js";
 import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+	toolDetail,
+} from "../tool-wire-projection.js";
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
@@ -337,12 +341,15 @@ interface SessionTranscriptPageOptions {
 	readonly limit: number;
 	/** Read from the oldest message, or inclusively from the supplied cursor. */
 	readonly forward?: { readonly from?: string };
+	/** Cut long tool outputs as the browser opens them (see previewParts). */
+	readonly previewTools?: boolean;
 }
 
 export interface ReadQueryEffect {
-	readonly getToolContent: (
-		toolId: string,
-	) => Effect.Effect<string | undefined, ReadQueryEffectError | SqlError>;
+	/** The named tools exactly as stored; unknown ids are left out. */
+	readonly readToolDetails: (
+		toolIds: readonly string[],
+	) => Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError>;
 
 	readonly getSessionStatus: (
 		sessionId: string,
@@ -513,7 +520,8 @@ export interface ReadQueryEffect {
 	 * As {@link readSessionList}, for one session's projected transcript. A
 	 * message part carries no version of its own, so a part write advances the
 	 * message that owns it and the whole message comes back. Each row carries
-	 * its own `version`.
+	 * its own `version`. Tool outputs come back as the browser opens them
+	 * (`previewTools`).
 	 */
 	readonly readSessionTranscript: (
 		sessionId: string,
@@ -763,26 +771,68 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			ORDER BY created_at ASC, id ASC
 		) pa) AS turn_waits`;
 
-	const getToolContent = (
-		toolId: string,
-	): Effect.Effect<string | undefined, ReadQueryEffectError | SqlError> =>
+	// A part's stored tool result as text: a JSON string decoded, anything
+	// else as stored. Nested so json_type never sees malformed JSON.
+	const toolOutput = sql`
+		CASE WHEN json_valid(mp.result)
+			THEN CASE WHEN json_type(mp.result) = 'text'
+				THEN json_extract(mp.result, '$') ELSE mp.result END
+			ELSE mp.result END`;
+
+	// Parts as the browser opens them, by the rule tool-wire-projection.ts
+	// owns: a tool output over the budget comes back as the JSON of its first
+	// PREVIEW_CODE_POINTS code points with `result_bytes` its whole UTF-8 size;
+	// never-cut tools come back whole. Only results whose stored JSON is over
+	// the budget are decoded, and parts' rest_payload blobs stay behind.
+	// `source` is the FROM clause over `message_parts mp`.
+	const previewParts = (source: Fragment) => sql<MessagePartRow>`
+		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
+			duration, status, sort_order, created_at, updated_at,
+			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
+				ELSE result END AS result,
+			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+				THEN length(CAST(output AS BLOB)) END AS result_bytes
+		FROM (
+			SELECT mp.*,
+				CASE WHEN mp.type = 'tool'
+					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
+				THEN ${toolOutput} END AS output
+			${source}
+		)
+		ORDER BY message_id, sort_order`;
+
+	const readToolDetails = (
+		toolIds: readonly string[],
+	): Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const rows = yield* sql<{ content: string }>`
-				SELECT content FROM tool_content WHERE tool_id = ${toolId}`;
-			if (rows[0]) return rows[0].content;
-			// Nothing writes tool_content any more: the part keeps the whole
-			// output, and transcripts ship a preview of it.
-			const parts = yield* sql<{ result: string }>`
-				SELECT result FROM message_parts
-				WHERE type = 'tool' AND call_id = ${toolId} AND result IS NOT NULL
-				LIMIT 1`;
-			return parts[0] && toolOutputText(parts[0].result);
+			if (toolIds.length === 0) return [];
+			const rows = yield* sql<{
+				call_id: string;
+				input: string | null;
+				output: string | null;
+				version: number;
+			}>`
+				SELECT mp.call_id, mp.input, ${toolOutput} AS output, messages.version
+				FROM message_parts mp
+				JOIN messages ON messages.id = mp.message_id
+				WHERE mp.call_id IN ${sql.in(toolIds)} AND mp.call_id IS NOT NULL
+					AND mp.type = 'tool'`;
+			return rows.map((row) =>
+				toolDetail({
+					toolId: row.call_id,
+					version: row.version,
+					input: row.input,
+					output: row.output,
+				}),
+			);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
 					? e
 					: new ReadQueryEffectError({
-							operation: "getToolContent",
+							operation: "readToolDetails",
 							cause: e,
 						}),
 			),
@@ -1302,12 +1352,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								);
 					const page = rows.slice(0, pageLimit);
 					if (!forward) page.reverse();
-					const parts = page.length
-						? yield* sql<MessagePartRow>`
-								SELECT * FROM message_parts
-								WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-								ORDER BY message_id, sort_order`
-						: [];
+					const ids = sql.in(page.map((message) => message.id));
+					const parts =
+						page.length === 0
+							? []
+							: options.previewTools
+								? yield* previewParts(
+										sql`FROM message_parts mp WHERE mp.message_id IN ${ids}`,
+									)
+								: yield* sql<MessagePartRow>`
+										SELECT * FROM message_parts
+										WHERE message_id IN ${ids}
+										ORDER BY message_id, sort_order`;
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(page, parts),
 						hasMore: rows.length > pageLimit,
@@ -1543,9 +1599,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								WHERE session_id = ${sessionId}
 									AND version > ${floor} AND version <= ${ceiling}
 							)
-							SELECT mp.* FROM message_parts mp
-							JOIN target_messages tm ON mp.message_id = tm.id
-							ORDER BY mp.message_id, mp.sort_order`;
+							${previewParts(
+								sql`FROM message_parts mp JOIN target_messages tm ON mp.message_id = tm.id`,
+							)}`;
 					}
 					const removed =
 						range === undefined
@@ -1758,7 +1814,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		);
 
 	return {
-		getToolContent,
+		readToolDetails,
 		getSessionStatus,
 		getSession,
 		getGoalDetails,

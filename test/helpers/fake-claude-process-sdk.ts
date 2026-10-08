@@ -38,6 +38,11 @@ import {
 	provisionalRejectedLimitWithoutReset,
 	provisionalUsageLimitTurnWithoutReset,
 } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn-no-reset.js";
+import {
+	LONG_COMMAND,
+	LONG_QUESTION,
+	LONG_RESULT,
+} from "../fixtures/tool-previews.js";
 
 type QuotaBehavior =
 	| "available"
@@ -65,6 +70,7 @@ export type ProcessMark =
 			upToMessageId: string | undefined;
 	  }
 	| { kind: "stop-held"; queryId: string }
+	| { kind: "question-asked"; prompt: string }
 	| {
 			kind: "handoff-first-turn-died";
 			prompt: string;
@@ -943,27 +949,80 @@ function query(params: {
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
-				await params.options.canUseTool(
-					"AskUserQuestion",
-					{
-						questions: [
+				const toolUseID = randomUUID();
+				const longQuestion = request.startsWith("question-long-");
+				const questionInput = longQuestion
+					? LONG_QUESTION
+					: {
+							questions: [
+								{
+									question: "Continue?",
+									header: "Runner",
+									options: [
+										{ label: "Continue", description: "Continue the turn" },
+									],
+								},
+							],
+						};
+				// The long question also reaches the transcript as its tool call.
+				if (longQuestion) {
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index: 1,
+						content_block: {
+							type: "tool_use",
+							id: toolUseID,
+							name: "AskUserQuestion",
+							input: questionInput,
+						},
+					});
+					yield stream(sessionId, { type: "content_block_stop", index: 1 });
+				}
+				mark({ kind: "question-asked", prompt });
+				await params.options.canUseTool("AskUserQuestion", questionInput, {
+					signal:
+						params.options.abortController?.signal ??
+						new AbortController().signal,
+					toolUseID,
+					requestId: randomUUID(),
+				});
+			}
+			// A long Bash call. With a proof directory it stays running until the
+			// spec releases its result; without one it completes straight away.
+			if (request.startsWith("tool-long-")) {
+				const toolUseID = randomUUID();
+				yield stream(sessionId, {
+					type: "content_block_start",
+					index: 1,
+					content_block: {
+						type: "tool_use",
+						id: toolUseID,
+						name: "Bash",
+						input: { command: LONG_COMMAND },
+					},
+				});
+				yield stream(sessionId, { type: "content_block_stop", index: 1 });
+				const release = proof && join(dirname(proof), "release-tool-long");
+				while (release && !existsSync(release) && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "user",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: [
 							{
-								question: "Continue?",
-								header: "Runner",
-								options: [
-									{ label: "Continue", description: "Continue the turn" },
-								],
+								type: "tool_result",
+								tool_use_id: toolUseID,
+								content: LONG_RESULT,
+								is_error: false,
 							},
 						],
 					},
-					{
-						signal:
-							params.options.abortController?.signal ??
-							new AbortController().signal,
-						toolUseID: randomUUID(),
-						requestId: randomUUID(),
-					},
-				);
+				} as unknown as SDKMessage;
 			}
 			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();

@@ -74,7 +74,7 @@ const makeReadQuery = (
 	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"],
 	provider: "claude" | "opencode" = "claude",
 ): ReadQueryEffect => ({
-	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider))),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),

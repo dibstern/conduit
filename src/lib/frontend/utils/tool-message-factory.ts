@@ -3,7 +3,7 @@
 // Eliminates duplicated construction logic across the two call sites.
 
 import type { ToolStatus } from "../../shared-types.js";
-import type { ToolMessage } from "../types.js";
+import type { ToolMessage, ToolPreview } from "../types.js";
 
 /** Initialization data for creating a ToolMessage. */
 export interface ToolMessageInit {
@@ -16,8 +16,7 @@ export interface ToolMessageInit {
 	input?: unknown;
 	metadata?: Record<string, unknown>;
 	messageId?: string;
-	isTruncated?: boolean;
-	fullContentLength?: number;
+	preview?: ToolPreview;
 	createdAt?: number;
 	endedAt?: number;
 }
@@ -40,10 +39,7 @@ export function createToolMessage(init: ToolMessageInit): ToolMessage {
 		...(init.input !== undefined && { input: init.input }),
 		...(init.metadata !== undefined && { metadata: init.metadata }),
 		...(init.messageId !== undefined && { messageId: init.messageId }),
-		...(init.isTruncated !== undefined && { isTruncated: init.isTruncated }),
-		...(init.fullContentLength !== undefined && {
-			fullContentLength: init.fullContentLength,
-		}),
+		...(init.preview !== undefined && { preview: init.preview }),
 		...(init.createdAt !== undefined && { createdAt: init.createdAt }),
 		...(init.endedAt !== undefined && { endedAt: init.endedAt }),
 	};

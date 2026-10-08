@@ -3,13 +3,13 @@
 // Pure conversion with no I/O.
 
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
-import { truncateContent } from "../relay/truncate-content.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
 	ToolStatus,
 } from "../shared-types.js";
 import type { MessagePartRow, MessageWithParts } from "./read-model-types.js";
+import { projectTool } from "./tool-wire-projection.js";
 
 function snapshotRowToHistory(
 	row: MessageWithParts,
@@ -38,10 +38,35 @@ function snapshotRowToHistory(
 		) {
 			throw new TypeError(`Invalid snapshot part for ${row.id}`);
 		}
+		const state =
+			"state" in part && typeof part.state === "object" && part.state !== null
+				? part.state
+				: undefined;
 		return {
 			...part,
 			id: part.id,
 			type: part.type as HistoryMessagePart["type"],
+			...(state === undefined
+				? {}
+				: {
+						state: {
+							...state,
+							...projectTool({
+								name:
+									"tool" in part && typeof part.tool === "string"
+										? part.tool
+										: undefined,
+								input:
+									"input" in state && state.input !== undefined
+										? JSON.stringify(state.input)
+										: undefined,
+								output:
+									"output" in state && typeof state.output === "string"
+										? state.output
+										: undefined,
+							}),
+						},
+					}),
 		};
 	});
 	return {
@@ -93,10 +118,7 @@ export function toolOutputText(result: string): string {
 	}
 }
 
-function partRowToHistoryPart(
-	row: MessagePartRow,
-	previewToolOutput: boolean,
-): HistoryMessagePart {
+function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	if (row.type === "compaction") {
 		const metadata =
 			row.metadata != null ? parseObjectJson(row.metadata) : undefined;
@@ -153,33 +175,16 @@ function partRowToHistoryPart(
 		row.result != null ||
 		row.metadata != null
 	) {
-		const stateObj: {
-			status?: ToolStatus;
-			input?: unknown;
-			output?: string;
-			isTruncated?: boolean;
-			fullContentLength?: number;
-			metadata?: Record<string, unknown>;
-			[key: string]: unknown;
-		} = {};
+		const stateObj: NonNullable<HistoryMessagePart["state"]> = {
+			...projectTool({
+				name: row.tool_name,
+				input: row.input,
+				output: row.result == null ? undefined : toolOutputText(row.result),
+				outputBytes: row.result_bytes,
+			}),
+		};
 		if (row.status != null && KNOWN_TOOL_STATUSES.has(row.status)) {
 			stateObj["status"] = row.status as ToolStatus;
-		}
-		if (row.input != null) {
-			try {
-				stateObj["input"] = JSON.parse(row.input as string);
-			} catch {
-				stateObj["input"] = row.input;
-			}
-		}
-		if (row.result != null) {
-			const output = toolOutputText(row.result);
-			const preview = previewToolOutput ? truncateContent(output) : undefined;
-			stateObj["output"] = preview?.content ?? output;
-			if (preview?.fullContentLength !== undefined) {
-				stateObj["isTruncated"] = true;
-				stateObj["fullContentLength"] = preview.fullContentLength;
-			}
 		}
 		if (row.metadata != null) {
 			const metadata = parseObjectJson(row.metadata);
@@ -210,13 +215,12 @@ function partRowToHistoryPart(
  * Uses all ascending rows from the read model to detect exact `hasMore`, then
  * keeps the newest `pageSize` rows while preserving ascending display order.
  *
- * `toolOutputPreview` cuts long tool output the way the live stream does, for
- * readers that can fetch the rest through GetToolContent. A busy session
- * otherwise ships megabytes of output it mostly never shows.
+ * Tool parts go through the tool wire projection: long fields travel as
+ * previews the browser expands through GetToolDetails.
  */
 export function messageRowsToHistory(
 	rows: MessageWithParts[],
-	opts: { pageSize: number; toolOutputPreview?: boolean },
+	opts: { pageSize: number },
 ): HistoryResult {
 	// The read query returns oldest-to-newest; keep the tail for REST parity.
 	const hasMore = rows.length > opts.pageSize;
@@ -225,9 +229,7 @@ export function messageRowsToHistory(
 	const messages: HistoryMessage[] = pageRows.map((row) => {
 		const snapshot = snapshotRowToHistory(row);
 		if (snapshot) return snapshot;
-		const parts = row.parts.map((part) =>
-			partRowToHistoryPart(part, opts.toolOutputPreview === true),
-		);
+		const parts = row.parts.map(partRowToHistoryPart);
 
 		return {
 			id: row.id,

@@ -45,7 +45,7 @@ const makeReadQuery = (
 		ReadQueryEffect["getLatestTurnModelExecution"]
 	>,
 ): ReadQueryEffect => ({
-	getToolContent: () => Effect.succeed(undefined),
+	readToolDetails: () => Effect.succeed([]),
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),

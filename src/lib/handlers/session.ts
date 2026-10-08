@@ -419,12 +419,12 @@ export const loadMoreHistoryForSession = ({
 		const page = yield* readQuery.readSessionTranscriptPage(sessionId, {
 			...(before ? { before } : {}),
 			limit: 50,
+			previewTools: true,
 		});
 		return {
 			sessionId,
 			messages: messageRowsToHistory(page.messages, {
 				pageSize: page.messages.length,
-				toolOutputPreview: true,
 			}).messages,
 			hasMore: page.hasMore,
 		};

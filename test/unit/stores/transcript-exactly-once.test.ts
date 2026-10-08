@@ -46,7 +46,11 @@ const assistant = (text: string): HistoryMessage => ({
 			type: "tool",
 			callID: "tool-1",
 			tool: "Read",
-			state: { status: "completed", input: {}, output: "ok" },
+			state: {
+				status: "completed",
+				input: { _tag: "whole", value: {} },
+				output: { _tag: "whole", text: "ok" },
+			},
 		},
 	],
 });
