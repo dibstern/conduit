@@ -22,6 +22,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -65,7 +66,9 @@ describe("WsRpcServerLayer ResolveSession", () => {
 });
 
 describe("WsRpcServerLayer ListSessions", () => {
-	it.effect("publishes a root summary when a child wakes", () =>
+	// The root's row shows only its own snooze, so a child waking is not a
+	// visible change and the root is not resent.
+	it.effect("does not resend a root summary when only a child wakes", () =>
 		Effect.gen(function* () {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
@@ -76,15 +79,18 @@ describe("WsRpcServerLayer ListSessions", () => {
 				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
 				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
 			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
+			yield* sql`UPDATE sessions SET root_id = 'root'`;
+			yield* refreshSidebar(["root"], 1);
 			const reader = yield* ReadQueryEffectTag;
-			const before = yield* reader.readSessionList({ roots: true });
+			const before = yield* reader.readSessionList();
 			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
 			expect(before.rows[0]?.version).toBe(1);
 			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
 				WHERE id = 'child'`;
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
-			const after = yield* reader.readSessionList({ after: 1, roots: true });
-			expect(after.rows).toEqual([{ item: before.rows[0]?.item, version: 2 }]);
+			yield* refreshSidebar(["child"], 2);
+			const after = yield* reader.readSessionList({ after: 1 });
+			expect(after).toEqual({ rows: [], version: 2 });
 		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 

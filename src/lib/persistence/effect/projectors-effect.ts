@@ -17,6 +17,7 @@ import {
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
+import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
@@ -213,6 +214,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const written: string[] = [];
+			// Families this event can take members from, which naming the
+			// sessions it wrote does not reach.
+			const formerRoots: string[] = [];
 
 			if (event.type === "session.goal_changed" && event.data.goal) {
 				const goal = event.data.goal;
@@ -246,6 +250,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 						SESSION_SUBTREE_SQL,
 						[stmt.removeSession],
 					);
+					const roots = yield* sql<{ root_id: string | null }>`
+						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
+					formerRoots.push(...roots.flatMap((row) => row.root_id ?? []));
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
 					written.push(...subtree.map((row) => row.id));
 					continue;
@@ -256,7 +263,12 @@ export const makeSessionProjector = (): EffectProjector => ({
 				);
 				written.push(...rows.map((row) => row.id));
 			}
-			return written;
+			// Only these two write a parent.
+			if (event.type === "session.created" || event.type === "session.forked")
+				formerRoots.push(...(yield* rerootSession(event.data.sessionId)));
+			const touch = yield* stampSessions(written, ctx.version);
+			yield* refreshSidebar(touch.stamped, ctx.version, formerRoots);
+			return touch;
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -267,7 +279,6 @@ export const makeSessionProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -1303,9 +1314,12 @@ export const makeApprovalProjector = (): EffectProjector => ({
 							AND (completed_at IS NULL OR completed_at >= ${approval.created_at})`;
 						messageIds.push(...ids(turns));
 					}
+					const sessions = yield* stampSessions(owners(written), ctx.version);
+					// The pending counts roll up into the family's row.
+					yield* refreshSidebar(sessions.stamped, ctx.version);
 					return mergeTouches([
 						yield* stampMessage(messageIds, ctx.version),
-						yield* stampSessions(owners(written), ctx.version),
+						sessions,
 					]);
 				}),
 			),

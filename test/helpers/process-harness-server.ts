@@ -1,5 +1,5 @@
 import { subscribe } from "node:diagnostics_channel";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Effect, Fiber } from "effect";
@@ -17,6 +17,12 @@ function recordServerMetrics(file: string): void {
 		string,
 		{ reads: Record<string, number>; windows: Set<number>; ranges: Set<string> }
 	> = {};
+	const sidebarReads: { at: number; ms: number; rows: number }[] = [];
+	subscribe("conduit:sidebar-read", (message) => {
+		const read =
+			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
+		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
+	});
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
@@ -41,31 +47,33 @@ function recordServerMetrics(file: string): void {
 		if (ms >= 20) stalls.push({ at: Date.now(), ms });
 		last = now;
 	}, tickMs).unref();
-	setInterval(
-		() =>
-			writeFileSync(
-				file,
-				JSON.stringify({
-					pid: process.pid,
-					startedAt,
-					flushedAt: Date.now(),
-					stalls,
-					reads,
-					changesRead: windows.size,
-					sources: Object.fromEntries(
-						Object.entries(sources).map(([name, source]) => [
-							name,
-							{
-								reads: source.reads,
-								changesRead: source.windows.size,
-								windowsRead: source.ranges.size,
-							},
-						]),
-					),
-				}),
-			),
-		250,
-	).unref();
+	// Written beside the file and renamed over it: past one 8 KB write, a spec
+	// polling the file would otherwise read it half written.
+	setInterval(() => {
+		writeFileSync(
+			`${file}.tmp`,
+			JSON.stringify({
+				pid: process.pid,
+				startedAt,
+				flushedAt: Date.now(),
+				stalls,
+				reads,
+				changesRead: windows.size,
+				sources: Object.fromEntries(
+					Object.entries(sources).map(([name, source]) => [
+						name,
+						{
+							reads: source.reads,
+							changesRead: source.windows.size,
+							windowsRead: source.ranges.size,
+						},
+					]),
+				),
+				sidebarReads,
+			}),
+		);
+		renameSync(`${file}.tmp`, file);
+	}, 250).unref();
 }
 
 async function main(): Promise<void> {

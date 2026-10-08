@@ -307,7 +307,7 @@ export const deleteSession = (sessionId: string) =>
 
 		const sessions =
 			readQueryOption._tag === "Some"
-				? (yield* readQueryOption.value.readSessionList().pipe(
+				? (yield* readQueryOption.value.getSessionLineage().pipe(
 						Effect.mapError(
 							(cause) =>
 								new SessionManagerError({
@@ -315,7 +315,7 @@ export const deleteSession = (sessionId: string) =>
 									cause,
 								}),
 						),
-					)).rows.map(({ item }) => item)
+					)).rows
 				: [];
 		// The provider that owns the session is row-only state, never on the wire.
 		const row =
@@ -335,7 +335,7 @@ export const deleteSession = (sessionId: string) =>
 		const pendingParents = [sessionId];
 		for (const parentId of pendingParents) {
 			for (const candidate of sessions) {
-				if (candidate.parentID === parentId && !discovered.has(candidate.id)) {
+				if (candidate.parent_id === parentId && !discovered.has(candidate.id)) {
 					discovered.add(candidate.id);
 					childSessionIds.push(candidate.id);
 					pendingParents.push(candidate.id);

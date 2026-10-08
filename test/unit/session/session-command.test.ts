@@ -349,9 +349,8 @@ describe("applySessionCommand", () => {
 
 				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
 				const reads = yield* makeReadQueryEffect;
-				const snapshot = yield* reads.readSessionList();
 				expect(
-					snapshot.rows.find(({ item }) => item.id === forked.id)?.item,
+					(yield* reads.listSessionInfos()).find(({ id }) => id === forked.id),
 				).toMatchObject({ forkMessageId: "msg-7", forkPointTimestamp: 123 });
 
 				// The fork keeps msg-7; OpenCode copies what precedes its messageID.

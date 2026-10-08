@@ -10,6 +10,7 @@ import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
+import { refreshSidebar } from "./sidebar-projection.js";
 
 export type CommitAndSignalFailure =
 	| EventStoreError
@@ -213,6 +214,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 											Effect.provideService(SqlClient.SqlClient, sql),
 										);
 										const sessionIds = yield* apply(version);
+										// A direct write to a session row can change what its
+										// family shows in the sidebar, as a projected one can.
+										yield* refreshSidebar(sessionIds, version).pipe(
+											Effect.provideService(SqlClient.SqlClient, sql),
+										);
 										// No rows, no announcement. An advance naming a row that was
 										// not touched sends every subscriber to re-query it for
 										// nothing; worse, it claims a version for rows that did not

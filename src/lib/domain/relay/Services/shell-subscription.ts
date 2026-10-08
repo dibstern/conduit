@@ -20,8 +20,9 @@
 // once per reconnect, which is what the unary session list cost on every
 // reconnect anyway.
 
+import { channel } from "node:diagnostics_channel";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Effect, Option, Stream } from "effect";
+import { Duration, Effect, Option, Stream } from "effect";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
@@ -36,6 +37,14 @@ import {
 import { SessionEventBusTag } from "./session-event-bus.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
+
+/** What one sidebar read cost the server, for load tests. */
+export interface SidebarRead {
+	readonly ms: number;
+	readonly rows: number;
+}
+
+const sidebarReads = channel("conduit:sidebar-read");
 
 /**
  * Subscribe to the shell (session-list) stream. Cold start and resume both emit
@@ -71,29 +80,37 @@ export const subscribeShell = (
 					name: "shell",
 					shareReads: true,
 					read: (range) =>
-						readQuery
-							.readSessionList({ ...range, roots: true, backgroundOf })
-							.pipe(
-								Effect.map((list) => ({
-									...list,
-									rows: list.rows.map((row) => {
-										const compacting = compactingOf?.(row.item.id);
-										const retrying = retryingOf?.(row.item.id);
-										return compacting === undefined && retrying === undefined
-											? row
-											: {
-													...row,
-													item: {
-														...row.item,
-														...(compacting === undefined ? {} : { compacting }),
-														...(retrying === undefined ? {} : { retrying }),
-													},
-												};
-									}),
-								})),
-							),
-					// A descendant advance can change its root summary. The read
-					// selects affected roots by the highest descendant version.
+						readQuery.readSessionList({ ...range, backgroundOf }).pipe(
+							Effect.timed,
+							Effect.map(([elapsed, list]) => {
+								if (sidebarReads.hasSubscribers)
+									sidebarReads.publish({
+										ms: Duration.toMillis(elapsed),
+										rows: list.rows.length,
+									} satisfies SidebarRead);
+								return list;
+							}),
+							Effect.map((list) => ({
+								...list,
+								rows: list.rows.map((row) => {
+									const compacting = compactingOf?.(row.item.id);
+									const retrying = retryingOf?.(row.item.id);
+									return compacting === undefined && retrying === undefined
+										? row
+										: {
+												...row,
+												item: {
+													...row.item,
+													...(compacting === undefined ? {} : { compacting }),
+													...(retrying === undefined ? {} : { retrying }),
+												},
+											};
+								}),
+							})),
+						),
+					// A descendant advance can change its root summary. The
+					// projectors move the root's sidebar row when it does, so the
+					// read finds it by version.
 					route: (advance) => ({
 						moved: advance.sessionIds.length > 0,
 						removed: advance.removedSessionIds,

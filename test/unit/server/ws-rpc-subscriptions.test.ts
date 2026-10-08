@@ -213,9 +213,9 @@ describe("subscription RPC handlers", () => {
 				);
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
-					(yield* readQuery.readSessionList()).rows.find(
-						({ item }) => item.id === "fork-1",
-					)?.item,
+					(yield* readQuery.listSessionInfos()).find(
+						({ id }) => id === "fork-1",
+					),
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const envelopes = yield* Queue.unbounded<unknown>();
@@ -229,7 +229,9 @@ describe("subscription RPC handlers", () => {
 					rows: [expect.objectContaining({ id: "parent-1" })],
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
-				const renamedVersion = yield* commit(
+				// The fork's title is not on its root's row, so the rename moves
+				// nothing; the fork starting work does.
+				yield* commit(
 					canonicalEvent(
 						"session.renamed",
 						"fork-1",
@@ -237,10 +239,21 @@ describe("subscription RPC handlers", () => {
 						{ provider: "opencode", createdAt: 2 },
 					),
 				);
+				const busyVersion = yield* commit(
+					canonicalEvent(
+						"session.status",
+						"fork-1",
+						{ sessionId: "fork-1", status: "busy" },
+						{ provider: "opencode", createdAt: 3 },
+					),
+				);
 				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "upsert",
-					sequence: renamedVersion,
-					item: expect.objectContaining({ id: "parent-1" }),
+					sequence: busyVersion,
+					item: expect.objectContaining({
+						id: "parent-1",
+						attention: "working",
+					}),
 				});
 				// The shell rebases on resume rather than catching up: a deleted row
 				// leaves no version behind (§8), so the only honest answer to "what
@@ -254,7 +267,7 @@ describe("subscription RPC handlers", () => {
 				expect(Array.from(replay)).toMatchObject([
 					{
 						_tag: "snapshot",
-						sequence: renamedVersion,
+						sequence: busyVersion,
 						rows: [expect.objectContaining({ id: "parent-1" })],
 					},
 					{ _tag: "synchronized" },

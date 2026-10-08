@@ -35,6 +35,7 @@ import {
 	messageRowsToHistory,
 	toolOutputText,
 } from "../session-history-adapter.js";
+import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
@@ -270,6 +271,40 @@ export const sessionRowsToSessionInfoList = (
 	});
 };
 
+const decodeSidebarRow = Schema.decodeUnknownSync(
+	Schema.parseJson(SidebarRowSchema),
+);
+
+/**
+ * A stored sidebar row as the sidebar shows it now. Background work and snooze
+ * depend on the moment of reading, so they are applied here, as the full
+ * session list applies them, and never stored.
+ */
+const sidebarItem = (
+	row: SidebarRow,
+	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
+): SessionInfo => {
+	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
+	const background = backgroundOf?.(row.session.id);
+	const quiet =
+		row.session.attention === "idle" || row.session.attention === "done-unread";
+	return {
+		...row.session,
+		updatedAt: row.lastActivity,
+		...(work.has("working") ? { processing: true } : {}),
+		...(background?.work ? { backgroundWork: background.work } : {}),
+		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
+		...deriveSessionSnooze(row.snooze),
+		attention: !quiet
+			? row.session.attention
+			: work.has("working")
+				? "working"
+				: work.has("monitoring")
+					? "monitoring"
+					: row.session.attention,
+	};
+};
+
 export class ReadQueryEffectError extends Data.TaggedError(
 	"ReadQueryEffectError",
 )<{
@@ -425,8 +460,10 @@ export interface ReadQueryEffect {
 	readonly readSessionList: (range?: {
 		readonly after?: number;
 		readonly through?: number;
-		readonly roots?: boolean;
-		/** Only the family (root and descendants) of this session. */
+		/**
+		 * Only the family (root and descendants) of this session. Without it,
+		 * the sidebar: one row per top-level session, its family rolled up.
+		 */
 		readonly familyOf?: string;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
 		readonly backgroundOf?: (
@@ -1210,7 +1247,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const readSessionList = (range?: {
 		readonly after?: number;
 		readonly through?: number;
-		readonly roots?: boolean;
 		readonly familyOf?: string;
 		readonly backgroundOf?: (
 			sessionId: string,
@@ -1231,32 +1267,27 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
-					const rows: readonly (SessionRow & {
-						readonly effective_version?: number;
-					})[] =
-						range?.familyOf !== undefined
-							? yield* sql.unsafe<SessionRow & { effective_version: number }>(
-									sessionFamilyWindowQuery,
-									[range.familyOf, floor, ceiling],
-								)
-							: range?.roots
-								? yield* sql<SessionRow & { effective_version: number }>`
-							WITH RECURSIVE descendants(root_id, id, version) AS (
-								SELECT id, id, version FROM sessions WHERE parent_id IS NULL
-								UNION ALL
-								SELECT d.root_id, child.id, child.version FROM sessions child
-								JOIN descendants d ON child.parent_id = d.id
-							), roots AS (
-								SELECT root_id, MAX(version) AS effective_version FROM descendants GROUP BY root_id
-							)
-							SELECT sessions.*, roots.effective_version FROM sessions
-							JOIN roots ON roots.root_id = sessions.id
-							WHERE roots.effective_version > ${floor} AND roots.effective_version <= ${ceiling}
-							ORDER BY sessions.updated_at DESC`
-								: yield* sql<SessionRow>`
-							SELECT * FROM sessions
+					if (range?.familyOf === undefined) {
+						// The sidebar table holds each family rolled up already, so
+						// this reads the rows that moved and nothing else.
+						const stored = yield* sql<{ row: string }>`
+							SELECT row FROM session_sidebar
 							WHERE version > ${floor} AND version <= ${ceiling}
-							ORDER BY updated_at DESC`;
+							ORDER BY last_activity DESC, session_id DESC`;
+						return {
+							rows: stored.map(({ row }) => {
+								const sidebar = decodeSidebarRow(row);
+								return {
+									item: sidebarItem(sidebar, range?.backgroundOf),
+									version: sidebar.version,
+								};
+							}),
+							version,
+						};
+					}
+					const rows = yield* sql.unsafe<
+						SessionRow & { effective_version: number }
+					>(sessionFamilyWindowQuery, [range.familyOf, floor, ceiling]);
 					const [lineage, approvals, projectedStatuses] = yield* Effect.all([
 						getSessionLineage(),
 						countPendingApprovalsBySession(),
@@ -1298,7 +1329,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							return [
 								{
 									item,
-									version: row.effective_version ?? row.version,
+									version: row.effective_version,
 								},
 							];
 						}),

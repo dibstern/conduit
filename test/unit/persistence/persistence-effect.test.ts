@@ -154,6 +154,7 @@ describe("Persistence Effect", () => {
 					"sent_alerts",
 					"session_goal_checks",
 					"session_providers",
+					"session_sidebar",
 					"sessions",
 					"tool_content",
 					"turns",
@@ -285,6 +286,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 35, name: "sessions_side_thread" },
 				{ migration_id: 36, name: "sessions_limit_recovery" },
 				{ migration_id: 37, name: "sessions_resumes" },
+				{ migration_id: 38, name: "session_sidebar" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

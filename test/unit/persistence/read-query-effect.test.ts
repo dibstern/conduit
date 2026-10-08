@@ -19,6 +19,10 @@ import {
 	ReadQueryEffectTag,
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	refreshSidebar,
+	rerootSession,
+} from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import {
@@ -107,6 +111,7 @@ describe("typed session row derivations", () => {
 				yield* makeEffectSqlMigrator();
 				yield* seedSession("monitor");
 				yield* seedSession("idle");
+				yield* projectSidebar();
 				const tasks = [
 					{
 						id: "watch-1",
@@ -497,6 +502,7 @@ describe("ReadQueryEffect snapshot consistency", () => {
 						yield* seedSession("B");
 						const sql = yield* SqlClient.SqlClient;
 						yield* sql`UPDATE sessions SET version = 5 WHERE id = 'B'`;
+						yield* projectSidebar(5);
 						yield* sql`INSERT INTO messages
 						(id, session_id, role, text, created_at, updated_at, version)
 						VALUES ('mB', 'B', 'user', 'Before deletion', 1, 1, 5)`;
@@ -556,6 +562,21 @@ function seedSession(
 				${options.updatedAt ?? 1},
 				${options.updatedAt ?? 1}
 			)`;
+	});
+}
+
+/** What the projectors keep for rows these tests insert directly. */
+function projectSidebar(version = 0) {
+	return Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Roots first, so each child finds its parent's root.
+		const rows = yield* sql<{ id: string }>`
+			SELECT id FROM sessions ORDER BY parent_id IS NOT NULL`;
+		for (const { id } of rows) yield* rerootSession(id);
+		yield* refreshSidebar(
+			rows.map(({ id }) => id),
+			version,
+		);
 	});
 }
 
@@ -1324,25 +1345,13 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("root");
 			yield* seedForkedSession;
+			yield* projectSidebar();
 			const readQuery = yield* makeReadQueryEffect;
 
+			// One row per top-level session, carrying its family's roll-up.
 			expect(
 				(yield* readQuery.readSessionList()).rows.map(({ item }) => item),
 			).toEqual([
-				{
-					id: "child",
-					limitRecovery: null,
-					resumes: [],
-					title: "Forked",
-					status: "busy",
-					createdAt: 5,
-					updatedAt: 9,
-					parentID: "root",
-					forkMessageId: "msg_9",
-					messageCount: 0,
-					processing: true,
-					attention: "working",
-				},
 				{
 					id: "root",
 					limitRecovery: null,
@@ -1381,6 +1390,7 @@ describe("ReadQueryEffect session list reads", () => {
 				('q2', 'noisy', 'question', 'pending', 2),
 				('p1', 'noisy', 'permission', 'pending', 3),
 				('q3', 'noisy', 'question', 'resolved', 4)`;
+				yield* projectSidebar();
 				const readQuery = yield* makeReadQueryEffect;
 
 				// Counts come off the same rows the approval projector writes — the
@@ -1428,6 +1438,7 @@ describe("ReadQueryEffect session list reads", () => {
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("fresh");
+			yield* projectSidebar();
 			const readQuery = yield* makeReadQueryEffect;
 
 			const entry = (yield* readQuery.readSessionList()).rows.find(
@@ -1442,17 +1453,20 @@ describe("ReadQueryEffect session list reads", () => {
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("root");
+			yield* seedSession("other");
 			yield* seedForkedSession;
+			yield* projectSidebar();
 			const sql = yield* SqlClient.SqlClient;
-			// What a commit leaves behind: the counter moved, and the row that
-			// commit wrote carries the number it moved to.
+			// What a commit leaves behind: the counter moved, and the family row
+			// that commit visibly changed carries the number it moved to.
 			yield* sql`UPDATE read_model_counter SET value = 7 WHERE id = 1`;
-			yield* sql`UPDATE sessions SET version = 7 WHERE id = 'child'`;
+			yield* sql`UPDATE sessions SET status = 'idle', version = 7 WHERE id = 'child'`;
+			yield* refreshSidebar(["child"], 7);
 			const readQuery = yield* makeReadQueryEffect;
 
 			const base = yield* readQuery.readSessionList();
 			expect(base.version).toBe(7);
-			expect(base.rows.map(({ item }) => item.id)).toEqual(["child", "root"]);
+			expect(base.rows.map(({ item }) => item.id)).toEqual(["root", "other"]);
 			// Each row carries the version it moved at, not the counter, so a
 			// replayed row keeps the identity it was first delivered under.
 			expect(base.rows.map(({ version }) => version)).toEqual([7, 0]);
@@ -1467,7 +1481,7 @@ describe("ReadQueryEffect session list reads", () => {
 			expect((yield* readQuery.readSessionList({ after: 7 })).rows).toEqual([]);
 
 			// `through` is the half that keeps a slow read honest: bounded below
-			// the commit that moved "child", it reports nothing even though the
+			// the commit that moved "root", it reports nothing even though the
 			// counter it returns is already past it.
 			const bounded = yield* readQuery.readSessionList({
 				after: 6,
@@ -1481,6 +1495,7 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("root");
 			yield* seedForkedSession;
+			yield* projectSidebar();
 			const readQuery = yield* makeReadQueryEffect;
 			const snapshot = yield* readQuery.readSessionList();
 			const queried = yield* readQuery.readSessionList({ after: -1 });

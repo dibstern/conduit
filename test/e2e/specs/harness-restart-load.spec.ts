@@ -49,6 +49,11 @@ interface ServerMetrics extends Reads {
 	 * distinct version windows each read.
 	 */
 	readonly sources: Record<string, Reads & { readonly windowsRead: number }>;
+	readonly sidebarReads: readonly {
+		readonly at: number;
+		readonly ms: number;
+		readonly rows: number;
+	}[];
 	readonly flushedAt: number;
 }
 
@@ -136,6 +141,9 @@ const serverWindow = (
 	to: number,
 ) => {
 	const stalls = end.stalls.filter(({ at }) => at >= from && at <= to);
+	const sidebar = end.sidebarReads.filter(({ at }) => at >= from && at <= to);
+	const sidebarMs = sidebar.map(({ ms }) => ms).sort((a, b) => a - b);
+	const round = (ms: number) => Math.round(ms * 100) / 100;
 	return {
 		stalls: {
 			count: stalls.length,
@@ -156,6 +164,14 @@ const serverWindow = (
 				},
 			]),
 		),
+		// Server time spent in sidebar (shell) reads of every kind.
+		sidebarReads: {
+			count: sidebar.length,
+			totalMs: round(sidebarMs.reduce((total, ms) => total + ms, 0)),
+			medianMs: round(sidebarMs[Math.floor(sidebarMs.length / 2)] ?? 0),
+			maxMs: round(sidebarMs.at(-1) ?? 0),
+			rows: sidebar.reduce((total, { rows }) => total + rows, 0),
+		},
 	};
 };
 

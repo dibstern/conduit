@@ -24,6 +24,7 @@ import {
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSION_GOALS_MIGRATION,
+	SESSION_SIDEBAR_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
@@ -41,6 +42,7 @@ import {
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
+import { refreshSidebar } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 
@@ -459,6 +461,7 @@ const appendedSessionColumns = [
 	"side_thread",
 	"limit_recovery",
 	"resumes",
+	"root_id",
 ] as const;
 
 function sameStrings(
@@ -1040,6 +1043,22 @@ export const effectMigrationEntries = {
 		"resumes",
 		readMigrationSql(SESSIONS_RESUMES_MIGRATION),
 	),
+	// Stores each session's top-level parent, then fills the sidebar table from
+	// it: one pass over every family, at the version the store is at.
+	"0038_session_sidebar": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "root_id")) return;
+		yield* executeSqlStatements(readMigrationSql(SESSION_SIDEBAR_MIGRATION));
+		const roots = yield* sql<{ id: string }>`
+			SELECT id FROM sessions WHERE parent_id IS NULL`;
+		const [counter] = yield* sql<{ value: number }>`
+			SELECT value FROM read_model_counter WHERE id = 1`;
+		yield* refreshSidebar(
+			roots.map((row) => row.id),
+			counter?.value ?? 0,
+		);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { announceSidebar } from "../../../persistence/effect/sidebar-projection.js";
 
 /**
  * The only writer of `sessions.seen_version` (ADR-0004, Scope). Read state is a
@@ -69,7 +70,11 @@ export const announceBackgroundWork = (sessionId: string) =>
 			stamp((version) =>
 				sql<{ id: string }>`
 					UPDATE sessions SET version = ${version} WHERE id = ${sessionId}
-					RETURNING id`.pipe(Effect.map((rows) => rows.map((row) => row.id))),
+					RETURNING id`.pipe(
+					Effect.map((rows) => rows.map((row) => row.id)),
+					// Its family's sidebar row cannot see the change either.
+					Effect.tap(() => announceSidebar(sessionId, version)),
+				),
 			),
 		);
 	});
