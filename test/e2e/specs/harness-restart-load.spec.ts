@@ -8,7 +8,9 @@
 // restart is sent only the sidebar changes it missed (conduit-test-y7eo.3). A
 // long turn's live frames stay flat, and a resume after a restart brings only
 // the parts that moved yet lands on the transcript a cold open shows
-// (conduit-test-y7eo.8).
+// (conduit-test-y7eo.8). Tool-detail prefetch (conduit-test-y7eo.11) is kept
+// out: no device sees a turn activity block on screen, so the numbers measure
+// the open alone.
 //
 // Wire sizes are WebSocket payloads as the page sees them, so after any
 // permessage-deflate inflation. Event-loop stalls come from a 10ms sampler in
@@ -244,6 +246,25 @@ test("opens the heavy session after a restart under load", async ({
 			...(hasTouch === undefined ? {} : { hasTouch }),
 		});
 		const page = await context.newPage();
+		// No turn activity block reports itself on screen, so nothing is
+		// prefetched (conduit-test-y7eo.11) and every window measures only
+		// what opening and restarting cost.
+		await page.addInitScript(() => {
+			const Observer = window.IntersectionObserver;
+			window.IntersectionObserver = class extends Observer {
+				constructor(
+					callback: IntersectionObserverCallback,
+					options?: IntersectionObserverInit,
+				) {
+					super((entries, observer) => {
+						const shown = entries.filter(
+							({ target }) => !target.matches(".turn-activity"),
+						);
+						if (shown.length > 0) callback(shown, observer);
+					}, options);
+				}
+			};
+		});
 		page.on("websocket", (socket) => {
 			const path = new URL(socket.url()).pathname;
 			const record =
@@ -389,18 +410,12 @@ test("opens the heavy session after a restart under load", async ({
 	await toolRow.locator("button").first().click();
 	// Every call waits seconds on a server this loaded.
 	await expect(toolRow).toContainText("END-OF-result", { timeout: 30_000 });
-	// This call's own detail: the heavy session's prefetches (conduit-test-y7eo.11)
-	// can land in this window too.
-	const toolId = completedTool()?.payload.match(
-		/"id":"([^"]+)","type":"tool"/,
-	)?.[1];
 	const toolPreviews = {
 		heavyFirstPageBytes,
 		liveToolUpdateBytes: completedTool()?.bytes ?? 0,
 		detailResponseBytes:
-			pinned.find(({ payload }) =>
-				payload.includes(`"tools":[{"toolId":"${toolId}"`),
-			)?.bytes ?? 0,
+			pinned.find(({ payload }) => payload.includes('"tools":[{"toolId"'))
+				?.bytes ?? 0,
 		limits: TOOL_PREVIEW_LIMITS,
 	};
 	pinned = undefined;

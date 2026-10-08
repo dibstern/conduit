@@ -706,5 +706,44 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	await expect(row.locator(".tool-result")).toContainText(endOf("result"));
 	await expect(row.locator(".tool-full-detail")).toHaveCount(0);
 	expect(rpc.detailRequests).toEqual([newest, middle]);
+
+	// A tool that finishes while its block stays on screen is prefetched once
+	// it has: its block rested while it ran.
+	const driver = await harness.connect();
+	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
+	const liveSession = await driver.createSession("Live prefetch");
+	await app.goto(`${harness.baseUrl}/s/${liveSession}?p=process-test`);
+	await expect(app.input).toBeVisible();
+	const liveFrom = rpc.frames.length;
+	const requestsBeforeLive = rpc.detailRequests.length;
+	await Effect.runPromise(
+		driver.rpc.input.submit({
+			projectSlug: "process-test",
+			sessionId: liveSession,
+			originId: driver.originId,
+			inputId: randomUUID(),
+			delivery: "queue",
+			text: "tool-long-live",
+		}),
+	);
+	const liveBash = () =>
+		lastTool(rpc.frames.slice(liveFrom), ({ tool }) => tool === "Bash");
+	await expect.poll(() => liveBash()?.state?.status).toBe("running");
+	await expect(blocks.last()).toBeInViewport();
+	await rest();
+	writeFileSync(join(harness.root, "release-tool-long"), "release");
+	await expect.poll(() => liveBash()?.state?.status).toBe("completed");
+	const liveId = liveBash()?.callID ?? "missing";
+	await rest();
+	expect(rpc.detailRequests.slice(requestsBeforeLive).at(-1)).toEqual([liveId]);
+	await expect(blocks.last().locator(".turn-activity-toggle")).toHaveAttribute(
+		"aria-expanded",
+		"false",
+	);
+	const requestsAfterLive = rpc.detailRequests.length;
+	const liveRow = await expandTool(page, toolRow(page, liveId));
+	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	expect(rpc.detailRequests).toHaveLength(requestsAfterLive);
+	await driver.close();
 	await context.close();
 });

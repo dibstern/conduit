@@ -168,11 +168,12 @@ export function makeToolDetails(
 	};
 
 	let prefetching = false;
+	/** Every tool wanted for one view since the last prefetch, by id. */
 	let wanted:
 		| {
 				view: Promise<boolean>;
 				session: SessionRef;
-				tools: readonly ToolMessage[];
+				tools: Map<string, ToolMessage>;
 		  }
 		| undefined;
 	let budget: { view: Promise<boolean>; spent: number } | undefined;
@@ -180,44 +181,51 @@ export function makeToolDetails(
 	const prefetch = async () => {
 		if (prefetching) return;
 		prefetching = true;
-		while (wanted) {
-			const next = wanted;
-			const loaded = await next.view;
-			// A newer set arrived while the view loaded; the left view's set is dropped.
-			if (wanted !== next) continue;
-			wanted = undefined;
-			if (!loaded) continue;
-			if (budget?.view !== next.view) budget = { view: next.view, spent: 0 };
-			const view = budget;
-			const chosen = next.tools.filter((tool) => {
-				const bytes = fullBytes(tool);
-				if (
-					(tool.status !== "completed" && tool.status !== "error") ||
-					shownCut(tool) === undefined ||
-					view.spent + bytes > PREFETCH_BYTES_PER_VIEW ||
-					kept.has(toolKey(next.session, tool.id)) ||
-					inFlight.has(flightKey(next.session, tool))
-				)
-					return false;
-				view.spent += bytes;
-				return true;
-			});
-			await Promise.allSettled(chosen.map((tool) => get(next.session, tool)));
+		try {
+			while (wanted) {
+				const next = wanted;
+				const loaded = await next.view;
+				// Another view's set replaced this one while it loaded: it was left.
+				if (wanted !== next) continue;
+				wanted = undefined;
+				if (!loaded) continue;
+				if (budget?.view !== next.view) budget = { view: next.view, spent: 0 };
+				const view = budget;
+				const chosen = [...next.tools.values()].filter((tool) => {
+					const bytes = fullBytes(tool);
+					if (
+						(tool.status !== "completed" && tool.status !== "error") ||
+						shownCut(tool) === undefined ||
+						view.spent + bytes > PREFETCH_BYTES_PER_VIEW ||
+						kept.has(toolKey(next.session, tool.id)) ||
+						inFlight.has(flightKey(next.session, tool))
+					)
+						return false;
+					view.spent += bytes;
+					return true;
+				});
+				await Promise.allSettled(chosen.map((tool) => get(next.session, tool)));
+			}
+		} finally {
+			prefetching = false;
 		}
-		prefetching = false;
 	};
 
 	/**
 	 * These tools are wanted soon: once the session's first load completes,
-	 * load the settled ones whose cut a card shows. One prefetch runs at a time
-	 * and the newest wanted set waits for it; each view of a session stops
-	 * after about 5 MB. Failures are silent and not retried.
+	 * load the settled ones whose cut a card shows. One prefetch runs at a
+	 * time; sets wanted for the same view meanwhile join into the next one.
+	 * Each view of a session stops after about 5 MB. Failures are silent and
+	 * not retried.
 	 */
 	const wantSoon = (session: SessionRef, tools: readonly ToolMessage[]) => {
 		const view = viewLoaded(session);
 		if (!view) return;
-		wanted = { view, session, tools };
-		void prefetch();
+		if (wanted?.view !== view) wanted = { view, session, tools: new Map() };
+		for (const tool of tools) wanted.tools.set(tool.id, tool);
+		prefetch().catch((error: unknown) =>
+			console.warn("Tool prefetch failed", error),
+		);
 	};
 
 	return { get, wantSoon };

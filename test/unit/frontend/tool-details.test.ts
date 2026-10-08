@@ -45,6 +45,19 @@
 // 17. A session that is not open is prefetched.
 // 18. Prefetch asks for a tool whose only cut is one no card shows (a written
 //     file's content), spending budget on a load no expand would make.
+// Review fixes, written before the change:
+// 19. Blocks resting together lose all but the first and the newest: sets
+//     wanted for one view before it loads, or during a prefetch, replace each
+//     other instead of joining, so only the last is prefetched.
+// 20. A tool in two joined sets is counted twice against the budget, crowding
+//     out a tool that fits.
+// 21. A throw inside prefetch leaves it marked as running, so nothing is ever
+//     prefetched again.
+// (TurnActivity, proved in harness-tool-previews)
+// 22. A tool that finishes while its block stays on screen is never
+//     prefetched: the block's 2 s timer fired while it ran.
+// 23. The observer reports after the block is gone and starts a timer for a
+//     block no longer shown.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -364,7 +377,7 @@ describe("wanted soon", () => {
 		await flying;
 	});
 
-	it("keeps one prefetch in flight, then runs the newest wanted set", async () => {
+	it("keeps one prefetch in flight, then runs every set wanted meanwhile in one request", async () => {
 		const s = server();
 		const details = makeToolDetails(s.fetch, opened);
 		details.wantSoon(session, [tool("a")]);
@@ -375,8 +388,39 @@ describe("wanted soon", () => {
 		expect(s.requests).toHaveLength(1);
 		await s.answer();
 		await tick();
-		expect(s.requests.map(({ ids }) => ids)).toEqual([["a"], ["c"]]);
+		expect(s.requests.map(({ ids }) => ids)).toEqual([["a"], ["b", "c"]]);
 		await s.answer();
+	});
+
+	it("counts a tool wanted by two blocks once against the budget", async () => {
+		const s = server();
+		const { view, settle } = loading();
+		const details = makeToolDetails(s.fetch, () => view);
+		details.wantSoon(session, [tool("a", "completed", 2 * MB)]);
+		details.wantSoon(session, [
+			tool("a", "completed", 2 * MB),
+			tool("fits", "completed", 2.5 * MB),
+		]);
+		settle(true);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["a", "fits"] }]);
+		await s.answer();
+	});
+
+	it("keeps prefetching after a throw inside it", async () => {
+		const s = server();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		let view: Promise<boolean> = Promise.reject(new Error("broken view"));
+		const details = makeToolDetails(s.fetch, () => view);
+		details.wantSoon(session, [tool("a")]);
+		await tick();
+		expect(warn).toHaveBeenCalledOnce();
+		view = Promise.resolve(true);
+		details.wantSoon(session, [tool("b")]);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["b"] }]);
+		await s.answer();
+		warn.mockRestore();
 	});
 
 	// Vitest fails the run on an unhandled rejection, so a surfaced failure shows.
@@ -437,17 +481,18 @@ describe("wanted soon", () => {
 		await s.answer();
 	});
 
-	it("waits for the session's first load, then runs the newest set wanted meanwhile", async () => {
+	it("waits for the session's first load, then runs every set wanted meanwhile in one request", async () => {
 		const s = server();
 		const { view, settle } = loading();
 		const details = makeToolDetails(s.fetch, () => view);
 		details.wantSoon(session, [tool("a")]);
 		details.wantSoon(session, [tool("b")]);
+		details.wantSoon(session, [tool("c")]);
 		await vi.advanceTimersByTimeAsync(30_000);
 		expect(s.requests).toHaveLength(0);
 		settle(true);
 		await tick();
-		expect(s.requests).toEqual([{ session, ids: ["b"] }]);
+		expect(s.requests).toEqual([{ session, ids: ["a", "b", "c"] }]);
 		await s.answer();
 	});
 

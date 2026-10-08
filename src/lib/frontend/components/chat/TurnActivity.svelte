@@ -16,7 +16,7 @@
 	import { clock } from "../../stores/clock.svelte.js";
 	import { revealedPart } from "../../stores/reveal.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { toolDetails } from "../../stores/tool-details.js";
+	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -76,27 +76,38 @@
 
 	const PREFETCH_REST_MS = 2_000;
 
+	let onScreen = $state(false);
 	$effect(() => {
 		if (!panelEl) return;
-		let resting: ReturnType<typeof setTimeout> | undefined;
+		let live = true;
 		const observer = new IntersectionObserver((entries) => {
-			clearTimeout(resting);
-			if (!entries.at(-1)?.isIntersecting) return;
-			resting = setTimeout(() => {
-				const projectSlug = getCurrentSlug();
-				const sessionId = getCurrentSessionId();
-				if (projectSlug && sessionId)
-					toolDetails.wantSoon(
-						{ projectSlug, sessionId },
-						segment.activity.flatMap((part) => (part.type === "tool" ? [part] : [])),
-					);
-			}, PREFETCH_REST_MS);
+			if (live) onScreen = entries.at(-1)?.isIntersecting ?? false;
 		});
 		observer.observe(panelEl);
 		return () => {
+			live = false;
 			observer.disconnect();
-			clearTimeout(resting);
 		};
+	});
+
+	const tools = $derived(segment.activity.flatMap((part) => (part.type === "tool" ? [part] : [])));
+	// What the finished tools have to load. A change restarts the rest, so a tool
+	// that finishes on screen, or whose cut result arrives, is fetched too.
+	const toLoad = $derived(
+		tools
+			.filter(({ status }) => status === "completed" || status === "error")
+			.map((tool) => `${tool.id}:${shownCut(tool)}`)
+			.join(),
+	);
+	$effect(() => {
+		if (!onScreen) return;
+		void toLoad;
+		const resting = setTimeout(() => {
+			const projectSlug = getCurrentSlug();
+			const sessionId = getCurrentSessionId();
+			if (projectSlug && sessionId) toolDetails.wantSoon({ projectSlug, sessionId }, tools);
+		}, PREFETCH_REST_MS);
+		return () => clearTimeout(resting);
 	});
 
 	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
