@@ -1177,8 +1177,22 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				const names = settings.getByTestId("usage-limit-account-name");
 				await expect(names.nth(0)).toHaveText("Account 2");
 				await expect(names.nth(1)).toHaveText("Account 3");
-				// Drag Account 3 above Account 2 with the mouse. Hovering waits for each
-				// handle to stop moving: the rows slide into the saved order as it loads.
+				// Drag Account 3 above Account 2 with the mouse. The rows slide into the
+				// saved order as it loads, and hover's stability check can pass mid-slide,
+				// so wait for the slide to finish before measuring the handles. The quota
+				// probes settle first: they run on, and count, past the reload below.
+				await expect(
+					settings.locator(
+						'[data-testid="quota-meter"][data-state="checking"]',
+					),
+				).toHaveCount(0);
+				await expect
+					.poll(() =>
+						settings.evaluate(
+							(element) => element.getAnimations({ subtree: true }).length,
+						),
+					)
+					.toBe(0);
 				const handleBox = async (name: string) => {
 					const handle = settings.getByRole("button", {
 						name: `Reorder ${name}`,
@@ -1226,6 +1240,13 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						name: "Toggle auto-switch account when limited",
 					}),
 				).toHaveAttribute("aria-checked", "true");
+				// Opening settings probes every account. Let those probes land before
+				// `before` is taken, or they count as auto-switch probes below.
+				await expect(
+					reloaded.locator(
+						'[data-testid="quota-meter"][data-state="checking"]',
+					),
+				).toHaveCount(0);
 				await page.getByTestId("settings-close-btn").click();
 				await expect(page.locator("#settings-panel")).toBeHidden();
 			}
