@@ -172,7 +172,12 @@ describe("root rows keep their subtree rollup", () => {
 				parentID: VICTIM.id,
 			},
 		]);
-		expect(getFilteredSessions()[0]?.attention).toBe("needs-approval");
+		// By id: the fixtures' Date.now() stamps can differ by a millisecond,
+		// which reorders the newest-first sidebar.
+		expect(
+			getFilteredSessions().find((session) => session.id === VICTIM.id)
+				?.attention,
+		).toBe("needs-approval");
 		sessionState.searchQuery = "doomed";
 		seedSearchResults([VICTIM]);
 		expect(getFilteredSessions()).toEqual([rolled]);
