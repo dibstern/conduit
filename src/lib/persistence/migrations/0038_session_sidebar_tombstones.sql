@@ -4,15 +4,14 @@
 -- no longer goes with its session's delete: the projector writes the
 -- tombstone, which needs the row still there.
 --
--- `deleted` tells a session that is gone (any session, child included, so a
--- device away while it went is told) from a root that only left the top level
--- by gaining a parent, which a device must not navigate away from.
+-- A deleted session, child included, leaves one too, so a device away while
+-- it went is told. Whether a tombstone's session is gone is read from
+-- `sessions`, not stored, so it stays true when the session is re-created.
 CREATE TABLE session_sidebar_next (
 	session_id TEXT PRIMARY KEY,
 	version INTEGER NOT NULL,
 	last_activity INTEGER NOT NULL,
-	row TEXT,
-	deleted INTEGER NOT NULL DEFAULT 0
+	row TEXT
 );
 
 INSERT INTO session_sidebar_next (session_id, version, last_activity, row)

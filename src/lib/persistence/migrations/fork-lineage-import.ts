@@ -179,12 +179,17 @@ export const migrateForkLineage = (configDir: string) =>
 									yield* sql`UPDATE sessions SET version =
 									(SELECT value FROM read_model_counter WHERE id = 1) WHERE id = ${id}`;
 									if (hasRootId) {
+										const left = yield* rerootSession(id);
+										// The sidebar's upkeep writes today's table, which an
+										// older store gets from a later migration whose
+										// backfill refreshes every family anyway.
+										const horizon = yield* sql<{ name: string }>`
+										SELECT name FROM sqlite_master
+										WHERE name = 'session_sidebar_horizon'`;
 										const [version] = yield* sql<{ value: number }>`
 										SELECT value FROM read_model_counter WHERE id = 1`;
-										yield* refreshSidebar(
-											yield* rerootSession(id),
-											version?.value ?? 0,
-										);
+										if (horizon.length > 0)
+											yield* refreshSidebar(left, version?.value ?? 0);
 									}
 								}
 							}

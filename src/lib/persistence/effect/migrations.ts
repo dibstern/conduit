@@ -1053,14 +1053,17 @@ export const effectMigrationEntries = {
 	}),
 	// Then fills it, once its schema is final, since the upkeep writes today's
 	// columns: one pass over every family, at the version the store is at. A
-	// store already filled by an earlier build keeps every row it holds.
+	// store already filled by an earlier build keeps every row that is still
+	// right, and a row for a session that is no longer a root (the lineage
+	// import gives parents before this runs) becomes a tombstone.
 	"0039_session_sidebar_tombstones": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* executeSqlStatements(
 			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
 		);
 		const roots = yield* sql<{ id: string }>`
-			SELECT id FROM sessions WHERE parent_id IS NULL`;
+			SELECT id FROM sessions WHERE parent_id IS NULL
+			UNION SELECT session_id FROM session_sidebar`;
 		const [counter] = yield* sql<{ value: number }>`
 			SELECT value FROM read_model_counter WHERE id = 1`;
 		yield* refreshSidebar(

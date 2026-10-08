@@ -1292,7 +1292,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					if (range?.familyOf === undefined) {
 						// The sidebar table holds each family rolled up already, so
 						// this reads the rows that moved and nothing else. A row with
-						// no content is a family's tombstone.
+						// no content is a family's tombstone, and a deletion while its
+						// session is gone.
 						const ranged = range?.after !== undefined;
 						const stored = yield* sql<{
 							session_id: string;
@@ -1300,7 +1301,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							row: string | null;
 							deleted: number;
 						}>`
-							SELECT session_id, version, row, deleted FROM session_sidebar
+							SELECT session_id, version, row,
+								NOT EXISTS (SELECT 1 FROM sessions
+									WHERE sessions.id = session_sidebar.session_id) AS deleted
+							FROM session_sidebar
 							WHERE version > ${floor} AND version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
