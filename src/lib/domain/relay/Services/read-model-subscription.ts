@@ -20,6 +20,7 @@
 // A dropped bus publication forces a fresh snapshot for sources whose live
 // removal signal may have been lost.
 
+import { channel } from "node:diagnostics_channel";
 import { Effect, Ref, type Schema, Stream } from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
@@ -106,6 +107,18 @@ export interface SubscriptionSource<T, E = never> {
 	readonly resume: "catchUp" | "rebase";
 }
 
+/**
+ * One source read, published on `conduit:read-model-read` so a test harness can
+ * count reads per change (conduit-test-y7eo.1). Nothing is built or published
+ * unless something subscribes.
+ */
+export interface ReadModelRead {
+	readonly kind: "base" | "resume" | "replacement" | "window";
+	readonly range?: VersionRange;
+}
+
+const readModelReads = channel("conduit:read-model-read");
+
 const deltaEnvelopes = <T>(
 	rows: readonly VersionedRow<T>[],
 	removed: readonly { readonly id: string; readonly version: number }[],
@@ -154,13 +167,21 @@ export const stream = <T, E = never>(options: {
 		Effect.gen(function* () {
 			// Buffers from this instant.
 			const advances = yield* options.bus.subscribeAdvances();
+			const read = (kind: ReadModelRead["kind"], range?: VersionRange) => {
+				if (readModelReads.hasSubscribers)
+					readModelReads.publish({
+						kind,
+						...(range === undefined ? {} : { range }),
+					} satisfies ReadModelRead);
+				return options.source.read(range);
+			};
 
 			const catchUp =
 				options.resumeFromSequence !== undefined &&
 				options.source.resume === "catchUp";
-			const base = yield* options.source.read(
-				catchUp ? { after: options.resumeFromSequence } : undefined,
-			);
+			const base = yield* catchUp
+				? read("resume", { after: options.resumeFromSequence })
+				: read("base");
 			// The counter the base was read at, not the newest row in it: what the
 			// live arm must not re-read, and what a resuming client resumes from.
 			const seen = yield* Ref.make(base.version);
@@ -186,7 +207,7 @@ export const stream = <T, E = never>(options: {
 						// A publication gap can hide a deletion, which a range read
 						// cannot recover. Replace the entire view before routing again.
 						if (advance.dropped) {
-							const replacement = yield* options.source.read();
+							const replacement = yield* read("replacement");
 							yield* Ref.set(seen, replacement.version);
 							yield* Ref.set(baseFloor, replacement.version);
 							return [
@@ -216,7 +237,7 @@ export const stream = <T, E = never>(options: {
 						const sequence = advance.version;
 						// A removal also closes this window, so catch up every row before
 						// moving the watermark past it.
-						const window = yield* options.source.read({
+						const window = yield* read("window", {
 							after: lastSeen,
 							through: advance.version,
 						});

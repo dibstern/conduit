@@ -522,6 +522,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 			opencodeUrl?: string;
 			/** OpenCode idle grace, kept for later restarts. */
 			opencodeIdleTimeoutMs?: number;
+			/** Listen on the previous port, so open tabs reconnect by themselves. */
+			keepPort?: boolean;
+			/** Record event-loop stalls and read-model reads to this JSON file. */
+			metricsFile?: string;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -652,6 +656,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 				cwd: this.projectDir,
 				env: (this.environment = {
 					...options.serviceEnvironment,
+					...(options.keepPort && this.port
+						? { CONDUIT_TEST_PORT: String(this.port) }
+						: {}),
+					...(options.metricsFile
+						? { CONDUIT_TEST_SERVER_METRICS: options.metricsFile }
+						: {}),
 					PATH:
 						this.managedOpenCode || this.foregroundCli
 							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
@@ -1095,12 +1105,15 @@ Object.assign(ClaudeDriver, { create: deps => {
 		sessionId?: string,
 		originId?: string,
 		projectSlug = "process-test",
+		/** False keeps a large store's sidebar rows from each opening a detail stream. */
+		followRows = true,
 	): Promise<ProcessBrowser> {
 		const browser = await ProcessBrowser.connect(
 			this.port,
 			sessionId,
 			originId,
 			projectSlug,
+			followRows,
 		);
 		this.browsers.push(browser);
 		return browser;
@@ -1643,6 +1656,7 @@ export class ProcessBrowser {
 		readonly rpc: BrowserRpc["Type"],
 		originId: string,
 		private readonly projectSlug: string,
+		private readonly followRows: boolean,
 	) {
 		this.originId = originId;
 	}
@@ -1652,6 +1666,7 @@ export class ProcessBrowser {
 		sessionId?: string,
 		originId: string = randomUUID(),
 		projectSlug = "process-test",
+		followRows = true,
 	): Promise<ProcessBrowser> {
 		let browser: ProcessBrowser | undefined;
 		let connectionFailure: Error | undefined;
@@ -1665,7 +1680,13 @@ export class ProcessBrowser {
 				await runtime.dispose();
 				throw error;
 			});
-		browser = new ProcessBrowser(runtime, rpc, originId, projectSlug);
+		browser = new ProcessBrowser(
+			runtime,
+			rpc,
+			originId,
+			projectSlug,
+			followRows,
+		);
 		if (connectionFailure) browser.fail(connectionFailure);
 		try {
 			await browser.followPtys();
@@ -1805,11 +1826,12 @@ export class ProcessBrowser {
 									: [];
 						for (const row of rows)
 							this.record({ ...row, type: "session_row" });
-						yield* Effect.forEach(
-							rows,
-							(row) => Effect.promise(() => this.followSession(row.id)),
-							{ discard: true },
-						);
+						if (this.followRows)
+							yield* Effect.forEach(
+								rows,
+								(row) => Effect.promise(() => this.followSession(row.id)),
+								{ discard: true },
+							);
 						if (envelope._tag === "remove")
 							this.record({ type: "session_removed", id: envelope.id });
 					}),

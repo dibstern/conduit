@@ -1,0 +1,265 @@
+{
+	"schema": 1,
+	"project": "mobile",
+	"recordedAt": "2026-10-08T02:20:22.086Z",
+	"fixture": {
+		"families": 2500,
+		"sessions": 10001,
+		"events": 60841,
+		"heavySessionId": "load-heavy",
+		"heavyFinalText": "Heavy session complete: all steps verified.",
+		"seedMs": 10546,
+		"storeBytes": 54190080
+	},
+	"devices": 4,
+	"streamingSessions": 3,
+	"restart": {
+		"stopMs": 866,
+		"startMs": 2396
+	},
+	"reconnectMs": [3304, 3699, 3309, 2973],
+	"open": {
+		"sessionId": "load-heavy",
+		"ms": 535,
+		"fromReadyMs": 577,
+		"wire": {
+			"received": {
+				"frames": 1,
+				"bytes": 2030012,
+				"maxFrameBytes": 2030012,
+				"p95FrameBytes": 2030012
+			},
+			"sent": {
+				"frames": 2,
+				"bytes": 277,
+				"maxFrameBytes": 246,
+				"p95FrameBytes": 246
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 1,
+					"bytes": 2030012,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 2030012
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 2030012,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"99\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"load-"
+				}
+			]
+		}
+	},
+	"wire": {
+		"warm": {
+			"ms": 2001,
+			"received": {
+				"frames": 10,
+				"bytes": 3362,
+				"maxFrameBytes": 747,
+				"p95FrameBytes": 747
+			},
+			"sent": {
+				"frames": 9,
+				"bytes": 274,
+				"maxFrameBytes": 31,
+				"p95FrameBytes": 31
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 10,
+					"bytes": 3362,
+					"maxFrameBytes": 747,
+					"p95FrameBytes": 747
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 573,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"54370491"
+				},
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 519,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"42369ba6"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 519,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"a7121444"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 353,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"6\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"id\":\"ses_315101199b7a49fd9a266bd40cb858a5\",\"title\":\""
+				}
+			]
+		},
+		"restart": {
+			"ms": 5870,
+			"received": {
+				"frames": 133,
+				"bytes": 4528000,
+				"maxFrameBytes": 2030012,
+				"p95FrameBytes": 1437
+			},
+			"sent": {
+				"frames": 197,
+				"bytes": 28702,
+				"maxFrameBytes": 306,
+				"p95FrameBytes": 297
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 133,
+					"bytes": 4528000,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 1437
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 2030012,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"99\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"load-"
+				},
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 608737,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"122\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_994901a171f14617ab9f8672302fc880\",\"tit"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 608737,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"110\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_994901a171f14617ab9f8672302fc880\",\"tit"
+				},
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 608737,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"121\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_994901a171f14617ab9f8672302fc880\",\"tit"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 608737,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"122\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_994901a171f14617ab9f8672302fc880\",\"tit"
+				}
+			],
+			"byDevice": [
+				{
+					"frames": 34,
+					"bytes": 626046,
+					"maxFrameBytes": 608737,
+					"p95FrameBytes": 1437
+				},
+				{
+					"frames": 33,
+					"bytes": 625790,
+					"maxFrameBytes": 608737,
+					"p95FrameBytes": 1509
+				},
+				{
+					"frames": 38,
+					"bytes": 626889,
+					"maxFrameBytes": 608737,
+					"p95FrameBytes": 1419
+				},
+				{
+					"frames": 28,
+					"bytes": 2649275,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 608737
+				}
+			]
+		}
+	},
+	"server": {
+		"warm": {
+			"stalls": {
+				"count": 5,
+				"totalMs": 1908,
+				"longest": [
+					{
+						"atMs": 1512,
+						"ms": 814
+					},
+					{
+						"atMs": 532,
+						"ms": 728
+					},
+					{
+						"atMs": 1752,
+						"ms": 230
+					},
+					{
+						"atMs": 688,
+						"ms": 86
+					},
+					{
+						"atMs": 592,
+						"ms": 50
+					}
+				]
+			},
+			"reads": {
+				"base": 0,
+				"window": 192
+			},
+			"changesRead": 14,
+			"windowReadsPerChange": 13.7
+		},
+		"restart": {
+			"stalls": {
+				"count": 16,
+				"totalMs": 3279,
+				"longest": [
+					{
+						"atMs": 1768,
+						"ms": 1253
+					},
+					{
+						"atMs": 4995,
+						"ms": 317
+					},
+					{
+						"atMs": 2373,
+						"ms": 289
+					},
+					{
+						"atMs": 4668,
+						"ms": 230
+					},
+					{
+						"atMs": 3692,
+						"ms": 220
+					}
+				]
+			},
+			"reads": {
+				"base": 17,
+				"resume": 3,
+				"window": 120
+			},
+			"changesRead": 26,
+			"windowReadsPerChange": 4.6
+		}
+	}
+}

@@ -874,6 +874,20 @@ function query(params: {
 				});
 				yield event;
 			}
+			// A turn that keeps streaming until it is stopped, for load tests.
+			if (request.startsWith("load-stream-"))
+				for (
+					let tick = 0;
+					!closed && !params.options?.abortController?.signal.aborted;
+					tick++
+				) {
+					await new Promise<void>((done) => setTimeout(done, 100));
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "text_delta", text: `tick(${tick}) ` },
+					});
+				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
 			if (request.startsWith("stall-"))
 				await new Promise<void>((done) => {
