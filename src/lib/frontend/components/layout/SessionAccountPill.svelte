@@ -29,6 +29,8 @@
 		return recovery && !recovery.switched && !recovery.continued && recovery.instanceId === account?.id ? recovery : undefined;
 	});
 	const projectSlug = $derived(getCurrentSlug());
+	// Shrinks beside a long branch, keeping 4 letters plus the ellipsis (5ch): dot, gap, padding and border on top, 1px of rounding slack.
+	const minimumWidth = $derived(`calc(${Math.min(account?.name.length ?? 0, 5)}ch + 6px + 5px + ${sessionViewState.compact ? 12 : 16}px + 2px + 1px)`);
 </script>
 
 {#if account?.driver === "claude" && canSwitch && projectSlug}
@@ -46,10 +48,11 @@
 				title="Switch this session's account"
 				data-testid="session-account-pill"
 				data-account={account.id}
-				class="shrink-0 gap-[5px] rounded-full border border-border bg-bg-alt font-mono {sessionViewState.compact ? 'h-[20px] px-[6px] text-[9px]' : 'h-[22px] px-[8px] text-[10px]'}"
+				style={`min-width: ${minimumWidth}`}
+				class="gap-[5px] rounded-full border border-border bg-bg-alt font-mono {sessionViewState.compact ? 'h-[20px] px-[6px] text-[9px]' : 'h-[22px] px-[8px] text-[10px]'}"
 			>
 				<AccountDot instanceId={account.id} size={6} />
-				<span class="max-w-[140px] truncate">{account.name}</span>
+				<span class="min-w-0 max-w-[140px] truncate">{account.name}</span>
 			</Button>
 		{/snippet}
 	</AccountSwitch>

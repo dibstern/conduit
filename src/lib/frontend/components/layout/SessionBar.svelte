@@ -396,7 +396,7 @@
 <!-- One border for the controls; the instance picker stays beside it. -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
-		<div class="session-bar-segments inline-flex h-[24px] min-w-0 items-stretch rounded-lg border border-border">
+		<div class="session-bar-segments inline-flex h-[24px] items-stretch rounded-lg border border-border">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
 			{#if sideThreads.length > 0 && !session?.sideThread}
 				<Button id="side-threads-control" variant="ghost" size="segment" icon="messages-square" touchTarget class="shrink-0 tabular-nums" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>

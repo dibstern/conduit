@@ -135,6 +135,12 @@ for (const mode of [
 			const dot = await pill.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
+			// It badges the icon, so a truncating branch never pushes it out.
+			const bounds = await pill.boundingBox();
+			expect(dot?.x).toBeGreaterThanOrEqual(bounds?.x ?? 0);
+			expect((dot?.x ?? 0) + 6).toBeLessThanOrEqual(
+				(bounds?.x ?? 0) + (bounds?.width ?? 0),
+			);
 			const group = page.locator(".session-bar-segments");
 			expect((await group.boundingBox())?.height).toBe(24);
 			await expect(group.locator(":scope > *")).toHaveCount(

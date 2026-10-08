@@ -27,7 +27,6 @@
 	// Floor = labels + slash, icon, padding, divider and fixed marks. It wins over the nominal cap for long operation labels.
 	const minimumWidth = $derived.by(() => {
 		const marks = [
-			git?.dirty ? "6px" : null,
 			!sessionViewState.compact && upstreamMark ? `${upstreamMark.length}ch` : null,
 			operation ? `${operation.length}ch` : null,
 			showMerged ? "6ch" : null,
@@ -49,25 +48,25 @@
 	{#snippet trigger({ props })}
 		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
-		<span class="inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start"
-			class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''}"
+		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
 			style={`min-width: ${minimumWidth}`}
 			title={label} ariaLabel={`Checkout: ${label}`} data-testid="session-bar-identity">
-			<span class="flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
+			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
 					<span class="commit-icon"><Icon name="circle" size={4} /></span>
 				{:else}
 					<Icon name={!git ? "folder" : git.worktree ? "folder-tree" : "git-branch"} size={12} />
 				{/if}
+				<!-- On the icon, not after the branch: the icon never truncates, and a trailing dot sat against the account pill's dot. -->
+				{#if git?.dirty}
+					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] ring-bg-surface" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
+				{/if}
 			</span>
 			<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
 			{#if checkout}
 				<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>
 				<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text' : 'text-text-muted'}" title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
-			{/if}
-			{#if git?.dirty}
-				<span data-part="dirty" class="size-[6px] shrink-0 rounded-full bg-warning" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
 			{/if}
 			{#if !sessionViewState.compact && upstreamMark}
 				<span class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
@@ -98,8 +97,9 @@
 </Menu>
 
 <style>
-	:global(.git-pill) { max-width: min(240px, 100%); flex-shrink: 1; }
-	:global(.git-pill-phone) { max-width: min(150px, 100%); }
+	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
+	.git-pill { max-width: 240px; flex-shrink: 1; }
+	.git-pill-phone { max-width: 150px; }
 	.commit-icon { display: flex; align-items: center; width: 12px; }
 	.commit-icon::before, .commit-icon::after { content: ""; flex: 1; border-top: 1px solid currentColor; }
 </style>

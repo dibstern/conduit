@@ -129,7 +129,18 @@ const meta = {
 		sessionSkillsState.loads = [];
 		uiState.clientCount = 1;
 		destroyAll();
+		// An RPC in a play function dials the control socket, and every dial,
+		// retries included, probes the attached project's relay status. Answer
+		// that probe; anything else still reaches the network guard.
+		const guardedFetch = globalThis.fetch;
+		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+			String(input instanceof Request ? input.url : input).endsWith(
+				"/api/status",
+			)
+				? Promise.resolve(Response.json({ status: "ready" }))
+				: guardedFetch(input, init);
 		return () => {
+			globalThis.fetch = guardedFetch;
 			attachedProjectState.slug = null;
 			goalDetails.open = detailsOpen;
 			sessionState.now = now;
@@ -986,6 +997,80 @@ export const PhoneGitIdentityWithSkills: Story = {
 			segment?.getBoundingClientRect().left,
 		);
 	},
+};
+
+/**
+ * The worst case for the phone row: a long dirty branch beside a Claude
+ * session's account pill with a long account name.
+ */
+export const PhoneLongBranchAccount: Story = {
+	beforeEach: () => {
+		projectState.projects = [
+			{
+				slug: "conduit",
+				title: "conduit",
+				folders: ["/src/conduit"],
+				instanceId: "claude-work",
+				git: { branch: "feature/session-header-overlap-fix", dirty: true },
+			},
+		];
+		const accounts = [
+			{ id: "claude-work", name: "Work Claude Max" },
+			{ id: "claude-personal", name: "Personal" },
+		];
+		instanceState.instances = mockInstances.map((instance, index) => ({
+			...instance,
+			...accounts[index],
+			driver: "claude",
+		}));
+		applyGetAgentsResponse(
+			{
+				projectSlug: "conduit",
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [],
+				instanceId: "claude-work",
+			},
+			mockSession.id,
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
+		const pill = canvas.getByTestId("session-bar-identity");
+		const group = pill
+			.closest(".session-bar-segments")
+			?.getBoundingClientRect();
+		const account = canvas.getByTestId("session-account-pill");
+		const more = canvas
+			.getByTestId("session-bar-island-overflow")
+			.getBoundingClientRect();
+		const dirty = pill
+			.querySelector('[data-part="dirty"]')
+			?.getBoundingClientRect();
+		const accountDot = within(account)
+			.getByTestId("account-dot")
+			.getBoundingClientRect();
+		// Both give way and neither overlaps a neighbour.
+		expect(back.right).toBeLessThanOrEqual(group?.left ?? 0);
+		expect(group?.right).toBeLessThanOrEqual(
+			account.getBoundingClientRect().left,
+		);
+		expect(account.getBoundingClientRect().right).toBeLessThanOrEqual(
+			more.left,
+		);
+		expect(pill.querySelector('[data-part="branch"]')?.textContent).toBe(
+			"feature/session-header-overlap-fix",
+		);
+		// The dirty mark stays inside the pill, well clear of the account dot.
+		expect(dirty?.left).toBeGreaterThanOrEqual(group?.left ?? 0);
+		expect(dirty?.right).toBeLessThanOrEqual(group?.right ?? 0);
+		expect(accountDot.left - (dirty?.right ?? 0)).toBeGreaterThan(40);
+	},
+};
+
+export const PhoneLongBranchAccountNarrowest: Story = {
+	...PhoneLongBranchAccount,
+	args: { width: 320 },
 };
 
 export const DesktopLongTitleNarrow: Story = {
