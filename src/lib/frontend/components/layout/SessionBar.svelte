@@ -426,9 +426,12 @@
 				</Tooltip>
 			{/if}
 		</div>
-		{#if session && discoveryState.sessionProviderIds[session.id] === "claude"}
+		<!-- Until an open session's provider is known, show neither: the project badge would flash before a Claude session's pill. -->
+		{#if !session}
+			<InstanceBadgeMenu />
+		{:else if discoveryState.sessionProviderIds[session.id] === "claude"}
 			<SessionAccountPill {session} />
-		{:else}
+		{:else if discoveryState.sessionProviderIds[session.id] !== undefined}
 			<InstanceBadgeMenu />
 		{/if}
 	</div>

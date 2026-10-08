@@ -7,6 +7,7 @@ import {
 	phaseToIdle,
 } from "../../stores/chat.svelte.js";
 import {
+	applyGetAgentsResponse,
 	discoveryState,
 	handleModelInfo,
 } from "../../stores/discovery.svelte.js";
@@ -680,6 +681,15 @@ const mockInstances: OpenCodeInstance[] = [
 export const WithInstanceBadge: Story = {
 	beforeEach: () => {
 		instanceState.instances = [...mockInstances];
+		// The bar shows the badge only once the open session's provider is known.
+		applyGetAgentsResponse(
+			{
+				projectSlug: "conduit",
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: [],
+			},
+			mockSession.id,
+		);
 		projectState.projects = [
 			{
 				slug: "conduit",

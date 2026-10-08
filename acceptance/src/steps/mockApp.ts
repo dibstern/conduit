@@ -28,6 +28,11 @@ import {
 } from "./shared.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
+/** GetAgents replies wait on this until the provider lookup answers. */
+const heldAgentLookups = new WeakMap<
+	Page,
+	{ promise: Promise<void>; resolve: () => void }
+>();
 
 // The detail mock sends the last 50 messages first. Turn 3 needs two older pages.
 const skillNavigationMessages = Array.from(
@@ -101,6 +106,26 @@ const skillNavigationMockup = {
 };
 
 export const mockAppHandlers: StepHandler[] = [
+	{
+		name: "hold the session's provider lookup",
+		match: /^the session's provider lookup is held$/,
+		run: ({ world }) => {
+			let resolve = () => {};
+			const promise = new Promise<void>((settle) => {
+				resolve = settle;
+			});
+			heldAgentLookups.set(world.page, { promise, resolve });
+		},
+	},
+	{
+		name: "release the session's provider lookup",
+		match: /^the session's provider lookup answers$/,
+		run: ({ world }) => {
+			const held = heldAgentLookups.get(world.page);
+			if (!held) throw new Error("No provider lookup is held");
+			held.resolve();
+		},
+	},
 	{
 		name: "serve conduit with mockup state",
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
@@ -318,6 +343,7 @@ export const mockAppHandlers: StepHandler[] = [
 							: {}),
 					}),
 					GetAgents: async (payload) => {
+						await heldAgentLookups.get(world.page)?.promise;
 						const instanceId =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]

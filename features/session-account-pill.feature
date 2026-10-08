@@ -58,6 +58,19 @@ Scenario: a Claude session with one account has no pill and no project badge
   Then the session bar shows no account pill
   And the session bar shows no instance badge
 
+Scenario: a Claude session shows no project badge while its provider is still loading
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the session's provider lookup is held
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And the project is bound to claude
+  Then the session bar shows no account pill
+  And the session bar shows no instance badge
+  When the session's provider lookup answers
+  Then the session bar account pill reads work2claude
+  And the session bar shows no instance badge
+
 Scenario: an OpenCode session keeps the project's instance badge
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
