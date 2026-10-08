@@ -2,9 +2,10 @@
 // prefetching both come here. A finished tool's detail never changes, so it is
 // kept by session and tool id (forks repeat call ids) within about 50 MB,
 // least recently used out first. Only the server's word that a tool finished
-// counts: the browser shows some running tools as completed. Asks for one
-// session in the same tick share one GetToolDetails request, and an ask for a
-// tool already on its way joins that request.
+// counts: the browser shows some running tools as completed. Every finished
+// detail a reply carries is kept, even one that arrives after its asker gave
+// up. Asks for one session in the same tick share one GetToolDetails request,
+// and an ask for a tool already on its way joins that request.
 
 import {
 	ToolCallId,
@@ -26,10 +27,15 @@ type SettledDetail = ToolDetail & { readonly settled: true };
 const isSettled = (detail: ToolDetail): detail is SettledDetail =>
 	detail.settled;
 
-const KEPT_BYTES = Utf8Bytes.make(50_000_000);
+/** In UTF-16 code units, which is about bytes for the mostly ASCII text tools return. */
+const KEPT_SIZE = 50_000_000;
 const PREFETCH_BYTES_PER_VIEW = Utf8Bytes.make(5_000_000);
 
-/** What a tool's full detail weighs: the full size of each field its preview cut. */
+/** What a kept detail weighs: its size as JSON, output measured without copying it. */
+const weight = ({ output, ...rest }: ToolDetail): number =>
+	JSON.stringify(rest).length + (output?.text.length ?? 0);
+
+/** What a prefetch will download: the full size of each field the preview cut. */
 const fullBytes = ({ preview }: ToolMessage): number =>
 	(preview?.resultBytes ?? 0) +
 	(preview?.inputCuts ?? []).reduce((sum, cut) => sum + cut.fullBytes, 0);
@@ -49,21 +55,24 @@ export function makeToolDetails(
 		toolIds: readonly [ToolCallId, ...ToolCallId[]],
 	) => Promise<readonly ToolDetail[]>,
 ) {
-	const kept = new Map<string, { detail: ToolDetail; bytes: number }>();
-	let keptBytes = 0;
+	const kept = new Map<string, { detail: SettledDetail; size: number }>();
+	let keptSize = 0;
 	const inFlight = new Map<string, Promise<ToolDetail | undefined>>();
 	const batches = new Map<string, Waiter[]>();
 
-	const keep = (key: string, tool: ToolMessage, detail: SettledDetail) => {
-		const bytes = fullBytes(tool);
-		if (bytes > KEPT_BYTES) return;
-		keptBytes += bytes - (kept.get(key)?.bytes ?? 0);
+	const toolKey = (session: SessionRef, id: string) =>
+		`${sessionKey(session)}\0${id}`;
+
+	const keep = (key: string, detail: SettledDetail) => {
+		const size = weight(detail);
+		if (size > KEPT_SIZE) return;
+		keptSize += size - (kept.get(key)?.size ?? 0);
 		kept.delete(key);
-		kept.set(key, { detail, bytes });
+		kept.set(key, { detail, size });
 		for (const [oldest, entry] of kept) {
-			if (keptBytes <= KEPT_BYTES) break;
+			if (keptSize <= KEPT_SIZE) break;
 			kept.delete(oldest);
-			keptBytes -= entry.bytes;
+			keptSize -= entry.size;
 		}
 	};
 
@@ -77,6 +86,9 @@ export function makeToolDetails(
 		fetchDetails(session, [first, ...rest])
 			.then(
 				(tools) => {
+					for (const detail of tools)
+						if (isSettled(detail))
+							keep(toolKey(session, detail.toolId), detail);
 					for (const waiter of waiters)
 						waiter.resolve(tools.find(({ toolId }) => toolId === waiter.id));
 				},
@@ -101,19 +113,17 @@ export function makeToolDetails(
 			batch.push({ id, resolve, reject });
 		});
 
-	const toolKey = (session: SessionRef, tool: ToolMessage) =>
-		`${sessionKey(session)}\0${tool.id}`;
 	// A request sent before the tool moved on answers for its old state, so an
 	// ask joins only a request sent for the same status.
 	const flightKey = (session: SessionRef, tool: ToolMessage) =>
-		`${toolKey(session, tool)}\0${tool.status}`;
+		`${toolKey(session, tool.id)}\0${tool.status}`;
 
 	/** This tool's full detail; undefined when the server has no such tool. */
 	const get = (
 		session: SessionRef,
 		tool: ToolMessage,
 	): Promise<ToolDetail | undefined> => {
-		const key = toolKey(session, tool);
+		const key = toolKey(session, tool.id);
 		const hit = kept.get(key);
 		if (hit) {
 			kept.delete(key);
@@ -123,12 +133,9 @@ export function makeToolDetails(
 		const flight = flightKey(session, tool);
 		const flying = inFlight.get(flight);
 		if (flying) return flying;
-		const loading = request(session, ToolCallId.make(tool.id))
-			.then((detail) => {
-				if (detail && isSettled(detail)) keep(key, tool, detail);
-				return detail;
-			})
-			.finally(() => inFlight.delete(flight));
+		const loading = request(session, ToolCallId.make(tool.id)).finally(() =>
+			inFlight.delete(flight),
+		);
 		inFlight.set(flight, loading);
 		return loading;
 	};
@@ -154,7 +161,7 @@ export function makeToolDetails(
 				(tool.status !== "completed" && tool.status !== "error") ||
 				bytes === 0 ||
 				spent + bytes > PREFETCH_BYTES_PER_VIEW ||
-				kept.has(toolKey(next.session, tool)) ||
+				kept.has(toolKey(next.session, tool.id)) ||
 				inFlight.has(flightKey(next.session, tool))
 			)
 				return false;

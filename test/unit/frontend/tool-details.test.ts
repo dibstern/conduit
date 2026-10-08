@@ -23,6 +23,17 @@
 //     never resets for a new view; a failure surfaces; a wanted set that
 //     arrives during a prefetch is lost.
 // 10. An expand after a prefetch asks again.
+// Review fixes, written before the change:
+// 11. An entry is weighed by the asker's preview, not by what came back: a
+//     tool asked for while its preview said running, or with no preview at
+//     all, is kept at a few bytes however large its detail, so the cache
+//     runs far past 50 MB; uncut input fields are never counted.
+// 12. A settled detail that arrives after the asker gave up (the 10 s
+//     timeout) is thrown away, so the retry downloads it again.
+// 13. (ToolFullDetail) Switching from a parent to its fork, where the same
+//     call id has the same status, keeps showing the parent's detail; the
+//     load asks under whichever session is current when it runs, not the
+//     one the tool was shown in.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -229,25 +240,29 @@ describe("expand", () => {
 });
 
 describe("memory", () => {
-	it("stays within about 50 MB, dropping the least recently used first", async () => {
+	const big = (size: number) => () => "x".repeat(size);
+
+	it("weighs what came back, staying within about 50 MB, least recently used out first", async () => {
 		const s = server();
 		const details = makeToolDetails(s.fetch);
-		const load = async (id: string, bytes: number) => {
-			const ask = details.get(session, tool(id, "completed", bytes));
+		const { preview: _cut, ...uncut } = tool("a", "running");
+		// Each asker's preview says a few KB, or nothing; each reply is 20 MB.
+		const load = async (ask: ToolMessage) => {
+			const loading = details.get(session, ask);
 			await tick();
-			await s.answer();
-			return ask;
+			await s.answer(big(20 * MB));
+			return loading;
 		};
-		await load("a", 20 * MB);
-		await load("b", 20 * MB);
+		await load(uncut);
+		await load(tool("b"));
 		// Using "a" makes "b" the least recently used.
-		await details.get(session, tool("a", "completed", 20 * MB));
+		await details.get(session, tool("a"));
 		expect(s.requests).toHaveLength(2);
-		await load("c", 20 * MB);
-		await details.get(session, tool("a", "completed", 20 * MB));
-		await details.get(session, tool("c", "completed", 20 * MB));
+		await load(tool("c"));
+		await details.get(session, tool("a"));
+		await details.get(session, tool("c"));
 		expect(s.requests).toHaveLength(3);
-		const b = details.get(session, tool("b", "completed", 20 * MB));
+		const b = details.get(session, tool("b"));
 		await tick();
 		expect(s.requests).toHaveLength(4);
 		await s.answer();
@@ -261,12 +276,28 @@ describe("memory", () => {
 		await tick();
 		await s.answer();
 		await small;
-		const huge = details.get(session, tool("huge", "completed", 60 * MB));
+		const huge = details.get(session, tool("huge"));
 		await tick();
-		await s.answer();
+		await s.answer(big(60 * MB));
 		await huge;
 		await details.get(session, tool("a"));
 		expect(s.requests).toHaveLength(2);
+		const again = details.get(session, tool("huge"));
+		await tick();
+		expect(s.requests).toHaveLength(3);
+		await s.answer();
+		await again;
+	});
+
+	it("keeps a finished detail that arrives after its asker gave up", async () => {
+		const s = server();
+		const details = makeToolDetails(s.fetch);
+		const late = details.get(session, tool("a")).catch((e: unknown) => e);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(await late).toBeInstanceOf(Error);
+		await s.answer();
+		expect(await details.get(session, tool("a"))).toEqual(detail("a"));
+		expect(s.requests).toHaveLength(1);
 	});
 });
 

@@ -7,16 +7,12 @@
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { toolDetails } from "../../stores/tool-details.js";
+	import { type SessionRef, toolDetails } from "../../stores/tool-details.js";
 	import { toolCommand } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
-	async function loadFromServer(tool: ToolMessage): Promise<ToolDetail | undefined> {
-		const projectSlug = getCurrentSlug();
-		const sessionId = getCurrentSessionId();
-		if (!projectSlug || !sessionId) return undefined;
-		return await toolDetails.get({ projectSlug, sessionId }, tool);
-	}
+	const loadFromServer = async (tool: ToolMessage, session: SessionRef | undefined) =>
+		session && (await toolDetails.get(session, tool));
 
 	let {
 		message,
@@ -25,7 +21,10 @@
 		class: className = "",
 	}: {
 		message: ToolMessage;
-		load?: (tool: ToolMessage) => Promise<ToolDetail | undefined>;
+		load?: (
+			tool: ToolMessage,
+			session: SessionRef | undefined,
+		) => Promise<ToolDetail | undefined>;
 		children: Snippet<[ToolMessage]>;
 		class?: string;
 	} = $props();
@@ -48,8 +47,19 @@
 		return command ? "command" : undefined;
 	});
 
+	// The session the tool is shown in: a fork repeats its parent's call ids.
+	const session = $derived.by((): SessionRef | undefined => {
+		const projectSlug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
+		return projectSlug && sessionId ? { projectSlug, sessionId } : undefined;
+	});
+
 	// Load again when the tool moves on, not each time the same state is re-sent.
-	const loadKey = $derived(cut ? `${message.id}:${message.status}` : undefined);
+	const loadKey = $derived(
+		cut
+			? `${session?.projectSlug}\0${session?.sessionId}\0${message.id}:${message.status}`
+			: undefined,
+	);
 
 	$effect(() => {
 		void attempt;
@@ -57,12 +67,12 @@
 		full = undefined;
 		failed = false;
 		if (key === undefined) return;
-		const tool = untrack(() => message);
+		const [tool, ref] = untrack(() => [message, session] as const);
 		let current = true;
 		const fail = () => {
 			if (current) failed = true;
 		};
-		load(tool).then((detail) => {
+		load(tool, ref).then((detail) => {
 			if (!current) return;
 			if (!detail) return fail();
 			const { preview: _preview, ...whole } = tool;
