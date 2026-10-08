@@ -300,7 +300,10 @@ export const makeProviderRuntimeIngestionLive = (
 				drain: () => Effect.void,
 			} satisfies ProviderRuntimeIngestion;
 		}),
-	).pipe(Layer.provideMerge(ContinuationLive));
+	).pipe(
+		// Suspended: this module sits on an import cycle back through ContinuationLive, so the eager export below would read it before it is initialised.
+		Layer.provideMerge(Layer.suspend(() => ContinuationLive)),
+	);
 
 export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 
