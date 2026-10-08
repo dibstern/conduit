@@ -250,37 +250,42 @@ export const stream = <T, E = never>(options: {
 			const readWindow = (
 				after: number,
 				through: number,
-			): Effect.Effect<SourceRead, E> =>
-				Effect.suspend(() => {
-					if (shared === undefined) return read("window", { after, through });
-					const latest = shared.latest;
-					if (latest?.through === through && latest.after <= after)
-						// Keyed by this source's name, so it holds this source's answer.
-						return (latest.read as Effect.Effect<SourceRead, E>).pipe(
-							Effect.map((window) => ({
-								...window,
-								rows: window.rows.filter((row) => row.version > after),
-								removed: (window.removed ?? []).filter(
-									(row) => row.version > after,
-								),
-							})),
+			): Effect.Effect<SourceRead, E> => {
+				if (shared === undefined) return read("window", { after, through });
+				// Uninterruptible from the miss until the read settles, so an asker
+				// interrupted after publishing its window cannot strand a joiner.
+				// Only a joiner's wait stays interruptible. A joiner shares the
+				// asker's answer, failure included.
+				return Effect.uninterruptibleMask((restore) =>
+					Effect.suspend(() => {
+						const latest = shared.latest;
+						if (latest?.through === through && latest.after <= after)
+							// Keyed by this source's name, so it holds this source's answer.
+							return restore(latest.read as Effect.Effect<SourceRead, E>).pipe(
+								Effect.map((window) => ({
+									...window,
+									rows: window.rows.filter((row) => row.version > after),
+									removed: (window.removed ?? []).filter(
+										(row) => row.version > after,
+									),
+								})),
+							);
+						const deferred = Deferred.unsafeMake<SourceRead, E>(FiberId.none);
+						const window = { after, through, read: Deferred.await(deferred) };
+						shared.latest = window;
+						// A failure is not kept for later readers.
+						return read("window", { after, through }).pipe(
+							Effect.exit,
+							Effect.tap((exit) => {
+								if (exit._tag === "Failure" && shared.latest === window)
+									delete shared.latest;
+								return Deferred.done(deferred, exit);
+							}),
+							Effect.flatten,
 						);
-					const deferred = Deferred.unsafeMake<SourceRead, E>(FiberId.none);
-					const window = { after, through, read: Deferred.await(deferred) };
-					shared.latest = window;
-					// Settles even if this subscriber goes, so no joiner hangs; a
-					// failure is not kept for later readers.
-					return read("window", { after, through }).pipe(
-						Effect.exit,
-						Effect.tap((exit) => {
-							if (exit._tag === "Failure" && shared.latest === window)
-								delete shared.latest;
-							return Deferred.done(deferred, exit);
-						}),
-						Effect.uninterruptible,
-						Effect.flatten,
-					);
-				});
+					}),
+				);
+			};
 
 			const catchUp =
 				options.resumeFromSequence !== undefined &&
@@ -335,32 +340,29 @@ export const stream = <T, E = never>(options: {
 						}
 						const floor = yield* Ref.get(baseFloor);
 						// The commit seam publishes in commit order. The chunk's window
-						// closes at its newest routed advance. An unrouted advance moved
-						// nothing served here, so the window may open past it, which keeps
-						// it the same for every subscriber of the source.
-						let after = yield* Ref.get(seen);
-						let last = after;
+						// closes at its newest routed advance and opens where the last
+						// window closed, never past an unrouted advance: a commit that
+						// publishes nothing may still have stamped a row in between.
 						let through: number | undefined;
 						const removed: { id: string; version: number }[] = [];
 						for (const advance of chunk) {
 							// Already accounted for in a coherent base, removals included.
 							if (advance.version <= floor) continue;
-							last = advance.version;
 							const route = options.source.route(advance);
 							if (route.moved || route.removed.length > 0) {
 								through = advance.version;
 								for (const id of route.removed)
 									removed.push({ id, version: advance.version });
-							} else if (through === undefined) after = advance.version;
+							}
 						}
-						yield* Ref.set(seen, last);
 						if (through === undefined) return Chunk.empty();
 
 						// A removal also closes the window, so catch up every row before
 						// moving the watermark past it. Removals sort first within a
 						// version: the client should drop before it adds, so a delete
 						// and a re-create that land together settle on the survivor.
-						const window = yield* readWindow(after, through);
+						const window = yield* readWindow(yield* Ref.get(seen), through);
+						yield* Ref.set(seen, through);
 						return Chunk.unsafeFromArray(
 							deltaEnvelopes(window.rows, [
 								...removed,
