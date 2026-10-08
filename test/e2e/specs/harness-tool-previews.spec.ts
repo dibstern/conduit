@@ -2,7 +2,10 @@
 // the built server and the fake Claude SDK. What the browser receives is read
 // off its /rpc socket: content that is the point arrives whole, long tool
 // fields arrive as previews that carry their full size, and expanding a tool
-// loads the rest, with a retry when that load fails.
+// loads the rest, with a retry when that load fails. The tool-detail module
+// (conduit-test-y7eo.10) keeps what was loaded: expanding again asks nothing,
+// expands close together share one request, and a running tool's detail is
+// never kept as final.
 //
 //   CONDUIT_TEST_DIST=dist pnpm exec playwright test \
 //     --config test/e2e/playwright-harness.config.ts harness-tool-previews
@@ -40,6 +43,7 @@ const SEEDED = "previews-seeded";
 const BASH_ID = `${SEEDED}-bash`;
 const TASK_ID = `${SEEDED}-task`;
 const WRITE_ID = `${SEEDED}-write`;
+const SEQ_IDS = [`${SEEDED}-seq-1`, `${SEEDED}-seq-2`] as const;
 
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
@@ -128,6 +132,9 @@ const seed = (filename: string) =>
 						{ tool: "Bash", command: LONG_COMMAND },
 						LONG_RESULT,
 					),
+					...SEQ_IDS.flatMap((id) =>
+						tool(id, { tool: "Bash", command: "seq 1500" }, LONG_RESULT),
+					),
 					event("text.delta", {
 						messageId: assistant,
 						partId: `${assistant}-text`,
@@ -180,14 +187,21 @@ const toolsIn = (value: unknown): WireTool[] => {
 };
 
 /**
- * Records every frame the server sends the page, and fails the next
- * GetToolDetails request once `failNextDetails` is set.
+ * Records every frame the server sends the page and the tool ids of each
+ * GetToolDetails request. Fails the next one once `failNextDetails` is set,
+ * and holds them back from the server while `holdDetails` is set.
  */
 const watchRpc = async (page: Page) => {
 	const control = {
 		frames: [] as Frame[],
 		failNextDetails: false,
-		detailRequests: 0,
+		holdDetails: false,
+		held: [] as (() => void)[],
+		detailRequests: [] as (readonly string[])[],
+		release() {
+			control.holdDetails = false;
+			for (const send of control.held.splice(0)) send();
+		},
 	};
 	await page.routeWebSocket(
 		(url) => url.pathname === "/rpc",
@@ -202,16 +216,22 @@ const watchRpc = async (page: Page) => {
 			});
 			socket.onMessage((message) => {
 				const sent: unknown = JSON.parse(message.toString());
-				const request = [sent]
-					.flat()
-					.find(
-						(item): item is { tag: string; id: string } =>
-							typeof item === "object" &&
-							item !== null &&
-							"tag" in item &&
-							item.tag === "GetToolDetails",
-					);
-				if (request) control.detailRequests++;
+				const request = [sent].flat().find(
+					(
+						item,
+					): item is {
+						tag: string;
+						id: string;
+						payload: { toolIds: readonly string[] };
+					} =>
+						typeof item === "object" &&
+						item !== null &&
+						"tag" in item &&
+						item.tag === "GetToolDetails",
+				);
+				if (request) control.detailRequests.push(request.payload.toolIds);
+				if (request && control.holdDetails)
+					return control.held.push(() => server.send(message));
 				if (!request || !control.failNextDetails) return server.send(message);
 				control.failNextDetails = false;
 				socket.send(
@@ -349,7 +369,7 @@ test("tools open as previews and expand to full detail", async ({
 	const writeRow = await expandTool(page, toolRow(page, WRITE_ID));
 	await expect(writeRow.locator(".tool-result")).toContainText("File written");
 	await expect(writeRow.locator(".tool-full-detail")).toHaveCount(0);
-	expect(rpc.detailRequests).toBe(0);
+	expect(rpc.detailRequests).toHaveLength(0);
 
 	const detailsBefore = detailResponses(rpc.frames).length;
 	rpc.failNextDetails = true;
@@ -367,9 +387,39 @@ test("tools open as previews and expand to full detail", async ({
 	);
 	await expect(bashRow.locator(".tool-full-detail")).toHaveCount(0);
 	// The failed load and the retry: nothing else asked.
-	expect(rpc.detailRequests).toBe(2);
+	expect(rpc.detailRequests).toHaveLength(2);
 	const [detail] = detailResponses(rpc.frames).slice(detailsBefore);
 	expect(detail).toBeDefined();
+
+	// y7eo.10: expanding it again shows the whole tool and asks nothing.
+	await bashRow.locator("button").first().click();
+	await expect(bashRow.locator(".tool-result")).toHaveCount(0);
+	await bashRow.locator("button").first().click();
+	await expect(bashRow.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(bashRow.locator(".tool-full-detail")).toHaveCount(0);
+	expect(rpc.detailRequests).toHaveLength(2);
+
+	// Expands close together share one request, and expanding a tool whose
+	// load is on its way joins it.
+	rpc.holdDetails = true;
+	await page.evaluate((ids) => {
+		for (const id of ids)
+			document
+				.querySelector<HTMLElement>(`.tool-item[data-tool-id="${id}"] button`)
+				?.click();
+	}, SEQ_IDS);
+	const seqRow = toolRow(page, SEQ_IDS[0]);
+	await expect(seqRow).toContainText("Loading full output…");
+	await seqRow.locator("button").first().click();
+	await expect(seqRow.locator(".tool-full-detail")).toHaveCount(0);
+	await seqRow.locator("button").first().click();
+	await expect(seqRow).toContainText("Loading full output…");
+	rpc.release();
+	for (const id of SEQ_IDS)
+		await expect(toolRow(page, id).locator(".tool-result")).toContainText(
+			endOf("result"),
+		);
+	expect(rpc.detailRequests.slice(2)).toEqual([SEQ_IDS]);
 
 	// AC2: a pending question with over 2,000 characters of options, whole.
 	await app.goto(`${harness.baseUrl}/s/${questionSession}?p=process-test`);
@@ -398,6 +448,15 @@ test("tools open as previews and expand to full detail", async ({
 	await expect.poll(() => liveBash()?.state?.status).toBe("running");
 	expect(liveBash()?.state?.input?._tag).toBe("preview");
 	expect(liveBash()?.state?.output).toBeUndefined();
+	// y7eo.10: a running tool's detail loads, but is never kept as final, even
+	// though the browser already shows the tool as completed.
+	const liveId = liveBash()?.callID ?? "missing";
+	const requestsBeforeLive = rpc.detailRequests.length;
+	const runningRow = await expandTool(page, toolRow(page, liveId));
+	await expect(runningRow.locator(".tool-result")).toContainText(
+		endOf("argument"),
+	);
+	expect(rpc.detailRequests.slice(requestsBeforeLive)).toEqual([[liveId]]);
 	writeFileSync(join(harness.root, "release-tool-long"), "release");
 	await expect.poll(() => liveBash()?.state?.status).toBe("completed");
 	expect(liveBash()?.state?.output).toEqual({
@@ -413,11 +472,18 @@ test("tools open as previews and expand to full detail", async ({
 		"aria-expanded",
 		"false",
 	);
-	const liveRow = await expandTool(
-		page,
-		toolRow(page, liveBash()?.callID ?? "missing"),
-	);
+	const liveRow = await expandTool(page, toolRow(page, liveId));
 	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	// The settled tool's detail was asked for once more, then kept.
+	expect(rpc.detailRequests.slice(requestsBeforeLive)).toEqual([
+		[liveId],
+		[liveId],
+	]);
+	await liveRow.locator("button").first().click();
+	await expect(liveRow.locator(".tool-result")).toHaveCount(0);
+	await liveRow.locator("button").first().click();
+	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	expect(rpc.detailRequests.slice(requestsBeforeLive)).toHaveLength(2);
 
 	// The artifact: what each kind of frame cost, in bytes.
 	const report = {

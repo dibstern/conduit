@@ -160,12 +160,14 @@ describe("toolDetail", () => {
 			toolDetail({
 				toolId: "call-1",
 				version: 7,
+				settled: true,
 				input: json(input),
 				output,
 			}),
 		).toEqual({
 			toolId: "call-1",
 			version: 7,
+			settled: true,
 			input: { _tag: "whole", value: input },
 			output: { _tag: "whole", text: output },
 		});
@@ -343,6 +345,7 @@ describe("transcript query and detail read", () => {
 			{
 				toolId: "write-1",
 				version: expect.any(Number),
+				settled: true,
 				input: { _tag: "whole", value: JSON.parse(stored[0]?.input ?? "") },
 				output: { _tag: "whole", text: result },
 			},
@@ -414,6 +417,8 @@ describe("transcript query and detail read", () => {
 			{ toolId: "legacy-1", value: { command: "legacy" } },
 		]);
 		expect(parent[1]?.output).toEqual({ _tag: "whole", text: "legacy out" });
+		// Started but never finished: not final.
+		expect(parent[0]?.settled).toBe(false);
 		expect(fork.map(({ toolId, input }) => [toolId, input?.value])).toEqual([
 			["dup-1", { tool: "Bash", command: "in fork" }],
 		]);

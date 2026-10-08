@@ -70,6 +70,8 @@ export type ToolInput = typeof ToolInput.Type;
 export const ToolDetail = Schema.Struct({
 	toolId: ToolCallId,
 	version: PartVersion,
+	/** The tool has finished (completed or failed), so this detail is final. */
+	settled: Schema.Boolean,
 	input: Schema.optionalWith(WholeInput, { exact: true }),
 	output: Schema.optionalWith(WholeText, { exact: true }),
 });

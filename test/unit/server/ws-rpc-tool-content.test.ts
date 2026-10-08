@@ -18,6 +18,7 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 const detail: ToolDetail = {
 	toolId: ToolCallId.make("tool-1"),
 	version: PartVersion.make(7),
+	settled: true,
 	input: { _tag: "whole", value: { command: "ls" } },
 	output: { _tag: "whole", text: "full tool output" },
 };

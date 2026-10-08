@@ -504,6 +504,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						tools: request.toolIds.map((toolId) => ({
 							toolId,
 							version: PartVersion.make(1),
+							settled: true,
 							output: { _tag: "whole" as const, text: "full output" },
 						})),
 					}),
@@ -1220,6 +1221,7 @@ describe("browser WebSocket RPC contract", () => {
 						{
 							toolId: "tool-1",
 							version: 1,
+							settled: true,
 							output: { _tag: "whole", text: "full output" },
 						},
 					],

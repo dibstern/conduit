@@ -1,27 +1,21 @@
 <!-- An expanded tool, in full. The transcript carries long inputs and outputs as -->
-<!-- previews; when the card shows a cut one, it loads the rest through           -->
-<!-- GetToolDetails, and a failed load says so with a retry rather than passing   -->
-<!-- the preview off as the whole.                                                -->
+<!-- previews; when the card shows a cut one, it loads the rest through the       -->
+<!-- tool-detail module, and a failed load says so with a retry rather than       -->
+<!-- passing the preview off as the whole.                                        -->
 <script lang="ts">
 	import { type Snippet, untrack } from "svelte";
-	import { ToolCallId, type ToolDetail } from "../../../contracts/tool-wire.js";
+	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
-	import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../../ui-constants.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getToolDetailsRpc } from "../../transport/ws-rpc-client.js";
+	import { toolDetails } from "../../stores/tool-details.js";
 	import { toolCommand } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
-	async function loadFromServer(toolId: string): Promise<ToolDetail | undefined> {
+	async function loadFromServer(tool: ToolMessage): Promise<ToolDetail | undefined> {
 		const projectSlug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
 		if (!projectSlug || !sessionId) return undefined;
-		const { tools } = await getToolDetailsRpc({
-			projectSlug,
-			sessionId,
-			toolIds: [ToolCallId.make(toolId)],
-		});
-		return tools.find((tool) => tool.toolId === toolId);
+		return await toolDetails.get({ projectSlug, sessionId }, tool);
 	}
 
 	let {
@@ -31,7 +25,7 @@
 		class: className = "",
 	}: {
 		message: ToolMessage;
-		load?: (toolId: string) => Promise<ToolDetail | undefined>;
+		load?: (tool: ToolMessage) => Promise<ToolDetail | undefined>;
 		children: Snippet<[ToolMessage]>;
 		class?: string;
 	} = $props();
@@ -68,9 +62,7 @@
 		const fail = () => {
 			if (current) failed = true;
 		};
-		// A load that never settles must still end in the retry.
-		const timeout = setTimeout(fail, TOOL_CONTENT_LOAD_TIMEOUT_MS);
-		load(tool.id).then((detail) => {
+		load(tool).then((detail) => {
 			if (!current) return;
 			if (!detail) return fail();
 			const { preview: _preview, ...whole } = tool;
@@ -79,10 +71,9 @@
 				...(detail.input && { input: detail.input.value }),
 				...(detail.output && !tool.isError && { result: detail.output.text }),
 			};
-		}, fail).finally(() => clearTimeout(timeout));
+		}, fail);
 		return () => {
 			current = false;
-			clearTimeout(timeout);
 		};
 	});
 </script>

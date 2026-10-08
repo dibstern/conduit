@@ -156,12 +156,14 @@ const outputWire = (
 export function toolDetail(stored: {
 	readonly toolId: string;
 	readonly version: number;
+	readonly settled: boolean;
 	readonly input: string | null;
 	readonly output: string | null;
 }): ToolDetail {
 	return {
 		toolId: ToolCallId.make(stored.toolId),
 		version: PartVersion.make(stored.version),
+		settled: stored.settled,
 		...(stored.input == null
 			? {}
 			: { input: { _tag: "whole", value: parseInput(stored.input) } }),

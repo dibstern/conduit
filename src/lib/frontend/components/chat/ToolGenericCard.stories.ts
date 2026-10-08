@@ -10,6 +10,7 @@ import {
 	mockToolReadWithOffset,
 	mockToolRunning,
 } from "../../stories/mocks.js";
+import type { ToolMessage } from "../../types.js";
 import ToolGenericCard from "./ToolGenericCard.svelte";
 
 const meta = {
@@ -83,9 +84,10 @@ export const ExpandedPreviewLoading: Story = {
 export const ExpandedFullDetail: Story = {
 	args: {
 		message: mockToolPreview,
-		loadDetails: async (toolId: string) => ({
-			toolId: ToolCallId.make(toolId),
+		loadDetails: async (tool: ToolMessage) => ({
+			toolId: ToolCallId.make(tool.id),
 			version: PartVersion.make(1),
+			settled: true,
 			output: { _tag: "whole", text: fullGrepOutput },
 		}),
 	},

@@ -824,9 +824,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				input: string | null;
 				output: string | null;
 				version: number;
+				settled: number | null;
 			}>`
 				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
-					${toolOutput} AS output, mp.version
+					${toolOutput} AS output, mp.version,
+					mp.status IN ('completed', 'error') AS settled
 				FROM message_parts mp
 				JOIN messages ON messages.id = mp.message_id
 				WHERE (mp.call_id IN ${sql.in(toolIds)}
@@ -837,6 +839,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				toolDetail({
 					toolId: row.tool_id,
 					version: row.version,
+					settled: row.settled === 1,
 					input: row.input,
 					output: row.output,
 				}),
