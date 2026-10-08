@@ -182,9 +182,8 @@ export const migrateForkLineage = (configDir: string) =>
 										const [version] = yield* sql<{ value: number }>`
 										SELECT value FROM read_model_counter WHERE id = 1`;
 										yield* refreshSidebar(
-											[id],
-											version?.value ?? 0,
 											yield* rerootSession(id),
+											version?.value ?? 0,
 										);
 									}
 								}

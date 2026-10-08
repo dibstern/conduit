@@ -1,8 +1,9 @@
-// Upkeep of the sidebar table (conduit-test-y7eo.2). Every writer that can
-// change what a family shows calls `refreshSidebar` in its own transaction,
-// with the sessions it wrote: the session projector, the approval projector
-// and the commit seam's direct stamps. Each family is found through the stored
-// `root_id`, so a refresh reads the touched families and nothing else.
+// Upkeep of the sidebar table (conduit-test-y7eo.2). The session and approval
+// projectors name the sessions whose families they may have changed, and the
+// projection runner and the commit seam's direct stamps call `refreshSidebar`
+// once per transaction with all of them. Each family is found through the
+// stored `root_id`, so a refresh reads the touched families and nothing else,
+// once: its cost is the family's size, not that times the commit's events.
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
@@ -24,41 +25,53 @@ import {
 const decodeRow = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema));
 const encodeRow = Schema.encodeSync(Schema.parseJson(SidebarRowSchema));
 
+/** What a family member contributes to its root's row. */
+export type FamilyMember = Pick<
+	SessionRow,
+	"id" | "parent_id" | "side_thread" | "unread" | "status"
+>;
+
 /**
- * Recompute the sidebar rows of the families `sessionIds` belong to, plus
- * `formerRoots`: sessions that were top-level, or whose family lost a member,
- * before this write. A candidate that is no longer a top-level session loses
- * its row. Rows that did not visibly change are left as they are.
+ * Recompute the sidebar rows of the families `sessionIds` belong to, and of
+ * any of them that held a row before this write: a session deleted, or a root
+ * that gained a parent, names the family it left. A candidate that is not a
+ * top-level session now loses its row. Rows that did not visibly change are
+ * left as they are.
  */
 export const refreshSidebar = (
 	sessionIds: readonly string[],
 	version: number,
-	formerRoots: readonly string[] = [],
 ): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
-		if (sessionIds.length === 0 && formerRoots.length === 0) return;
+		if (sessionIds.length === 0) return;
 		const sql = yield* SqlClient.SqlClient;
+		const ids = JSON.stringify(sessionIds);
 		const candidates = yield* sql<{ root_id: string }>`
 			SELECT root_id FROM sessions
-			WHERE id IN (SELECT value FROM json_each(${JSON.stringify(sessionIds)}))
+			WHERE id IN (SELECT value FROM json_each(${ids}))
 			AND root_id IS NOT NULL
-			UNION SELECT value FROM json_each(${JSON.stringify(formerRoots)})`;
+			UNION SELECT value FROM json_each(${ids})`;
 		const roots = JSON.stringify(candidates.map((row) => row.root_id));
-		const family = yield* sql<SessionRow>`
-			SELECT * FROM sessions
-			WHERE root_id IN (SELECT value FROM json_each(${roots}))`;
-		const [approvals, stored] = yield* Effect.all([
+		// Whole rows for the roots alone; the rest of the family only rolls up.
+		const [top, family, approvals, stored] = yield* Effect.all([
+			sql<SessionRow>`
+				SELECT * FROM sessions
+				WHERE id IN (SELECT value FROM json_each(${roots}))
+				AND parent_id IS NULL`,
+			sql<FamilyMember>`
+				SELECT id, parent_id, side_thread, unread, status FROM sessions
+				WHERE root_id IN (SELECT value FROM json_each(${roots}))`,
 			sql<PendingApprovalCountRow>`
-				SELECT session_id, type, COUNT(*) AS pending_count
-				FROM pending_approvals
-				WHERE status = 'pending'
-				AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
-				GROUP BY session_id, type`,
+				SELECT a.session_id, a.type, COUNT(*) AS pending_count
+				FROM pending_approvals a JOIN sessions s ON s.id = a.session_id
+				WHERE a.status = 'pending'
+				AND s.root_id IN (SELECT value FROM json_each(${roots}))
+				GROUP BY a.session_id, a.type`,
 			sql<{ session_id: string; row: string }>`
 				SELECT session_id, row FROM session_sidebar
 				WHERE session_id IN (SELECT value FROM json_each(${roots}))`,
 		]);
-		const next = sidebarRows(family, approvals, version);
+		const next = sidebarRows(top, family, approvals, version);
 		const storedRows = new Map(
 			stored.map((row) => [row.session_id, decodeRow(row.row)]),
 		);
@@ -83,19 +96,28 @@ export const refreshSidebar = (
 
 /**
  * Store the top-level parent of a session whose parent was just written, for
- * it and everything beneath it. Returns the families the write can have
- * changed besides the session's own: the one it left, and its own row if it
- * was top-level and no longer is.
+ * it and everything beneath it. Returns the sessions whose families the write
+ * can have changed: its own, the one it left, and its own row if it was
+ * top-level and no longer is.
+ *
+ * The top is found by walking up, as the migration's backfill walks down, so
+ * both agree on a session whose chain never reaches a top-level one: an orphan
+ * (its parent is missing) or a member of a parent cycle has no root, and no
+ * family shows it, as the full session list does not.
  */
 export const rerootSession = (
 	sessionId: string,
 ): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const [row] = yield* sql<{ root_id: string | null; next: string }>`
-			SELECT s.root_id, COALESCE(parent.root_id, s.parent_id, s.id) AS next
-			FROM sessions s LEFT JOIN sessions parent ON parent.id = s.parent_id
-			WHERE s.id = ${sessionId}`;
+		const [row] = yield* sql<{ root_id: string | null; next: string | null }>`
+			WITH RECURSIVE up(id, parent_id) AS (
+				SELECT id, parent_id FROM sessions WHERE id = ${sessionId}
+				UNION
+				SELECT s.id, s.parent_id FROM sessions s JOIN up ON s.id = up.parent_id
+			)
+			SELECT root_id, (SELECT id FROM up WHERE parent_id IS NULL) AS next
+			FROM sessions WHERE id = ${sessionId}`;
 		if (row === undefined) return [];
 		if (row.root_id !== row.next)
 			yield* sql`
@@ -129,11 +151,12 @@ export const announceSidebar = (sessionId: string, version: number) =>
 	);
 
 /**
- * The sidebar row of every top-level session in `family`, which must hold
- * whole families. Pure: the same roll-up the full session list computes.
+ * The sidebar row of every session in `roots`, whose whole families `family`
+ * must hold. Pure: the same roll-up the full session list computes.
  */
 export const sidebarRows = (
-	family: readonly SessionRow[],
+	roots: readonly SessionRow[],
+	family: readonly FamilyMember[],
 	approvals: readonly PendingApprovalCountRow[],
 	version: number,
 ): ReadonlyMap<string, SidebarRow> => {
@@ -145,7 +168,6 @@ export const sidebarRows = (
 	const sideThreadIds = new Set(
 		family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 	);
-	const roots = family.filter((row) => row.parent_id === null);
 	const pending = pendingApprovalCountsByType(approvals);
 	const items = sessionRowsToSessionInfoList(roots, {
 		parentMap,
@@ -174,7 +196,9 @@ export const sidebarRows = (
 	const members = new Map<string, string[]>();
 	for (const row of family) {
 		const root = activityRoot(row.id);
-		members.set(root, [...(members.get(root) ?? []), row.id]);
+		const group = members.get(root);
+		if (group === undefined) members.set(root, [row.id]);
+		else group.push(row.id);
 	}
 	return new Map(
 		roots.flatMap((root, index) => {

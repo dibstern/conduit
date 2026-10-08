@@ -13,6 +13,7 @@ import {
 	type ProjectionTouch,
 	UNPROJECTED_CANONICAL_EVENT_TYPES,
 } from "./projectors-effect.js";
+import { refreshSidebar } from "./sidebar-projection.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
@@ -233,6 +234,7 @@ export const makeProjectionRunnerEffect = (
 					}
 
 					const touched = mergeTouches(touches);
+					yield* refreshSidebar(touched.sidebar ?? [], version);
 					return {
 						version,
 						sessionIds: touched.stamped,
@@ -274,7 +276,7 @@ export const makeProjectionRunnerEffect = (
 				// One counter bump for the batch, taken inside that transaction: every
 				// row the batch writes carries the same version, and the bump's write
 				// lock is held until the rows it stamps are committed.
-				const version = yield* sql.withTransaction(
+				const { version, touched } = yield* sql.withTransaction(
 					Effect.gen(function* () {
 						const version = yield* nextVersion;
 						const ctx: ProjectionContext = { version, replaying };
@@ -293,7 +295,10 @@ export const makeProjectionRunnerEffect = (
 								yield* cursorRepo.upsert(projector.name, lastEvent.sequence);
 							}
 						}
-						return version;
+						// Once for the batch: a refresh reads whole families.
+						const touched = mergeTouches(touches);
+						yield* refreshSidebar(touched.sidebar ?? [], version);
+						return { version, touched };
 					}).pipe(
 						Effect.mapError(
 							(e) =>
@@ -305,7 +310,6 @@ export const makeProjectionRunnerEffect = (
 					),
 				);
 
-				const touched = mergeTouches(touches);
 				return {
 					version,
 					sessionIds: touched.stamped,
@@ -385,10 +389,13 @@ export const makeProjectionRunnerEffect = (
 								yield* sql
 									.withTransaction(
 										Effect.gen(function* () {
-											yield* projector.project(storedEvent, {
-												version: yield* nextVersion,
+											const version = yield* nextVersion;
+											const touched = yield* projector.project(storedEvent, {
+												version,
 												replaying: true,
 											});
+											// Each replayed projection is its own transaction.
+											yield* refreshSidebar(touched.sidebar ?? [], version);
 											yield* cursorRepo.upsert(
 												projector.name,
 												eventRow.sequence,

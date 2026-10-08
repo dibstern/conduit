@@ -29,6 +29,11 @@
 // 12. A delta read costs more than 5 ms on the 10k-session fixture.
 // 13. Last-activity time moves without a visible change (reorders the sidebar
 //     on a chunk), or does not follow the root when the row does change.
+// 14. An orphan (its parent is missing) or a parent cycle loops the upkeep, is
+//     shown in some family, or gets a root the migration's backfill would not
+//     give it. Neither reaches a top-level session, so neither has a root.
+// 15. Upkeep runs once per event, so a commit costs events x family size
+//     inside the write transaction.
 //
 // Resuming past a removal tombstone belongs to conduit-test-y7eo.3.
 
@@ -36,7 +41,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, Tracer } from "effect";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
@@ -54,6 +59,10 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	refreshSidebar,
+	rerootSession,
+} from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionBackground } from "../../../src/lib/session/background-liveness.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
@@ -72,6 +81,8 @@ type Command =
 			readonly fork: boolean;
 	  }
 	| { readonly kind: "fork"; readonly id: string; readonly parent: string }
+	/** Re-parent under a session that does not exist. */
+	| { readonly kind: "orphan"; readonly id: string; readonly parent: string }
 	| { readonly kind: "delete"; readonly id: string }
 	| {
 			readonly kind: "status";
@@ -148,14 +159,36 @@ const scenario = (store: Store) => {
 			yield* commitAndSignal(events, { publish: false });
 		});
 
-	const ancestors = (id: string | undefined): string[] =>
-		id === undefined ? [] : [id, ...ancestors(parents.get(id))];
-	const subtree = (id: string): string[] => [
-		id,
-		...[...parents]
-			.filter(([, parent]) => parent === id)
-			.flatMap(([child]) => subtree(child)),
-	];
+	// No event can name a missing parent while foreign keys are on. A write
+	// with them off can, as the fork-lineage import does during migration.
+	const orphan = (id: string, parent: string) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commitAndSignal = yield* makeCommitAndSignal;
+			yield* sql`PRAGMA foreign_keys = OFF`;
+			yield* commitAndSignal
+				.write(
+					(_project, stamp) =>
+						stamp((version) =>
+							Effect.gen(function* () {
+								yield* sql`UPDATE sessions SET parent_id = ${parent}, version = ${version} WHERE id = ${id}`;
+								yield* refreshSidebar(yield* rerootSession(id), version);
+								return [id];
+							}),
+						),
+					{ publish: false },
+				)
+				.pipe(Effect.ensuring(Effect.orDie(sql`PRAGMA foreign_keys = ON`)));
+		});
+
+	// Parents can form cycles, so this collects instead of recursing.
+	const subtree = (id: string): string[] => {
+		const found = new Set([id]);
+		for (const at of found)
+			for (const [child, parent] of parents)
+				if (parent === at) found.add(child);
+		return [...found];
+	};
 
 	/** The events for a command, or undefined when the model rejects it. */
 	const plan = (command: Command) => {
@@ -164,10 +197,8 @@ const scenario = (store: Store) => {
 		switch (command.kind) {
 			case "create": {
 				const { id, parent } = command;
-				if (parent !== undefined) {
-					if (!parents.has(parent) || ancestors(parent).includes(id))
-						return undefined;
-				}
+				// The parent must exist (a foreign key), but may close a cycle.
+				if (parent !== undefined && !parents.has(parent)) return undefined;
 				const message = `${id}-m${messages++}`;
 				parents.set(id, parent ?? parents.get(id));
 				return run(
@@ -189,8 +220,7 @@ const scenario = (store: Store) => {
 			}
 			case "fork": {
 				const { id, parent } = command;
-				if (!exists || !parents.has(parent) || ancestors(parent).includes(id))
-					return undefined;
+				if (!exists || !parents.has(parent)) return undefined;
 				parents.set(id, parent);
 				return run(
 					commit([
@@ -201,6 +231,12 @@ const scenario = (store: Store) => {
 						}),
 					]),
 				);
+			}
+			case "orphan": {
+				const { id, parent } = command;
+				if (!exists || parents.has(parent)) return undefined;
+				parents.set(id, parent);
+				return run(orphan(id, parent));
 			}
 			case "delete": {
 				if (!exists) return undefined;
@@ -437,7 +473,27 @@ const scenario = (store: Store) => {
 			}),
 		);
 
-	return { apply, rebuild, shown: () => shown };
+	/** Run the migration's backfill again: it must agree with the upkeep. */
+	const backfill = () =>
+		store.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const roots = sql<{ id: string; root_id: string | null }>`
+					SELECT id, root_id FROM sessions ORDER BY id`;
+				const kept = yield* roots;
+				yield* sql`DROP TABLE session_sidebar`;
+				yield* sql`DROP INDEX idx_sessions_root`;
+				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 38`;
+				yield* makeEffectSqlMigrator();
+				expect(yield* roots, "backfilled roots").toEqual(kept);
+				shown = new Map();
+				readVersion = -1;
+				return yield* check(undefined);
+			}),
+		);
+
+	return { apply, rebuild, backfill, shown: () => shown };
 };
 
 const ids = ["a", "b", "c", "d", "e"] as const;
@@ -455,6 +511,7 @@ const command: fc.Arbitrary<Command> = fc.oneof(
 		}),
 	},
 	fc.record({ kind: fc.constant("fork" as const), id, parent: id }),
+	fc.record({ kind: fc.constant("orphan" as const), id, parent: id }),
 	fc.record({ kind: fc.constant("delete" as const), id }),
 	{
 		weight: 3,
@@ -505,12 +562,13 @@ const command: fc.Arbitrary<Command> = fc.oneof(
 
 const run = async (
 	commands: readonly Command[],
-	options: { readonly rebuild?: boolean } = {},
+	options: { readonly backfill?: boolean; readonly rebuild?: boolean } = {},
 ) => {
 	const store = openStore(":memory:");
 	try {
 		const sidebar = scenario(store);
 		for (const next of commands) await sidebar.apply(next);
+		if (options.backfill) await sidebar.backfill();
 		if (options.rebuild) await sidebar.rebuild();
 		return sidebar.shown();
 	} finally {
@@ -542,12 +600,40 @@ describe("sidebar table against the full computation", () => {
 			fc.asyncProperty(
 				fc.array(command, { minLength: 10, maxLength: 40 }),
 				async (commands) => {
-					await run(commands, { rebuild: true });
+					await run(commands, { backfill: true, rebuild: true });
 				},
 			),
 			{ numRuns: 60 },
 		);
 	}, 120_000);
+
+	it("shows no orphan or parent cycle, as the full list does not, and backfills them alike", async () => {
+		const shown = await run(
+			[
+				root("a"),
+				child("b", "a"),
+				child("c", "b"),
+				{ kind: "status", id: "c", status: "busy" },
+				// b and c close a cycle and leave a's family.
+				{ kind: "fork", id: "b", parent: "c" },
+				child("d", "a"),
+				{ kind: "orphan", id: "d", parent: "e" },
+				{ kind: "ask", id: "d", question: true },
+			],
+			{ backfill: true },
+		);
+		expect([...shown.keys()]).toEqual(["a"]);
+		expect(shown.get("a")?.item.attention).toBe("idle");
+		// The missing parent arriving adopts the orphan.
+		const adopted = await run([
+			root("a"),
+			{ kind: "orphan", id: "a", parent: "e" },
+			{ kind: "ask", id: "a", question: true },
+			root("e"),
+		]);
+		expect([...adopted.keys()]).toEqual(["e"]);
+		expect(adopted.get("e")?.item.attention).toBe("needs-reply");
+	});
 
 	it("refreshes both families when a child moves, and drops a root that gains a parent", async () => {
 		const shown = await run([
@@ -759,4 +845,123 @@ describe("sidebar table on the 10k-session fixture", () => {
 		expect(ms).toBeLessThan(1000);
 		await store.runPromise(compare);
 	}, 30_000);
+});
+
+describe("sidebar upkeep in a large family", () => {
+	// Counts, not timings. Upkeep reads the whole family, so it has to happen
+	// once per commit: once per event makes a commit cost events x family size,
+	// all of it inside the write transaction.
+	const FAMILY = 1500;
+	const FAMILY_READ = /FROM sessions\s+WHERE root_id IN/;
+
+	/** Records the text of every SQL statement run under it. */
+	const recordQueries = (queries: string[]): Tracer.Tracer =>
+		Tracer.make({
+			span: (name, parent, context, links, startTime, kind) => ({
+				_tag: "Span",
+				name,
+				spanId: "query",
+				traceId: "query",
+				parent,
+				context,
+				status: { _tag: "Started", startTime },
+				attributes: new Map(),
+				links,
+				sampled: true,
+				kind,
+				end: () => {},
+				attribute: (key, value) => {
+					if (key === "db.query.text" && typeof value === "string")
+						queries.push(value);
+				},
+				event: () => {},
+				addLinks: () => {},
+			}),
+			context: (f) => f(),
+		});
+
+	it("reads the family once per commit, however many events it holds", async () => {
+		const store = openStore(":memory:");
+		const event = <T extends CanonicalEventType>(
+			type: T,
+			sessionId: string,
+			data: EventPayloadMap[T],
+		) => canonicalEvent(type, sessionId, data, { provider: "claude" });
+		const commit = (events: readonly CanonicalEvent[]) =>
+			Effect.flatMap(makeCommitAndSignal, (commitAndSignal) =>
+				commitAndSignal(events, { publish: false }),
+			);
+		/** Family reads, each one of every member row, made by one write. */
+		const familyReads = async <A, E>(
+			write: Effect.Effect<A, E, ManagedRuntime.ManagedRuntime.Context<Store>>,
+		) => {
+			const queries: string[] = [];
+			await store.runPromise(
+				write.pipe(Effect.withTracer(recordQueries(queries))),
+			);
+			return queries.filter((query) => FAMILY_READ.test(query)).length;
+		};
+		// A deep spine as well as a wide fan.
+		const children = Array.from({ length: FAMILY - 1 }, (_, index) => ({
+			id: `child-${index}`,
+			parent: index < 2 || index % 2 === 0 ? "root" : `child-${index - 2}`,
+		}));
+		try {
+			expect(
+				await familyReads(
+					commit([
+						event("session.created", "root", {
+							sessionId: "root",
+							title: "root",
+							provider: "claude",
+						}),
+						...children.map(({ id, parent }) =>
+							event("session.created", id, {
+								sessionId: id,
+								title: id,
+								provider: "claude",
+								parentId: parent,
+							}),
+						),
+					]),
+				),
+				"creating the family",
+			).toBe(1);
+			expect(
+				await familyReads(
+					commit(
+						Array.from({ length: 100 }, (_, index) =>
+							index % 4 === 0
+								? event("question.asked", "child-9", {
+										id: `q-${index}`,
+										sessionId: "child-9",
+										questions: [],
+									})
+								: index % 4 === 1
+									? event("session.status", "child-9", {
+											sessionId: "child-9",
+											status: index % 8 === 1 ? "busy" : "idle",
+										})
+									: event("session.variant_changed", "child-9", {
+											sessionId: "child-9",
+											variant: `v${index}`,
+										}),
+						),
+					),
+				),
+				"100 events on one child",
+			).toBe(1);
+			expect(await familyReads(markUnread("root")), "a direct stamp").toBe(1);
+			const sidebar = await store.runPromise(
+				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
+					readQuery.readSessionList(),
+				),
+			);
+			expect(sidebar.rows.map(({ item }) => item.attention)).toEqual([
+				"needs-reply",
+			]);
+		} finally {
+			await store.dispose();
+		}
+	}, 60_000);
 });

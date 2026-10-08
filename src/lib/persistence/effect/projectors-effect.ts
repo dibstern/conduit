@@ -17,7 +17,7 @@ import {
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
-import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
+import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
@@ -51,6 +51,12 @@ export interface ProjectionContext {
 export interface ProjectionTouch {
 	readonly stamped: readonly string[];
 	readonly removed: readonly string[];
+	/**
+	 * Sessions whose family's sidebar row this projection may have changed,
+	 * or that held a row before it. The runner refreshes them all once per
+	 * transaction, not once per projection.
+	 */
+	readonly sidebar?: readonly string[];
 }
 
 /**
@@ -68,13 +74,16 @@ export const mergeTouches = (
 	touches: Iterable<ProjectionTouch>,
 ): ProjectionTouch => {
 	const live = new Map<string, boolean>();
+	const sidebar = new Set<string>();
 	for (const touch of touches) {
 		for (const sessionId of touch.stamped) live.set(sessionId, true);
 		for (const sessionId of touch.removed) live.set(sessionId, false);
+		for (const sessionId of touch.sidebar ?? []) sidebar.add(sessionId);
 	}
 	return {
 		stamped: [...live].filter(([, alive]) => alive).map(([id]) => id),
 		removed: [...live].filter(([, alive]) => !alive).map(([id]) => id),
+		...(sidebar.size > 0 ? { sidebar: [...sidebar] } : {}),
 	};
 };
 
@@ -216,7 +225,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
-			const formerRoots: string[] = [];
+			const left: string[] = [];
 
 			if (event.type === "session.goal_changed" && event.data.goal) {
 				const goal = event.data.goal;
@@ -252,7 +261,7 @@ export const makeSessionProjector = (): EffectProjector => ({
 					);
 					const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
-					formerRoots.push(...roots.flatMap((row) => row.root_id ?? []));
+					left.push(...roots.flatMap((row) => row.root_id ?? []));
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
 					written.push(...subtree.map((row) => row.id));
 					continue;
@@ -265,10 +274,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
-				formerRoots.push(...(yield* rerootSession(event.data.sessionId)));
+				left.push(...(yield* rerootSession(event.data.sessionId)));
 			const touch = yield* stampSessions(written, ctx.version);
-			yield* refreshSidebar(touch.stamped, ctx.version, formerRoots);
-			return touch;
+			return { ...touch, sidebar: [...touch.stamped, ...left] };
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -1315,11 +1323,10 @@ export const makeApprovalProjector = (): EffectProjector => ({
 						messageIds.push(...ids(turns));
 					}
 					const sessions = yield* stampSessions(owners(written), ctx.version);
-					// The pending counts roll up into the family's row.
-					yield* refreshSidebar(sessions.stamped, ctx.version);
 					return mergeTouches([
 						yield* stampMessage(messageIds, ctx.version),
-						sessions,
+						// The pending counts roll up into the family's row.
+						{ ...sessions, sidebar: sessions.stamped },
 					]);
 				}),
 			),
