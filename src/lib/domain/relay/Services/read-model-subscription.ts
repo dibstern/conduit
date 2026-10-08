@@ -139,7 +139,8 @@ export interface SubscriptionSource<T, E = never> {
 			 * set that base began, as it stands at `version`, in the same
 			 * transaction and without reading a row's body. Absent when the
 			 * source cannot place that base, such as a page cursor that is
-			 * gone; the resume then gets a snapshot.
+			 * gone; the resume then gets a snapshot. A source may skip it when
+			 * the cursor already means one (see `removedSince`).
 			 */
 			readonly listing?: Iterable<readonly [id: string, version: number]>;
 		},

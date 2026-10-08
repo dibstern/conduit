@@ -364,7 +364,8 @@ interface TranscriptWindow {
 		readonly partId: string;
 		readonly version: number;
 	}[];
-	/** With listing options whose `from` still exists. */
+	/** With listing options whose `from` still exists, read from a cursor
+	 *  the store has reached. */
 	readonly listing?: {
 		readonly messages: readonly {
 			readonly id: string;
@@ -1477,6 +1478,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE version > ${floor} AND version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
+						const removedSince = ranged
+							? ((yield* sql<{ version: number }>`
+									SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
+									?.version ?? 0)
+							: undefined;
+						// A cursor the tombstones cannot cover, or one past the store,
+						// is answered with a snapshot, so it is not listed.
+						const listable =
+							range?.listing === true &&
+							floor <= version &&
+							floor >= (removedSince ?? floor);
 						return {
 							rows: stored.flatMap(({ row }) => {
 								if (row === null) return [];
@@ -1501,12 +1513,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 											]
 										: [],
 								),
-								removedSince:
-									(yield* sql<{ version: number }>`
-										SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
-										?.version ?? 0,
 							}),
-							...(range?.listing === true && {
+							...(removedSince === undefined ? {} : { removedSince }),
+							...(listable && {
 								listing: (yield* sql<{ session_id: string; version: number }>`
 									SELECT session_id, version FROM session_sidebar
 									WHERE row IS NOT NULL`).map(
@@ -1629,31 +1638,49 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							: (yield* sql<{ created_at: number; id: string }>`
 									SELECT created_at, id FROM messages
 									WHERE session_id = ${sessionId} AND id = ${listing.from}`)[0];
-					// Ids and versions only, from the page's first message on, and
-					// whatever moved past the page's version wherever it sits.
+					// Ids and versions only: the page, from its first message on (the
+					// whole session without one), then whatever moved past the page's
+					// version before it. Each half is one index range. A cursor past
+					// the store is answered with a snapshot, so it is not listed.
+					const inPage =
+						from === undefined
+							? sql.literal("1")
+							: sql`m.created_at >= ${from.created_at}
+								AND (m.created_at > ${from.created_at} OR m.id >= ${from.id})`;
 					const listed =
-						listing === undefined || (listing.from !== undefined && !from)
+						listing === undefined ||
+						(listing.from !== undefined && !from) ||
+						floor > version
 							? undefined
 							: {
 									messages: yield* sql<{ id: string; version: number }>`
-										SELECT id, version FROM messages
-										WHERE session_id = ${sessionId}
-										AND (version > ${listing.since}
-											OR ${from?.id ?? null} IS NULL
-											OR created_at > ${from?.created_at ?? null}
-											OR (created_at = ${from?.created_at ?? null} AND id >= ${from?.id ?? null}))`,
+										SELECT m.id, m.version FROM messages m
+										WHERE m.session_id = ${sessionId} AND ${inPage}
+										${
+											from === undefined
+												? sql.literal("")
+												: sql`UNION ALL
+										SELECT m.id, m.version FROM messages m
+										WHERE m.session_id = ${sessionId}
+											AND m.version > ${listing.since} AND NOT (${inPage})`
+										}`,
 									parts: yield* sql<{
 										messageId: string;
 										partId: string;
 										version: number;
 									}>`
 										SELECT mp.message_id AS messageId, mp.id AS partId, mp.version
-										FROM message_parts mp JOIN messages m ON m.id = mp.message_id
-										WHERE m.session_id = ${sessionId}
-										AND (mp.version > ${listing.since}
-											OR ${from?.id ?? null} IS NULL
-											OR m.created_at > ${from?.created_at ?? null}
-											OR (m.created_at = ${from?.created_at ?? null} AND m.id >= ${from?.id ?? null}))`,
+										FROM messages m JOIN message_parts mp ON mp.message_id = m.id
+										WHERE m.session_id = ${sessionId} AND ${inPage}
+										${
+											from === undefined
+												? sql.literal("")
+												: sql`UNION ALL
+										SELECT mp.message_id, mp.id, mp.version
+										FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
+										WHERE mp.version > ${listing.since}
+											AND m.session_id = ${sessionId} AND NOT (${inPage})`
+										}`,
 								};
 					// A part write stamps its message too, so a message is never older
 					// than its parts: every message with a part in the window is past

@@ -126,34 +126,17 @@ export const reduce = <T>(
 			return { ...state, versions, floor, settled: true };
 		}
 
-		case "snapshot": {
-			const sequence = change.sequence;
-			const rows = new Map(change.rows.map((item) => [identify(item), item]));
-			// The server's sequences only grow, so a snapshot below anything we
-			// hold is the server gone back, a restored store. The server wins
-			// (conduit-test-y7eo.9): take it whole. One at what we hold is a
-			// corrective re-read, and is merged below like any other.
-			const held = Math.max(state.floor ?? -1, ...state.versions.values());
-			if (sequence < held)
-				return {
-					rows,
-					versions: new Map(),
-					floor: sequence,
-					settled: state.settled,
-				};
-			// A delayed snapshot covers only its own sequence. Keep newer live
-			// rows and tombstones, while replacing everything the snapshot covers.
-			const versions = new Map<string, number>();
-			for (const [id, version] of state.versions) {
-				if (version <= sequence) continue;
-				versions.set(id, version);
-				if (state.rows.has(id)) {
-					const item = state.rows.get(id);
-					if (item !== undefined) rows.set(id, item);
-				} else rows.delete(id);
-			}
-			return { rows, versions, floor: sequence, settled: state.settled };
-		}
+		// A snapshot is the whole set at its sequence, and replaces what we hold.
+		// It opens a subscription, so no live change can be newer than it, unless
+		// the server went back (a restored store); the server wins then too
+		// (conduit-test-y7eo.9).
+		case "snapshot":
+			return {
+				rows: new Map(change.rows.map((item) => [identify(item), item])),
+				versions: new Map(),
+				floor: change.sequence,
+				settled: state.settled,
+			};
 
 		case "upsert": {
 			const id = identify(change.item);

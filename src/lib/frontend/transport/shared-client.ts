@@ -63,7 +63,6 @@ export type WsRpcClient = Effect.Effect.Success<typeof wsRpcClient>;
 const makeSubscriptions = (
 	projectSlug: string,
 	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
-	ledgers = new Map<string, ResumeLedger>(),
 ) => ({
 	/** The session list. Low-rate, so it rides the control socket. */
 	shell: (
@@ -103,17 +102,11 @@ const makeSubscriptions = (
 	sessionDetail: (options: {
 		readonly sessionId: string;
 		readonly resumeFromSequence?: number;
-	}) => {
-		// A view resumed from its high-water mark is checked against what the
-		// last subscription applied to it. Each subscription folds into its own
-		// copy, so two open at once cannot interleave into one ledger.
-		const held = ledgers.get(options.sessionId);
-		const ledger: ResumeLedger =
-			options.resumeFromSequence === undefined || held === undefined
-				? makeResumeLedger()
-				: { base: held.base, rows: new Map(held.rows) };
-		ledgers.set(options.sessionId, ledger);
-		return resumeStream(
+		/** What the view resumed from has applied; the caller keeps it with
+		 *  the view, so a resume from its high-water mark is checked too. */
+		readonly ledger?: ResumeLedger;
+	}) =>
+		resumeStream(
 			(resumeFromSequence, resumeBase) =>
 				sockets.stream
 					.SubscribeSessionDetail({
@@ -124,9 +117,11 @@ const makeSubscriptions = (
 						...(resumeBase === undefined ? {} : { resumeBase }),
 					})
 					.pipe(decodeSessionDetail),
-			{ from: options.resumeFromSequence, ledger },
-		);
-	},
+			{
+				from: options.resumeFromSequence,
+				ledger: options.ledger ?? makeResumeLedger(),
+			},
+		),
 	/** One session's todo list. Low-rate, so it rides the control socket. */
 	todos: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>

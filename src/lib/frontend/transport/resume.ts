@@ -139,12 +139,21 @@ declare global {
 export interface ResumeLedger {
 	base: ResumeBase | undefined;
 	readonly rows: Map<string, number>;
+	/** The part rows seen under each message, which go when it goes. */
+	readonly parts: Map<string, Set<string>>;
 }
 
 export const makeResumeLedger = (): ResumeLedger => ({
 	base: undefined,
 	rows: new Map(),
+	parts: new Map(),
 });
+
+const clearLedger = (ledger: ResumeLedger) => {
+	ledger.base = undefined;
+	ledger.rows.clear();
+	ledger.parts.clear();
+};
 
 /** The server's checksum of a resumed set disagrees with the ledger's. */
 class ResumeChecksumMismatch extends Data.TaggedError(
@@ -269,6 +278,25 @@ const advance = (cursor: Cursor, envelope: object): Step => {
 	return { cursor: closing ? settled(opened) : opened, deliver: true };
 };
 
+/** Note one row the subscription holds, at the version it moved at. */
+const holdRow = (ledger: ResumeLedger, envelope: object, version: number) => {
+	const id = subjectOf(payloadOf(envelope));
+	if (id === undefined) return;
+	ledger.rows.set(id, Math.max(ledger.rows.get(id) ?? version, version));
+	const item = "item" in envelope ? envelope.item : undefined;
+	if (
+		typeof item === "object" &&
+		item !== null &&
+		"part" in item &&
+		"messageId" in item &&
+		typeof item.messageId === "string"
+	)
+		ledger.parts.set(
+			item.messageId,
+			(ledger.parts.get(item.messageId) ?? new Set()).add(id),
+		);
+};
+
 /**
  * Fold one delivered envelope into the ledger, and check a `synchronized`
  * that carries the server's checksum against it.
@@ -281,35 +309,29 @@ const record = (
 	switch (tagOf(envelope)) {
 		case "snapshot": {
 			if (sequence === undefined) return Effect.void;
+			clearLedger(ledger);
 			ledger.base = {
 				sequence,
 				...("cursor" in envelope && typeof envelope.cursor === "string"
 					? { cursor: envelope.cursor }
 					: {}),
 			};
-			ledger.rows.clear();
 			const rows: readonly unknown[] =
 				"rows" in envelope && Array.isArray(envelope.rows) ? envelope.rows : [];
-			for (const row of rows) {
-				const id = subjectOf(payloadOf({ item: row }));
-				if (id !== undefined) ledger.rows.set(id, sequence);
-			}
+			for (const row of rows) holdRow(ledger, { item: row }, sequence);
 			return Effect.void;
 		}
-		case "upsert": {
-			const id = subjectOf(payloadOf(envelope));
-			if (id !== undefined && sequence !== undefined)
-				ledger.rows.set(id, sequence);
+		case "upsert":
+			if (sequence !== undefined) holdRow(ledger, envelope, sequence);
 			return Effect.void;
-		}
 		case "remove": {
 			if (!("id" in envelope) || typeof envelope.id !== "string")
 				return Effect.void;
 			ledger.rows.delete(envelope.id);
-			// A removed message takes its parts, each named `["<its id>",…`.
-			const parts = `${JSON.stringify([envelope.id]).slice(0, -1)},`;
-			for (const id of ledger.rows.keys())
-				if (id.startsWith(parts)) ledger.rows.delete(id);
+			// A removed message takes its parts.
+			for (const part of ledger.parts.get(envelope.id) ?? [])
+				ledger.rows.delete(part);
+			ledger.parts.delete(envelope.id);
 			return Effect.void;
 		}
 		case "synchronized": {
@@ -437,9 +459,7 @@ export const resumeStream = <A extends object>(
 									seen: nothingSeen,
 								}).pipe(
 									Effect.tap(() => {
-										if (ledger === undefined) return;
-										ledger.base = undefined;
-										ledger.rows.clear();
+										if (ledger !== undefined) clearLedger(ledger);
 									}),
 									Effect.as(reissue()),
 								),

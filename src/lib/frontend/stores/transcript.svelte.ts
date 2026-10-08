@@ -4,6 +4,7 @@ import {
 	PartRemovalId,
 	type SessionDetailEnvelope,
 } from "../../contracts/ws-rpc.js";
+import { makeResumeLedger, type ResumeLedger } from "../transport/resume.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { type FeedStatus, supervise } from "../transport/supervise.js";
@@ -418,6 +419,9 @@ export function applyTranscriptEnvelope(
 }
 
 const convertedRows = new WeakMap<HistoryMessage, ChatMessage[]>();
+/** What each slot's feed has applied, so its resumes are checked. Keyed by the
+ *  slot, so it goes when the slot is evicted; reset with the transcript. */
+const ledgers = new WeakMap<SessionMessages, ResumeLedger>();
 // Projected UUIDs contain "/"; local generateUuid() values never do.
 const uuidFor = (messageId: string, partId: string): string =>
 	`${messageId}/${partId}`;
@@ -598,6 +602,7 @@ export function viewTranscript(
 			!slot.messages.transcript ||
 			slot.messages.transcript.project !== project
 		) {
+			ledgers.delete(slot.messages);
 			slot.messages.transcript = {
 				rows: [],
 				hwm: null,
@@ -620,6 +625,8 @@ export function viewTranscript(
 		if (currentGeneration !== generation || !sessionId || !slot) return;
 		const runtime = await getRuntime();
 		if (currentGeneration !== generation) return;
+		const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
+		ledgers.set(slot.messages, ledger);
 		const next = runtime.runFork(
 			Effect.flatMap(WsRpcClients, (clients) =>
 				Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
@@ -628,6 +635,7 @@ export function viewTranscript(
 							Stream.suspend(() =>
 								subscriptions.sessionDetail({
 									sessionId,
+									ledger,
 									...(slot.messages.transcript?.hwm == null
 										? {}
 										: { resumeFromSequence: slot.messages.transcript.hwm }),

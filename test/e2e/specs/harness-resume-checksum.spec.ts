@@ -1,6 +1,6 @@
 // A resumed subscription is checked, and the server wins (conduit-test-y7eo.9),
-// through the built server and a real browser. One open tab rides five daemon
-// restarts. While the daemon is down the store is changed directly, so on each
+// through the built server and a real browser. One open tab rides a run of
+// daemon restarts. While the daemon is down the store is changed directly, so on each
 // restart the tab resumes into exactly those changes, as both the sidebar and
 // the open transcript.
 //
@@ -9,7 +9,8 @@
 // - the checksum is missing, so a resume is never checked;
 // - the client's ledger disagrees with the server's listing on an honest
 //   resume, so every restart costs a snapshot (a false mismatch);
-// - a change the browser lost goes unnoticed, sidebar or transcript;
+// - a change the browser lost goes unnoticed, sidebar or transcript, including
+//   a lost update to a row it holds, where only the version differs;
 // - a detected mismatch is not followed by a fresh snapshot, or the snapshot
 //   is ignored because it is no newer than what the tab holds;
 // - a catch-up over the page budget is sent as deltas;
@@ -160,7 +161,20 @@ const tagOf = (value: unknown) =>
 		? value._tag
 		: undefined;
 
-const transcriptOf = (page: Page) => page.locator("#messages").innerText();
+/** The transcript's text, without the "↓ Latest" button, which shows or not
+ * depending on where the tab happens to be scrolled. */
+const transcriptOf = (page: Page) =>
+	page.locator("#messages").evaluate((messages: HTMLElement) => {
+		const button = messages.querySelector<HTMLElement>("#scroll-btn");
+		if (!button) return messages.innerText;
+		const display = button.style.display;
+		button.style.display = "none";
+		try {
+			return messages.innerText;
+		} finally {
+			button.style.display = display;
+		}
+	});
 const sidebarOf = (page: Page) =>
 	page.locator("[data-session-id] .session-item-title").allTextContents();
 
@@ -270,6 +284,11 @@ test("a resume is checked against the server, and the server wins", async ({
 			sidebar: await sidebarOf(page),
 		};
 		const coldView = await cold();
+		if (view.transcript !== coldView.transcript)
+			writeFileSync(
+				testInfo.outputPath(`${name}-transcripts.json`),
+				JSON.stringify({ tab: view.transcript, cold: coldView.transcript }),
+			);
 		return {
 			name,
 			reads,
@@ -362,6 +381,38 @@ test("a resume is checked against the server, and the server wins", async ({
 		},
 	);
 
+	// C2. The tab drops an update to a part it already holds: the row count
+	// agrees, so only the versions can catch it.
+	const updated = `${SESSION}-away-a0`;
+	await page.evaluate((partId) => {
+		window.__conduitDropChange = (envelope) =>
+			"item" in envelope &&
+			typeof envelope.item === "object" &&
+			envelope.item !== null &&
+			"part" in envelope.item &&
+			typeof envelope.item.part === "object" &&
+			envelope.item.part !== null &&
+			"id" in envelope.item.part &&
+			envelope.item.part.id === partId;
+	}, `${updated}-text`);
+	const droppedUpdate = await restartWith(
+		"dropped-part-update",
+		() =>
+			seed(store, [
+				event(SESSION, START + 45_000_000)("text.delta", {
+					messageId: updated,
+					partId: `${updated}-text`,
+					text: " Appended while away.",
+				}),
+			]),
+		async () => {
+			await expect.poll(() => mismatches.length).toBe(3);
+			await expect(page.locator("#messages")).toContainText(
+				"Appended while away.",
+			);
+		},
+	);
+
 	// D. More changed while away than one page holds: a snapshot, not deltas.
 	const overBudget = await restartWith(
 		"over-budget",
@@ -423,7 +474,15 @@ test("a resume is checked against the server, and the server wins", async ({
 		schema: 1,
 		project: testInfo.project.name,
 		recordedAt: new Date().toISOString(),
-		phases: [changesOnly, droppedPart, droppedRow, overBudget, ahead, behind],
+		phases: [
+			changesOnly,
+			droppedPart,
+			droppedRow,
+			droppedUpdate,
+			overBudget,
+			ahead,
+			behind,
+		],
 		flagCleared,
 	};
 	mkdirSync("test-results", { recursive: true });
@@ -466,6 +525,12 @@ test("a resume is checked against the server, and the server wins", async ({
 	});
 	expect(droppedRow.reads.shell["base"]).toBe(1);
 	expect(droppedRow.reads.detail).not.toHaveProperty("base");
+	expect(droppedUpdate).toMatchObject({
+		mismatches: 1,
+		snapshots: { shell: 0, detail: 1 },
+	});
+	expect(droppedUpdate.reads.detail["base"]).toBe(1);
+	expect(droppedUpdate.reads.shell).not.toHaveProperty("base");
 	// D: the transcript falls back to a snapshot without a mismatch; the
 	// sidebar is never paged, so it still catches up.
 	expect(overBudget).toMatchObject({
