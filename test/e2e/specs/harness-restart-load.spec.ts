@@ -4,7 +4,8 @@
 // tickets assert against: it holds today's numbers and only sanity is checked,
 // except that devices watching the same thing share its reads: every device
 // holds the sidebar, two watch the same stream, and no sidebar or detail window
-// is read twice (conduit-test-y7eo.4).
+// is read twice (conduit-test-y7eo.4); and a device reconnecting after the
+// restart is sent only the sidebar changes it missed (conduit-test-y7eo.3).
 //
 // Wire sizes are WebSocket payloads as the page sees them, so after any
 // permessage-deflate inflation. Event-loop stalls come from a 10ms sampler in
@@ -387,5 +388,12 @@ test("opens the heavy session after a restart under load", async ({
 		expect(shared[name]?.changesRead, name).toBeGreaterThan(0);
 		expect(shared[name]?.reads["window"], name).toBe(shared[name]?.windowsRead);
 	}
+	// Every device reconnects with its cursor and is sent the sidebar changes
+	// past it, not the list again: no base read, and fewer rows across all four
+	// than one list holds (conduit-test-y7eo.3).
+	const afterRestart = report.server.restart;
+	expect(afterRestart.bySource["shell"]?.reads).not.toHaveProperty("base");
+	expect(afterRestart.bySource["shell"]?.reads["resume"]).toBe(DEVICES);
+	expect(afterRestart.sidebarReads.rows).toBeLessThan(fixture.families);
 	for (const page of pages) await page.context().close();
 });

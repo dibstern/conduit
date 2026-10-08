@@ -476,6 +476,15 @@ export interface ReadQueryEffect {
 				readonly version: number;
 			}[];
 			readonly version: number;
+			/**
+			 * Families that left the sidebar inside a range with an `after`, each
+			 * at the version it left. A read without one is a base, which shows
+			 * absence by leaving them out.
+			 */
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
 		},
 		ReadQueryEffectError | SqlError
 	>;
@@ -1258,6 +1267,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly version: number;
 			}[];
 			readonly version: number;
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1269,20 +1282,37 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
 					if (range?.familyOf === undefined) {
 						// The sidebar table holds each family rolled up already, so
-						// this reads the rows that moved and nothing else.
-						const stored = yield* sql<{ row: string }>`
-							SELECT row FROM session_sidebar
+						// this reads the rows that moved and nothing else. A row with
+						// no content is a family's tombstone.
+						const ranged = range?.after !== undefined;
+						const stored = yield* sql<{
+							session_id: string;
+							version: number;
+							row: string | null;
+						}>`
+							SELECT session_id, version, row FROM session_sidebar
 							WHERE version > ${floor} AND version <= ${ceiling}
+							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
 						return {
-							rows: stored.map(({ row }) => {
+							rows: stored.flatMap(({ row }) => {
+								if (row === null) return [];
 								const sidebar = decodeSidebarRow(row);
-								return {
-									item: sidebarItem(sidebar, range?.backgroundOf),
-									version: sidebar.version,
-								};
+								return [
+									{
+										item: sidebarItem(sidebar, range?.backgroundOf),
+										version: sidebar.version,
+									},
+								];
 							}),
 							version,
+							...(ranged && {
+								removed: stored.flatMap((stamp) =>
+									stamp.row === null
+										? [{ id: stamp.session_id, version: stamp.version }]
+										: [],
+								),
+							}),
 						};
 					}
 					const rows = yield* sql.unsafe<

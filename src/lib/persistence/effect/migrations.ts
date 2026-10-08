@@ -25,6 +25,7 @@ import {
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
+	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
@@ -1059,6 +1060,9 @@ export const effectMigrationEntries = {
 			counter?.value ?? 0,
 		);
 	}),
+	"0039_session_sidebar_tombstones": executeSqlStatements(
+		readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

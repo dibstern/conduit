@@ -35,8 +35,9 @@ export type FamilyMember = Pick<
  * Recompute the sidebar rows of the families `sessionIds` belong to, and of
  * any of them that held a row before this write: a session deleted, or a root
  * that gained a parent, names the family it left. A candidate that is not a
- * top-level session now loses its row. Rows that did not visibly change are
- * left as they are.
+ * top-level session now leaves a tombstone, its row with no content at this
+ * version, so a device resuming from before sees it go (conduit-test-y7eo.3).
+ * Rows that did not visibly change are left as they are.
  */
 export const refreshSidebar = (
 	sessionIds: readonly string[],
@@ -69,7 +70,8 @@ export const refreshSidebar = (
 				GROUP BY a.session_id, a.type`,
 			sql<{ session_id: string; row: string }>`
 				SELECT session_id, row FROM session_sidebar
-				WHERE session_id IN (SELECT value FROM json_each(${roots}))`,
+				WHERE session_id IN (SELECT value FROM json_each(${roots}))
+				AND row IS NOT NULL`,
 		]);
 		const next = sidebarRows(top, family, approvals, version);
 		const storedRows = new Map(
@@ -79,7 +81,9 @@ export const refreshSidebar = (
 			const row = next.get(rootId);
 			if (row === undefined) {
 				if (storedRows.has(rootId))
-					yield* sql`DELETE FROM session_sidebar WHERE session_id = ${rootId}`;
+					yield* sql`
+						UPDATE session_sidebar SET row = NULL, version = ${version}
+						WHERE session_id = ${rootId}`;
 				continue;
 			}
 			const { changed } = changeSidebarRow(storedRows.get(rootId), row);

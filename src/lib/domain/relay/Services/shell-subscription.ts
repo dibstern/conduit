@@ -2,23 +2,19 @@
 // The concrete SubscriptionSource for the shell — the sidebar session list
 // (root session summaries: title, attention, status, recency).
 //
-// It is two answers and a policy (ni8.5 §7). The sessions table carries a
-// read-model version, so "what changed" is `WHERE version > lastSeen` and
-// nothing else: no event-type allowlist to drift out of step with the session
-// projector, no per-session coalesce window, no replay out of the durable log,
-// no per-row re-query. A burst that does not touch a session row costs one
-// indexed range scan returning nothing, which is what the 50ms window used to
-// buy by filtering event types.
+// It is two answers and a policy (ni8.5 §7). The sidebar table carries a
+// read-model version per family, so "what changed" is `WHERE version >
+// lastSeen` and nothing else: no event-type allowlist to drift out of step with
+// the session projector, no per-session coalesce window, no replay out of the
+// durable log, no per-row re-query. A burst that does not touch a sidebar row
+// costs one indexed range scan returning nothing.
 //
-// Removals are the exception the column cannot serve: a deleted row leaves no
-// version behind, so the advance names them (§8) and they become `remove`
-// envelopes with no round trip.
+// Removals come from the same scan. A family that leaves the sidebar (its root
+// deleted, or given a parent) keeps a tombstone at the version it left
+// (conduit-test-y7eo.3), so a ranged read returns it as a `remove`.
 //
-// Resume is therefore a REBASE, not a catch-up. A client reconnecting across a
-// deletion would otherwise keep showing a session that is gone — the query can
-// only report rows that still exist. The full set is tens of rows and is read
-// once per reconnect, which is what the unary session list cost on every
-// reconnect anyway.
+// Resume is therefore a CATCH-UP: a reconnecting device is sent the families
+// that moved or left past its cursor, not the whole list again.
 
 import { channel } from "node:diagnostics_channel";
 import type { SqlError } from "@effect/sql/SqlError";
@@ -47,9 +43,10 @@ export interface SidebarRead {
 const sidebarReads = channel("conduit:sidebar-read");
 
 /**
- * Subscribe to the shell (session-list) stream. Cold start and resume both emit
- * the recency-ordered session set, a `synchronized` boundary, then whole-session
- * upserts and removes as the read model advances. Lifecycle is the ambient
+ * Subscribe to the shell (session-list) stream. Cold start emits the
+ * recency-ordered session set and resume the families changed or removed past
+ * its cursor, then a `synchronized` boundary, then whole-session upserts and
+ * removes as the read model advances. Lifecycle is the ambient
  * Scope: closing it releases the advance subscription.
  *
  * The read-query service and SessionEventBus are taken from context so the
@@ -108,14 +105,17 @@ export const subscribeShell = (
 								}),
 							})),
 						),
-					// A descendant advance can change its root summary. The
-					// projectors move the root's sidebar row when it does, so the
-					// read finds it by version.
+					// A descendant advance can change its root summary, and a
+					// deletion can end a family. The projectors move the root's
+					// sidebar row, or leave its tombstone, so the read finds either
+					// by version.
 					route: (advance) => ({
-						moved: advance.sessionIds.length > 0,
-						removed: advance.removedSessionIds,
+						moved:
+							advance.sessionIds.length > 0 ||
+							advance.removedSessionIds.length > 0,
+						removed: [],
 					}),
-					resume: "rebase",
+					resume: "catchUp",
 				},
 				...(options.resumeFromSequence === undefined
 					? {}

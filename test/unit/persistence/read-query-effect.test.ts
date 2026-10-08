@@ -486,7 +486,10 @@ describe("ReadQueryEffect snapshot consistency", () => {
 					if (name === "value" && deleteAfterCounter) {
 						deleteAfterCounter = false;
 						writer.transaction(() => {
-							writer.exec("DELETE FROM messages; DELETE FROM sessions");
+							// The session projector tombstones the family it removes.
+							writer.exec(
+								"DELETE FROM messages; DELETE FROM sessions; UPDATE session_sidebar SET row = NULL, version = 6",
+							);
 							writer.exec(
 								"UPDATE read_model_counter SET value = 6 WHERE id = 1",
 							);
@@ -1475,7 +1478,7 @@ describe("ReadQueryEffect session list reads", () => {
 			// moved comes back identical to the base's, the one that did not is
 			// absent.
 			const moved = yield* readQuery.readSessionList({ after: 6 });
-			expect(moved).toEqual({ rows: [base.rows[0]], version: 7 });
+			expect(moved).toEqual({ rows: [base.rows[0]], version: 7, removed: [] });
 
 			// A subscriber current through the counter is caught up.
 			expect((yield* readQuery.readSessionList({ after: 7 })).rows).toEqual([]);
@@ -1487,7 +1490,7 @@ describe("ReadQueryEffect session list reads", () => {
 				after: 6,
 				through: 6,
 			});
-			expect(bounded).toEqual({ rows: [], version: 7 });
+			expect(bounded).toEqual({ rows: [], version: 7, removed: [] });
 		}).pipe(Effect.provide(testLayer)),
 	);
 	it.effect("carries the same shape into the snapshot and the re-query", () =>

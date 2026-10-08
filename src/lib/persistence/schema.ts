@@ -58,6 +58,8 @@ export const SESSIONS_LIMIT_RECOVERY_MIGRATION =
 	"0035_sessions_limit_recovery.sql";
 export const SESSIONS_RESUMES_MIGRATION = "0036_sessions_resumes.sql";
 export const SESSION_SIDEBAR_MIGRATION = "0037_session_sidebar.sql";
+export const SESSION_SIDEBAR_TOMBSTONES_MIGRATION =
+	"0038_session_sidebar_tombstones.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

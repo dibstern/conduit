@@ -39,9 +39,9 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 type Member = "SubscribeShell" | "SubscribeSessionDetail";
 
 // The only thing a subscription listens to is the read-model advance. The shell
-// is driven by removals (which need no query at all) and detail by a routed
-// advance (which re-reads `version > lastSeen`); between them the fixture
-// exercises both arms of the orchestrator over the real RPC transport.
+// is driven by removals (which its ranged read answers with tombstones) and
+// detail by a routed advance (which re-reads `version > lastSeen`); between them
+// the fixture exercises both over the real RPC transport.
 const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 	member === "SubscribeShell"
 		? [
@@ -139,10 +139,25 @@ const makeLayer = (options: {
 											},
 								),
 					readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
-					readSessionList: () =>
+					// The same stateless shape for the shell: each ranged read finds
+					// the one family that left at the version after its floor.
+					readSessionList: (range?: { readonly after?: number }) =>
 						options.failRead
 							? Effect.fail(readFailure)
-							: Effect.succeed({ rows: [], version: 0 }),
+							: Effect.succeed(
+									range?.after === undefined
+										? { rows: [], version: 0 }
+										: {
+												rows: [],
+												version: range.after + 1,
+												removed: [
+													{
+														id: `session-${range.after + 1}`,
+														version: range.after + 1,
+													},
+												],
+											},
+								),
 					getLatestTurnModelExecution: () => Effect.succeed(undefined),
 				}),
 				Layer.succeed(EventStoreEffectTag, {
@@ -220,8 +235,7 @@ const makeObservedClient = (
 const deltas = (member: Member) =>
 	member === "SubscribeShell"
 		? [
-				// A removal carries no version of its own, so the advance is the whole
-				// answer: a remove envelope without a database round trip.
+				// Each removal is its family's tombstone, at the advance's version.
 				{ _tag: "remove", id: "session-1", sequence: 1 },
 				{ _tag: "remove", id: "session-2", sequence: 2 },
 			]

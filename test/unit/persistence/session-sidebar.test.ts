@@ -35,7 +35,20 @@
 // 15. Upkeep runs once per event, so a commit costs events x family size
 //     inside the write transaction.
 //
-// Resuming past a removal tombstone belongs to conduit-test-y7eo.3.
+// Resuming through tombstones (conduit-test-y7eo.3): a device that held the
+// sidebar at any earlier version, and applies the ranged read past it (removes,
+// then rows), must hold the sidebar as it is now. Failure modes:
+// 16. A deleted root leaves no tombstone, because its session's delete took the
+//     row first, so a device resumed past it keeps showing it.
+// 17. A root that gains a parent, or is orphaned or caught in a cycle, leaves
+//     no tombstone, so a resumed device keeps it at the top level.
+// 18. A family re-created over its tombstone does not come back on resume, or
+//     comes back removed, or its old tombstone resurfaces after it.
+// 19. A family that changes but stays shown writes a tombstone, or a tombstone
+//     is decoded as a row and breaks the upkeep or the read.
+// 20. A base read returns tombstones (absence is the removal there), or a
+//     tombstone is reported in a range it did not move in.
+// 21. A rebuild after a restart forgets tombstones a device has not yet seen.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -142,6 +155,11 @@ const scenario = (store: Store) => {
 	const backgroundOf = (id: string) => background.get(id);
 	let shown = new Map<string, Shown>();
 	let readVersion = -1;
+	/** What a device held after each check, to resume from. */
+	let devices: {
+		readonly version: number;
+		readonly items: Map<string, Item>;
+	}[] = [];
 
 	const event = <T extends CanonicalEventType>(
 		type: T,
@@ -400,6 +418,25 @@ const scenario = (store: Store) => {
 		return { sidebar, oracle, delta };
 	});
 
+	/** A device that held `from` applies the catch-up past it: removes, rows. */
+	const resume = (from: (typeof devices)[number]) =>
+		Effect.gen(function* () {
+			const readQuery = yield* ReadQueryEffectTag;
+			const caught = yield* readQuery.readSessionList({
+				after: from.version,
+				backgroundOf,
+			});
+			const items = new Map(from.items);
+			for (const { id, version } of caught.removed ?? []) {
+				expect(version, `${id} left inside the range`).toBeGreaterThan(
+					from.version,
+				);
+				items.delete(id);
+			}
+			for (const { item } of caught.rows) items.set(item.id, visible(item));
+			return Object.fromEntries(items);
+		});
+
 	/** Check the sidebar against the full computation and the last read. */
 	const check = (command: Command | undefined) =>
 		Effect.gen(function* () {
@@ -407,6 +444,10 @@ const scenario = (store: Store) => {
 			expect(byId(sidebar.rows.map(({ item }) => visible(item)))).toEqual(
 				byId(oracle.map(visible)),
 			);
+			expect(
+				sidebar,
+				"a base shows absence, not tombstones",
+			).not.toHaveProperty("removed");
 			const oracleUpdatedAt = new Map(
 				oracle.map((item) => [item.id, item.updatedAt]),
 			);
@@ -442,6 +483,35 @@ const scenario = (store: Store) => {
 					.map(([id]) => id)
 					.sort(),
 			);
+			// Every family shown at the last read and gone now left a tombstone
+			// past it, and nothing shown now is reported gone.
+			const left = (delta.removed ?? []).map(({ id }) => id);
+			expect(
+				left.filter((id) => next.has(id)),
+				"removed but shown",
+			).toEqual([]);
+			expect(
+				[...shown.keys()].filter((id) => !next.has(id) && !left.includes(id)),
+				"gone without a tombstone",
+			).toEqual([]);
+			// Devices that held the sidebar at the first, a middle and the last
+			// check all catch up to what it is now.
+			const now = Object.fromEntries(
+				sidebar.rows.map(({ item }) => [item.id, visible(item)]),
+			);
+			for (const from of new Set([
+				devices[0],
+				devices[devices.length >> 1],
+				devices.at(-1),
+			]))
+				if (from !== undefined)
+					expect(yield* resume(from), `resumed from ${from.version}`).toEqual(
+						now,
+					);
+			devices.push({
+				version: sidebar.version,
+				items: new Map(Object.entries(now)),
+			});
 			shown = next;
 			readVersion = sidebar.version;
 			return next;
@@ -467,6 +537,7 @@ const scenario = (store: Store) => {
 				yield* sql`DELETE FROM pending_approvals`;
 				yield* sql`UPDATE projector_cursors SET last_applied_seq = 0`;
 				yield* runner.recover();
+				// Devices are kept: each must catch up across the replay.
 				shown = new Map();
 				readVersion = -1;
 				return yield* check(undefined);
@@ -484,9 +555,12 @@ const scenario = (store: Store) => {
 				yield* sql`DROP TABLE session_sidebar`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 38`;
+				// The tombstone migration rebuilds the table the backfill creates.
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
 				yield* makeEffectSqlMigrator();
 				expect(yield* roots, "backfilled roots").toEqual(kept);
+				// Tombstones went with the dropped table; no device resumes past it.
+				devices = [];
 				shown = new Map();
 				readVersion = -1;
 				return yield* check(undefined);
@@ -748,6 +822,25 @@ describe("sidebar table against the full computation", () => {
 		expect([...shown.keys()]).toEqual(["a"]);
 	});
 
+	it("catches a resumed device up past a deleted root, a root that gains a parent and a re-created family", async () => {
+		// The per-step checks resume a device from the first, a middle and the
+		// last earlier check; this drives each removal past them.
+		const shown = await run([
+			root("a"),
+			root("b"),
+			root("c"),
+			child("d", "a"),
+			{ kind: "delete", id: "a" },
+			{ kind: "fork", id: "c", parent: "b" },
+			{ kind: "orphan", id: "b", parent: "e" },
+			root("a"),
+			child("d", "a"),
+			{ kind: "status", id: "d", status: "busy" },
+			root("e"),
+		]);
+		expect([...shown.keys()].sort()).toEqual(["a", "e"]);
+	});
+
 	it("rebuilds the table when projections are replayed", async () => {
 		await run(
 			[
@@ -835,7 +928,7 @@ describe("sidebar table on the 10k-session fixture", () => {
 				yield* sql`DROP TABLE session_sidebar`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 38`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
 				const started = performance.now();
 				yield* makeEffectSqlMigrator();
 				return performance.now() - started;
