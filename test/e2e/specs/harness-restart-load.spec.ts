@@ -1,7 +1,10 @@
 // Restart under load (conduit-test-y7eo.1). A ~10k-session store, four
 // connected devices and three streaming sessions; the daemon restarts and one
 // device opens the heavy session. The JSON report is the artifact later
-// tickets assert against: it holds today's numbers and only sanity is checked.
+// tickets assert against: it holds today's numbers and only sanity is checked,
+// except that devices watching the same thing share its reads: every device
+// holds the sidebar, two watch the same stream, and no sidebar or detail window
+// is read twice (conduit-test-y7eo.4).
 //
 // Wire sizes are WebSocket payloads as the page sees them, so after any
 // permessage-deflate inflation. Event-loop stalls come from a 10ms sampler in
@@ -34,15 +37,26 @@ interface Frame {
 	readonly head: string;
 }
 
-interface ServerMetrics {
-	readonly stalls: readonly { readonly at: number; readonly ms: number }[];
+interface Reads {
 	readonly reads: Record<string, number>;
 	readonly changesRead: number;
+}
+
+interface ServerMetrics extends Reads {
+	readonly stalls: readonly { readonly at: number; readonly ms: number }[];
+	/**
+	 * Keyed by source name, e.g. `shell` or `session-detail/<id>`, with the
+	 * distinct version windows each read.
+	 */
+	readonly sources: Record<string, Reads & { readonly windowsRead: number }>;
 	readonly flushedAt: number;
 }
 
 const DEVICES = 4;
 const STREAMS = 3;
+// The stream each device watches; the rest (the opener) watch the sidebar.
+// Two devices share a stream, and every device holds the sidebar.
+const WATCHED_STREAM: readonly number[] = [0, 0, 1];
 const SETTLE_MS = 2_000;
 
 // Totals and size spread for one window of frames, per socket path.
@@ -92,16 +106,9 @@ const serverMetrics = async (file: string): Promise<ServerMetrics> => {
 	return JSON.parse(readFileSync(file, "utf8")) as ServerMetrics;
 };
 
-// Stalls inside [from, to], and reads since `start` (or since server start).
-// Reads are summed over every subscription source: shell, detail, family,
-// approvals and todos. A window read serves one change for one subscriber.
-const serverWindow = (
-	start: ServerMetrics | undefined,
-	end: ServerMetrics,
-	from: number,
-	to: number,
-) => {
-	const stalls = end.stalls.filter(({ at }) => at >= from && at <= to);
+// Reads since `start`, and how many window reads each change cost. A window
+// read serves one change for every subscriber of its source asking it then.
+const readsSince = (start: Reads | undefined, end: Reads) => {
 	const reads = Object.fromEntries(
 		Object.entries(end.reads).map(([kind, count]) => [
 			kind,
@@ -109,6 +116,26 @@ const serverWindow = (
 		]),
 	);
 	const changesRead = end.changesRead - (start?.changesRead ?? 0);
+	return {
+		reads,
+		changesRead,
+		windowReadsPerChange:
+			changesRead === 0
+				? 0
+				: Math.round(((reads["window"] ?? 0) / changesRead) * 10) / 10,
+	};
+};
+
+// Stalls inside [from, to], and reads since `start` (or since server start).
+// Totals sum every subscription source: shell, detail, family, approvals and
+// todos; `bySource` splits them by source name.
+const serverWindow = (
+	start: ServerMetrics | undefined,
+	end: ServerMetrics,
+	from: number,
+	to: number,
+) => {
+	const stalls = end.stalls.filter(({ at }) => at >= from && at <= to);
 	return {
 		stalls: {
 			count: stalls.length,
@@ -118,12 +145,17 @@ const serverWindow = (
 				.slice(0, 5)
 				.map(({ at, ms }) => ({ atMs: at - from, ms })),
 		},
-		reads,
-		changesRead,
-		windowReadsPerChange:
-			changesRead === 0
-				? 0
-				: Math.round(((reads["window"] ?? 0) / changesRead) * 10) / 10,
+		...readsSince(start, end),
+		bySource: Object.fromEntries(
+			Object.entries(end.sources).map(([name, source]) => [
+				name,
+				{
+					...readsSince(start?.sources[name], source),
+					windowsRead:
+						source.windowsRead - (start?.sources[name]?.windowsRead ?? 0),
+				},
+			]),
+		),
 	};
 };
 
@@ -201,7 +233,8 @@ test("opens the heavy session after a restart under load", async ({
 	);
 	await Promise.all(
 		pages.map(async (page, device) => {
-			const stream = streams[device];
+			const watched = WATCHED_STREAM[device];
+			const stream = watched === undefined ? undefined : streams[watched];
 			await new AppPage(page).goto(
 				stream === undefined
 					? `${harness.baseUrl}/?p=process-test`
@@ -330,5 +363,13 @@ test("opens the heavy session after a restart under load", async ({
 	for (const device of report.wire.restart.byDevice)
 		expect(device.frames).toBeGreaterThan(0);
 	expect(report.reconnectMs.every(Number.isFinite)).toBe(true);
+	// Devices that keep pace ask the same window and share one read of it; one
+	// that falls behind catches up with one read of its own, a different window
+	// (conduit-test-y7eo.4).
+	const shared = report.server.warm.bySource;
+	for (const name of ["shell", `session-detail/${streams[0]}`]) {
+		expect(shared[name]?.changesRead, name).toBeGreaterThan(0);
+		expect(shared[name]?.reads["window"], name).toBe(shared[name]?.windowsRead);
+	}
 	for (const page of pages) await page.context().close();
 });

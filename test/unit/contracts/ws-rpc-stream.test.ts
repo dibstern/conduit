@@ -159,7 +159,13 @@ const makeLayer = (options: {
 					subscribe: () => Effect.succeed(Stream.empty),
 					subscribeAdvances: () =>
 						options.advances ??
-						Effect.succeed(Stream.fromIterable(advancesFor(options.member))),
+						// One chunk per advance, as when each lands after the last was
+						// handled; advances queued together are read as one window.
+						Effect.succeed(
+							Stream.fromIterable(advancesFor(options.member)).pipe(
+								Stream.rechunk(1),
+							),
+						),
 				}),
 			),
 		),

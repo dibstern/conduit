@@ -77,6 +77,7 @@ const makeFakeSource = <T>(
 		const onNextRead = yield* Ref.make<Effect.Effect<void>>(Effect.void);
 
 		const source: SubscriptionSource<T> = {
+			name: "fake",
 			read: (range) =>
 				Effect.gen(function* () {
 					yield* Ref.update(calls, (seen) => [...seen, range]);
@@ -153,6 +154,7 @@ describe("ReadModelSubscription", () => {
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
 				const source: SubscriptionSource<Row> = {
+					name: "fake",
 					read: (range) =>
 						Effect.succeed({
 							rows: [],
@@ -369,10 +371,11 @@ describe("ReadModelSubscription", () => {
 						item: { title: "mine-moved" },
 						sequence: 7,
 					});
-					// The unrouted advance cost nothing: no read for version 6 at all.
+					// The unrouted advance cost nothing: no read for version 6 at all,
+					// and the next window opens past it.
 					expect(yield* Ref.get(fake.calls)).toEqual([
 						undefined,
-						{ after: 5, through: 7 },
+						{ after: 6, through: 7 },
 					]);
 				}),
 			),

@@ -68,6 +68,8 @@ export const subscribeShell = (
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
+					name: "shell",
+					shareReads: true,
 					read: (range) =>
 						readQuery
 							.readSessionList({ ...range, roots: true, backgroundOf })

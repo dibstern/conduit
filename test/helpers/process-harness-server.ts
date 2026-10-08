@@ -11,12 +11,27 @@ function recordServerMetrics(file: string): void {
 	const stalls: { at: number; ms: number }[] = [];
 	const reads: Record<string, number> = {};
 	const windows = new Set<number>();
+	// Per source name: reads by kind, the distinct changes its windows read, and
+	// the distinct windows (`after-through`) it read.
+	const sources: Record<
+		string,
+		{ reads: Record<string, number>; windows: Set<number>; ranges: Set<string> }
+	> = {};
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
+		const source = (sources[read.source] ??= {
+			reads: {},
+			windows: new Set(),
+			ranges: new Set(),
+		});
 		reads[read.kind] = (reads[read.kind] ?? 0) + 1;
-		if (read.kind === "window" && read.range?.through !== undefined)
+		source.reads[read.kind] = (source.reads[read.kind] ?? 0) + 1;
+		if (read.kind === "window" && read.range?.through !== undefined) {
 			windows.add(read.range.through);
+			source.windows.add(read.range.through);
+			source.ranges.add(`${read.range.after}-${read.range.through}`);
+		}
 	});
 	const tickMs = 10;
 	let last = performance.now();
@@ -37,6 +52,16 @@ function recordServerMetrics(file: string): void {
 					stalls,
 					reads,
 					changesRead: windows.size,
+					sources: Object.fromEntries(
+						Object.entries(sources).map(([name, source]) => [
+							name,
+							{
+								reads: source.reads,
+								changesRead: source.windows.size,
+								windowsRead: source.ranges.size,
+							},
+						]),
+					),
 				}),
 			),
 		250,

@@ -92,6 +92,8 @@ export const subscribeSessionDetail = (options: {
 			return stream<SessionDetailItem, SessionDetailSubscriptionError>({
 				bus,
 				source: {
+					name: `session-detail/${options.sessionId}`,
+					shareReads: true,
 					read: (range) =>
 						Effect.gen(function* () {
 							const page =

@@ -40,6 +40,7 @@ export const subscribeSessionFamily = (options: {
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
+					name: `session-family/${options.sessionId}`,
 					read: (range) =>
 						readQuery
 							.readSessionList({ ...range, familyOf: anchor, backgroundOf })
