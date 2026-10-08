@@ -31,6 +31,8 @@ import {
 } from "effect";
 import { AuthManager } from "../auth.js";
 import { type GlobalProjectSetting, WsRpcError } from "../contracts/ws-rpc.js";
+import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	ProjectSettingsTag,
@@ -823,6 +825,10 @@ export async function createRelayStack(
 			);
 			const newRelay = await createProjectRelay({
 				httpServer,
+				daemonConfigContext: Context.pick(
+					DaemonConfigRefTag,
+					ConfigPersistenceTag,
+				)((await relay.effectRuntime.runtime.runtime()).context),
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,

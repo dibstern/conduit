@@ -9,10 +9,8 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
-import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
-	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadRecentProjects,
 	syncRecentProjects,
 } from "../../../daemon/config-persistence.js";
@@ -35,7 +33,7 @@ import {
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
-	DaemonConfigRefTag,
+	type DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -609,59 +607,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						};
 					}),
 				),
-			GetAutoSettleSetting: () =>
-				run(
-					Effect.gen(function* () {
-						const config = yield* DaemonConfigRefTag;
-						const days = (yield* Ref.get(config)).autoSettleAfterDays;
-						return {
-							autoSettleAfterDays:
-								days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
-						};
-					}),
-				),
+			GetAutoSettleSetting: (request) =>
+				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
-				run(
-					Effect.gen(function* () {
-						const days = request.autoSettleAfterDays;
-						if (
-							days !== null &&
-							(!Number.isInteger(days) || days < 1 || days > 90)
-						) {
-							return yield* new WsRpcError({
-								message:
-									"Auto-settle days must be an integer from 1 to 90, or Never",
-							});
-						}
-						yield* commitDaemonRuntimeConfig((config) => ({
-							...config,
-							autoSettleAfterDays: days,
-						}));
-						yield* persistConfig;
-						return { autoSettleAfterDays: days };
-					}),
-				),
-			GetUsageLimitsSetting: () =>
-				run(
-					Effect.gen(function* () {
-						const config = yield* DaemonConfigRefTag;
-						return {
-							usageLimits:
-								(yield* Ref.get(config)).usageLimits ?? DEFAULT_USAGE_LIMITS,
-						};
-					}),
-				),
-			SetUsageLimitsSetting: ({ usageLimits }) =>
-				run(
-					Effect.gen(function* () {
-						yield* commitDaemonRuntimeConfig((config) => ({
-							...config,
-							usageLimits,
-						}));
-						yield* persistConfig;
-						return { usageLimits };
-					}),
-				),
+				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetUsageLimitsSetting: (request) =>
+				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
+			SetUsageLimitsSetting: (request) =>
+				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {

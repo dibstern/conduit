@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Clock, Context, Effect, Layer, Queue, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Queue, Ref, Schema } from "effect";
 import {
 	AccountUnavailable,
 	type ContinuationError,
@@ -33,6 +33,7 @@ import {
 	canonicalEvent,
 } from "../../../persistence/events.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
+import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { QuotaCheckTag } from "../../daemon/Services/quota-check.js";
 import {
 	type ProviderTurnService,
@@ -525,8 +526,12 @@ export const makeContinuation = Effect.gen(function* () {
 	const tryAutoSwitch = (sessionId: string) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			if (!loadDaemonConfig(config.configDir)?.usageLimits?.autoSwitch)
-				return false;
+			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+			const usageLimits =
+				configRef._tag === "Some"
+					? (yield* Ref.get(configRef.value)).usageLimits
+					: loadDaemonConfig(config.configDir)?.usageLimits;
+			if (!usageLimits?.autoSwitch) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
 			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
@@ -561,8 +566,12 @@ export const makeContinuation = Effect.gen(function* () {
 	const tryAutoResume = (sessionId: string) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			if (!loadDaemonConfig(config.configDir)?.usageLimits?.autoResume)
-				return false;
+			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+			const usageLimits =
+				configRef._tag === "Some"
+					? (yield* Ref.get(configRef.value)).usageLimits
+					: loadDaemonConfig(config.configDir)?.usageLimits;
+			if (!usageLimits?.autoResume) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
 			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;

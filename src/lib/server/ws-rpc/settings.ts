@@ -1,16 +1,16 @@
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
 } from "../../contracts/claude-settings.js";
 import { DEFAULT_USAGE_LIMITS } from "../../contracts/limit-recovery.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
+import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
 import {
-	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
-	defaultDaemonConfig,
-	loadDaemonConfig,
-	saveDaemonConfig,
-} from "../../daemon/config-persistence.js";
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "../../domain/daemon/Services/daemon-config-ref.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import {
 	getClaudeSettingsOverrides,
@@ -25,13 +25,12 @@ import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 export const settingsHandlers = {
 	GetAutoSettleSetting: (_request) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const persisted = loadDaemonConfig(config.configDir);
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
 			return {
 				autoSettleAfterDays:
-					persisted?.autoSettleAfterDays === undefined
+					config.autoSettleAfterDays === undefined
 						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
-						: persisted.autoSettleAfterDays,
+						: config.autoSettleAfterDays,
 			};
 		}),
 	SetAutoSettleSetting: (request) =>
@@ -42,34 +41,31 @@ export const settingsHandlers = {
 					message: "Auto-settle days must be an integer from 1 to 90, or Never",
 				});
 			}
-			const config = yield* ConfigTag;
-			const persisted =
-				loadDaemonConfig(config.configDir) ?? defaultDaemonConfig();
-			yield* Effect.tryPromise(() =>
-				saveDaemonConfig(
-					{ ...persisted, autoSettleAfterDays: days },
-					config.configDir,
-				),
-			);
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				autoSettleAfterDays: days,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
 			return { autoSettleAfterDays: days };
 		}).pipe(Effect.catchAll(mapRpcFailure("SetAutoSettleSetting"))),
 	GetUsageLimitsSetting: (_request) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
 			return {
-				usageLimits:
-					loadDaemonConfig(config.configDir)?.usageLimits ??
-					DEFAULT_USAGE_LIMITS,
+				usageLimits: config.usageLimits ?? DEFAULT_USAGE_LIMITS,
 			};
 		}),
 	SetUsageLimitsSetting: ({ usageLimits }) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const persisted =
-				loadDaemonConfig(config.configDir) ?? defaultDaemonConfig();
-			yield* Effect.tryPromise(() =>
-				saveDaemonConfig({ ...persisted, usageLimits }, config.configDir),
-			);
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				usageLimits,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
 			return { usageLimits };
 		}).pipe(Effect.catchAll(mapRpcFailure("SetUsageLimitsSetting"))),
 	SetDefaultPermissionMode: (request) =>

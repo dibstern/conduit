@@ -1,20 +1,11 @@
 // Coalesces explicit config save requests and writes daemon.json snapshots to
-// disk using a debounced fiber plus a final scope-close flush. Replaces the
+// disk within 500 ms of the first request plus a final scope-close flush. Replaces the
 // imperative persistConfig() / flushConfigSave() closures in daemon-main.ts.
 //
 // The ConfigWriterTag service exists for dependency injection — production
 // code provides a real disk writer, tests provide a mock.
 
-import {
-	Context,
-	Data,
-	Duration,
-	Effect,
-	Layer,
-	Queue,
-	Ref,
-	Stream,
-} from "effect";
+import { Context, Data, Duration, Effect, Layer, Queue, Ref } from "effect";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -239,7 +230,11 @@ export const ConfigPersistenceLive = Layer.scoped(
 						Ref.set(dirty, true).pipe(Effect.zipRight(Effect.fail(error))),
 					),
 				);
-			}),
+			}).pipe(
+				// Disk writes cannot be cancelled. Retain the permit until the
+				// write completes, even when the requesting RPC disconnects.
+				Effect.uninterruptible,
+			),
 		);
 
 		const scheduleRetry = Effect.sleep(CONFIG_PERSISTENCE_RETRY_DELAY).pipe(
@@ -266,10 +261,12 @@ export const ConfigPersistenceLive = Layer.scoped(
 		);
 
 		yield* Effect.forkScoped(
-			Stream.fromQueue(requests).pipe(
-				Stream.debounce(Duration.millis(500)),
-				Stream.runForEach(() => backgroundFlush),
-			),
+			Effect.gen(function* () {
+				yield* Queue.take(requests);
+				yield* Effect.sleep(Duration.millis(500));
+				yield* Queue.takeAll(requests);
+				yield* backgroundFlush;
+			}).pipe(Effect.forever),
 		);
 
 		yield* Effect.addFinalizer(() => finalizerFlush);

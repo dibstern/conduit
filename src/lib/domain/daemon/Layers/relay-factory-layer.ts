@@ -387,6 +387,10 @@ export const RelayFactoryLive = (
 							try: () => {
 								creation = createProjectRelay({
 									httpServer,
+									daemonConfigContext: Context.make(
+										DaemonConfigRefTag,
+										configRef,
+									).pipe(Context.add(ConfigPersistenceTag, configPersistence)),
 									openCodeInstances,
 									...(quotaCheck ? { quotaCheck } : {}),
 									...(selectedInstance

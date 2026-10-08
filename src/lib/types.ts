@@ -153,6 +153,11 @@ export interface ProjectRelayConfig {
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
 	/** Fresh quota decisions shared by every relay in this daemon. */
 	quotaCheck?: import("./domain/daemon/Services/quota-check.js").QuotaCheck;
+	/** Shared daemon config state and persistence for settings and continuation. */
+	daemonConfigContext?: import("effect").Context.Context<
+		| import("./domain/daemon/Services/daemon-config-ref.js").DaemonConfigRefTag
+		| import("./domain/daemon/Services/config-persistence-service.js").ConfigPersistenceTag
+	>;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;
 	/** Project working directory */

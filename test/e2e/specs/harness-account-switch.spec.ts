@@ -47,6 +47,115 @@ const readProofMarks = (root: string): ProcessMark[] =>
 				.map((line) => JSON.parse(line) as ProcessMark)
 		: [];
 
+// Failures: an acknowledged account is absent from disk, session creation falls
+// back to OpenCode, or the Claude runner uses a different account directory.
+test("a just-added Claude account can run a session immediately", async ({
+	harness,
+}, testInfo) => {
+	const browser = await harness.connect();
+	const configDir = mkdtempSync(join(harness.root, "immediate-account-"));
+	const { addedInstanceId } = await Effect.runPromise(
+		browser.rpc.AddInstance({
+			name: "Immediate account",
+			driver: "claude",
+			configDir,
+		}),
+	);
+	if (!addedInstanceId) throw new Error("No immediate account ID");
+	const { sessionId } = await Effect.runPromise(
+		browser.rpc.CreateSession({
+			projectSlug: "process-test",
+			instanceId: Schema.decodeUnknownSync(
+				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			)(addedInstanceId),
+			model: { modelId: "harness", providerId: "claude" },
+			originId: browser.originId,
+		}),
+	);
+	const prompt = "immediate-account-session";
+	await Effect.runPromise(
+		browser.rpc.SendMessage({
+			projectSlug: "process-test",
+			sessionId,
+			text: prompt,
+			commandId: "immediate-account-send",
+			originId: browser.originId,
+		}),
+	);
+	await expect
+		.poll(() => harness.claudeOptions().find((call) => call.prompt === prompt))
+		.toMatchObject({ configDir });
+	await expect
+		.poll(() => JSON.stringify(readProofMarks(harness.root)))
+		.toContain(`done(${prompt})`);
+	const history = await Effect.runPromise(
+		browser.rpc.LoadMoreHistory({ projectSlug: "process-test", sessionId }),
+	);
+	expect(history.messages.some((message) => message.role === "assistant")).toBe(
+		true,
+	);
+	await testInfo.attach("immediate-account-session", {
+		body: JSON.stringify({
+			addedInstanceId,
+			sessionId,
+			configDir,
+			calls: harness.claudeOptions(),
+			history,
+		}),
+		contentType: "application/json",
+	});
+});
+
+// Failures: a later instance snapshot erases a setting, a getter returns stale
+// memory, or a successful settings RPC replies before daemon.json is written.
+test("usage limits and auto-settle survive another config save", async ({
+	harness,
+}, testInfo) => {
+	const browser = await harness.connect();
+	const usageLimits = {
+		autoResume: true,
+		autoSwitch: true,
+		order: ["config-save-account", "claude"],
+	};
+	const autoSettleAfterDays = null;
+	await Effect.runPromise(browser.rpc.SetUsageLimitsSetting({ usageLimits }));
+	await Effect.runPromise(
+		browser.rpc.SetAutoSettleSetting({ autoSettleAfterDays }),
+	);
+	const beforeSave = JSON.parse(
+		readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+	) as Record<string, unknown>;
+	expect(beforeSave).toMatchObject({ usageLimits, autoSettleAfterDays });
+	const { addedInstanceId } = await Effect.runPromise(
+		browser.rpc.AddInstance({
+			name: "Config save account",
+			driver: "claude",
+			configDir: mkdtempSync(join(harness.root, "config-save-account-")),
+		}),
+	);
+	expect(addedInstanceId).toBe("config-save-account");
+	expect(
+		await Effect.runPromise(browser.rpc.GetUsageLimitsSetting({})),
+	).toEqual({ usageLimits });
+	expect(await Effect.runPromise(browser.rpc.GetAutoSettleSetting({}))).toEqual(
+		{ autoSettleAfterDays },
+	);
+	const afterSave = JSON.parse(
+		readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
+	) as Record<string, unknown>;
+	expect(afterSave).toMatchObject({
+		usageLimits,
+		autoSettleAfterDays,
+		instances: expect.arrayContaining([
+			expect.objectContaining({ id: addedInstanceId }),
+		]),
+	});
+	await testInfo.attach("settings-config-save", {
+		body: JSON.stringify({ beforeSave, afterSave }),
+		contentType: "application/json",
+	});
+});
+
 // Failures: returning to an account drops its native cursor, repeats delivered
 // history, loses the cut-off, previews full history, or loops on a stale cursor.
 for (const stale of [false, true]) {

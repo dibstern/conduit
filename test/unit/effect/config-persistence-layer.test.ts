@@ -1,9 +1,13 @@
+// Failure modes: continuous requests postpone saves indefinitely, a burst writes
+// more than once, a flush uses stale state, failure/shutdown loses dirty state,
+// or cancellation releases the lock before an uncancellable write finishes.
 import { describe, expect, it } from "@effect/vitest";
 import {
 	Context,
 	Duration,
 	Effect,
 	Exit,
+	Fiber,
 	Layer,
 	Ref,
 	Scope,
@@ -124,17 +128,46 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("coalesces multiple save requests within debounce window", () =>
+	it.scoped("writes within 500 ms despite requests every 100 ms", () =>
 		Effect.gen(function* () {
 			const { layer, writes } = makeTestLayer();
 			const ctx = yield* Layer.build(Layer.fresh(layer));
 			const persistence = Context.get(ctx, ConfigPersistenceTag);
-			// Request 5 writes rapidly.
+			const configRef = Context.get(ctx, DaemonConfigRefTag);
+			yield* persistence.requestSave;
+			yield* TestClock.adjust(Duration.zero);
+			for (let i = 1; i <= 4; i++) {
+				yield* TestClock.adjust(Duration.millis(100));
+				yield* Ref.update(configRef, (config) => ({
+					...config,
+					port: 8000 + i,
+				}));
+				yield* persistence.requestSave;
+			}
+			yield* TestClock.adjust(Duration.millis(99));
+			expect(writes).toHaveLength(0);
+			yield* TestClock.adjust(Duration.millis(1));
+			expect(writes).toHaveLength(1);
+			expect(writes[0]?.port).toBe(8004);
+		}),
+	);
+
+	it.scoped("coalesces a burst into one write at the end of the window", () =>
+		Effect.gen(function* () {
+			const { layer, writes } = makeTestLayer();
+			const ctx = yield* Layer.build(Layer.fresh(layer));
+			const persistence = Context.get(ctx, ConfigPersistenceTag);
+			yield* persistence.requestSave;
+			yield* TestClock.adjust(Duration.zero);
 			for (let i = 0; i < 5; i++) {
 				yield* persistence.requestSave;
 			}
-			yield* TestClock.adjust(Duration.millis(600));
-			expect(writes.length).toBe(1);
+			yield* TestClock.adjust(Duration.millis(499));
+			expect(writes).toHaveLength(0);
+			yield* TestClock.adjust(Duration.millis(1));
+			expect(writes).toHaveLength(1);
+			yield* TestClock.adjust(Duration.millis(500));
+			expect(writes).toHaveLength(1);
 		}),
 	);
 
@@ -145,6 +178,66 @@ describe("ConfigPersistenceLive", () => {
 			yield* TestClock.adjust(Duration.millis(600));
 			expect(writes.length).toBe(0);
 		}),
+	);
+
+	it.scoped(
+		"keeps an interrupted write locked until the disk operation ends",
+		() =>
+			Effect.gen(function* () {
+				const writes: DaemonConfig[] = [];
+				const pendingWrites: { complete: () => void }[] = [];
+				const stateDeps = Layer.mergeAll(
+					DaemonConfigRefLive(defaults),
+					makeProjectRegistryLive(),
+					makeInstanceManagerStateLive(),
+					Layer.succeed(ConfigWriterTag, {
+						// Like a filesystem Promise, the operation can finish even if
+						// the waiting fiber has been interrupted.
+						write: (config) =>
+							Effect.async<void>((resume) => {
+								pendingWrites.push({
+									complete: () => {
+										writes.push(config);
+										resume(Effect.void);
+									},
+								});
+							}),
+					}),
+				);
+				const context = yield* Layer.build(
+					ConfigPersistenceLive.pipe(
+						Layer.provideMerge(
+							ConfigSnapshotFromEffectStateLive.pipe(
+								Layer.provideMerge(stateDeps),
+							),
+						),
+					),
+				);
+				const persistence = Context.get(context, ConfigPersistenceTag);
+				const configRef = Context.get(context, DaemonConfigRefTag);
+				yield* persistence.requestSave;
+				const firstSave = yield* Effect.fork(persistence.flush);
+				yield* TestClock.adjust(Duration.zero);
+				expect(pendingWrites).toHaveLength(1);
+				const interruption = yield* Effect.fork(Fiber.interrupt(firstSave));
+				yield* Ref.update(configRef, (config) => ({ ...config, port: 7777 }));
+				yield* persistence.requestSave;
+				const secondSave = yield* Effect.fork(persistence.flush);
+				yield* TestClock.adjust(Duration.zero);
+				const writesBeforeCompletion = pendingWrites.length;
+
+				yield* Effect.sync(() => pendingWrites[0]?.complete());
+				yield* TestClock.adjust(Duration.zero);
+				yield* Effect.sync(() => pendingWrites[1]?.complete());
+				yield* Fiber.join(secondSave);
+				yield* Fiber.join(interruption);
+				expect(writesBeforeCompletion).toBe(1);
+				expect(pendingWrites).toHaveLength(2);
+				expect(writes.map((config) => config.port)).toEqual([
+					defaults.port,
+					7777,
+				]);
+			}),
 	);
 
 	it.scoped("writes reflect current config state at time of flush", () =>
