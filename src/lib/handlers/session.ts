@@ -14,7 +14,11 @@ import {
 } from "../domain/relay/Services/session-model-settings.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	newestRowsWithin,
+	PAGE_FRAME_BUDGET,
+} from "../persistence/session-history-adapter.js";
 import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
@@ -421,12 +425,14 @@ export const loadMoreHistoryForSession = ({
 			limit: 50,
 			previewTools: true,
 		});
+		const { messages } = messageRowsToHistory(page.messages, {
+			pageSize: page.messages.length,
+		});
+		const pageMessages = newestRowsWithin(messages, PAGE_FRAME_BUDGET);
 		return {
 			sessionId,
-			messages: messageRowsToHistory(page.messages, {
-				pageSize: page.messages.length,
-			}).messages,
-			hasMore: page.hasMore,
+			messages: pageMessages,
+			hasMore: page.hasMore || pageMessages.length < messages.length,
 		};
 	});
 

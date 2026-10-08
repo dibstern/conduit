@@ -65,11 +65,12 @@ const STREAMS = 3;
 const WATCHED_STREAM: readonly number[] = [0, 0, 1];
 const SETTLE_MS = 2_000;
 // Fixed ceilings, in encoded bytes, for the frames tool previews shape
-// (conduit-test-y7eo.6), each a little over what it measured: the heavy first
-// page 279,833 (2,030,012 before previews), a live update 4,945 to 5,516, and
-// a detail response 46,608, which carries the whole result by design.
+// (conduit-test-y7eo.6), each a little over what it measured: a live update
+// 4,945 to 5,516, and a detail response 46,608, which carries the whole result
+// by design. The heavy first page (2,030,012 before previews, 279,833 after)
+// is held to the page budget (conduit-test-y7eo.7).
 const TOOL_PREVIEW_LIMITS = {
-	heavyFirstPageBytes: 300_000,
+	heavyFirstPageBytes: 256 * 1024,
 	liveToolUpdateBytes: 8_000,
 	detailResponseBytes: 50_000,
 };

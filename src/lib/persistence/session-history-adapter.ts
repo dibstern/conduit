@@ -2,6 +2,7 @@
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for transcript consumers.
 // Pure conversion with no I/O.
 
+import { Utf8Bytes } from "../contracts/tool-wire.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import type {
 	HistoryMessage,
@@ -319,4 +320,28 @@ export function messageRowsToHistory(
 	});
 
 	return { messages, hasMore };
+}
+
+/** The most a transcript page may weigh on the wire, as one encoded frame. */
+export const PAGE_FRAME_BUDGET = Utf8Bytes.make(256 * 1024);
+
+// What a frame holds besides its rows: the RPC wrapper and the page's
+// sequence, cursor and paging flags.
+const FRAME_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The newest of `rows` that fit one frame of `budget`, oldest first. A row is
+ * weighed whole, as its JSON, so a page never splits a message; the newest row
+ * stays however large it is, so a page always holds one whole message.
+ */
+export function newestRowsWithin<T>(
+	rows: readonly T[],
+	budget: Utf8Bytes,
+): readonly T[] {
+	let bytes = FRAME_ENVELOPE_BYTES;
+	for (let index = rows.length - 1; index >= 0; index--) {
+		bytes += Buffer.byteLength(JSON.stringify(rows[index]), "utf8") + 1;
+		if (bytes > budget && index < rows.length - 1) return rows.slice(index + 1);
+	}
+	return rows;
 }

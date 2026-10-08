@@ -3,7 +3,8 @@
 // of messages, streamed text, thinking, and tool activity.
 //
 // Its rows are `messages`, which carry a read-model version. The base reads
-// the newest transcript page; live and resume queries use a version window.
+// the newest transcript page, up to 50 messages or 256 KB of frame; live and
+// resume queries use a version window.
 // A message part carries no version of its own, so a part write advances the
 // message that owns it and the whole current message comes back — which is why
 // a delta here is a projected transcript message and not the raw event that
@@ -24,7 +25,11 @@ import {
 	ReadQueryEffectTag,
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
-import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	newestRowsWithin,
+	PAGE_FRAME_BUDGET,
+} from "../../../persistence/session-history-adapter.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
@@ -163,23 +168,26 @@ export const subscribeSessionDetail = (options: {
 											},
 										]
 									: [];
+							// The adapter gets exactly these rows, so index `i` is still row `i`.
+							// That is what lets each item keep the version its row
+							// carries instead of borrowing the read's counter.
+							const rows = messageRowsToHistory(result.messages, {
+								pageSize: result.messages.length,
+							}).messages.map((message, index) => ({
+								item: {
+									_tag: "transcriptMessage" as const,
+									message,
+								} satisfies SessionDetailItem,
+								version: result.messages[index]?.version ?? result.version,
+							}));
+							// The first page also ends where its frame would pass the
+							// budget; "load older" pages from its oldest message.
+							const pageRows =
+								page === undefined
+									? rows
+									: newestRowsWithin(rows, PAGE_FRAME_BUDGET);
 							return {
-								// The adapter gets exactly these rows, so index `i` is still row `i`.
-								// That is what lets each item keep the version its row
-								// carries instead of borrowing the read's counter.
-								rows: [
-									...messageRowsToHistory(result.messages, {
-										pageSize: result.messages.length,
-									}).messages.map((message, index) => ({
-										item: {
-											_tag: "transcriptMessage" as const,
-											message,
-										} satisfies SessionDetailItem,
-										version: result.messages[index]?.version ?? result.version,
-									})),
-									...inputs,
-									...inboxRows,
-								],
+								rows: [...pageRows, ...inputs, ...inboxRows],
 								version: result.version,
 								...(range === undefined
 									? {}
@@ -192,10 +200,10 @@ export const subscribeSessionDetail = (options: {
 								...(page === undefined
 									? {}
 									: {
-											hasMore: page.hasMore,
-											...(page.messages[0] === undefined
+											hasMore: page.hasMore || pageRows.length < rows.length,
+											...(pageRows[0] === undefined
 												? {}
-												: { cursor: page.messages[0].id }),
+												: { cursor: pageRows[0].item.message.id }),
 										}),
 							};
 						}),
