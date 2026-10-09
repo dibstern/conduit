@@ -228,6 +228,9 @@ export function createProjectRelayLayers({
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		claudeQueryFactory: claudeSdk.query,
+		...(config.claudeSdk?.subagentSdk && {
+			claudeSubagentSdk: config.claudeSdk.subagentSdk,
+		}),
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		extraFolders: config.extraFolders ?? [],

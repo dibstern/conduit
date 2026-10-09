@@ -288,5 +288,7 @@ export interface ProjectRelayConfig {
 		>;
 		readonly titleQuery: import("./domain/relay/Services/session-title-service.js").ClaudeTitleQueryFactory;
 		readonly fork: import("./provider/claude/claude-session-fork.js").ClaudeSessionForkSdk;
+		/** Agent transcript reads; defaults to the real SDK's. */
+		readonly subagentSdk?: import("./provider/claude/claude-subagent-materializer.js").ClaudeSubagentSdk;
 	};
 }

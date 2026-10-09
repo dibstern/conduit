@@ -60,6 +60,8 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -75,6 +77,8 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -170,7 +174,7 @@ const createOrchestrationComponentsEffect = (
 
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const materializeSubagents = makeClaudeSubagentMaterializer({
-			sdk: defaultClaudeSubagentSdk,
+			sdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
 			persist,
 		});
 		let shellEnv = options.shellEnv;
@@ -205,6 +209,9 @@ const createOrchestrationComponentsEffect = (
 			materializeSubagents,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
+				: {}),
+			...(options.claudeSubagentSdk
+				? { subagentSdk: options.claudeSubagentSdk }
 				: {}),
 			...(options.claudeRunnerFactory
 				? { runnerFactory: options.claudeRunnerFactory }
@@ -318,6 +325,9 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeSubagentSdk
+					? { claudeSubagentSdk: options.claudeSubagentSdk }
 					: {}),
 				...(options.claudeRunnerFactory
 					? { claudeRunnerFactory: options.claudeRunnerFactory }
