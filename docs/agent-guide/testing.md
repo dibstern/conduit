@@ -59,6 +59,20 @@ title generation and capability probing use fakes. See
 [Claude runners](claude-runners.md) for the default-path latency comparison
 against a preserved pre-.15 build.
 
+The worktree contract test uses the same opt-in gate and needs no build:
+
+```bash
+RUN_EXPENSIVE_E2E=1 pnpm exec vitest run --config vitest.e2e.config.ts \
+  test/e2e/provider/claude-worktree-trace-capture.test.ts
+```
+
+It pins resume/cwd behaviour and captures `enter-worktree-turn.jsonl` and
+`exit-worktree-keep-turn.jsonl` under `test/fixtures/claude-sdk-traces/` after
+all assertions pass. Review these real wire traces before committing them.
+Each run writes `run.json` and raw turn traces to a unique directory under
+`test-results/q5u6-1.1-worktree/`, including failures and `CwdChanged` hook
+observations. If that hook fires, revisit it as the workspace move signal.
+
 ### E2E (Replay — Default)
 
 Run this when changing browser-visible workflows, WebSocket behavior, mobile flows, or end-to-end session lifecycles. Uses recorded WebSocket fixtures — no running OpenCode instance needed.
