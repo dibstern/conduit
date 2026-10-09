@@ -9,6 +9,7 @@ import { RpcClient, RpcSerialization } from "@effect/rpc";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -1061,81 +1062,6 @@ test.describe("Claude replay lane", () => {
 				]);
 			});
 		});
-
-		test.describe("a late done for the turn before", () => {
-			test.use({
-				claudeReplay: {
-					turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
-					delayMs: 300,
-				},
-			});
-
-			test("does not end the queued turn that started after it", async ({
-				page,
-				relayUrl,
-				harness,
-			}, testInfo) => {
-				test.setTimeout(60_000);
-				const dbPath = harness.eventsDbPath;
-				const sessionId = sessionOf(harness);
-				const sends = recordSends(page);
-				const app = new AppPage(page);
-				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
-
-				await app.sendMessage("Alpha");
-				await expect(chat.stopBtn).toBeVisible();
-				await app.sendMessage("Bravo");
-				await expect.poll(() => sends.length).toBe(2);
-				const [a, b] = sends.map((send) => send.commandId);
-
-				// Bravo is streaming once its assistant message shows.
-				await expect(chat.assistantMessages).toHaveCount(2, {
-					timeout: 20_000,
-				});
-				const [alphaTurn] = queryDb<{ assistant_message_id: string }>(
-					dbPath,
-					"SELECT assistant_message_id FROM turns WHERE user_message_id = ?",
-					a ?? "",
-				);
-				const alphaAssistant = alphaTurn?.assistant_message_id;
-				expect(alphaAssistant).toMatch(/\S/);
-				expect(countEvents(dbPath, "turn.completed")).toBe(1);
-				await expect(chat.stopBtn).toBeVisible();
-
-				// The monitoring layer's synthetic done for Alpha, arriving late.
-				harness.stack.wsHandler.sendToSession(sessionId, {
-					type: "done",
-					sessionId,
-					code: 0,
-					alertId: JSON.stringify([sessionId, alphaAssistant, "done"]),
-					...(alphaAssistant ? { messageId: alphaAssistant } : {}),
-				});
-				await page.waitForTimeout(1_000);
-				const stopAfterLateDone = await chat.stopBtn.isVisible();
-				const completedAfterLateDone = countEvents(dbPath, "turn.completed");
-				expect(completedAfterLateDone).toBe(1);
-				expect(stopAfterLateDone).toBe(true);
-
-				await expect.poll(() => countEvents(dbPath, "turn.completed")).toBe(2);
-				await chat.waitForStreamingComplete();
-				await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
-				await testInfo.attach("late-done-proof.json", {
-					body: JSON.stringify(
-						{
-							inputs: { a, b },
-							lateDoneMessageId: alphaAssistant,
-							stopAfterLateDone,
-							completedAfterLateDone,
-							final: ledger(dbPath, sessionId),
-						},
-						null,
-						2,
-					),
-					contentType: "application/json",
-				});
-			});
-		});
 	});
 
 	test.describe("steering a running turn", () => {
@@ -1895,20 +1821,15 @@ test.describe("Claude replay lane", () => {
 			const parentPath = new URL(page.url()).pathname;
 			// The SDK resume cursor commits after the completed-turn event.
 			await expect
-				.poll(() => {
-					const db = new DatabaseSync(harness.eventsDbPath ?? "", {
-						readOnly: true,
-					});
-					try {
-						return db
-							.prepare(
-								"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
+				.poll(
+					async () =>
+						(
+							await readNativeThread(
+								harness.eventsDbPath ?? "",
+								parentPath.split("/").at(-1) ?? "",
 							)
-							.get(parentPath.split("/").at(-1) ?? "")?.["value"];
-					} finally {
-						db.close();
-					}
-				})
+						)?.resumeSessionId,
+				)
 				.toBeTruthy();
 			await page.getByTestId("session-bar-title-menu").click();
 			await page.getByTestId("session-ctx-fork").click();

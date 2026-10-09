@@ -71,7 +71,6 @@ import {
 	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
-import { DaemonWsClientRegistryLive } from "../Services/daemon-ws-client-registry.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	ManagedOpenCodeLifecycleLive,
@@ -114,6 +113,7 @@ import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
+import { QuotaCheckLive } from "./quota-check-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -428,10 +428,10 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
+						syncGlobalSetting: relay.syncGlobalSetting,
+						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
 							relay.settleIdleSessions(idleWindowMs, now),
-						attach: (ws, options) => relay.wsHandler.attach(ws, options),
-						wsHandler: relay.wsHandler,
 						rpcWsHandler: relay.rpcWsHandler,
 						getStatusSnapshot: () => relay.getStatusSnapshot(),
 						setDefaultAgent: (agent: string) => relay.setDefaultAgent(agent),
@@ -657,7 +657,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			),
 		),
 		DaemonEventBusLive,
-		DaemonWsClientRegistryLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),
@@ -770,7 +769,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(withOpenCodeInstances),
+		Layer.provideMerge(
+			QuotaCheckLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
+		),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(

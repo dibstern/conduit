@@ -7,6 +7,7 @@ import {
 	type ClaudeRunnerMessage,
 	ClaudeRunnerSocket,
 } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -47,13 +48,13 @@ describe("foreground daemon process harness", () => {
 		}
 	});
 
-	it("sends over browser RPC and receives each streamed response chunk", async () => {
+	it("sends over browser RPC and receives projected response text", async () => {
 		harness = await ProcessHarness.start({ enqueueMarkDelayMs: 250 });
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession();
 		const turn = await browser.send(sessionId, "stream-proof");
-		expect(turn.chunks).toEqual(responseChunks("stream-proof"));
-		expect(turn.done["code"]).toBe(0);
+		expect(turn.chunks.join("")).toBe(responseChunks("stream-proof").join(""));
+		expect(turn.done["status"]).toBe("idle");
 		await vi.waitFor(
 			() => {
 				expect(
@@ -120,11 +121,20 @@ describe("foreground daemon process harness", () => {
 		expect(
 			browser.frames
 				.slice(cursor)
-				.some(({ message }) => message["type"] === "tool_result"),
+				.some(
+					({ message }) =>
+						message["type"] === "transcript_message" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) =>
+								part.type === "tool" && part.state?.status === "completed",
+						) === true,
+				),
 		).toBe(false);
 		await browser.answerApproval(request, decision);
 		const turn = await pending;
-		expect(turn.chunks).toEqual(responseChunks("approval-proof"));
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("approval-proof").join(""),
+		);
 		await browser.waitFor(
 			(message) =>
 				message["type"] === "approval_removed" &&
@@ -132,11 +142,24 @@ describe("foreground daemon process harness", () => {
 			cursor,
 		);
 		const result = await browser.waitFor(
-			(message) => message["type"] === "tool_result",
+			(message) =>
+				message["type"] === "transcript_message" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "tool" && part.state?.status === "completed",
+				) === true,
 			cursor,
 		);
-		expect(result["content"]).toBe(
-			decision === "allow" ? "harness-approved" : "harness-denied",
+		expect(result["parts"]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "tool",
+					state: expect.objectContaining({
+						status: "completed",
+						output:
+							decision === "allow" ? "harness-approved" : "harness-denied",
+					}),
+				}),
+			]),
 		);
 	});
 

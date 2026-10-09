@@ -27,14 +27,18 @@ import {
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSION_GOALS_MIGRATION,
+	SESSION_SIDEBAR_MIGRATION,
+	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
+	SESSIONS_LIMIT_RECOVERY_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
+	SESSIONS_RESUMES_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
@@ -42,6 +46,7 @@ import {
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
+import { refreshSidebar } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 
@@ -368,7 +373,7 @@ const postBaselineTableNames = new Set<string>([
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
-	"pending_inputs", // 0037
+	"pending_inputs", // 0040
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -459,6 +464,9 @@ const appendedSessionColumns = [
 	"variant",
 	"context_window",
 	"side_thread",
+	"limit_recovery",
+	"resumes",
+	"root_id",
 ] as const;
 
 function sameStrings(
@@ -1030,15 +1038,52 @@ export const effectMigrationEntries = {
 		"side_thread",
 		readMigrationSql(SESSIONS_SIDE_THREAD_MIGRATION),
 	),
-	"0036_messages_input_id": runAddColumnMigrationIfMissing(
+	"0036_sessions_limit_recovery": runAddColumnMigrationIfMissing(
+		"sessions",
+		"limit_recovery",
+		readMigrationSql(SESSIONS_LIMIT_RECOVERY_MIGRATION),
+	),
+	"0037_sessions_resumes": runAddColumnMigrationIfMissing(
+		"sessions",
+		"resumes",
+		readMigrationSql(SESSIONS_RESUMES_MIGRATION),
+	),
+	// Stores each session's top-level parent and creates the sidebar table.
+	"0038_session_sidebar": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "root_id")) return;
+		yield* executeSqlStatements(readMigrationSql(SESSION_SIDEBAR_MIGRATION));
+	}),
+	// Then fills it, once its schema is final, since the upkeep writes today's
+	// columns: one pass over every family, at the version the store is at. A
+	// store already filled by an earlier build keeps every row that is still
+	// right, and a row for a session that is no longer a root (the lineage
+	// import gives parents before this runs) becomes a tombstone.
+	"0039_session_sidebar_tombstones": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* executeSqlStatements(
+			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
+		);
+		const roots = yield* sql<{ id: string }>`
+			SELECT id FROM sessions WHERE parent_id IS NULL
+			UNION SELECT session_id FROM session_sidebar`;
+		const [counter] = yield* sql<{ value: number }>`
+			SELECT value FROM read_model_counter WHERE id = 1`;
+		yield* refreshSidebar(
+			roots.map((row) => row.id),
+			counter?.value ?? 0,
+		);
+	}),
+	"0040_messages_input_id": runAddColumnMigrationIfMissing(
 		"messages",
 		"input_id",
 		readMigrationSql(MESSAGES_INPUT_ID_MIGRATION),
 	),
-	"0037_pending_inputs": executeSqlStatements(
+	"0041_pending_inputs": executeSqlStatements(
 		readMigrationSql(PENDING_INPUTS_MIGRATION),
 	),
-	"0038_messages_steered": runAddColumnMigrationIfMissing(
+	"0042_messages_steered": runAddColumnMigrationIfMissing(
 		"messages",
 		"steered",
 		readMigrationSql(MESSAGES_STEERED_MIGRATION),

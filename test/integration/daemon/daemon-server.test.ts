@@ -4,9 +4,8 @@
 // unit test suite (~15s total). Run via `pnpm test:integration`.
 //
 // Covers:
-// - WS attachment waiting on registering projects (waitForRelay)
+// - Lazy RPC activation and project status while relays register or fail
 // - Rejection of removed per-project socket paths
-// - WS connections remaining unattached for failed relays
 // - WS upgrade rejection for non-matching URLs
 // - Instance status broadcast and health checking
 
@@ -14,6 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import {
 	afterEach,
 	assert,
@@ -23,11 +23,14 @@ import {
 	it,
 	vi,
 } from "vitest";
-import WebSocket from "ws";
+import { AttachProject, GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 
 function makeTmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -50,7 +53,7 @@ function daemonOpts(tmpDir: string, port = 0) {
 	};
 }
 
-describe("Daemon WS upgrade — waitForRelay integration", () => {
+describe("daemon project readiness and socket routing", () => {
 	let tmpDir: string;
 
 	beforeEach(() => {
@@ -61,12 +64,20 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 		cleanTmpDir(tmpDir);
 	});
 
-	it("WS connection attaches when a registering relay becomes ready", async () => {
-		const { createMockProjectRelay } = await import(
-			"../../helpers/mock-factories.js"
+	it("reports a registering project as ready after its relay starts", async () => {
+		const { createMockProjectRelay, makeMockConfig, makeTestHandlerLayer } =
+			await import("../../helpers/mock-factories.js");
+		const slug = "ws-test-app";
+		const runtime = ManagedRuntime.make(
+			Layer.mergeAll(
+				makeTestHandlerLayer({ config: makeMockConfig({ slug }) }),
+				makeWsTransportLive({ noServer: true }),
+			),
 		);
-		const relay = createMockProjectRelay();
-		const attach = vi.spyOn(relay.wsHandler, "attach");
+		const rpcWsHandler = await Effect.runPromise(
+			makeWsRpcWebSocketHandler({ runtime }).pipe(Effect.provide(runtime)),
+		);
+		const relay = createMockProjectRelay({ rpcWsHandler });
 
 		let releaseRelay!: () => void;
 		const relayGate = new Promise<void>((resolve) => {
@@ -80,11 +91,9 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 			createProjectRelay: createProjectRelayMock,
 		}));
 
-		const slug = "ws-test-app";
 		const projectDir = join(tmpDir, slug);
 		mkdirSync(projectDir, { recursive: true });
 		let d: ForegroundDaemonHandle | null = null;
-		let ws: WebSocket | null = null;
 
 		try {
 			d = await startForegroundDaemon({
@@ -92,30 +101,36 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 				opencodeUrl: "http://localhost:4096",
 			});
 			const runningDaemon = d;
-			const port = runningDaemon.port;
 
 			await runningDaemon.addProject(projectDir);
+			const registering = await sendRpcRequest(
+				join(tmpDir, "relay.sock"),
+				new GetStatus({}),
+			);
+			expect(
+				registering.projects.find((project) => project.slug === slug)?.status,
+			).toBe("registering");
+			expect(createProjectRelayMock).not.toHaveBeenCalled();
+			let attachmentSettled = false;
+			const attachment = sendRpcRequest(
+				join(tmpDir, "relay.sock"),
+				new AttachProject({ projectSlug: slug, originId: "waiting-client" }),
+			).finally(() => {
+				attachmentSettled = true;
+			});
+
+			await vi.waitFor(() => {
+				expect(createProjectRelayMock).toHaveBeenCalledOnce();
+			});
+			expect(attachmentSettled).toBe(false);
 			expect(
 				runningDaemon
 					.getStatus()
 					.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
 
-			ws = new WebSocket(
-				`ws://127.0.0.1:${port}/ws?p=${slug}&client=waiting-client`,
-			);
-			const socket = ws;
-			await new Promise<void>((resolve, reject) => {
-				socket.once("open", resolve);
-				socket.once("error", reject);
-			});
-
-			await vi.waitFor(() => {
-				expect(createProjectRelayMock).toHaveBeenCalled();
-			});
-			expect(attach).not.toHaveBeenCalled();
-
 			releaseRelay();
+			expect(await attachment).toEqual({ projectSlug: slug });
 
 			await vi.waitFor(() => {
 				expect(
@@ -124,16 +139,22 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 						.projects.find((project) => project.slug === slug)?.status,
 				).toBe("ready");
 			});
-			await vi.waitFor(() => {
-				expect(attach).toHaveBeenCalledWith(expect.any(WebSocket), {
-					clientId: "waiting-client",
-					skipDefaultSession: true,
-				});
-			});
+			const ready = await sendRpcRequest(
+				join(tmpDir, "relay.sock"),
+				new GetStatus({}),
+			);
+			expect(
+				ready.projects.find((project) => project.slug === slug)?.status,
+			).toBe("ready");
 		} finally {
-			ws?.terminate();
-			await d?.stop();
-			vi.doUnmock("../../../src/lib/relay/relay-stack.js");
+			releaseRelay();
+			try {
+				await d?.stop();
+			} finally {
+				await rpcWsHandler.drain();
+				await runtime.dispose();
+				vi.doUnmock("../../../src/lib/relay/relay-stack.js");
+			}
 		}
 	});
 
@@ -175,42 +196,56 @@ describe("Daemon WS upgrade — waitForRelay integration", () => {
 		}
 	});
 
-	it("WS stays open without attaching when the relay fails to become ready", async () => {
-		const d = await startForegroundDaemon(daemonOpts(tmpDir));
-		const port = d.port;
-
-		// Add a project with no usable OpenCode instance. Relay startup should
-		// fail through the Effect-owned relay cache without closing the daemon socket.
-		const directory = join(tmpDir, "error-app");
-		mkdirSync(directory);
-		await d.addProject(directory);
+	it("reports failed relay startup while daemon RPC remains available", async () => {
+		const createProjectRelayMock = vi.fn(async () => {
+			throw new Error("Relay startup failed");
+		});
+		vi.doMock("../../../src/lib/relay/relay-stack.js", () => ({
+			createProjectRelay: createProjectRelayMock,
+		}));
 		const slug = "error-app";
-		const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?p=${slug}`);
-		const messages: string[] = [];
-		ws.on("message", (data) => messages.push(data.toString()));
+		let d: ForegroundDaemonHandle | null = null;
 
 		try {
-			await new Promise<void>((resolve, reject) => {
-				ws.once("open", resolve);
-				ws.once("error", reject);
+			d = await startForegroundDaemon(daemonOpts(tmpDir));
+			const directory = join(tmpDir, slug);
+			mkdirSync(directory);
+			await d.addProject(directory);
+			expect(createProjectRelayMock).not.toHaveBeenCalled();
+			await expect(
+				sendRpcRequest(
+					join(tmpDir, "relay.sock"),
+					new AttachProject({ projectSlug: slug, originId: "failed-client" }),
+				),
+			).rejects.toMatchObject({
+				_tag: "WsRpcError",
+				message: expect.stringContaining(`Project "${slug}" unavailable`),
 			});
+			expect(createProjectRelayMock).toHaveBeenCalledOnce();
+			const runningDaemon = d;
 			await vi.waitFor(() => {
-				const project = d
+				const project = runningDaemon
 					.getStatus()
 					.projects.find((entry) => entry.slug === slug);
 				expect(project?.status).toBe("error");
 			});
-			expect(ws.readyState).toBe(WebSocket.OPEN);
+			const failed = await sendRpcRequest(
+				join(tmpDir, "relay.sock"),
+				new GetStatus({}),
+			);
 			expect(
-				messages.some((message) => message.includes("project_attached")),
-			).toBe(false);
+				failed.projects.find((project) => project.slug === slug)?.status,
+			).toBe("error");
 		} finally {
-			ws.terminate();
-			await d.stop();
+			try {
+				await d?.stop();
+			} finally {
+				vi.doUnmock("../../../src/lib/relay/relay-stack.js");
+			}
 		}
 	});
 
-	it("WS upgrade on a path other than /ws or /rpc destroys socket", async () => {
+	it("WS upgrade on a path other than /rpc destroys socket", async () => {
 		const d = await startForegroundDaemon(daemonOpts(tmpDir));
 		const port = d.port;
 

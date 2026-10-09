@@ -332,9 +332,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const facts = goals.get(world.page);
 			if (!facts) throw new Error("No goal was set");
-			// The daemon restores a goal through the session row and the /ws
-			// metadata push, in either order. A row without goalState arriving
-			// after the push would clear the goal.
+			// Preserve the stored goal on its session row so the RPC shell
+			// snapshot after reload cannot clear it.
 			const rpc = requireRpcControl(world.page);
 			rpc.setShellRows(
 				(rpc.shellRows ?? []).map((row) =>

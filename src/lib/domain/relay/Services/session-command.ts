@@ -9,6 +9,7 @@
 //
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
+import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
 import {
@@ -17,10 +18,17 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignalProject,
+	makeCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
+import {
+	type NativeThread,
+	nativeThreadKey,
+	ProviderStateEffectTag,
+} from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import {
 	canonicalEvent,
@@ -73,6 +81,7 @@ type SessionCommandType =
 	| "session.auto_settle_set"
 	| "session.unsnoozed"
 	| "session.deleted"
+	| "session.provider_changed"
 	| "session.forked";
 
 export type SessionCommand = {
@@ -98,6 +107,8 @@ export interface SessionUpstreamAdapter {
 }
 
 export interface ApplySessionCommandOptions {
+	/** Join a caller's canonical commit, without publishing before that commit. */
+	readonly project?: CommitAndSignalProject;
 	/**
 	 * Override the provider adapter while retaining the canonical
 	 * append/project/sync pipeline. SessionManager uses this to fold its richer
@@ -136,6 +147,7 @@ export const openCodeUpstreamAdapter = (
 			case "session.snoozed":
 			case "session.auto_settle_set":
 			case "session.unsnoozed":
+			case "session.provider_changed":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
@@ -213,13 +225,18 @@ export const applySessionCommand = (
 				: row?.provider;
 
 		if (appendProvider !== undefined) {
-			yield* commitAndSignal([
+			const events = [
 				canonicalEvent(command.type, sessionId, command.data, {
 					provider: appendProvider,
 					createdAt: Date.now(),
 					metadata: { source: "relay" },
 				}),
-			]).pipe(
+			];
+			yield* (
+				options.project
+					? Effect.flatMap(eventStore.appendBatch(events), options.project)
+					: commitAndSignal(events)
+			).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({
@@ -583,23 +600,6 @@ export const forkSession = (
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
-		const parentState = yield* state.getState(parentSessionId);
-		const claudeConfigDir =
-			parentState["claudeConfigDir"] ??
-			resolveClaudeInstanceConfigDir(
-				loadDaemonConfig(config.value.configDir),
-				parent.provider,
-			) ??
-			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
-		const providerSessionId = parentState["resumeSessionId"];
-		if (!providerSessionId) {
-			return yield* new SessionCommandError({
-				operation: "session.forked.claude",
-				cause: "Claude parent has no SDK resume session",
-				message:
-					"This session has no Claude transcript yet. Send a message first.",
-			});
-		}
 		const parentMessages =
 			yield* readOption.value.getSessionMessagesWithParts(parentSessionId);
 		const forkPointMessage =
@@ -610,19 +610,28 @@ export const forkSession = (
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
 				cause: "Claude fork boundary has no persisted message ordering key",
-				message: `Fork point ${messageId} was not found in the session history`,
+				message:
+					messageId === undefined
+						? "This session has no Claude transcript yet. Send a message first."
+						: `Fork point ${messageId} was not found in the session history`,
 			});
 		}
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const parentEvents =
 			yield* eventStore.value.readAllBySession(parentSessionId);
+		const forkPointSequence = parentEvents.find(
+			(event) =>
+				event.type === "message.created" &&
+				event.data.messageId === forkPointMessage.id,
+		)?.sequence;
 		if (
-			messageId !== undefined &&
-			!copyForkHistory(parentEvents, {
-				newSessionId: parentSessionId,
-				upToMessageId: messageId,
-			})
+			forkPointSequence === undefined ||
+			(messageId !== undefined &&
+				!copyForkHistory(parentEvents, {
+					newSessionId: parentSessionId,
+					upToMessageId: messageId,
+				}))
 		) {
 			return yield* new SessionCommandError({
 				operation: "session.forked.point",
@@ -630,42 +639,75 @@ export const forkSession = (
 				message: `Fork point ${messageId} was not found in the session history`,
 			});
 		}
-		const forked = yield* Effect.tryPromise({
-			try: () =>
-				forkClaudeTranscript(
-					{
-						parentSdkId: providerSessionId,
-						projectDir: config.value.projectDir,
-						...(claudeConfigDir !== undefined && {
-							configDir: claudeConfigDir,
+		const instanceIds = new Set([parent.provider]);
+		for (const event of parentEvents) {
+			if (event.type === "session.created")
+				instanceIds.add(event.data.provider);
+			if (event.type === "session.provider_changed") {
+				instanceIds.add(event.data.oldProvider);
+				instanceIds.add(event.data.newProvider);
+			}
+		}
+		let selected: { instanceId: string; thread: NativeThread } | undefined;
+		for (const instanceId of instanceIds) {
+			const thread = yield* state.nativeThread(parentSessionId, instanceId);
+			if (
+				thread &&
+				thread.firstSequence <= forkPointSequence &&
+				forkPointSequence <= thread.deliveredThrough &&
+				(!selected || thread.firstSequence > selected.thread.firstSequence)
+			)
+				selected = { instanceId, thread };
+		}
+		// Prefer the thread that began closest to the point when an older
+		// account has since returned and received a catch-up covering that range.
+		const provider = selected?.instanceId ?? parent.provider;
+		const parentThread = selected?.thread;
+		const claudeConfigDir =
+			parentThread?.configDir ??
+			resolveClaudeInstanceConfigDir(
+				loadDaemonConfig(config.value.configDir),
+				provider,
+			) ??
+			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
+		const forked = parentThread
+			? yield* Effect.tryPromise({
+					try: () =>
+						forkClaudeTranscript(
+							{
+								parentSdkId: parentThread.resumeSessionId,
+								projectDir: config.value.projectDir,
+								...(claudeConfigDir !== undefined && {
+									configDir: claudeConfigDir,
+								}),
+								title,
+								...(messageId !== undefined && { messageId }),
+								...(messageId !== undefined && {
+									fallbackMessageIds: parentMessages
+										.slice(0, parentMessages.indexOf(forkPointMessage))
+										.flatMap((message) =>
+											message.role === "assistant" ? [message.id] : [],
+										)
+										.reverse(),
+								}),
+							},
+							claudeSdk.fork,
+						),
+					catch: (cause) =>
+						new SessionCommandError({
+							operation: "session.forked.upstream",
+							cause,
+							message: cause instanceof Error ? cause.message : String(cause),
 						}),
-						title,
-						...(messageId !== undefined && { messageId }),
-						...(messageId !== undefined && {
-							fallbackMessageIds: parentMessages
-								.slice(0, parentMessages.indexOf(forkPointMessage))
-								.flatMap((message) =>
-									message.role === "assistant" ? [message.id] : [],
-								)
-								.reverse(),
-						}),
-					},
-					claudeSdk.fork,
-				),
-			catch: (cause) =>
-				new SessionCommandError({
-					operation: "session.forked.upstream",
-					cause,
-					message: cause instanceof Error ? cause.message : String(cause),
-				}),
-		});
+				})
+			: { sdkSessionId: randomUUID() };
 		const history = copyForkHistory(parentEvents, {
 			newSessionId: forked.sdkSessionId,
 			...(messageId !== undefined && { upToMessageId: messageId }),
 		});
 		const forkPointEvent = messageId ?? forkPointMessage.id;
-		// Creation and the SDK resume cursor must commit before the first row
-		// is announced, or a prompt could start a fresh Claude conversation.
+		// A native cursor commits before the row is announced. Without one,
+		// prepareTurn hands off this child's bounded history on its first send.
 		yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
 				const stored = yield* eventStore.value.appendBatch([
@@ -675,8 +717,10 @@ export const forkSession = (
 						{
 							sessionId: forked.sdkSessionId,
 							title,
-							provider: parent.provider,
-							providerSessionId: forked.sdkSessionId,
+							provider,
+							...(parentThread
+								? { providerSessionId: forked.sdkSessionId }
+								: {}),
 							parentId: parentSessionId,
 							...(side
 								? { sideThread: true, permissionMode: "plan" as const }
@@ -686,7 +730,7 @@ export const forkSession = (
 							forkPointMessageId: forkPointMessage.id,
 						},
 						{
-							provider: parent.provider,
+							provider,
 							createdAt: Date.now(),
 							metadata: { source: "relay" },
 						},
@@ -694,12 +738,20 @@ export const forkSession = (
 					...(history?.events ?? []),
 				]);
 				yield* project(stored);
-				yield* state.saveUpdates(forked.sdkSessionId, [
-					{ key: "resumeSessionId", value: forked.sdkSessionId },
-					...(claudeConfigDir !== undefined
-						? [{ key: "claudeConfigDir", value: claudeConfigDir }]
-						: []),
-				]);
+				if (parentThread)
+					yield* state.saveUpdates(forked.sdkSessionId, [
+						{
+							key: nativeThreadKey(provider),
+							value: JSON.stringify({
+								...(claudeConfigDir !== undefined
+									? { configDir: claudeConfigDir }
+									: {}),
+								resumeSessionId: forked.sdkSessionId,
+								firstSequence: stored[0]?.sequence ?? 0,
+								deliveredThrough: stored.at(-1)?.sequence ?? 0,
+							}),
+						},
+					]);
 				// Plan applies before the row is announced, so no send can reach the
 				// Side Thread first.
 				if (side) yield* setPermissionMode(forked.sdkSessionId, "plan");

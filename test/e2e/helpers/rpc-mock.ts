@@ -34,7 +34,11 @@ type RpcHandler = (
 	request: JsonRpcRequest | EffectRpcRequest,
 ) => unknown | Promise<unknown>;
 
-type DaemonListTag = "SubscribeInstances" | "SubscribeProjects";
+/** Daemon-global feeds whose latest value the mock replays to each subscriber. */
+type DaemonListTag =
+	| "SubscribeInstances"
+	| "SubscribeProjects"
+	| "SubscribeServerStatus";
 
 /** Subscriptions opened once per session, so each session gets its own stream. */
 const isSessionStream = (tag: string): boolean =>
@@ -81,6 +85,10 @@ export interface RecordedRpcRequest {
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
+	onConnect?: () => void;
+	onSendMessage?: (payload: Record<string, unknown>) => void;
+	private readonly sockets = new Set<WebSocketRoute>();
+	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
 	private readonly responseHandlers = new Map<string, RpcHandler>();
 	private readonly streams = new Map<
@@ -101,6 +109,11 @@ export class RpcMockControl {
 
 	setResponse(tag: string, value: unknown): void {
 		this.responseHandlers.set(tag, () => value);
+	}
+
+	/** Answers `tag` from a handler, which may throw a WsRpcError to fail it. */
+	setHandler(tag: string, handler: RpcHandler): void {
+		this.responseHandlers.set(tag, handler);
 	}
 
 	getResponseHandler(tag: string): RpcHandler | undefined {
@@ -214,6 +227,18 @@ export class RpcMockControl {
 		if (this.streams.has("SubscribeShell"))
 			this.sendChunk("SubscribeShell", [
 				{ _tag: "upsert", item: row, sequence: this.shellSequence },
+			]);
+	}
+
+	/** Delete one session row the way the server does: a `remove` naming it. */
+	removeShellRow(id: string): void {
+		this.shellRows = (this.shellRows ?? []).filter(
+			(candidate) => (candidate as { id?: string }).id !== id,
+		);
+		this.shellSequence++;
+		if (this.streams.has("SubscribeShell"))
+			this.sendChunk("SubscribeShell", [
+				{ _tag: "remove", id, sequence: this.shellSequence },
 			]);
 	}
 
@@ -334,6 +359,29 @@ export class RpcMockControl {
 		return this.requests;
 	}
 
+	/** RPC sockets opened so far, including reconnects and page reloads. */
+	get connections(): number {
+		return this.connectionCount;
+	}
+
+	registerSocket(ws: WebSocketRoute): void {
+		this.sockets.add(ws);
+		this.connectionCount++;
+	}
+
+	unregisterSocket(ws: WebSocketRoute): void {
+		this.sockets.delete(ws);
+		for (const [key, stream] of this.streams)
+			if (stream.ws === ws) this.streams.delete(key);
+	}
+
+	closeSockets(options?: { code?: number; reason?: string }): void {
+		for (const ws of this.sockets) {
+			this.unregisterSocket(ws);
+			void ws.close(options);
+		}
+	}
+
 	private streamKey(tag: string, sessionId?: string): string {
 		return isSessionStream(tag) ? `${tag}:${sessionId ?? ""}` : tag;
 	}
@@ -381,8 +429,8 @@ export class RpcMockControl {
 		const key = this.streamKey(tag, sessionId);
 		const stream = this.streams.get(key);
 		if (!stream) throw new Error(`No active ${tag} stream`);
-		this.streams.delete(key);
-		stream.ws.close();
+		this.unregisterSocket(stream.ws);
+		void stream.ws.close();
 	}
 
 	async waitForRequest(
@@ -457,7 +505,7 @@ export function sendMockModelState(page: Page, state: MockModelState): void {
 	else pendingCatalogs.set(page, { ...pendingCatalogs.get(page), ...state });
 }
 
-/** Mock-only input: deliver a daemon list through its subscription, never /ws. */
+/** Mock-only input: deliver a daemon list through its RPC subscription. */
 export function sendMockDaemonList(
 	page: Page,
 	tag: DaemonListTag,
@@ -512,20 +560,22 @@ export function sendMockShellSnapshot(
 	else pendingShellRows.set(page, rows);
 }
 
-/** Set an existing session row's status the way a live write does (ni8.35:
- *  the shell row is the only server signal for a running turn). */
-export function sendMockShellRowStatus(
+/** Patch an existing session row the way a live write does (ni8.35: the
+ *  shell row is the only server signal for a running turn or a goal). */
+export function sendMockShellRowPatch(
 	page: Page,
 	sessionId: string,
-	status: "busy" | "idle",
+	patch: (
+		row: Readonly<Record<string, unknown>>,
+	) => Readonly<Record<string, unknown>>,
 ): void {
 	const control = controls.get(page);
 	const rows = control?.shellRows ?? pendingShellRows.get(page) ?? [];
 	const existing = rows.find(
 		(row) => (row as { id?: string }).id === sessionId,
-	);
+	) as Readonly<Record<string, unknown>> | undefined;
 	if (!existing) return;
-	const row = { ...(existing as object), id: sessionId, status };
+	const row = { ...existing, ...patch(existing), id: sessionId };
 	if (control) control.upsertShellRow(row);
 	else
 		pendingShellRows.set(
@@ -565,7 +615,9 @@ async function handleMessage(
 	if (isEffectRpcRequest(raw)) {
 		control.record(raw.tag, raw.payload ?? {});
 		const daemonList =
-			raw.tag === "SubscribeInstances" || raw.tag === "SubscribeProjects"
+			raw.tag === "SubscribeInstances" ||
+			raw.tag === "SubscribeProjects" ||
+			raw.tag === "SubscribeServerStatus"
 				? control.initialDaemonList(raw.tag)
 				: undefined;
 		const stream =
@@ -616,7 +668,9 @@ async function handleMessage(
 						})
 					: raw.tag === "ViewSession"
 						? () => ({ ok: true })
-						: undefined);
+						: raw.tag === "input.submit"
+							? ({ sessionId }) => ({ ok: true, sessionId })
+							: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
@@ -636,6 +690,8 @@ async function handleMessage(
 				requestId: raw.id,
 				exit: { _tag: "Success", value: result },
 			});
+			if (raw.tag === "input.submit")
+				control.onSendMessage?.(raw.payload ?? {});
 		} catch (error) {
 			if (error instanceof WsRpcError) {
 				sendJson(ws, {
@@ -676,6 +732,8 @@ async function handleMessage(
 		control.record(raw.method, raw.params ?? {});
 		const result = await handler(raw.params ?? {}, raw);
 		sendJson(ws, { jsonrpc: "2.0", id: raw.id, result });
+		if (raw.method === "input.submit")
+			control.onSendMessage?.(raw.params ?? {});
 	} catch (error) {
 		sendJson(ws, {
 			jsonrpc: "2.0",
@@ -710,6 +768,9 @@ export async function mockWsRpc(
 		control.setProjectSetting(setting);
 	pendingProjectSettings.delete(page);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
+		control.registerSocket(ws);
+		ws.onClose(() => control.unregisterSocket(ws));
+		control.onConnect?.();
 		ws.onMessage((data) => {
 			if (typeof data !== "string") return;
 			try {
@@ -728,10 +789,13 @@ export async function mockWsRpc(
 	return control;
 }
 
-/** Legacy transcript fixtures need an RPC detail feed even when a spec only mocks /ws. */
-export async function ensureMockTranscriptRpc(page: Page): Promise<void> {
-	if (controls.has(page)) return;
-	await mockWsRpc(page, {
+/** Relay fixtures share the page's RPC mock and its replayable detail feed. */
+export async function ensureMockTranscriptRpc(
+	page: Page,
+): Promise<RpcMockControl> {
+	const control = controls.get(page);
+	if (control) return control;
+	return mockWsRpc(page, {
 		handlers: {
 			ViewSession: () => ({ ok: true }),
 			ResolveSession: ({ projectSlug }) => ({

@@ -1,7 +1,7 @@
 <!-- OpenCode "O" mark animation overlay shown during WebSocket connection.    -->
 
 <script lang="ts">
-	import { wsState, getIsConnected } from "../../stores/ws.svelte.js";
+	import { connectionState, getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import {
@@ -20,8 +20,8 @@
 	let displayNone = $state(false);
 
 	const connected = $derived(getIsConnected());
-	const relayStatus = $derived(wsState.relayStatus);
-	const relayError = $derived(wsState.relayError);
+	const relayStatus = $derived(connectionState.relayStatus);
+	const relayError = $derived(connectionState.relayError);
 
 	// Cached instance name — survives store clearing on WS disconnect.
 	// Updated whenever a fresh value is derived from the store; retains
@@ -97,16 +97,16 @@
 
 	const displayStatusText = $derived.by(() => {
 		if (
-			wsState.statusText === "Connecting" ||
-			wsState.statusText === "" ||
-			!wsState.statusText
+			connectionState.statusText === "Connecting" ||
+			connectionState.statusText === "" ||
+			!connectionState.statusText
 		) {
 			return `Connecting to ${connectionTargetName} server...`;
 		}
-		if (wsState.statusText === "Disconnected") {
+		if (connectionState.statusText === "Disconnected") {
 			return "Reconnecting...";
 		}
-		return wsState.statusText;
+		return connectionState.statusText;
 	});
 
 	$effect(() => {

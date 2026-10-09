@@ -136,6 +136,8 @@ describe("DaemonHandleTag", () => {
 						attach: () => () => {},
 						wsHandler: {},
 						rpcWsHandler: {},
+						syncGlobalSetting: () => Effect.void,
+						refreshGlobalDefaults: () => Effect.void,
 						getStatusSnapshot: () => ({
 							sessionCount: slug === "existing" ? 5 : 4,
 							clients: 0,
@@ -159,6 +161,8 @@ describe("DaemonHandleTag", () => {
 									attach: () => () => {},
 									wsHandler: {},
 									rpcWsHandler: {},
+									syncGlobalSetting: () => Effect.void,
+									refreshGlobalDefaults: () => Effect.void,
 									getStatusSnapshot: () => ({
 										sessionCount: slug === "existing" ? 5 : 4,
 										clients: 0,

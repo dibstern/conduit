@@ -2,7 +2,7 @@
 	import Toggle from "../ui/Toggle.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { saveNotifSettings, type NotifSettings } from "../../utils/notif-settings.js";
-	import { setPushActive } from "../../stores/ws.svelte.js";
+	import { setPushActive } from "../../stores/ws-notifications.js";
 	const log = createFrontendLogger("push");
 	let { state = $bindable() }: { state: {
 		notifSettings: NotifSettings;
@@ -81,39 +81,31 @@
 	}
 </script>
 
-<div class="space-y-2">
-	<Toggle
-		icon="smartphone"
-		label="Push notifications"
-		description="Receive push notifications even when the tab is closed"
-		checked={state.notifSettings.push}
-		onchange={togglePush}
-		disabled={state.pushBusy || pushUnavailable}
-		class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
-	/>
-	<Toggle
-		icon="bell"
-		label="Browser alerts"
-		description="Show desktop notifications when tasks complete"
-		checked={state.notifSettings.browser}
-		onchange={toggleBrowser}
-		class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
-	/>
-	<Toggle
-		icon="volume-2"
-		label="Sound"
-		description="Play a sound when notifications are triggered"
-		checked={state.notifSettings.sound}
-		onchange={toggleSound}
-		class="bg-bg-surface border border-border rounded-panel px-5 py-4 gap-4 font-brand"
-	/>
-	{#if pushUnavailable}
-		<div class="px-2 py-1.5 text-xs text-text-muted">Push notifications require HTTPS. Enable a certificate in the CLI settings.</div>
-	{:else if state.pushError}
-		<div class="px-2 py-1.5 text-xs text-error">{state.pushError}</div>
-	{:else if state.pushBlocked}
-		<div class="px-2 py-1.5 text-xs text-error">Push notifications are blocked by your browser. Update site settings to allow notifications.</div>
-	{:else if state.browserBlocked}
-		<div class="px-2 py-1.5 text-xs text-error">Browser alerts are blocked. Update site settings to allow notifications.</div>
-	{/if}
-</div>
+<Toggle
+	label="Push notifications"
+	description="Receive push notifications even when the tab is closed"
+	checked={state.notifSettings.push}
+	onchange={togglePush}
+	disabled={state.pushBusy || pushUnavailable}
+/>
+<Toggle
+	label="Browser alerts"
+	description="Show desktop notifications when tasks complete"
+	checked={state.notifSettings.browser}
+	onchange={toggleBrowser}
+/>
+<Toggle
+	label="Sound"
+	description="Play a sound when notifications are triggered"
+	checked={state.notifSettings.sound}
+	onchange={toggleSound}
+/>
+{#if pushUnavailable}
+	<p class="text-text-dimmer">Push notifications require HTTPS. Enable a certificate in the CLI settings.</p>
+{:else if state.pushError}
+	<p class="text-error">{state.pushError}</p>
+{:else if state.pushBlocked}
+	<p class="text-error">Push notifications are blocked by your browser. Update site settings to allow notifications.</p>
+{:else if state.browserBlocked}
+	<p class="text-error">Browser alerts are blocked. Update site settings to allow notifications.</p>
+{/if}

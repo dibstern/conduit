@@ -1,0 +1,289 @@
+{
+	"schema": 1,
+	"project": "desktop",
+	"recordedAt": "2026-10-08T02:19:48.539Z",
+	"fixture": {
+		"families": 2500,
+		"sessions": 10001,
+		"events": 60841,
+		"heavySessionId": "load-heavy",
+		"heavyFinalText": "Heavy session complete: all steps verified.",
+		"seedMs": 10393,
+		"storeBytes": 54149120
+	},
+	"devices": 4,
+	"streamingSessions": 3,
+	"restart": {
+		"stopMs": 686,
+		"startMs": 2120
+	},
+	"reconnectMs": [2491, 2485, 2508, 2329],
+	"open": {
+		"sessionId": "load-heavy",
+		"ms": 393,
+		"fromReadyMs": 440,
+		"wire": {
+			"received": {
+				"frames": 10,
+				"bytes": 2031735,
+				"maxFrameBytes": 2030012,
+				"p95FrameBytes": 2030012
+			},
+			"sent": {
+				"frames": 24,
+				"bytes": 4605,
+				"maxFrameBytes": 305,
+				"p95FrameBytes": 286
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 10,
+					"bytes": 2031735,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 2030012
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 2030012,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"load-"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 664,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"70\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"commands\":[{\"name\":\"init"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 319,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"77\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"load-heavy\",\"title\":\"Heavy session\",\"status"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 197,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"69\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"instanceId\":\"claude\",\"pr"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 150,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"75\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"sessionId\":\"load-heavy\",\"items\":[]}],\"sequence\":"
+				}
+			]
+		}
+	},
+	"wire": {
+		"warm": {
+			"ms": 2000,
+			"received": {
+				"frames": 31,
+				"bytes": 11170,
+				"maxFrameBytes": 747,
+				"p95FrameBytes": 747
+			},
+			"sent": {
+				"frames": 29,
+				"bytes": 885,
+				"maxFrameBytes": 31,
+				"p95FrameBytes": 31
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 31,
+					"bytes": 11170,
+					"maxFrameBytes": 747,
+					"p95FrameBytes": 747
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 611,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"28c505a2"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 593,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"580bedd0"
+				},
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 519,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"91862a0e"
+				}
+			]
+		},
+		"restart": {
+			"ms": 5290,
+			"received": {
+				"frames": 135,
+				"bytes": 4529438,
+				"maxFrameBytes": 2030012,
+				"p95FrameBytes": 1311
+			},
+			"sent": {
+				"frames": 197,
+				"bytes": 30297,
+				"maxFrameBytes": 305,
+				"p95FrameBytes": 297
+			},
+			"bySocket": {
+				"/rpc": {
+					"frames": 135,
+					"bytes": 4529438,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 1311
+				}
+			},
+			"largestReceived": [
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 2030012,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"transcriptMessage\",\"message\":{\"id\":\"load-"
+				},
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 608716,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"110\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_fc60855ac5b848ab9a34e168353225a6\",\"tit"
+				},
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 608716,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"108\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_fc60855ac5b848ab9a34e168353225a6\",\"tit"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 608716,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"110\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_fc60855ac5b848ab9a34e168353225a6\",\"tit"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 608715,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"83\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"ses_fc60855ac5b848ab9a34e168353225a6\",\"titl"
+				}
+			],
+			"byDevice": [
+				{
+					"frames": 34,
+					"bytes": 626232,
+					"maxFrameBytes": 608716,
+					"p95FrameBytes": 1311
+				},
+				{
+					"frames": 34,
+					"bytes": 626142,
+					"maxFrameBytes": 608716,
+					"p95FrameBytes": 1293
+				},
+				{
+					"frames": 35,
+					"bytes": 626513,
+					"maxFrameBytes": 608716,
+					"p95FrameBytes": 1311
+				},
+				{
+					"frames": 32,
+					"bytes": 2650551,
+					"maxFrameBytes": 2030012,
+					"p95FrameBytes": 608715
+				}
+			]
+		}
+	},
+	"server": {
+		"warm": {
+			"stalls": {
+				"count": 17,
+				"totalMs": 1664,
+				"longest": [
+					{
+						"atMs": 302,
+						"ms": 297
+					},
+					{
+						"atMs": 770,
+						"ms": 218
+					},
+					{
+						"atMs": 944,
+						"ms": 164
+					},
+					{
+						"atMs": 462,
+						"ms": 151
+					},
+					{
+						"atMs": 1591,
+						"ms": 128
+					}
+				]
+			},
+			"reads": {
+				"base": 0,
+				"window": 304
+			},
+			"changesRead": 29,
+			"windowReadsPerChange": 10.5
+		},
+		"restart": {
+			"stalls": {
+				"count": 17,
+				"totalMs": 3420,
+				"longest": [
+					{
+						"atMs": 1517,
+						"ms": 937
+					},
+					{
+						"atMs": 4244,
+						"ms": 355
+					},
+					{
+						"atMs": 4587,
+						"ms": 333
+					},
+					{
+						"atMs": 2096,
+						"ms": 292
+					},
+					{
+						"atMs": 2817,
+						"ms": 276
+					}
+				]
+			},
+			"reads": {
+				"base": 17,
+				"window": 165,
+				"resume": 3
+			},
+			"changesRead": 30,
+			"windowReadsPerChange": 5.5
+		}
+	}
+}

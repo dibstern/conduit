@@ -74,6 +74,7 @@ const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
 				projectDir: process.cwd(),
 				slug: "test-project",
 				persistenceDbPath: tempEventsDbPath(),
+				publishGlobalSetting: () => Effect.void,
 				getInstances: instanceMgmt.getInstances,
 				addInstance: instanceMgmt.addInstance,
 				removeInstance: instanceMgmt.removeInstance,

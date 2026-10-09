@@ -3,10 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import type {
-	PollerManagerShape,
-	SessionManagerShape,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import type { PollerManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -39,7 +36,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
-	makeMockSessionManagerShape,
 	makeMockStatusPoller,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
@@ -47,7 +43,6 @@ import {
 function makeSessionMetadataLayer(options: {
 	readonly api?: OpenCodeAPI;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
-	readonly sessionMgr?: SessionManagerShape;
 	readonly sessionManagerService?: SessionManagerService;
 	readonly clientSession?: string;
 }) {
@@ -67,7 +62,6 @@ function makeSessionMetadataLayer(options: {
 			? {}
 			: { getClientSession: vi.fn(() => options.clientSession) },
 	);
-	const _sessionMgr = options.sessionMgr ?? makeMockSessionManagerShape();
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
 	const statusPoller = makeMockStatusPoller({
@@ -100,40 +94,40 @@ function makeSessionMetadataLayer(options: {
 	return {
 		api,
 		logger,
-		wsHandler,
 		layer: baseLayer,
 	};
 }
 
 describe("session handler metadata", () => {
 	for (const changed of [true, false]) {
-		it.effect(`pushes no family when changed=${changed}`, () => {
-			const service = makeMockSessionManagerService({
-				setSessionSettled: vi.fn(() => Effect.succeed(changed)),
-				setSessionPinned: vi.fn(() => Effect.succeed(changed)),
-			});
-			const { wsHandler, layer } = makeSessionMetadataLayer({
-				sessionManagerService: service,
-			});
-			return Effect.gen(function* () {
-				yield* setSessionSettledForClient({
-					clientId: "c1",
-					sessionId: "s1",
-					settled: true,
+		it.effect(
+			`updates metadata through SessionManagerService when changed=${changed}`,
+			() => {
+				const service = makeMockSessionManagerService({
+					setSessionSettled: vi.fn(() => Effect.succeed(changed)),
+					setSessionPinned: vi.fn(() => Effect.succeed(changed)),
 				});
-				yield* setSessionPinnedForClient({
-					clientId: "c1",
-					sessionId: "s1",
-					pinned: false,
+				const { layer } = makeSessionMetadataLayer({
+					sessionManagerService: service,
 				});
-				expect(service.setSessionSettled).toHaveBeenCalledWith("s1", {
-					settled: true,
-				});
-				expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
-				expect(wsHandler.sendTo).not.toHaveBeenCalled();
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
-		});
+				return Effect.gen(function* () {
+					yield* setSessionSettledForClient({
+						clientId: "c1",
+						sessionId: "s1",
+						settled: true,
+					});
+					yield* setSessionPinnedForClient({
+						clientId: "c1",
+						sessionId: "s1",
+						pinned: false,
+					});
+					expect(service.setSessionSettled).toHaveBeenCalledWith("s1", {
+						settled: true,
+					});
+					expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
+				}).pipe(Effect.provide(layer));
+			},
+		);
 	}
 	const makeOpenCodeRowsReadQuery = (
 		historyComplete: number,
@@ -273,35 +267,20 @@ describe("session handler metadata", () => {
 		);
 	}
 
-	it.effect(
-		"sends session metadata without querying OpenCode session models",
-		() => {
-			const { api, wsHandler, layer } = makeSessionMetadataLayer({});
+	it.effect("views a session without querying OpenCode session models", () => {
+		const { api, layer } = makeSessionMetadataLayer({});
 
-			return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(api.session.get).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).toHaveBeenCalledWith("client-1", {
-						type: "session.goal_changed",
-						sessionId: "session-1",
-						goal: null,
-					});
-					expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({ type: "model_info" }),
-					);
-				}),
-			);
-		},
-	);
+		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
+			Effect.provide(layer),
+			Effect.tap(() => {
+				expect(api.session.get).not.toHaveBeenCalled();
+			}),
+		);
+	});
 
 	it.effect(
-		"reads no permission metadata and still sends session lists",
+		"does not replay permission metadata when viewing a session",
 		() => {
-			const legacySendSessionLists = vi.fn(async () => {
-				throw new Error("legacy session manager sendDual should not be called");
-			});
 			const sessionManagerService = makeMockSessionManagerService({});
 			const logger = makeMockLogger();
 			const api = makeHandlerOpenCodeAPI({
@@ -311,12 +290,9 @@ describe("session handler metadata", () => {
 					}),
 				},
 			});
-			const { wsHandler, layer } = makeSessionMetadataLayer({
+			const { layer } = makeSessionMetadataLayer({
 				logger,
 				api,
-				sessionMgr: makeMockSessionManagerShape({
-					sendSessionLists: legacySendSessionLists,
-				}),
 				sessionManagerService,
 			});
 
@@ -326,21 +302,15 @@ describe("session handler metadata", () => {
 					// Approvals come from the approvals subscription, not a replay.
 					expect(api.permission.list).not.toHaveBeenCalled();
 					expect(logger.warn).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).not.toHaveBeenCalledWith("client-1", {
-						type: "model_info",
-						model: "gpt-4",
-						provider: "openai",
-					});
-					expect(legacySendSessionLists).not.toHaveBeenCalled();
 				}),
 			);
 		},
 	);
 
 	it.effect(
-		"session selection does not resend model_info even with a relay default",
+		"session selection does not query OpenCode models with a relay default",
 		() => {
-			const { api, wsHandler, layer } = makeSessionMetadataLayer({});
+			const { api, layer } = makeSessionMetadataLayer({});
 
 			return Effect.gen(function* () {
 				yield* setDefaultModel({ providerID: "openai", modelID: "gpt-4" });
@@ -349,10 +319,6 @@ describe("session handler metadata", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(api.session.get).not.toHaveBeenCalled();
-					expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-						"client-1",
-						expect.objectContaining({ type: "model_info" }),
-					);
 				}),
 			);
 		},
@@ -363,14 +329,14 @@ describe("session handler metadata", () => {
 // state; the browser reports a user's pick instead (ADR-0004, Scope;
 // conduit-test-hk9m.3).
 describe("viewing a session", () => {
-	it.effect("writes no read state and sends no broad list broadcast", () => {
+	it.effect("writes no read state when viewing a session", () => {
 		const markSessionRead = vi.fn(() => Effect.void);
 		const markSessionSeen = vi.fn(() => Effect.succeed(true));
 		const service = makeMockSessionManagerService({
 			markSessionRead,
 			markSessionSeen,
 		});
-		const { wsHandler, layer } = makeSessionMetadataLayer({
+		const { layer } = makeSessionMetadataLayer({
 			clientSession: "session-left",
 			sessionManagerService: service,
 		});
@@ -379,9 +345,6 @@ describe("viewing a session", () => {
 			Effect.tap(() => {
 				expect(markSessionRead).not.toHaveBeenCalled();
 				expect(markSessionSeen).not.toHaveBeenCalled();
-				expect(wsHandler.broadcast).not.toHaveBeenCalledWith(
-					expect.objectContaining({ type: "session_list", roots: false }),
-				);
 			}),
 		);
 	});

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import {
 		composerPreferences,
 		setComposerPreferences,
@@ -19,32 +18,30 @@
 	] as const;
 </script>
 
-<div class="space-y-2">
-	<Surface variant="card" padding="lg" radius="panel" class="font-brand">
-		<h3 class="text-base font-medium text-text">Controls</h3>
-		<SegmentedControl
-			bind:value={() => composerPreferences.controls, (controls) => setComposerPreferences({ controls })}
-			options={controls}
-			label="Controls"
-			class="mt-3"
-		/>
-		<p class="mt-3 text-xs text-text-muted">
-			<b class="font-semibold">Icons</b> puts model, effort and approvals in the composer as icon buttons.
-			<b class="font-semibold">Words</b> lists them as text under the field.
-		</p>
-	</Surface>
+<div class="py-[8px] border-b border-border-subtle">
+	<h3 class="font-semibold text-text mb-[2px]">Controls</h3>
+	<p>
+		<b class="font-semibold">Icons</b> puts model, effort and approvals in the composer as icon buttons.
+		<b class="font-semibold">Words</b> lists them as text under the field.
+	</p>
+	<SegmentedControl
+		bind:value={() => composerPreferences.controls, (controls) => setComposerPreferences({ controls })}
+		options={controls}
+		label="Controls"
+		class="mt-[8px] md:max-w-[260px]"
+	/>
+</div>
 
-	<Surface variant="card" padding="lg" radius="panel" class="font-brand">
-		<h3 class="text-base font-medium text-text">Context warning</h3>
-		<SegmentedControl
-			bind:value={() => String(composerPreferences.contextWarning), (value) => setComposerPreferences({ contextWarning: value === "never" ? "never" : Number(value) as 60 | 70 | 80 | 90 })}
-			options={contextWarnings}
-			label="Context warning"
-			class="mt-3"
-		/>
-		<p class="mt-3 text-xs text-text-muted">
-			Show the <b class="font-semibold">Compact</b> bar and turn the context % amber once the session is this full.
-			<b class="font-semibold">Never</b> hides both.
-		</p>
-	</Surface>
+<div class="py-[8px] border-b border-border-subtle">
+	<h3 class="font-semibold text-text mb-[2px]">Context warning</h3>
+	<p>
+		Show the <b class="font-semibold">Compact</b> bar and turn the context % amber once the session is this full.
+		<b class="font-semibold">Never</b> hides both.
+	</p>
+	<SegmentedControl
+		bind:value={() => String(composerPreferences.contextWarning), (value) => setComposerPreferences({ contextWarning: value === "never" ? "never" : Number(value) as 60 | 70 | 80 | 90 })}
+		options={contextWarnings}
+		label="Context warning"
+		class="mt-[8px] md:max-w-[360px]"
+	/>
 </div>

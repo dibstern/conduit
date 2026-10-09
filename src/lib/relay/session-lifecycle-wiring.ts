@@ -1,6 +1,6 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // Session Lifecycle Wiring (G4)
-// Subscribes to DaemonEventBus lifecycle and relay broadcast events.
+// Subscribes to DaemonEventBus session lifecycle events.
 
 import { Data, Effect, FiberMap, Layer, Ref, Stream } from "effect";
 import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
@@ -9,11 +9,9 @@ import {
 	PollerManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
-import type { RelayMessage } from "../types.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistoryOrThrow,
@@ -74,9 +72,7 @@ const isSessionGenerationCurrent = (
 
 // Subscribes to DaemonEventBus PubSub for session lifecycle events.
 //
-// Two independent subscriber fibers:
-// - Broadcast fiber:  RelayBroadcast → wsHandler.broadcast (fast, never blocks)
-// - Lifecycle fiber:  SessionCreated/SessionDeleted → translator rebuild, poller mgmt.
+// SessionCreated/SessionDeleted drive translator rebuild and poller management.
 //   Create rebuilds run in keyed scoped fibers so delete events can invalidate
 //   in-flight creates before those creates start polling.
 
@@ -92,7 +88,6 @@ export const makeSessionLifecycleWiringLive = (
 ): Layer.Layer<
 	never,
 	never,
-	| WebSocketHandlerTag
 	| OpenCodeAPITag
 	| PollerManagerTag
 	| StatusPollerTag
@@ -101,7 +96,6 @@ export const makeSessionLifecycleWiringLive = (
 > =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			const wsHandler = yield* WebSocketHandlerTag;
 			const client = yield* OpenCodeAPITag;
 			const pollerManager = yield* PollerManagerTag;
 			const statusPoller = yield* StatusPollerTag;
@@ -115,19 +109,6 @@ export const makeSessionLifecycleWiringLive = (
 
 			const { translator, sseTracker, getMonitoringState, setMonitoringState } =
 				deps;
-
-			// Broadcast fiber (fast path)
-			yield* Effect.forkScoped(
-				Stream.fromPubSub(bus).pipe(
-					Stream.runForEach((event) =>
-						event._tag === "RelayBroadcast"
-							? Effect.sync(() =>
-									wsHandler.broadcast(event.message as RelayMessage),
-								)
-							: Effect.void,
-					),
-				),
-			);
 
 			// Lifecycle fiber (sequential processing)
 			yield* Effect.forkScoped(

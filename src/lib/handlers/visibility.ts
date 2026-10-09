@@ -1,7 +1,7 @@
 // Global hide-lists for the agent/model dropdowns. Persisted in relay settings.
 
 import { Data, Effect } from "effect";
-import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import {
 	loadRelaySettings,
@@ -62,7 +62,7 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 		});
 
 		const entries = getHiddenEntries(config.configDir);
-		yield* publishProjectSetting({ _tag: "visibility", ...entries });
+		yield* publishGlobalProjectSetting("visibility");
 		log.info(
 			`client=${input.clientId} Hidden entries updated: ${entries.hiddenModels.length} models, ${entries.hiddenAgents.length} agents`,
 		);

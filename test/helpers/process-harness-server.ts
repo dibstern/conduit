@@ -1,7 +1,80 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { subscribe } from "node:diagnostics_channel";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Effect, Fiber } from "effect";
+
+// Event-loop stalls and read-model reads for load tests, flushed to a file the
+// spec reads after each phase. Stalls are wall-clock end times and durations.
+function recordServerMetrics(file: string): void {
+	const startedAt = Date.now();
+	const stalls: { at: number; ms: number }[] = [];
+	const reads: Record<string, number> = {};
+	const windows = new Set<number>();
+	// Per source name: reads by kind, the distinct changes its windows read, and
+	// the distinct windows (`after-through`) it read.
+	const sources: Record<
+		string,
+		{ reads: Record<string, number>; windows: Set<number>; ranges: Set<string> }
+	> = {};
+	const sidebarReads: { at: number; ms: number; rows: number }[] = [];
+	subscribe("conduit:sidebar-read", (message) => {
+		const read =
+			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
+		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
+	});
+	subscribe("conduit:read-model-read", (message) => {
+		const read =
+			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
+		const source = (sources[read.source] ??= {
+			reads: {},
+			windows: new Set(),
+			ranges: new Set(),
+		});
+		reads[read.kind] = (reads[read.kind] ?? 0) + 1;
+		source.reads[read.kind] = (source.reads[read.kind] ?? 0) + 1;
+		if (read.kind === "window" && read.range?.through !== undefined) {
+			windows.add(read.range.through);
+			source.windows.add(read.range.through);
+			source.ranges.add(`${read.range.after}-${read.range.through}`);
+		}
+	});
+	const tickMs = 10;
+	let last = performance.now();
+	setInterval(() => {
+		const now = performance.now();
+		const ms = Math.round(now - last - tickMs);
+		if (ms >= 20) stalls.push({ at: Date.now(), ms });
+		last = now;
+	}, tickMs).unref();
+	// Written beside the file and renamed over it: past one 8 KB write, a spec
+	// polling the file would otherwise read it half written.
+	setInterval(() => {
+		writeFileSync(
+			`${file}.tmp`,
+			JSON.stringify({
+				pid: process.pid,
+				startedAt,
+				flushedAt: Date.now(),
+				stalls,
+				reads,
+				changesRead: windows.size,
+				sources: Object.fromEntries(
+					Object.entries(sources).map(([name, source]) => [
+						name,
+						{
+							reads: source.reads,
+							changesRead: source.windows.size,
+							windowsRead: source.ranges.size,
+						},
+					]),
+				),
+				sidebarReads,
+			}),
+		);
+		renameSync(`${file}.tmp`, file);
+	}, 250).unref();
+}
 
 async function main(): Promise<void> {
 	const root = process.argv[2];
@@ -27,6 +100,8 @@ async function main(): Promise<void> {
 		});
 	});
 	if (!process.connected) process.exit(1);
+	const metricsFile = process.env["CONDUIT_TEST_SERVER_METRICS"];
+	if (metricsFile) recordServerMetrics(metricsFile);
 	const codeRoot = dist
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
@@ -117,7 +192,7 @@ async function main(): Promise<void> {
 		).href
 	)) as typeof import("../../src/lib/domain/daemon/Layers/daemon-foreground.js");
 	const activeDaemon = await startForegroundDaemon({
-		port: 0,
+		port: Number(process.env["CONDUIT_TEST_PORT"] ?? 0),
 		host: "127.0.0.1",
 		configDir:
 			process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config"),

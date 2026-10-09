@@ -17,7 +17,6 @@ describe("wirePollers", () => {
 		let pollerEvents:
 			| ((messages: RelayMessage[], sessionId: string) => void)
 			| undefined;
-		const publishAlert = vi.fn();
 		const pushManager = {
 			sendToAll: vi.fn(async () => undefined),
 		};
@@ -36,10 +35,7 @@ describe("wirePollers", () => {
 				markMessageActivity: vi.fn(),
 			} as never,
 			wsHandler: {
-				broadcast: vi.fn(),
-				broadcastPerSessionEvent: vi.fn(),
 				getClientsForSession: vi.fn(() => []),
-				sendToSession: vi.fn(),
 			} as never,
 			sessionService: {
 				getSessionParentMap: () =>
@@ -49,9 +45,6 @@ describe("wirePollers", () => {
 				processingTimeouts: {
 					clearProcessingTimeout: vi.fn(),
 					resetProcessingTimeout: vi.fn(),
-				},
-				wsHandler: {
-					broadcastPerSessionEvent: vi.fn(),
 				},
 				log: createSilentLogger(),
 			},
@@ -63,7 +56,6 @@ describe("wirePollers", () => {
 				slug: "project",
 			},
 			pollerLog: createSilentLogger(),
-			publishAlert,
 		});
 
 		pollerEvents?.(
@@ -72,7 +64,6 @@ describe("wirePollers", () => {
 		);
 
 		expect(pushManager.sendToAll).not.toHaveBeenCalled();
-		expect(publishAlert).not.toHaveBeenCalled();
 	});
 
 	it("effect-owned production wiring reads parent map from SessionManagerService", async () => {
@@ -111,15 +102,9 @@ describe("wirePollers", () => {
 					on: vi.fn(),
 				},
 				wsHandler: {
-					broadcast: vi.fn(),
-					broadcastPerSessionEvent: vi.fn(),
 					getClientsForSession: vi.fn(() => []),
-					sendToSession: vi.fn(),
 				} as never,
 				pipelineDeps: {
-					wsHandler: {
-						broadcastPerSessionEvent: vi.fn(),
-					},
 					log: createSilentLogger(),
 				},
 				sseTracker: {

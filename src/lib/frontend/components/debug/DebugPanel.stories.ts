@@ -1,12 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { wsState } from "../../stores/ws.svelte.js";
 import {
 	clearDebugLog,
 	wsDebugLog,
 	wsDebugLogMessage,
 	wsDebugState,
 } from "../../stores/ws-debug.svelte.js";
+import { connectionState } from "../../transport/connection-status.svelte.js";
 import DebugPanel from "./DebugPanel.svelte";
 
 const FIXED_NOW = Date.parse("2026-02-25T10:30:12.000Z");
@@ -29,10 +29,10 @@ const meta = {
 		clearDebugLog();
 		wsDebugState.verboseMessages = false;
 		wsDebugState.lastTransitionTime = FIXED_NOW - 12_000;
-		wsState.status = "connected";
-		wsState.statusText = "Connected to the Conduit relay";
-		wsState.attempts = 1;
-		wsState.relayStatus = "ready";
+		connectionState.status = "connected";
+		connectionState.statusText = "Connected to the Conduit relay";
+		connectionState.attempts = 1;
+		connectionState.relayStatus = "ready";
 		return () => {
 			Date.now = originalDateNow;
 			clearDebugLog();

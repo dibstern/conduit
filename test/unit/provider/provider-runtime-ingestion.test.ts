@@ -705,7 +705,7 @@ describe("ProviderRuntimeIngestion", () => {
 		);
 
 		expect(harness.append).not.toHaveBeenCalled();
-		expect(harness.appendBatch).toHaveBeenCalledWith([]);
+		expect(harness.appendBatch).not.toHaveBeenCalled();
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 	});
 

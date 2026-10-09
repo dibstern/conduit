@@ -15,19 +15,6 @@ describe("Frontend Effect boundary", () => {
 		expect(result).toHaveProperty("text", "hello");
 	});
 
-	it("validates a session_list message", async () => {
-		const { validateIncomingMessage } = await import(
-			"../../../src/lib/frontend/effect-boundary.js"
-		);
-		const raw = {
-			type: "session_list",
-			sessions: [{ id: "s1", title: "test", status: "idle" }],
-			roots: true,
-		};
-		const result = await validateIncomingMessage(raw);
-		expect(result).toHaveProperty("type", "session_list");
-	});
-
 	it("validates a status message", async () => {
 		const { validateIncomingMessage } = await import(
 			"../../../src/lib/frontend/effect-boundary.js"

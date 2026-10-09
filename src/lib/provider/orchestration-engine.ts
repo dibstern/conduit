@@ -10,6 +10,7 @@ import { Data, Deferred, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CommitAndSignal,
 	CommitAndSignalFailure,
@@ -163,6 +164,7 @@ export interface DurableCommandStoreOptions {
 	 * Absent in narrow unit tests, where events are appended unprojected.
 	 */
 	readonly write?: CommitAndSignal["write"];
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 }
 
 export interface OrchestrationEngineOptions {
@@ -249,6 +251,9 @@ export class OrchestrationEngine {
 					sql: durable.sql,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					...(durable.persistHandoffDelivered
+						? { persistHandoffDelivered: durable.persistHandoffDelivered }
+						: {}),
 					nowMs: durable.now,
 					...(this.resolveProviderDriver
 						? { resolveProviderDriver: this.resolveProviderDriver }

@@ -94,10 +94,10 @@ describe.skipIf(process.platform === "win32")(
 				const sessionId = await browser.createSession("Long runner socket");
 				const first = await browser.send(sessionId, "long-path-before-restart");
 				evidence["firstTurn"] = first;
-				expect(first.chunks).toEqual(
-					responseChunks("long-path-before-restart"),
+				expect(first.chunks.join("")).toBe(
+					responseChunks("long-path-before-restart").join(""),
 				);
-				expect(first.done["code"]).toBe(0);
+				expect(first.done["status"]).toBe("idle");
 				const original = harness.marks.find(
 					(mark) => mark.kind === "runner-started",
 				);
@@ -140,10 +140,10 @@ describe.skipIf(process.platform === "win32")(
 				});
 				evidence["adopted"] = adopted;
 				const second = await browser.send(sessionId, "long-path-after-restart");
-				expect(second.chunks).toEqual(
-					responseChunks("long-path-after-restart"),
+				expect(second.chunks.join("")).toBe(
+					responseChunks("long-path-after-restart").join(""),
 				);
-				expect(second.done["code"]).toBe(0);
+				expect(second.done["status"]).toBe("idle");
 
 				await harness.kill();
 				const upgradeCursor = harness.marks.length;
@@ -180,8 +180,10 @@ describe.skipIf(process.platform === "win32")(
 					{ timeout: 20_000 },
 				);
 				const third = await browser.send(sessionId, "long-path-after-upgrade");
-				expect(third.chunks).toEqual(responseChunks("long-path-after-upgrade"));
-				expect(third.done["code"]).toBe(0);
+				expect(third.chunks.join("")).toBe(
+					responseChunks("long-path-after-upgrade").join(""),
+				);
+				expect(third.done["status"]).toBe("idle");
 				const history = JSON.stringify(await browser.history(sessionId));
 				for (const prompt of [
 					"long-path-before-restart",

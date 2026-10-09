@@ -21,10 +21,7 @@ export function buildClaudeQueryOptions(
 		throw new ClaudeRuntimeError({
 			message: "Claude model is required before query creation",
 		});
-	const resumeSessionId =
-		typeof input.providerState["resumeSessionId"] === "string"
-			? input.providerState["resumeSessionId"]
-			: undefined;
+	const resumeSessionId = input.resumeSessionId;
 	// Older durable commands and launch snapshots predate extra folders.
 	const extraFolders = input.extraFolders ?? [];
 	return validateOptionsJsonShape({
@@ -34,11 +31,7 @@ export function buildClaudeQueryOptions(
 			: {}),
 		abortController,
 		env: makeClaudeSdkEnv({
-			configDir:
-				input.configDir ??
-				(typeof input.providerState["claudeConfigDir"] === "string"
-					? input.providerState["claudeConfigDir"]
-					: undefined),
+			configDir: input.configDir ?? input.nativeThread?.configDir,
 			baseEnv: shellEnv,
 		}),
 		includePartialMessages: true,

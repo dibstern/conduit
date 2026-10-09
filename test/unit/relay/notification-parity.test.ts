@@ -49,10 +49,10 @@ describe("notification parity contract", () => {
 	it("root error without viewers → push yes, cross-session yes with error message", () => {
 		const result = resolveNotifications(
 			{
-				type: "error",
+				type: "done",
 				alertId: "turn-1:error",
-				code: "FATAL",
-				message: "Something broke",
+				code: 1,
+				error: "Something broke",
 			} as RelayMessage,
 			routeDrop("no viewers"),
 			false,
@@ -84,10 +84,10 @@ describe("notification parity contract", () => {
 	it("subagent error → NOT suppressed (errors always notify)", () => {
 		const result = resolveNotifications(
 			{
-				type: "error",
+				type: "done",
 				alertId: "turn-1:error",
-				code: "ERR",
-				message: "subagent failed",
+				code: 1,
+				error: "subagent failed",
 			} as RelayMessage,
 			routeDrop("no viewers"),
 			true, // is subagent
@@ -119,10 +119,10 @@ describe("notification parity contract", () => {
 	it("error with viewers (route send) → push yes, cross-session no", () => {
 		const result = resolveNotifications(
 			{
-				type: "error",
+				type: "done",
 				alertId: "turn-1:error",
-				code: "ERR",
-				message: "oops",
+				code: 1,
+				error: "oops",
 			} as RelayMessage,
 			routeSend("s1"),
 			false,

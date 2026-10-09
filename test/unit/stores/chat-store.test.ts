@@ -19,12 +19,10 @@ import {
 	addSystemMessage,
 	chatState,
 	clearMessages,
-	handleError,
 	historyState,
 	isProcessing,
 	isStreaming,
 	phaseToProcessing,
-	phaseToStreaming,
 	prependMessages,
 	restoreContextFromMessages,
 	type SessionActivity,
@@ -69,77 +67,6 @@ describe("projected context usage", () => {
 		restoreContextFromMessages(tm);
 
 		expect(tm.contextPercent).toBe(33);
-	});
-});
-
-describe("handleError", () => {
-	it("adds an info system message for RETRY code", () => {
-		handleError(ta, tm, {
-			type: "error",
-			sessionId: "s1",
-			code: "RETRY",
-			message: "Retrying...",
-		});
-		const m = chatState.messages[0];
-		assert.exists(m, "expected chat message");
-		expect(m.type).toBe("system");
-		if (m.type === "system") {
-			expect(m.variant).toBe("info");
-			expect(m.text).toBe("Retrying...");
-		}
-	});
-
-	it("adds an error system message for non-RETRY", () => {
-		handleError(ta, tm, {
-			type: "error",
-			sessionId: "s1",
-			code: "UNKNOWN",
-			message: "Something broke",
-		});
-		const m = chatState.messages[0];
-		assert.exists(m, "expected chat message");
-		expect(m.type).toBe("system");
-		if (m.type === "system") {
-			expect(m.variant).toBe("error");
-		}
-	});
-
-	it("stops processing on non-RETRY error", () => {
-		phaseToStreaming(ta);
-		handleError(ta, tm, {
-			type: "error",
-			sessionId: "s1",
-			code: "FATAL",
-			message: "fail",
-		});
-		expect(isProcessing()).toBe(false);
-		expect(isStreaming()).toBe(false);
-	});
-
-	it("does NOT stop processing on RETRY", () => {
-		phaseToProcessing(ta);
-		handleError(ta, tm, {
-			type: "error",
-			sessionId: "s1",
-			code: "RETRY",
-			message: "retry",
-		});
-		expect(isProcessing()).toBe(true);
-	});
-
-	it("uses fallback text when message is empty", () => {
-		handleError(ta, tm, {
-			type: "error",
-			sessionId: "s1",
-			code: "",
-			message: "",
-		});
-		const m = chatState.messages[0];
-		assert.exists(m, "expected chat message");
-		if (m.type === "system") {
-			// Empty message is still passed through; the store uses msg.message directly
-			expect(m.text).toBe("");
-		}
 	});
 });
 

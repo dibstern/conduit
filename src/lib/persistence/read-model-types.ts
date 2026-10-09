@@ -23,6 +23,9 @@ export interface SessionRow {
 	variant?: string | null;
 	context_window?: string | null;
 	goal_state?: string | null;
+	limit_recovery?: string | null;
+	/** JSON array of SessionResume, oldest first. */
+	resumes?: string | null;
 	last_turn_end_version?: number | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */

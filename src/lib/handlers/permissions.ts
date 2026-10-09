@@ -9,7 +9,7 @@ import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
-import { publishProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -19,10 +19,9 @@ import {
 } from "../domain/relay/Services/services.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
-	setDefaultPermissionMode,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { RelayError } from "../errors.js";
+import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -61,11 +60,7 @@ export const setDefaultPermissionModeForRelay = (input: {
 				),
 			catch: (cause) => new RelaySettingsSaveError({ cause }),
 		});
-		yield* setDefaultPermissionMode(input.mode);
-		yield* publishProjectSetting({
-			_tag: "defaultPermissionMode",
-			mode: input.mode,
-		});
+		yield* publishGlobalProjectSetting("defaultPermissionMode");
 		log.info(
 			`client=${input.clientId} Set default permission mode to: ${input.mode}`,
 		);
@@ -118,26 +113,19 @@ function formatAnswers(rawAnswers: Record<string, string>): string[][] {
 const restartProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		if (!sessionId) return;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
+		const failTurn = yield* makeFailTurn;
 
 		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.sync(() => {
+			Effect.suspend(() => {
 				log.warn(
-					`session=${sessionId} Processing timeout (120s) after question answered — broadcasting done`,
+					`session=${sessionId} Processing timeout (120s) after question answered — failing the turn`,
 				);
-				wsHandler.sendToSession(
+				return failTurn(
 					sessionId,
-					new RelayError(
-						"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-						{ code: "PROCESSING_TIMEOUT" },
-					).toMessage(sessionId),
+					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
+					"PROCESSING_TIMEOUT",
 				);
-				wsHandler.sendToSession(sessionId, {
-					type: "done",
-					sessionId,
-					code: 1,
-				});
 			}),
 		);
 	});

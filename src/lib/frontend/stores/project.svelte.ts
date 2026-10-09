@@ -17,6 +17,7 @@ import {
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
+import { applyServerStatus, serverStatusFeed } from "./server-status.js";
 import { confirm } from "./ui.svelte.js";
 
 // This store has no client half: the project list and the current slug both
@@ -135,6 +136,10 @@ export function followDaemonLists(connection: string | null): void {
 							[
 								follow(subscriptions.projects, applyProjectList),
 								follow(subscriptions.instances, applyInstanceListResponse),
+								follow(
+									() => serverStatusFeed(subscriptions),
+									applyServerStatus,
+								),
 							],
 							{ concurrency: "unbounded", discard: true },
 						),

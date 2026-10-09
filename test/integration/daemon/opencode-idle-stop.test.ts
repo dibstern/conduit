@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -170,14 +172,42 @@ describe("Managed OpenCode stops when idle", () => {
 		evidence["attachedAfterStop"] = quiet;
 		expect(quiet).toEqual({ spawned: 1, livePids: [], status: "stopped" });
 
-		const reply = await browser.send(sessionId, "hello");
+		// This fixture emits session status updates without a stored turn terminal.
+		const cursor = browser.frames.length;
+		const accepted = await Effect.runPromise(
+			browser.rpc.input.submit({
+				projectSlug: "process-test",
+				sessionId,
+				text: "hello",
+				inputId: randomUUID(),
+				originId: browser.originId,
+				delivery: "queue",
+			}),
+		);
+		expect(accepted).toEqual({ ok: true, sessionId });
+		const busy = await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				message["status"] === "busy",
+			cursor,
+		);
+		const idle = await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				message["status"] === "idle",
+			browser.frames.findIndex(({ message }) => message === busy) + 1,
+		);
 		const restarted = {
-			done: reply.done,
+			accepted,
+			busy,
+			idle,
 			spawned: spawned(fixture).length,
 			status: await status(browser),
 		};
 		evidence["restarted"] = restarted;
-		expect(restarted.done["code"]).toBe(0);
+		expect(restarted.idle["status"]).toBe("idle");
 		expect(restarted.spawned).toBe(2);
 		expect(restarted.status).toBe("healthy");
 	}, 120_000);

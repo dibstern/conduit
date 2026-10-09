@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Surface from "../ui/Surface.svelte";
 	import Toggle from "../ui/Toggle.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -93,59 +92,41 @@
 	}
 </script>
 
-<div class="space-y-4">
-	<div class="px-1 text-xs text-text-muted font-brand">
-		Unchecked items are hidden from the input-area dropdowns. New
-		models and agents appear automatically.
-	</div>
+<p>Unchecked items are hidden from the input-area dropdowns. New models and agents appear automatically.</p>
 
-	<!-- Models -->
-	{#if modelProviders.length === 0}
-		<div class="px-1 text-xs text-text-muted font-brand">
-			{state.modelsFetchPending ? "Loading models…" : "No models available"}
+<!-- Models -->
+{#if modelProviders.length === 0}
+	<p class="text-text-dimmer">{state.modelsFetchPending ? "Loading models…" : "No models available"}</p>
+{/if}
+{#each modelProviders as provider (provider.id)}
+	{@const allHidden = provider.models.every((m) => hiddenModelSet.has(`${provider.id}/${m.id}`))}
+	<section>
+		<div class="flex items-center justify-between gap-[10px] pt-[8px]">
+			<h3 class="text-[12px] font-semibold text-text">{provider.name}</h3>
+			<TextButton onclick={() => toggleProviderAll(provider.id, !allHidden)}>
+				{allHidden ? "Show all" : "Hide all"}
+			</TextButton>
 		</div>
-	{/if}
-	{#each modelProviders as provider (provider.id)}
-		{@const allHidden = provider.models.every((m) => hiddenModelSet.has(`${provider.id}/${m.id}`))}
-		<div>
-			<div class="flex items-center justify-between px-1 mb-2">
-				<div class="text-xs font-semibold uppercase tracking-widest text-text-muted font-brand">{provider.name}</div>
-				<TextButton
-					class="text-xs font-brand"
-					onclick={() => toggleProviderAll(provider.id, !allHidden)}
-				>
-					{allHidden ? "Show all" : "Hide all"}
-				</TextButton>
-			</div>
-			<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
-				{#each provider.models as model (model.id)}
-					<Toggle
-						label={model.name || model.id}
-						checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
-						onchange={() => toggleModel(provider.id, model.id)}
-						class="py-1.5 gap-3 font-brand border-none bg-transparent"
-					/>
-				{/each}
-			</Surface>
-		</div>
-	{/each}
+		{#each provider.models as model (model.id)}
+			<Toggle
+				label={model.name || model.id}
+				checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
+				onchange={() => toggleModel(provider.id, model.id)}
+			/>
+		{/each}
+	</section>
+{/each}
 
-	<!-- Agents (current provider scope only) -->
-	{#if agentScopeId && discoveryState.agents.length > 0}
-		<div>
-			<div class="text-xs font-semibold uppercase tracking-widest text-text-muted px-1 mb-2 font-brand">
-				{discoveryState.agentProviderScope?.name} agents
-			</div>
-			<Surface variant="card" radius="panel" class="space-y-1 px-4 py-2">
-				{#each discoveryState.agents as agent (agent.id)}
-					<Toggle
-						label={agent.name || agent.id}
-						checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
-						onchange={() => toggleAgent(agent.id)}
-						class="py-1.5 gap-3 font-brand border-none bg-transparent"
-					/>
-				{/each}
-			</Surface>
-		</div>
-	{/if}
-</div>
+<!-- Agents (current provider scope only) -->
+{#if agentScopeId && discoveryState.agents.length > 0}
+	<section>
+		<h3 class="pt-[8px] text-[12px] font-semibold text-text">{discoveryState.agentProviderScope?.name} agents</h3>
+		{#each discoveryState.agents as agent (agent.id)}
+			<Toggle
+				label={agent.name || agent.id}
+				checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
+				onchange={() => toggleAgent(agent.id)}
+			/>
+		{/each}
+	</section>
+{/if}

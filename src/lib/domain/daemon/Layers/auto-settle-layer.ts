@@ -1,12 +1,20 @@
 import { existsSync } from "node:fs";
-import { Cause, Clock, Effect, Layer, Option, Ref, Schedule } from "effect";
+import {
+	Cause,
+	Clock,
+	Effect,
+	Layer,
+	Option,
+	PubSub,
+	Ref,
+	Schedule,
+} from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
-import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
 import {
 	allProjects,
-	broadcastToAll,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
@@ -64,9 +72,7 @@ export const AutoSettleLive = (configDir: string) =>
 						if (relay?.settleIdleSessions === undefined) return;
 						const count = yield* relay.settleIdleSessions(idleWindowMs, now);
 						if (count > 0)
-							yield* broadcastToAll({ type: "daemon_sessions_changed" }).pipe(
-								Effect.provideService(DaemonEventBusTag, bus),
-							);
+							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(
 						Effect.catchAllCause((cause) =>
 							Cause.isInterruptedOnly(cause)

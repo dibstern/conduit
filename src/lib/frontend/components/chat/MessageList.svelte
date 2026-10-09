@@ -8,6 +8,9 @@
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
@@ -16,6 +19,7 @@
 	import {
 		uiState,
 		selectRewindMessage,
+		showToast,
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
@@ -37,9 +41,15 @@
 	import HistoryLoader from "./HistoryLoader.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
+	import ContinuationDivider from "./ContinuationDivider.svelte";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
+	import type { SessionResume } from "../../../contracts/limit-recovery.js";
+	import { formatSnoozeTime } from "../../utils/format.js";
 	import { retryFeedsNow } from "../../transport/supervise.js";
 	import { transcriptFeed } from "../../stores/transcript.svelte.js";
 
+	const END_OF_TRANSCRIPT = "end";
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let { topClearance = 0 }: { topClearance?: number } = $props();
 	let sentinelEl: HTMLElement | undefined = $state();
@@ -241,6 +251,15 @@
 	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? sessionState.currentFork?.forkMessageId);
 	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? sessionState.currentFork?.forkPointTimestamp);
 	const isFork = $derived(!!forkMessageId || !!forkPointTimestamp);
+	const cutOffMessageId = $derived(activeSession?.limitRecovery?.cutOffMessageId);
+	// The tag leaves when the server clears the cut-off; nothing is hidden locally.
+	function dismissCutOff(): void {
+		const sessionId = activeSession?.id;
+		const projectSlug = activeSession?.projectSlug ?? getCurrentSlug();
+		if (!sessionId || !projectSlug) return;
+		dismissCutOffRpc({ projectSlug, sessionId, originId: getBrowserClientId() })
+			.catch(() => showToast("Couldn't dismiss the cut-off", { variant: "error" }));
+	}
 	const forkSplit = $derived(
 		isFork
 			? splitAtForkPoint(
@@ -260,6 +279,26 @@
 	const currentTurns = $derived(
 		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
 	);
+	// Each continuation leaves a divider before the first reply-side message
+	// created at or after it, or after the last message until one arrives. An
+	// activity panel renders as one collapsed row, so a divider that falls inside
+	// one goes before the whole panel. Keyed by the uuid it renders before.
+	const resumeDividers = $derived.by(() => {
+		const dividers = new Map<string, SessionResume[]>();
+		const resumes = activeSession?.resumes ?? [];
+		if (resumes.length === 0) return dividers;
+		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) =>
+			turn.segments.flatMap((segment) => [
+				...(segment.activity[0] ? [{ key: segment.activity[0].uuid, parts: segment.activity }] : []),
+				...segment.reply.map((reply) => ({ key: reply.uuid, parts: [reply] })),
+			]),
+		);
+		for (const resume of resumes) {
+			const key = slots.find((slot) => slot.parts.some((part) => (part.createdAt ?? -Infinity) >= resume.at))?.key ?? END_OF_TRANSCRIPT;
+			dividers.set(key, [...(dividers.get(key) ?? []), resume]);
+		}
+		return dividers;
+	});
 	const goal = $derived(
 		discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "")?.goal : null,
 	);
@@ -351,7 +390,7 @@
 	{#snippet turnItem(turn: Turn)}
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-				<UserMessage message={turn.user} />
+				<UserMessage message={turn.user} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
 			</div>
 		{/if}
 		{#if goal && turn.id === goalNoticeTurnId}
@@ -359,6 +398,9 @@
 		{/if}
 		{#each turn.segments as segment, i}
 			{@const final = i === turn.segments.length - 1}
+			{#if segment.activity[0]}
+				{@render resumed(segment.activity[0].uuid)}
+			{/if}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
 				<TurnActivity {turn} {segment} {final} />
 			{/if}
@@ -372,6 +414,7 @@
 				{/each}
 			{/if}
 			{#each segment.reply as reply (reply.uuid)}
+				{@render resumed(reply.uuid)}
 				<div class="msg-container" class:rewind-point={uiState.rewindActive}>
 					<AssistantMessage message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)} />
 				</div>
@@ -400,6 +443,18 @@
 		{#if turn.id === newestEndedTurnId}
 			<div data-turn-end aria-hidden="true"></div>
 		{/if}
+	{/snippet}
+
+	{#snippet resumed(key: string)}
+		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
+			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
+				<ContinuationDivider {resume} sessionId={activeSession.id} projectSlug={activeSession.projectSlug ?? getCurrentSlug() ?? ""} />
+			{:else}
+				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
+					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
+				</TranscriptDivider>
+			{/if}
+		{/each}
 	{/snippet}
 
 	{#snippet goalNotice()}
@@ -440,6 +495,7 @@
 			{@render turnItem(turn)}
 		{/each}
 	{/if}
+	{@render resumed(END_OF_TRANSCRIPT)}
 	</div>
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where

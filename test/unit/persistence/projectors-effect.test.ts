@@ -1235,9 +1235,8 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* runner.projectEvent(
 					yield* store.append(makeSessionCreated("child")),
 				);
-				const { rows } = yield* reads.readSessionList();
 				expect(
-					rows.find(({ item }) => item.id === "child")?.item,
+					(yield* reads.listSessionInfos()).find(({ id }) => id === "child"),
 				).toMatchObject({
 					forkMessageId: "boundary",
 					forkPointTimestamp: 1000,
@@ -1262,8 +1261,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					}),
 				])
 					yield* runner.projectEvent(yield* store.append(event));
-				const { rows } = yield* reads.readSessionList();
-				const child = rows.find(({ item }) => item.id === "child")?.item;
+				const child = (yield* reads.listSessionInfos()).find(
+					({ id }) => id === "child",
+				);
 				const page = [
 					{
 						type: "user" as const,

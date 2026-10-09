@@ -2,7 +2,7 @@
 <!-- Terminal aesthetic: dark background, green monospace text, compact layout.   -->
 
 <script lang="ts">
-	import { wsState } from "../../stores/ws.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 	import { confirm } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -351,18 +351,18 @@
 		<!-- Status summary -->
 		<div class="px-3 py-1.5 border-b border-green-900/30 text-gray-300 space-y-0.5 select-none">
 			<div class="flex items-center gap-2">
-				<span class={statusColor(wsState.status)}>&#9679;</span>
-				<span class="text-white">{wsState.status || "(none)"}</span>
+				<span class={statusColor(connectionState.status)}>&#9679;</span>
+				<span class="text-white">{connectionState.status || "(none)"}</span>
 				<span class="text-gray-500">({timeInState}s)</span>
 			</div>
 			<div class="flex gap-4 text-gray-400">
-				<span>attempts: {wsState.attempts}</span>
-				{#if wsState.relayStatus}
-					<span>relay: {wsState.relayStatus}</span>
+				<span>attempts: {connectionState.attempts}</span>
+				{#if connectionState.relayStatus}
+					<span>relay: {connectionState.relayStatus}</span>
 				{/if}
 			</div>
-			{#if wsState.statusText}
-				<div class="text-gray-500 truncate">{wsState.statusText}</div>
+			{#if connectionState.statusText}
+				<div class="text-gray-500 truncate">{connectionState.statusText}</div>
 			{/if}
 		</div>
 

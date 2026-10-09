@@ -44,6 +44,16 @@ export const harnessHandlers: StepHandler[] = [
 			const claude = instanceIdForLabel(harness) === "claude";
 			const sessionId = claude ? "sess-bound-claude" : "sess-bound-opencode";
 			const rpc = requireRpcControl(world.page);
+			// A real session has a shell row; its turn ends ride on it.
+			if (
+				!rpc.shellRows?.some((row) => (row as { id?: string }).id === sessionId)
+			)
+				rpc.upsertShellRow({
+					id: sessionId,
+					title: `${harness} session`,
+					status: "idle",
+					updatedAt: Date.now(),
+				});
 			const previousRequests = rpc.getRequests().length;
 			await openSessionRoute(world.page, sessionId);
 			// The session's GetModels reply binds the trigger to its harness.

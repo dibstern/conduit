@@ -588,17 +588,6 @@ export const removeAll = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
 
 /**
- * Broadcast a message to all connected clients via DaemonEventBus.
- * Publishes a RelayBroadcast event that consumers (e.g., WS handlers)
- * can subscribe to for cross-relay broadcasting.
- */
-export const broadcastToAll = (message: unknown) =>
-	Effect.gen(function* () {
-		const bus = yield* DaemonEventBusTag;
-		yield* PubSub.publish(bus, DaemonEvent.RelayBroadcast({ message }));
-	}).pipe(Effect.withSpan("projectRegistry.broadcastToAll"));
-
-/**
  * Wait until a project transitions to Ready state, or timeout.
  * Subscribes to DaemonEventBus and filters for InstanceStatusChanged
  * events matching the given slug.

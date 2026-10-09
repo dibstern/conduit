@@ -396,7 +396,6 @@ describe("model handlers with Effect-native model service", () => {
 					variant: "",
 					variants: ["standard", "fast"],
 				});
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);

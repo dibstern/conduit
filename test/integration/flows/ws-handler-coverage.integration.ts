@@ -1,5 +1,4 @@
-// Verifies Bug B: all 23 WebSocket message types from ws-router.ts have
-// handlers in the relay stack. None should be silently dropped.
+// Verifies that browser RPC requests reach their relay handlers.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -75,11 +74,7 @@ describe("Integration: WS Handler Coverage", () => {
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		await client.switchAgent("code");
-		// Observe a full window to ensure SwitchAgent produces no error.
-		await new Promise((r) => setTimeout(r, 500));
-		const errors = client.getReceivedOfType("error");
-		expect(errors).toHaveLength(0);
+		await expect(client.switchAgent("code")).resolves.toBeUndefined();
 		await client.close();
 	});
 

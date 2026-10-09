@@ -259,7 +259,7 @@ test.describe("Notification → Session Navigation", () => {
 		});
 		// The in-app ding for a tab without push: an error toast.
 		await expect(
-			page.getByText("Error — Provider quota exhausted"),
+			page.getByRole("status").filter({ hasText: "Provider quota exhausted" }),
 		).toBeVisible();
 		expect(errors).toEqual([]);
 

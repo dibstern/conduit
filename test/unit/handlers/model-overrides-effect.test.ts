@@ -40,21 +40,12 @@ function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
 ): WebSocketHandlerShape {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => "session-1"),
 		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
+		registerSessionViewer: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
 		...overrides,
 	};
 }

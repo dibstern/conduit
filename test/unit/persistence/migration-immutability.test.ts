@@ -89,11 +89,19 @@ const SHIPPED_MIGRATION_HASHES = {
 		"b73ed248ed34d011e5127c6a240512dedd726a7fe7de89518ae4bd5aa1eefb27",
 	"0034_sessions_side_thread.sql":
 		"04bdd308699b5355cc5bf38405136551c408fa83ead2b9bdbd8a52643b180a98",
-	"0035_messages_input_id.sql":
+	"0035_sessions_limit_recovery.sql":
+		"30ba500dba79cbb3a9c2979d63c2db083699ed11742435f26d0b9a49f2dd666f",
+	"0036_sessions_resumes.sql":
+		"baf0ede81b1ce62ed4114ebadcebc5790002c5029ee43176840192bcc7110c89",
+	"0037_session_sidebar.sql":
+		"a127b46ea6bde1e8df71fc15de72232c73874d033ba8be5f284d088ca0ed3c08",
+	"0038_session_sidebar_tombstones.sql":
+		"08be345da1699bd430c0abfb4ee369ef4bb197ddcbfe96af8b4b040cb4e60c0b",
+	"0039_messages_input_id.sql":
 		"9810a56cd0d51fc664bf8eabbe757997bad9abcff00142052d4ddcc129ba130e",
-	"0036_pending_inputs.sql":
+	"0040_pending_inputs.sql":
 		"4454f92eb123bac242c514140668577a7c06874a119de4ea42d32b8cfc8716d6",
-	"0037_messages_steered.sql":
+	"0041_messages_steered.sql":
 		"bc7e3ec7b28fdd150dc76afbbc5a45f9fde2aa28c6c817c80fca72bd24410afc",
 } satisfies Record<string, string>;
 

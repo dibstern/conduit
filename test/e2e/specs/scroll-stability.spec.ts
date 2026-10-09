@@ -82,7 +82,7 @@ async function scrollTo(page: Page, scrollTop: number): Promise<void> {
 
 async function mockRelayWithViewSessionRpc(
 	page: Page,
-	options: Omit<WsMockOptions, "onClientMessage">,
+	options: WsMockOptions,
 	viewResponses: ReadonlyMap<string, readonly MockMessage[]>,
 ): Promise<WsMockControl> {
 	let control!: WsMockControl;

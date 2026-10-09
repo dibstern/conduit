@@ -160,7 +160,6 @@ export const conversationHandlers = {
 				commandId: request.inputId,
 				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
-				errorDelivery: "session",
 			});
 			return sent.refused
 				? { ok: false as const, reason: sent.refused }

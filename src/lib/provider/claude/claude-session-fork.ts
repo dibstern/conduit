@@ -31,10 +31,14 @@ export interface ClaudeSessionForkSdk {
 // uncompacted history up to them.
 const SDK_WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
-const { sdkUrl, op, sessionId, options } = workerData;
+const { sdkUrl, op, sessionId, sdkSubagentId, options } = workerData;
 import(sdkUrl)
 	.then(async (sdk) => {
 		if (op === "forkSession") return sdk.forkSession(sessionId, options);
+		if (op === "listSubagents") return sdk.listSubagents(sessionId, options);
+		if (op === "getSubagentMessages") {
+			return sdk.getSubagentMessages(sessionId, sdkSubagentId, options);
+		}
 		const entries = [];
 		await sdk.importSessionToStore(
 			sessionId,
@@ -54,13 +58,18 @@ import(sdkUrl)
 	);
 `;
 
-function runSdkInWorker<T>(
-	op: "readTranscript" | "forkSession",
+export function runSdkInWorker<T>(
+	op:
+		| "readTranscript"
+		| "forkSession"
+		| "listSubagents"
+		| "getSubagentMessages",
 	sessionId: string,
 	{
 		configDir,
 		...options
 	}: SdkCallOptions & { title?: string; upToMessageId?: string },
+	sdkSubagentId?: string,
 ): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const worker = new Worker(SDK_WORKER_SOURCE, {
@@ -76,6 +85,7 @@ function runSdkInWorker<T>(
 				).href,
 				op,
 				sessionId,
+				sdkSubagentId,
 				options,
 			},
 		});

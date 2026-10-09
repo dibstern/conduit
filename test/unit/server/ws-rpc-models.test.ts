@@ -294,12 +294,10 @@ describe("WsRpcServerLayer GetModels", () => {
 				}
 				const matchSink = createRelayEventSink({
 					sessionId: "match-session",
-					send: vi.fn(),
 					persist,
 				});
 				const driftSink = createRelayEventSink({
 					sessionId: "drift-session",
-					send: vi.fn(),
 					persist,
 				});
 				for (const [sessionId, sink, actualModel] of [

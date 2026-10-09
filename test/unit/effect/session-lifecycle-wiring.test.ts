@@ -22,7 +22,6 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SessionManagerServiceLive,
@@ -82,10 +81,6 @@ function makeMockDeps() {
 
 function makeMockServices() {
 	return {
-		wsHandler: {
-			broadcast: vi.fn(),
-			drain: vi.fn().mockResolvedValue(undefined),
-		},
 		client: {
 			session: {
 				messages: vi.fn().mockResolvedValue([]),
@@ -117,7 +112,6 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
-		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
 		Layer.succeed(OpenCodeAPITag, services.client as any),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),
 		Layer.succeed(StatusPollerTag, services.statusPoller),
@@ -150,7 +144,6 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 			OpenCodeInstancesTag,
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),
-		Layer.succeed(WebSocketHandlerTag, services.wsHandler as any),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),
 		Layer.succeed(StatusPollerTag, services.statusPoller),
@@ -252,27 +245,6 @@ describe("SessionLifecycleWiringLive", () => {
 			expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
 		}),
 	);
-
-	it.live("broadcasts RelayBroadcast to WebSocket handler", () => {
-		const services = makeMockServices();
-		const deps = makeMockDeps();
-		const msg = { type: "session_list" as const, sessions: [], roots: true };
-
-		return Effect.gen(function* () {
-			const bus = yield* DaemonEventBusTag;
-			// Allow subscriber fibers to start and subscribe to PubSub
-			yield* flushSubscribers;
-			yield* PubSub.publish(bus, DaemonEvent.RelayBroadcast({ message: msg }));
-			yield* waitForAssertion(() =>
-				expect(services.wsHandler.broadcast).toHaveBeenCalledWith(msg),
-			);
-
-			expect(services.wsHandler.broadcast).toHaveBeenCalledWith(msg);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
-		);
-	});
 
 	it.live(
 		"SessionManagerServiceLive createSession drives lifecycle wiring without SessionEventBridgeLive",

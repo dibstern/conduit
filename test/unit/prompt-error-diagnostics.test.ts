@@ -114,20 +114,6 @@ describe("OpenCodeApiError response body enrichment", () => {
 		expect(err).toBeInstanceOf(Error);
 	});
 
-	it("toWebSocket includes enriched message", () => {
-		const err = new OpenCodeApiError({
-			message: "POST failed with 400",
-			endpoint: "/test",
-			responseStatus: 400,
-			responseBody: "validation failed",
-		});
-
-		const ws = err.toWebSocket();
-		expect(ws.type).toBe("error");
-		expect(ws.code).toBe("OpenCodeApiError");
-		expect(ws.message).toContain("validation failed");
-	});
-
 	it("toJSON includes enriched message", () => {
 		const err = new OpenCodeApiError({
 			message: "POST failed with 400",

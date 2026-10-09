@@ -5,6 +5,7 @@ import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instanc
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
+import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
@@ -20,6 +21,7 @@ import { restoreSessionPermissionModes } from "../domain/relay/Services/session-
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { restoreSessionModelSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
+	type OverridesStateTag,
 	setContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
@@ -49,12 +51,10 @@ import {
 import type { parseDefaultModel, RelaySettings } from "./relay-settings.js";
 import { RelayCreationAbortedError } from "./relay-stack.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
-import { wireRelayWebSocketCallbacksEffect } from "./websocket-callback-wiring.js";
 
 interface StartupInputs {
 	config: ProjectRelayConfig;
 	log: Logger;
-	wsLog: Logger;
 	sseLog: Logger;
 	statusLog: Logger;
 	pollerLog: Logger;
@@ -77,6 +77,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 	const { relayManagedRuntime } = layers;
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const projectSettingsContext = yield* Effect.context<
+			ProjectSettingsTag | OverridesStateTag | ConfigTag
+		>();
 		const api = yield* OpenCodeAPITag;
 		const translator = yield* TranslatorTag;
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -247,6 +250,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		return {
 			sql,
+			projectSettingsContext,
 			translator,
 			api,
 			wsHandler,
@@ -268,21 +272,13 @@ type AcquiredStartupServices = Effect.Effect.Success<
 	ReturnType<typeof acquireStartupServices>
 >;
 
-function wireStartupCallbacks(
-	inputs: StartupInputs,
-	services: AcquiredStartupServices,
-) {
-	const { wsLog } = inputs;
-	const { orchestration, sseStream, wsHandler } = services;
+function wireStartupCallbacks(services: AcquiredStartupServices) {
+	const { orchestration, sseStream } = services;
 	return Effect.gen(function* () {
 		yield* Effect.sync(() => {
 			orchestration.wireSSEToInstance((event, handler) => {
 				sseStream.on(event, handler);
 			});
-		});
-		yield* wireRelayWebSocketCallbacksEffect({
-			wsHandler,
-			log: wsLog,
 		});
 	});
 }
@@ -421,7 +417,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 		return await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const services = yield* acquireStartupServices(inputs);
-				yield* wireStartupCallbacks(inputs, services);
+				yield* wireStartupCallbacks(services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
@@ -448,6 +444,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				} = services;
 				return {
 					sql,
+					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: (changedSessionId: string) => {

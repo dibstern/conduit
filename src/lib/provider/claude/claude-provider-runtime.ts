@@ -63,6 +63,7 @@ import {
 	ClaudeBoundaryError,
 	ClaudeRuntimeError,
 	EventSinkIngestionError,
+	isClaudeResumeFailure,
 } from "../event-sink-errors.js";
 import type {
 	EventSink,
@@ -70,6 +71,7 @@ import type {
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCapabilities,
+	ProviderNativeSession,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -120,6 +122,7 @@ import {
 	removeTurnWaiter,
 	resolveErrorTurnEffect,
 	resolveTurnEffect,
+	sdkResultToTurnResult,
 	settleQueuedTurnDeferredsEffect,
 	startTurnWaiter,
 	type TurnWaiters,
@@ -154,11 +157,14 @@ import {
 	makeClaudeTranslationService,
 } from "./claude-translation-service.js";
 import {
+	emitClaudeUsageLimit,
+	interceptClaudeUsageLimit,
+} from "./claude-usage-limit.js";
+import {
 	type ClaudeWarmedQueryOwner,
 	makeClaudeWarmedQueryOwner,
 } from "./claude-warmed-query.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
-import { serializePriorConversation } from "./history-transcript.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	CanUseTool,
@@ -204,6 +210,7 @@ export interface ClaudeProviderInstanceDeps {
 	) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError>;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 	/** Tests can host the session engine locally; production defaults to a process. */
@@ -222,6 +229,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
 	| "readGoalStatus"
+	| "persistHandoffDelivered"
 > & {
 	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
@@ -291,6 +299,9 @@ export const makeClaudeProviderRuntime = (
 				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
 				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
+				...(deps.persistHandoffDelivered
+					? { persistHandoffDelivered: deps.persistHandoffDelivered }
+					: {}),
 			},
 			(output, sessionId?: string) =>
 				runtime
@@ -482,6 +493,7 @@ export class ClaudeProviderRuntime {
 					// failClaudeRunnerTurn logs errors; database failures still need a retry.
 					if (persistenceError) return yield* Effect.fail(persistenceError);
 				}),
+			this.deps.daemonConfigDir,
 		);
 	});
 
@@ -538,6 +550,15 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
+	getNativeSessionEffect(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined> {
+		return (
+			this.runner.getNativeSessionEffect?.(sessionId) ??
+			Effect.succeed(undefined)
+		);
+	}
+
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
@@ -563,8 +584,9 @@ export class ClaudeProviderRuntime {
 					Effect.gen(this, function* () {
 						// An idle send is placed before the runner hop, as fast as a
 						// local write; the runner places a held send when the SDK
-						// starts it (command_lifecycle: started).
-						if (inFlight === 0)
+						// starts it (command_lifecycle: started). A continuation places
+						// nothing: it resumes the cut-off message's turn.
+						if (inFlight === 0 && !input.continuation)
 							yield* this.placeUserMessageEffect({
 								sessionId,
 								inputId: input.inputId,
@@ -582,6 +604,7 @@ export class ClaudeProviderRuntime {
 						const sinkId = claudeRunnerSinkId(
 							input.inputId,
 							input.commandAttempt,
+							input.nativeResumeFallback,
 						);
 						this.sinks.set(sinkId, eventSink);
 						this.reportSinkForTesting("allocated", sinkId, sessionId);
@@ -1016,7 +1039,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			readonly sessionId: string;
 			readonly finished: Deferred.Deferred<void>;
 			readonly claudeSettingsOverrides: Settings | undefined;
-			readonly historyOnDemand: boolean;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -1074,6 +1096,23 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
+	getNativeSessionEffect(
+		sessionId: string,
+	): Effect.Effect<ProviderNativeSession | undefined> {
+		return getSession(this.stateRef, sessionId).pipe(
+			Effect.map((ctx) =>
+				ctx
+					? {
+							instanceId: ctx.instanceId ?? "claude",
+							configDir: ctx.configDir,
+							agent: ctx.currentAgent,
+							resumeSessionId: ctx.resumeSessionId,
+						}
+					: undefined,
+			),
+		);
+	}
+
 	executeEffect(
 		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -1109,7 +1148,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						command.input.sessionId,
 						finished,
 						command.claudeSettingsOverrides,
-						command.historyOnDemand ?? false,
 					);
 					const controller = this.sinkBindings.get(
 						command.sinkId,
@@ -1122,6 +1160,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						eventSink,
 						abortSignal: controller.signal,
 					}).pipe(
+						Effect.map((result) =>
+							result.status === "completed" && command.input.handoff
+								? { ...result, handoff: command.input.handoff }
+								: result,
+						),
 						Effect.ensuring(Deferred.succeed(finished, undefined)),
 						Effect.ensuring(this.releaseSinkEffect(eventSink)),
 					);
@@ -1284,7 +1327,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		sessionId: string,
 		finished: Deferred.Deferred<void>,
 		claudeSettingsOverrides: Settings | undefined,
-		historyOnDemand: boolean,
 	): EventSink {
 		const permissions = new Map<
 			string,
@@ -1397,7 +1439,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			sessionId,
 			finished,
 			claudeSettingsOverrides,
-			historyOnDemand,
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -1647,25 +1688,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				// endSession, shutdown) leaves it in sessions with a closed prompt
 				// queue; enqueueing would throw. Evict silently and create fresh.
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
-				const providerState =
-					existingCtx.resumeSessionId != null
-						? {
-								...input.providerState,
-								resumeSessionId: existingCtx.resumeSessionId,
-							}
-						: input.providerState;
 				yield* this.removeSessionEffect(sessionId);
-				return yield* this.createSessionAndSendTurnEffect({
-					...input,
-					providerState,
-				});
+				return yield* this.createSessionAndSendTurnEffect(input);
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);
 				}
-				return yield* this.restartSessionForAgentChangeEffect(
+				return yield* this.restartSessionEffect(
 					existingCtx,
 					input,
+					"Claude agent changed",
+				);
+			} else if (
+				existingCtx &&
+				input.startFreshNativeSession &&
+				!(yield* hasPendingTurn(this.stateRef, sessionId))
+			) {
+				return yield* this.restartSessionEffect(
+					existingCtx,
+					input,
+					"Server requested a fresh Claude session",
 				);
 			} else if (
 				existingCtx &&
@@ -1781,6 +1823,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const resumeSessionId = options.resume;
 				const context = {
 					sessionId,
+					instanceId: input.instanceId ?? "claude",
+					nativeThread: input.nativeThread,
 					workspaceRoot: input.workspaceRoot,
 					...(input.configDir !== undefined
 						? { configDir: input.configDir }
@@ -1798,6 +1842,10 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					pendingSubagentMessages: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.inputId,
+					currentUserMessageId:
+						input.continuation?.cutOffMessageId ?? input.inputId,
+					resumeFallbackAllowed: !!input.resumeSessionId && !!input.handoff,
+					queryInitialized: false,
 					turnInFlight: true,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
@@ -2041,7 +2089,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				if (yield* hasPendingTurn(this.stateRef, ctx.sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(ctx, input);
 				}
-				return yield* this.restartSessionForAgentChangeEffect(ctx, input);
+				return yield* this.restartSessionEffect(
+					ctx,
+					input,
+					"Claude agent changed",
+				);
 			}
 
 			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
@@ -2138,6 +2190,13 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							// A steer becomes current when the SDK starts it.
 							if (!joinsRunningTurn) {
 								ctx.currentTurnId = input.inputId;
+								ctx.currentUserMessageId =
+									input.continuation?.cutOffMessageId ?? input.inputId;
+								ctx.resumeFallbackAllowed =
+									!!input.resumeSessionId && !!input.handoff;
+								ctx.usageLimit = undefined;
+								ctx.usageLimitReported = undefined;
+								ctx.pendingSyntheticMessages = undefined;
 								const priorSink = ctx.eventSink;
 								this.retainSink(input.eventSink);
 								ctx.eventSink = input.eventSink;
@@ -2201,39 +2260,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		};
 	}
 
-	private restartSessionForAgentChangeEffect(
+	private restartSessionEffect(
 		ctx: ClaudeSessionContext,
 		input: SendTurnInput,
+		reason: string,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
-			yield* this.disposeSessionEffect(ctx, "Claude agent changed");
-
-			const providerState = { ...input.providerState };
-			delete providerState["resumeSessionId"];
-			const sinkId = this.sinkId(input.eventSink);
-			const history =
-				sinkId && this.sinkBindings.get(sinkId)?.historyOnDemand
-					? ((yield* this.emit({ type: "read-turn-history", sinkId }).pipe(
-							Effect.mapError(
-								(cause) =>
-									new ClaudeBoundaryError({
-										operation: "readTurnHistory",
-										cause,
-									}),
-							),
-						)).history ?? [])
-					: input.history;
-			const transcript = serializePriorConversation(history);
-			const prompt =
-				transcript.length > 0
-					? `${transcript}\n\n${input.prompt}`
-					: input.prompt;
-			return yield* this.createSessionAndSendTurnEffect({
-				...input,
-				providerState,
-				prompt,
-			});
+			yield* this.disposeSessionEffect(ctx, reason);
+			return yield* this.createSessionAndSendTurnEffect(input);
 		});
 	}
 
@@ -2262,7 +2297,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				resultFinalizationStarted = true;
 			}).pipe(
 				Effect.catchAll((err) =>
-					this.handleStreamFailureEffect(ctx, translator, err),
+					ctx.resumeFallbackAllowed &&
+					!ctx.queryInitialized &&
+					isClaudeResumeFailure(err)
+						? this.handleStreamFailureEffect(ctx, translator, err)
+						: this.finishStreamOutputEffect(ctx, translator).pipe(
+								Effect.matchEffect({
+									onFailure: (limitError) =>
+										this.handleStreamFailureEffect(ctx, translator, limitError),
+									onSuccess: () =>
+										this.handleStreamFailureEffect(ctx, translator, err),
+								}),
+							),
 				),
 				Effect.ensuring(
 					this.finalizeStreamConsumerEffect(
@@ -2320,6 +2366,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				if (decodedMessage.type === "command_lifecycle") {
 					yield* this.handleCommandLifecycleEffect(ctx, decodedMessage);
 				}
+				if (
+					decodedMessage.type === "system" &&
+					decodedMessage.subtype === "init"
+				)
+					ctx.queryInitialized = true;
+				if (
+					decodedMessage.type === "result" &&
+					ctx.resumeFallbackAllowed &&
+					!ctx.queryInitialized &&
+					isClaudeResumeFailure(
+						sdkResultToTurnResult(ctx, decodedMessage).error,
+					)
+				) {
+					ctx.resumeSessionId = undefined;
+					ctx.pendingSyntheticMessages = undefined;
+					ctx.turnInFlight = false;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
+					break;
+				}
 				if (yield* pushForwardedSubagentMessageEffect(ctx, decodedMessage)) {
 					continue;
 				}
@@ -2335,13 +2401,21 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
 				if (decodedMessage.type === "result") ctx.turnInFlight = false;
-				yield* translator.translate(ctx, decodedMessage);
+				const translatedMessages = yield* interceptClaudeUsageLimit(
+					ctx,
+					decodedMessage,
+				);
+				for (const message of translatedMessages)
+					yield* translator.translate(ctx, message);
 				yield* handleSubagentTaskStartedEffect(
 					(input) => this.ensureSubagentSessionEffect(ctx, input),
 					ctx,
 					decodedMessage,
 				);
 				if (decodedMessage.type === "result") {
+					const translatedResult = translatedMessages.find(
+						(message) => message.type === "result",
+					);
 					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					const finalizationCtx = detachSubagentFinalizationContext(ctx);
 					markResultFinalizationStarted();
@@ -2349,10 +2423,31 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						finalizationCtx,
 						decodedMessage,
 					);
-					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
+					yield* resolveTurnEffect(
+						this.stateRef,
+						ctx,
+						translatedResult ?? decodedMessage,
+					);
 					ctx.interruptRequested = false;
 				}
 			}
+			yield* this.finishStreamOutputEffect(ctx, translator);
+		});
+	}
+
+	private finishStreamOutputEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+	): Effect.Effect<void, ClaudeAdapterError> {
+		return Effect.gen(function* () {
+			yield* emitClaudeUsageLimit(ctx);
+			const pending = ctx.pendingSyntheticMessages;
+			ctx.pendingSyntheticMessages = undefined;
+			// Ordinary SDK command output is still history if its stream ends
+			// without a result; only classified limit replies are discarded.
+			if (pending && !ctx.usageLimit)
+				for (const message of pending)
+					yield* translator.translate(ctx, message);
 		});
 	}
 
@@ -2384,6 +2479,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			// A steer becomes the current turn when it starts, on its own sink,
 			// and is in flight even when the turn before it already ended.
 			ctx.currentTurnId = message.command_uuid;
+			ctx.currentUserMessageId =
+				unplaced.continuation?.cutOffMessageId ?? message.command_uuid;
 			ctx.turnInFlight = true;
 			if (unplaced.eventSink !== ctx.eventSink) {
 				const priorSink = ctx.eventSink;
@@ -2391,6 +2488,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx.eventSink = unplaced.eventSink;
 				yield* this.releaseSinkEffect(priorSink);
 			}
+			// A continuation places nothing: it resumes the cut-off message's turn.
+			if (unplaced.continuation) return;
 			// The stream outlives one input: a failed placement must not end it.
 			yield* this.placeUserMessageEffect(unplaced).pipe(
 				Effect.catchAll((error) =>
@@ -2477,12 +2576,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			if (
 				ctx.resumeSessionId &&
-				/invalid.session|session.*not.*found|session.*expired/i.test(errMsg)
+				!ctx.queryInitialized &&
+				isClaudeResumeFailure(err)
 			) {
 				ctx.resumeSessionId = undefined;
 				log.warn(
 					`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
 				);
+				if (ctx.resumeFallbackAllowed) {
+					ctx.turnInFlight = false;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					return yield* resolveErrorTurnEffect(this.stateRef, ctx, err);
+				}
 			}
 
 			yield* translator.translateError(ctx, err).pipe(

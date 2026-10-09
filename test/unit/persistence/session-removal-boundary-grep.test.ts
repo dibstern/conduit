@@ -141,6 +141,7 @@ const productionSources = (): Source[] =>
 		.filter(({ path }) => !RECORDED_GAPS.includes(path));
 
 describe("session removal boundary grep", () => {
+	// Any session delete must also write the sidebar tombstone (refreshSidebar on every removed id): no cascade does it any more.
 	it("leaves one way to remove a session, inside the seam and outside it", () => {
 		const requirement = `A deleted session leaves no row behind to carry a version, and sessions.parent_id ON DELETE CASCADE takes the subagent subtree inside SQLite, where no statement names it. A removal that happens any other way reaches no subscriber: the row simply stops being there, with no advance to explain it, and a client keeps showing a session that is gone.
 

@@ -17,6 +17,7 @@ import {
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
+import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
@@ -50,6 +51,12 @@ export interface ProjectionContext {
 export interface ProjectionTouch {
 	readonly stamped: readonly string[];
 	readonly removed: readonly string[];
+	/**
+	 * Sessions whose family's sidebar row this projection may have changed,
+	 * or that held a row before it. The runner refreshes them all once per
+	 * transaction, not once per projection.
+	 */
+	readonly sidebar?: readonly string[];
 }
 
 /**
@@ -67,13 +74,16 @@ export const mergeTouches = (
 	touches: Iterable<ProjectionTouch>,
 ): ProjectionTouch => {
 	const live = new Map<string, boolean>();
+	const sidebar = new Set<string>();
 	for (const touch of touches) {
 		for (const sessionId of touch.stamped) live.set(sessionId, true);
 		for (const sessionId of touch.removed) live.set(sessionId, false);
+		for (const sessionId of touch.sidebar ?? []) sidebar.add(sessionId);
 	}
 	return {
 		stamped: [...live].filter(([, alive]) => alive).map(([id]) => id),
 		removed: [...live].filter(([, alive]) => !alive).map(([id]) => id),
+		...(sidebar.size > 0 ? { sidebar: [...sidebar] } : {}),
 	};
 };
 
@@ -213,6 +223,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const written: string[] = [];
+			// Families this event can take members from, which naming the
+			// sessions it wrote does not reach.
+			const left: string[] = [];
 
 			if (event.type === "session.goal_changed" && event.data.goal) {
 				const goal = event.data.goal;
@@ -246,6 +259,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 						SESSION_SUBTREE_SQL,
 						[stmt.removeSession],
 					);
+					const roots = yield* sql<{ root_id: string | null }>`
+						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
+					left.push(...roots.flatMap((row) => row.root_id ?? []));
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
 					written.push(...subtree.map((row) => row.id));
 					continue;
@@ -256,7 +272,15 @@ export const makeSessionProjector = (): EffectProjector => ({
 				);
 				written.push(...rows.map((row) => row.id));
 			}
-			return written;
+			// Only these two write a parent.
+			if (event.type === "session.created" || event.type === "session.forked")
+				left.push(...(yield* rerootSession(event.data.sessionId)));
+			const touch = yield* stampSessions(written, ctx.version);
+			// A removed session, child or root, leaves a deleted tombstone.
+			return {
+				...touch,
+				sidebar: [...touch.stamped, ...touch.removed, ...left],
+			};
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ProjectionError
@@ -267,7 +291,6 @@ export const makeSessionProjector = (): EffectProjector => ({
 							cause: e,
 						}),
 			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
 });
 
@@ -721,7 +744,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				return yield* closeThinking(event.data.messageId);
+				const closed = yield* closeThinking(event.data.messageId);
+				const interrupted = yield* sql<{ id: string }>`UPDATE messages
+					SET finish = 'interrupted' WHERE id = ${event.data.messageId}
+						OR id IN (SELECT user_message_id FROM turns
+							WHERE session_id = ${event.sessionId} AND state IN ('pending', 'running'))
+					RETURNING id`;
+				return [...new Set([...closed, ...ids(interrupted)])];
 			}
 
 			if (isEventType(event, "session.compaction")) {
@@ -1326,9 +1355,11 @@ export const makeApprovalProjector = (): EffectProjector => ({
 							AND (completed_at IS NULL OR completed_at >= ${approval.created_at})`;
 						messageIds.push(...ids(turns));
 					}
+					const sessions = yield* stampSessions(owners(written), ctx.version);
 					return mergeTouches([
 						yield* stampMessage(messageIds, ctx.version),
-						yield* stampSessions(owners(written), ctx.version),
+						// The pending counts roll up into the family's row.
+						{ ...sessions, sidebar: sessions.stamped },
 					]);
 				}),
 			),
@@ -1475,6 +1506,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	// canonical vocabulary only so historical stores still decode.
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
+	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",

@@ -21,6 +21,7 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
 import {
 	type BrowserFrame,
@@ -75,6 +76,44 @@ describe("supervised server build updates", () => {
 		return { harness, generation, serviceEnvironment };
 	}
 
+	/** Follow SubscribeServerStatus over /rpc as the page does, recording each
+	 *  status as a frame. Acks every chunk so the server keeps streaming. */
+	function followStatus(port: number, headers: Record<string, string> = {}) {
+		const frames: BrowserFrame[] = [];
+		const ws = new WebSocket(`ws://127.0.0.1:${port}/rpc`, { headers });
+		sockets.add(ws);
+		ws.on("open", () =>
+			ws.send(
+				JSON.stringify({
+					_tag: "Request",
+					id: "1",
+					tag: "SubscribeServerStatus",
+					payload: {},
+					headers: [],
+				}),
+			),
+		);
+		ws.on("message", (data) => {
+			const parsed = JSON.parse(data.toString()) as unknown;
+			const messages = (Array.isArray(parsed) ? parsed : [parsed]) as Array<{
+				_tag: string;
+				requestId?: string;
+				values?: Array<Record<string, unknown>>;
+			}>;
+			for (const message of messages) {
+				if (message._tag !== "Chunk") continue;
+				for (const value of message.values ?? [])
+					frames.push({
+						message: { type: "server_status", ...value },
+						at: process.hrtime.bigint(),
+					});
+				ws.send(JSON.stringify({ _tag: "Ack", requestId: message.requestId }));
+			}
+		});
+		ws.on("error", () => {});
+		return { frames, ws };
+	}
+
 	async function status(
 		browser: { frames: BrowserFrame[] },
 		restartAvailable: boolean,
@@ -87,14 +126,14 @@ describe("supervised server build updates", () => {
 					.slice(cursor)
 					.find(
 						({ message }) =>
-							message["type"] === "server_update" &&
+							message["type"] === "server_status" &&
 							message["restartAvailable"] === restartAvailable,
 					);
 				expect(found).toBeDefined();
 			},
 			{ timeout: POLL_TIMEOUT_MS, interval: 20 },
 		);
-		if (!found) throw new Error("Expected server_update was not received");
+		if (!found) throw new Error("Expected server status was not received");
 		return {
 			message: found.message,
 			at: found.at.toString(),
@@ -108,13 +147,10 @@ describe("supervised server build updates", () => {
 		buildId = BUILD_ID,
 	) {
 		const update = await status(browser, restartAvailable);
-		const protocolIndex = browser.frames.findIndex(
-			({ message }) => message["type"] === "protocol_version",
-		);
-		expect(protocolIndex).toBeGreaterThanOrEqual(0);
-		expect(browser.frames[protocolIndex]?.message["buildId"]).toBe(buildId);
-		expect(update.index).toBe(protocolIndex + 1);
-		return { protocolIndex, ...update };
+		expect(update.index).toBe(0);
+		expect(update.message["buildId"]).toBe(buildId);
+		expect(update.message["protocolVersion"]).toBe(WS_PROTOCOL_VERSION);
+		return update;
 	}
 
 	afterEach(async (context) => {
@@ -203,7 +239,8 @@ describe("supervised server build updates", () => {
 	it("pushes build changes to both projects and late clients, then clears stale status", async () => {
 		const { harness: owned, generation } = await start("service");
 		const first = await owned.connect();
-		const firstInitial = await initialStatus(first, false);
+		const firstStatus = followStatus(generation.port);
+		const firstInitial = await initialStatus(firstStatus, false);
 		const directory = join(owned.root, "second-project");
 		mkdirSync(directory);
 		const added = await sendRpcRequest(
@@ -212,18 +249,19 @@ describe("supervised server build updates", () => {
 		);
 		if (!added.savedSlug) throw new Error("Second project was not registered");
 		const second = await owned.connect(undefined, undefined, added.savedSlug);
-		const secondInitial = await initialStatus(second, false);
+		const secondStatus = followStatus(generation.port);
+		const secondInitial = await initialStatus(secondStatus, false);
 		const transitions: Array<Record<string, unknown>> = [];
 
 		async function transition(marker: string | undefined, available: boolean) {
-			const firstCursor = first.frames.length;
-			const secondCursor = second.frames.length;
+			const firstCursor = firstStatus.frames.length;
+			const secondCursor = secondStatus.frames.length;
 			const started = process.hrtime.bigint();
 			if (marker === undefined) rmSync(markerPath);
 			else writeFileSync(markerPath, marker);
 			const [firstUpdate, secondUpdate] = await Promise.all([
-				status(first, available, firstCursor),
-				status(second, available, secondCursor),
+				status(firstStatus, available, firstCursor),
+				status(secondStatus, available, secondCursor),
 			]);
 			expect(first.connected && second.connected).toBe(true);
 			transitions.push({
@@ -236,8 +274,10 @@ describe("supervised server build updates", () => {
 		}
 
 		await transition(JSON.stringify({ buildId: randomUUID() }), true);
-		const late = await owned.connect(undefined, undefined, added.savedSlug);
-		const lateInitial = await initialStatus(late, true);
+		const lateInitial = await initialStatus(
+			followStatus(generation.port),
+			true,
+		);
 		await transition(JSON.stringify({ buildId: BUILD_ID }), false);
 		await transition(JSON.stringify({ buildId: randomUUID() }), true);
 		await transition(JSON.stringify({ buildId: 42 }), false);
@@ -257,10 +297,11 @@ describe("supervised server build updates", () => {
 	it("sends the current update status to a late browser with no registered projects", async () => {
 		const { harness: owned, generation } = await start("service");
 		const projectBrowser = await owned.connect();
-		const projectInitial = await initialStatus(projectBrowser, false);
-		const cursor = projectBrowser.frames.length;
+		const projectStatus = followStatus(generation.port);
+		const projectInitial = await initialStatus(projectStatus, false);
+		const cursor = projectStatus.frames.length;
 		writeFileSync(markerPath, JSON.stringify({ buildId: randomUUID() }));
-		const projectUpdate = await status(projectBrowser, true, cursor);
+		const projectUpdate = await status(projectStatus, true, cursor);
 		await projectBrowser.close();
 		const removed = await sendRpcRequest(
 			join(owned.configDir, "relay.sock"),
@@ -268,19 +309,10 @@ describe("supervised server build updates", () => {
 		);
 		expect(removed.projects).toEqual([]);
 
-		const frames: BrowserFrame[] = [];
-		const browserUrl = `ws://127.0.0.1:${generation.port}/ws`;
-		const ws = new WebSocket(browserUrl);
-		sockets.add(ws);
-		ws.on("message", (data) => {
-			frames.push({
-				message: JSON.parse(data.toString()) as Record<string, unknown>,
-				at: process.hrtime.bigint(),
-			});
-		});
-		ws.on("error", () => {});
-		const lateInitial = await initialStatus({ frames }, true);
-		expect(ws.readyState).toBe(WebSocket.OPEN);
+		const browserUrl = `ws://127.0.0.1:${generation.port}/rpc`;
+		const late = followStatus(generation.port);
+		const lateInitial = await initialStatus(late, true);
+		expect(late.ws.readyState).toBe(WebSocket.OPEN);
 		scenarios.push({
 			scenario: "late browser without projects",
 			generation,
@@ -303,8 +335,8 @@ describe("supervised server build updates", () => {
 				: initialMarker === "invalid JSON"
 					? "{unfinished-build"
 					: undefined;
-		const { harness: owned, generation } = await start("service", marker);
-		const browser = await owned.connect();
+		const { generation } = await start("service", marker);
+		const browser = followStatus(generation.port);
 		const initial = await initialStatus(browser, false);
 		scenarios.push({
 			scenario: "initial marker",
@@ -321,16 +353,17 @@ describe("supervised server build updates", () => {
 		const marker = JSON.stringify({ buildId: randomUUID() });
 		const { harness: owned, generation } = await start(mode, marker);
 		const browser = await owned.connect();
-		const initial = await initialStatus(browser, false);
-		const cursor = browser.frames.length;
+		const browserStatus = followStatus(generation.port);
+		const initial = await initialStatus(browserStatus, false);
+		const cursor = browserStatus.frames.length;
 		writeFileSync(markerPath, JSON.stringify({ buildId: randomUUID() }));
 		await new Promise<void>((done) => setTimeout(done, 5500));
 		expect(
-			browser.frames
+			browserStatus.frames
 				.slice(cursor)
 				.filter(
 					({ message }) =>
-						message["type"] === "server_update" &&
+						message["type"] === "server_status" &&
 						message["restartAvailable"] === true,
 				),
 		).toEqual([]);
@@ -344,28 +377,28 @@ describe("supervised server build updates", () => {
 	}, 30_000);
 
 	it("recognizes the legacy launchd service environment", async () => {
-		const { harness: owned, generation } = await start(
+		const { generation } = await start(
 			"legacy",
 			JSON.stringify({ buildId: randomUUID() }),
 		);
-		const browser = await owned.connect();
+		const browser = followStatus(generation.port);
 		const initial = await initialStatus(browser, true);
 		scenarios.push({ scenario: "legacy service", generation, initial });
 	});
 
 	it("does not offer restart when the running build is the dev sentinel", async () => {
-		const { harness: owned, generation } = await start(
+		const { generation } = await start(
 			"service",
 			JSON.stringify({ buildId: randomUUID() }),
 			"dev",
 		);
-		const browser = await owned.connect();
+		const browser = followStatus(generation.port);
 		const initial = await initialStatus(browser, false, "dev");
 		await new Promise<void>((done) => setTimeout(done, 5500));
 		expect(
 			browser.frames.filter(
 				({ message }) =>
-					message["type"] === "server_update" &&
+					message["type"] === "server_status" &&
 					message["restartAvailable"] === true,
 			),
 		).toEqual([]);
@@ -379,11 +412,11 @@ describe("supervised server build updates", () => {
 			serviceEnvironment,
 		} = await start("service");
 		const browser = await owned.connect();
-		await initialStatus(browser, false);
+		await initialStatus(followStatus(generation.port), false);
 		const sessionId = await browser.createSession("server update restart");
 		const prompt = "before-build-restart";
-		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		const runner = owned.marks.find(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
@@ -401,21 +434,11 @@ describe("supervised server build updates", () => {
 		await browser.close();
 
 		const originId = randomUUID();
-		const frames: BrowserFrame[] = [];
-		const projectUrl = `ws://127.0.0.1:${generation.port}/ws?p=process-test&client=${originId}`;
-		const ws = new WebSocket(projectUrl, { headers: { "x-relay-pin": pin } });
-		sockets.add(ws);
-		ws.on("message", (data) => {
-			frames.push({
-				message: JSON.parse(data.toString()) as Record<string, unknown>,
-				at: process.hrtime.bigint(),
-			});
-		});
-		ws.on("error", () => {});
-		await initialStatus({ frames }, false);
-		const cursor = frames.length;
+		const pinned = followStatus(generation.port, { "x-relay-pin": pin });
+		await initialStatus(pinned, false);
+		const cursor = pinned.frames.length;
 		writeFileSync(markerPath, JSON.stringify({ buildId: randomUUID() }));
-		const update = await status({ frames }, true, cursor);
+		const update = await status(pinned, true, cursor);
 
 		const rpcUrl = `ws://127.0.0.1:${generation.port}/rpc`;
 		const protocol = RpcClient.layerProtocolSocket().pipe(
@@ -435,17 +458,16 @@ describe("supervised server build updates", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
-					yield* client.AttachProject({
+					const attached = yield* client.AttachProject({
 						projectSlug: "process-test",
 						originId,
 					});
+					expect(attached).toEqual({ projectSlug: "process-test" });
 					return yield* client.RestartWithConfig({});
 				}),
 			).pipe(Effect.provide(protocol), Effect.timeout(10_000)),
 		);
 		expect(restarted).toEqual({ ok: true });
-		ws.terminate();
-		sockets.delete(ws);
 		await owned.waitForExit({ keepBrowsersOpen: true });
 		expect(generation.exitCode).toBe(0);
 		expect(generation.signal).toBeNull();
@@ -476,18 +498,20 @@ describe("supervised server build updates", () => {
 		await vi.waitFor(() => expect(replacement.fakeSdkActive).toBe(true), {
 			timeout: 2000,
 		});
-		const replacementInitial = await initialStatus(reconnected, false);
-		const afterPrompt = "after-build-restart";
-		expect((await reconnected.send(sessionId, afterPrompt)).chunks).toEqual(
-			responseChunks(afterPrompt),
+		const replacementInitial = await initialStatus(
+			followStatus(replacement.port),
+			false,
 		);
+		const afterPrompt = "after-build-restart";
+		expect(
+			(await reconnected.send(sessionId, afterPrompt)).chunks.join(""),
+		).toBe(responseChunks(afterPrompt).join(""));
 		expect(owned.runnerPids()).toEqual([runner.pid]);
 		expect(readProof().filter((mark) => mark["kind"] === "query")).toHaveLength(
 			1,
 		);
 		scenarios.push({
 			scenario: "authenticated browser restart and runner re-adoption",
-			projectUrl,
 			rpcUrl,
 			pinRequired: true,
 			generation,

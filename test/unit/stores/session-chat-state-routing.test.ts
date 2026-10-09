@@ -10,7 +10,6 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 afterEach(() => {
 	sessionActivity.clear();
@@ -31,7 +30,7 @@ it("a background session's busy row moves only that session's phase", () => {
 	expect(a.activity.phase).toBe("idle");
 });
 
-it("routes done to the named background session", () => {
+it("routes idle rows to the named background session", () => {
 	seedSessions([
 		{ id: "A", title: "A", status: "idle" },
 		{ id: "B", title: "B", status: "idle" },
@@ -40,7 +39,8 @@ it("routes done to the named background session", () => {
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
 	phaseToProcessing(b.activity);
-	handleMessage({ type: "done", sessionId: "B", code: 0 });
+	applySessionUpsert({ id: "B", title: "B", status: "busy" });
+	applySessionUpsert({ id: "B", title: "B", status: "idle" });
 	expect(b.activity.phase).toBe("idle");
 	expect(b.activity.endedGeneration).toBe(b.activity.turnGeneration);
 	expect(a.activity.endedGeneration).toBe(-1);

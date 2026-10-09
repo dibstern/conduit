@@ -18,6 +18,7 @@ import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { FolderIssue } from "../../../src/lib/project-folders.js";
 import { discoverClaudeRunners } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
 import {
 	ProcessHarness,
@@ -429,7 +430,12 @@ describe("SaveProject through the built daemon", () => {
 			await Effect.runPromise(before.rpc.input.submit(input));
 			await before.waitFor(
 				(message) =>
-					message["type"] === "delta" && message["sessionId"] === sessionId,
+					message["type"] === "transcript_message" &&
+					message["role"] === "assistant" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "text" && Boolean(part.text),
+					) === true &&
+					message["sessionId"] === sessionId,
 			);
 			await vi.waitFor(() => {
 				const state = persistedTurn(fixture, sessionId);
@@ -492,13 +498,9 @@ describe("SaveProject through the built daemon", () => {
 			const after = await fixture.connect(sessionId);
 			const cursor = after.frames.length;
 			writeFileSync(release, "finish held turn");
-			const done = await after.waitFor(
-				(message) =>
-					message["type"] === "done" && message["sessionId"] === sessionId,
-				cursor,
-			);
+			const done = await after.waitForTurnEnd(sessionId, cursor);
 			evidence["done"] = done;
-			expect(done["code"]).toBe(0);
+			expect(done["status"]).toBe("idle");
 			await vi.waitFor(() => {
 				const state = persistedTurn(fixture, sessionId);
 				evidence["persisted"] = state;
@@ -538,13 +540,18 @@ describe("SaveProject through the built daemon", () => {
 			evidence["sdkEnqueues"] = enqueues;
 			expect(enqueues).toHaveLength(1);
 			expect(
-				after.frames
-					.slice(cursor)
-					.filter(
-						({ message }) =>
-							message["type"] === "done" && message["sessionId"] === sessionId,
-					),
-			).toHaveLength(1);
+				new Set(
+					after.frames
+						.slice(cursor)
+						.filter(
+							({ message }) =>
+								message["type"] === "session_row" &&
+								message["id"] === sessionId &&
+								Number(message["lastTurnEndVersion"] ?? 0) > 0,
+						)
+						.map(({ message }) => message["lastTurnEndVersion"]),
+				).size,
+			).toBe(1);
 			evidence["runnerRegistrationsAfter"] = discoverClaudeRunners(
 				fixture.projectDir,
 				fixture.configDir,

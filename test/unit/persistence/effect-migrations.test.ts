@@ -69,6 +69,10 @@ const expectedNames = [
 	"pending_approvals_version",
 	"sessions_model_settings",
 	"sessions_side_thread",
+	"sessions_limit_recovery",
+	"sessions_resumes",
+	"session_sidebar",
+	"session_sidebar_tombstones",
 	"messages_input_id",
 	"pending_inputs",
 	"messages_steered",
@@ -458,7 +462,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(27);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(31);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -611,9 +615,13 @@ describe("Effect migration lineage", () => {
 				[33, "pending_approvals_version"],
 				[34, "sessions_model_settings"],
 				[35, "sessions_side_thread"],
-				[36, "messages_input_id"],
-				[37, "pending_inputs"],
-				[38, "messages_steered"],
+				[36, "sessions_limit_recovery"],
+				[37, "sessions_resumes"],
+				[38, "session_sidebar"],
+				[39, "session_sidebar_tombstones"],
+				[40, "messages_input_id"],
+				[41, "pending_inputs"],
+				[42, "messages_steered"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -686,9 +694,13 @@ describe("Effect migration lineage", () => {
 					[33, "pending_approvals_version"],
 					[34, "sessions_model_settings"],
 					[35, "sessions_side_thread"],
-					[36, "messages_input_id"],
-					[37, "pending_inputs"],
-					[38, "messages_steered"],
+					[36, "sessions_limit_recovery"],
+					[37, "sessions_resumes"],
+					[38, "session_sidebar"],
+					[39, "session_sidebar_tombstones"],
+					[40, "messages_input_id"],
+					[41, "pending_inputs"],
+					[42, "messages_steered"],
 				]);
 				const rows = yield* sql<{
 					id: string;

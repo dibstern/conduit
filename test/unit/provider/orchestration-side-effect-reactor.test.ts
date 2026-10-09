@@ -1,6 +1,14 @@
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Option, TestClock } from "effect";
+import {
+	Deferred,
+	Duration,
+	Effect,
+	Fiber,
+	Layer,
+	Option,
+	TestClock,
+} from "effect";
 import { expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -10,7 +18,13 @@ import {
 	type DaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -66,10 +80,21 @@ describe("ProviderSideEffectReactor", () => {
 			const sendTurn = vi.fn((_input: SendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
+			const getNativeSession = vi.fn((_sessionId: string) =>
+				Effect.succeed({
+					instanceId: "claude",
+					resumeSessionId: "live-interrupted-cursor",
+				}),
+			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
 				sql,
-				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				registry: new ProviderRegistry([
+					{
+						...makeProvider(sendTurn),
+						getNativeSessionEffect: getNativeSession,
+					},
+				]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
 			});
 
@@ -78,11 +103,14 @@ describe("ProviderSideEffectReactor", () => {
 			yield* reactor.drain();
 
 			expect(sendTurn).toHaveBeenCalledTimes(1);
+			expect(getNativeSession).toHaveBeenCalledExactlyOnceWith("session-1");
 			expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
 				sessionId: "session-1",
 				inputId: "legacy-user-1",
 				prompt: "hello",
 				workspaceRoot: "/repo",
+				resumeSessionId: "live-interrupted-cursor",
+				startFreshNativeSession: false,
 			});
 			expect(
 				(yield* sql.unsafe<{ status: string; attempt_count: number }>(
@@ -139,6 +167,80 @@ describe("ProviderSideEffectReactor", () => {
 
 				expect(sendTurn).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+	);
+
+	it.effect(
+		"resumes an old-format durable named-instance turn with its migrated native thread",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const events = yield* EventStoreEffectTag;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* sql`
+					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'work-claude', 'Work', 'idle', 1, 1),
+						('session-2', 'personal', 'Other', 'idle', 1, 1)`;
+				yield* events.appendBatch([
+					canonicalEvent("session.created", "session-2", {
+						sessionId: "session-2",
+						title: "Other",
+						provider: "personal",
+					}),
+					canonicalEvent("session.created", "session-1", {
+						sessionId: "session-1",
+						title: "Work",
+						provider: "work-claude",
+					}),
+					canonicalEvent("session.renamed", "session-2", {
+						sessionId: "session-2",
+						title: "Other renamed",
+					}),
+					canonicalEvent("session.renamed", "session-1", {
+						sessionId: "session-1",
+						title: "Work renamed",
+					}),
+				]);
+				yield* sql`
+					INSERT INTO provider_state (session_id, key, value) VALUES
+						('session-1', 'resumeSessionId', 'legacy-work-sdk-session'),
+						('session-1', 'claudeConfigDir', '/accounts/work')`;
+				yield* seedSendTurnOutbox(sql, { providerId: "work-claude" });
+				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(
+					payload_json, '$.providerState', json(${JSON.stringify({
+						resumeSessionId: "legacy-work-sdk-session",
+						claudeConfigDir: "/accounts/work",
+					})})) WHERE command_id = 'cmd-1'`;
+				const sendTurn = vi.fn((_input: SendTurnInput) =>
+					Effect.succeed(completedTurn),
+				);
+				const reactor = new ProviderSideEffectReactor({
+					sql,
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+					ingestion,
+					resolveProviderDriver: (instanceId) =>
+						instanceId === "work-claude" ? "claude" : undefined,
+				});
+
+				yield* reactor.drain();
+
+				expect(sendTurn).toHaveBeenCalledOnce();
+				expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
+					instanceId: "work-claude",
+					nativeThread: {
+						configDir: "/accounts/work",
+						resumeSessionId: "legacy-work-sdk-session",
+						firstSequence: 2,
+						deliveredThrough: 4,
+					},
+				});
+			}).pipe(
+				Effect.provide(
+					Layer.provideMerge(
+						makeProviderRuntimeIngestionLive(),
+						makePersistenceEffectLayer(":memory:"),
+					),
+				),
+			),
 	);
 
 	it.effect("hands provider output to provider runtime ingestion", () =>

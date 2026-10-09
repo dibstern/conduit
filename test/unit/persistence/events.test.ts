@@ -18,8 +18,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 46 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(46);
+	it("exports all 52 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(52);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("message.snapshot");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
@@ -53,6 +53,7 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_cleanup_failed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.permission_mode_changed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.goal_changed");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.handoff_delivered");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.asked");
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.asked");

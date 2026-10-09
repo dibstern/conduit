@@ -1,8 +1,20 @@
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
+import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
+import {
+	makeProviderStateEffect,
+	ProviderStateEffectTag,
+} from "../persistence/effect/provider-state-effect.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../persistence/effect/read-query-effect.js";
+import {
+	type PreparedTurn,
+	sendPreparedClaudeTurn,
+} from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
@@ -108,6 +120,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
@@ -138,7 +151,7 @@ function clampPollDuration(
 
 const storeFailure =
 	(operation: string) =>
-	(cause: SqlError): ProviderCommandStoreFailure =>
+	(cause: unknown): ProviderCommandStoreFailure =>
 		new ProviderCommandStoreFailure({
 			operation,
 			code: "provider_command_store_failure",
@@ -354,6 +367,7 @@ export class ProviderSideEffectReactor {
 		| UnknownProviderCommandEffect
 		| ProviderNotRegistered
 		| ProviderInstanceFailure
+		| ProviderCommandStoreFailure
 	> {
 		return Effect.gen(this, function* () {
 			const driver = this.options.resolveProviderDriver
@@ -368,13 +382,103 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				return yield* instance.sendTurnEffect({
-					...payload,
-					history: payload.history ?? [],
-					...(driver === "claude" ? { commandAttempt } : {}),
-					eventSink: this.makeReactorEventSink(interactions),
-					abortSignal: new AbortController().signal,
-				});
+				const send = (
+					prepared: PreparedTurn | undefined,
+					nativeResumeFallback: boolean,
+				) =>
+					instance.sendTurnEffect({
+						...payload,
+						history: payload.history ?? [],
+						...(driver === "claude"
+							? {
+									commandAttempt,
+									instanceId: payload.instanceId ?? row.provider_id,
+									prompt: prepared?.prompt ?? payload.prompt,
+									configDir: prepared?.configDir,
+									resumeSessionId: prepared?.resumeSessionId,
+									startFreshNativeSession:
+										prepared?.resumeSessionId === undefined,
+									nativeResumeFallback,
+									nativeThread: prepared?.nativeThread,
+									...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
+								}
+							: {}),
+						eventSink: this.makeReactorEventSink(interactions),
+						abortSignal: new AbortController().signal,
+					});
+				const result =
+					driver === "claude"
+						? yield* Effect.gen(function* () {
+								const state = yield* makeProviderStateEffect;
+								const read = yield* makeReadQueryEffect;
+								return yield* sendPreparedClaudeTurn({
+									sessionId: payload.sessionId,
+									instanceId: payload.instanceId ?? row.provider_id,
+									commandId: row.command_id,
+									userText: payload.prompt,
+									options: {
+										liveSession: yield* instance.getNativeSessionEffect?.(
+											payload.sessionId,
+										) ?? Effect.succeed(undefined),
+										configDir: payload.configDir,
+										agent: payload.agent,
+										userMessageId:
+											payload.continuation?.cutOffMessageId ?? payload.inputId,
+										continuation: payload.continuation !== undefined,
+										nativeResumeFallback: payload.nativeResumeFallback,
+										modelContextWindow:
+											payload.contextWindow === "1m" ? 1000000 : undefined,
+									},
+									send,
+								}).pipe(
+									Effect.provideService(ProviderStateEffectTag, state),
+									Effect.provideService(ReadQueryEffectTag, read),
+								);
+							}).pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.mapError((cause) =>
+									cause instanceof ProviderInstanceFailure
+										? cause
+										: storeFailure("prepareTurn")(cause),
+								),
+							)
+						: yield* send(undefined, false);
+				if (
+					result.status === "completed" &&
+					result.handoff &&
+					this.options.persistHandoffDelivered
+				) {
+					yield* this.options
+						.persistHandoffDelivered(
+							payload.sessionId,
+							{
+								...result.handoff,
+								instanceId: payload.instanceId ?? row.provider_id,
+							},
+							row.command_id,
+						)
+						.pipe(Effect.mapError(storeFailure("handoffDelivered")));
+				}
+				if (
+					driver === "claude" &&
+					result.status === "completed" &&
+					result.providerStateUpdates?.length
+				) {
+					yield* makeProviderStateEffect.pipe(
+						Effect.flatMap((state) =>
+							state.saveUpdates(
+								payload.sessionId,
+								result.providerStateUpdates.map((update) => ({
+									key: update.key,
+									value: String(update.value),
+								})),
+							),
+						),
+						Effect.provideService(SqlClient.SqlClient, this.options.sql),
+						Effect.mapError(storeFailure("saveProviderState")),
+					);
+				}
+				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
 				yield* instance.interruptTurnEffect(row.session_id);
@@ -442,18 +546,30 @@ export class ProviderSideEffectReactor {
 					return Effect.fail(
 						toParseFailure("Invalid send_turn outbox payload"),
 					);
-				const inputId =
-					payload["inputId"] ??
-					payload["userMessageId"] ??
-					payload["commandId"] ??
-					payload["turnId"];
+				// Pre-inbox continuations carried a boolean and the cut-off id in
+				// userMessageId; their own identity was the command id.
+				const legacyContinuation =
+					payload["continuation"] === true &&
+					typeof payload["userMessageId"] === "string";
+				const inputId = legacyContinuation
+					? payload["commandId"]
+					: (payload["inputId"] ??
+						payload["userMessageId"] ??
+						payload["commandId"] ??
+						payload["turnId"]);
 				const {
 					turnId: _turnId,
 					userMessageId: _userMessageId,
 					commandId: _commandId,
 					...input
 				} = payload;
-				const normalized = { ...input, inputId };
+				const normalized = {
+					...input,
+					inputId,
+					...(legacyContinuation
+						? { continuation: { cutOffMessageId: payload["userMessageId"] } }
+						: {}),
+				};
 				return isSendTurnOutboxPayload(normalized)
 					? Effect.succeed(normalized)
 					: Effect.fail(toParseFailure("Invalid send_turn outbox payload"));

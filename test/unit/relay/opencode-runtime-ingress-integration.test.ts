@@ -108,10 +108,6 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			"opencode",
 		);
 		expect(order).toEqual(["ingress-effect", "translator"]);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"s1",
-			translated,
-		);
 	});
 
 	it("calls runtime ingress even when relay translation skips the event", async () => {
@@ -137,7 +133,6 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			"s1",
 			"opencode",
 		);
-		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 	});
 
 	it("calls runtime ingress on permission.asked before the relay early return", async () => {
@@ -198,10 +193,6 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			"s1",
 			"opencode",
 		);
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"s1",
-			translated,
-		);
 	});
 
 	it("surfaces unexpected runtime ingress effect failures to the caller", async () => {
@@ -238,7 +229,6 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 			"work-oc",
 		);
 		expect(deps.translator.translate).not.toHaveBeenCalled();
-		expect(deps.wsHandler.broadcastPerSessionEvent).not.toHaveBeenCalled();
 	});
 
 	it("continues relay handling when runtime ingress is absent", async () => {
@@ -260,10 +250,5 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 		});
 
 		await runSSEEvent(deps, event);
-
-		expect(deps.wsHandler.broadcastPerSessionEvent).toHaveBeenCalledWith(
-			"s1",
-			translated,
-		);
 	});
 });

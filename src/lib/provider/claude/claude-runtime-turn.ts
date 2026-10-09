@@ -1,5 +1,7 @@
 import type { UUID } from "node:crypto";
 import { Deferred, Effect, HashMap, Ref } from "effect";
+import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
+import { isClaudeResumeFailure } from "../event-sink-errors.js";
 import type { SendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
@@ -223,6 +225,12 @@ export function resolveErrorTurnEffect(
 			yield* Deferred.succeed(waiter.deferred, {
 				...zeroTurnResult("error"),
 				error: { code: "provider_error", message: errorMsg },
+				...(ctx.resumeFallbackAllowed &&
+				!ctx.queryInitialized &&
+				isClaudeResumeFailure(err)
+					? { nativeResumeRejected: true }
+					: {}),
+				providerStateUpdates: [],
 			});
 	});
 }
@@ -273,15 +281,34 @@ export function sdkResultToTurnResult(
 					},
 				}
 			: {}),
+		...(!isSuccess &&
+		!isInterrupted &&
+		ctx.resumeFallbackAllowed &&
+		!ctx.queryInitialized &&
+		isClaudeResumeFailure(errorMessage)
+			? { nativeResumeRejected: true }
+			: {}),
 		providerStateUpdates: [
-			...(ctx.configDir
-				? [{ key: "claudeConfigDir", value: ctx.configDir }]
-				: []),
-			...(ctx.resumeSessionId
+			...(isSuccess && ctx.resumeSessionId
 				? [
 						{
-							key: "resumeSessionId",
-							value: ctx.resumeSessionId,
+							key: nativeThreadKey(ctx.instanceId ?? "claude"),
+							value: JSON.stringify({
+								...(ctx.configDir !== undefined
+									? { configDir: ctx.configDir }
+									: {}),
+								resumeSessionId: ctx.resumeSessionId,
+								firstSequence: ctx.nativeThread?.firstSequence ?? 0,
+								deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,
+							}),
+						},
+					]
+				: []),
+			...(isSuccess
+				? [
+						{
+							key: `claudeAgent:${ctx.instanceId ?? "claude"}`,
+							value: ctx.currentAgent ?? "",
 						},
 					]
 				: []),

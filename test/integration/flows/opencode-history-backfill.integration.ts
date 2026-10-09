@@ -278,13 +278,21 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			persistenceDbPath: dbPath,
 			...(configDir ? { configDir } : {}),
 		});
-		await waitFor(
-			() =>
-				server.diagnostics.filter((entry) => entry.event === "sse_connect")
-					.length > connectsBefore,
-			"the relay's SSE connection",
-		);
-		return started;
+		try {
+			// Startup only subscribes to instance events. A provider read opens
+			// the lazy OpenCode stream without creating or viewing a session.
+			await started.client.app.path();
+			await waitFor(
+				() =>
+					server.diagnostics.filter((entry) => entry.event === "sse_connect")
+						.length > connectsBefore,
+				"the relay's SSE connection",
+			);
+			return started;
+		} catch (error) {
+			await started.stop();
+			throw error;
+		}
 	}
 
 	async function restartWithRest(
@@ -327,7 +335,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		stack = await startStack(mock, dbPath);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/ws?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
@@ -419,7 +427,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		stack = await startStack(mock, dbPath, configDir);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/ws?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();

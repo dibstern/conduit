@@ -1,9 +1,27 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import {
+	type ProcessBrowser,
+	ProcessHarness,
+	responseChunks,
+} from "../../helpers/process-harness.js";
+
+async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
+	const envelopes = await Effect.runPromise(
+		browser.rpc
+			.SubscribeShell({ projectSlug: "process-test" })
+			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+	);
+	const snapshot = [...envelopes][0];
+	if (snapshot?._tag !== "snapshot") throw new Error("Missing shell snapshot");
+	const session = snapshot.rows.find((row) => row.id === sessionId);
+	if (!session) throw new Error("Missing session row");
+	return session;
+}
 
 function persisted(harness: ProcessHarness, sessionId: string) {
 	const db = new Database(harness.projectStorePath(), { readonly: true });
@@ -77,10 +95,16 @@ describe("running Claude turn status across restart", () => {
 			}),
 		);
 		// This fixture pauses after its first delta until release-upgrade-turn.
-		void browser.send(sessionId, "upgrade-long-turn").catch(() => undefined);
+		const prompt = "upgrade-long-turn";
+		void browser.send(sessionId, prompt).catch(() => undefined);
 		await browser.waitFor(
 			(message) =>
-				message["type"] === "delta" && message["sessionId"] === sessionId,
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true &&
+				message["sessionId"] === sessionId,
 		);
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
@@ -99,17 +123,9 @@ describe("running Claude turn status across restart", () => {
 		const stopped = persisted(harness, sessionId);
 		await harness.restart();
 		const reconnected = await harness.connect(sessionId);
-		const initSnapshot = await reconnected.waitFor(
-			(message) =>
-				message["type"] === "status" && message["sessionId"] === sessionId,
-		);
-		const cursor = reconnected.frames.length;
+		const initSnapshot = await sessionSnapshot(reconnected, sessionId);
 		await reconnected.view(sessionId);
-		const snapshot = await reconnected.waitFor(
-			(message) =>
-				message["type"] === "status" && message["sessionId"] === sessionId,
-			cursor,
-		);
+		const snapshot = await sessionSnapshot(reconnected, sessionId);
 		const adopted = harness.marks
 			.filter((mark) => mark.kind === "runner-started")
 			.at(-1);
@@ -128,42 +144,40 @@ describe("running Claude turn status across restart", () => {
 		};
 		proofs.push(proof);
 		expect(adopted).toMatchObject({ pid: runner.pid });
-		expect(initSnapshot["status"]).toBe("processing");
-		expect(snapshot["status"]).toBe("processing");
+		expect(initSnapshot.status).toBe("busy");
+		expect(snapshot.status).toBe("busy");
 		expect(resumed.session.status).toBe("busy");
 		expect(resumed.terminalEvents).toEqual(before.terminalEvents);
 		expect(resumed.turns).toEqual([{ state: "running" }]);
-		// The first poll is silent. When monitoring is enabled, its later busy
-		// notification must carry the session ID required by frontend routing.
-		if (opencodeAvailable) {
-			const monitoringStatus = await reconnected.waitFor(
-				(message) =>
-					message["type"] === "status" && message["status"] === "processing",
-				reconnected.frames.length,
-			);
-			proof["monitoringStatus"] = monitoringStatus;
-			expect(monitoringStatus["sessionId"]).toBe(sessionId);
-		}
 		const streamingCursor = reconnected.frames.length;
-		proof["restartResultCount"] = reconnected.frames.filter(
-			({ message }) =>
-				message["type"] === "result" && message["sessionId"] === sessionId,
-		).length;
-		expect(proof["restartResultCount"]).toBe(0);
-		const done = reconnected.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
-		);
+		proof["restartTerminalEvents"] = resumed.terminalEvents;
+		const done = reconnected.waitForTurnEnd(sessionId, streamingCursor);
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
-		expect((await done)["code"]).toBe(0);
-		const continuedDeltaCount = reconnected.frames
+		expect((await done)["status"]).toBe("idle");
+		await reconnected.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				message["sessionId"] === sessionId &&
+				(message["parts"] as HistoryMessage["parts"])
+					?.filter((part) => part.type === "text")
+					.map((part) => part.text ?? "")
+					.join("") === responseChunks(prompt).join(""),
+			streamingCursor,
+		);
+		const continuedProjectionCount = reconnected.frames
 			.slice(streamingCursor)
 			.filter(
 				({ message }) =>
-					message["type"] === "delta" && message["sessionId"] === sessionId,
+					message["type"] === "transcript_message" &&
+					message["role"] === "assistant" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "text" && Boolean(part.text),
+					) === true &&
+					message["sessionId"] === sessionId,
 			).length;
-		proof["continuedDeltaCount"] = continuedDeltaCount;
-		expect(continuedDeltaCount).toBeGreaterThan(0);
+		proof["continuedProjectionCount"] = continuedProjectionCount;
+		expect(continuedProjectionCount).toBeGreaterThan(0);
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
 			expect(persisted(harness, sessionId).session.status).toBe("idle");

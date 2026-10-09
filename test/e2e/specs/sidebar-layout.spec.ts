@@ -190,8 +190,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 	const warning = page.getByTestId("session-list-stale");
 	await expect(warning).toBeVisible({ timeout: 5_000 });
 	const beforeReconnect = subscriptions;
-	// The shell rides the /rpc control socket, and the project attach no longer
-	// replays on a /ws reconnect (964169b9), so drop the socket the feed is on.
+	// Close the /rpc control socket to make the shell feed resubscribe.
 	rpc.closeStreamSocket("SubscribeShell");
 	await expect.poll(() => subscriptions).toBeGreaterThan(beforeReconnect);
 	await expect(warning).toBeVisible();

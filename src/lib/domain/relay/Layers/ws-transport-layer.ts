@@ -1,12 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
-import {
-	type ClientState,
-	removeClient,
-	WsHandlerStateTag,
-} from "../Services/ws-handler-service.js";
+import { Context, Effect, Layer } from "effect";
 
 export interface WsTransport {
 	readonly wss: import("ws").WebSocketServer;
@@ -87,52 +82,3 @@ export const makeWsTransportLive = (
 			return { wss, handleUpgrade };
 		}),
 	);
-
-const heartbeatOnce = Effect.fn("ws.heartbeat.tick")(function* () {
-	const ref = yield* WsHandlerStateTag;
-	const clients = yield* Ref.get(ref);
-	const staleClients: Array<[string, ClientState]> = [];
-	const clientsToPing: Array<[string, ClientState]> = [];
-
-	for (const [clientId, client] of clients) {
-		if (!client.isAlive) {
-			staleClients.push([clientId, client]);
-			yield* Effect.try(() => {
-				client.ws.terminate?.();
-				if (!client.ws.terminate) client.ws.close();
-			}).pipe(Effect.catchAll(() => Effect.void));
-			continue;
-		}
-		clientsToPing.push([clientId, client]);
-	}
-
-	if (clientsToPing.length > 0) {
-		yield* Ref.update(ref, (map) => {
-			let updated = map;
-			for (const [clientId, client] of clientsToPing) {
-				const current = HashMap.get(updated, clientId);
-				if (Option.isNone(current) || current.value.ws !== client.ws) continue;
-				updated = HashMap.set(updated, clientId, {
-					...current.value,
-					isAlive: false,
-				});
-			}
-			return updated;
-		});
-	}
-
-	for (const [_clientId, client] of clientsToPing) {
-		yield* Effect.try(() => client.ws.ping?.()).pipe(
-			Effect.catchAll(() => Effect.void),
-		);
-	}
-
-	for (const [clientId, client] of staleClients) {
-		yield* removeClient(clientId, client.ws);
-	}
-});
-
-export const makeHeartbeatFiber = (intervalMs = 30_000) =>
-	Effect.forever(
-		Effect.sleep(intervalMs).pipe(Effect.zipRight(heartbeatOnce())),
-	).pipe(Effect.annotateLogs("component", "ws-heartbeat"));

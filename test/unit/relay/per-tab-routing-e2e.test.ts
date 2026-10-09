@@ -1,10 +1,9 @@
 // E2E: Per-Tab Session Routing (Mock OpenCode)
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
-// real WebSocket clients to verify SSE events route only to session viewers.
+// RPC clients to verify SSE events reach session-detail subscribers.
 //
 // No real OpenCode required — runs in CI without external dependencies.
 
-import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
@@ -16,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -254,6 +252,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		configDir: persistenceDir,
 		slug: "test-project",
 		persistenceDbPath: join(persistenceDir, "events.db"),
+		publishGlobalSetting: () => Effect.void,
 		log: createSilentLogger(), // silence logs
 		noServer: true,
 		statusPollerInterval: 100,
@@ -264,24 +263,7 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	});
 
-	const browserSockets = new WebSocketServer({ noServer: true });
 	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			browserSockets.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const clientId = params.get("client");
-				const requestedSessionId = params.get("session");
-				relay.wsHandler.attach(ws, {
-					clientId:
-						clientId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientId)
-							? clientId
-							: randomBytes(8).toString("hex"),
-					...(requestedSessionId != null ? { requestedSessionId } : {}),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			relay.rpcWsHandler.handleUpgrade(req, socket, head);
 			return;
@@ -304,23 +286,16 @@ async function createTestHarness(): Promise<TestHarness> {
 		mock,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}/ws`;
+			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-project`;
 			if (opts?.session) {
-				url += `?session=${encodeURIComponent(opts.session)}`;
+				url += `&session=${encodeURIComponent(opts.session)}`;
 			}
 			const client = new TestWsClient(url);
 			await client.waitForOpen();
 			return client;
 		},
 		async stop() {
-			try {
-				await relay.stop();
-			} finally {
-				for (const ws of browserSockets.clients) ws.terminate();
-				await new Promise<void>((resolve) =>
-					browserSockets.close(() => resolve()),
-				);
-			}
+			await relay.stop();
 			await new Promise<void>((r) => relayServer.close(() => r()));
 			await mock.close();
 			rmSync(persistenceDir, { recursive: true, force: true });
@@ -332,7 +307,7 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 	let harness: TestHarness;
 
 	beforeAll(async () => {
-		// Client init also discovers Claude capabilities; keep the relay off the live SDK.
+		// Keep capability discovery off the live Claude SDK.
 		__setProbeOverrideForTesting(async () => ({
 			models: [],
 			commands: [],
@@ -356,30 +331,30 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		expect(client.getReceivedOfType("family")).toContainEqual(
 			expect.objectContaining({ _tag: "snapshot" }),
 		);
-		expect(client.getReceivedOfType("session_family")).toEqual([]);
 
 		await client.close();
 	});
 
-	it("SSE chat events reach every client on the project (Phase 0b firehose)", async () => {
-		// Phase 0b: per-session chat events are broadcast to every client on
-		// the project's /p/<slug> regardless of viewed session. The frontend
-		// dispatcher routes into the correct per-session slot using each
-		// event's sessionId.
+	it("SSE chat events reach every session subscriber, whatever it views", async () => {
 		const client1 = await harness.connectClient();
 		const client2 = await harness.connectClient();
 		await client1.waitForInitialState();
 		await client2.waitForInitialState();
 
-		// Client1 views session A, Client2 views session B — but this no
-		// longer gates event delivery under Phase 0b.
+		// Viewing does not gate delivery: a subscriber to session A's detail
+		// receives its transcript while viewing session B.
 		await client1.viewSession("sess-A");
 		await client2.viewSession("sess-B");
+		await client1.subscribeSessionDetail("sess-A");
+		await client2.subscribeSessionDetail("sess-A");
 
-		client1.clearReceived();
-		client2.clearReceived();
-
-		// Inject an SSE text delta event for session A only.
+		harness.mock.injectSSE({
+			type: "message.updated",
+			properties: {
+				sessionID: "sess-A",
+				info: { id: "msg-1", sessionID: "sess-A", role: "assistant" },
+			},
+		});
 		harness.mock.injectSSE({
 			type: "message.part.delta",
 			properties: {
@@ -391,80 +366,14 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 			},
 		});
 
-		// Both clients should receive it — the frontend dispatcher decides
-		// which session slot to write into.
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		expect(delta1["text"]).toBe("hello from session A");
-		expect(delta2["text"]).toBe("hello from session A");
-
-		await client1.close();
-		await client2.close();
-	});
-
-	it("SSE events for session B reach every client on the project", async () => {
-		const client1 = await harness.connectClient();
-		const client2 = await harness.connectClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-
-		await client1.viewSession("sess-A");
-		await client2.viewSession("sess-B");
-
-		client1.clearReceived();
-		client2.clearReceived();
-
-		harness.mock.injectSSE({
-			type: "message.part.delta",
-			properties: {
-				sessionID: "sess-B",
-				partID: "part-2",
-				messageID: "msg-2",
-				field: "text",
-				delta: "hello from session B",
-			},
-		});
-
-		// Both clients receive it under Phase 0b.
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		expect(delta2["text"]).toBe("hello from session B");
-		expect(delta1["text"]).toBe("hello from session B");
-
-		await client1.close();
-		await client2.close();
-	});
-
-	it("both clients viewing same session both receive SSE events", async () => {
-		const client1 = await harness.connectClient();
-		const client2 = await harness.connectClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-
-		// Both view session A
-		await client1.viewSession("sess-A");
-		await client2.viewSession("sess-A");
-
-		client1.clearReceived();
-		client2.clearReceived();
-
-		// Inject SSE delta event for session A
-		harness.mock.injectSSE({
-			type: "message.part.delta",
-			properties: {
-				sessionID: "sess-A",
-				partID: "part-3",
-				messageID: "msg-3",
-				field: "text",
-				delta: "shared update",
-			},
-		});
-
-		// Both clients should receive it
-		const delta1 = await client1.waitFor("delta", { timeout: 3000 });
-		const delta2 = await client2.waitFor("delta", { timeout: 3000 });
-		expect(delta1["text"]).toBe("shared update");
-		expect(delta2["text"]).toBe("shared update");
+		const hasText: Parameters<TestWsClient["waitForTranscriptMessage"]>[0] = (
+			message,
+		) =>
+			(message.parts ?? []).some(
+				(part) => part.text === "hello from session A",
+			);
+		await client1.waitForTranscriptMessage(hasText, "sess-A", 3000);
+		await client2.waitForTranscriptMessage(hasText, "sess-A", 3000);
 
 		await client1.close();
 		await client2.close();
@@ -497,14 +406,14 @@ describe("E2E: Per-tab session routing with mock OpenCode", () => {
 		await client2.close();
 	});
 
-	it("client connecting with ?session= gets that session metadata first", async () => {
+	it("client requesting a session gets that family snapshot first", async () => {
 		// First, ensure the global active session is sess-A (the default)
 		const setupClient = await harness.connectClient();
 		await setupClient.waitForInitialState();
 		await setupClient.viewSession("sess-A");
 		await setupClient.close();
 
-		// Now connect a NEW client requesting sess-B via query param
+		// The RPC client follows sess-B before selecting its initial session.
 		const client = await harness.connectClient({ session: "sess-B" });
 		await client.waitForInitialState();
 

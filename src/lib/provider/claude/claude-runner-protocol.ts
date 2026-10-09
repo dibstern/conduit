@@ -14,6 +14,7 @@ import type {
 	ClaudeSessionOutputReply,
 	ClaudeSessionTurn,
 } from "./claude-session-runner.js";
+import type { ClaudeThreadReadInput, ClaudeThreadReadResult } from "./types.js";
 
 export const CLAUDE_RUNNER_PROTOCOL_VERSION = 5;
 
@@ -23,8 +24,12 @@ export const claudeRunnerBuildId = (): string =>
 		: BUILD_ID;
 
 /** Cleanup from an old attempt must never release a newer attempt's sink. */
-export const claudeRunnerSinkId = (commandId: string, attempt = 0): string =>
-	`${commandId}:${attempt}`;
+export const claudeRunnerSinkId = (
+	commandId: string,
+	attempt = 0,
+	nativeResumeFallback = false,
+): string =>
+	`${commandId}:${attempt}${nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 
 export interface ClaudeRunnerHello {
 	readonly type: "hello";
@@ -60,6 +65,12 @@ export interface ClaudeRunnerHello {
 
 type ClaudeRunnerReply =
 	| {
+			readonly type: "thread-read-reply";
+			readonly requestId: string;
+			readonly result: ClaudeThreadReadResult;
+			readonly failure?: ClaudeSessionFailure;
+	  }
+	| {
 			readonly type: "upgrade-reply";
 			readonly requestId: string;
 			readonly result: boolean;
@@ -81,6 +92,11 @@ type ClaudeRunnerReply =
 
 export type ClaudeRunnerMessage =
 	| ClaudeRunnerHello
+	| {
+			readonly type: "thread-read";
+			readonly requestId: string;
+			readonly input: ClaudeThreadReadInput;
+	  }
 	| { readonly type: "upgrade-state"; readonly state: ClaudeRunnerUpgradeState }
 	| {
 			readonly type: "upgrade-retire";
@@ -218,14 +234,17 @@ export class ClaudeRunnerSocket {
 				if (
 					message.type === "command-reply" ||
 					message.type === "output-reply" ||
-					message.type === "upgrade-reply"
+					message.type === "upgrade-reply" ||
+					message.type === "thread-read-reply"
 				) {
 					const key =
-						message.type === "upgrade-reply"
-							? `upgrade:${message.requestId}`
-							: message.type === "command-reply"
-								? `command:${message.commandId}`
-								: `output:${message.outputId}`;
+						message.type === "thread-read-reply"
+							? `thread-read:${message.requestId}`
+							: message.type === "upgrade-reply"
+								? `upgrade:${message.requestId}`
+								: message.type === "command-reply"
+									? `command:${message.commandId}`
+									: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -262,7 +281,8 @@ export class ClaudeRunnerSocket {
 	write(message: ClaudeRunnerMessage): void {
 		if (this.socket.destroyed) return;
 		// Runners can outlive the daemon. Older builds read these aliases for
-		// turn correlation and report commandId in their attachment bindings.
+		// turn correlation (a continuation's turn is its cut-off message) and
+		// report commandId in their attachment bindings.
 		const frame =
 			message.type === "command" && message.command.type === "send-turn"
 				? {
@@ -272,7 +292,9 @@ export class ClaudeRunnerSocket {
 							input: {
 								...message.command.input,
 								turnId: message.command.input.inputId,
-								userMessageId: message.command.input.inputId,
+								userMessageId:
+									message.command.input.continuation?.cutOffMessageId ??
+									message.command.input.inputId,
 								commandId: message.commandId,
 							},
 						},
@@ -315,6 +337,17 @@ export class ClaudeRunnerSocket {
 			type: "output",
 			outputId,
 			output,
+		});
+	}
+
+	threadReadEffect(
+		input: ClaudeThreadReadInput,
+	): Effect.Effect<ClaudeThreadReadResult, ClaudeSessionFailure> {
+		const requestId = randomUUID();
+		return this.requestEffect(`thread-read:${requestId}`, {
+			type: "thread-read",
+			requestId,
+			input,
 		});
 	}
 

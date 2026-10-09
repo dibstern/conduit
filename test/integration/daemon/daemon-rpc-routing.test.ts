@@ -8,7 +8,6 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, ManagedRuntime, Ref } from "effect";
 import { expect, vi } from "vitest";
-import WebSocket from "ws";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -21,19 +20,19 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { makeWsHandlerStateLive } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	WebSocketRelayRouterLive,
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { clearSessionInputDraft } from "../../../src/lib/handlers/prompt.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
-import { makeEffectWsHandler } from "../../../src/lib/server/effect-ws-handler.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockConfig,
+	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -56,22 +55,9 @@ const makeProjectStore = (
 	);
 };
 
-const waitForOpen = (ws: WebSocket) =>
-	Effect.async<void, Error>((resume) => {
-		ws.once("open", () => resume(Effect.void));
-		ws.once("error", (error) => resume(Effect.fail(error)));
-	});
-
-const waitFor = (assertion: () => void) =>
-	Effect.tryPromise({
-		try: () => vi.waitFor(assertion),
-		catch: (cause) =>
-			cause instanceof Error ? cause : new Error(String(cause)),
-	});
-
 describe("daemon shared RPC routing", () => {
 	it.scoped.each(["ViewSession", "AttachProject"] as const)(
-		"reattaches one daemon event socket when %s moves across projects",
+		"routes %s across projects on one daemon RPC socket",
 		(operation) =>
 			Effect.gen(function* () {
 				const root = yield* Effect.acquireRelease(
@@ -101,50 +87,43 @@ describe("daemon shared RPC routing", () => {
 				];
 				const handlers = new Map<
 					string,
-					Effect.Effect.Success<ReturnType<typeof makeEffectWsHandler>>
+					ReturnType<typeof makeMockWebSocketHandler>
 				>();
+				const startPolling = vi.fn();
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => clearSessionInputDraft("session-b")),
+				);
 				const factory = (slug: string) =>
 					Effect.gen(function* () {
+						const wsHandler = makeMockWebSocketHandler();
+						const pollerManager = {
+							on: vi.fn(),
+							isPolling: vi.fn(() => false),
+							startPolling,
+							stopPolling: vi.fn(),
+							notifySSEEvent: vi.fn(),
+						};
 						const runtime = ManagedRuntime.make(
 							Layer.mergeAll(
 								makeTestHandlerLayer({
 									config: makeMockConfig({ slug }),
+									wsHandler,
+									pollerManager,
 								}),
 								makeWsTransportLive({ noServer: true }),
-								makeWsHandlerStateLive(),
 							),
 						);
-						const wsHandler = yield* makeEffectWsHandler({
-							heartbeatInterval: 300_000,
-						}).pipe(Effect.provide(runtime));
 						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 							runtime,
 						}).pipe(Effect.provide(runtime));
 						handlers.set(slug, wsHandler);
-						wsHandler.on(
-							"client_connected",
-							({ clientId, requestedSessionId }) => {
-								if (requestedSessionId) {
-									wsHandler.setClientSession(clientId, requestedSessionId);
-								}
-								wsHandler.sendTo(clientId, {
-									type: "error",
-									sessionId: requestedSessionId ?? `${slug}-default`,
-									code: "BOOTSTRAP",
-									message: `${slug} bootstrap`,
-								});
-							},
-						);
 						return {
 							slug,
-							attach: (
-								ws: WebSocket,
-								options: Parameters<typeof wsHandler.attach>[1],
-							) => wsHandler.attach(ws, options),
 							wsHandler,
 							rpcWsHandler,
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							stop: async () => {
-								await wsHandler.drain();
 								await rpcWsHandler.drain();
 								await runtime.dispose();
 							},
@@ -162,6 +141,8 @@ describe("daemon shared RPC routing", () => {
 							server.close(() => resume(Effect.void));
 						}),
 				);
+				const upgrades = vi.fn();
+				server.on("upgrade", upgrades);
 				const routerContext = yield* Layer.build(
 					WebSocketRelayRouterLive.pipe(
 						Layer.provide(
@@ -198,38 +179,6 @@ describe("daemon shared RPC routing", () => {
 				if (!address || typeof address === "string") {
 					return yield* Effect.fail(new Error("No TCP address"));
 				}
-				const eventMessages: Record<string, unknown>[] = [];
-				const eventSocket = yield* Effect.acquireRelease(
-					Effect.sync(
-						() =>
-							new WebSocket(
-								`ws://127.0.0.1:${address.port}/ws?client=daemon-client&session=session-a`,
-							),
-					),
-					(ws) => Effect.sync(() => ws.close()),
-				);
-				eventSocket.on("message", (data) => {
-					eventMessages.push(
-						JSON.parse(data.toString()) as Record<string, unknown>,
-					);
-				});
-				yield* waitForOpen(eventSocket);
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["code"] === "BOOTSTRAP" &&
-								JSON.stringify(message).includes("project-a bootstrap"),
-						),
-					).toBe(true);
-				});
-				const bootstrapA = eventMessages.findIndex(
-					(message) =>
-						message["code"] === "BOOTSTRAP" &&
-						JSON.stringify(message).includes("project-a bootstrap"),
-				);
-				expect(bootstrapA).toBeGreaterThanOrEqual(0);
-
 				const rpcContext = yield* Layer.build(
 					RpcClient.layerProtocolSocket().pipe(
 						Layer.provide(
@@ -243,6 +192,19 @@ describe("daemon shared RPC routing", () => {
 					Effect.provide(rpcContext),
 				);
 				expect(
+					yield* rpcClient.AttachProject({
+						projectSlug: "project-a",
+						originId: "daemon-client",
+					}),
+				).toEqual({ projectSlug: "project-a" });
+				if (operation === "ViewSession") {
+					yield* rpcClient.SyncInputDraft({
+						projectSlug: "project-b",
+						sessionId: "session-b",
+						text: "saved draft",
+					});
+				}
+				expect(
 					yield* operation === "ViewSession"
 						? rpcClient.ViewSession({
 								projectSlug: "project-b",
@@ -250,79 +212,35 @@ describe("daemon shared RPC routing", () => {
 								originId: "daemon-client",
 							})
 						: rpcClient.AttachProject({
-								projectSlug: "project-b",
+								projectSlug: "project-a",
+								sessionId: "session-b",
 								originId: "daemon-client",
 							}),
 				).toMatchObject(
 					operation === "ViewSession"
-						? { ok: true }
+						? { ok: true, draft: "saved draft" }
 						: { projectSlug: "project-b" },
 				);
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["code"] === "BOOTSTRAP" &&
-								JSON.stringify(message).includes("project-b bootstrap"),
-						),
-					).toBe(true);
-				});
-				const bootstrapB = eventMessages.findIndex(
-					(message) =>
-						message["code"] === "BOOTSTRAP" &&
-						JSON.stringify(message).includes("project-b bootstrap"),
-				);
-				expect(bootstrapB).toBeGreaterThan(bootstrapA);
-				expect(eventSocket.readyState).toBe(WebSocket.OPEN);
-				expect(
-					eventMessages.filter((message) => message["code"] === "BOOTSTRAP"),
-				).toEqual([
-					{
-						type: "error",
-						alertId: expect.any(String),
-						sessionId: "session-a",
-						code: "BOOTSTRAP",
-						message: "project-a bootstrap",
-					},
-					{
-						type: "error",
-						alertId: expect.any(String),
-						sessionId:
-							operation === "ViewSession" ? "session-b" : "project-b-default",
-						code: "BOOTSTRAP",
-						message: "project-b bootstrap",
-					},
-				]);
+				for (const projectSlug of ["project-a", "project-b"]) {
+					expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
+						projectSlug,
+						commands: [],
+					});
+				}
+				expect(upgrades).toHaveBeenCalledTimes(1);
 
 				const handlerA = handlers.get("project-a");
 				const handlerB = handlers.get("project-b");
 				if (!handlerA || !handlerB) {
 					return yield* Effect.fail(new Error("Expected both relays to start"));
 				}
-				handlerA.broadcast({
-					type: "instance_update",
-					instanceId: "from-a",
-				});
-				handlerB.broadcast({
-					type: "instance_update",
-					instanceId: "from-b",
-				});
-				yield* waitFor(() => {
-					expect(
-						eventMessages.some(
-							(message) =>
-								message["type"] === "instance_update" &&
-								JSON.stringify(message).includes("from-b"),
-						),
-					).toBe(true);
-				});
-				expect(
-					eventMessages.some(
-						(message) =>
-							message["type"] === "instance_update" &&
-							JSON.stringify(message).includes("from-a"),
-					),
-				).toBe(false);
+				if (operation === "ViewSession") {
+					expect(handlerB.setClientSession).toHaveBeenCalledWith(
+						"daemon-client",
+						"session-b",
+					);
+					expect(startPolling).toHaveBeenCalledWith("session-b");
+				}
 			}),
 	);
 
@@ -441,9 +359,10 @@ describe("daemon shared RPC routing", () => {
 						}).pipe(Effect.provide(runtime));
 						return {
 							slug,
-							attach: () => () => {},
 							wsHandler: {},
 							rpcWsHandler,
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							stop: async () => {
 								await rpcWsHandler.drain();
 								await runtime.dispose();

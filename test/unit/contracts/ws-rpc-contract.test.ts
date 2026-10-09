@@ -92,6 +92,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeAlerts: () => Stream.empty,
 				SubscribeInputDraft: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
+				SubscribeServerStatus: () => Stream.empty,
 				SubscribeProjects: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ projectSlug: null }),
 				ResolveSession: () => Effect.succeed({ projectSlug: null }),
@@ -342,6 +343,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						sessionId: "session-forked",
+						parentId: "session-parent",
 					}),
 				StartSideThread: () =>
 					Effect.succeed({ sessionId: "session-side-thread" }),
@@ -441,9 +443,27 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
 				SetAutoSettleSetting: (request) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
+				GetUsageLimitsSetting: () =>
+					Effect.succeed({
+						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+					}),
+				SetUsageLimitsSetting: (request) =>
+					Effect.succeed({ usageLimits: request.usageLimits }),
 				SetSessionPinned: () => Effect.succeed({ ok: true as const }),
 				SnoozeSession: () => Effect.succeed({ ok: true as const }),
 				UnsnoozeSession: () => Effect.succeed({ ok: true as const }),
+				DismissCutOff: () => Effect.succeed({ ok: true as const }),
+				ContinueSession: () => Effect.succeed({ ok: true as const }),
+				CancelContinuation: () => Effect.succeed({ ok: true as const }),
+				PreviewContinuation: () =>
+					Effect.succeed({
+						included: 0,
+						omitted: 0,
+						firstMessageIncluded: false,
+						tokens: 0,
+					}),
+				QuotaForAccounts: () => Effect.succeed({ accounts: [] }),
+				GetContinuationHandoff: () => Effect.succeed({ handoff: null }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -1253,6 +1273,7 @@ describe("browser WebSocket RPC contract", () => {
 				expect(forked).toEqual({
 					projectSlug: "demo",
 					sessionId: "session-forked",
+					parentId: "session-parent",
 				});
 
 				expect(

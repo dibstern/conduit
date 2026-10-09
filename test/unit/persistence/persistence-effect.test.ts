@@ -155,6 +155,8 @@ describe("Persistence Effect", () => {
 					"sent_alerts",
 					"session_goal_checks",
 					"session_providers",
+					"session_sidebar",
+					"session_sidebar_horizon",
 					"sessions",
 					"tool_content",
 					"turns",
@@ -284,9 +286,13 @@ describe("Persistence Effect", () => {
 				{ migration_id: 33, name: "pending_approvals_version" },
 				{ migration_id: 34, name: "sessions_model_settings" },
 				{ migration_id: 35, name: "sessions_side_thread" },
-				{ migration_id: 36, name: "messages_input_id" },
-				{ migration_id: 37, name: "pending_inputs" },
-				{ migration_id: 38, name: "messages_steered" },
+				{ migration_id: 36, name: "sessions_limit_recovery" },
+				{ migration_id: 37, name: "sessions_resumes" },
+				{ migration_id: 38, name: "session_sidebar" },
+				{ migration_id: 39, name: "session_sidebar_tombstones" },
+				{ migration_id: 40, name: "messages_input_id" },
+				{ migration_id: 41, name: "pending_inputs" },
+				{ migration_id: 42, name: "messages_steered" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

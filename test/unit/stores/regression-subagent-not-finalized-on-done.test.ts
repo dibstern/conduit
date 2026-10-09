@@ -7,6 +7,7 @@ import { seedSessions } from "./session-fixtures.js";
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
+	applyTerminalTurn,
 	getOrCreateSessionSlot,
 	seedRegistryFromMessages,
 	sessionActivity,
@@ -18,7 +19,6 @@ import {
 	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 
 const sessionId = "sub-parent";
 beforeEach(() => {
@@ -78,7 +78,7 @@ function projectTool(name: "Task" | "Read") {
 
 it("keeps a running subagent Task after its parent turn ends", () => {
 	const slot = projectTool("Task");
-	handleMessage({ type: "done", sessionId, code: 0 });
+	applyTerminalTurn(slot.activity, slot.messages);
 	expect(
 		slot.messages.messages.find((item) => item.type === "tool"),
 	).toMatchObject({
@@ -89,7 +89,7 @@ it("keeps a running subagent Task after its parent turn ends", () => {
 
 it("completes an ordinary running tool when the turn ends", () => {
 	const slot = projectTool("Read");
-	handleMessage({ type: "done", sessionId, code: 0 });
+	applyTerminalTurn(slot.activity, slot.messages);
 	expect(
 		slot.messages.messages.find((item) => item.type === "tool"),
 	).toMatchObject({

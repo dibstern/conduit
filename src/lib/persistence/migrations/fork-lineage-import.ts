@@ -16,6 +16,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
 import { loadDaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
+import { refreshSidebar, rerootSession } from "../effect/sidebar-projection.js";
 import { projectEventsDbPath } from "../project-storage.js";
 
 class ForkLineageImportError extends Data.TaggedError(
@@ -128,6 +129,9 @@ export const migrateForkLineage = (configDir: string) =>
 						const hasForkTimestamp = columns.some(
 							(column) => column.name === "fork_point_timestamp",
 						);
+						const hasRootId = columns.some(
+							(column) => column.name === "root_id",
+						);
 						const ids: string[] = [];
 						for (const [id, entry] of entries) {
 							const [row] = yield* sql<{
@@ -174,6 +178,19 @@ export const migrateForkLineage = (configDir: string) =>
 									yield* sql`UPDATE read_model_counter SET value = value + 1 WHERE id = 1`;
 									yield* sql`UPDATE sessions SET version =
 									(SELECT value FROM read_model_counter WHERE id = 1) WHERE id = ${id}`;
+									if (hasRootId) {
+										const left = yield* rerootSession(id);
+										// The sidebar's upkeep writes today's table, which an
+										// older store gets from a later migration whose
+										// backfill refreshes every family anyway.
+										const horizon = yield* sql<{ name: string }>`
+										SELECT name FROM sqlite_master
+										WHERE name = 'session_sidebar_horizon'`;
+										const [version] = yield* sql<{ value: number }>`
+										SELECT value FROM read_model_counter WHERE id = 1`;
+										if (horizon.length > 0)
+											yield* refreshSidebar(left, version?.value ?? 0);
+									}
 								}
 							}
 							ids.push(id);

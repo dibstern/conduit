@@ -3,10 +3,9 @@
  * pnpm build
  * RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-extra-folder-trace-capture.test.ts
- * Copies the captured session to extra-folder-read-turn.jsonl only after the
- * reply contains the marker. Review the trace before committing it.
+ * Copies the captured session to extra-folder-read-turn.jsonl only after a
+ * successful SDK result and a reply containing the marker. Review before committing.
  */
-import { randomUUID } from "node:crypto";
 import {
 	copyFileSync,
 	existsSync,
@@ -18,8 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -76,53 +74,27 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						"Extra-folder Read capture",
 					);
 					evidence["sessionId"] = sessionId;
-					const cursor = browser.frames.length;
-					await Effect.runPromise(
-						browser.rpc.input
-							.submit({
-								projectSlug: "process-test",
-								sessionId,
-								originId: browser.originId,
-								inputId: randomUUID(),
-								delivery: "queue",
-								text: `Use the Read tool to read the file at the absolute path ${markerPath}, then reply with its contents.`,
-							})
-							.pipe(Effect.timeout(15_000)),
+					const response = await browser.send(
+						sessionId,
+						`Use the Read tool to read the file at the absolute path ${markerPath}, then reply with its contents.`,
+						120_000,
 					);
-					await vi.waitFor(
-						() =>
-							expect(
-								browser.frames
-									.slice(cursor)
-									.some(
-										({ message }) =>
-											message["type"] === "done" &&
-											message["sessionId"] === sessionId,
-									),
-							).toBe(true),
-						{ timeout: 120_000, interval: 50 },
-					);
-					const messages = browser.frames
-						.slice(cursor)
-						.filter(({ message }) => message["sessionId"] === sessionId)
-						.map(({ message }) => message);
-					const text = messages
-						.filter((message) => message["type"] === "delta")
-						.map((message) => String(message["text"]))
-						.join("");
+					const text = response.chunks.join("");
 					evidence["text"] = text;
 					expect(text).toContain(MARKER);
-					expect(
-						messages.find((message) => message["type"] === "done"),
-					).toMatchObject({
-						code: 0,
-					});
+					expect(response.done["status"]).toBe("idle");
 					const captured = join(captureDir, `${sessionId}.jsonl`);
 					expect(existsSync(captured)).toBe(true);
 					const trace = readFileSync(captured, "utf8")
 						.split("\n")
 						.filter((line) => line.trim() !== "")
 						.map((line) => decodeClaudeSDKMessage(JSON.parse(line)));
+					const results = trace.filter((message) => message.type === "result");
+					expect(results).toHaveLength(1);
+					expect(results[0]).toMatchObject({
+						subtype: "success",
+						is_error: false,
+					});
 					expect(
 						trace.some(
 							(message) =>

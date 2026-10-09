@@ -40,6 +40,28 @@ export class ClaudeRuntimeError extends Data.TaggedError("ClaudeRuntimeError")<{
 	readonly message: string;
 }> {}
 
+/** Match the CLI's stale-resume diagnostic, including SDK stderr tails. */
+export function isClaudeResumeFailure(error: unknown): boolean {
+	let cause = error;
+	for (let depth = 0; depth < 5; depth++) {
+		const message =
+			typeof cause === "string"
+				? cause
+				: cause !== null && typeof cause === "object" && "message" in cause
+					? cause.message
+					: undefined;
+		if (
+			typeof message === "string" &&
+			/^No conversation found with session ID/m.test(message)
+		)
+			return true;
+		if (cause === null || typeof cause !== "object" || !("cause" in cause))
+			return false;
+		cause = cause.cause;
+	}
+	return false;
+}
+
 export type ClaudeAdapterError =
 	| EventSinkError
 	| ClaudeBoundaryError

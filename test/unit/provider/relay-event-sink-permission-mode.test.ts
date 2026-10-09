@@ -6,12 +6,11 @@
 // turn reads), and the connected clients' picker.
 
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
 
 const modeChanged = (mode: SessionPermissionMode): ProviderRuntimeEvent => ({
 	eventId: `evt_${mode}`,
@@ -27,12 +26,10 @@ const modeChanged = (mode: SessionPermissionMode): ProviderRuntimeEvent => ({
 
 describe("createRelayEventSink — SDK-reported permission mode", () => {
 	it("persists the change and updates the live override", async () => {
-		const send = vi.fn<(msg: RelayMessage) => void>();
 		const persisted: CanonicalEvent[] = [];
 		const applied: SessionPermissionMode[] = [];
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send,
 			persist: {
 				persistEvent: (event) =>
 					Effect.sync(() => {
@@ -54,8 +51,6 @@ describe("createRelayEventSink — SDK-reported permission mode", () => {
 			],
 		]);
 		expect(applied).toEqual(["acceptEdits"]);
-		// Tabs hear it through the session's shell row, not a relay frame.
-		expect(send).not.toHaveBeenCalled();
 	});
 
 	// The override drives the next turn's query options; a persist failure that
@@ -64,7 +59,6 @@ describe("createRelayEventSink — SDK-reported permission mode", () => {
 		const applied: SessionPermissionMode[] = [];
 		const sink = createRelayEventSink({
 			sessionId: "ses-1",
-			send: vi.fn(),
 			applyReportedPermissionMode: (mode) =>
 				Effect.sync(() => {
 					applied.push(mode);

@@ -2,7 +2,7 @@
 // all streaming/processing state is cleaned up:
 // 1. In-flight message finalized via flushAndFinalizeAssistant
 // 2. Phase set to idle
-// 3. currentMessageId cleared, currentAssistantText cleared, thinkingStartTime cleared
+// 3. currentMessageId cleared, currentAssistantText cleared
 // 4. liveEventBuffer drained
 // 5. seenMessageIds / doneMessageIds preserved (cross-turn dedup)
 
@@ -66,15 +66,6 @@ describe("F2 fix: idle row full cleanup", () => {
 		followSessionBusy("test-session", false);
 
 		expect(chatState.currentAssistantText).toBe("");
-	});
-
-	it("clears thinkingStartTime on idle", () => {
-		ta.thinkingStartTime = Date.now();
-		phaseToProcessing(ta);
-
-		followSessionBusy("test-session", false);
-
-		expect(ta.thinkingStartTime).toBe(0);
 	});
 
 	it("preserves seenMessageIds across idle (cross-turn dedup)", () => {

@@ -42,6 +42,8 @@ export interface InboxView {
 	readonly busy: boolean;
 	/** A turn was stopped or failed since the latest handoff. */
 	readonly stoppedSinceHandoff: boolean;
+	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
+	readonly limited: boolean;
 	/** The command's input id is already admitted or started. */
 	readonly known: boolean;
 	/** The session's provider can take an input mid-turn. */
@@ -143,8 +145,11 @@ export function decideInbox(
 	command: InboxCommand,
 ): InboxDecision {
 	// Pause is derived: a non-empty queue behind a turn stopped or failed since
-	// the latest handoff. A steer still answered after Stop leaves it paused.
-	const paused = view.queued.length > 0 && view.stoppedSinceHandoff;
+	// the latest handoff, or behind a usage limit's open cut-off. A steer still
+	// answered after Stop leaves it paused. The cut-off lifts when a reply lands
+	// (a resume, a switch's continuation, or a new turn) or when it is dismissed.
+	const paused =
+		view.queued.length > 0 && (view.stoppedSinceHandoff || view.limited);
 	const idle = !view.busy && !view.steering;
 	switch (command._tag) {
 		case "Submit": {
@@ -209,7 +214,6 @@ export interface SessionInboxSubmitInput {
 	readonly inputId: string;
 	readonly delivery: InputDelivery;
 	readonly request: InputRequest;
-	readonly errorDelivery?: "client" | "session";
 }
 
 type SendTurnError = Effect.Effect.Error<
@@ -256,8 +260,8 @@ export class SessionInboxTag extends Context.Tag("SessionInbox")<
 	SessionInbox
 >() {}
 
-// A drained handoff has no requesting client; its errors go to the session.
-const DRAINED = { clientId: "", errorDelivery: "session" } as const;
+// A drained handoff has no requesting client.
+const DRAINED = { clientId: "" } as const;
 
 const decodeRequest = Schema.decodeUnknown(
 	Schema.parseJson(InputRequestSchema),
@@ -303,6 +307,7 @@ export const SessionInboxLive = Layer.scoped(
 				const [facts] = yield* sql<{
 					status: string | null;
 					provider: string | null;
+					limited: number;
 					open_prompts: number;
 					last_turn: string | null;
 					stopped: number;
@@ -311,6 +316,8 @@ export const SessionInboxLive = Layer.scoped(
 				}>`SELECT
 					(SELECT status FROM sessions WHERE id = ${sessionId}) AS status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
+					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
+						FROM sessions WHERE id = ${sessionId}) AS limited,
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
 					(SELECT state FROM turns WHERE session_id = ${sessionId}
@@ -358,6 +365,7 @@ export const SessionInboxLive = Layer.scoped(
 						lastTurn === "running" ||
 						facts?.in_flight === 1,
 					stoppedSinceHandoff: facts?.stopped === 1,
+					limited: facts?.limited === 1,
 					known,
 					providerSteers:
 						facts?.provider != null &&
@@ -371,7 +379,7 @@ export const SessionInboxLive = Layer.scoped(
 		const commit = (
 			sessionId: string,
 			decision: InboxDecision,
-			delivery: Pick<SessionInboxSubmitInput, "clientId" | "errorDelivery">,
+			delivery: Pick<SessionInboxSubmitInput, "clientId">,
 		) =>
 			Effect.gen(function* () {
 				if (decision._tag === "Rejected") return;
@@ -407,9 +415,6 @@ export const SessionInboxLive = Layer.scoped(
 						...(request.variant ? { variant: request.variant } : {}),
 						...(request.contextWindow
 							? { contextWindow: request.contextWindow }
-							: {}),
-						...(delivery.errorDelivery
-							? { errorDelivery: delivery.errorDelivery }
 							: {}),
 						...(decision.steer ? { steer: true } : {}),
 						events,
@@ -457,7 +462,6 @@ export const SessionInboxLive = Layer.scoped(
 						});
 						yield* commit(target.sessionId, decision, {
 							clientId: target.clientId,
-							errorDelivery: "session",
 						});
 						return decision._tag === "Rejected"
 							? decision.reason

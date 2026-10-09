@@ -8,6 +8,7 @@ import {
 	defaultDaemonConfig,
 	loadDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	ProcessHarness,
@@ -203,9 +204,11 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			browser.frames
 				.slice(cursor)
 				.some(({ message }) =>
-					["delta", "done", "permission_pending"].includes(
-						String(message["type"]),
-					),
+					[
+						"transcript_message",
+						"permission_pending",
+						"question_pending",
+					].includes(String(message["type"])),
 				),
 		).toBe(false);
 		const repeated = performance.now();
@@ -219,14 +222,20 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		await browser.answerApproval(request, "allow");
 		const result = await pending;
-		expect(result.chunks).toEqual(
-			responseChunks("approval-prewarmed-first-send"),
+		expect(result.chunks.join("")).toBe(
+			responseChunks("approval-prewarmed-first-send").join(""),
 		);
-		expect(result.done["code"]).toBe(0);
+		expect(result.done["status"]).toBe("idle");
 		await browser.waitFor(
 			(message) =>
-				message["type"] === "tool_result" &&
-				message["content"] === "harness-approved",
+				message["type"] === "transcript_message" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "tool" && part.state?.status === "completed",
+				) === true &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) =>
+						part.type === "tool" && part.state?.output === "harness-approved",
+				) === true,
 			sendCursor,
 		);
 		await vi.waitFor(() =>
@@ -249,8 +258,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			harness.marks.filter((mark) => mark.kind === "runner-started"),
 		).toHaveLength(0);
 		const turn = await browser.send(sessionId, "cold-first-send");
-		expect(turn.chunks).toEqual(responseChunks("cold-first-send"));
-		expect(turn.done["code"]).toBe(0);
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("cold-first-send").join(""),
+		);
+		expect(turn.done["status"]).toBe("idle");
 		await vi.waitFor(() =>
 			expect(
 				harness.marks.filter((mark) => mark.kind === "query"),
@@ -336,8 +347,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				harness.marks.filter((mark) => mark.kind === "enqueue"),
 			).toHaveLength(0);
 			expect(
-				(await browser.send(sessionId, "first-send-after-shell-ready")).chunks,
-			).toEqual(responseChunks("first-send-after-shell-ready"));
+				(
+					await browser.send(sessionId, "first-send-after-shell-ready")
+				).chunks.join(""),
+			).toBe(responseChunks("first-send-after-shell-ready").join(""));
 			expect(
 				harness.marks.filter((mark) => mark.kind === "query"),
 			).toHaveLength(1);
@@ -449,8 +462,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			else {
 				expect(counts.status).toMatchObject({ status: "idle" });
 				expect(
-					(await browser.send(sessionId, "send-after-capture-cancel")).chunks,
-				).toEqual(responseChunks("send-after-capture-cancel"));
+					(
+						await browser.send(sessionId, "send-after-capture-cancel")
+					).chunks.join(""),
+				).toBe(responseChunks("send-after-capture-cancel").join(""));
 				expect(
 					harness.marks.filter((mark) => mark.kind === "query"),
 				).toHaveLength(1);
@@ -564,8 +579,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			expect(durableCounts(harness, sessionId).commands).toEqual([]);
 			if (lifecycleAction === "cancel") {
 				expect(
-					(await browser.send(sessionId, "send-after-discovery-cancel")).chunks,
-				).toEqual(responseChunks("send-after-discovery-cancel"));
+					(
+						await browser.send(sessionId, "send-after-discovery-cancel")
+					).chunks.join(""),
+				).toBe(responseChunks("send-after-discovery-cancel").join(""));
 				expect(
 					harness.marks.filter((mark) => mark.kind === "query"),
 				).toHaveLength(1);
@@ -672,10 +689,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			writeFileSync(releasePath, "release");
 			capture.released = true;
 			const result = await pending;
-			expect(result.chunks).toEqual(
-				responseChunks("first-send-sharing-warm-catalog"),
+			expect(result.chunks.join("")).toBe(
+				responseChunks("first-send-sharing-warm-catalog").join(""),
 			);
-			expect(result.done["code"]).toBe(0);
+			expect(result.done["status"]).toBe("idle");
 			await vi.waitFor(() =>
 				expect(
 					harness.marks.filter((mark) => mark.kind === "query"),
@@ -772,8 +789,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			harness.marks.filter((mark) => mark.kind === "enqueue"),
 		).toHaveLength(0);
 		expect(
-			(await browser.send(sessionId, "named-instance-first-send")).chunks,
-		).toEqual(responseChunks("named-instance-first-send"));
+			(await browser.send(sessionId, "named-instance-first-send")).chunks.join(
+				"",
+			),
+		).toBe(responseChunks("named-instance-first-send").join(""));
 		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 			1,
 		);
@@ -842,8 +861,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			{ timeout: 5000 },
 		);
 		expect(
-			(await browser.send(sessionId, "send-after-cancelled-warm")).chunks,
-		).toEqual(responseChunks("send-after-cancelled-warm"));
+			(await browser.send(sessionId, "send-after-cancelled-warm")).chunks.join(
+				"",
+			),
+		).toBe(responseChunks("send-after-cancelled-warm").join(""));
 		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 			2,
 		);
@@ -875,8 +896,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			harness.marks.filter((mark) => mark.kind === "initialization-ready"),
 		).toHaveLength(0);
 		const result = await browser.send(sessionId, "racing-first-send");
-		expect(result.chunks).toEqual(responseChunks("racing-first-send"));
-		expect(result.done["code"]).toBe(0);
+		expect(result.chunks.join("")).toBe(
+			responseChunks("racing-first-send").join(""),
+		);
+		expect(result.done["status"]).toBe("idle");
 		expect(await warm).toBe(
 			queryInitializationFailures === 0 ? "ready" : "failed",
 		);
@@ -964,8 +987,8 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				}),
 			);
 		const prompt = `first-send-after-${changed}-change`;
-		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		await vi.waitFor(() =>
 			expect(
@@ -1036,8 +1059,8 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			);
 		} else if (state === "used") {
 			const prompt = "query-cleanup-after-turn";
-			expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-				responseChunks(prompt),
+			expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+				responseChunks(prompt).join(""),
 			);
 		} else {
 			expect(

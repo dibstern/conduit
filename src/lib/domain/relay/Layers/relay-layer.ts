@@ -27,7 +27,6 @@ import {
 	type ClaudeTitleQueryFactory,
 	makeSessionTitleServiceLive,
 } from "../Services/session-title-service.js";
-import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 
 const sessionManagerDepsLive = Layer.mergeAll(
@@ -79,8 +78,6 @@ export const makeRelayStateLive = (
 		makePollerManagerStateLive(),
 		makePollerStateLive(),
 		makePollerPubSubLive(),
-		// WebSocket handler state
-		makeWsHandlerStateLive(),
 		// Per-relay domain event fanout
 		RelayEventBusLive,
 		// Per-relay committed-event change signal (streaming subscriptions)

@@ -20,8 +20,8 @@ import {
 	type AttachDaemonProject,
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
-	type ReattachDaemonViewSession,
 	type ResolveRpcContext,
+	type RpcSubscriptionScopeTag,
 	WsRpcGroup,
 	WsRpcServerLayer,
 } from "./ws-rpc.js";
@@ -32,7 +32,9 @@ type RpcWebSocketHandlerOptions = (
 	| { readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> }
 	| {
 			readonly context: Effect.Effect<
-				Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+				Context.Context<
+					Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+				>,
 				unknown
 			>;
 			readonly runFork: (
@@ -57,7 +59,9 @@ interface RpcWebSocketHandlerRuntime {
 
 export interface RpcWebSocketHandlerShape {
 	readonly context?: Effect.Effect<
-		Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+		Context.Context<
+			Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+		>,
 		unknown
 	>;
 	readonly handleUpgrade: (
@@ -153,7 +157,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
-	reattachViewSession?: ReattachDaemonViewSession,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 	attachProject?: AttachDaemonProject,
 ) =>
@@ -169,7 +172,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
-			reattachViewSession,
 			attachProject,
 		);
 		const handler = new WsRpcWebSocketHandler(undefined, {
@@ -198,7 +200,9 @@ export const makeRoutedWsRpcWebSocketHandler = (
 
 export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	readonly context?: Effect.Effect<
-		Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+		Context.Context<
+			Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+		>,
 		unknown
 	>;
 	private readonly runConnection: (ws: WebSocket) => void;

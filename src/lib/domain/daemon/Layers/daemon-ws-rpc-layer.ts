@@ -11,17 +11,20 @@ import {
 import { hashPin } from "../../../auth.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
-	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadRecentProjects,
 	syncRecentProjects,
 } from "../../../daemon/config-persistence.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
+	getRestartAvailable,
+	SERVER_BUILD_ID,
+} from "../../../server/build-update.js";
+import {
 	type DaemonRpcHandlers,
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
-import type { RelayMessage } from "../../../shared-types.js";
+import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import {
@@ -30,7 +33,7 @@ import {
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
-	DaemonConfigRefTag,
+	type DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -39,7 +42,6 @@ import {
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
-import { DaemonWsClientRegistryTag } from "../Services/daemon-ws-client-registry.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance,
@@ -81,7 +83,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
-			| DaemonWsClientRegistryTag
 			| ConfigPersistenceTag
 			| RelayCacheTag
 			| InstanceManagerStateTag
@@ -93,7 +94,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 		>();
 		const bus = yield* DaemonEventBusTag;
-		const daemonWsClients = yield* DaemonWsClientRegistryTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
@@ -101,40 +101,42 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
-			readonly list: "instances" | "projects";
+			readonly list: "instances" | "projects" | "serverStatus";
 			readonly changed: Queue.Queue<void>;
 		}>();
+		// Moves when the cross-project session lists went stale; a tab refetches
+		// them when it sees a new value (conduit-test-ni8.16.2).
+		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
 		yield* Stream.fromQueue(subscription).pipe(
 			Stream.runForEach((event) => {
+				if (event._tag === "GlobalSettingChanged")
+					return Effect.gen(function* () {
+						for (const project of yield* allProjects) {
+							if (project.slug === event.originSlug) continue;
+							const relay = yield* cache.peek(project.slug);
+							if (Option.isSome(relay))
+								yield* relay.value.syncGlobalSetting(event.tag);
+						}
+					}).pipe(Effect.provide(context));
+				if (event._tag === "DaemonSessionsChanged") sessionsRevision++;
 				const list =
-					event._tag === "ProjectsChanged"
-						? "projects"
-						: event._tag === "InstancesChanged" ||
-								event._tag === "InstanceStatusChanged"
-							? "instances"
-							: undefined;
+					event._tag === "RestartAvailabilityChanged" ||
+					event._tag === "DaemonSessionsChanged"
+						? "serverStatus"
+						: event._tag === "ProjectsChanged"
+							? "projects"
+							: event._tag === "InstancesChanged" ||
+									event._tag === "InstanceStatusChanged"
+								? "instances"
+								: undefined;
 				if (list !== undefined)
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
 								Queue.unsafeOffer(subscriber.changed, undefined);
 					});
-				return event._tag === "RelayBroadcast"
-					? Effect.gen(function* () {
-							yield* daemonWsClients.broadcastUnattached(
-								event.message as RelayMessage,
-							);
-							for (const project of yield* allProjects) {
-								const relay = yield* cache.peek(project.slug);
-								if (Option.isSome(relay)) {
-									relay.value.wsHandler.broadcast?.(
-										event.message as RelayMessage,
-									);
-								}
-							}
-						}).pipe(Effect.provide(context))
-					: Effect.void;
+				return Effect.void;
 			}),
 			Effect.forkScoped,
 		);
@@ -146,7 +148,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
-				| DaemonWsClientRegistryTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| InstanceManagerStateTag
@@ -178,7 +179,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
 		const followList = <A, E>(
-			list: "instances" | "projects",
+			list: "instances" | "projects" | "serverStatus",
 			read: Effect.Effect<A, E, InstanceManagerStateTag | ProjectRegistryTag>,
 		) =>
 			Stream.unwrapScoped(
@@ -207,6 +208,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				followList(
 					"projects",
 					Effect.map(projectInfos, (projects) => ({ projects })),
+				),
+			SubscribeServerStatus: () =>
+				followList(
+					"serverStatus",
+					Effect.sync(() => ({
+						protocolVersion: WS_PROTOCOL_VERSION,
+						buildId: SERVER_BUILD_ID,
+						restartAvailable: getRestartAvailable(),
+						sessionsRevision,
+					})),
 				),
 			GetStatus: () =>
 				run(
@@ -596,38 +607,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						};
 					}),
 				),
-			GetAutoSettleSetting: () =>
-				run(
-					Effect.gen(function* () {
-						const config = yield* DaemonConfigRefTag;
-						const days = (yield* Ref.get(config)).autoSettleAfterDays;
-						return {
-							autoSettleAfterDays:
-								days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
-						};
-					}),
-				),
+			GetAutoSettleSetting: (request) =>
+				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
-				run(
-					Effect.gen(function* () {
-						const days = request.autoSettleAfterDays;
-						if (
-							days !== null &&
-							(!Number.isInteger(days) || days < 1 || days > 90)
-						) {
-							return yield* new WsRpcError({
-								message:
-									"Auto-settle days must be an integer from 1 to 90, or Never",
-							});
-						}
-						yield* commitDaemonRuntimeConfig((config) => ({
-							...config,
-							autoSettleAfterDays: days,
-						}));
-						yield* persistConfig;
-						return { autoSettleAfterDays: days };
-					}),
-				),
+				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetUsageLimitsSetting: (request) =>
+				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
+			SetUsageLimitsSetting: (request) =>
+				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {

@@ -7,6 +7,7 @@
 //   DaemonConfigRefLive(initial) → Layer providing the Tag
 
 import { Context, Effect, Layer, Ref } from "effect";
+import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 
@@ -20,6 +21,7 @@ export interface DaemonRuntimeConfig {
 	readonly tailscaleServe?: DaemonStatus["tailscaleServe"];
 	readonly keepAwake: boolean;
 	readonly autoSettleAfterDays?: number | null;
+	readonly usageLimits?: UsageLimitsSetting;
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
 	readonly claudeConfigDir: string | undefined;
@@ -74,6 +76,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	tailscaleServeCleanupPending?: boolean;
 	keepAwake?: boolean;
 	autoSettleAfterDays?: number | null;
+	usageLimits?: UsageLimitsSetting;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
 	claudeConfigDir?: string;
@@ -93,6 +96,9 @@ export const makeDaemonConfigFromOptions = (options: {
 		options.autoSettleAfterDays === undefined
 			? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 			: options.autoSettleAfterDays,
+	...(options.usageLimits !== undefined && {
+		usageLimits: options.usageLimits,
+	}),
 	keepAwakeCommand: options.keepAwakeCommand,
 	keepAwakeArgs: options.keepAwakeArgs,
 	claudeConfigDir: options.claudeConfigDir,

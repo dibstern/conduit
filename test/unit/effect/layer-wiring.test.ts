@@ -71,7 +71,6 @@ const makeMockOptions = (): DaemonLiveOptions => {
 		versionCheck: {
 			getCurrentVersion: () => "0.0.0",
 			fetchLatestVersion: () => Effect.succeed(null),
-			broadcast: () => Effect.void,
 			checkInterval: Duration.hours(24),
 		},
 		storageMon: {

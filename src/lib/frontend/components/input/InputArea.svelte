@@ -20,6 +20,7 @@
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
 	import FileMenu from "./FileMenu.svelte";
 	import NewSessionContext from "./NewSessionContext.svelte";
+	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -53,7 +54,7 @@
 	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { rateLimitChatSend } from "../../stores/ws.svelte.js";
+	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
@@ -729,6 +730,10 @@
 			projectSlug,
 			sessionId,
 			commandId: crypto.randomUUID(),
+		}).then(() => {
+			// An interrupt can end a turn the row never reported busy for, so
+			// nothing else would end it. A still-busy row ends it on idle.
+			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
 		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
@@ -910,6 +915,25 @@
 		document.addEventListener("keydown", handleGlobalEsc);
 		return () => document.removeEventListener("keydown", handleGlobalEsc);
 	});
+
+	/** Publishes how far the composer's top edge sits above the viewport bottom
+	 *  as --composer-clearance, so the toast stack (Toast.svelte) never covers
+	 *  it. Measured from the viewport rather than the composer's height because a
+	 *  terminal panel below the chat lifts the composer. Watching the parent too
+	 *  catches that move, since the chat column shrinks when it happens. */
+	function publishComposerClearance(area: HTMLElement) {
+		const root = document.documentElement;
+		const observer = new ResizeObserver(() => {
+			const clearance = area.offsetHeight > 0 ? window.innerHeight - area.getBoundingClientRect().top : 0;
+			root.style.setProperty("--composer-clearance", `${Math.max(0, clearance)}px`);
+		});
+		observer.observe(area);
+		if (area.parentElement) observer.observe(area.parentElement);
+		return () => {
+			observer.disconnect();
+			root.style.removeProperty("--composer-clearance");
+		};
+	}
 </script>
 
 <!-- File Menu (above input when "@" is typed) -->
@@ -951,6 +975,7 @@
      keyboard. Drop the inset then. -->
 <div
 	id="input-area"
+	{@attach publishComposerClearance}
 	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
@@ -994,6 +1019,10 @@
 					<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
 				{/if}
 			</div>
+		{/if}
+
+		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
+			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
 		{/if}
 
 		<PendingInputTray

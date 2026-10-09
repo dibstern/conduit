@@ -23,11 +23,9 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
-import type { WebSocket } from "ws";
+import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
-import type { WsAttachOptions } from "../../../server/ws-handler-shape.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
-import type { RelayMessage } from "../../../shared-types.js";
 import type { ConnectionHealth } from "../../../types.js";
 import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
@@ -42,15 +40,13 @@ export interface RelayStatusSnapshot {
 }
 
 export interface Relay {
+	syncGlobalSetting: (tag: GlobalProjectSetting["_tag"]) => Effect.Effect<void>;
+	refreshGlobalDefaults: () => Effect.Effect<void>;
 	settleIdleSessions?: (
 		idleWindowMs: number,
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
-	attach: (ws: WebSocket, options: WsAttachOptions) => () => void;
-	wsHandler: {
-		broadcast?: (message: RelayMessage) => void;
-	};
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;
@@ -174,6 +170,10 @@ export const makeRelayCacheService = (
 								return relay;
 							}),
 						);
+						// Startup may have read defaults before a global write. Once
+						// installed, broadcasts can reach this relay; refresh before
+						// allowing its first client to read the snapshot.
+						yield* relay.refreshGlobalDefaults();
 						return relay;
 					}),
 				).pipe(

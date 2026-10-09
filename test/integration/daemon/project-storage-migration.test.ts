@@ -17,6 +17,7 @@ import {
 	projectStorageDir,
 	readProjectStorageOwner,
 } from "../../../src/lib/persistence/project-storage.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -171,7 +172,14 @@ describe("project storage migration through the daemon", () => {
 		const pending = before
 			.send(sessionId, "migration-replay")
 			.catch(() => undefined);
-		await before.waitFor((message) => message["type"] === "delta");
+		await before.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing preserved runner");

@@ -42,6 +42,7 @@ export const subscribeSessionTodos = (options: {
 			return stream<SessionTodos, ReadQueryEffectError | SqlError>({
 				bus,
 				source: {
+					name: `todos/${options.sessionId}`,
 					read: (range) =>
 						Effect.gen(function* () {
 							const answer = yield* readQuery.readSessionTodos(

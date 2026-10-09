@@ -1,7 +1,6 @@
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { UntaggedRelayMessage } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
-import { isRecord } from "../utils.js";
 
 export type DomainEventRelayTranslation =
 	| {
@@ -35,50 +34,17 @@ export function translateDomainEventToRelay(
 			});
 
 		case "thinking.end":
-			return emit({ type: "thinking_stop", messageId: event.data.messageId });
+		case "tool.running":
+			return silent("canonical event is delivered through RPC projections");
 
 		case "tool.started": {
-			const { toolName, callId, input, messageId } = event.data;
-			return emit(
-				{ type: "tool_start", id: callId, name: toolName, messageId },
-				{
-					type: "tool_executing",
-					id: callId,
-					name: toolName,
-					input: isRecord(input) ? input : undefined,
-					messageId,
-				},
-			);
-		}
-
-		case "tool.running": {
-			const { partId, messageId, metadata, input, callId, toolName } =
-				event.data;
-			// Refreshed input (args streamed after tool.started, e.g. skill):
-			// anchor to callId — the id tool_start registered the tool under.
-			if (isRecord(input)) {
-				return emit({
-					type: "tool_executing",
-					id: callId ?? partId,
-					name: toolName ?? "Task",
-					input,
-					...(metadata ? { metadata } : {}),
-					messageId,
-				});
-			}
-			if (metadata) {
-				return emit({
-					type: "tool_executing",
-					id: partId,
-					name: "Task",
-					input: undefined,
-					metadata,
-					messageId,
-				});
-			}
-			return silent(
-				"ToolRunningPayload carries no callId; partId anchor already covered by tool.started",
-			);
+			const { toolName, callId, messageId } = event.data;
+			return emit({
+				type: "tool_start",
+				id: callId,
+				name: toolName,
+				messageId,
+			});
 		}
 
 		case "tool.input_updated":
@@ -121,36 +87,25 @@ export function translateDomainEventToRelay(
 						event.data.messageId || event.eventId,
 						"done",
 					]),
-					...doneMessage(event.data.messageId),
 				},
 			);
 		}
 
 		case "turn.error": {
-			const { error, code } = event.data;
-			return emit(
-				{
-					type: "error",
-					code: code ?? "TURN_ERROR",
-					message: error,
-					alertId: JSON.stringify([
-						event.sessionId,
-						event.data.messageId || event.eventId,
-						"error",
-						error,
-					]),
-				},
-				{
-					type: "done",
-					code: 1,
-					alertId: JSON.stringify([
-						event.sessionId,
-						event.data.messageId || event.eventId,
-						"done",
-					]),
-					...doneMessage(event.data.messageId),
-				},
-			);
+			// The transcript projects the notice; the failed completion carries
+			// the reason for the alert.
+			const { error } = event.data;
+			return emit({
+				type: "done",
+				code: 1,
+				error,
+				alertId: JSON.stringify([
+					event.sessionId,
+					event.data.messageId || event.eventId,
+					"error",
+					error,
+				]),
+			});
 		}
 
 		case "turn.interrupted":
@@ -162,7 +117,6 @@ export function translateDomainEventToRelay(
 					event.data.messageId || event.eventId,
 					"done",
 				]),
-				...doneMessage(event.data.messageId),
 			});
 
 		case "turn.model_resolved":
@@ -176,20 +130,8 @@ export function translateDomainEventToRelay(
 			);
 
 		case "session.status":
-			if (event.data.status === "retry") {
-				const reason =
-					typeof event.metadata.correlationId === "string"
-						? event.metadata.correlationId
-						: "Retrying";
-				return emit({
-					type: "error",
-					code: "RETRY",
-					message: reason,
-					alertId: JSON.stringify([event.sessionId, event.eventId, "error"]),
-				});
-			}
 			return silent(
-				"the shell row carries session status; terminal done/error covers completion",
+				"the shell row carries session status, including a retry; the terminal done covers completion",
 			);
 
 		case "session.compaction":
@@ -207,6 +149,12 @@ export function translateDomainEventToRelay(
 		case "session.forked":
 		case "session.provider_changed":
 		case "session.provider_cleanup_failed":
+		case "session.handoff_delivered":
+		case "session.usage_limited":
+		case "session.cut_off_dismissed":
+		case "session.resumed":
+		case "session.resume_scheduled":
+		case "session.resume_cancelled":
 		// Read state reaches the UI as the `unread` field on a broadcast session
 		// list, never as a relay event, so there is nothing to translate here.
 		case "session.read":
@@ -221,7 +169,7 @@ export function translateDomainEventToRelay(
 			return silent("persistence-only event; no UI surface in relay");
 
 		case "session.goal_changed":
-			return emit({ type: "session.goal_changed", ...event.data });
+			return silent("delivered as the shell row's goalState");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; it does, as the session's shell row (ni8.12).
@@ -249,11 +197,6 @@ function emit(
 	...messages: UntaggedRelayMessage[]
 ): DomainEventRelayTranslation {
 	return { kind: "emit", messages };
-}
-
-/** A turn's done names its assistant message so a late copy ends nothing. */
-function doneMessage(messageId: string): { messageId?: string } {
-	return messageId ? { messageId } : {};
 }
 
 function silent(reason: string): DomainEventRelayTranslation {

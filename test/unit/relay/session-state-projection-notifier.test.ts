@@ -229,7 +229,6 @@ describe("SessionStateProjectionNotifier", () => {
 					yield* TestClock.adjust("150 millis");
 
 					expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
-					expect(wsHandler.broadcast).not.toHaveBeenCalled();
 				}).pipe(Effect.provide(layer));
 			}),
 	);

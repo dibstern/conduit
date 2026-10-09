@@ -1,8 +1,19 @@
 import { Rpc, type RpcGroup } from "@effect/rpc";
-import { type Context, Effect, type Layer, Stream, Struct } from "effect";
+import {
+	Context,
+	Effect,
+	Fiber,
+	Layer,
+	Queue,
+	type Scope,
+	Stream,
+	Struct,
+	type Take,
+} from "effect";
 import {
 	type OpenCodeInstance,
 	type ProjectInfo,
+	type ServerStatus,
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
@@ -11,12 +22,12 @@ import { subscribeApprovals } from "../domain/relay/Services/approvals-subscript
 import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
+import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
-import { getSessionInputDraft } from "../handlers/prompt.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -31,16 +42,20 @@ import { terminalsHandlers } from "./ws-rpc/terminals.js";
 export {
 	AnswerQuestion,
 	AttachProject,
+	CancelContinuation,
 	CancelInput,
 	CancelSession,
 	type ClaudeSettingsResponse,
 	ClosePty,
+	type ContinuationHandoffResponse,
+	ContinueSession,
 	CreatePty,
 	CreateSession,
 	type CreateSessionResponse,
 	DeleteSession,
 	DetectProxy,
 	type DetectProxyResponse,
+	DismissCutOff,
 	FindFolders,
 	type FindFoldersResponse,
 	ForkSession,
@@ -50,6 +65,7 @@ export {
 	GetClaudeSettings,
 	GetCommands,
 	type GetCommandsResponse,
+	GetContinuationHandoff,
 	GetFileContent,
 	type GetFileContentResponse,
 	GetFileList,
@@ -83,12 +99,16 @@ export {
 	MarkSessionSeen,
 	MarkSessionUnread,
 	type ModelInfo,
+	PreviewContinuation,
+	type PreviewContinuationResponse,
 	type ProjectMutationResponse,
 	type ProviderInfo,
 	type PtyEnvelope,
 	type PtyInfo,
 	PtyInput,
 	type PtyListResponse,
+	QuotaForAccounts,
+	type QuotaForAccountsResponse,
 	RejectQuestion,
 	ReloadProviderSession,
 	type ReloadProviderSessionResponse,
@@ -163,6 +183,20 @@ const unaryHandlers = {
 	...conversationHandlers,
 };
 
+const subscribeSessionDetailWithPresence = (
+	options: Parameters<typeof subscribeSessionDetail>[0],
+) =>
+	Stream.unwrapScoped(
+		Effect.gen(function* () {
+			const wsHandler = yield* WebSocketHandlerTag;
+			yield* Effect.acquireRelease(
+				Effect.sync(() => wsHandler.registerSessionViewer(options.sessionId)),
+				(removeViewer) => Effect.sync(removeViewer),
+			);
+			return subscribeSessionDetail(options);
+		}),
+	);
+
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
@@ -196,7 +230,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		),
 	SubscribeSessionDetail: (request) =>
 		Rpc.fork(
-			subscribeSessionDetail({
+			subscribeSessionDetailWithPresence({
 				sessionId: request.sessionId,
 				...(request.resumeFromSequence === undefined
 					? {}
@@ -267,23 +301,32 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
 		),
+	SubscribeServerStatus: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeServerStatus requires daemon mode" }),
+		),
 	...unaryHandlers,
 });
 
 export const WsRpcServerLayer = WsRpcGroup.toLayer(wsRpcHandlers);
 
+export class RpcSubscriptionScopeTag extends Context.Tag(
+	"RpcSubscriptionScope",
+)<RpcSubscriptionScopeTag, Scope.Scope>() {}
+
+export const RpcSubscriptionScopeLive = Layer.scoped(
+	RpcSubscriptionScopeTag,
+	Effect.scope,
+);
+
 export type ResolveRpcContext = (
 	projectSlug: string,
 ) => Effect.Effect<
-	Context.Context<Layer.Layer.Context<typeof WsRpcServerLayer>>,
+	Context.Context<
+		Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+	>,
 	WsRpcError
 >;
-
-export type ReattachDaemonViewSession = (payload: {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly sessionId?: string;
-}) => Effect.Effect<boolean, WsRpcError>;
 
 export type AttachDaemonProject = (payload: {
 	readonly originId: string;
@@ -305,6 +348,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetUsageLimitsSetting"
+	| "SetUsageLimitsSetting"
 	| "ScanNow"
 	| "DetectProxy"
 	| "FindFolders"
@@ -330,13 +375,13 @@ export type DaemonRpcHandlers = {
 		{ readonly projects: readonly ProjectInfo[] },
 		WsRpcError
 	>;
+	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
 };
 
 export const makeRoutedWsRpcServerLayer = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
-	reattachViewSession?: ReattachDaemonViewSession,
 	attachProject?: AttachDaemonProject,
 ) => {
 	const routeHandler =
@@ -356,7 +401,12 @@ export const makeRoutedWsRpcServerLayer = (
 
 	const daemonUnaryHandlers =
 		daemonHandlers &&
-		Struct.omit(daemonHandlers, "SubscribeInstances", "SubscribeProjects");
+		Struct.omit(
+			daemonHandlers,
+			"SubscribeInstances",
+			"SubscribeProjects",
+			"SubscribeServerStatus",
+		);
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
 	const handlers = Object.fromEntries(
@@ -378,22 +428,6 @@ export const makeRoutedWsRpcServerLayer = (
 		>;
 	};
 	if (attachProject) handlers.AttachProject = attachProject;
-	if (reattachViewSession) {
-		const routeViewSession = routeHandler(unaryHandlers.ViewSession);
-		handlers.ViewSession = (
-			payload: Parameters<(typeof unaryHandlers)["ViewSession"]>[0],
-		) =>
-			reattachViewSession(payload).pipe(
-				Effect.flatMap((reattached) =>
-					reattached
-						? Effect.succeed({
-								ok: true as const,
-								draft: getSessionInputDraft(payload.sessionId),
-							})
-						: routeViewSession(payload),
-				),
-			);
-	}
 	const routeStream = <
 		A,
 		E,
@@ -403,17 +437,36 @@ export const makeRoutedWsRpcServerLayer = (
 		make: () => Stream.Stream<A, E, R>,
 	) =>
 		Rpc.fork(
-			Stream.unwrap(
-				Effect.map(resolveContext(projectSlug), (context) =>
-					Stream.provideContext(make(), context).pipe(
+			Stream.unwrapScoped(
+				Effect.gen(function* () {
+					const context = yield* resolveContext(projectSlug);
+					const queue = yield* Effect.acquireRelease(
+						Queue.bounded<Take.Take<A, E>>(2),
+						Queue.shutdown,
+					);
+					// Project removal and browser cancellation both await this producer
+					// before SQLite closes. Queue shutdown ends the consumer cleanly.
+					yield* Effect.acquireRelease(
+						Stream.runIntoQueue(
+							Stream.provideContext(make(), context),
+							queue,
+						).pipe(
+							Effect.interruptible,
+							Effect.onInterrupt(() => Queue.shutdown(queue)),
+							Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
+						),
+						Fiber.interrupt,
+					);
+					return Stream.fromQueue(queue).pipe(
+						Stream.flattenTake,
 						Stream.mapError(
 							(error) =>
 								new WsRpcError({
 									message: `Subscription failed: ${String(error)}`,
 								}),
 						),
-					),
-				),
+					);
+				}),
 			),
 		);
 	return WsRpcGroup.toLayer({
@@ -436,7 +489,7 @@ export const makeRoutedWsRpcServerLayer = (
 			),
 		SubscribeSessionDetail: (request) =>
 			routeStream(request.projectSlug, () => {
-				const source = subscribeSessionDetail({
+				const source = subscribeSessionDetailWithPresence({
 					sessionId: request.sessionId,
 					...(request.resumeFromSequence === undefined
 						? {}
@@ -481,5 +534,9 @@ export const makeRoutedWsRpcServerLayer = (
 			daemonHandlers
 				? Rpc.fork(daemonHandlers.SubscribeProjects())
 				: wsRpcHandlers.SubscribeProjects(),
+		SubscribeServerStatus: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeServerStatus())
+				: wsRpcHandlers.SubscribeServerStatus(),
 	});
 };

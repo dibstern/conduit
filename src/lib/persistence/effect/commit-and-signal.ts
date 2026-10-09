@@ -10,6 +10,7 @@ import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
+import { refreshSidebar } from "./sidebar-projection.js";
 
 export type CommitAndSignalFailure =
 	| EventStoreError
@@ -156,6 +157,9 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				// to feed them from anywhere the COMMIT does not cover.
 				const stored: StoredEvent[] = [];
 				const advances: ReadModelAdvance[] = [];
+				// Sessions direct stamps wrote, whose families are refreshed once,
+				// before COMMIT, however many stamps the body makes.
+				const stampedSessions: string[] = [];
 
 				const result = yield* withCommitPermit(
 					Effect.gen(function* () {
@@ -213,6 +217,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 											Effect.provideService(SqlClient.SqlClient, sql),
 										);
 										const sessionIds = yield* apply(version);
+										stampedSessions.push(...sessionIds);
 										// No rows, no announcement. An advance naming a row that was
 										// not touched sends every subscriber to re-query it for
 										// nothing; worse, it claims a version for rows that did not
@@ -226,7 +231,16 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										return sessionIds;
 									});
 
-								return yield* body(project, stamp);
+								const result = yield* body(project, stamp);
+								// A direct write to a session row can change what its
+								// family shows in the sidebar, as a projected one can. At
+								// the highest version this commit took, so the row never
+								// lands below one the advance announces.
+								yield* refreshSidebar(
+									stampedSessions,
+									Math.max(0, ...advances.map((advance) => advance.version)),
+								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+								return result;
 							}),
 						);
 						if (Option.isSome(sessionEventBus) && options.publish !== false) {

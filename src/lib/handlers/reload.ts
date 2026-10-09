@@ -6,7 +6,6 @@ import { Effect } from "effect";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { formatErrorDetail } from "../errors.js";
 
@@ -20,7 +19,6 @@ export const reloadProviderSessionForClient = (
 	input: ReloadProviderSessionInput,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
 		log.info(
@@ -41,9 +39,5 @@ export const reloadProviderSessionForClient = (
 			log.warn(`endSession failed: ${formatErrorDetail(engineResult.left)}`);
 		}
 
-		wsHandler.sendTo(input.clientId, {
-			type: "provider_session_reloaded",
-			sessionId: input.sessionId,
-		});
 		return { sessionId: input.sessionId };
 	});

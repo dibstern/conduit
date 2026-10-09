@@ -1,5 +1,6 @@
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ServerStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import type {
 	WsRpcClient,
 	WsRpcClients,
@@ -73,8 +74,9 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 describe("build ID dispatch", () => {
-	let handleMessage: typeof import("../../../src/lib/frontend/stores/ws-dispatch.js")["handleMessage"];
-	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/ws-dispatch.js")["setAttachedProject"];
+	let server: typeof import("../../../src/lib/frontend/stores/server-status.js");
+	let current: ServerStatus;
+	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/session.svelte.js")["setAttachedProject"];
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -114,10 +116,21 @@ describe("build ID dispatch", () => {
 			history: { pushState: () => {}, replaceState: () => {} },
 			addEventListener: () => {},
 		});
-		({ handleMessage, setAttachedProject } = await import(
-			"../../../src/lib/frontend/stores/ws-dispatch.js"
-		));
+		current = {
+			protocolVersion: WS_PROTOCOL_VERSION,
+			buildId: "A",
+			restartAvailable: false,
+			sessionsRevision: 0,
+		};
+		await load();
 	});
+
+	async function load() {
+		({ setAttachedProject } = await import(
+			"../../../src/lib/frontend/stores/session.svelte.js"
+		));
+		server = await import("../../../src/lib/frontend/stores/server-status.js");
+	}
 
 	afterEach(() => {
 		vi.clearAllTimers();
@@ -125,16 +138,20 @@ describe("build ID dispatch", () => {
 		vi.unstubAllGlobals();
 	});
 
+	/** A fresh connection: the feed starts over and delivers its snapshot. */
 	function handshake(buildId = "B") {
-		handleMessage({
-			type: "protocol_version",
-			version: WS_PROTOCOL_VERSION,
-			buildId,
-		});
+		current = { ...current, buildId };
+		Effect.runSync(
+			Stream.runForEach(
+				server.serverStatusFeed({ serverStatus: () => Stream.make(current) }),
+				(status) => Effect.sync(() => server.applyServerStatus(status)),
+			),
+		);
 	}
 
 	function serverUpdate(restartAvailable: boolean) {
-		handleMessage({ type: "server_update", restartAvailable });
+		current = { ...current, restartAvailable };
+		server.applyServerStatus(current);
 	}
 
 	function restartAction() {
@@ -256,7 +273,9 @@ describe("build ID dispatch", () => {
 		expect(mocks.removeBanner).toHaveBeenCalledWith("build-mismatch");
 		mocks.showBanner.mockClear();
 		handshake();
-		expect(mocks.showBanner).not.toHaveBeenCalled();
+		expect(mocks.showBanner).not.toHaveBeenCalledWith(
+			expect.objectContaining({ id: "build-mismatch" }),
+		);
 		serverUpdate(false);
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "build-mismatch" }),
@@ -345,9 +364,7 @@ describe("build ID dispatch", () => {
 		await vi.runAllTimersAsync();
 		expect(mocks.reload).toHaveBeenCalledTimes(1);
 		vi.resetModules();
-		({ handleMessage, setAttachedProject } = await import(
-			"../../../src/lib/frontend/stores/ws-dispatch.js"
-		));
+		await load();
 		handshake();
 		await vi.runAllTimersAsync();
 		expect(mocks.reload).toHaveBeenCalledTimes(1);

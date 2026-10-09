@@ -1,4 +1,8 @@
 import { Schema } from "effect";
+import {
+	type ContinuationReason,
+	ContinuationReasonSchema,
+} from "./limit-recovery.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
 export type EventId = typeof EventId.Type;
@@ -73,6 +77,12 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.variant_changed",
 	"session.context_window_changed",
 	"session.goal_changed",
+	"session.handoff_delivered",
+	"session.usage_limited",
+	"session.cut_off_dismissed",
+	"session.resumed",
+	"session.resume_scheduled",
+	"session.resume_cancelled",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -372,6 +382,8 @@ export interface SessionStatusPayload {
 	readonly sessionId: string;
 	readonly status: SessionStatusValue;
 	readonly turnId?: string;
+	/** A retry's reason, for the shell row while the provider waits. */
+	readonly message?: string;
 }
 
 export interface SessionCompactionPayload {
@@ -386,6 +398,7 @@ export interface SessionProviderChangedPayload {
 	readonly sessionId: string;
 	readonly oldProvider: string;
 	readonly newProvider: string;
+	readonly reason?: ContinuationReason;
 }
 
 export interface SessionDeletedPayload {
@@ -448,6 +461,41 @@ export const SessionGoalChangedPayloadSchema = Schema.Struct({
 });
 export type SessionGoalChangedPayload =
 	typeof SessionGoalChangedPayloadSchema.Type;
+
+export interface SessionHandoffDeliveredPayload {
+	readonly included: number;
+	readonly omitted: number;
+	readonly tokens: number;
+	readonly firstMessageIncluded?: boolean;
+	readonly instanceId?: string;
+}
+
+export interface SessionUsageLimitedPayload {
+	readonly instanceId: string;
+	readonly rateLimitType: string;
+	/** SDK reset time, in Unix seconds. */
+	readonly resetsAt?: number;
+	readonly cutOffMessageId: string;
+}
+
+export interface SessionCutOffDismissedPayload {
+	readonly cutOffMessageId: string;
+}
+
+export interface SessionResumedPayload {
+	readonly reason: ContinuationReason;
+	readonly instanceId: string;
+	/** The previous account, when the continuation switched accounts. */
+	readonly from?: string;
+}
+
+export interface SessionResumeScheduledPayload {
+	readonly instanceId: string;
+	/** Unix seconds, matching the SDK's reset time. */
+	readonly at: number;
+}
+
+export type SessionResumeCancelledPayload = Record<string, never>;
 
 /**
  * Everything the approval card shows rides the asked event: the approvals
@@ -538,6 +586,12 @@ export interface EventPayloadMap {
 	"session.variant_changed": SessionVariantChangedPayload;
 	"session.context_window_changed": SessionContextWindowChangedPayload;
 	"session.goal_changed": SessionGoalChangedPayload;
+	"session.handoff_delivered": SessionHandoffDeliveredPayload;
+	"session.usage_limited": SessionUsageLimitedPayload;
+	"session.cut_off_dismissed": SessionCutOffDismissedPayload;
+	"session.resumed": SessionResumedPayload;
+	"session.resume_scheduled": SessionResumeScheduledPayload;
+	"session.resume_cancelled": SessionResumeCancelledPayload;
 	"permission.asked": PermissionAskedPayload;
 	"permission.resolved": PermissionResolvedPayload;
 	"question.asked": QuestionAskedPayload;
@@ -953,6 +1007,7 @@ const SessionStatusPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	status: SessionStatusSchema,
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	message: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 const SessionCompactionPayloadSchema = Schema.Struct({
@@ -967,6 +1022,7 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	oldProvider: Schema.String,
 	newProvider: Schema.String,
+	reason: Schema.optionalWith(ContinuationReasonSchema, { exact: true }),
 });
 
 const SessionDeletedPayloadSchema = Schema.Struct({
@@ -1003,6 +1059,38 @@ const SessionContextWindowChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	contextWindow: Schema.String,
 });
+
+export const SessionHandoffDeliveredPayloadSchema = Schema.Struct({
+	included: Schema.NonNegativeInt,
+	omitted: Schema.NonNegativeInt,
+	tokens: Schema.NonNegativeInt,
+	firstMessageIncluded: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	instanceId: Schema.optionalWith(Schema.String, { exact: true }),
+});
+
+export const SessionUsageLimitedPayloadSchema = Schema.Struct({
+	instanceId: Schema.String,
+	rateLimitType: Schema.String,
+	resetsAt: Schema.optionalWith(Schema.Number, { exact: true }),
+	cutOffMessageId: Schema.String,
+});
+
+const SessionCutOffDismissedPayloadSchema = Schema.Struct({
+	cutOffMessageId: Schema.String,
+});
+
+const SessionResumedPayloadSchema = Schema.Struct({
+	reason: ContinuationReasonSchema,
+	instanceId: Schema.String,
+	from: Schema.optionalWith(Schema.String, { exact: true }),
+});
+
+const SessionResumeScheduledPayloadSchema = Schema.Struct({
+	instanceId: Schema.String,
+	at: Schema.Number.pipe(Schema.finite()),
+});
+
+const SessionResumeCancelledPayloadSchema = Schema.Struct({});
 
 const optionalString = Schema.optionalWith(Schema.String, { exact: true });
 
@@ -1234,6 +1322,30 @@ const SessionGoalChangedEventSchema = eventEnvelope(
 	"session.goal_changed",
 	SessionGoalChangedPayloadSchema,
 );
+const SessionHandoffDeliveredEventSchema = eventEnvelope(
+	"session.handoff_delivered",
+	SessionHandoffDeliveredPayloadSchema,
+);
+const SessionUsageLimitedEventSchema = eventEnvelope(
+	"session.usage_limited",
+	SessionUsageLimitedPayloadSchema,
+);
+const SessionCutOffDismissedEventSchema = eventEnvelope(
+	"session.cut_off_dismissed",
+	SessionCutOffDismissedPayloadSchema,
+);
+const SessionResumedEventSchema = eventEnvelope(
+	"session.resumed",
+	SessionResumedPayloadSchema,
+);
+const SessionResumeScheduledEventSchema = eventEnvelope(
+	"session.resume_scheduled",
+	SessionResumeScheduledPayloadSchema,
+);
+const SessionResumeCancelledEventSchema = eventEnvelope(
+	"session.resume_cancelled",
+	SessionResumeCancelledPayloadSchema,
+);
 const PermissionAskedEventSchema = eventEnvelope(
 	"permission.asked",
 	PermissionAskedPayloadSchema,
@@ -1251,7 +1363,7 @@ const QuestionResolvedEventSchema = eventEnvelope(
 	QuestionResolvedPayloadSchema,
 );
 
-// Canonical Event Schema (Union of all 43 event types)
+// Canonical Event Schema (Union of all canonical event types)
 
 export const CanonicalEventSchema = Schema.Union(
 	MessageCreatedEventSchema,
@@ -1296,6 +1408,12 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionVariantChangedEventSchema,
 	SessionContextWindowChangedEventSchema,
 	SessionGoalChangedEventSchema,
+	SessionHandoffDeliveredEventSchema,
+	SessionUsageLimitedEventSchema,
+	SessionCutOffDismissedEventSchema,
+	SessionResumedEventSchema,
+	SessionResumeScheduledEventSchema,
+	SessionResumeCancelledEventSchema,
 	PermissionAskedEventSchema,
 	PermissionResolvedEventSchema,
 	QuestionAskedEventSchema,

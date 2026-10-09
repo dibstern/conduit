@@ -18,6 +18,7 @@ import {
 	ClaudeRunnerSocket,
 } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import type { ClaudeSessionTurn } from "../../../src/lib/provider/claude/claude-session-runner.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -194,8 +195,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 			{ timeout: 5000 },
 		);
 		const reply = await browser.send(sessionId, "after-adopted-idle");
-		expect(reply.chunks).toEqual(responseChunks("after-adopted-idle"));
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.chunks.join("")).toBe(
+			responseChunks("after-adopted-idle").join(""),
+		);
+		expect(reply.done["status"]).toBe("idle");
 		const replacement = harness.marks
 			.filter((mark) => mark.kind === "runner-started")
 			.at(-1);
@@ -242,7 +245,14 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const pending = browser
 				.send(sessionId, "restart-stream")
 				.catch(() => undefined);
-			await browser.waitFor((message) => message["type"] === "delta");
+			await browser.waitFor(
+				(message) =>
+					message["type"] === "transcript_message" &&
+					message["role"] === "assistant" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "text" && Boolean(part.text),
+					) === true,
+			);
 			const runner = harness.marks.find(
 				(mark) => mark.kind === "runner-started",
 			);
@@ -368,8 +378,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 				));
 			await after.answerApproval(recovered, "allow");
 		}
-		if (scenario !== "committed-answer")
-			await after.waitFor((message) => message["type"] === "done");
+		if (scenario !== "committed-answer") await after.waitForTurnEnd(sessionId);
 		await settled(harness, sessionId);
 		expect(JSON.stringify(await after.history(sessionId))).toContain(
 			responseChunks("approval-restart").join(""),
@@ -639,8 +648,14 @@ describe("Claude runners survive server replacement through built dist", () => {
 			).toEqual([]);
 			expect(blockedState.turns).toMatchObject([{ state: "running" }]);
 			expect(
-				after.frames.filter(({ message }) => message["type"] === "done"),
+				after.frames.filter(
+					({ message }) =>
+						message["type"] === "session_row" &&
+						message["id"] === sessionId &&
+						message["status"] === "idle",
+				),
 			).toEqual([]);
+			const releaseCursor = after.frames.length;
 			db.exec("DROP TRIGGER hold_terminal_replay");
 			await vi.waitFor(
 				() => {
@@ -662,13 +677,23 @@ describe("Claude runners survive server replacement through built dist", () => {
 				},
 				{ timeout: 15_000 },
 			);
-			await after.waitFor((message) => message["type"] === "done");
+			await after.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionId &&
+					message["status"] === "idle",
+				releaseCursor,
+			);
 			await vi.waitFor(() =>
 				expect(statSync(`${runner.socketPath}.spool`).size).toBe(0),
 			);
 			expect(
-				after.frames.filter(({ message }) => message["type"] === "done"),
-			).toHaveLength(1);
+				persisted(harness, sessionId).events.filter((event) =>
+					["turn.completed", "turn.error", "turn.interrupted"].includes(
+						event.type,
+					),
+				),
+			).toEqual([expect.objectContaining({ type: "turn.interrupted" })]);
 			expect(
 				sdkProof(harness).filter((mark) => mark["kind"] === "query"),
 			).toHaveLength(1);
@@ -779,12 +804,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 			expect(env["ANTHROPIC_API_KEY"]).toBeUndefined();
 			expect(env["ANTHROPIC_MODEL"]).toBeUndefined();
 			await after.answerApproval(approval, "allow");
-			expect(
-				await after.waitFor(
-					(message) =>
-						message["type"] === "done" && message["sessionId"] === sessionId,
-				),
-			).toMatchObject({ code: 0 });
+			expect(await after.waitForTurnEnd(sessionId)).toMatchObject({
+				id: sessionId,
+				status: "idle",
+				lastTurnEndVersion: expect.any(Number),
+			});
 			await settled(harness, sessionId);
 			expect(persisted(harness, sessionId)).toMatchObject({
 				session: { status: "idle" },
@@ -879,12 +903,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 				approvals: [{ status: "pending" }],
 			});
 			await after.answerApproval(recovered, "allow");
-			expect(
-				await after.waitFor(
-					(message) =>
-						message["type"] === "done" && message["sessionId"] === sessionId,
-				),
-			).toMatchObject({ code: 0 });
+			expect(await after.waitForTurnEnd(sessionId)).toMatchObject({
+				id: sessionId,
+				status: "idle",
+				lastTurnEndVersion: expect.any(Number),
+			});
 			await settled(harness, sessionId);
 			const state = persisted(harness, sessionId);
 			expect(state).toMatchObject({
@@ -976,6 +999,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					expect(errors).toHaveLength(1);
 					expect(JSON.parse(errors[0]?.data ?? "{}")).toMatchObject({
 						messageId: active.turns[0]?.assistant_message_id,
+						error: expect.any(String),
 					});
 					expect(
 						state.messages.find(
@@ -985,16 +1009,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 				},
 				{ timeout: 5000 },
 			);
-			expect(
-				await after.waitFor(
-					(message) =>
-						message["type"] === "done" && message["sessionId"] === sessionId,
-				),
-			).toMatchObject({ code: 1 });
-			await after.waitFor(
-				(message) =>
-					message["type"] === "error" && message["sessionId"] === sessionId,
-			);
+			expect(await after.waitForTurnEnd(sessionId)).toMatchObject({
+				id: sessionId,
+				status: "idle",
+				lastTurnEndVersion: expect.any(Number),
+			});
 			await after.close();
 			const reconnect = await harness.connect(sessionId);
 			await reconnect.view(sessionId);
@@ -1108,12 +1127,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 				},
 				{ timeout: 5000 },
 			);
-			expect(
-				await after.waitFor(
-					(message) =>
-						message["type"] === "done" && message["sessionId"] === sessionId,
-				),
-			).toMatchObject({ code: 1 });
+			expect(await after.waitForTurnEnd(sessionId)).toMatchObject({
+				id: sessionId,
+				status: "idle",
+				lastTurnEndVersion: expect.any(Number),
+			});
 			expect(
 				sdkProof(harness).filter(
 					(mark) => mark["kind"] === "enqueue" && mark["prompt"] === prompt,
@@ -1150,8 +1168,13 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const pending = browser.send(sessionId, prompt).catch(() => undefined);
 		await browser.waitFor(
 			(message) =>
-				message["type"] === "delta" &&
-				message["text"] === responseChunks(prompt)[0],
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) =>
+						part.type === "text" &&
+						part.text?.includes(responseChunks(prompt)[0] ?? ""),
+				) === true,
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")

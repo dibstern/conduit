@@ -7,6 +7,7 @@ import { Deferred, Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -148,7 +149,6 @@ const defaultInput = (
 		text: "current prompt",
 		...(model === undefined ? {} : { model }),
 		modelUserSelected: overrides?.modelUserSelected ?? true,
-		errorDelivery: "client",
 		...rest,
 	};
 };
@@ -225,6 +225,7 @@ const makeReadQuery = (
 const makePersistService = (
 	persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"],
 ): ClaudeEventPersistEffect => ({
+	persistHandoffDelivered: vi.fn(() => Effect.void),
 	persistEvent: vi.fn(() => Effect.void),
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
@@ -235,6 +236,7 @@ const makePersistService = (
 const makeProviderState = (
 	overrides?: Partial<ProviderStateEffect>,
 ): ProviderStateEffect => ({
+	nativeThread: vi.fn(() => Effect.succeed(undefined)),
 	getState: vi.fn(() => Effect.succeed({})),
 	saveUpdates: vi.fn(() => Effect.void),
 	clearState: vi.fn(() => Effect.void),
@@ -290,6 +292,7 @@ const serviceLayer = (input: {
 	});
 	const log = makeMockLogger();
 	const sessionManagerService = makeMockSessionManagerService();
+	const ingestion = input.ingestion ?? makeIngestion();
 	let baseLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
@@ -312,10 +315,8 @@ const serviceLayer = (input: {
 			input.persist ?? makePersistService(() => Effect.void),
 		),
 		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
-		Layer.succeed(
-			ProviderRuntimeIngestionTag,
-			input.ingestion ?? makeIngestion(),
-		),
+		Layer.succeed(ProviderRuntimeIngestionTag, ingestion),
+		AlertsLive,
 		Layer.succeed(
 			SessionTitleServiceTag,
 			input.titleService ?? makeTitleService(),
@@ -338,6 +339,7 @@ const serviceLayer = (input: {
 		wsHandler,
 		log,
 		sessionManagerService,
+		ingestion,
 	};
 };
 
@@ -641,7 +643,7 @@ describe("ProviderTurnService", () => {
 			const engine = makeEngine({ providerId: "claude", dispatchEffect });
 			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
 			const persist = makePersistService(vi.fn(() => Effect.void));
-			const { layer, log, wsHandler } = serviceLayer({
+			const { layer, log, ingestion } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -663,19 +665,15 @@ describe("ProviderTurnService", () => {
 				expect(log.error).toHaveBeenCalledWith(
 					expect.stringContaining("discovery unavailable"),
 				);
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "error",
-						code: "MODEL_REQUIRED",
-						sessionId: "session-1",
-					}),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({ code: "MODEL_REQUIRED" }),
+						}),
+					]),
 				);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -691,7 +689,7 @@ describe("ProviderTurnService", () => {
 			const engine = makeEngine({ providerId: "claude", dispatchEffect });
 			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
 			const persist = makePersistService(vi.fn(() => Effect.void));
-			const { layer, log, wsHandler } = serviceLayer({
+			const { layer, log, ingestion } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -713,19 +711,15 @@ describe("ProviderTurnService", () => {
 				expect(log.error).toHaveBeenCalledWith(
 					expect.stringContaining("no usable model catalog"),
 				);
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "error",
-						code: "MODEL_REQUIRED",
-						sessionId: "session-1",
-					}),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({ code: "MODEL_REQUIRED" }),
+						}),
+					]),
 				);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -745,7 +739,7 @@ describe("ProviderTurnService", () => {
 			const engine = makeEngine({ providerId: "claude", dispatchEffect });
 			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
 			const persist = makePersistService(vi.fn(() => Effect.void));
-			const { layer, log, wsHandler } = serviceLayer({
+			const { layer, log, ingestion } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -767,19 +761,15 @@ describe("ProviderTurnService", () => {
 				expect(log.error).toHaveBeenCalledWith(
 					expect.stringContaining("no usable model catalog"),
 				);
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "error",
-						code: "MODEL_REQUIRED",
-						sessionId: "session-1",
-					}),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({ code: "MODEL_REQUIRED" }),
+						}),
+					]),
 				);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -800,9 +790,15 @@ describe("ProviderTurnService", () => {
 				),
 			};
 			const providerState = makeProviderState({
-				getState: vi.fn(() => Effect.succeed({ resumeSessionId: "prev" })),
+				nativeThread: vi.fn(() =>
+					Effect.succeed({
+						resumeSessionId: "prev",
+						firstSequence: 3,
+						deliveredThrough: 8,
+					}),
+				),
 			});
-			const { layer, wsHandler } = serviceLayer({
+			const { layer } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -822,6 +818,7 @@ describe("ProviderTurnService", () => {
 				expect(persist.persistUserMessage).not.toHaveBeenCalled();
 				expect(events).toEqual(["title"]);
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
+				expect(providerState.nativeThread).not.toHaveBeenCalled();
 				expect(command).toMatchObject({
 					type: "send_turn",
 					commandId: "cmd-send-1",
@@ -830,7 +827,7 @@ describe("ProviderTurnService", () => {
 						sessionId: "session-1",
 						prompt: "current prompt",
 						history: [],
-						providerState: { resumeSessionId: "prev" },
+						instanceId: "claude",
 						workspaceRoot: MOCK_PROJECT_DIR,
 						model: {
 							providerId: "claude",
@@ -856,10 +853,6 @@ describe("ProviderTurnService", () => {
 						type: "text.delta",
 						sessionId: "session-1",
 					}),
-				);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "delta", text: "hello" }),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -932,7 +925,7 @@ describe("ProviderTurnService", () => {
 				projects: [],
 			});
 			const engine = makeEngine({ providerId: "deleted-instance" });
-			const { layer, wsHandler } = serviceLayer({
+			const { layer, ingestion } = serviceLayer({
 				engine,
 				configDir,
 			});
@@ -941,19 +934,17 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(engine.dispatchEffect).not.toHaveBeenCalled();
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({
-						type: "error",
-						code: "SEND_FAILED",
-						sessionId: "session-1",
-						message: expect.stringContaining("deleted-instance"),
-					}),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({
+								code: "SEND_FAILED",
+								error: expect.stringContaining("deleted-instance"),
+							}),
+						}),
+					]),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1065,7 +1056,16 @@ describe("ProviderTurnService", () => {
 			const engine = makeEngine({
 				providerId: "claude",
 				result: completedTurn({
-					providerStateUpdates: [{ key: "resumeSessionId", value: "next" }],
+					providerStateUpdates: [
+						{
+							key: "nativeThread:claude",
+							value: JSON.stringify({
+								resumeSessionId: "next",
+								firstSequence: 3,
+								deliveredThrough: 8,
+							}),
+						},
+					],
 				}),
 			});
 			const providerState = makeProviderState({
@@ -1078,24 +1078,28 @@ describe("ProviderTurnService", () => {
 					),
 				),
 			});
-			const { layer, log, wsHandler } = serviceLayer({ engine, providerState });
+			const { layer, log, ingestion } = serviceLayer({
+				engine,
+				providerState,
+			});
 
 			return Effect.gen(function* () {
 				yield* sendTurn();
 
 				expect(providerState.saveUpdates).toHaveBeenCalledWith("session-1", [
-					{ key: "resumeSessionId", value: "next" },
+					{
+						key: "nativeThread:claude",
+						value:
+							'{"resumeSessionId":"next","firstSequence":3,"deliveredThrough":8}',
+					},
 				]);
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("Non-fatal provider state persistence error"),
 				);
-				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ type: "error" }),
-				);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done", code: 1 }),
+				expect(ingestion.ingestBatch).not.toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({ type: "turn.error" }),
+					]),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1113,7 +1117,7 @@ describe("ProviderTurnService", () => {
 			const engine = new OrchestrationEngine({ registry });
 			engine.bindSession("session-1", "opencode");
 			const persist = makePersistService(vi.fn(() => Effect.void));
-			const { layer, wsHandler } = serviceLayer({ engine, api, persist });
+			const { layer, ingestion } = serviceLayer({ engine, api, persist });
 			return Effect.gen(function* () {
 				yield* sendTurn({
 					commandId: "cmd-error",
@@ -1121,9 +1125,14 @@ describe("ProviderTurnService", () => {
 					model: { providerID: "opencode", modelID: "test" },
 				});
 				expect(api.session.prompt).toHaveBeenCalledOnce();
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ code: "SEND_FAILED" }),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({ code: "SEND_FAILED" }),
+						}),
+					]),
 				);
 				expect(persist.persistUserMessage).toHaveBeenCalledWith(
 					"session-1",
@@ -1145,7 +1154,7 @@ describe("ProviderTurnService", () => {
 				providerId: "opencode",
 				result: completedTurn({ status: "interrupted" }),
 			});
-			const { layer, wsHandler } = serviceLayer({ engine });
+			const { layer, ingestion } = serviceLayer({ engine });
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(
@@ -1156,13 +1165,10 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done" }),
-				);
-				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ type: "error" }),
+				expect(ingestion.ingestBatch).not.toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({ type: "turn.error" }),
+					]),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1182,7 +1188,7 @@ describe("ProviderTurnService", () => {
 					error: { code: "interrupted", message: "Turn interrupted" },
 				},
 			});
-			const { layer, wsHandler } = serviceLayer({ engine });
+			const { layer, ingestion } = serviceLayer({ engine });
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(
@@ -1196,14 +1202,17 @@ describe("ProviderTurnService", () => {
 				// 2-minute PROCESSING_TIMEOUT: the timeout must be cleared and a
 				// `done` broadcast immediately.
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
-				expect(wsHandler.sendTo).toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ type: "error", code: "SEND_FAILED" }),
+				expect(ingestion.ingestBatch).toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "turn.error",
+							sessionId: "session-1",
+							data: expect.objectContaining({
+								code: "SEND_FAILED",
+								error: "Turn interrupted",
+							}),
+						}),
+					]),
 				);
 			}).pipe(Effect.provide(layer));
 		},
@@ -1227,7 +1236,7 @@ describe("ProviderTurnService", () => {
 			);
 			const persist = makePersistService(vi.fn(() => Effect.void));
 			const titleService = makeTitleService();
-			const { layer, wsHandler } = serviceLayer({
+			const { layer } = serviceLayer({
 				engine,
 				readQuery,
 				persist,
@@ -1269,10 +1278,6 @@ describe("ProviderTurnService", () => {
 						),
 					);
 				}
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "delta" }),
-				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1304,14 +1309,14 @@ describe("ProviderTurnService", () => {
 	});
 
 	it.effect(
-		"uses OpenCode abort for an unbound session, clears processing timeout, and broadcasts done",
+		"uses OpenCode abort for an unbound session and clears processing timeout",
 		() => {
 			const api = partialFake<OpenCodeAPI>({
 				session: partialFake<OpenCodeAPI["session"]>({
 					abort: vi.fn(async () => undefined),
 				}),
 			});
-			const { layer, wsHandler } = serviceLayer({ api });
+			const { layer } = serviceLayer({ api });
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(
@@ -1323,11 +1328,6 @@ describe("ProviderTurnService", () => {
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 				expect(api.session.abort).toHaveBeenCalledWith("session-1");
-				expect(wsHandler.sendToSession).toHaveBeenCalledWith("session-1", {
-					type: "done",
-					sessionId: "session-1",
-					code: 1,
-				});
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1655,7 +1655,7 @@ describe("ProviderTurnService", () => {
 					}),
 					dispatchEffect,
 				} as unknown as OrchestrationEngine;
-				const { layer, wsHandler } = serviceLayer({ engine });
+				const { layer, ingestion } = serviceLayer({ engine });
 
 				yield* Effect.gen(function* () {
 					yield* sendTurn();
@@ -1664,14 +1664,10 @@ describe("ProviderTurnService", () => {
 
 				yield* Deferred.succeed(releaseSend, undefined);
 				yield* flushDispatch();
-
-				expect(wsHandler.sendToSession).not.toHaveBeenCalledWith(
-					"session-1",
-					expect.objectContaining({ type: "done" }),
-				);
-				expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-					"client-1",
-					expect.objectContaining({ type: "error" }),
+				expect(ingestion.ingestBatch).not.toHaveBeenCalledWith(
+					expect.arrayContaining([
+						expect.objectContaining({ type: "turn.error" }),
+					]),
 				);
 			}),
 	);

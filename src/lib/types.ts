@@ -151,6 +151,13 @@ export interface ProjectRelayConfig {
 	opencodeAuth?: { username: string; password: string };
 	/** Daemon-owned OpenCode Instances module shared by project relays. */
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
+	/** Fresh quota decisions shared by every relay in this daemon. */
+	quotaCheck?: import("./domain/daemon/Services/quota-check.js").QuotaCheck;
+	/** Shared daemon config state and persistence for settings and continuation. */
+	daemonConfigContext?: import("effect").Context.Context<
+		| import("./domain/daemon/Services/daemon-config-ref.js").DaemonConfigRefTag
+		| import("./domain/daemon/Services/config-persistence-service.js").ConfigPersistenceTag
+	>;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;
 	/** Project working directory */
@@ -184,6 +191,10 @@ export interface ProjectRelayConfig {
 	) => MaybePromise<DaemonSessionQueryResult>;
 	/** Notify browsers on other project relays that the daemon list changed. */
 	broadcastSessionListChanged?: () => Promise<void>;
+	/** Notify the daemon's other live relays; standalone relays use a no-op. */
+	publishGlobalSetting: (
+		tag: import("./contracts/ws-rpc.js").GlobalProjectSetting["_tag"],
+	) => import("effect").Effect.Effect<void>;
 	/** Refresh the daemon's cached git context before publishing a turn-end list. */
 	refreshSessionGit?: () => Promise<void>;
 	/** Remove a project from the registry. */

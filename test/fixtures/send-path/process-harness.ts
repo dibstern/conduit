@@ -61,7 +61,17 @@ export class ProcessHarness {
 		return {
 			frames: this.frames,
 			createSession: async () => "fixture-session",
-			send: async (_sessionId: string, prompt: string) => {
+			waitFor: async (
+				predicate: (message: Record<string, unknown>) => boolean,
+				cursor = 0,
+			) => {
+				const frame = this.frames
+					.slice(cursor)
+					.find(({ message }) => predicate(message));
+				if (!frame) throw new Error("Missing fixture transcript projection");
+				return frame.message;
+			},
+			send: async (sessionId: string, prompt: string) => {
 				appendFileSync(config.promptTrace, "send\n");
 				const warmup = prompt.includes("-warmup-");
 				const batch = Math.floor(this.sends / 200);
@@ -77,7 +87,9 @@ export class ProcessHarness {
 					{ kind: "receipt", prompt, at: receipt.toString() },
 					{ kind: "enqueue", prompt, at: enqueue.toString() },
 				);
+				let projectedText = "";
 				for (const text of responseChunks(prompt)) {
+					projectedText += text;
 					this.marks.push({
 						kind: "emit",
 						prompt,
@@ -85,7 +97,13 @@ export class ProcessHarness {
 						at: enqueue.toString(),
 					});
 					this.frames.push({
-						message: { type: "delta", text },
+						message: {
+							type: "transcript_message",
+							sessionId,
+							id: prompt,
+							role: "assistant",
+							parts: [{ id: prompt, type: "text", text: projectedText }],
+						},
 						at:
 							enqueue + BigInt(Math.round((config.forward[batch] ?? 1) * 1e6)),
 					});

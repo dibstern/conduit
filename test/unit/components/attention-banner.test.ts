@@ -15,14 +15,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const wsSendSpy = vi.fn();
 const viewSessionRpcSpy = vi.hoisted(() =>
 	vi.fn(async (_input: unknown) => ({ ok: true as const })),
 );
 
-vi.mock("../../../src/lib/frontend/stores/ws.svelte.js", () => ({
-	wsSend: (...args: unknown[]) => wsSendSpy(...args),
-}));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getAgentsRpc: vi.fn(async () => ({ projectSlug: "project-a", agents: [] })),
 	getCommandsRpc: vi.fn(async () => ({

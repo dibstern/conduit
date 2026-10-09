@@ -3,12 +3,11 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
-	import { onFileBrowser } from "../../stores/ws.svelte.js";
+	import { onFileBrowser, applyGetFileContentResponse } from "../../stores/ws-listeners.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
-	import { applyGetFileContentResponse } from "../../stores/ws-dispatch.js";
 	import hljs from "highlight.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";

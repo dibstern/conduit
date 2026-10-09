@@ -148,7 +148,6 @@ describe("Integration: Terminal (PTY)", () => {
 		await expect(
 			client.ptyInput("nonexistent-pty-id", "hello\n"),
 		).rejects.toThrow("Terminal is unavailable");
-		expect(client.getReceivedOfType("error")).toHaveLength(0);
 
 		await client.close();
 	}, 10_000);

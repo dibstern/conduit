@@ -6,6 +6,7 @@ import {
 	isBusy,
 	resetSessionSubscription,
 	sessionSubscription,
+	turnEnded,
 } from "../transport/session-subscription.svelte.js";
 import {
 	type Change,
@@ -13,7 +14,10 @@ import {
 	reduce,
 	type SubscriptionState,
 } from "../transport/subscription-state.js";
-import type { ListDaemonSessionsResponse } from "../transport/ws-rpc.js";
+import type {
+	ForkSessionResponse,
+	ListDaemonSessionsResponse,
+} from "../transport/ws-rpc.js";
 import {
 	getAgentsRpc,
 	getCommandsRpc,
@@ -28,7 +32,6 @@ import type {
 	AttentionGroups,
 	DateGroups,
 	Immutable,
-	RelayMessage,
 	SessionAttention,
 	SessionInfo,
 } from "../types.js";
@@ -50,17 +53,19 @@ import {
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import {
+	attachedProjectState,
+	getCurrentRoute,
 	getCurrentSessionId,
 	getCurrentSlug,
 	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
-import { sessionActivityBridge } from "./session-activity.svelte.js";
+import { restoreServerUpdateBanner } from "./server-status.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
-import { updateContextPercent } from "./ui.svelte.js";
-import { setAttachedProject } from "./ws-dispatch.js";
+import { showToast, updateContextPercent } from "./ui.svelte.js";
+import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Re-exported so chat.svelte.ts need not import the subscription directly,
 // which would load it ahead of this store and leave its rows undefined.
@@ -85,15 +90,6 @@ let familyApplied = $state.raw<SubscriptionState<SessionInfo>>(
 );
 const familySessions = $derived([...familyApplied.rows.values()]);
 
-/** A session can receive events while its row is still arriving. */
-export function isRoutable(id: string): boolean {
-	return (
-		id === clientSession.currentId ||
-		serverSessions.has(id) ||
-		familySessions.some((row) => row.id === id)
-	);
-}
-
 /** Prefer the versioned row when a family message carries older metadata. */
 export function parentOf(id: string): string | null {
 	return (
@@ -108,17 +104,7 @@ export function parentOf(id: string): string | null {
 const busySessionIds = $derived.by(() => {
 	const rows = new Map(familySessions.map((row) => [row.id, row]));
 	for (const row of serverSessions.values()) rows.set(row.id, row);
-	// Activity can arrive before the current session's first family row.
-	const currentId = clientSession.currentId;
-	if (currentId && !rows.has(currentId)) {
-		rows.set(currentId, {
-			id: currentId,
-			title: "",
-			status: "idle",
-			parentID: parentOf(currentId) ?? undefined,
-		});
-	}
-	return calculateBusySessionIds(rows, sessionActivityBridge.pending.keys());
+	return calculateBusySessionIds(rows);
 });
 
 /** The session view's single busy decision, shared by every sidebar row. */
@@ -126,22 +112,15 @@ export function isSessionBusy(id: string): boolean {
 	return busySessionIds.has(id);
 }
 
-/** Live content only. Replay must never create a new activity bridge. */
-export function observeSessionActivity(event: RelayMessage): void {
-	if (!("sessionId" in event) || !event.sessionId) return;
-	const id = event.sessionId;
-	if (!isRoutable(id)) return;
-	// Legacy `status` hints may come from the poller. Only the shell's
-	// accepted row can retire activity or supply a status for this view.
-	switch (event.type) {
-		case "delta":
-		case "thinking_start":
-		case "thinking_delta":
-		case "tool_start":
-		case "tool_executing":
-		case "tool_result":
-			sessionActivityBridge.mark(id);
-	}
+/** Attach this tab from an AttachProject or cross-project ViewSession reply. */
+export function setAttachedProject(slug: string): void {
+	if (attachedProjectState.slug !== slug)
+		for (const activity of sessionActivity.values())
+			activity.replayGeneration++;
+	attachedProjectState.slug = slug;
+	for (const listener of projectAttachedListeners) listener(slug);
+	// Project listeners reset banners, so restore the daemon-wide update offer.
+	restoreServerUpdateBanner();
 }
 
 // What this tab is looking at. Applying server rows never touches it.
@@ -234,9 +213,12 @@ export const sessionState = {
 		return id ? parentOf(id) : null;
 	},
 	get currentFork() {
-		return clientSession.announcedParent?.sessionId === clientSession.currentId
-			? clientSession.announcedParent
-			: null;
+		const id = clientSession.currentId;
+		if (clientSession.announcedParent?.sessionId === id)
+			return clientSession.announcedParent;
+		// An OpenCode fork is projected before its parent is recorded, and the
+		// shell keeps that stale root row; the family row carries the lineage.
+		return familySessions.find((row) => row.id === id && row.parentID) ?? null;
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
@@ -251,8 +233,13 @@ export const sessionState = {
 
 let selectionGeneration = 0;
 
-/** Prune separate cross-project and search reads after a deletion notice. */
-export function pruneSessionLists(id: string): void {
+/**
+ * A session was deleted (the shell feed marked its remove deleted). Prune the
+ * cross-project and search reads the feed does not cover, and move off it if
+ * it is on screen. Runs before `forgetSession` clears the selection; a row
+ * that merely left a snapshot is not deleted and must not come through here.
+ */
+export function leaveDeletedSession(id: string): void {
 	clientSession.daemonSessions = clientSession.daemonSessions.filter(
 		(row) => row.id !== id,
 	);
@@ -260,6 +247,26 @@ export function pruneSessionLists(id: string): void {
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
 		);
+	const route = getCurrentRoute();
+	if (
+		route.page !== "chat" ||
+		route.sessionId !== id ||
+		(clientSession.currentId !== id && clientSession.currentId !== null)
+	)
+		return;
+	const survivor = getFilteredSessions().find((row) => row.id !== id);
+	if (survivor) {
+		switchToSession(survivor.id, survivor.projectSlug, undefined, {
+			replace: true,
+		});
+		return;
+	}
+	const activity = sessionActivity.get(id);
+	if (activity) activity.replayGeneration++;
+	updateContextPercent(0);
+	clearTodoState();
+	replaceRoute("/");
+	clientSession.currentId = null;
 }
 
 /** Drop the state this tab keeps for a session the map no longer holds. */
@@ -514,15 +521,21 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (viewed?.parentID && viewed !== previous)
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
-	// A child has no shell row, so its family row is the only status it has.
+	// The shell feed carries roots only, so a child's family row is the only
+	// status it has. Key on parentID, not shell membership: a root that gains a
+	// parent leaves the shell, and its family row is the one kept current.
 	if (change._tag === "snapshot") {
 		for (const row of next.rows.values()) {
-			if (!serverSessions.has(row.id)) followSessionBusy(row.id, isBusy(row));
+			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
 		}
 	}
-	if (change._tag === "upsert" && !serverSessions.has(change.item.id)) {
+	if (change._tag === "upsert" && change.item.parentID !== undefined) {
+		const previousRow = previousRows.get(change.item.id);
 		const busy = isBusy(change.item);
-		if (busy !== isBusy(previousRows.get(change.item.id)))
+		if (
+			busy !== isBusy(previousRow) ||
+			(!busy && turnEnded(previousRow, change.item))
+		)
 			followSessionBusy(change.item.id, busy);
 	}
 }
@@ -727,25 +740,24 @@ export function applySearchResultsResponse(
 	clientSession.searchHasMore = response.hasMore;
 }
 
-/** Keep fork lineage with this tab's selection until the family row arrives. */
-export function handleSessionForked(
-	msg: Extract<RelayMessage, { type: "session_forked" }>,
-): void {
-	if (
-		clientSession.announcedParent?.sessionId === clientSession.currentId &&
-		clientSession.currentId !== msg.parentId
-	)
-		return;
+/**
+ * This tab forked: select the fork and keep its lineage until the family row
+ * arrives. Only the forking tab announces it.
+ */
+export function followFork(response: ForkSessionResponse): void {
 	clientSession.announcedParent = {
-		sessionId: msg.sessionId,
-		parentId: msg.parentId,
-		...(msg.forkMessageId && {
-			forkMessageId: msg.forkMessageId,
-		}),
-		...(msg.forkPointTimestamp != null && {
-			forkPointTimestamp: msg.forkPointTimestamp,
+		sessionId: response.sessionId,
+		parentId: response.parentId,
+		...(response.forkMessageId && { forkMessageId: response.forkMessageId }),
+		...(response.forkPointTimestamp != null && {
+			forkPointTimestamp: response.forkPointTimestamp,
 		}),
 	};
+	showToast(
+		`Forked from "${findSession(response.parentId)?.title || "session"}"`,
+	);
+	if (clientSession.currentId !== response.sessionId)
+		switchToSession(response.sessionId, response.projectSlug);
 }
 
 // Components should wrap these in $derived() for reactive caching.

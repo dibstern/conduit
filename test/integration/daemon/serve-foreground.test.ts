@@ -27,6 +27,7 @@ import {
 	prepareClaudeRunnerDirectory,
 	registerClaudeRunner,
 } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -505,8 +506,13 @@ describe("foreground conduit serve", () => {
 			.catch(() => undefined);
 		await failed.browser.waitFor(
 			(frame) =>
-				frame["type"] === "delta" &&
-				frame["text"] === responseChunks(prompt)[0],
+				frame["type"] === "transcript_message" &&
+				frame["role"] === "assistant" &&
+				(frame["parts"] as HistoryMessage["parts"])?.some(
+					(part) =>
+						part.type === "text" &&
+						part.text?.includes(responseChunks(prompt)[0] ?? ""),
+				) === true,
 		);
 		const registration = JSON.parse(
 			readFileSync(`${failed.runner.socketPath}.json`, "utf8"),
@@ -772,8 +778,13 @@ describe("foreground conduit serve", () => {
 		try {
 			await browser.waitFor(
 				(frame) =>
-					frame["type"] === "delta" &&
-					frame["text"] === "Echo(upgrade-long-turn): ",
+					frame["type"] === "transcript_message" &&
+					frame["role"] === "assistant" &&
+					(frame["parts"] as HistoryMessage["parts"])?.some(
+						(part) =>
+							part.type === "text" &&
+							part.text?.includes("Echo(upgrade-long-turn): "),
+					) === true,
 			);
 			const runner = harness.marks.find(
 				(mark) =>

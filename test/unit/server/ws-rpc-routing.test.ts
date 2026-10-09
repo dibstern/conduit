@@ -19,7 +19,10 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import {
+	makeRoutedWsRpcServerLayer,
+	RpcSubscriptionScopeLive,
+} from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	makeWsRpcWebSocketHandler,
@@ -37,6 +40,7 @@ describe("routed RPC server", () => {
 				const bus = makeSessionEventBusLive();
 				const context = yield* Layer.build(
 					Layer.mergeAll(
+						RpcSubscriptionScopeLive,
 						bus,
 						makePersistenceEffectLayer(":memory:", undefined, bus),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
@@ -94,6 +98,7 @@ describe("routed RPC server", () => {
 					const bus = makeSessionEventBusLive();
 					const context = yield* Layer.build(
 						Layer.mergeAll(
+							RpcSubscriptionScopeLive,
 							bus,
 							makePersistenceEffectLayer(":memory:", undefined, bus),
 							Layer.succeed(BackgroundLivenessTag, () => undefined),
@@ -206,7 +211,6 @@ describe("routed RPC server", () => {
 							resolve,
 							undefined,
 							undefined,
-							undefined,
 							attachProject,
 						),
 					),
@@ -235,7 +239,7 @@ describe("routed RPC server", () => {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
 						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
-					}),
+					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
@@ -250,63 +254,27 @@ describe("routed RPC server", () => {
 			}),
 	);
 
-	it.scoped(
-		"lets daemon ViewSession reattachment bypass the relay handler",
-		() =>
-			Effect.gen(function* () {
-				const resolve = vi.fn(() =>
-					Effect.fail(
-						new WsRpcError({ message: "must not resolve relay context" }),
-					),
-				);
-				const reattach = vi.fn(() => Effect.succeed(true));
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
-					),
-				);
+	it.scoped("routes ViewSession through the project handler", () =>
+		Effect.gen(function* () {
+			const context = yield* Layer.build(
+				makeTestHandlerLayer().pipe(
+					Layer.provideMerge(RpcSubscriptionScopeLive),
+				),
+			);
+			const resolve = vi.fn(() => Effect.succeed(context));
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+				Effect.provide(makeRoutedWsRpcServerLayer(resolve)),
+			);
 
-				expect(
-					yield* client.ViewSession({
-						projectSlug: "project-b",
-						sessionId: "session-b",
-						originId: "daemon-client",
-					}),
-				).toEqual({ ok: true, draft: "" });
-				expect(reattach).toHaveBeenCalledWith(
-					expect.objectContaining({
-						projectSlug: "project-b",
-						sessionId: "session-b",
-						originId: "daemon-client",
-					}),
-				);
-				expect(resolve).not.toHaveBeenCalled();
-			}),
-	);
-
-	it.scoped(
-		"routes ViewSession normally when daemon reattachment declines",
-		() =>
-			Effect.gen(function* () {
-				const context = yield* Layer.build(makeTestHandlerLayer());
-				const resolve = vi.fn(() => Effect.succeed(context));
-				const reattach = vi.fn(() => Effect.succeed(false));
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, undefined, reattach),
-					),
-				);
-
-				expect(
-					yield* client.ViewSession({
-						projectSlug: "project-a",
-						sessionId: "session-a",
-						originId: "relay-client",
-					}),
-				).toEqual({ ok: true, draft: "" });
-				expect(reattach).toHaveBeenCalledTimes(1);
-				expect(resolve).toHaveBeenCalledWith("project-a");
-			}),
+			expect(
+				yield* client.ViewSession({
+					projectSlug: "project-a",
+					sessionId: "session-a",
+					originId: "relay-client",
+				}),
+			).toEqual({ ok: true, draft: "" });
+			expect(resolve).toHaveBeenCalledWith("project-a");
+		}),
 	);
 
 	it.scoped(
@@ -316,7 +284,7 @@ describe("routed RPC server", () => {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
 						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
-					}),
+					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(

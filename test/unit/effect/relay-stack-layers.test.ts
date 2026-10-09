@@ -9,13 +9,11 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import { WsHandlerStateTag } from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -23,7 +21,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
@@ -36,7 +33,6 @@ const relayStateTestLayer = RelayStateLive.pipe(
 			Layer.succeed(OpenCodeAPITag, openCodeApi),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 			Layer.succeed(BackgroundLivenessTag, () => undefined),
 			Layer.succeed(
 				OpenCodeInstancesTag,
@@ -66,10 +62,6 @@ describe("Relay stack Layer composition", () => {
 			const overridesRef = yield* OverridesStateTag;
 			const overridesState = yield* Ref.get(overridesRef);
 			expect(overridesState.sessions.size).toBe(0);
-
-			const wsRef = yield* WsHandlerStateTag;
-			const wsState = yield* Ref.get(wsRef);
-			expect(HashMap.size(wsState)).toBe(0);
 
 			const pollerRef = yield* PollerStateTag;
 			const pollerState = yield* Ref.get(pollerRef);

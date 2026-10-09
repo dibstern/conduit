@@ -2,7 +2,6 @@ import {
 	applyFamilyChange,
 	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
-	pruneSessionLists,
 	resetSessionFamily,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { applySessionChange as applyFeedChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
@@ -29,7 +28,12 @@ type TestChange =
 			readonly item: SessionInfo;
 			readonly sequence?: number;
 	  }
-	| { readonly _tag: "remove"; readonly id: string; readonly sequence?: number }
+	| {
+			readonly _tag: "remove";
+			readonly id: string;
+			readonly sequence?: number;
+			readonly deleted?: boolean;
+	  }
 	| { readonly _tag: "synchronized" };
 
 const sequenced = (change: TestChange): Change<SessionInfo> => {
@@ -82,8 +86,7 @@ export function applySessionUpsert(row: SessionInfo): void {
 }
 
 export function applySessionRemoved(id: string): void {
-	applyFeedChange({ _tag: "remove", sequence: ++sequence, id });
-	pruneSessionLists(id);
+	applyFeedChange({ _tag: "remove", sequence: ++sequence, id, deleted: true });
 }
 
 /** A fresh family feed: its snapshot, then `synchronized`. */

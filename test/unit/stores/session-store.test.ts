@@ -37,7 +37,6 @@ import {
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import {
 	applySessionChange,
 	sessionSubscription,
@@ -200,6 +199,23 @@ it("forgets chat and selection when the subscription snapshot omits a session", 
 	expect(sessionState.currentId).toBeNull();
 });
 
+it("keeps chat and selection when a root only leaves the list", () => {
+	applySessionChange({
+		_tag: "upsert",
+		sequence: 10,
+		item: { id: "forked", title: "Forked", status: "idle" },
+	});
+	getOrCreateSessionSlot("forked");
+	sessionState.currentId = "forked";
+
+	// It gained a parent: out of the sidebar, but not deleted.
+	applySessionChange({ _tag: "remove", sequence: 11, id: "forked" });
+
+	expect(sessionState.sessions.has("forked")).toBe(false);
+	expect(sessionActivity.has("forked")).toBe(true);
+	expect(sessionState.currentId).toBe("forked");
+});
+
 it("forgets chat and selection when the subscription removes a session", () => {
 	applySessionChange({
 		_tag: "upsert",
@@ -209,29 +225,17 @@ it("forgets chat and selection when the subscription removes a session", () => {
 	getOrCreateSessionSlot("gone");
 	sessionState.currentId = "gone";
 
-	applySessionChange({ _tag: "remove", sequence: 11, id: "gone" });
+	applySessionChange({
+		_tag: "remove",
+		sequence: 11,
+		id: "gone",
+		deleted: true,
+	});
 
 	expect(sessionState.sessions.has("gone")).toBe(false);
 	expect(sessionActivity.has("gone")).toBe(false);
 	expect(sessionMessages.has("gone")).toBe(false);
 	expect(sessionState.currentId).toBeNull();
-});
-
-it("does not write a row from a fork notice", () => {
-	applySessionChange({
-		_tag: "snapshot",
-		sequence: 10,
-		rows: [{ id: "ses_original", title: "Original", status: "idle" }],
-	});
-	handleMessage({
-		type: "session_forked",
-		sessionId: "fork",
-		parentId: "ses_original",
-		parentTitle: "Original",
-	});
-
-	expect(sessionState.sessions.has("fork")).toBe(false);
-	expect(sessionState.sessions.get("ses_original")?.title).toBe("Original");
 });
 
 it("keeps the family list owned by the family feed", () => {

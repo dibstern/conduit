@@ -1,12 +1,42 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, ManagedRuntime, Option, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Ref,
+	Stream,
+} from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import {
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+	defaultDaemonConfig,
+	getConfigDir,
+	loadDaemonConfig,
+	resolveConfiguredInstances,
+} from "../daemon/config-persistence.js";
+import {
+	ConfigPersistenceLive,
+	ConfigSnapshotTag,
+	makeConfigWriterLive,
+} from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import type { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
+import {
+	DaemonConfigRefLive,
+	DaemonConfigRefTag,
+	makeDaemonConfigFromOptions,
+} from "../domain/daemon/Services/daemon-config-ref.js";
 import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeQuotaCheck,
+	QuotaCheckTag,
+} from "../domain/daemon/Services/quota-check.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -53,6 +83,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	type OrchestrationEngineTag,
 	SessionCompactionsTag,
+	SessionRetriesTag,
 	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
@@ -72,13 +103,16 @@ import {
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
+import { makeClaudeUsageProbe } from "../provider/claude/claude-usage-probe.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
+import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import { makeSessionCompactions } from "../session/session-compactions.js";
+import { makeSessionRetries } from "../session/session-retries.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
@@ -131,6 +165,8 @@ const relayOpenCodeInstances = (
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
 	| OverridesStateTag
+	| DaemonConfigRefTag
+	| ConfigPersistenceTag
 	| Layer.Layer.Success<typeof PendingInteractionServiceLive>
 	| PollerStateTag
 	| ReadQueryEffectTag
@@ -185,6 +221,7 @@ export function createProjectRelayLayers({
 		fork: defaultClaudeSessionForkSdk,
 	};
 	const compactions = makeSessionCompactions();
+	const retries = makeSessionRetries();
 	// Orchestration runtime layer (provider instance routing)
 	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
 		...(config.shellEnv && { shellEnv: config.shellEnv }),
@@ -203,6 +240,78 @@ export function createProjectRelayLayers({
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
+	const daemonConfigLayer = config.daemonConfigContext
+		? Layer.succeedContext(config.daemonConfigContext)
+		: Layer.unwrapEffect(
+				Effect.gen(function* () {
+					const configDir = config.configDir ?? getConfigDir();
+					const saved = loadDaemonConfig(configDir) ?? defaultDaemonConfig();
+					const { pinHash, tls, ...initial } = saved;
+					const configRefLayer = DaemonConfigRefLive(
+						makeDaemonConfigFromOptions({
+							...initial,
+							tlsEnabled: tls,
+							...(pinHash !== null && { pinHash }),
+						}),
+					);
+					// Standalone relays have no daemon project/instance registry.
+					// Preserve those disk fields while snapshotting their live settings.
+					const snapshot = Layer.effect(
+						ConfigSnapshotTag,
+						Effect.gen(function* () {
+							const configRef = yield* DaemonConfigRefTag;
+							return {
+								build: Ref.get(configRef).pipe(
+									Effect.map((current) => ({
+										...(loadDaemonConfig(configDir) ?? defaultDaemonConfig()),
+										autoSettleAfterDays:
+											current.autoSettleAfterDays === undefined
+												? DEFAULT_AUTO_SETTLE_AFTER_DAYS
+												: current.autoSettleAfterDays,
+										...(current.usageLimits !== undefined && {
+											usageLimits: current.usageLimits,
+										}),
+									})),
+								),
+							};
+						}),
+					).pipe(Layer.provideMerge(configRefLayer));
+					return ConfigPersistenceLive.pipe(
+						Layer.provideMerge(snapshot),
+						Layer.provide(makeConfigWriterLive(configDir)),
+					);
+				}),
+			);
+	const sharedQuotaCheck = config.quotaCheck;
+	const quotaCheckLayer = sharedQuotaCheck
+		? Layer.sync(QuotaCheckTag, () => sharedQuotaCheck)
+		: Layer.scoped(
+				QuotaCheckTag,
+				makeQuotaCheck({
+					instances: Effect.sync(() => {
+						const saved = loadDaemonConfig(config.configDir);
+						return saved
+							? resolveConfiguredInstances(saved)
+									.filter((instance) => instance.driver === "claude")
+									.map((instance) => {
+										const configDir =
+											instance.configDir ?? saved.claudeConfigDir;
+										return {
+											id: instance.id,
+											...(configDir === undefined ? {} : { configDir }),
+										};
+									})
+							: [{ id: "claude" }];
+					}),
+					probe: makeClaudeUsageProbe({
+						queryFactory: claudeSdk.query,
+						cwd: config.projectDir,
+						...(config.shellEnv
+							? { shellEnv: config.shellEnv(config.projectDir) }
+							: {}),
+					}),
+				}),
+			);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
@@ -255,6 +364,7 @@ export function createProjectRelayLayers({
 						),
 				},
 				compactions,
+				retries,
 			});
 		}),
 	).pipe(
@@ -368,6 +478,8 @@ export function createProjectRelayLayers({
 	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
+		daemonConfigLayer,
+		quotaCheckLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
 		openCodeApiLayer,
@@ -386,6 +498,7 @@ export function createProjectRelayLayers({
 		messagePollerManagerLayer,
 		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
 		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
+		Layer.sync(SessionRetriesTag, () => retries.retryingOf),
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
@@ -466,8 +579,8 @@ export function createProjectRelayLayers({
 	// The inbox drains on the relay's one bus (memoised by layer reference).
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
 	const fullLayer = Layer.provideMerge(
-		Layer.merge(wiringLayers, inboxLayer),
-		fullBaseLayers,
+		RpcSubscriptionScopeLive,
+		Layer.provideMerge(Layer.merge(wiringLayers, inboxLayer), fullBaseLayers),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

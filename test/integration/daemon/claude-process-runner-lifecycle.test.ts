@@ -23,6 +23,7 @@ import {
 	discoverClaudeRunners,
 	registerClaudeRunner,
 } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
 	cleanupTestClaudeRunners,
@@ -612,8 +613,8 @@ describe("built-dist Claude runner lifecycle", () => {
 			),
 		).toBe(false);
 		const next = await browser.send(sessionId, "idle-restart");
-		expect(next.chunks).toEqual(responseChunks("idle-restart"));
-		expect(next.done["code"]).toBe(0);
+		expect(next.chunks.join("")).toBe(responseChunks("idle-restart").join(""));
+		expect(next.done["status"]).toBe("idle");
 		expect(started(harness).pid).not.toBe(first.pid);
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).commands).toEqual([
@@ -646,11 +647,13 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		controller.abort();
 		expect(await reload).toBe("interrupted");
-		expect((await first).done["code"]).toBe(0);
+		expect((await first).done["status"]).toBe("idle");
 		const runner = started(harness);
 		const next = await browser.send(sessionId, "after-interrupted-end");
-		expect(next.done["code"]).toBe(0);
-		expect(next.chunks).toEqual(responseChunks("after-interrupted-end"));
+		expect(next.done["status"]).toBe("idle");
+		expect(next.chunks.join("")).toBe(
+			responseChunks("after-interrupted-end").join(""),
+		);
 		expect(started(harness).pid).toBe(runner.pid);
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).commands).toEqual([
@@ -688,7 +691,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		expect(started(harness).pid).not.toBe(first.pid);
 		await browser.answerApproval(approval, "allow");
-		expect((await turn).done["code"]).toBe(0);
+		expect((await turn).done["status"]).toBe("idle");
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).commands).toEqual([
 				{ status: "completed" },
@@ -698,7 +701,13 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(
 			browser.frames
 				.slice(cursor)
-				.some(({ message }) => message["type"] === "error"),
+				.some(
+					({ message }) =>
+						message["type"] === "transcript_message" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) => part.type === "error",
+						) === true,
+				),
 		).toBe(false);
 		expect(
 			snapshot(harness, sessionId).events.some(
@@ -744,8 +753,8 @@ describe("built-dist Claude runner lifecycle", () => {
 			{ timeout: 5000 },
 		);
 		expect(
-			(await browser.send(sessionId, "active-config-restart")).done["code"],
-		).toBe(0);
+			(await browser.send(sessionId, "active-config-restart")).done["status"],
+		).toBe("idle");
 		expect(started(harness).pid).not.toBe(first.pid);
 	}, 35_000);
 
@@ -759,7 +768,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		await new Promise<void>((done) => setTimeout(done, 400));
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
 		await browser.answerApproval(request, "allow");
-		expect((await pending).done["code"]).toBe(0);
+		expect((await pending).done["status"]).toBe("idle");
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).session).toEqual({ status: "idle" }),
 		);
@@ -782,22 +791,21 @@ describe("built-dist Claude runner lifecycle", () => {
 	])("persists a crash during %s and clears replayed interactions", async (phase) => {
 		const { harness, browser, sessionId } = await start();
 		const pending = browser.send(sessionId, `${phase}-crash`);
-		await browser.waitFor(
-			(message) =>
-				message["type"] ===
-				(phase === "approval"
-					? "permission_pending"
-					: phase === "question"
-						? "question_pending"
-						: "delta"),
+		await browser.waitFor((message) =>
+			phase === "approval"
+				? message["type"] === "permission_pending"
+				: phase === "question"
+					? message["type"] === "question_pending"
+					: message["type"] === "transcript_message" &&
+						message["role"] === "assistant" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) => part.type === "text" && Boolean(part.text),
+						) === true,
 		);
 		const runner = started(harness);
 		process.kill(runner.pid, "SIGKILL");
-		expect((await pending).done["code"]).toBe(1);
-		await browser.waitFor(
-			(message) =>
-				message["type"] === "error" && message["sessionId"] === sessionId,
-		);
+		const { done } = await pending;
+		expect(done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		await vi.waitFor(
 			() => {
 				const state = snapshot(harness, sessionId);
@@ -806,7 +814,11 @@ describe("built-dist Claude runner lifecycle", () => {
 				expect(state.commands).toEqual([{ status: "failed" }]);
 				expect(
 					state.events.filter((event) => event.type === "turn.error"),
-				).toHaveLength(1);
+				).toEqual([
+					expect.objectContaining({
+						data: expect.objectContaining({ error: expect.any(String) }),
+					}),
+				]);
 				expect(state.approvals).toHaveLength(phase === "stall" ? 0 : 1);
 				for (const approval of state.approvals)
 					expect(approval).toMatchObject({ status: "resolved" });
@@ -817,8 +829,10 @@ describe("built-dist Claude runner lifecycle", () => {
 		const reconnect = await harness.connect(sessionId);
 		await reconnect.view(sessionId);
 		const recovered = await reconnect.send(sessionId, "after-crash");
-		expect(recovered.done["code"]).toBe(0);
-		expect(recovered.chunks).toEqual(responseChunks("after-crash"));
+		expect(recovered.done["status"]).toBe("idle");
+		expect(recovered.chunks.join("")).toBe(
+			responseChunks("after-crash").join(""),
+		);
 		expect(started(harness).pid).not.toBe(runner.pid);
 		await vi.waitFor(() =>
 			expect(snapshot(harness, sessionId).session).toEqual({ status: "idle" }),
@@ -858,6 +872,24 @@ describe("built-dist Claude runner lifecycle", () => {
 			cursor,
 		);
 		await failed;
+		const enqueue = harness.marks.find(
+			(mark) =>
+				mark.kind === "enqueue" &&
+				mark.prompt.endsWith(
+					"[End conduit context handoff]\n\napproval-overlap-recovery",
+				),
+		);
+		expect(enqueue?.kind).toBe("enqueue");
+		if (enqueue?.kind !== "enqueue")
+			throw new Error("Missing replacement SDK prompt");
+		expect(enqueue.prompt).toContain("approval-overlap-crash");
+		const query = harness.marks.find(
+			(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+		);
+		if (query?.kind !== "query")
+			throw new Error("Missing replacement SDK query");
+		const queryOptions: unknown = JSON.parse(query.optionsJson);
+		expect(queryOptions).not.toHaveProperty("resume");
 		const active = snapshot(harness, sessionId);
 		expect(active.session).toEqual({ status: "busy" });
 		expect(
@@ -866,10 +898,7 @@ describe("built-dist Claude runner lifecycle", () => {
 			),
 		).toHaveLength(1);
 		await browser.answerApproval(approval, "allow");
-		await browser.waitFor(
-			(message) => message["type"] === "done" && message["code"] === 0,
-			cursor,
-		);
+		await browser.waitForTurnEnd(sessionId, cursor);
 		await replacement;
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
@@ -902,12 +931,7 @@ describe("built-dist Claude runner lifecycle", () => {
 				: { runnerHelloProtocolVersion: 999 },
 		);
 		const turn = await browser.send(sessionId, "protocol-refusal");
-		expect(turn.done["code"]).toBe(1);
-		const error = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" && message["code"] === "provider_error",
-		);
-		expect(error["message"]).toMatch(/protocol.*mismatch.*999/i);
+		expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
@@ -918,7 +942,7 @@ describe("built-dist Claude runner lifecycle", () => {
 					(event) =>
 						event.type === "turn.error" &&
 						isRecord(event.data) &&
-						/protocol.*mismatch/i.test(String(event.data["error"])),
+						/protocol.*mismatch.*999/i.test(String(event.data["error"])),
 				),
 			).toBe(true);
 			expect(JSON.stringify(harness.proof())).toMatch(
@@ -936,7 +960,8 @@ describe("built-dist Claude runner lifecycle", () => {
 			browser.send(sessionId, "protocol-queued-first"),
 			browser.send(sessionId, "protocol-queued-second"),
 		]);
-		for (const turn of turns) expect(turn.done["code"]).toBe(1);
+		for (const turn of turns)
+			expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		await vi.waitFor(() => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });

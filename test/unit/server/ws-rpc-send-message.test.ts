@@ -10,7 +10,6 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockSessionManagerService,
-	makeRecordingWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -66,6 +65,7 @@ describe("WsRpcServerLayer input.submit", () => {
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
 							claudeEventPersistEffect: {
+								persistHandoffDelivered: () => Effect.void,
 								persistEvent: () => Effect.void,
 								persistEvents: () => Effect.void,
 								persistUserMessage: () => Effect.void,
@@ -87,9 +87,6 @@ describe("WsRpcServerLayer input.submit", () => {
 		);
 		const engine = withDispatchEffect({ dispatchEffect });
 		const recordMessageActivity = vi.fn(() => Effect.void);
-		const { wsHandler, calls } = makeRecordingWebSocketHandler({
-			getClientsForSession: vi.fn(() => ["tab-a", "tab-b"]),
-		});
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -116,13 +113,6 @@ describe("WsRpcServerLayer input.submit", () => {
 					}),
 				}),
 			);
-			// The phase follows the shell row (ni8.35), and the sender and every
-			// other tab see the message once it is placed: nothing is broadcast.
-			expect(calls).not.toContainEqual(
-				expect.objectContaining({
-					message: expect.objectContaining({ type: "user_message" }),
-				}),
-			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -131,7 +121,6 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
-							wsHandler,
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
 							}),

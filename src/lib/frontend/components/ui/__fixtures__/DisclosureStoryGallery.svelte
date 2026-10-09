@@ -17,8 +17,7 @@
 		"default",
 		"compact",
 		"tight",
-		"roomy",
-		"split",
+		"list",
 	] as const;
 
 	const looks = ["card", "section", "row"] as const;
@@ -29,8 +28,7 @@
 		"default-open": true,
 		"compact-open": true,
 		"tight-open": true,
-		"roomy-open": true,
-		"split-open": true,
+		"list-open": true,
 		"nochevron-open": true,
 		"look-section": true,
 	});

@@ -103,6 +103,11 @@ type SessionHandledType =
 	| "session.variant_changed"
 	| "session.context_window_changed"
 	| "session.goal_changed"
+	| "session.usage_limited"
+	| "session.cut_off_dismissed"
+	| "session.resumed"
+	| "session.resume_scheduled"
+	| "session.resume_cancelled"
 	| "turn.completed"
 	| "turn.error"
 	| "permission.asked"
@@ -347,6 +352,10 @@ export const sessionHandlers: {
 				sql: "UPDATE sessions SET provider = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.newProvider, event.createdAt, event.data.sessionId],
 			},
+			{
+				sql: "UPDATE sessions SET limit_recovery = CASE WHEN json_extract(limit_recovery, '$.cutOffMessageId') IS NULL THEN NULL ELSE json_remove(json_set(limit_recovery, '$.continued', json('true'), '$.switched', json('true')), '$.scheduledAt') END WHERE id = ? AND limit_recovery IS NOT NULL",
+				params: [event.data.sessionId],
+			},
 		];
 	},
 
@@ -393,6 +402,73 @@ export const sessionHandlers: {
 		},
 	],
 
+	"session.usage_limited": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = ?, updated_at = ? WHERE id = ?",
+			params: [
+				JSON.stringify({ ...event.data, rearms: 0, continued: false }),
+				event.createdAt,
+				event.sessionId,
+			],
+		},
+	],
+	"session.cut_off_dismissed": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.cutOffMessageId'), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.cutOffMessageId') = ?",
+			params: [event.createdAt, event.sessionId, event.data.cutOffMessageId],
+		},
+	],
+	"session.resumed": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ? AND provider = ? AND limit_recovery IS NOT NULL",
+			params: [event.createdAt, event.sessionId, event.data.instanceId],
+		},
+		{
+			// The transcript divider outlives limit_recovery, which the reply nulls.
+			sql: "UPDATE sessions SET resumes = json_insert(resumes, '$[#]', json(?)), updated_at = ? WHERE id = ?",
+			params: [
+				JSON.stringify({
+					at: event.createdAt,
+					instanceId: event.data.instanceId,
+					reason: event.data.reason,
+					...(event.data.from === undefined ? {} : { from: event.data.from }),
+				}),
+				event.createdAt,
+				event.sessionId,
+			],
+		},
+	],
+	"session.resume_scheduled": (event) => {
+		const source = event.metadata.source;
+		// The limit policy marks its schedule, a user's schedule clears the mark,
+		// and a sweep re-arm keeps whichever one it re-arms.
+		const marked =
+			source === "limit-policy"
+				? "json_set(limit_recovery, '$.auto', json('true'))"
+				: source === "continuation-sweep"
+					? "limit_recovery"
+					: "json_remove(limit_recovery, '$.auto')";
+		return [
+			{
+				// Only the sweep re-arms. A user changing the time is still scheduling.
+				sql: `UPDATE sessions SET limit_recovery = json_set(${marked}, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?`,
+				params: [
+					event.data.at,
+					source === "continuation-sweep" ? 1 : 0,
+					event.createdAt,
+					event.sessionId,
+					event.data.instanceId,
+				],
+			},
+		];
+	},
+	"session.resume_cancelled": (event) => [
+		{
+			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
+		},
+	],
+
 	"turn.completed": (event) => {
 		return [
 			wakeSession(event.sessionId, event.createdAt, "turn"),
@@ -432,7 +508,7 @@ export const sessionHandlers: {
 			{
 				sql: `UPDATE sessions SET
 					last_message_at = MAX(COALESCE(last_message_at, 0), ?),
-					updated_at = ?${startsNewTurn ? ",\n\t\t\t\t\tlast_turn_error_at = NULL" : ""}
+					updated_at = ?${startsNewTurn ? ",\n\t\t\t\t\tlast_turn_error_at = NULL" : event.data.backfilled ? "" : ",\n\t\t\t\t\tlimit_recovery = NULL"}
 				 WHERE id = ?`,
 				params: [event.createdAt, event.createdAt, event.data.sessionId],
 			},

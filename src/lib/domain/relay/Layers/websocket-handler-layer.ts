@@ -2,7 +2,6 @@ import { Cause, Effect, Layer } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeEffectWsHandler } from "../../../server/effect-ws-handler.js";
 import { LoggerTag, WebSocketHandlerTag } from "../Services/services.js";
-import { makeWsHandlerStateLive } from "../Services/ws-handler-service.js";
 
 export const WebSocketHandlerLive: Layer.Layer<
 	WebSocketHandlerTag,
@@ -39,4 +38,4 @@ export const WebSocketHandlerLive: Layer.Layer<
 
 		return handler;
 	}),
-).pipe(Layer.provide(makeWsHandlerStateLive()));
+);

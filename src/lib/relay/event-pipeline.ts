@@ -52,23 +52,16 @@ export function shouldCache(
  * Event types that are persisted to the SQLite event store for replay.
  * Used to type-check test event arrays — if a test includes an event type
  * not in this list, it's fabricating data that wouldn't exist in the real store.
- *
- * NOTE: "status" is intentionally excluded. All status:processing events
- * are sent via wsHandler.sendToSession() directly (prompt.ts, relay-stack.ts,
- * session.ts, client-init.ts) — none flow through the event pipeline.
  */
 export const PERSISTED_EVENT_TYPES = [
 	"user_message",
 	"delta",
 	"thinking_start",
 	"thinking_delta",
-	"thinking_stop",
 	"tool_start",
-	"tool_executing",
 	"tool_result",
 	"result",
 	"done",
-	"error",
 ] as const;
 
 export type PersistedEventType = (typeof PERSISTED_EVENT_TYPES)[number];
@@ -82,22 +75,6 @@ type _AssertPersistedSubset =
 		? true
 		: { error: "PERSISTED_EVENT_TYPES has invalid types" };
 const _assertPersistedTypes: _AssertPersistedSubset = true;
-
-/**
- * Event types that warrant a notification (sound/browser alert/push).
- * When the pipeline drops one of these because no viewers are on the session,
- * the server publishes an alert (SubscribeAlerts) so clients can still fire
- * sound/browser notifications without updating chat state.
- * Permissions and questions reach every browser through the approvals
- * subscription, so only done and error need the alert fallback.
- */
-export const NOTIFICATION_EVENT_TYPES: ReadonlySet<RelayMessage["type"]> =
-	new Set(["done", "error"]);
-
-/** Check if a message type warrants a cross-session notification broadcast. */
-export function isNotificationWorthy(type: RelayMessage["type"]): boolean {
-	return NOTIFICATION_EVENT_TYPES.has(type);
-}
 
 /** Determine where to route a message: send to session viewers, or drop. */
 export function resolveRoute(
@@ -132,32 +109,10 @@ export interface ProcessingTimeoutsPort {
 
 export interface PipelineDeps {
 	processingTimeouts: ProcessingTimeoutsPort;
-	/**
-	 * Per-session events are broadcast to every client on the
-	 * project's `/p/<slug>` regardless of per-tab viewed-session state. The
-	 * handler buffers events for clients still in bootstrap so that
-	 * initial state arrives before buffered events — see
-	 * {@link WebSocketHandler.broadcastPerSessionEvent} and
-	 * {@link WebSocketHandler.markClientBootstrapped}.
-	 */
-	wsHandler: {
-		broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
-	};
 	log: Logger;
 }
 
-/**
- * Apply pipeline side effects based on PipelineResult decisions.
- * This is the single place where pipeline decisions become actions.
- *
- * The {@link PipelineResult.route} field still reflects
- * viewer presence (`action: "send"` when at least one client has bound to
- * the target session, `action: "drop"` otherwise).
- * That signal drives downstream notification logic (cross-session
- * alerts fire only when no client is actively
- * viewing), but it no longer gates delivery: every per-session event is
- * sent to every connected client via `broadcastPerSessionEvent`.
- */
+/** Apply processing timeouts and log viewer-routing decisions. */
 export function applyPipelineResult(
 	result: PipelineResult,
 	sessionId: string | undefined,
@@ -167,11 +122,6 @@ export function applyPipelineResult(
 		deps.processingTimeouts.clearProcessingTimeout(sessionId);
 	} else if (result.timeout === "reset" && sessionId) {
 		deps.processingTimeouts.resetProcessingTimeout(sessionId);
-	}
-	// Always firehose to the project. The route field is retained
-	// as a "had-viewers?" signal for cross-session notification decisions.
-	if (sessionId) {
-		deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
 	}
 	if (result.route.action === "drop") {
 		deps.log.info(
@@ -192,11 +142,6 @@ export function applyPipelineResultEffect(
 			yield* resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION);
 		}
 		yield* Effect.sync(() => {
-			// Always firehose to the project. The route field is retained
-			// as a "had-viewers?" signal for cross-session notification decisions.
-			if (sessionId) {
-				deps.wsHandler.broadcastPerSessionEvent(sessionId, result.msg);
-			}
 			if (result.route.action === "drop") {
 				deps.log.info(
 					`${result.route.reason} — ${result.msg.type} (${result.source})`,

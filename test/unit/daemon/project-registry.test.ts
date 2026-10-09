@@ -704,56 +704,6 @@ describe("ProjectRegistry — Negative paths", () => {
 // Cross-relay operations (D4)
 
 describe("ProjectRegistry — Cross-relay operations (D4)", () => {
-	it("broadcastToAll() sends to all ready relays' wsHandler", async () => {
-		const reg = new ProjectRegistry();
-		const relay1 = createMockProjectRelay();
-		const relay2 = createMockProjectRelay();
-
-		reg.add(makeProject("alpha"), immediateRelayFactory(relay1));
-		reg.add(makeProject("beta"), immediateRelayFactory(relay2));
-
-		await vi.waitFor(() => {
-			expect(reg.isReady("alpha")).toBe(true);
-			expect(reg.isReady("beta")).toBe(true);
-		});
-
-		const message = { type: "test", payload: "hello" } as unknown as Parameters<
-			ProjectRegistry["broadcastToAll"]
-		>[0];
-		reg.broadcastToAll(message);
-
-		expect(relay1.wsHandler.broadcast).toHaveBeenCalledWith(message);
-		expect(relay2.wsHandler.broadcast).toHaveBeenCalledWith(message);
-	});
-
-	it("broadcastToAll() skips registering/error entries", async () => {
-		const reg = new ProjectRegistry();
-		const readyRelay = createMockProjectRelay();
-		reg.add(makeProject("alpha"), immediateRelayFactory(readyRelay));
-
-		await vi.waitFor(() => {
-			expect(reg.isReady("alpha")).toBe(true);
-		});
-
-		// beta is registering
-		const deferred = deferredRelayFactory();
-		reg.add(makeProject("beta"), deferred.factory);
-
-		// gamma is in error
-		reg.add(makeProject("gamma"), failingRelayFactory("fail"));
-		await vi.waitFor(() => {
-			expect(reg.get("gamma")?.status).toBe("error");
-		});
-
-		const message = { type: "test" } as unknown as Parameters<
-			ProjectRegistry["broadcastToAll"]
-		>[0];
-		reg.broadcastToAll(message);
-
-		expect(readyRelay.wsHandler.broadcast).toHaveBeenCalledWith(message);
-		// Only readyRelay should have been called — registering/error have no relay
-	});
-
 	it("evictOldestSessions() is a no-op (MessageCache removed, SQLite WAL handles storage)", () => {
 		// MessageCache has been removed in Task 50.5. SQLite WAL + EventStoreEviction
 		// (Task 51) handles storage pressure. evictOldestSessions is retained for

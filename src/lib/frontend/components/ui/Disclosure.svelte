@@ -50,7 +50,7 @@
 	 * a screenshot and is the behaviour the other five already chose.
 	 */
 	const BASE_CLASSES =
-		"flex items-center w-full px-3 text-left cursor-pointer " +
+		"flex items-center w-full text-left cursor-pointer " +
 		"transition-colors duration-150";
 
 	/**
@@ -76,13 +76,11 @@
 	} as const;
 
 	const DENSITY_CLASSES = {
-		default: "gap-2.5 py-2",
-		compact: "gap-2 py-1",
-		tight: "gap-1.5 py-2",
-		roomy: "gap-2 py-2.5",
-		/** No gap on purpose: a row that pushes its children apart with
-		 *  `justify-between` only gets a minimum-separation fight from one. */
-		split: "py-2",
+		default: "gap-2.5 px-3 py-2",
+		compact: "gap-2 px-3 py-1",
+		tight: "gap-1.5 px-3 py-2",
+		/** Settings' frame H list rows: 6px all round, at least 30px tall. */
+		list: "gap-2 p-[6px] min-h-[30px]",
 	} as const;
 </script>
 
@@ -122,8 +120,8 @@
 		 *                           ToolGenericCard, SkillItem)
 		 *   compact  gap-2   py-1   ToolGroupItem, a row nested inside a group
 		 *   tight    gap-1.5 py-2   ThinkingBlock's collapsed bar
-		 *   roomy    gap-2   py-2.5 SettingsPanel's setup-scenario headers
-		 *   split    (none)  py-2   SettingsPanel's instance rows
+		 *   list     gap-2   p-[6px] Settings' instance and setup-scenario
+		 *                           rows (frame H), at least 30px tall
 		 *
 		 * `tight` has MORE padding than `compact`; they vary on different axes.
 		 */

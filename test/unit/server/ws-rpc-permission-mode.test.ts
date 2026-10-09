@@ -227,7 +227,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					SELECT permission_mode FROM sessions WHERE id = ${sessionId}`;
 				expect(rows).toHaveLength(1);
 				expect(rows[0]?.permission_mode).toBe("ask");
-				expect(wsHandler.sendToSession).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

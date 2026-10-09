@@ -114,12 +114,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the meter query, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/overlays/SettingsPanel.stories.ts",
-		snippetPattern: /Settings panel is missing/,
-		reason:
-			"storybook play() guard that narrows the panel query, not executable production code",
-	},
-	{
 		path: "src/lib/frontend/components/ui/Icon.stories.ts",
 		snippetPattern: /Pause icon is missing/,
 		reason:
@@ -164,11 +158,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		path: "src/lib/frontend/stores/chat.svelte.ts",
 		snippetPattern: /getOrCreateSessionMessages: empty sessionId/,
 		reason: "frontend session-store invariant",
-	},
-	{
-		path: "src/lib/frontend/stores/ws-dispatch.ts",
-		snippetPattern: /routePerSession: missing sessionId/,
-		reason: "dev-only frontend event-routing invariant",
 	},
 ];
 
@@ -2109,33 +2098,6 @@ describe("Effect runtime boundary grep", () => {
 						: [],
 				);
 		});
-
-		expect(hits).toEqual([]);
-	});
-
-	it("does not read client-init model data through the raw OpenCode client", () => {
-		const path = "src/lib/bridges/client-init.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
-		const retiredReadPatterns = [
-			{
-				pattern: /client\.session\.get\(/,
-				reason: "active session model reads belong to OpenCodeModelService",
-			},
-			{
-				pattern: /client\.provider\.list\(/,
-				reason: "provider/model list reads belong to OpenCodeModelService",
-			},
-		] as const;
-
-		const hits = retiredReadPatterns.flatMap(({ pattern, reason }) =>
-			source
-				.split("\n")
-				.flatMap((line, index) =>
-					pattern.test(line)
-						? [{ path, line: index + 1, source: line.trim(), reason }]
-						: [],
-				),
-		);
 
 		expect(hits).toEqual([]);
 	});

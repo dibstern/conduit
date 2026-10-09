@@ -154,10 +154,7 @@ export class ClaudeRunnerSpool {
 	}
 
 	private needsReply(output: ClaudeSessionOutput): boolean {
-		return (
-			output.type === "read-turn-history" ||
-			output.type === "materialize-subagents"
-		);
+		return output.type === "materialize-subagents";
 	}
 
 	private truncate(sequence: number): void {

@@ -117,6 +117,7 @@ export const subscribeApprovals = (
 			return stream<Approval, ApprovalsSubscriptionError>({
 				bus,
 				source: {
+					name: "approvals",
 					read: (range) =>
 						Effect.map(readQuery.readPendingApprovals(range), (answer) => {
 							if (range === undefined) announced.clear();

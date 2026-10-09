@@ -7,14 +7,9 @@ import { SqlClient } from "@effect/sql";
 import { Cause, Deferred, Effect, Exit, FiberSet } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
-import {
-	makeReadQueryEffect,
-	ReadQueryEffectTag,
-} from "../../persistence/effect/read-query-effect.js";
-import { messageRowsToHistory } from "../../persistence/session-history-adapter.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
-import type { TurnResult } from "../types.js";
+import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import { connectClaudeRunner } from "./claude-runner-connection.js";
 import {
@@ -266,15 +261,6 @@ export const makeProcessClaudeSessionRunner = (
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
-		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const readQuery =
-			readQueryOption._tag === "Some"
-				? readQueryOption.value
-				: sql
-					? yield* makeReadQueryEffect.pipe(
-							Effect.provideService(SqlClient.SqlClient, sql),
-						)
-					: undefined;
 		const receipts = sql
 			? yield* makeClaudeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
@@ -284,7 +270,8 @@ export const makeProcessClaudeSessionRunner = (
 			string,
 			{
 				sessionId: string;
-				inputId?: string;
+				/** The turn's user message: a continuation's is its cut-off message. */
+				userMessageId?: string;
 				messageId: string;
 				terminal: boolean;
 				pending: boolean;
@@ -293,44 +280,6 @@ export const makeProcessClaudeSessionRunner = (
 				completed: Deferred.Deferred<void> | undefined;
 			}
 		>();
-		const loadClaudeHistory = (binding: {
-			readonly sessionId: string;
-			readonly inputId?: string;
-		}) =>
-			Effect.gen(function* () {
-				if (!readQuery || !binding.inputId)
-					return yield* Effect.fail(new Error("Missing Claude history cutoff"));
-				const rows = yield* readQuery.getSessionMessagesWithParts(
-					binding.sessionId,
-				);
-				const cutoff = rows.find(
-					(row) => row.id === binding.inputId && row.role === "user",
-				);
-				if (!cutoff)
-					return yield* Effect.fail(
-						new Error("Missing Claude history user message"),
-					);
-				const priorRows = rows.filter(
-					(row) => row.created_at < cutoff.created_at,
-				);
-				return yield* Effect.try(() => ({
-					history: messageRowsToHistory(priorRows, {
-						pageSize: Number.MAX_SAFE_INTEGER,
-					}).messages,
-				}));
-			}).pipe(
-				Effect.catchAll((cause) => {
-					log.warn(
-						`Failed to load prior Claude history for ${binding.sessionId}: ${cause instanceof Error ? cause.message : cause}`,
-					);
-					return Effect.fail(
-						claudeRunnerFailure(
-							"read-turn-history",
-							"Claude turn history is no longer available",
-						),
-					);
-				}),
-			);
 		let closing = false;
 		const upgradeMark = (
 			sessionId: string,
@@ -511,7 +460,7 @@ export const makeProcessClaudeSessionRunner = (
 						const output =
 							received.type === "event" &&
 							received.event.type === "turn.error" &&
-							binding?.inputId &&
+							binding?.userMessageId &&
 							received.event.sessionId === binding.sessionId &&
 							isRecord(received.event.data)
 								? {
@@ -520,20 +469,11 @@ export const makeProcessClaudeSessionRunner = (
 											...received.event,
 											data: {
 												...received.event.data,
-												userMessageId: binding.inputId,
+												userMessageId: binding.userMessageId,
 											},
 										},
 									}
 								: received;
-						if (output.type === "read-turn-history")
-							return binding
-								? loadClaudeHistory(binding)
-								: Effect.fail(
-										claudeRunnerFailure(
-											output.type,
-											"Claude turn history is no longer available",
-										),
-									);
 						if (output.type === "release-sink" && binding?.pending) {
 							binding.releaseRequested = true;
 							return Effect.succeed({});
@@ -549,8 +489,7 @@ export const makeProcessClaudeSessionRunner = (
 						);
 					});
 					return received.type === "materialize-subagents" ||
-						received.type === "ensure-subagent-session" ||
-						received.type === "read-turn-history"
+						received.type === "ensure-subagent-session"
 						? operation
 						: entry.outputs.withPermits(1)(operation);
 				},
@@ -590,21 +529,24 @@ export const makeProcessClaudeSessionRunner = (
 							? []
 							: (hello.bindings ?? [])) {
 							let inputId: string | undefined;
+							let userMessageId: string | undefined;
 							let messageId = "";
 							let terminal = false;
 							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
 									input_id: string | null;
+									user_message_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
 									state: string | null;
 								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+									COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
-										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
+										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("restore runner history", cause),
@@ -614,6 +556,7 @@ export const makeProcessClaudeSessionRunner = (
 								const row = rows[0];
 								if (row) {
 									inputId = row.input_id ?? undefined;
+									userMessageId = row.user_message_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
 									terminal =
@@ -638,7 +581,7 @@ export const makeProcessClaudeSessionRunner = (
 							yield* ensureAttached();
 							sinks.set(binding.sinkId, {
 								sessionId,
-								...(inputId ? { inputId } : {}),
+								...(userMessageId ? { userMessageId } : {}),
 								messageId,
 								terminal,
 								pending,
@@ -671,7 +614,9 @@ export const makeProcessClaudeSessionRunner = (
 					if (binding) binding.accepted = true;
 				},
 				onUpgradeState: (state) => {
-					entry.upgrade.state = { ...entry.upgrade.state, ...state };
+					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+					// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
+					entry.upgrade.state = { ...state, ...(snapshot ? { snapshot } : {}) };
 					upgrade(sessionId, entry);
 				},
 				onIdleExit: () => {
@@ -880,12 +825,11 @@ export const makeProcessClaudeSessionRunner = (
 								...(variant ? { variant } : {}),
 								...(permissionMode ? { permissionMode } : {}),
 							}),
-							providerState: {
-								...snapshot.input.providerState,
-								...(state.resumeSessionId
-									? { resumeSessionId: state.resumeSessionId }
-									: {}),
-							},
+							...(state.resumeSessionId
+								? {
+										resumeSessionId: state.resumeSessionId,
+									}
+								: {}),
 						},
 						claudeSettingsOverrides: snapshot.claudeSettingsOverrides,
 						shellEnv: snapshot.options.env ?? {},
@@ -1128,11 +1072,20 @@ export const makeProcessClaudeSessionRunner = (
 									},
 									() => closing,
 									deps,
-									(commandId, inputId, attempt) => {
-										const sinkId = claudeRunnerSinkId(inputId, attempt);
+									runner.getNativeSessionEffect(registration.sessionId),
+									(commandId, inputId, attempt, nativeResumeFallback) => {
+										const sinkId = claudeRunnerSinkId(
+											inputId,
+											attempt,
+											nativeResumeFallback,
+										);
 										return sinks.has(sinkId)
 											? sinkId
-											: claudeRunnerSinkId(commandId, attempt);
+											: claudeRunnerSinkId(
+													commandId,
+													attempt,
+													nativeResumeFallback,
+												);
 									},
 								).pipe(
 									Effect.mapError((cause) =>
@@ -1150,7 +1103,9 @@ export const makeProcessClaudeSessionRunner = (
 									if (!binding) {
 										binding = {
 											sessionId: registration.sessionId,
-											inputId: command.input.inputId,
+											userMessageId:
+												command.input.continuation?.cutOffMessageId ??
+												command.input.inputId,
 											messageId: command.messageId,
 											terminal: command.terminal,
 											pending: true,
@@ -1236,6 +1191,33 @@ export const makeProcessClaudeSessionRunner = (
 					);
 				}
 			});
+			getNativeSessionEffect(
+				sessionId: string,
+			): Effect.Effect<ProviderNativeSession | undefined> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					const state = entry?.upgrade.state;
+					const snapshot = state?.snapshot;
+					if (
+						!entry ||
+						entry.failure ||
+						entry.stopping ||
+						entry.idleExiting ||
+						entry.ending > 0 ||
+						!snapshot
+					)
+						return undefined;
+					return {
+						instanceId: snapshot.input.instanceId ?? "claude",
+						configDir:
+							snapshot.options.env?.["CLAUDE_CONFIG_DIR"] ??
+							snapshot.input.configDir,
+						agent: snapshot.input.agent,
+						resumeSessionId: state?.resumeSessionId,
+					};
+				});
+			}
+
 			executeEffect(
 				command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
 			): Effect.Effect<TurnResult, ClaudeSessionFailure>;
@@ -1252,7 +1234,9 @@ export const makeProcessClaudeSessionRunner = (
 					command.type === "send-turn"
 						? {
 								sessionId: command.input.sessionId,
-								inputId: command.input.inputId,
+								userMessageId:
+									command.input.continuation?.cutOffMessageId ??
+									command.input.inputId,
 								messageId: "",
 								terminal: false,
 								pending: true,
@@ -1265,7 +1249,6 @@ export const makeProcessClaudeSessionRunner = (
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
-				let latestResumeSessionId: string | undefined;
 				return Effect.gen(function* () {
 					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
@@ -1423,9 +1406,6 @@ export const makeProcessClaudeSessionRunner = (
 									),
 									Effect.uninterruptible,
 								);
-							latestResumeSessionId =
-								retiring.upgrade.state?.resumeSessionId ??
-								latestResumeSessionId;
 						}
 						// Old cleanup is session-wide. Finish it before a replacement
 						// can register interactions or publish a new busy status.
@@ -1435,9 +1415,6 @@ export const makeProcessClaudeSessionRunner = (
 									? selection.admission
 									: entry.drained,
 							);
-						if (entry && draining)
-							latestResumeSessionId =
-								entry.upgrade.state?.resumeSessionId ?? latestResumeSessionId;
 					} while (draining);
 					if (!entry) return;
 					child = entry;
@@ -1462,19 +1439,6 @@ export const makeProcessClaudeSessionRunner = (
 						command.type === "send-turn"
 							? {
 									...command,
-									// Only an agent switch consumes history. Keep it server-side
-									// until requested rather than serializing it on every warm send.
-									historyOnDemand: true,
-									input: {
-										...command.input,
-										history: [],
-										providerState: latestResumeSessionId
-											? {
-													...command.input.providerState,
-													resumeSessionId: latestResumeSessionId,
-												}
-											: command.input.providerState,
-									},
 									...(entry.upgrade.state?.frozen
 										? {
 												claudeSettingsOverrides:
@@ -1594,9 +1558,6 @@ export const makeProcessClaudeSessionRunner = (
 					Effect.ensuring(
 						Effect.sync(() => {
 							if (!admitted) return;
-							latestResumeSessionId =
-								admitted.upgrade.state?.resumeSessionId ??
-								latestResumeSessionId;
 							admitted.commandsInFlight--;
 							upgrade(admittedSessionId, admitted);
 							admitted = undefined;

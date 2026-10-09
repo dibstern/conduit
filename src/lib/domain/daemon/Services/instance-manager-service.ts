@@ -1348,9 +1348,11 @@ export const updateInstance = (
 		Effect.withSpan("instance.update"),
 	);
 
-/** Request config persistence. */
+/** Persist instance mutations before their RPC acknowledgement. */
 export const persistConfig = Effect.gen(function* () {
-	yield* requestConfigSave;
+	const persistence = yield* ConfigPersistenceTag;
+	yield* persistence.requestSave;
+	yield* persistence.flush;
 }).pipe(Effect.withSpan("instance.persistConfig"));
 
 /**

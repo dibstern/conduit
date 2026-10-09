@@ -13,10 +13,7 @@ import {
 	selectSessionVariant,
 } from "../domain/relay/Services/session-model-settings.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
-import {
-	ReadQueryEffectTag,
-	sessionGoalState,
-} from "../persistence/effect/read-query-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { savedVariantFor } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
@@ -39,22 +36,6 @@ interface ForkSessionPayload {
 	readonly sessionId?: string;
 	readonly messageId?: string;
 }
-
-/**
- * Send the session goal to a client. It is supplementary to the transcript and
- * selection RPCs; pending permissions and questions come from the approvals
- * subscription (ni8.9), the family from SubscribeSessionFamily (ni8.28).
- */
-const sendSessionMetadata = (clientId: string, id: string) =>
-	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		const readQuery = yield* ReadQueryEffectTag;
-		const row = yield* readQuery.getSession(id);
-		wsHandler.sendTo(clientId, {
-			type: "session.goal_changed",
-			...(row ? sessionGoalState(row) : { sessionId: id, goal: null }),
-		});
-	});
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -108,9 +89,6 @@ export const viewSessionForClient = ({
 		// No read state here: a switch also fires on restore, reload and
 		// reconnect. The browser reports a user's sidebar pick through
 		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
-
-		// Run metadata send as a forked fiber — non-blocking
-		yield* Effect.either(sendSessionMetadata(clientId, id));
 
 		log.info(`client=${clientId} Viewing: ${id}`);
 		return { draft: getSessionInputDraft(id) };
@@ -201,7 +179,6 @@ export const deleteSessionForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
@@ -211,9 +188,6 @@ export const deleteSessionForClient = ({
 		const didDelete = yield* sessionManagerService.deleteSession(id);
 		if (!didDelete) return;
 
-		// Id only, no row: tabs prune the daemon-wide list and search results,
-		// which the per-project shell feed does not cover.
-		wsHandler.broadcast({ type: "session_deleted", sessionId: id });
 		log.info(`client=${clientId} Deleted: ${id}`);
 	});
 
@@ -459,9 +433,9 @@ export const forkSessionForClient = ({
 
 		yield* clearEffectOverrideSession(sessionId);
 
-		// Find the parent title for the notification
+		// The forking tab gets the lineage in its response; other tabs read it
+		// off the family row.
 		const sessions = yield* sessionManagerService.listSessions();
-		const parent = sessions.find((s) => s.id === sessionId);
 		const persistedFork = sessions.find((s) => s.id === forked.id);
 		const forkMessageId = persistedFork?.forkMessageId ?? forked.forkMessageId;
 		const forkPointTimestamp =
@@ -471,21 +445,16 @@ export const forkSessionForClient = ({
 				? forked.forkPointTimestamp
 				: undefined);
 
-		// Broadcast the fork notification
-		wsHandler.broadcast({
-			type: "session_forked",
-			sessionId: forked.id,
-			...(forkMessageId && { forkMessageId }),
-			...(forkPointTimestamp != null && { forkPointTimestamp }),
-			parentId: sessionId,
-			parentTitle: parent?.title ?? "Unknown",
-		});
-
 		log.info(
 			`client=${clientId} Forked: ${sessionId} → ${forked.id}${messageId ? ` at ${messageId}` : ""}`,
 		);
 
-		return forked;
+		return {
+			id: forked.id,
+			parentId: sessionId,
+			...(forkMessageId && { forkMessageId }),
+			...(forkPointTimestamp != null && { forkPointTimestamp }),
+		};
 	});
 
 /** Fork a session at a specific message point (ticket 5.3). */

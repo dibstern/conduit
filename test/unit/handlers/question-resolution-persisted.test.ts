@@ -21,6 +21,7 @@ import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -60,6 +61,7 @@ import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
+	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 
@@ -68,16 +70,10 @@ const QUESTION = "que-1";
 
 const makeWsHandler = () => ({
 	attach: vi.fn(() => () => {}),
-	broadcast: vi.fn(),
-	sendTo: vi.fn(),
 	setClientSession: vi.fn(),
 	getClientSession: vi.fn(() => SESSION),
 	getClientsForSession: vi.fn(() => ["client-1"]),
-	sendToSession: vi.fn(),
-	broadcastPerSessionEvent: vi.fn(),
-	markClientBootstrapped: vi.fn(),
-	getClientCount: vi.fn(() => 1),
-	getClientIds: vi.fn(() => ["client-1"]),
+	registerSessionViewer: vi.fn(() => () => {}),
 	handleUpgrade: vi.fn(),
 	close: vi.fn(),
 	drain: vi.fn(async () => undefined),
@@ -101,6 +97,7 @@ type HandlerStack =
 	| SessionManagerServiceTag
 	| AgentServiceTag
 	| ProviderTurnServiceTag
+	| ProviderRuntimeIngestionTag
 	| OverridesStateTag
 	| SessionInboxTag;
 
@@ -138,7 +135,9 @@ const withHandlerStack = async (
 		Layer.succeed(LoggerTag, createSilentLogger()),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 		Layer.succeed(AgentServiceTag, makeMockAgentService()),
+		NoopProviderRuntimeIngestionLive,
 		Layer.succeed(ProviderTurnServiceTag, {
+			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,
 			interruptTurn: () => Effect.void,

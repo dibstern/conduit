@@ -32,7 +32,6 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 			const ledger = yield* makeAlertLedger;
 			const deps = {
 				wsHandler: {
-					sendToSession: vi.fn(),
 					getClientsForSession: () => [],
 				},
 				pushManager: { sendToAll },

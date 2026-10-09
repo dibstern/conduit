@@ -61,6 +61,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 			slug: "startup-recovery",
 			configDir: dir,
 			persistenceDbPath: filename,
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
 		const sessions = await relay.effectRuntime.runtime.runPromise(
@@ -147,6 +148,7 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 			slug: "orphaned-permissions",
 			configDir: dir,
 			persistenceDbPath: filename,
+			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
 		const approvals = await relay.effectRuntime.runtime.runPromise(

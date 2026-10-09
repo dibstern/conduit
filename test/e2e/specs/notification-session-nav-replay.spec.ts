@@ -76,8 +76,8 @@ test.describe("Notification → session navigation (replay)", () => {
 			.toBe(true);
 
 		// Inject a session.error for an unwatched session.
-		// session.error is translated by the event translator into an
-		// { type: "error", ... } relay message, which is notification-worthy.
+		// session.error is translated by the event translator into a failed
+		// { type: "done", error, ... } relay message, which is notification-worthy.
 		// Since no browser client is viewing this session, the pipeline
 		// drops the message and publishes an alert instead.
 		const TARGET = "ses_notification_target";

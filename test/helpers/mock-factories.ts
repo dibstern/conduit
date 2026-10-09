@@ -47,7 +47,10 @@ import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
-import { makeProviderRuntimeIngestionLive } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceLive,
 	ProviderTurnServiceTag,
@@ -128,18 +131,15 @@ import {
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
-import type { ProjectRelayConfig, RelayMessage } from "../../src/lib/types.js";
+import type { ProjectRelayConfig } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
 
 function createMockWsHandlerFull(): HandlerDeps["wsHandler"] {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(),
 		getClientsForSession: vi.fn().mockReturnValue([]),
-		sendToSession: vi.fn(),
 	};
 }
 
@@ -241,15 +241,6 @@ function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 			.mockResolvedValue([
 				{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 			]),
-		sendSessionLists: vi.fn().mockImplementation(async (send) => {
-			send({
-				type: "session_list",
-				sessions: [
-					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
-				],
-				roots: true,
-			});
-		}),
 		searchSessions: vi.fn().mockResolvedValue([]),
 		loadHistory: vi.fn().mockResolvedValue({
 			messages: [],
@@ -297,6 +288,7 @@ function createMockConfig(): HandlerDeps["config"] {
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
+		publishGlobalSetting: () => Effect.void,
 	} satisfies HandlerDeps["config"];
 }
 
@@ -340,10 +332,7 @@ export function createMockSSEWiringDeps(
 	return {
 		translator: createMockTranslator(),
 		wsHandler: {
-			broadcast: vi.fn(),
-			sendToSession: vi.fn(),
 			getClientsForSession: vi.fn().mockReturnValue(["c1"]),
-			broadcastPerSessionEvent: vi.fn(),
 		},
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
@@ -357,11 +346,10 @@ export function createMockProjectRelay(
 	overrides?: Partial<ProjectRelay>,
 ): ProjectRelay {
 	return {
+		syncGlobalSetting: () => Effect.void,
+		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
-		wsHandler: partialFake<ProjectRelay["wsHandler"]>({
-			...createMockWsHandlerFull(),
-			attach: vi.fn(() => () => {}),
-		}),
+		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
 			drain: vi.fn().mockResolvedValue(undefined),
@@ -610,86 +598,13 @@ export function makeMockWebSocketHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
 ): WebSocketHandlerShape {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => undefined),
 		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
+		registerSessionViewer: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
 		...overrides,
-	};
-}
-
-export type RecordedWebSocketCall =
-	| {
-			readonly channel: "broadcast";
-			readonly message: RelayMessage;
-	  }
-	| {
-			readonly channel: "sendTo";
-			readonly clientId: string;
-			readonly message: RelayMessage;
-	  }
-	| {
-			readonly channel: "sendToSession";
-			readonly sessionId: string;
-			readonly message: RelayMessage;
-	  }
-	| {
-			readonly channel: "broadcastPerSessionEvent";
-			readonly sessionId: string;
-			readonly message: RelayMessage;
-	  };
-
-/** Create a WebSocket handler mock that records outbound envelopes. */
-export function makeRecordingWebSocketHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): {
-	readonly wsHandler: WebSocketHandlerShape;
-	readonly calls: RecordedWebSocketCall[];
-} {
-	const calls: RecordedWebSocketCall[] = [];
-	const onBroadcast = overrides?.broadcast;
-	const onSendTo = overrides?.sendTo;
-	const onSendToSession = overrides?.sendToSession;
-	const onBroadcastPerSessionEvent = overrides?.broadcastPerSessionEvent;
-
-	return {
-		calls,
-		wsHandler: makeMockWebSocketHandler({
-			...overrides,
-			broadcast: vi.fn((message: RelayMessage) => {
-				calls.push({ channel: "broadcast", message });
-				onBroadcast?.(message);
-			}),
-			sendTo: vi.fn((clientId: string, message: RelayMessage) => {
-				calls.push({ channel: "sendTo", clientId, message });
-				onSendTo?.(clientId, message);
-			}),
-			sendToSession: vi.fn((sessionId: string, message: RelayMessage) => {
-				calls.push({ channel: "sendToSession", sessionId, message });
-				onSendToSession?.(sessionId, message);
-			}),
-			broadcastPerSessionEvent: vi.fn(
-				(sessionId: string, message: RelayMessage) => {
-					calls.push({
-						channel: "broadcastPerSessionEvent",
-						sessionId,
-						message,
-					});
-					onBroadcastPerSessionEvent?.(sessionId, message);
-				},
-			),
-		}),
 	};
 }
 
@@ -705,15 +620,6 @@ export function makeMockSessionManagerShape(
 		listSessions: vi.fn(async () => [
 			{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
 		]),
-		sendSessionLists: vi.fn(async (send) => {
-			send({
-				type: "session_list",
-				sessions: [
-					{ id: "s1", title: "Session 1", updatedAt: 0, messageCount: 0 },
-				],
-				roots: true,
-			});
-		}),
 		searchSessions: vi.fn(async () => []),
 		loadPreRenderedHistory: vi.fn(async () => ({
 			messages: [],
@@ -858,6 +764,7 @@ export function makeMockConfig(
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
+		publishGlobalSetting: () => Effect.void,
 		...overrides,
 	} as unknown as ProjectRelayConfig;
 }
@@ -1088,6 +995,7 @@ export function makeTestHandlerLayer(
 				providerTurnPersistenceLayer,
 				providerRuntimeIngestionLayer,
 				sessionTitleServiceLayer,
+				AlertsLive,
 			),
 		),
 	);
@@ -1214,9 +1122,6 @@ export const PassThroughSessionInbox = Layer.effect(
 						commandId: inputId,
 						sessionId: input.sessionId,
 						...request,
-						...(input.errorDelivery
-							? { errorDelivery: input.errorDelivery }
-							: {}),
 					})
 					.pipe(
 						Effect.provideService(OverridesStateTag, overrides),
@@ -1228,4 +1133,14 @@ export const PassThroughSessionInbox = Layer.effect(
 			start: Effect.void,
 		};
 	}),
+);
+
+/** Drops every event: for tests whose turns never reach the store. */
+export const NoopProviderRuntimeIngestionLive = Layer.succeed(
+	ProviderRuntimeIngestionTag,
+	{
+		ingest: () => Effect.succeed(0),
+		ingestBatch: () => Effect.succeed(0),
+		drain: () => Effect.void,
+	},
 );

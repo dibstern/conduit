@@ -52,6 +52,8 @@ describe("daemon control through the shared RPC group", () => {
 					attach: () => () => {},
 					wsHandler: {},
 					rpcWsHandler: {},
+					syncGlobalSetting: () => Effect.void,
+					refreshGlobalDefaults: () => Effect.void,
 					getStatusSnapshot: () => ({
 						sessionCount: 3,
 						clients: 2,
@@ -223,6 +225,8 @@ describe("daemon control through the shared RPC group", () => {
 							attach: () => () => {},
 							wsHandler: {},
 							rpcWsHandler: {},
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							setDefaultAgent,
 							stop: () => {},
 						}),
@@ -257,6 +261,8 @@ describe("daemon control through the shared RPC group", () => {
 							attach: () => () => {},
 							wsHandler: {},
 							rpcWsHandler: {},
+							syncGlobalSetting: () => Effect.void,
+							refreshGlobalDefaults: () => Effect.void,
 							...(slug === "rejected"
 								? {
 										setDefaultAgent: async () => {

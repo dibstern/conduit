@@ -10,6 +10,7 @@ import {
 	type Queue,
 	type Scope,
 } from "effect";
+import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
 
 export type DaemonEvent = Data.TaggedEnum<{
 	StatusChanged: { readonly statuses: Record<string, string> };
@@ -23,11 +24,18 @@ export type DaemonEvent = Data.TaggedEnum<{
 	// Session lifecycle events (used by relay wiring Layers)
 	SessionCreated: { readonly sessionId: string };
 	SessionDeleted: { readonly sessionId: string };
-	RelayBroadcast: { readonly message: unknown };
 	ConfigChanged: Record<never, never>;
 	// The daemon's instance or project list changed (conduit-test-ni8.14).
 	InstancesChanged: Record<never, never>;
 	ProjectsChanged: Record<never, never>;
+	GlobalSettingChanged: {
+		readonly originSlug: string;
+		readonly tag: GlobalProjectSetting["_tag"];
+	};
+	// SubscribeServerStatus inputs (conduit-test-ni8.16.2): a new build became
+	// (un)available, or the cross-project session lists went stale.
+	RestartAvailabilityChanged: Record<never, never>;
+	DaemonSessionsChanged: Record<never, never>;
 }>;
 
 export const DaemonEvent = Data.taggedEnum<DaemonEvent>();
@@ -77,9 +85,6 @@ export const publishSessionCreated = (sessionId: string) =>
 
 export const publishSessionDeleted = (sessionId: string) =>
 	publish(DaemonEvent.SessionDeleted({ sessionId }));
-
-export const publishRelayBroadcast = (message: unknown) =>
-	publish(DaemonEvent.RelayBroadcast({ message }));
 
 export const publishConfigChanged = publish(DaemonEvent.ConfigChanged());
 

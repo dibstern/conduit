@@ -23,10 +23,6 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import {
-	makeWsHandlerStateLive,
-	WsHandlerStateTag,
-} from "../../../src/lib/domain/relay/Services/ws-handler-service.js";
 
 describe("Self-constructing service layers", () => {
 	const testLayer = Layer.mergeAll(
@@ -35,7 +31,6 @@ describe("Self-constructing service layers", () => {
 		makePollerManagerStateLive(),
 		makePollerStateLive(),
 		makePollerPubSubLive(),
-		makeWsHandlerStateLive(),
 		makeSessionManagerStateLive(),
 		makeInstanceManagerStateLive(),
 		PtyManagerStateLive,
@@ -62,14 +57,6 @@ describe("Self-constructing service layers", () => {
 			const ref = yield* OverridesStateTag;
 			const state = yield* Ref.get(ref);
 			expect(state.sessions.size).toBe(0);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
-
-	it.scoped("WsHandlerStateTag starts empty", () =>
-		Effect.gen(function* () {
-			const ref = yield* WsHandlerStateTag;
-			const state = yield* Ref.get(ref);
-			expect(HashMap.size(state)).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 

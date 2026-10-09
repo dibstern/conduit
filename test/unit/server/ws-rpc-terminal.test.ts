@@ -63,7 +63,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 						},
 					],
 				});
-				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 				expect(connectPtyUpstream).toHaveBeenCalledWith("pty-1", -1);
 			}).pipe(
 				Effect.scoped,
@@ -179,7 +178,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 					},
 					{ _tag: "remove", id: "pty-1" },
 				]);
-				expect(wsHandler.broadcast).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
@@ -222,7 +220,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 				);
 				expect(error).toBeInstanceOf(WsRpcError);
 				expect(error.message).toContain("spawn failed");
-				expect(wsHandler.sendTo).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(

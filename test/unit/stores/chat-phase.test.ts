@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
+	applyTerminalTurn,
 	chatState,
 	clearMessages,
 	followSessionBusy,
 	getOrCreateSessionSlot,
-	handleDone,
 	isLoading,
 	isProcessing,
 	isReplaying,
@@ -52,20 +52,12 @@ describe("chat phase and transcript lifecycle", () => {
 		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 
-	it("done is idempotent after a status transition", () => {
+	it("terminal state is idempotent after a status transition", () => {
 		const { activity, messages } = getOrCreateSessionSlot("phase-test");
 		messages.loadLifecycle = "ready";
 		phaseToProcessing(activity);
-		handleDone(activity, messages, {
-			type: "done",
-			sessionId: "phase-test",
-			code: 0,
-		});
-		handleDone(activity, messages, {
-			type: "done",
-			sessionId: "phase-test",
-			code: 0,
-		});
+		applyTerminalTurn(activity, messages);
+		applyTerminalTurn(activity, messages);
 		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 });

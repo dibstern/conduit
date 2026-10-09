@@ -240,6 +240,7 @@ function makeRelayConfig(configDir: string): ProjectRelayConfig {
 		projectDir: "/tmp/project",
 		slug: "project",
 		persistenceDbPath: tempEventsDbPath(),
+		publishGlobalSetting: () => Effect.void,
 		configDir,
 	};
 }
@@ -974,6 +975,7 @@ describe("SessionManagerService", () => {
 				projectDir: "/tmp/project",
 				slug: "project",
 				persistenceDbPath: tempEventsDbPath(),
+				publishGlobalSetting: () => Effect.void,
 				configDir: tmpDir,
 			};
 			const api = makeMockOpenCodeAPI();
@@ -2306,6 +2308,8 @@ describe("SessionManagerService", () => {
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 250,
 					attention: "idle",
+					limitRecovery: null,
+					resumes: [],
 				},
 			]);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
@@ -2710,51 +2714,46 @@ describe("SessionManagerService", () => {
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 
-	it.effect(
-		"refreshes the lineage caches without sending to any client",
-		() => {
-			const rows = [
-				makeRow("root"),
-				makeRow("child", { parent_id: "root" }),
-				makeRow("side", { parent_id: "root", side_thread: 1 }),
-			];
-			const readQuery = makeReadQueryEffect(rows);
-			const ws = makeMockWebSocketHandler({
-				getClientIds: vi.fn(() => ["root-viewer"]),
-				getClientSession: vi.fn(() => "root"),
-			});
-			const layer = Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Layer.succeed(ReadQueryEffectTag, readQuery),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
-				Layer.succeed(LoggerTag, makeMockLogger()),
-				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				RelayStatusSnapshotLive,
+	it.effect("refreshes the lineage caches", () => {
+		const rows = [
+			makeRow("root"),
+			makeRow("child", { parent_id: "root" }),
+			makeRow("side", { parent_id: "root", side_thread: 1 }),
+		];
+		const readQuery = makeReadQueryEffect(rows);
+		const ws = makeMockWebSocketHandler({
+			getClientSession: vi.fn(() => "root"),
+		});
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(ReadQueryEffectTag, readQuery),
+			Layer.succeed(WebSocketHandlerTag, ws),
+			Layer.succeed(StatusPollerTag, makeMockStatusPoller()),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			makeSessionManagerStateLive(),
+			DaemonEventBusLive,
+			RelayStatusSnapshotLive,
+		);
+		return Effect.gen(function* () {
+			const service = yield* SessionManagerServiceTag;
+			yield* service.refreshSessionLineage();
+			expect(readQuery.listSessionInfos).not.toHaveBeenCalled();
+			expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
+			const state = yield* Ref.get(yield* SessionManagerStateTag);
+			expect(state.lastKnownSessionCount).toBe(3);
+			expect(HashMap.get(state.cachedParentMap, "child")).toEqual(
+				Option.some("root"),
 			);
-			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
-				yield* service.refreshSessionLineage();
-				expect(readQuery.listSessionInfos).not.toHaveBeenCalled();
-				expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
-				expect(ws.sendTo).not.toHaveBeenCalled();
-				const state = yield* Ref.get(yield* SessionManagerStateTag);
-				expect(state.lastKnownSessionCount).toBe(3);
-				expect(HashMap.get(state.cachedParentMap, "child")).toEqual(
-					Option.some("root"),
-				);
-				expect([...state.cachedSideThreadIds]).toEqual(["side"]);
-				expect((yield* RelayStatusSnapshotTag).getSnapshot().sessionCount).toBe(
-					3,
-				);
-			}).pipe(
-				Effect.provide(SessionManagerServiceLive),
-				Effect.provide(layer),
-				Effect.provide(requiredSessionServices),
+			expect([...state.cachedSideThreadIds]).toEqual(["side"]);
+			expect((yield* RelayStatusSnapshotTag).getSnapshot().sessionCount).toBe(
+				3,
 			);
-		},
-	);
+		}).pipe(
+			Effect.provide(SessionManagerServiceLive),
+			Effect.provide(layer),
+			Effect.provide(requiredSessionServices),
+		);
+	});
 
 	it.effect("live service falls back to current status poller statuses", () => {
 		const api = makeMockOpenCodeAPI();

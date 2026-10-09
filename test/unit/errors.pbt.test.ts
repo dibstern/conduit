@@ -5,8 +5,6 @@
 //     → Source: AC1 (structured error classes)
 // P2: toJSON() always produces valid { error: { code, message } } shape
 //     → Source: AC2 (error formatting for HTTP)
-// P3: toWebSocket() always produces { type: "error", code, message }
-//     → Source: AC2 (error formatting for WebSocket)
 // P4: Sensitive data is always redacted in toLog()
 //     → Source: AC2 (sensitive data filtering)
 // P5: wrapError preserves the cause chain
@@ -46,9 +44,7 @@ const ALL_ERROR_CODES: ErrorCode[] = [
 	"AGENT_SWITCH_FAILED",
 	"FILE_NOT_FOUND",
 	"FILE_READ_FAILED",
-	"PTY_CONNECT_FAILED",
 	"PTY_CREATE_FAILED",
-	"HANDLER_ERROR",
 	"UNKNOWN_MESSAGE_TYPE",
 	"PARSE_ERROR",
 	"INTERNAL_ERROR",
@@ -172,20 +168,6 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					const parsed = JSON.parse(serialized);
 					expect(parsed.error.code).toBe(err._tag);
 					expect(parsed.error.message).toBe(err.message);
-				}),
-				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
-			);
-		});
-	});
-
-	describe("P3: toWebSocket always produces valid WS error message (AC2)", () => {
-		it("property: toWebSocket returns { type: 'error', code, message }", () => {
-			fc.assert(
-				fc.property(arbRelayError, (err) => {
-					const ws = err.toWebSocket();
-					expect(ws.type).toBe("error");
-					expect(ws.code).toBe(err._tag);
-					expect(ws.message).toBe(err.message);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);

@@ -21,6 +21,12 @@ import {
 	ClaudeSettingsTrustBoundaryError,
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
+import {
+	ContinuationErrorSchema,
+	HandoffSummarySchema,
+	QuotaCheckResultSchema,
+	UsageLimitsSettingSchema,
+} from "./limit-recovery.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
 import {
 	INPUT_DELIVERIES,
@@ -50,6 +56,8 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			_tag: Schema.Literal("remove"),
 			id: Schema.String,
 			sequence: Schema.Number,
+			/** The item itself is gone, not only out of this collection. */
+			deleted: Schema.optional(Schema.Boolean),
 		}),
 	);
 
@@ -471,6 +479,10 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
+	/** Lineage for the forking tab until the fork's family row arrives. */
+	parentId: Schema.String,
+	forkMessageId: Schema.optional(Schema.String),
+	forkPointTimestamp: Schema.optional(Schema.Number),
 });
 
 export const GetAgentsResponseSchema = Schema.Struct({
@@ -1039,6 +1051,28 @@ export class SetAutoSettleSetting extends Schema.TaggedRequest<SetAutoSettleSett
 	},
 ) {}
 
+const UsageLimitsSettingResponseSchema = Schema.Struct({
+	usageLimits: UsageLimitsSettingSchema,
+});
+
+export class GetUsageLimitsSetting extends Schema.TaggedRequest<GetUsageLimitsSetting>()(
+	"GetUsageLimitsSetting",
+	{
+		failure: WsRpcError,
+		success: UsageLimitsSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSetting>()(
+	"SetUsageLimitsSetting",
+	{
+		failure: WsRpcError,
+		success: UsageLimitsSettingResponseSchema,
+		payload: { usageLimits: UsageLimitsSettingSchema },
+	},
+) {}
+
 export class ScanNow extends Schema.TaggedRequest<ScanNow>()("ScanNow", {
 	failure: WsRpcError,
 	success: ScanNowResponseSchema,
@@ -1363,6 +1397,117 @@ export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			until: Schema.NullOr(Schema.Number),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
+	"DismissCutOff",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ContinueSession extends Schema.TaggedRequest<ContinueSession>()(
+	"ContinueSession",
+	{
+		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			expectedInstanceId: NonEmptyString,
+			/** Unix seconds. */
+			at: Schema.optional(Schema.Number.pipe(Schema.finite())),
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>()(
+	"CancelContinuation",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export type PreviewContinuationResponse = typeof HandoffSummarySchema.Type;
+
+export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuation>()(
+	"PreviewContinuation",
+	{
+		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
+		success: HandoffSummarySchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export const QuotaForAccountsResponseSchema = Schema.Struct({
+	accounts: Schema.Array(
+		Schema.Struct({
+			instanceId: NonEmptyString,
+			quota: QuotaCheckResultSchema,
+		}),
+	),
+});
+export type QuotaForAccountsResponse =
+	typeof QuotaForAccountsResponseSchema.Type;
+
+export class QuotaForAccounts extends Schema.TaggedRequest<QuotaForAccounts>()(
+	"QuotaForAccounts",
+	{
+		failure: WsRpcError,
+		success: QuotaForAccountsResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export const ContinuationHandoffResponseSchema = Schema.Struct({
+	handoff: Schema.NullOr(
+		Schema.Struct({
+			...HandoffSummarySchema.fields,
+			eventId: NonEmptyString,
+			instanceId: NonEmptyString,
+			at: Schema.Number,
+		}),
+	),
+});
+export type ContinuationHandoffResponse =
+	typeof ContinuationHandoffResponseSchema.Type;
+
+/** Link the first completed handoff to a durable resumes entry, including reload. */
+export class GetContinuationHandoff extends Schema.TaggedRequest<GetContinuationHandoff>()(
+	"GetContinuationHandoff",
+	{
+		failure: WsRpcError,
+		success: ContinuationHandoffResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			instanceId: NonEmptyString,
+			at: Schema.Number,
 			originId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -1857,6 +2002,12 @@ export const WsRpcRequest = Schema.Union(
 	SetSessionAutoSettle,
 	SnoozeSession,
 	UnsnoozeSession,
+	DismissCutOff,
+	ContinueSession,
+	CancelContinuation,
+	PreviewContinuation,
+	QuotaForAccounts,
+	GetContinuationHandoff,
 	SwitchVariant,
 	SwitchPermissionMode,
 	GetFileTree,
@@ -1877,6 +2028,8 @@ export const WsRpcRequest = Schema.Union(
 	UpdateInstance,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetUsageLimitsSetting,
+	SetUsageLimitsSetting,
 	ScanNow,
 	DetectProxy,
 	ListPtys,
@@ -2049,6 +2202,27 @@ export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	stream: true,
 });
 
+/**
+ * The daemon's own facts (conduit-test-ni8.16.2), daemon-global like the
+ * lists above: its protocol and build, whether a newer build is ready to
+ * restart into, and a revision that moves whenever the cross-project session
+ * lists went stale. One value on subscribe, then one per change.
+ */
+export const ServerStatusSchema = Schema.Struct({
+	protocolVersion: Schema.Number,
+	buildId: Schema.String,
+	restartAvailable: Schema.Boolean,
+	sessionsRevision: Schema.Number,
+});
+export type ServerStatus = typeof ServerStatusSchema.Type;
+
+export const SubscribeServerStatus = Rpc.make("SubscribeServerStatus", {
+	payload: {},
+	success: ServerStatusSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const OpenCodeConnectionStatusSchema = Schema.Literal(
 	"stopped",
 	"starting",
@@ -2093,6 +2267,17 @@ export const ProjectSettingSchema = Schema.Union(
 	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
+/** Persisted settings shared by all projects; live facts stay per relay. */
+export type GlobalProjectSetting = Extract<
+	ProjectSetting,
+	{
+		readonly _tag:
+			| "defaultModel"
+			| "defaultPermissionMode"
+			| "visibility"
+			| "claudeSettings";
+	}
+>;
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 
@@ -2106,7 +2291,8 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
-	kind: Schema.Literal("done", "error"),
+	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
+	kind: Schema.Literal("done", "error", "warning"),
 	alertId: NonEmptyString,
 	sessionId: Schema.optional(Schema.String),
 	message: Schema.optional(Schema.String),
@@ -2162,6 +2348,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,
+	SubscribeServerStatus,
 	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),
 	Rpc.fromTaggedRequest(SetPin),
@@ -2198,6 +2385,12 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetSessionAutoSettle),
 	Rpc.fromTaggedRequest(SnoozeSession),
 	Rpc.fromTaggedRequest(UnsnoozeSession),
+	Rpc.fromTaggedRequest(DismissCutOff),
+	Rpc.fromTaggedRequest(ContinueSession),
+	Rpc.fromTaggedRequest(CancelContinuation),
+	Rpc.fromTaggedRequest(PreviewContinuation),
+	Rpc.fromTaggedRequest(QuotaForAccounts),
+	Rpc.fromTaggedRequest(GetContinuationHandoff),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
 	Rpc.fromTaggedRequest(GetFileTree),
@@ -2218,6 +2411,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(UpdateInstance),
 	Rpc.fromTaggedRequest(GetAutoSettleSetting),
 	Rpc.fromTaggedRequest(SetAutoSettleSetting),
+	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
+	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),

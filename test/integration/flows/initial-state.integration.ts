@@ -33,7 +33,7 @@ describe("Integration: Initial State on Connect", () => {
 		await client.close();
 	});
 
-	it("never pushes a session_family message", async () => {
+	it("publishes a renamed session through its family subscription", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
@@ -45,7 +45,6 @@ describe("Integration: Initial State on Connect", () => {
 				(msg["item"] as { title?: string }).title ===
 					"Renamed for the family feed",
 		});
-		expect(client.getReceivedOfType("session_family")).toEqual([]);
 		await client.close();
 	});
 

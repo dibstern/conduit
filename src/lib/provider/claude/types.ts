@@ -15,11 +15,36 @@
 
 import type { Effect } from "effect";
 import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers/claude-agent-sdk.js";
+import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
+
+export const THREAD_READ_MCP_SERVER = "conduit";
+export const THREAD_READ_TOOL_NAME = "conduit_thread_read";
+export const THREAD_READ_QUALIFIED_NAME = `mcp__${THREAD_READ_MCP_SERVER}__${THREAD_READ_TOOL_NAME}`;
+
+export interface ClaudeThreadReadInput {
+	readonly cursor?: string | undefined;
+	readonly textOffset?: number | undefined;
+	readonly limit?: number | undefined;
+}
+
+export type ClaudeThreadReadResult =
+	| {
+			readonly items: readonly {
+				readonly id: string;
+				readonly role: string;
+				readonly text: string;
+				readonly textOffset: number;
+				readonly interrupted: boolean;
+			}[];
+			readonly nextCursor?: string;
+			readonly nextTextOffset?: number;
+	  }
+	| { readonly code: string; readonly message: string };
 
 // Imported from the real Claude Agent SDK and re-exported so that internal
 // modules can import from "./types.js" without depending on the SDK directly.
@@ -88,11 +113,7 @@ export type SDKSystemLike = Extract<
 	{ type: "system" }
 >;
 
-/**
- * Stored in a session's `provider_state` under the `claude` namespace.
- * Written on every turn completion, read on session reopen to resume the
- * SDK session in place.
- */
+/** Cursor metadata for the live SDK query. Durable resume state uses NativeThread. */
 export interface ClaudeResumeCursor {
 	readonly resumeSessionId?: string;
 	readonly lastAssistantUuid?: string;
@@ -167,6 +188,8 @@ export interface ClaudeSubagentLivePoller {
  */
 export interface ClaudeSessionContext {
 	readonly sessionId: string;
+	readonly instanceId?: string;
+	readonly nativeThread?: NativeThread | undefined;
 	readonly workspaceRoot: string;
 	goalTracker?: ClaudeGoalTracker;
 	cumulativeTokens?: number;
@@ -187,6 +210,18 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** Canonical prompt identity, retained for late rejected background notices. */
+	currentUserMessageId?: string | undefined;
+	/** A returning account's failed resume is retried by the server gate. */
+	resumeFallbackAllowed?: boolean;
+	/** Remains true for this query after its first system/init message. */
+	queryInitialized?: boolean;
+	usageLimit?:
+		| { readonly rateLimitType: string; readonly resetsAt?: number }
+		| undefined;
+	usageLimitReported?: boolean | undefined;
+	/** Synthetic SDK rounds wait for their result before translation. */
+	pendingSyntheticMessages?: SDKMessage[] | undefined;
 	/** True from prompt submit or an autonomous SDK turn until its result. The SDK's
 	 *  system/init reports idle to clear a busy status stranded by a crash
 	 *  mid-turn, but it arrives ~1s AFTER the prompt starts — so it needs to

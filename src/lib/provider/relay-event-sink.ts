@@ -1,8 +1,7 @@
 // Translates provider-emitted ProviderRuntimeEvents into Conduit domain events,
-// persists them when configured, then pushes RelayMessages to WebSocket clients.
+// persists them when configured, and maintains processing timeouts.
 // Used for the in-process Claude SDK path where there is no SSE stream to
-// piggy-back on. Permissions and questions are routed through the same path so
-// the UI receives the familiar RelayMessage shapes.
+// piggy-back on. Permissions and questions persist through the same path.
 // Production ProviderTurnService fail-closes Claude output unless
 // ProviderRuntimeIngestion is present; the local translation branch here remains
 // for focused translator and compatibility tests.
@@ -21,10 +20,7 @@ import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
 import { PersistenceError } from "../persistence/errors.js";
 import { type CanonicalEvent, createEventId } from "../persistence/events.js";
-import { translateDomainEventToRelay } from "../relay/domain-event-to-relay.js";
 import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
-import { tagWithSessionId } from "../shared-types.js";
-import type { RelayMessage } from "../types.js";
 import { currentClaudeRunnerPermissionReply } from "./claude/claude-runner-receipts.js";
 import { MissingPendingInteractions } from "./errors.js";
 import {
@@ -60,7 +56,6 @@ export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
 export interface RelayEventSinkDeps {
 	readonly sessionId: string;
 	readonly providerId?: string;
-	readonly send: (msg: RelayMessage) => void;
 	/** Optional: clear processing timeout when the turn finishes (done/error). */
 	readonly clearTimeout?: () => void;
 	/** Optional: reset processing timeout on any activity. */
@@ -123,7 +118,7 @@ export interface RelayEventSinkDeps {
 export type RelayEventSink = EventSink;
 
 export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
-	const { sessionId, send, clearTimeout, resetTimeout, persist } = deps;
+	const { sessionId, clearTimeout, resetTimeout, persist } = deps;
 	let mapperState = emptyProviderRuntimeDomainMapperState;
 	let detachingInteractions = false;
 
@@ -160,7 +155,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			}
 		});
 
-	// Persist a runtime event and send what it translates to. Unlike push(),
+	// Persist a runtime event. Unlike push(),
 	// this is not activity: asks and their answers go through here so that a
 	// turn blocked on the human keeps its inactivity timeout stopped.
 	const deliver = (event: ProviderRuntimeEvent): Effect.Effect<void, unknown> =>
@@ -175,16 +170,22 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			const result = translateProviderRuntimeEventToDomain(event, mapperState);
 			mapperState = result.state;
 
-			// Attempt persistence before WS send; failures are logged and delivery continues.
+			// Attempt persistence; failures are logged and timeout handling continues.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
-			// A compaction's "started" notice is transient status (C1) that rides the
-			// shell row. Its outcome, completed or failed, persists so the divider or
+			// A compaction's "started" notice and a retry are transient status (C1) on the
+			// shell row. A compaction's outcome, completed or failed, persists so the divider or
 			// the failure notice survives a reload.
 			const persistentEvents = result.events.filter(
 				(domainEvent) =>
-					domainEvent.type !== "session.compaction" ||
-					domainEvent.data.state !== "started",
+					!(
+						domainEvent.type === "session.compaction" &&
+						domainEvent.data.state === "started"
+					) &&
+					!(
+						domainEvent.type === "session.status" &&
+						domainEvent.data.status === "retry"
+					),
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
@@ -216,24 +217,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				}
 			}
 
-			for (const domainEvent of result.events) {
-				yield* Effect.sync(() => {
-					const translated = translateDomainEventToRelay(domainEvent);
-					if (translated.kind === "emit") {
-						for (const raw of translated.messages) {
-							const message = tagWithSessionId(
-								raw,
-								domainEvent.sessionId || sessionId,
-							);
-							send(message);
-							const isTerminal =
-								message.type === "done" ||
-								(message.type === "error" && message.code !== "RETRY");
-							if (isTerminal) finish();
-						}
-					}
-				});
-			}
+			if (isTerminalRuntimeEvent(event)) yield* Effect.sync(finish);
 		});
 
 	// Asks and their resolutions are canonical events, as they are for
@@ -300,16 +284,22 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				);
 				mapperState = result.state;
 
-				// Attempt persistence before WS send; failures are logged and delivery continues.
+				// Attempt persistence; failures are logged and timeout handling continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
 				// older tests and adapters can still provide persistEvent.
-				// A compaction's "started" notice is transient status (C1) that rides the
-				// shell row. Its outcome, completed or failed, persists so the divider or
+				// A compaction's "started" notice and a retry are transient status (C1) on the
+				// shell row. A compaction's outcome, completed or failed, persists so the divider or
 				// the failure notice survives a reload.
 				const persistentEvents = result.events.filter(
 					(domainEvent) =>
-						domainEvent.type !== "session.compaction" ||
-						domainEvent.data.state !== "started",
+						!(
+							domainEvent.type === "session.compaction" &&
+							domainEvent.data.state === "started"
+						) &&
+						!(
+							domainEvent.type === "session.status" &&
+							domainEvent.data.status === "retry"
+						),
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
@@ -341,24 +331,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					}
 				}
 
-				for (const domainEvent of result.events) {
-					yield* Effect.sync(() => {
-						const translated = translateDomainEventToRelay(domainEvent);
-						if (translated.kind === "emit") {
-							for (const raw of translated.messages) {
-								const message = tagWithSessionId(
-									raw,
-									domainEvent.sessionId || sessionId,
-								);
-								send(message);
-								const isTerminal =
-									message.type === "done" ||
-									(message.type === "error" && message.code !== "RETRY");
-								if (isTerminal) finish();
-							}
-						}
-					});
-				}
+				if (isTerminalRuntimeEvent(event)) yield* Effect.sync(finish);
 			});
 		},
 

@@ -65,13 +65,13 @@ describe("SessionList fork", () => {
 		vi.unstubAllGlobals();
 	});
 
-	// The relay's own switch to the fork is uncorrelated and names a parent
-	// that is not the open session, so ws-dispatch ignores it. The list must
-	// open the fork itself once ForkSession answers.
+	// Nothing else announces the fork, so the list must open it itself once
+	// ForkSession answers.
 	it("opens the fork of a session that is not the open one", async () => {
 		vi.mocked(forkSessionRpc).mockResolvedValue({
 			projectSlug: "current-project",
 			sessionId: "fork",
+			parentId: "other",
 		});
 		render(SessionList);
 		const row = screen.getByText("Other work").closest("a");

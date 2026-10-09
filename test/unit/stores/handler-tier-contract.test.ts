@@ -38,7 +38,6 @@ function snapActivity(a: SessionActivity) {
 		doneMessageIds: [...a.doneMessageIds],
 		seenMessageIds: [...a.seenMessageIds],
 		renderTimer: a.renderTimer,
-		thinkingStartTime: a.thinkingStartTime,
 	};
 }
 

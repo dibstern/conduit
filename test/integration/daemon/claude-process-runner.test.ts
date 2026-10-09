@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	ProcessHarness,
@@ -96,8 +97,16 @@ async function settled(
 			expect(commands.map((command) => command.status)).toEqual(
 				Array.from({ length: turns }, () => "completed"),
 			);
-			expect(events.at(-1)?.type).toBe("session.status");
-			expect(events.at(-1)?.data).toMatchObject({ status: "idle" });
+			// The handoff receipt is recorded once the turn has settled.
+			const last = events
+				.map((event) => event.type)
+				.lastIndexOf("session.status");
+			expect(events[last]?.data).toMatchObject({ status: "idle" });
+			expect(
+				events
+					.slice(last + 1)
+					.filter((event) => event.type !== "session.handoff_delivered"),
+			).toEqual([]);
 		},
 		{ timeout: 5000 },
 	);
@@ -132,8 +141,8 @@ describe("Claude session process runner", () => {
 		).toHaveLength(0);
 		for (const prompt of ["stream-parity", "warm-parity"]) {
 			const turn = await browser.send(sessionId, prompt);
-			expect(turn.chunks).toEqual(responseChunks(prompt));
-			expect(turn.done["code"]).toBe(0);
+			expect(turn.chunks.join("")).toBe(responseChunks(prompt).join(""));
+			expect(turn.done["status"]).toBe("idle");
 			await settled(harness, sessionId, prompt === "stream-parity" ? 1 : 2);
 		}
 		const cursor = browser.frames.length;
@@ -148,10 +157,19 @@ describe("Claude session process runner", () => {
 		expect(
 			browser.frames
 				.slice(cursor)
-				.some(({ message }) => message["type"] === "tool_result"),
+				.some(
+					({ message }) =>
+						message["type"] === "transcript_message" &&
+						(message["parts"] as HistoryMessage["parts"])?.some(
+							(part) =>
+								part.type === "tool" && part.state?.status === "completed",
+						) === true,
+				),
 		).toBe(false);
 		await browser.answerApproval(request, decision);
-		expect((await pending).chunks).toEqual(responseChunks("approval-parity"));
+		expect((await pending).chunks.join("")).toBe(
+			responseChunks("approval-parity").join(""),
+		);
 		await browser.waitFor(
 			(message) =>
 				message["type"] === "approval_removed" &&
@@ -159,11 +177,24 @@ describe("Claude session process runner", () => {
 			cursor,
 		);
 		const result = await browser.waitFor(
-			(message) => message["type"] === "tool_result",
+			(message) =>
+				message["type"] === "transcript_message" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "tool" && part.state?.status === "completed",
+				) === true,
 			cursor,
 		);
-		expect(result["content"]).toBe(
-			decision === "allow" ? "harness-approved" : "harness-denied",
+		expect(result["parts"]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "tool",
+					state: expect.objectContaining({
+						status: "completed",
+						output:
+							decision === "allow" ? "harness-approved" : "harness-denied",
+					}),
+				}),
+			]),
 		);
 		await vi.waitFor(() =>
 			expect(
@@ -245,7 +276,7 @@ describe("Claude session process runner", () => {
 		});
 	}, 60_000);
 
-	it("preserves the full history on an agent change in the default runner", async () => {
+	it("preserves history in a hidden handoff on an agent change in the default runner", async () => {
 		const harness = await ProcessHarness.start();
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -254,7 +285,9 @@ describe("Claude session process runner", () => {
 		await settled(harness, sessionId, 1);
 		await browser.switchAgent(sessionId, "reviewer");
 		const turn = await browser.send(sessionId, "after-agent-change");
-		expect(turn.chunks.join("")).toContain("history-before-agent-change");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("after-agent-change").join(""),
+		);
 		await settled(harness, sessionId, 2);
 		const events = persisted(harness, sessionId).events;
 		const prompts = harness.marks
@@ -263,7 +296,27 @@ describe("Claude session process runner", () => {
 		expect(prompts).toHaveLength(2);
 		expect(prompts[0]).toBe("history-before-agent-change");
 		expect(prompts[1]).toContain("history-before-agent-change");
-		expect(prompts[1]).toContain("after-agent-change");
+		expect(prompts[1]).toContain(
+			responseChunks("history-before-agent-change").join(""),
+		);
+		expect(prompts[1]?.startsWith("[Conduit context handoff]")).toBe(true);
+		expect(
+			prompts[1]?.endsWith(
+				"[End conduit context handoff]\n\nafter-agent-change",
+			),
+		).toBe(true);
+		const queries = harness.marks.filter((mark) => mark.kind === "query");
+		expect(queries).toHaveLength(2);
+		const changedQuery = queries[1];
+		if (!changedQuery) throw new Error("Missing changed-agent SDK query");
+		const changedOptions: unknown = JSON.parse(changedQuery.optionsJson);
+		expect(changedOptions).not.toHaveProperty("resume");
+		expect(queries[1]?.sessionId).not.toBe(queries[0]?.sessionId);
+		expect(
+			(await browser.history(sessionId))
+				.filter((message) => message.role === "user")
+				.map((message) => message.text),
+		).toEqual(["history-before-agent-change", "after-agent-change"]);
 		expect(
 			harness.marks.filter((mark) => mark.kind === "runner-started"),
 		).toHaveLength(1);
@@ -272,7 +325,12 @@ describe("Claude session process runner", () => {
 		writeFileSync(
 			"test-results/process-harness/85kb-8-agent-change-events.json",
 			JSON.stringify(
-				{ events, normalized: normalize(events, harness.root), prompts },
+				{
+					events,
+					normalized: normalize(events, harness.root),
+					prompts,
+					queries,
+				},
 				null,
 				2,
 			),
@@ -340,7 +398,9 @@ describe("Claude session process runner", () => {
 		});
 		try {
 			const result = await browser.send(sessionId, "after-runner-exit");
-			expect(result.chunks).toEqual(responseChunks("after-runner-exit"));
+			expect(result.chunks.join("")).toBe(
+				responseChunks("after-runner-exit").join(""),
+			);
 			await settled(harness, sessionId, 2);
 			const runners = harness.marks.filter(
 				(mark) => mark.kind === "runner-started",
@@ -424,8 +484,8 @@ describe("Claude session process runner", () => {
 			action === "interrupt-before-snapshot"
 				? "notification-parent-turn-before-snapshot"
 				: "notification-parent-turn";
-		expect((await browser.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await browser.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		await settled(harness, sessionId, 1);
 		const runner = harness.marks.find(
@@ -621,8 +681,8 @@ describe("Claude session process runner", () => {
 				);
 			});
 		const result = await after.send(sessionId, "after-explicit-approval-stop");
-		expect(result.chunks).toEqual(
-			responseChunks("after-explicit-approval-stop"),
+		expect(result.chunks.join("")).toBe(
+			responseChunks("after-explicit-approval-stop").join(""),
 		);
 	}, 60_000);
 });

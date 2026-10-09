@@ -16,20 +16,22 @@ import { showToast } from "./ui.svelte.js";
 import { triggerNotifications } from "./ws-notifications.js";
 
 export const applyAlert = (alert: Alert): void => {
-	const syntheticMsg = {
-		type: alert.kind,
+	if (alert.kind === "warning") {
+		if (alert.message) showToast(alert.message, { variant: "warn" });
+		return;
+	}
+	const failed = alert.kind === "error";
+	const syntheticMsg: RelayMessage = {
+		type: "done",
+		code: failed ? 1 : 0,
 		alertId: alert.alertId,
-		...(alert.message != null ? { message: alert.message } : {}),
-		...(alert.sessionId != null ? { sessionId: alert.sessionId } : {}),
-	} as RelayMessage;
+		sessionId: alert.sessionId ?? "",
+		...(failed ? { error: alert.message ?? "" } : {}),
+	};
 
 	// The server already suppresses subagent completions; this is
 	// belt-and-suspenders.
-	if (
-		alert.kind === "done" &&
-		alert.sessionId &&
-		findSession(alert.sessionId)?.parentID
-	)
+	if (!failed && alert.sessionId && findSession(alert.sessionId)?.parentID)
 		return;
 
 	void triggerNotifications(syntheticMsg);
@@ -37,10 +39,12 @@ export const applyAlert = (alert: Alert): void => {
 	// Toast errors only. Every "done" is synthesized from session.status idle,
 	// which OpenCode can emit between tool rounds, so a toast for it would be
 	// a spurious "Response complete" mid-turn.
-	if (alert.kind !== "error") return;
+	if (!failed) return;
 	const content = notificationContent(syntheticMsg);
 	if (content)
-		showToast(content.title + (content.body ? ` — ${content.body}` : ""), {
+		showToast({
+			title: content.title,
+			...(content.body ? { body: content.body } : {}),
 			variant: "warn",
 		});
 };

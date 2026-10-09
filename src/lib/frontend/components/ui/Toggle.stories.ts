@@ -24,9 +24,8 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
-export const WithDescriptionAndIcon: Story = {
+export const WithDescription: Story = {
 	args: {
-		icon: "bell",
 		description: "Show a desktop notification when a task completes.",
 	},
 };

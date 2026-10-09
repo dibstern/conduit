@@ -1,5 +1,6 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
+import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import type {
@@ -19,6 +20,7 @@ export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
 import type {
 	ClaudeSettingsResponse,
+	ContinuationHandoffResponse,
 	CreateSessionResponse,
 	DetectProxyResponse,
 	FindFoldersResponse,
@@ -38,7 +40,9 @@ import type {
 	PermissionDecision,
 	PermissionPersistScope,
 	PermissionUpdateDestination,
+	PreviewContinuationResponse,
 	ProjectMutationResponse,
+	QuotaForAccountsResponse,
 	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
 	RewindSessionResponse,
@@ -386,6 +390,44 @@ export interface UnsnoozeSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+}
+
+export interface DismissCutOffRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
+export interface ContinueSessionRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly expectedInstanceId: string;
+	readonly at?: number;
+	readonly originId?: string;
+}
+
+export interface CancelContinuationRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly originId?: string;
+}
+
+export interface PreviewContinuationRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly originId?: string;
+}
+
+export interface QuotaForAccountsRpcInput {
+	readonly projectSlug: string;
+	readonly originId?: string;
+}
+
+export interface GetContinuationHandoffRpcInput
+	extends PreviewContinuationRpcInput {
+	readonly at: number;
 }
 
 export interface SwitchVariantRpcInput {
@@ -1220,6 +1262,24 @@ export async function setAutoSettleSettingRpc(
 	return result.autoSettleAfterDays;
 }
 
+export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
+	);
+	return result.usageLimits;
+}
+
+export async function setUsageLimitsSettingRpc(
+	usageLimits: UsageLimitsSetting,
+): Promise<UsageLimitsSetting> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) =>
+			client.SetUsageLimitsSetting({ usageLimits }),
+		),
+	);
+	return result.usageLimits;
+}
+
 export async function snoozeSessionRpc(
 	input: SnoozeSessionRpcInput,
 ): Promise<void> {
@@ -1230,6 +1290,67 @@ export async function unsnoozeSessionRpc(
 	input: UnsnoozeSessionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callUnsnoozeSession(input));
+}
+
+export async function dismissCutOffRpc(
+	input: DismissCutOffRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.DismissCutOff(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
+export async function continueSessionRpc(
+	input: ContinueSessionRpcInput,
+): Promise<void> {
+	const result = await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.ContinueSession(input).pipe(Effect.asVoid, Effect.either),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function cancelContinuationRpc(
+	input: CancelContinuationRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.CancelContinuation(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
+export async function previewContinuationRpc(
+	input: PreviewContinuationRpcInput,
+): Promise<PreviewContinuationResponse> {
+	const result = await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.PreviewContinuation(input).pipe(Effect.either),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
+export async function quotaForAccountsRpc(
+	input: QuotaForAccountsRpcInput,
+): Promise<QuotaForAccountsResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.QuotaForAccounts(input)),
+	);
+}
+
+export async function getContinuationHandoffRpc(
+	input: GetContinuationHandoffRpcInput,
+): Promise<ContinuationHandoffResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.GetContinuationHandoff(input),
+		),
+	);
 }
 
 export async function switchVariantRpc(

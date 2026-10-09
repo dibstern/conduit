@@ -5,7 +5,7 @@ import {
 	seedSessions,
 } from "./session-fixtures.js";
 // Verifies that clearSessionChatState is wired to:
-// 1. session_deleted relay events
+// 1. shell feed removal
 // 2. shell snapshot omission and its chat cleanup
 // 3. Search query results never trigger cleanup
 // 4. Active-session teardown
@@ -56,8 +56,6 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 
 beforeEach(() => {
 	sessionActivity.clear();
@@ -94,14 +92,11 @@ describe("clearSessionChatState wired to the shell feed", () => {
 		expect(sessionActivity.has("deleted-session")).toBe(true);
 		expect(sessionMessages.has("deleted-session")).toBe(true);
 
-		// Dispatch session_deleted
-		handleMessage({
-			type: "session_deleted",
-			sessionId: "deleted-session",
-		} as RelayMessage);
-
-		expect(sessionState.sessions.has("deleted-session")).toBe(true);
-		applySessionChange({ _tag: "remove", id: "deleted-session" });
+		applySessionChange({
+			_tag: "remove",
+			id: "deleted-session",
+			deleted: true,
+		});
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has("deleted-session")).toBe(false);
 		expect(sessionMessages.has("deleted-session")).toBe(false);
@@ -109,14 +104,11 @@ describe("clearSessionChatState wired to the shell feed", () => {
 		expect(sessionState.sessions.has("deleted-session")).toBe(false);
 	});
 
-	it("session_deleted for unknown session is a no-op", () => {
+	it("feed removal of an unknown session is a no-op", () => {
 		const activitySizeBefore = sessionActivity.size;
 		const messagesSizeBefore = sessionMessages.size;
 
-		handleMessage({
-			type: "session_deleted",
-			sessionId: "nonexistent",
-		} as RelayMessage);
+		applySessionChange({ _tag: "remove", id: "nonexistent", deleted: true });
 
 		expect(sessionActivity.size).toBe(activitySizeBefore);
 		expect(sessionMessages.size).toBe(messagesSizeBefore);
@@ -249,11 +241,7 @@ describe("active-session teardown", () => {
 		]);
 		getOrCreateSessionSlot(activeId);
 
-		handleMessage({
-			type: "session_deleted",
-			sessionId: activeId,
-		} as RelayMessage);
-		applySessionChange({ _tag: "remove", id: activeId });
+		applySessionChange({ _tag: "remove", id: activeId, deleted: true });
 
 		// Per-session state should be cleaned up
 		expect(sessionActivity.has(activeId)).toBe(false);

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ClaudeTraceName } from "../../e2e/helpers/claude-trace-replayer.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const MARKER = "CONDUIT-EXTRA-FOLDER-MARKER-7f3a";
@@ -131,7 +132,7 @@ describe("Claude project extra folders through the built daemon", () => {
 			`Use the Read tool to read the file at the absolute path ${markerPath}, then reply with its contents.`,
 		);
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toContain(MARKER);
 		await vi.waitFor(async () => {
 			const history = await browser.history(sessionId);
@@ -159,7 +160,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		const sessionId = await before.createSession("Live runner folder change");
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(sessionId, "Reply with pong.");
-		expect(first.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
 		expect(first.chunks.join("")).toBe("pong");
 		const original = runnerOptions(fixture, sessionId).at(-1);
 		if (!original) throw new Error("Missing live runner query options");
@@ -176,7 +177,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		await new Promise((resolve) => setTimeout(resolve, 2_000));
 		const second = await after.send(sessionId, "Reply with pong again.");
 		evidence["replies"] = [first, second];
-		expect(second.done["code"]).toBe(0);
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toBe("pong");
 		const options = runnerOptions(fixture, sessionId);
 		evidence["sessionQueries"] = options;
@@ -205,7 +206,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		const sessionId = await before.createSession("Running turn folder change");
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(sessionId, "Reply with pong.");
-		expect(first.done["code"]).toBe(0);
+		expect(first.done["status"]).toBe("idle");
 		expect(first.chunks.join("")).toBe("pong");
 		const original = runnerOptions(fixture, sessionId).at(-1);
 		if (!original) throw new Error("Missing live runner query options");
@@ -223,7 +224,7 @@ describe("Claude project extra folders through the built daemon", () => {
 			// Completion can arrive while SaveProject replaces the relay, before
 			// this browser reconnects. The durable turn survives that WS gap.
 			await vi.waitFor(
-				() => {
+				async () => {
 					const turns = db
 						.prepare(
 							"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
@@ -234,12 +235,9 @@ describe("Claude project extra folders through the built daemon", () => {
 							"SELECT type, data FROM events WHERE session_id = ? AND type IN ('turn.error', 'turn.interrupted') ORDER BY sequence",
 						)
 						.all(sessionId);
-					const cursor = db
-						.prepare(
-							"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
-						)
-						.get(sessionId) as { value: string } | undefined;
-					resumeSessionId = cursor?.value;
+					resumeSessionId = (
+						await readNativeThread(fixture.projectStorePath(), sessionId)
+					)?.resumeSessionId;
 					evidence["turnsBeforeNextSend"] = turns;
 					evidence["turnErrorsBeforeNextSend"] = errors;
 					evidence["resumeSessionIdBeforeNextSend"] = resumeSessionId;
@@ -268,7 +266,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		).toBe("pong");
 		const second = await after.send(sessionId, "Reply with pong again.");
 		evidence["secondReply"] = second;
-		expect(second.done["code"]).toBe(0);
+		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toBe("pong");
 		evidence["idleRunnerEndedAtSend"] = fixture.marks.some(
 			(mark) =>
@@ -293,7 +291,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		]);
 	}, 60_000);
 
-	it("drops a deleted extra folder and shows a session warning", async () => {
+	it("drops a deleted extra folder from the launch", async () => {
 		const fixture = await start("missing-extra", ["pong-thinking-text-turn"]);
 		const extra = join(fixture.root, "deleted-extra-folder");
 		mkdirSync(extra);
@@ -307,23 +305,10 @@ describe("Claude project extra folders through the built daemon", () => {
 			additionalDirectories: [extra],
 		});
 		rmSync(extra, { recursive: true });
-		const cursor = browser.frames.length;
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(0);
+		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toBe("pong");
-		const warning = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["code"] === "RETRY" &&
-				message["sessionId"] === sessionId &&
-				typeof message["message"] === "string" &&
-				message["message"].includes(extra) &&
-				/skip|warn|missing|no longer|does not exist/i.test(message["message"]),
-			cursor,
-		);
-		evidence["warning"] = warning;
-		expect(String(warning["message"])).toContain(extra);
 		const current = runnerOptions(fixture, sessionId).at(-1)?.options;
 		expect(current?.["cwd"]).toBe(fixture.projectDir);
 		expect(current).not.toHaveProperty("additionalDirectories");
@@ -337,20 +322,23 @@ describe("Claude project extra folders through the built daemon", () => {
 		evidence["sessionId"] = sessionId;
 		await browser.preWarmSession(sessionId);
 		rmSync(fixture.projectDir, { recursive: true });
-		const cursor = browser.frames.length;
 		const reply = await browser.send(sessionId, "Reply with pong.");
 		evidence["reply"] = reply;
-		expect(reply.done["code"]).toBe(1);
+		expect(reply.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
 		expect(reply.chunks).toEqual([]);
-		const error = await browser.waitFor(
-			(message) =>
-				message["type"] === "error" &&
-				message["sessionId"] === sessionId &&
-				typeof message["message"] === "string" &&
-				message["message"].includes(fixture.projectDir),
-			cursor,
-		);
-		evidence["error"] = error;
-		expect(String(error["message"])).toContain(fixture.projectDir);
+		// An identical failure is still its own turn error, not swallowed.
+		const repeat = await browser.send(sessionId, "Reply with pong.");
+		evidence["repeat"] = repeat;
+		expect(repeat.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
+		// The failure is a turn error in the transcript, so it survives a reload.
+		const history = await browser.history(sessionId);
+		evidence["history"] = history;
+		const notices = history
+			.flatMap(({ parts }) => parts ?? [])
+			.filter(({ type }) => type === "error");
+		expect(notices).toHaveLength(2);
+		for (const notice of notices) {
+			expect(String(notice.text)).toContain(fixture.projectDir);
+		}
 	}, 60_000);
 });

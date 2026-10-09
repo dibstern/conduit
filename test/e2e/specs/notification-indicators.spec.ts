@@ -123,7 +123,7 @@ function attentionBanner(page: Page) {
 
 async function mockRelayWithViewSessionRpc(
 	page: Page,
-	options: Omit<WsMockOptions, "onClientMessage">,
+	options: WsMockOptions,
 ): Promise<WsMockControl> {
 	await mockWsRpc(page, {
 		handlers: {

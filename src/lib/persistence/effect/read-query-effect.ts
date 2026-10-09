@@ -2,6 +2,10 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
 import {
+	LimitRecoverySchema,
+	SessionResumeSchema,
+} from "../../contracts/limit-recovery.js";
+import {
 	type InputRequest,
 	InputRequestSchema,
 	type SessionGoalChangedPayload,
@@ -33,6 +37,7 @@ import {
 	messageRowsToHistory,
 	toolOutputText,
 } from "../session-history-adapter.js";
+import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
@@ -243,6 +248,18 @@ export const sessionRowsToSessionInfoList = (
 				? { lastTurnEndVersion: row.last_turn_end_version }
 				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+			limitRecovery:
+				row.limit_recovery == null
+					? null
+					: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
+							row.limit_recovery,
+						),
+			resumes:
+				row.resumes == null
+					? []
+					: Schema.decodeUnknownSync(
+							Schema.parseJson(Schema.Array(SessionResumeSchema)),
+						)(row.resumes),
 			...(row.settled_automatically === 1
 				? { settledAutomatically: true }
 				: {}),
@@ -254,6 +271,40 @@ export const sessionRowsToSessionInfoList = (
 			attention,
 		};
 	});
+};
+
+const decodeSidebarRow = Schema.decodeUnknownSync(
+	Schema.parseJson(SidebarRowSchema),
+);
+
+/**
+ * A stored sidebar row as the sidebar shows it now. Background work and snooze
+ * depend on the moment of reading, so they are applied here, as the full
+ * session list applies them, and never stored.
+ */
+const sidebarItem = (
+	row: SidebarRow,
+	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
+): SessionInfo => {
+	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
+	const background = backgroundOf?.(row.session.id);
+	const quiet =
+		row.session.attention === "idle" || row.session.attention === "done-unread";
+	return {
+		...row.session,
+		updatedAt: row.lastActivity,
+		...(work.has("working") ? { processing: true } : {}),
+		...(background?.work ? { backgroundWork: background.work } : {}),
+		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
+		...deriveSessionSnooze(row.snooze),
+		attention: !quiet
+			? row.session.attention
+			: work.has("working")
+				? "working"
+				: work.has("monitoring")
+					? "monitoring"
+					: row.session.attention,
+	};
 };
 
 export class ReadQueryEffectError extends Data.TaggedError(
@@ -269,6 +320,13 @@ export class TranscriptPageCursorNotFoundError extends Data.TaggedError(
 	readonly sessionId: string;
 	readonly before: string;
 }> {}
+
+interface SessionTranscriptPageOptions {
+	readonly before?: string;
+	readonly limit: number;
+	/** Read from the oldest message, or inclusively from the supplied cursor. */
+	readonly forward?: { readonly from?: string };
+}
 
 export interface ReadQueryEffect {
 	readonly getToolContent: (
@@ -376,7 +434,7 @@ export interface ReadQueryEffect {
 	>;
 	readonly readSessionTranscriptPage: (
 		sessionId: string,
-		options: { readonly before?: string; readonly limit: number },
+		options: SessionTranscriptPageOptions,
 	) => Effect.Effect<
 		{
 			readonly messages: MessageWithParts[];
@@ -404,8 +462,10 @@ export interface ReadQueryEffect {
 	readonly readSessionList: (range?: {
 		readonly after?: number;
 		readonly through?: number;
-		readonly roots?: boolean;
-		/** Only the family (root and descendants) of this session. */
+		/**
+		 * Only the family (root and descendants) of this session. Without it,
+		 * the sidebar: one row per top-level session, its family rolled up.
+		 */
 		readonly familyOf?: string;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
 		readonly backgroundOf?: (
@@ -418,6 +478,22 @@ export interface ReadQueryEffect {
 				readonly version: number;
 			}[];
 			readonly version: number;
+			/**
+			 * Families that left the sidebar inside a range with an `after`, each
+			 * at the version it left, and sessions deleted there, children too,
+			 * marked `deleted`. A read without one is a base, which shows absence
+			 * by leaving them out.
+			 */
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+				readonly deleted: boolean;
+			}[];
+			/**
+			 * With `removed`: the version tombstones were first kept at. A range
+			 * opening before it may have missed removals.
+			 */
+			readonly removedSince?: number;
 		},
 		ReadQueryEffectError | SqlError
 	>;
@@ -497,8 +573,9 @@ export interface ReadQueryEffect {
 
 	/**
 	 * The session's inbox facts, computed on read. A queue is paused while
-	 * inputs wait behind a turn stopped or failed since the latest handoff;
-	 * the next handoff un-pauses it. `version` is the session row's, which
+	 * inputs wait behind a turn stopped or failed since the latest handoff,
+	 * or behind a usage limit's open cut-off; the next handoff, or the
+	 * cut-off's reply or dismissal, un-pauses it. `version` is the session row's, which
 	 * every turn end, prompt and pending-input write stamps. Undefined for a
 	 * session that has never held an input, which has no queue to pause and no
 	 * turn to steer into.
@@ -1110,7 +1187,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 	const readSessionTranscriptPage = (
 		sessionId: string,
-		options: { readonly before?: string; readonly limit: number },
+		options: SessionTranscriptPageOptions,
 	): Effect.Effect<
 		{
 			readonly messages: MessageWithParts[];
@@ -1123,25 +1200,28 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
+					const forward = options.forward !== undefined;
+					const cursorId = forward ? options.forward?.from : options.before;
 					const cursor =
-						options.before !== undefined
+						cursorId !== undefined
 							? (yield* sql<{ created_at: number; id: string }>`
 									SELECT created_at, id FROM messages
-									WHERE session_id = ${sessionId} AND id = ${options.before}`)[0]
+									WHERE session_id = ${sessionId} AND id = ${cursorId}`)[0]
 							: undefined;
-					if (options.before !== undefined && !cursor) {
+					if (cursorId !== undefined && !cursor) {
 						return yield* new TranscriptPageCursorNotFoundError({
 							sessionId,
-							before: options.before,
+							before: cursorId,
 						});
 					}
 					// The first page reaches back to the newest prompt, or further to
 					// the prompt still running, which a prompt queued behind it would
 					// otherwise push off the page. A turn left running before a later
 					// one settled is a crash leftover and is ignored.
-					const [anchor] = cursor
-						? []
-						: yield* sql<{ created_at: number; id: string }>`
+					const [anchor] =
+						forward || cursor
+							? []
+							: yield* sql<{ created_at: number; id: string }>`
 								SELECT created_at, id FROM messages
 								WHERE session_id = ${sessionId} AND role = 'user'
 								ORDER BY id IS (
@@ -1153,8 +1233,24 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									ORDER BY requested_at ASC, rowid ASC LIMIT 1
 								) DESC, created_at DESC, id DESC
 								LIMIT 1`;
-					const rows = cursor
+					const rows = forward
 						? yield* sql<MessageWithTurnModelRow>`
+								SELECT messages.*,
+									turns.requested_model AS turn_requested_model,
+									turns.expected_model AS turn_expected_model,
+									turns.actual_model AS turn_actual_model,
+									${turnTimingColumns}
+								FROM messages
+								LEFT JOIN turns ON turns.id = messages.turn_id
+								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
+								WHERE messages.session_id = ${sessionId}
+									AND (${cursor?.id ?? null} IS NULL
+										OR messages.created_at > ${cursor?.created_at ?? null}
+										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id >= ${cursor?.id ?? null}))
+								ORDER BY messages.created_at ASC, messages.id ASC
+								LIMIT ${options.limit + 1}`
+						: cursor
+							? yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
@@ -1168,7 +1264,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT ${options.limit + 1}`
-						: yield* sql<MessageWithTurnModelRow>`
+							: yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
@@ -1186,13 +1282,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										AND (m.created_at > ${anchor?.created_at ?? null}
 											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
 								)`;
-					const pageLimit = cursor
-						? options.limit
-						: Math.max(
-								options.limit,
-								rows.findIndex((message) => message.id === anchor?.id) + 1,
-							);
-					const page = rows.slice(0, pageLimit).reverse();
+					const pageLimit =
+						forward || cursor
+							? options.limit
+							: Math.max(
+									options.limit,
+									rows.findIndex((message) => message.id === anchor?.id) + 1,
+								);
+					const page = rows.slice(0, pageLimit);
+					if (!forward) page.reverse();
 					const parts = page.length
 						? yield* sql<MessagePartRow>`
 								SELECT * FROM message_parts
@@ -1220,7 +1318,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const readSessionList = (range?: {
 		readonly after?: number;
 		readonly through?: number;
-		readonly roots?: boolean;
 		readonly familyOf?: string;
 		readonly backgroundOf?: (
 			sessionId: string,
@@ -1232,6 +1329,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly version: number;
 			}[];
 			readonly version: number;
+			readonly removed?: readonly {
+				readonly id: string;
+				readonly version: number;
+				readonly deleted: boolean;
+			}[];
+			readonly removedSince?: number;
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1241,32 +1344,59 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
-					const rows: readonly (SessionRow & {
-						readonly effective_version?: number;
-					})[] =
-						range?.familyOf !== undefined
-							? yield* sql.unsafe<SessionRow & { effective_version: number }>(
-									sessionFamilyWindowQuery,
-									[range.familyOf, floor, ceiling],
-								)
-							: range?.roots
-								? yield* sql<SessionRow & { effective_version: number }>`
-							WITH RECURSIVE descendants(root_id, id, version) AS (
-								SELECT id, id, version FROM sessions WHERE parent_id IS NULL
-								UNION ALL
-								SELECT d.root_id, child.id, child.version FROM sessions child
-								JOIN descendants d ON child.parent_id = d.id
-							), roots AS (
-								SELECT root_id, MAX(version) AS effective_version FROM descendants GROUP BY root_id
-							)
-							SELECT sessions.*, roots.effective_version FROM sessions
-							JOIN roots ON roots.root_id = sessions.id
-							WHERE roots.effective_version > ${floor} AND roots.effective_version <= ${ceiling}
-							ORDER BY sessions.updated_at DESC`
-								: yield* sql<SessionRow>`
-							SELECT * FROM sessions
+					if (range?.familyOf === undefined) {
+						// The sidebar table holds each family rolled up already, so
+						// this reads the rows that moved and nothing else. A row with
+						// no content is a family's tombstone, and a deletion while its
+						// session is gone.
+						const ranged = range?.after !== undefined;
+						const stored = yield* sql<{
+							session_id: string;
+							version: number;
+							row: string | null;
+							deleted: number;
+						}>`
+							SELECT session_id, version, row,
+								NOT EXISTS (SELECT 1 FROM sessions
+									WHERE sessions.id = session_sidebar.session_id) AS deleted
+							FROM session_sidebar
 							WHERE version > ${floor} AND version <= ${ceiling}
-							ORDER BY updated_at DESC`;
+							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
+							ORDER BY last_activity DESC, session_id DESC`;
+						return {
+							rows: stored.flatMap(({ row }) => {
+								if (row === null) return [];
+								const sidebar = decodeSidebarRow(row);
+								return [
+									{
+										item: sidebarItem(sidebar, range?.backgroundOf),
+										version: sidebar.version,
+									},
+								];
+							}),
+							version,
+							...(ranged && {
+								removed: stored.flatMap((stamp) =>
+									stamp.row === null
+										? [
+												{
+													id: stamp.session_id,
+													version: stamp.version,
+													deleted: stamp.deleted === 1,
+												},
+											]
+										: [],
+								),
+								removedSince:
+									(yield* sql<{ version: number }>`
+										SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
+										?.version ?? 0,
+							}),
+						};
+					}
+					const rows = yield* sql.unsafe<
+						SessionRow & { effective_version: number }
+					>(sessionFamilyWindowQuery, [range.familyOf, floor, ceiling]);
 					const [lineage, approvals, projectedStatuses] = yield* Effect.all([
 						getSessionLineage(),
 						countPendingApprovalsBySession(),
@@ -1308,7 +1438,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							return [
 								{
 									item,
-									version: row.effective_version ?? row.version,
+									version: row.effective_version,
 								},
 							];
 						}),
@@ -1445,13 +1575,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT version, provider,
 				EXISTS (SELECT 1 FROM pending_inputs
 					WHERE session_id = ${sessionId} AND state = 'queued')
-				AND EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
+				AND (EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
 					AND state IN ('interrupted', 'error')
 					AND completed_at >= COALESCE(
 						(SELECT MAX(requested_at) FROM provider_command_outbox
 							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
 						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-						0)) AS paused,
+						0))
+					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
 					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
 			FROM sessions WHERE id = ${sessionId}

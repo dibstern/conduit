@@ -13,12 +13,14 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The instance badge stays beside the project identity. The title menu carries
-  session verbs and global actions; the desktop overflow carries global actions.
+  The instance badge stays beside the project identity; a Claude session wears
+  its own account pill there instead, which moves the session, not the project.
+  The title menu carries session verbs and global actions; the desktop overflow
+  carries global actions.
 -->
 
 <script lang="ts">
-	import { isProcessing } from "../../stores/chat.svelte.js";
+	import { followSessionBusy, isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
@@ -31,7 +33,7 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, isSessionBusy, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
@@ -64,9 +66,10 @@
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
-	import { wsState } from "../../stores/ws.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
+	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
@@ -117,7 +120,10 @@
 		const projectSlug = getCurrentSlug();
 		tasksPanel.open = false;
 		if (!sessionId || !projectSlug) return;
-		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).catch(() => {
+		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).then(() => {
+			// See InputArea's handleStop: an interrupt may end a turn the row never reported.
+			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
+		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
 	}
@@ -205,9 +211,9 @@
 	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
 	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
-	const statusTitle = $derived(wsState.statusText || "Connecting");
+	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
-		switch (wsState.status) {
+		switch (connectionState.status) {
 			case "connected": return "bg-success";
 			case "processing": return "bg-success animate-[pulse-dot_1.2s_ease-in-out_infinite]";
 			case "error": return "bg-error";
@@ -390,7 +396,7 @@
 <!-- One border for the controls; the instance picker stays beside it. -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
-		<div class="session-bar-segments inline-flex h-[24px] min-w-0 items-stretch rounded-lg border border-border">
+		<div class="session-bar-segments inline-flex h-[24px] items-stretch rounded-lg border border-border">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
 			{#if sideThreads.length > 0 && !session?.sideThread}
 				<Button id="side-threads-control" variant="ghost" size="segment" icon="messages-square" touchTarget class="shrink-0 tabular-nums" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
@@ -420,7 +426,14 @@
 				</Tooltip>
 			{/if}
 		</div>
-		<InstanceBadgeMenu />
+		<!-- Until an open session's provider is known, show neither: the project badge would flash before a Claude session's pill. -->
+		{#if !session}
+			<InstanceBadgeMenu />
+		{:else if discoveryState.sessionProviderIds[session.id] === "claude"}
+			<SessionAccountPill {session} />
+		{:else if discoveryState.sessionProviderIds[session.id] !== undefined}
+			<InstanceBadgeMenu />
+		{/if}
 	</div>
 {/snippet}
 

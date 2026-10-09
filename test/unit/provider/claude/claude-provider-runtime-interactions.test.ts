@@ -109,11 +109,9 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 				),
 			);
 			yield* runner.projectEvent(creation);
-			const send = vi.fn();
 			const sink = createRelayEventSink({
 				sessionId: "session-1",
 				providerId: "claude",
-				send,
 				ingestion,
 				pendingInteractions: {
 					beginPermissionRequest: pending.beginPermissionRequest,
@@ -132,7 +130,6 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 				ingestion,
 				sql,
 				sink,
-				send,
 			};
 		}),
 	);
@@ -567,7 +564,6 @@ describe("Claude durable interaction resolution", () => {
 					const sink = createRelayEventSink({
 						sessionId: "session-1",
 						providerId: "claude",
-						send: f.send,
 						ingestion: f.ingestion,
 						pendingInteractions: {
 							beginPermissionRequest: (entry) =>

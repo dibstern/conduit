@@ -1,11 +1,26 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type {
 	ResolvedSettings,
 	ResolveSettingsOptions,
+	SDKControlGetUsageResponse,
+	SDKControlInitializeResponse,
+	SessionMessage,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+	type CallToolResult,
+	CallToolResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
@@ -14,8 +29,73 @@ import type {
 	SDKUserMessage,
 } from "../../src/lib/provider/claude/types.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import {
+	provisionalRejectedLimit,
+	provisionalUsageLimitTurn,
+} from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
+import {
+	provisionalRejectedLimitWithoutReset,
+	provisionalUsageLimitTurnWithoutReset,
+} from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn-no-reset.js";
+
+type QuotaBehavior =
+	| "available"
+	| "limited"
+	| "fail"
+	| "hang"
+	| "unavailable"
+	| "plan-unavailable";
+
+// Unix seconds supplied by the harness; the same marker drives intake and quota.
+function injectedResetAt(configDir: string | undefined): number | undefined {
+	if (!configDir) return;
+	const marker = join(configDir, "conduit-test-resets-at");
+	if (!existsSync(marker)) return;
+	const value = Number(readFileSync(marker, "utf8").trim());
+	return Number.isFinite(value) ? value : undefined;
+}
 
 export type ProcessMark =
+	| {
+			kind: "native-fork";
+			parentSessionId: string;
+			sessionId: string;
+			configDir: string | undefined;
+			upToMessageId: string | undefined;
+	  }
+	| { kind: "stop-held"; queryId: string }
+	| {
+			kind: "handoff-first-turn-died";
+			prompt: string;
+			queryId: string;
+			sessionId: string;
+	  }
+	| {
+			kind: "usage-probe";
+			configDir: string | undefined;
+			queryId: string;
+			behavior: QuotaBehavior;
+	  }
+	| {
+			kind: "mcp-tools";
+			prompt: string;
+			serverKey: string;
+			serverName: string;
+			toolNames: string[];
+	  }
+	| {
+			kind: "mcp-tool-call";
+			prompt: string;
+			toolName: string;
+			arguments: Record<string, unknown>;
+			result: CallToolResult;
+	  }
+	| {
+			kind: "usage-limit";
+			phase: "limited" | "repeated";
+			sessionId: string;
+			prompt: string;
+	  }
 	| {
 			kind:
 				| "runner-hello-pending"
@@ -141,8 +221,27 @@ export type ProcessMark =
 	  }
 	| { kind: "runner-spawned"; pid: number; socketPath: string };
 
+function currentRequest(prompt: string): string {
+	if (prompt.startsWith("[Conduit still-open note]"))
+		prompt = prompt.slice(prompt.indexOf("\n\n") + 2);
+	const end = "[End conduit context handoff]\n\n";
+	const boundary = prompt.indexOf(end);
+	return prompt.startsWith("[Conduit context handoff]") && boundary >= 0
+		? prompt.slice(boundary + end.length)
+		: prompt;
+}
+
 export function responseChunks(prompt: string): string[] {
-	return [`Echo(${prompt}): `, `stream(${prompt}) `, `done(${prompt}).`];
+	const visiblePrompt = currentRequest(prompt);
+	if (visiblePrompt === "approval-account-switch-history")
+		return ["OMIT-THIS-ASSISTANT-CONTEXT ".repeat(900), "\nHistory complete."];
+	if (visiblePrompt.startsWith("approval-thread-read-history-"))
+		return [`OMIT-${visiblePrompt} `.repeat(900), "\nHistory complete."];
+	return [
+		`Echo(${visiblePrompt}): `,
+		`stream(${visiblePrompt}) `,
+		`done(${visiblePrompt}).`,
+	];
 }
 
 function mark(message: ProcessMark): void {
@@ -273,18 +372,46 @@ export const claudeSubagentSdk: ClaudeSubagentSdk = {
 
 let initializationAttempts = 0;
 
+function readNativeTranscript(
+	sessionId: string,
+	configDir: string | undefined,
+): SessionMessage[] {
+	if (!configDir)
+		throw new Error("A native transcript requires an account config dir");
+	return readFileSync(
+		join(configDir, `conduit-test-transcript-${sessionId}.ndjson`),
+		"utf8",
+	)
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as SessionMessage);
+}
+
+function recordNativeMessage(
+	entry: SessionMessage,
+	configDir: string | undefined,
+): void {
+	if (configDir && existsSync(join(configDir, "conduit-test-record-forks")))
+		appendFileSync(
+			join(configDir, `conduit-test-transcript-${entry.session_id}.ndjson`),
+			`${JSON.stringify(entry)}\n`,
+		);
+}
+
 function query(params: {
 	prompt: AsyncIterable<SDKUserMessage>;
 	options?: Options;
 }): Query {
 	const sessionId = params.options?.resume ?? randomUUID();
+	const accountConfigDir =
+		params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+		process.env["CLAUDE_CONFIG_DIR"];
 	const queryId = randomUUID();
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
 	let livePermissionMode = params.options?.permissionMode;
 	let closed = false;
 	let promptIndex = 0;
-	let rejectedPrompt: string | undefined;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
@@ -345,6 +472,7 @@ function query(params: {
 					([key]) => !["abortController", "canUseTool", "resume"].includes(key),
 				),
 			),
+			(key, value: unknown) => (key === "instance" ? undefined : value),
 		),
 		options: {
 			...(params.options?.model ? { model: params.options.model } : {}),
@@ -372,36 +500,51 @@ function query(params: {
 	});
 	// Like the SDK, query construction starts initialization without input. The
 	// public system/init message remains a first-prompt event, not readiness.
-	const initialization = new Promise<Record<string, never>>((done, fail) => {
-		rejectInitialization = fail;
-		if (holdNext)
-			mark({
-				kind: "initialization-held",
-				queryId,
-				at: process.hrtime.bigint().toString(),
-			});
-		const finish = () => {
-			if (initializationFinished) return;
-			if (
-				holdNext &&
-				proof &&
-				!existsSync(join(dirname(proof), "release-held-initialization"))
-			) {
-				initializationTimer = setTimeout(finish, 20);
-				return;
-			}
-			initializationFinished = true;
-			mark({
-				kind: fails ? "initialization-failed" : "initialization-ready",
-				queryId,
-				at: process.hrtime.bigint().toString(),
-			});
-			if (fails) fail(new Error("Synthetic Claude initialization failure"));
-			else done({});
-		};
-		if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
-		else finish();
-	});
+	const initialization = new Promise<SDKControlInitializeResponse>(
+		(done, fail) => {
+			rejectInitialization = fail;
+			if (holdNext)
+				mark({
+					kind: "initialization-held",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+			const finish = () => {
+				if (initializationFinished) return;
+				if (
+					holdNext &&
+					proof &&
+					!existsSync(join(dirname(proof), "release-held-initialization"))
+				) {
+					initializationTimer = setTimeout(finish, 20);
+					return;
+				}
+				initializationFinished = true;
+				mark({
+					kind: fails ? "initialization-failed" : "initialization-ready",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				if (fails) fail(new Error("Synthetic Claude initialization failure"));
+				else
+					done({
+						commands: [],
+						agents: [],
+						models: [],
+						output_style: "default",
+						available_output_styles: ["default"],
+						account: {
+							email: "process-test@example.test",
+							subscriptionType: "max",
+							tokenSource: "oauth",
+							apiProvider: "firstParty",
+						},
+					});
+			};
+			if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
+			else finish();
+		},
+	);
 	// A caller may attach the readiness barrier on the next tick.
 	void initialization.catch(() => {});
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
@@ -417,6 +560,45 @@ function query(params: {
 							.filter((block) => block.type === "text")
 							.map((block) => block.text)
 							.join("");
+			const request = currentRequest(prompt);
+			const userUuid = input.uuid ?? randomUUID();
+			recordNativeMessage(
+				{
+					type: "user",
+					uuid: userUuid,
+					session_id: sessionId,
+					message: { ...input.message, id: userUuid },
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+				accountConfigDir,
+			);
+			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
+			if (optionsFile) {
+				const seen = new WeakSet<object>();
+				const record = JSON.stringify(
+					{
+						pid: process.pid,
+						prompt,
+						configDir:
+							params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+							process.env["CLAUDE_CONFIG_DIR"] ??
+							null,
+						resumeId: params.options?.resume ?? null,
+						options: params.options ?? {},
+					},
+					(key, value: unknown) => {
+						if (key === "instance") return undefined;
+						if (typeof value === "bigint") return value.toString();
+						if (typeof value === "object" && value !== null) {
+							if (seen.has(value)) return undefined;
+							seen.add(value);
+						}
+						return value;
+					},
+				);
+				appendFileSync(optionsFile, `${record}\n`);
+			}
 			mark({
 				kind: "enqueue",
 				prompt,
@@ -439,9 +621,11 @@ function query(params: {
 				rejectedResume &&
 				existsSync(rejectedResume) &&
 				readFileSync(rejectedResume, "utf8") === params.options.resume
-			)
-				rejectedPrompt = prompt;
-			if (prompt === "fail-before-assistant-restart") {
+			) {
+				mark({ kind: "resume-rejected", prompt, queryId, sessionId });
+				throw new Error(`No conversation found with session ID: ${sessionId}`);
+			}
+			if (request === "fail-before-assistant-restart") {
 				const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 				if (!proof) throw new Error("Missing pre-assistant failure gate");
 				mark({ kind: "pre-assistant-held", prompt, queryId });
@@ -474,6 +658,190 @@ function query(params: {
 					plugins: [],
 				} as unknown as SDKMessage;
 			}
+			if (request === "thread-read-omitted-history") {
+				const serverKey = "conduit";
+				const server = params.options?.mcpServers?.[serverKey];
+				if (server?.type !== "sdk")
+					throw new Error("The thread reader MCP server was not registered");
+				const client = new Client({
+					name: "fake-claude-sdk",
+					version: "1.0.0",
+				});
+				const [clientTransport, serverTransport] =
+					InMemoryTransport.createLinkedPair();
+				await server.instance.connect(serverTransport);
+				try {
+					await client.connect(clientTransport);
+					const { tools } = await client.listTools();
+					mark({
+						kind: "mcp-tools",
+						prompt,
+						serverKey,
+						serverName: server.name,
+						toolNames: tools.map(({ name }) => `mcp__${serverKey}__${name}`),
+					});
+					const tool = tools.find(({ name }) => name === "conduit_thread_read");
+					if (!tool)
+						throw new Error("The thread reader MCP tool was not listed");
+					let args: { cursor?: string; textOffset?: number; limit: number } = {
+						limit: 1,
+					};
+					let reachedEnd = false;
+					for (let index = 0; index < 32; index++) {
+						const result = CallToolResultSchema.parse(
+							await client.callTool({ name: tool.name, arguments: args }),
+						);
+						mark({
+							kind: "mcp-tool-call",
+							prompt,
+							toolName: `mcp__${serverKey}__${tool.name}`,
+							arguments: args,
+							result,
+						});
+						const page: unknown = JSON.parse(
+							result.content
+								.filter((block) => block.type === "text")
+								.map((block) => block.text)
+								.join(""),
+						);
+						if (
+							!page ||
+							typeof page !== "object" ||
+							!("items" in page) ||
+							!Array.isArray(page.items)
+						)
+							throw new Error(
+								"The thread reader returned an invalid history page",
+							);
+						if (
+							!("nextCursor" in page) ||
+							typeof page.nextCursor !== "string"
+						) {
+							reachedEnd = true;
+							break;
+						}
+						args = {
+							cursor: page.nextCursor,
+							...("nextTextOffset" in page &&
+							typeof page.nextTextOffset === "number"
+								? { textOffset: page.nextTextOffset }
+								: {}),
+							limit: 1,
+						};
+					}
+					if (!reachedEnd)
+						throw new Error("The thread reader did not finish paging");
+					const invalid = { cursor: "invalid-thread-cursor", limit: 1 };
+					const result = CallToolResultSchema.parse(
+						await client.callTool({ name: tool.name, arguments: invalid }),
+					);
+					mark({
+						kind: "mcp-tool-call",
+						prompt,
+						toolName: `mcp__${serverKey}__${tool.name}`,
+						arguments: invalid,
+						result,
+					});
+				} finally {
+					await client.close();
+				}
+			}
+			const switchMarker = accountConfigDir
+				? join(accountConfigDir, "conduit-test-switch-turn")
+				: undefined;
+			const switchTurn =
+				prompt.includes("[Conduit context handoff]") &&
+				switchMarker &&
+				existsSync(switchMarker)
+					? readFileSync(switchMarker, "utf8").trim()
+					: undefined;
+			if (switchTurn === "die-once" && switchMarker) {
+				writeFileSync(switchMarker, "hold");
+				mark({ kind: "handoff-first-turn-died", prompt, queryId, sessionId });
+				process.exit(86);
+			}
+			if (switchTurn === "hold" && proof) {
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-switch-turn")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
+			if (switchTurn === "limited") {
+				yield provisionalRejectedLimitWithoutReset(sessionId);
+				yield* provisionalUsageLimitTurnWithoutReset(
+					sessionId,
+					input,
+				).events.filter((event) => event.type === "result");
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				continue;
+			}
+			if (!switchTurn && request.startsWith("usage-limit-account-1")) {
+				const noReset = request.startsWith("usage-limit-account-1-no-reset");
+				const resetsAt = noReset
+					? undefined
+					: injectedResetAt(
+							params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+								process.env["CLAUDE_CONFIG_DIR"],
+						);
+				const withReset = (event: SDKMessage): SDKMessage =>
+					event.type === "rate_limit_event" && resetsAt !== undefined
+						? {
+								...event,
+								rate_limit_info: { ...event.rate_limit_info, resetsAt },
+							}
+						: event;
+				const fixture = noReset
+					? provisionalUsageLimitTurnWithoutReset(sessionId, input)
+					: provisionalUsageLimitTurn(sessionId, input);
+				if (proof)
+					writeFileSync(
+						join(dirname(proof), `provisional-limit-native-${sessionId}.json`),
+						JSON.stringify(fixture.nativeTranscript, null, 2),
+					);
+				for (const event of fixture.events) yield withReset(event);
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				if (proof) {
+					const release = join(dirname(proof), "release-limit-repeats");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
+				for (let repeat = 0; repeat < 4; repeat++)
+					yield withReset(
+						noReset
+							? provisionalRejectedLimitWithoutReset(sessionId)
+							: provisionalRejectedLimit(sessionId),
+					);
+				mark({ kind: "usage-limit", phase: "repeated", sessionId, prompt });
+				continue;
+			}
+			if (
+				request === "Continue where you left off." &&
+				proof &&
+				existsSync(join(dirname(proof), "hold-continuation"))
+			) {
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-continuation")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
+			if (
+				request === "Continue where you left off." &&
+				proof &&
+				existsSync(join(dirname(proof), "limit-continuation"))
+			) {
+				yield provisionalRejectedLimitWithoutReset(sessionId);
+				const fixture = provisionalUsageLimitTurnWithoutReset(sessionId, input);
+				yield* fixture.events.filter((event) => event.type === "result");
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				continue;
+			}
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",
@@ -485,13 +853,13 @@ function query(params: {
 				content_block: { type: "text", text: "" },
 			});
 			for (const [index, text] of responseChunks(prompt).entries()) {
-				if (prompt === "upgrade-long-turn" && index === 1 && proof) {
+				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
 					while (!existsSync(release) && !closed)
 						await new Promise<void>((done) => setTimeout(done, 20));
 					if (closed) return;
 				}
-				if (prompt.startsWith("restart-"))
+				if (request.startsWith("restart-"))
 					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {
 					type: "content_block_delta",
@@ -506,8 +874,22 @@ function query(params: {
 				});
 				yield event;
 			}
+			// A turn that keeps streaming until it is stopped, for load tests.
+			if (request.startsWith("load-stream-"))
+				for (
+					let tick = 0;
+					!closed && !params.options?.abortController?.signal.aborted;
+					tick++
+				) {
+					await new Promise<void>((done) => setTimeout(done, 100));
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "text_delta", text: `tick(${tick}) ` },
+					});
+				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
-			if (prompt.startsWith("stall-"))
+			if (request.startsWith("stall-"))
 				await new Promise<void>((done) => {
 					params.options?.abortController?.signal.addEventListener(
 						"abort",
@@ -515,7 +897,7 @@ function query(params: {
 						{ once: true },
 					);
 				});
-			if (prompt.startsWith("question-")) {
+			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
 				await params.options.canUseTool(
@@ -540,29 +922,35 @@ function query(params: {
 					},
 				);
 			}
-			if (prompt.startsWith("approval-")) {
+			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();
-				const toolInput = { command: "printf harness-approved" };
+				const handoffHistory =
+					request === "approval-account-switch-history" ||
+					request.startsWith("approval-thread-read-history-");
+				const toolName = handoffHistory ? "Read" : "Bash";
+				const toolInput = handoffHistory
+					? { file_path: "/account-switch-general-result.txt" }
+					: { command: "printf harness-approved" };
 				yield stream(sessionId, {
 					type: "content_block_start",
 					index: 1,
 					content_block: {
 						type: "tool_use",
 						id: toolUseID,
-						name: "Bash",
+						name: toolName,
 						input: toolInput,
 					},
 				});
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
-				const approval = await params.options.canUseTool("Bash", toolInput, {
+				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:
 						params.options.abortController?.signal ??
 						new AbortController().signal,
 					toolUseID,
 					requestId: randomUUID(),
-					...(prompt === "approval-restart"
+					...(request === "approval-restart"
 						? {
 								suggestions: [
 									{
@@ -602,7 +990,9 @@ function query(params: {
 								tool_use_id: toolUseID,
 								content:
 									approval.behavior === "allow"
-										? "harness-approved"
+										? handoffHistory
+											? "ACCOUNT-SWITCH-GENERAL-TOOL-RESULT"
+											: "harness-approved"
 										: "harness-denied",
 								is_error: approval.behavior !== "allow",
 							},
@@ -611,13 +1001,13 @@ function query(params: {
 				} as unknown as SDKMessage;
 			}
 			if (
-				prompt.startsWith("failure-") ||
-				prompt.startsWith("approval-failure-")
+				request.startsWith("failure-") ||
+				request.startsWith("approval-failure-")
 			)
 				throw new Error("Harness adapter failure");
 			if (
-				prompt === "upgrade-background-work" ||
-				prompt.startsWith("notification-parent-turn")
+				request === "upgrade-background-work" ||
+				request.startsWith("notification-parent-turn")
 			) {
 				mark({
 					kind: "background-work",
@@ -636,12 +1026,12 @@ function query(params: {
 							task_id: "upgrade-background-task",
 							task_type: "local_bash",
 							description: "Live background task",
-							ambient: prompt === "notification-parent-turn-during-warm",
+							ambient: request === "notification-parent-turn-during-warm",
 						},
 					],
 				} as unknown as SDKMessage;
 			}
-			if (prompt === "review-subagent-finalizer") {
+			if (request === "review-subagent-finalizer") {
 				yield {
 					type: "system",
 					subtype: "task_started",
@@ -666,6 +1056,21 @@ function query(params: {
 					summary: "Task complete; transcript catch-up pending",
 				} as unknown as SDKMessage;
 			}
+			recordNativeMessage(
+				{
+					type: "assistant",
+					uuid: messageId,
+					session_id: sessionId,
+					message: {
+						id: messageId,
+						role: "assistant",
+						content: [{ type: "text", text: responseChunks(prompt).join("") }],
+					},
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+				accountConfigDir,
+			);
 			yield {
 				type: "assistant",
 				uuid: messageId,
@@ -677,7 +1082,7 @@ function query(params: {
 					content: [{ type: "text", text: responseChunks(prompt).join("") }],
 				},
 			} as unknown as SDKMessage;
-			if (prompt === "terminal-replay-interrupt") {
+			if (request === "terminal-replay-interrupt") {
 				mark({ kind: "assistant-held", prompt, queryId });
 				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
 				return;
@@ -703,7 +1108,7 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
-			if (prompt === "restart-background-work") {
+			if (request === "restart-background-work") {
 				yield {
 					type: "system",
 					subtype: "background_tasks_changed",
@@ -749,7 +1154,7 @@ function query(params: {
 					} as unknown as SDKMessage;
 				}
 			}
-			if (prompt === "upgrade-background-work" && proof) {
+			if (request === "upgrade-background-work" && proof) {
 				const release = join(dirname(proof), "release-upgrade-background");
 				while (!existsSync(release) && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
@@ -769,7 +1174,7 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 			}
-			if (prompt.startsWith("notification-parent-turn") && proof) {
+			if (request.startsWith("notification-parent-turn") && proof) {
 				const release = join(dirname(proof), "release-notification-parent");
 				while (!existsSync(release) && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
@@ -808,7 +1213,7 @@ function query(params: {
 					"Notification parent finished.",
 				]) {
 					const beforeSnapshot =
-						prompt === "notification-parent-turn-before-snapshot";
+						request === "notification-parent-turn-before-snapshot";
 					parentMessageId = beforeSnapshot
 						? `msg_${randomUUID()}`
 						: randomUUID();
@@ -912,7 +1317,7 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 			}
-			if (prompt === "ambient-idle") {
+			if (request === "ambient-idle") {
 				while (!closed) {
 					await new Promise<void>((done) => setTimeout(done, 50));
 					yield {
@@ -937,23 +1342,68 @@ function query(params: {
 	// interface also contains unrelated account/MCP methods that this fake never uses.
 	return Object.assign(messages, {
 		[Symbol.asyncIterator]: () => ({
-			next: () => {
-				if (rejectedPrompt) {
-					mark({
-						kind: "resume-rejected",
-						prompt: rejectedPrompt,
-						queryId,
-						sessionId,
-					});
-					return Promise.reject(
-						new Error(`Claude session not found: ${sessionId}`),
-					);
-				}
-				return messages.next();
-			},
+			next: () => messages.next(),
 			return: () => messages.return(undefined),
 		}),
 		initializationResult: () => initialization,
+		usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
+			async (): Promise<SDKControlGetUsageResponse> => {
+				const configDir =
+					params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+					process.env["CLAUDE_CONFIG_DIR"];
+				const resetsAt = injectedResetAt(configDir);
+				const marker = configDir
+					? join(configDir, "conduit-test-quota")
+					: undefined;
+				const selected =
+					marker && existsSync(marker)
+						? readFileSync(marker, "utf8").trim()
+						: "available";
+				const behavior: QuotaBehavior =
+					selected === "limited" ||
+					selected === "fail" ||
+					selected === "hang" ||
+					selected === "unavailable" ||
+					selected === "plan-unavailable"
+						? selected
+						: "available";
+				mark({ kind: "usage-probe", configDir, queryId, behavior });
+				if (behavior === "unavailable")
+					throw new Error("Not logged in. Please run /login");
+				if (behavior === "fail")
+					throw new Error("Synthetic usage control failure");
+				if (behavior === "hang") {
+					while (!closed && !params.options?.abortController?.signal.aborted)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					throw new Error("Usage control query closed");
+				}
+				return {
+					session: {
+						total_cost_usd: 0,
+						total_api_duration_ms: 0,
+						total_duration_ms: 0,
+						total_lines_added: 0,
+						total_lines_removed: 0,
+						model_usage: {},
+					},
+					subscription_type: "max",
+					rate_limits_available: behavior !== "plan-unavailable",
+					rate_limits:
+						behavior === "plan-unavailable"
+							? null
+							: {
+									five_hour: { utilization: 12, resets_at: null },
+									seven_day: {
+										utilization: behavior === "limited" ? 100 : 37,
+										resets_at:
+											resetsAt === undefined
+												? null
+												: new Date(resetsAt * 1000).toISOString(),
+									},
+								},
+					behaviors: null,
+				};
+			},
 		close: () => {
 			if (closed) return;
 			closed = true;
@@ -970,7 +1420,23 @@ function query(params: {
 				at: process.hrtime.bigint().toString(),
 			});
 		},
-		interrupt: async () => {},
+		interrupt: async () => {
+			const configDir =
+				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
+				process.env["CLAUDE_CONFIG_DIR"];
+			if (
+				proof &&
+				configDir &&
+				existsSync(join(configDir, "conduit-test-hold-stop"))
+			) {
+				mark({ kind: "stop-held", queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-switch-stop")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+			}
+		},
 		setModel: async (model?: string) => {
 			liveModel = model;
 			mark({
@@ -1003,11 +1469,36 @@ function query(params: {
 export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
 	fork: {
-		readTranscript: async () => {
-			throw new Error("Process harness does not replay Claude forks");
+		readTranscript: async (sessionId, options) => {
+			return readNativeTranscript(sessionId, options.configDir);
 		},
-		forkSession: async () => {
-			throw new Error("Process harness does not replay Claude forks");
+		forkSession: async (parentSessionId, options) => {
+			const transcript = readNativeTranscript(
+				parentSessionId,
+				options.configDir,
+			);
+			const end =
+				options.upToMessageId === undefined
+					? transcript.length - 1
+					: transcript.findIndex(
+							(entry) => entry.uuid === options.upToMessageId,
+						);
+			if (end < 0) throw new Error("Native fork boundary was not found");
+			const sessionId = randomUUID();
+			for (const entry of transcript.slice(0, end + 1)) {
+				recordNativeMessage(
+					{ ...entry, session_id: sessionId },
+					options.configDir,
+				);
+			}
+			mark({
+				kind: "native-fork",
+				parentSessionId,
+				sessionId,
+				configDir: options.configDir,
+				upToMessageId: options.upToMessageId,
+			});
+			return { sessionId };
 		},
 	},
 	titleQuery: async function* () {

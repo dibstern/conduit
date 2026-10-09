@@ -31,7 +31,9 @@
 		| "plain"
 		| "bare"
 		| "raised"
-		| "inset";
+		| "inset"
+		| "danger"
+		| "warning";
 	type SurfacePadding = "none" | "sm" | "md" | "lg";
 	type SurfaceRadius = "none" | "sm" | "md" | "lg" | "panel";
 	type SurfaceElevation =
@@ -60,6 +62,14 @@
 		bare: "", // 5
 		raised: "bg-bg-alt border border-border", // 19
 		inset: "bg-code-bg border border-border-subtle", // 6
+		// The one tinted tone, and the exception to "two or more sites": it is
+		// the account-switch design's limit surface (border at 45%, fill at 7%
+		// of the theme red), added here rather than as call-site CSS so the
+		// recovery strips that follow it share one recipe.
+		danger: "bg-error/7 border border-error/45", // 1
+		// Its waiting counterpart: the same strip once a resume is scheduled
+		// (border at 40%, fill at 6% of the theme amber).
+		warning: "bg-warning/6 border border-warning/40", // 1
 	};
 
 	// Three steps, not twenty-two, and the default is `none`.

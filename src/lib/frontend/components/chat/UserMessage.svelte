@@ -19,9 +19,19 @@
 	import { tokenizeSkills } from "../../../skill-recognition.js";
 	import Badge from "../ui/Badge.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import MessageTime from "./MessageTime.svelte";
 
-	let { message }: { message: UserMessage } = $props();
+	let {
+		message,
+		onDismissCutOff,
+	}: {
+		message: UserMessage;
+		/** Present while a usage limit has left this message unanswered; the
+		 *  cut-off tag under the card calls it from its Dismiss link. */
+		onDismissCutOff?: (() => void) | undefined;
+	} = $props();
 
 	const commandNames = $derived(
 		new Set(discoveryState.commands.map((c) => c.name)),
@@ -52,4 +62,9 @@
 			</div>
 		{/if}
 	</Surface>
+	{#if onDismissCutOff}
+		<div data-testid="cut-off-tag" class="mt-1 text-right font-mono text-[10px] text-status-amber">
+			⏸ {sessionViewState.compact ? "Cut off" : "Cut off by usage limit"} · <TextButton tone="inherit" underline="always" data-testid="cut-off-dismiss" onclick={onDismissCutOff}>Dismiss</TextButton>
+		</div>
+	{/if}
 </div>

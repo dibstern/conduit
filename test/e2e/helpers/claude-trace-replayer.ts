@@ -38,6 +38,7 @@ import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
 export type ClaudeTraceName =
+	| "api-retry-pong-turn"
 	| "background-shell-turn"
 	| "extra-folder-read-turn"
 	| "pong-thinking-text-turn"

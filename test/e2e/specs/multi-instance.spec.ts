@@ -19,6 +19,15 @@ type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 
+/** Hold the RPC retry so the disconnected overlay can be inspected. */
+async function disconnectControl(
+	page: Page,
+	rpc: RpcMockControl,
+): Promise<void> {
+	await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+	rpc.closeStreamSocket("SubscribeInstances");
+}
+
 /** Health changes reach the browser as a fresh SubscribeInstances list. */
 const pushInstances = (
 	rpc: RpcMockControl,
@@ -266,8 +275,9 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 		page,
 		baseURL,
 	}) => {
+		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
-		control.close();
+		await disconnectControl(page, control.rpc);
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
 		await expect(overlay).toContainText("Reconnecting...");
@@ -277,8 +287,9 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 		page,
 		baseURL,
 	}) => {
+		await page.clock.install();
 		const control = await setupSingleInstance(page, baseURL);
-		control.close();
+		await disconnectControl(page, control.rpc);
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
 		await expect(overlay).toContainText("Reconnecting...");
@@ -325,16 +336,16 @@ test.describe("Instance Store: Reactivity", () => {
 		).toHaveClass(/bg-green-500/);
 	});
 
-	test("store survives a /ws disconnect", async ({ page, baseURL }) => {
+	test("store survives an RPC disconnect", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		const badge = page.locator("[data-testid='instance-badge']");
 		await expect(badge).toBeVisible();
 
-		// The list rides the RPC subscription, so closing /ws must not empty it:
-		// nothing on /ws would re-populate it after the reconnect.
+		// Keep the current list during the RPC disconnect, then replay it to
+		// the replacement subscription after reconnecting.
 		control.close();
-		await expect(page.locator(".connect-overlay")).toBeVisible({
+		await expect(page.locator(".connect-overlay")).toBeHidden({
 			timeout: 5_000,
 		});
 		await expect(badge).toContainText("Personal");
@@ -600,12 +611,13 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		page,
 		baseURL,
 	}) => {
+		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
-		control.close();
+		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
 		const startBtn = overlay.getByText("Start Instance");
@@ -616,12 +628,13 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		page,
 		baseURL,
 	}) => {
+		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(
 			page.locator("[data-testid='instance-status-dot']"),
 		).toHaveClass(/bg-red-500/);
-		control.close();
+		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
 		const switchBtn = overlay.getByText("Switch Instance");

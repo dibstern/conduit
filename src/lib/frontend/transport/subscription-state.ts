@@ -68,6 +68,8 @@ export type Change<T> =
 			readonly _tag: "remove";
 			readonly id: string;
 			readonly sequence: number;
+			/** The item is gone, not only out of this collection. */
+			readonly deleted?: boolean | undefined;
 	  };
 
 /** A subscription that has been told nothing yet. */

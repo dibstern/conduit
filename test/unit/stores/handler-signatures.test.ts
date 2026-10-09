@@ -87,7 +87,6 @@ describe("getOrCreateSessionSlot", () => {
 		expect(activity.doneMessageIds.size).toBe(0);
 		expect(activity.seenMessageIds.size).toBe(0);
 		expect(activity.renderTimer).toBeNull();
-		expect(activity.thinkingStartTime).toBe(0);
 	});
 
 	it("preserves type narrowing — messages has SessionMessages shape", () => {

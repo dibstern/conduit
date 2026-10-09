@@ -7,69 +7,59 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 describe("WsRpcServerLayer ReloadProviderSession", () => {
-	it.effect(
-		"ends the requested provider session and refreshes browser state",
-		() => {
-			const wsHandler = makeMockWebSocketHandler();
-			const api = makeMockOpenCodeAPI();
-			api.provider.list = vi.fn(async () => ({
-				connected: ["openai"],
-				defaults: {},
-				providers: [
-					{
-						id: "openai",
-						name: "OpenAI",
-						models: [{ id: "gpt-4", name: "GPT-4" }],
-					},
-				],
-			})) as typeof api.provider.list;
-			const engine = withDispatchEffect({
-				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
+	it.effect("ends the requested provider session", () => {
+		const api = makeMockOpenCodeAPI();
+		api.provider.list = vi.fn(async () => ({
+			connected: ["openai"],
+			defaults: {},
+			providers: [
+				{
+					id: "openai",
+					name: "OpenAI",
+					models: [{ id: "gpt-4", name: "GPT-4" }],
+				},
+			],
+		})) as typeof api.provider.list;
+		const engine = withDispatchEffect({
+			dispatch: vi.fn(async () => ({ models: [], commands: [] })),
+		});
+
+		return Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client.ReloadProviderSession({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+				commandId: "cmd-reload-session",
+				originId: "browser-1",
 			});
 
-			return Effect.gen(function* () {
-				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const result = yield* client.ReloadProviderSession({
-					projectSlug: "project-a",
-					sessionId: "session-1",
-					commandId: "cmd-reload-session",
-					originId: "browser-1",
-				});
-
-				expect(result).toEqual({
-					projectSlug: "project-a",
-					sessionId: "session-1",
-				});
-				expect(engine.dispatchEffect).toHaveBeenCalledWith({
-					type: "end_session",
-					commandId: "cmd-reload-session",
-					sessionId: "session-1",
-				});
-				expect(wsHandler.sendTo).toHaveBeenCalledWith("browser-1", {
-					type: "provider_session_reloaded",
-					sessionId: "session-1",
-				});
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(
-					WsRpcServerLayer.pipe(
-						Layer.provideMerge(
-							makeTestHandlerLayer({
-								api,
-								wsHandler,
-								log: makeMockLogger(),
-								orchestrationEngine: engine,
-							}),
-						),
+			expect(result).toEqual({
+				projectSlug: "project-a",
+				sessionId: "session-1",
+			});
+			expect(engine.dispatchEffect).toHaveBeenCalledWith({
+				type: "end_session",
+				commandId: "cmd-reload-session",
+				sessionId: "session-1",
+			});
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							log: makeMockLogger(),
+							orchestrationEngine: engine,
+						}),
 					),
 				),
-			);
-		},
-	);
+			),
+		);
+	});
 });

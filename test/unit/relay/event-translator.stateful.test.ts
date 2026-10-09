@@ -5,7 +5,7 @@
 //   - ReceiveToolPart (new tool part → pending)
 //   - UpdateToolStatus (pending → running → completed | error)
 //   - ReceiveReasoningPart (new reasoning → thinking_start)
-//   - FinalizeReasoning (set time.end → thinking_stop)
+//   - FinalizeReasoning (set time.end)
 //   - ReceiveTextDelta (delta on known text or reasoning part)
 //   - RemovePart (part.removed)
 //   - RemoveMessage (message.removed — clears tracking)
@@ -161,11 +161,6 @@ class UpdateToolStatusCommand implements fc.Command<ModelState, RealState> {
 		if (result.ok && result.messages.length === 1) {
 			const msg = result.messages[0];
 			assert.exists(msg, "expected message");
-			if (this.status === "running" && msg.type !== "tool_executing") {
-				throw new Error(
-					`Expected tool_executing for running status, got ${msg.type}`,
-				);
-			}
 			if (this.status === "completed" && msg.type !== "tool_result") {
 				throw new Error(
 					`Expected tool_result for completed status, got ${msg.type}`,
@@ -255,21 +250,7 @@ class FinalizeReasoningCommand implements fc.Command<ModelState, RealState> {
 
 		const result = real.translator.translate(event);
 
-		// Should emit thinking_stop (not thinking_start since part is already seen)
-		if (result.ok && result.messages.length === 1) {
-			const msg = result.messages[0];
-			assert.exists(msg, "expected message");
-			if (msg.type === "thinking_start") {
-				throw new Error(
-					`Duplicate thinking_start for already-seen reasoning part "${this.partID}"`,
-				);
-			}
-			if (msg.type !== "thinking_stop") {
-				throw new Error(
-					`Expected thinking_stop for finalized reasoning, got ${msg.type}`,
-				);
-			}
-		}
+		assert.isTrue(result.ok);
 	}
 
 	toString(): string {

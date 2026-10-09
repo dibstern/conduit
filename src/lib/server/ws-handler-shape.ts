@@ -1,64 +1,9 @@
-import type { WebSocket } from "ws";
-import type { RelayMessage } from "../shared-types.js";
-
-export interface WsAttachOptions {
-	clientId: string;
-	requestedSessionId?: string;
-	/** Leave session selection to the browser when no session was requested. */
-	skipDefaultSession?: boolean;
-	/** The daemon already sent the handshake on this browser connection. */
-	skipHandshake?: boolean;
-}
-
-export interface WsClientConnectedEvent {
-	clientId: string;
-	clientCount: number;
-	requestedSessionId?: string;
-	skipDefaultSession?: boolean;
-}
-
-export interface WsClientDisconnectedEvent {
-	clientId: string;
-	clientCount: number;
-	sessionId?: string;
-}
-
 export interface WebSocketHandlerShape {
-	broadcast(msg: RelayMessage): void;
-	sendTo(clientId: string, msg: RelayMessage): void;
 	setClientSession(clientId: string, sessionId: string): void;
 	getClientSession(clientId: string): string | undefined;
 	getClientsForSession(sessionId: string): string[];
-	sendToSession(sessionId: string, msg: RelayMessage): void;
-	broadcastPerSessionEvent(sessionId: string, msg: RelayMessage): void;
-	markClientBootstrapped(clientId: string): void;
-	getClientCount(): number;
-	getClientIds(): string[];
-	attach(ws: WebSocket, options: WsAttachOptions): () => void;
+	/** Register a subscription viewer and return its presence cleanup. */
+	registerSessionViewer(sessionId: string): () => void;
 	close(): void;
 	drain(): Promise<void>;
-	on(
-		event: "client_connected",
-		cb: (data: WsClientConnectedEvent) => void,
-	): void;
-	on(
-		event: "client_disconnected",
-		cb: (data: WsClientDisconnectedEvent) => void,
-	): void;
-	on(
-		event: "client_error",
-		cb: (data: { clientId: string; error: Error }) => void,
-	): void;
-	once(
-		event: "client_connected",
-		cb: (data: WsClientConnectedEvent) => void,
-	): void;
-	once(
-		event: "client_disconnected",
-		cb: (data: WsClientDisconnectedEvent) => void,
-	): void;
-	once(
-		event: "client_error",
-		cb: (data: { clientId: string; error: Error }) => void,
-	): void;
 }

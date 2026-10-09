@@ -9,6 +9,10 @@ import { join, resolve } from "node:path";
 
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import {
+	type UsageLimitsSetting,
+	UsageLimitsSettingSchema,
+} from "../contracts/limit-recovery.js";
+import {
 	type ManagedOpenCodeProcessIdentity,
 	ManagedOpenCodeProcessIdentitySchema,
 } from "../contracts/managed-opencode.js";
@@ -50,6 +54,8 @@ export interface DaemonConfig {
 	keepAwake: boolean;
 	/** Days of inactivity before automatic settlement; null disables it. */
 	autoSettleAfterDays?: number | null;
+	/** What to do when a Claude account reaches its usage limit; absent means the defaults. */
+	usageLimits?: UsageLimitsSetting;
 	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
 	keepAwakeCommand?: string;
 	/** Arguments for the keep-awake command override. */
@@ -171,6 +177,7 @@ export const DaemonConfigSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.optional(
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 	),
+	usageLimits: Schema.optional(UsageLimitsSettingSchema),
 	keepAwakeCommand: Schema.optional(Schema.String),
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
 	dangerouslySkipPermissions: Schema.Boolean,

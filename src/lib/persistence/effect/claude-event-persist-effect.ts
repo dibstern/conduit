@@ -5,6 +5,7 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 	EventId,
+	type SessionHandoffDeliveredPayload,
 	type StoredEvent,
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
@@ -35,6 +36,12 @@ export type ClaudeEventPersistFailure =
 	| ClaudeSessionLifecycleError;
 
 export interface ClaudeEventPersistEffect {
+	readonly persistHandoffDelivered: (
+		sessionId: string,
+		handoff: SessionHandoffDeliveredPayload,
+		commandId: string,
+	) => Effect.Effect<void, ClaudeEventPersistFailure>;
+
 	readonly persistEvent: (
 		event: CanonicalEvent,
 		options?: { readonly publish?: boolean },
@@ -201,6 +208,33 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				: requireSession(event.sessionId, "persistEvent", "existing-session");
 			yield* commitAndSignal([event], options);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
+
+	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
+		(sessionId, handoff, commandId) =>
+			Effect.gen(function* () {
+				yield* requireSession(sessionId, "persistEvent", "existing-session");
+				const event = canonicalEvent(
+					"session.handoff_delivered",
+					sessionId,
+					handoff,
+					{
+						provider: "claude",
+						eventId: Schema.decodeSync(EventId)(
+							`evt_claude_handoff_delivered_${commandId}`,
+						),
+					},
+				);
+				// Recovery can observe a completed SDK command after its delivery
+				// event committed but before the outbox completion did.
+				yield* commitAndSignal.write((project) =>
+					Effect.gen(function* () {
+						const existing = yield* sql<{ event_id: string }>`SELECT event_id
+							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
+						if (existing.length > 0) return;
+						yield* project(yield* eventStore.appendBatch([event]));
+					}),
+				);
+			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
 
 	const persistEvents = (
 		events: readonly CanonicalEvent[],
@@ -396,6 +430,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
 
 	return {
+		persistHandoffDelivered,
 		persistEvent,
 		persistEvents,
 		persistUserMessage,

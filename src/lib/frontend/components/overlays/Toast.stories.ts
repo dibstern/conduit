@@ -23,86 +23,127 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const WithUndoAction: Story = {
-	name: "With undo action",
-	beforeEach: () => {
-		setToasts([
-			{
-				id: "story-undo",
-				message: "Moved “Fix navigation” to Settled",
-				variant: "default",
-				duration: 5000,
-				action: { label: "Undo", run: fn() },
-			},
-		]);
-	},
-};
-
-/** Helper to set toasts directly without auto-dismiss. */
-function setToasts(toasts: ToastType[]): void {
-	uiState.toasts = toasts;
+/** Set toasts directly, with no auto-dismiss timer. */
+function show(...toasts: Omit<ToastType, "id" | "duration">[]): () => void {
+	return () => {
+		uiState.toasts = toasts.map((toast, index) => ({
+			id: `story-${index}`,
+			duration: 999999,
+			...toast,
+		}));
+	};
 }
 
+// One story per variant x {no action, primary only, primary + secondary +
+// dismiss}. The copy is what the app actually says in each situation.
+
 export const DefaultToast: Story = {
-	beforeEach: () => {
-		setToasts([
-			{
-				id: "story-default-1",
-				message: "Session created successfully",
-				variant: "default",
-				duration: 999999,
-			},
-		]);
-	},
+	beforeEach: show({
+		title: "Copied resume command",
+		variant: "default",
+		actions: [],
+	}),
+};
+
+export const DefaultWithPrimary: Story = {
+	name: "Default with primary (undo)",
+	beforeEach: show({
+		title: "Moved to Settled",
+		body: "Fix navigation focus after closing the sheet",
+		variant: "default",
+		actions: [{ label: "Undo", run: fn(), kind: "primary" }],
+	}),
+};
+
+export const DefaultWithAllActions: Story = {
+	name: "Default with primary, secondary and dismiss",
+	beforeEach: show({
+		title: "Switched to personal",
+		body: "Now on personal; work2claude hit its weekly limit.",
+		emphasis: "personal",
+		variant: "default",
+		actions: [
+			{ label: "Undo", run: fn(), kind: "primary" },
+			{ label: "What carried over?", run: fn(), kind: "secondary" },
+			{ label: "Later", kind: "dismiss" },
+		],
+	}),
 };
 
 export const WarnToast: Story = {
-	beforeEach: () => {
-		setToasts([
-			{
-				id: "story-warn-1",
-				message: "Context window is almost full (92%)",
-				variant: "warn",
-				duration: 999999,
-			},
-		]);
-	},
+	beforeEach: show({
+		title: "Context window is almost full",
+		body: "92% used. Compact or start a new session soon.",
+		variant: "warn",
+		actions: [],
+	}),
+};
+
+export const WarnWithPrimary: Story = {
+	name: "Warn with primary",
+	beforeEach: show({
+		title: "Terminal input was not delivered",
+		variant: "warn",
+		actions: [{ label: "Retry", run: fn(), kind: "primary" }],
+	}),
+};
+
+export const WarnWithAllActions: Story = {
+	name: "Warn with primary, secondary and dismiss",
+	beforeEach: show({
+		title: "work2claude is out until Mon 9:00",
+		body: "personal has 77% of its week left.",
+		emphasis: "personal",
+		variant: "warn",
+		actions: [
+			{ label: "Switch and resend", run: fn(), kind: "primary" },
+			{ label: "Other…", run: fn(), kind: "secondary" },
+			{ label: "Later", kind: "dismiss" },
+		],
+	}),
 };
 
 export const ErrorToast: Story = {
-	beforeEach: () => {
-		setToasts([
-			{
-				id: "story-error-1",
-				message: "Failed to send message",
-				variant: "error",
-				duration: 999999,
-			},
-		]);
-	},
+	beforeEach: show({
+		title: "Failed to send message",
+		variant: "error",
+		actions: [],
+	}),
+};
+
+export const ErrorWithPrimary: Story = {
+	name: "Error with primary",
+	beforeEach: show({
+		title: "Failed to restart conduit",
+		body: "The server did not come back within 10 seconds.",
+		variant: "error",
+		actions: [{ label: "Retry", run: fn(), kind: "primary" }],
+	}),
+};
+
+export const ErrorWithAllActions: Story = {
+	name: "Error with primary, secondary and dismiss",
+	beforeEach: show({
+		title: "Couldn't switch account",
+		body: "personal is signed out. Sign in again to use it.",
+		emphasis: "personal",
+		variant: "error",
+		actions: [
+			{ label: "Sign in", run: fn(), kind: "primary" },
+			{ label: "Other…", run: fn(), kind: "secondary" },
+			{ label: "Later", kind: "dismiss" },
+		],
+	}),
 };
 
 export const MultipleToasts: Story = {
-	beforeEach: () => {
-		setToasts([
-			{
-				id: "story-multi-1",
-				message: "File saved",
-				variant: "default",
-				duration: 999999,
-			},
-			{
-				id: "story-multi-2",
-				message: "Connection lost",
-				variant: "warn",
-				duration: 999999,
-			},
-			{
-				id: "story-multi-3",
-				message: "Failed to reconnect",
-				variant: "error",
-				duration: 999999,
-			},
-		]);
-	},
+	beforeEach: show(
+		{
+			title: "Marked unread",
+			body: "Composer redesign",
+			variant: "default",
+			actions: [{ label: "Undo", run: fn(), kind: "primary" }],
+		},
+		{ title: "Connection lost", variant: "warn", actions: [] },
+	),
 };

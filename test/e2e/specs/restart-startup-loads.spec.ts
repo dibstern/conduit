@@ -1,5 +1,5 @@
 // An open tab must reload all startup data without error toasts after a restart.
-// Holding /rpc on a dead address lets /ws attach first, making the race deterministic.
+// Holding /rpc on a dead address makes its restart outage deterministic.
 // Once released, /rpc must be back within the budget: the socket retries at
 // most a second apart (shared-client.ts), not on the library's 5 s default.
 
@@ -10,7 +10,6 @@ import { AppPage } from "../page-objects/app.page.js";
 type ProbeWindow = typeof window & {
 	__holdRpc: boolean;
 	__heldRpcDials: number;
-	__wsAttachedWhileHeld: boolean;
 	__startupLoadErrors: string[];
 };
 
@@ -38,7 +37,6 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 		const probe = window as ProbeWindow;
 		probe.__holdRpc = false;
 		probe.__heldRpcDials = 0;
-		probe.__wsAttachedWhileHeld = false;
 		probe.__startupLoadErrors = [];
 		const NativeWebSocket = window.WebSocket;
 		window.WebSocket = class extends NativeWebSocket {
@@ -47,16 +45,6 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				const held = probe.__holdRpc && String(url).includes("/rpc");
 				if (held) probe.__heldRpcDials++;
 				super(held ? "ws://127.0.0.1:9/rpc" : url, protocols);
-				if (String(url).includes("/ws")) {
-					this.addEventListener("message", ({ data }) => {
-						if (!probe.__holdRpc || typeof data !== "string") return;
-						const message = JSON.parse(data) as { type: string };
-						// The relay handshake: /ws reattached while /rpc stays down.
-						if (message.type === "protocol_version") {
-							probe.__wsAttachedWhileHeld = true;
-						}
-					});
-				}
 			}
 		};
 		new MutationObserver((records) => {
@@ -148,10 +136,8 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 	releasedAt = Date.now();
 	const hold = await page.evaluate(() => ({
 		heldRpcDials: (window as ProbeWindow).__heldRpcDials,
-		wsAttachedWhileHeld: (window as ProbeWindow).__wsAttachedWhileHeld,
 	}));
 	expect(hold.heldRpcDials).toBeGreaterThan(0);
-	expect(hold.wsAttachedWhileHeld).toBe(true);
 
 	try {
 		await expect

@@ -1,5 +1,5 @@
 import type { SqlClient } from "@effect/sql";
-import { Context, Deferred, Effect, FiberMap, Layer } from "effect";
+import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -7,6 +7,7 @@ import type { ProviderStateEffectTag } from "../../../persistence/effect/provide
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import type { AlertsTag } from "./alerts.js";
 import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
@@ -29,7 +30,10 @@ import type {
 	WebSocketHandlerTag,
 } from "./services.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
-import { OverridesStateTag } from "./session-overrides-state.js";
+import {
+	clearProcessingTimeout,
+	OverridesStateTag,
+} from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
 
 export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
@@ -39,6 +43,8 @@ export interface ProviderTurnServiceSendInput {
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly text: string;
+	/** Hidden resumption of the original request, with no new user message. */
+	readonly continuation?: { readonly cutOffMessageId: string };
 	readonly images?: readonly string[];
 	readonly model?: {
 		readonly providerID: string;
@@ -48,7 +54,6 @@ export interface ProviderTurnServiceSendInput {
 	readonly agent?: string;
 	readonly variant?: string;
 	readonly contextWindow?: string;
-	readonly errorDelivery?: "client" | "session";
 	/** A steer joins the running turn, whose status and timeout already run. */
 	readonly steer?: boolean;
 	/** Committed with the handoff's outbox row, in one transaction. */
@@ -70,6 +75,10 @@ export interface ProviderTurnServiceInterruptInput {
 }
 
 export interface ProviderTurnService {
+	/** Hold new user turns until account mutation and runner replacement finish. */
+	readonly holdUserTurnsForAccountSwitch: (
+		sessionId: string,
+	) => Effect.Effect<void, never, Scope.Scope>;
 	readonly completeRecoveredQuestion?: (
 		question: PendingQuestion,
 		result: string | null,
@@ -115,6 +124,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ReadQueryEffectTag
 		| ClaudeEventPersistEffectTag
 		| ProviderRuntimeIngestionTag
+		| AlertsTag
 		| ProviderStateEffectTag
 		| SessionTitleServiceTag
 		| ProviderTurnDispatchFibersTag
@@ -132,14 +142,32 @@ const makeProviderTurnService = Effect.gen(function* () {
 	// the button press. A prompt sent before they go out would be ended by
 	// them, so a new prompt waits for the session's Stop to finish first.
 	const stopping = new Map<string, Deferred.Deferred<void>>();
+	const accountSwitches = new Map<string, Deferred.Deferred<void>>();
 	const awaitStop = (sessionId: string) =>
-		Effect.suspend(() => {
+		Effect.gen(function* () {
 			const stop = stopping.get(sessionId);
-			return stop
-				? Deferred.await(stop).pipe(Effect.timeout("5 seconds"), Effect.ignore)
-				: Effect.void;
+			if (stop)
+				yield* Deferred.await(stop).pipe(
+					Effect.timeout("5 seconds"),
+					Effect.ignore,
+				);
+			// A switch can begin while this send awaits an earlier Stop.
+			const switching = accountSwitches.get(sessionId);
+			if (switching) yield* Deferred.await(switching);
 		});
 	const service: ProviderTurnService = {
+		holdUserTurnsForAccountSwitch: (sessionId) =>
+			Effect.acquireRelease(
+				Effect.gen(function* () {
+					const hold = yield* Deferred.make<void>();
+					accountSwitches.set(sessionId, hold);
+					return hold;
+				}),
+				(hold) =>
+					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
+						Effect.zipRight(Deferred.succeed(hold, undefined)),
+					),
+			).pipe(Effect.asVoid),
 		completeRecoveredQuestion: (question, result, answers) =>
 			completeRecoveredQuestion(question, result, answers).pipe(
 				Effect.provide(providedContext),
@@ -149,7 +177,19 @@ const makeProviderTurnService = Effect.gen(function* () {
 				Effect.zipRight(prepareTurnSession(input)),
 				Effect.provide(providedContext),
 			),
-		sendTurn: (input) => sendTurn(input).pipe(Effect.provide(providedContext)),
+		sendTurn: (input) =>
+			Effect.gen(function* () {
+				// A user may already have prepared before the switch acquired its
+				// hold. Wait again before routing; the switch's own turn owns the hold.
+				if (!input.continuation) yield* awaitStop(input.sessionId);
+				// The handoff arms a non-steer turn's timeout; a failure that escapes
+				// the dispatch must not leave it to fire on an idle session.
+				yield* sendTurn(input).pipe(
+					Effect.onError(() =>
+						input.steer ? Effect.void : clearProcessingTimeout(input.sessionId),
+					),
+				);
+			}).pipe(Effect.provide(providedContext)),
 		interruptTurn: (input) =>
 			Effect.gen(function* () {
 				const stop = yield* Deferred.make<void>();
@@ -186,6 +226,7 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ReadQueryEffectTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| AlertsTag
 	| ProviderStateEffectTag
 	| SessionTitleServiceTag
 	| SqlClient.SqlClient

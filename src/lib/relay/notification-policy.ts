@@ -2,9 +2,9 @@
 // session is a subagent, decide what notifications to fire.
 //
 // Rules:
-// - Only "done" and "error" events are notification-worthy.
-// - Subagent "done" events are completely suppressed (parent emits its own).
-// - Subagent "error" events still fire notifications (errors are always important).
+// - Only "done" events are notification-worthy; a failed one carries `error`.
+// - A subagent's clean "done" is suppressed (parent emits its own).
+// - A subagent's failure still fires notifications (errors are always important).
 // - Push fires for all notification-worthy events (unless suppressed).
 // - The in-app alert (SubscribeAlerts) fires only when route dropped (no
 //   viewers on session).
@@ -32,15 +32,14 @@ export function resolveNotifications(
 	/** In-app identity when no durable completion origin is available. */
 	syntheticAlertId?: string,
 ): NotificationResolution {
-	if (msg.type !== "done" && msg.type !== "error") {
+	if (msg.type !== "done") {
 		return { sendPush: false, broadcastCrossSession: false };
 	}
-	const alertId =
-		msg.alertId ?? (msg.type === "done" ? syntheticAlertId : undefined);
+	const alertId = msg.alertId ?? syntheticAlertId;
 	if (!alertId) return { sendPush: false, broadcastCrossSession: false };
 
-	// Subagent "done" is suppressed — parent session emits its own done
-	if (isSubagent && msg.type === "done") {
+	// A subagent's clean "done" is suppressed — parent session emits its own
+	if (isSubagent && msg.error === undefined) {
 		return { sendPush: false, broadcastCrossSession: false };
 	}
 
@@ -50,13 +49,11 @@ export function resolveNotifications(
 	const broadcastCrossSession = route.action === "drop";
 
 	if (broadcastCrossSession) {
-		const errorMessage =
-			msg.type === "error" ? (msg as { message: string }).message : undefined;
 		const alert: Alert = {
 			_tag: "alert",
-			kind: msg.type,
+			kind: msg.error === undefined ? "done" : "error",
 			alertId,
-			...(errorMessage !== undefined ? { message: errorMessage } : {}),
+			...(msg.error !== undefined ? { message: msg.error } : {}),
 			...(sessionId != null ? { sessionId } : {}),
 		};
 		return { sendPush, broadcastCrossSession, alert };

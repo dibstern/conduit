@@ -25,6 +25,7 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../provider-runtime-event-to-domain.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
+import { runSdkInWorker } from "./claude-session-fork.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 const PROVIDER = "claude" as const;
@@ -32,13 +33,13 @@ const PROVIDER = "claude" as const;
 export interface ClaudeSubagentSdk {
 	listSubagents(
 		parentClaudeSessionId: string,
-		options: { dir: string },
+		options: { dir: string; configDir?: string },
 	): Promise<readonly string[]>;
 
 	getSubagentMessages(
 		parentClaudeSessionId: string,
 		sdkSubagentId: string,
-		options: { dir: string },
+		options: { dir: string; configDir?: string },
 	): Promise<readonly SessionMessage[]>;
 }
 
@@ -46,6 +47,7 @@ export interface MaterializeClaudeSubagentsInput {
 	readonly parentConduitSessionId: string;
 	readonly parentClaudeSessionId: string;
 	readonly workspaceRoot: string;
+	readonly configDir?: string;
 	readonly knownTasks: ReadonlyMap<
 		string,
 		{
@@ -89,9 +91,22 @@ type MutableClaudeSubagentTranscriptCursor = {
 
 export const defaultClaudeSubagentSdk: ClaudeSubagentSdk = {
 	listSubagents: (parentClaudeSessionId, options) =>
-		listSubagents(parentClaudeSessionId, options),
+		options.configDir !== undefined
+			? runSdkInWorker<readonly string[]>(
+					"listSubagents",
+					parentClaudeSessionId,
+					options,
+				)
+			: listSubagents(parentClaudeSessionId, options),
 	getSubagentMessages: (parentClaudeSessionId, sdkSubagentId, options) =>
-		getSubagentMessages(parentClaudeSessionId, sdkSubagentId, options),
+		options.configDir !== undefined
+			? runSdkInWorker<readonly SessionMessage[]>(
+					"getSubagentMessages",
+					parentClaudeSessionId,
+					options,
+					sdkSubagentId,
+				)
+			: getSubagentMessages(parentClaudeSessionId, sdkSubagentId, options),
 };
 
 export function claudeSubagentSessionId(input: {
@@ -116,11 +131,12 @@ export function makeClaudeSubagentMaterializer(deps: {
 ) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError> {
 	return (input) =>
 		Effect.gen(function* () {
+			const options = {
+				dir: input.workspaceRoot,
+				...(input.configDir !== undefined && { configDir: input.configDir }),
+			};
 			const subagentIds = yield* Effect.tryPromise({
-				try: () =>
-					deps.sdk.listSubagents(input.parentClaudeSessionId, {
-						dir: input.workspaceRoot,
-					}),
+				try: () => deps.sdk.listSubagents(input.parentClaudeSessionId, options),
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "listSubagents", cause }),
 			});
@@ -138,7 +154,7 @@ export function makeClaudeSubagentMaterializer(deps: {
 						deps.sdk.getSubagentMessages(
 							input.parentClaudeSessionId,
 							sdkSubagentId,
-							{ dir: input.workspaceRoot },
+							options,
 						),
 					catch: (cause) =>
 						new ClaudeBoundaryError({

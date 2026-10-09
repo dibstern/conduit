@@ -18,6 +18,7 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { makePrepareTurn } from "../provider/claude/prepare-turn.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 
 /** Resolve the same launch inputs as a send without admitting a turn. */
@@ -49,6 +50,8 @@ export const preWarmSession = (sessionId: string) =>
 		const contextWindow = yield* getContextWindow(sessionId);
 		const configDir = resolveClaudeInstanceConfigDir(daemonConfig, providerId);
 		const state = yield* providerState.getState(sessionId);
+		const prepareTurn = yield* makePrepareTurn({ configDir, agent });
+		const prepared = yield* prepareTurn(sessionId, providerId);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.
 		if (
@@ -61,11 +64,14 @@ export const preWarmSession = (sessionId: string) =>
 			sessionId,
 			...folders,
 			providerState: state,
+			instanceId: providerId,
+			nativeThread: prepared.nativeThread,
+			resumeSessionId: prepared.resumeSessionId,
 			...(model
 				? { model: { providerId: model.providerID, modelId: model.modelID } }
 				: {}),
 			permissionMode,
-			...(configDir === undefined ? {} : { configDir }),
+			configDir: prepared.configDir,
 			...(agent ? { agent } : {}),
 			...(variant ? { variant } : {}),
 			...(contextWindow ? { contextWindow } : {}),

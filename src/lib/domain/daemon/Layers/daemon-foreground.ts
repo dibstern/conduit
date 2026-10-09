@@ -141,6 +141,9 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
+		...(persisted?.usageLimits !== undefined && {
+			usageLimits: persisted.usageLimits,
+		}),
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(claudeConfigDir !== undefined && { claudeConfigDir }),

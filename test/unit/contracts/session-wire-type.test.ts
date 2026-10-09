@@ -7,7 +7,6 @@ import { Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	type RelayMessage,
 	type SessionInfo,
 	SessionInfoSchema as SharedSessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
@@ -67,14 +66,5 @@ describe("session wire type", () => {
 		expect(Schema.decodeUnknownSync(SessionInfoSchema)(encoded)).toEqual(
 			derived,
 		);
-	});
-
-	it("ships no notification side-channel beside the sessions (ni8.23)", () => {
-		// ni8.5 §5 put pending question counts in a map beside the list because
-		// no session row could carry them. One of them is now a column, and two
-		// sources for one fact is how a badge starts disagreeing with itself.
-		expectTypeOf<
-			Extract<RelayMessage, { type: "session_list" }>
-		>().not.toHaveProperty("pendingQuestionCounts");
 	});
 });

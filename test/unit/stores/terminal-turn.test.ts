@@ -13,7 +13,6 @@ import {
 	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws-dispatch.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
 
 afterEach(() => {
@@ -68,24 +67,18 @@ function projectedTurn() {
 }
 
 it.each([
-	["idle row", "done", "error"],
-	["idle row", "error", "done"],
-	["done", "idle row", "error"],
-	["done", "error", "idle row"],
-	["error", "done", "idle row"],
-	["error", "idle row", "done"],
+	["idle row", "terminal row", "terminal replay"],
+	["idle row", "terminal replay", "terminal row"],
+	["terminal row", "idle row", "terminal replay"],
+	["terminal row", "terminal replay", "idle row"],
+	["terminal replay", "terminal row", "idle row"],
+	["terminal replay", "idle row", "terminal row"],
 ] as const)("one terminal transition: %s, %s, %s", (...order) => {
 	const { activity, messages } = projectedTurn();
 	const events: Record<(typeof order)[number], () => void> = {
 		"idle row": () => chat.followSessionBusy("s", false),
-		done: () => handleMessage({ type: "done", sessionId: "s", code: 0 }),
-		error: () =>
-			handleMessage({
-				type: "error",
-				sessionId: "s",
-				code: "TURN_FAILED",
-				message: "failed",
-			}),
+		"terminal row": () => chat.applyTerminalTurn(activity, messages),
+		"terminal replay": () => chat.applyTerminalTurn(activity, messages),
 	};
 	events[order[0]]();
 	const ended = activity.endedGeneration;

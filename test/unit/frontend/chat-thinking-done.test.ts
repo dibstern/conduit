@@ -1,5 +1,4 @@
-// Verifies that handleDone finalizes any unclosed thinking blocks (done=false)
-// so they don't spin forever if thinking_stop is lost.
+// Terminal reduction is safe when there are no thinking blocks.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,22 +8,14 @@ vi.mock("dompurify", () => ({
 }));
 
 import {
+	applyTerminalTurn,
 	chatState,
 	clearMessages,
-	handleDone,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
-
-function msg<T extends RelayMessage["type"]>(data: {
-	type: T;
-	[k: string]: unknown;
-}): Extract<RelayMessage, { type: T }> {
-	return data as Extract<RelayMessage, { type: T }>;
-}
 
 let ta: SessionActivity;
 let tm: SessionMessages;
@@ -41,10 +32,9 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("handleDone — thinking block finalization", () => {
+describe("terminal thinking block finalization", () => {
 	it("is a no-op when there are no thinking blocks", () => {
-		// handleDone with no messages should not throw
-		handleDone(ta, tm, msg({ type: "done", code: 0 }));
+		applyTerminalTurn(ta, tm);
 		expect(chatState.messages.length).toBe(0);
 	});
 });

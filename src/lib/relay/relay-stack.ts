@@ -4,7 +4,6 @@
 // Extracted from skeleton.ts so integration tests exercise the exact same
 // wiring as production. skeleton.ts is now a thin CLI wrapper around this.
 
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -19,10 +18,27 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Cause, Data, Effect, Exit, Layer, ManagedRuntime } from "effect";
-import { WebSocketServer } from "ws";
+import {
+	Cause,
+	Context,
+	Data,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Schedule,
+} from "effect";
 import { AuthManager } from "../auth.js";
-import { WsRpcError } from "../contracts/ws-rpc.js";
+import { type GlobalProjectSetting, WsRpcError } from "../contracts/ws-rpc.js";
+import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { ContinuationTag } from "../domain/relay/Services/continuation.js";
+import {
+	ProjectSettingsTag,
+	refreshGlobalDefaults,
+	syncGlobalSetting,
+} from "../domain/relay/Services/project-settings.js";
 import type { SessionManagerError } from "../domain/relay/Services/session-manager-error.js";
 import {
 	type OverridesStateTag,
@@ -266,6 +282,9 @@ export class EffectRelayServer {
 
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
+	/** Reload a global setting without writing or echoing its notification. */
+	syncGlobalSetting(tag: GlobalProjectSetting["_tag"]): Effect.Effect<void>;
+	refreshGlobalDefaults(): Effect.Effect<void>;
 	settleIdleSessions(
 		idleWindowMs: number,
 		now: number,
@@ -522,7 +541,6 @@ export async function createProjectRelay(
 	const backgroundLiveness = makeSessionBackgroundLiveness((sessionId) =>
 		announceBackgroundWork?.(sessionId),
 	);
-	const wsLog = log.child("ws");
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
@@ -559,7 +577,6 @@ export async function createProjectRelay(
 	const startup = await startProjectRelay({
 		config,
 		log,
-		wsLog,
 		sseLog,
 		statusLog,
 		pollerLog,
@@ -572,6 +589,22 @@ export async function createProjectRelay(
 	announceBackgroundWork = startup.announceBackgroundWork;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
+	const continuationSweep = layers.relayManagedRuntime.runFork(
+		Effect.flatMap(ContinuationTag, (continuation) =>
+			Effect.zip(
+				continuation.sweepDueContinuations().pipe(
+					Effect.catchAllCause((cause) =>
+						Cause.isInterruptedOnly(cause)
+							? Effect.interrupt
+							: Effect.logError("Continuation sweep failed", cause),
+					),
+					Effect.repeat(Schedule.fixed(ENV.continuationSweepIntervalMs)),
+				),
+				continuation.runLimitPolicies,
+				{ concurrent: true },
+			),
+		),
+	);
 	const {
 		rpcWsHandler,
 		sessionId,
@@ -589,7 +622,10 @@ export async function createProjectRelay(
 	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {
 		return {
 			...statusSnapshot.getSnapshot(),
-			clients: wsHandler.getClientCount(),
+			clients: Context.get(
+				startup.projectSettingsContext,
+				ProjectSettingsTag,
+			).browsers.count(),
 			sse: sseStream.getHealth(),
 		};
 	};
@@ -603,6 +639,15 @@ export async function createProjectRelay(
 	}
 
 	return {
+		refreshGlobalDefaults: () =>
+			refreshGlobalDefaults.pipe(
+				Effect.asVoid,
+				Effect.provide(startup.projectSettingsContext),
+			),
+		syncGlobalSetting: (tag) =>
+			syncGlobalSetting(tag).pipe(
+				Effect.provide(startup.projectSettingsContext),
+			),
 		settleIdleSessions: (idleWindowMs, now) =>
 			settleIdleSessions(
 				{
@@ -637,6 +682,14 @@ export async function createProjectRelay(
 		},
 
 		async stop() {
+			await new Promise<void>((resolve, reject) => {
+				layers.relayManagedRuntime
+					.runFork(Fiber.interrupt(continuationSweep))
+					.addObserver((exit) => {
+						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						else resolve();
+					});
+			});
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			startup.stopMonitoring();
@@ -697,7 +750,7 @@ export async function createRelayStack(
 	// Assign to a fresh const so TypeScript narrows to non-null in closures.
 	const httpServer = maybeServer;
 
-	// The server owns browser upgrades and attaches /ws sockets to the initial relay.
+	// The server owns browser RPC upgrades.
 	// This matches the daemon pattern and allows dynamic project addition.
 
 	const relays = new Map<string, ProjectRelay>();
@@ -772,6 +825,10 @@ export async function createRelayStack(
 			);
 			const newRelay = await createProjectRelay({
 				httpServer,
+				daemonConfigContext: Context.pick(
+					DaemonConfigRefTag,
+					ConfigPersistenceTag,
+				)((await relay.effectRuntime.runtime.runtime()).context),
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,
@@ -781,6 +838,7 @@ export async function createRelayStack(
 				}),
 				log,
 				getProjects: getProjectList,
+				publishGlobalSetting: () => Effect.void,
 				saveProject: saveProjectRelay,
 				persistenceDbPath,
 				...(pushMgr != null && { pushManager: pushMgr }),
@@ -823,6 +881,7 @@ export async function createRelayStack(
 		log,
 		noServer: true,
 		getProjects: getProjectList,
+		publishGlobalSetting: () => Effect.void,
 		saveProject: saveProjectRelay,
 		...(pushMgr != null && { pushManager: pushMgr }),
 		...(config.configDir != null && { configDir: config.configDir }),
@@ -848,7 +907,6 @@ export async function createRelayStack(
 		getIsProcessing: () => relay.getStatusSnapshot().isProcessing,
 	});
 
-	// Owns /ws upgrades and attaches sockets to the initial relay.
 	// /rpc uses per-request project routing.
 	// Also checks auth when a PIN is configured (fixes pre-existing gap where
 	// standalone WS connections bypassed PIN auth).
@@ -875,14 +933,6 @@ export async function createRelayStack(
 		),
 	);
 
-	const wss = new WebSocketServer({
-		noServer: true,
-		maxPayload: 50 * 1024 * 1024,
-		perMessageDeflate: {
-			serverMaxWindowBits: 10,
-			zlibDeflateOptions: { level: 1 },
-		},
-	});
 	httpServer.on("upgrade", (req, socket, head) => {
 		// Auth check (mirrors server.ts private checkAuth)
 		const auth = server.getAuth();
@@ -904,23 +954,6 @@ export async function createRelayStack(
 			}
 		}
 
-		// Route /ws → initial relay
-		if (req.url === "/ws" || req.url?.startsWith("/ws?")) {
-			wss.handleUpgrade(req, socket, head, (ws) => {
-				const params = new URL(req.url ?? "/ws", "http://localhost")
-					.searchParams;
-				const requestedClientId = params.get("client") ?? "";
-				const clientId = /^[A-Za-z0-9._:-]{1,128}$/.test(requestedClientId)
-					? requestedClientId
-					: randomBytes(8).toString("hex");
-				const requestedSessionId = params.get("session") || undefined;
-				relay.wsHandler.attach(ws, {
-					clientId,
-					...(requestedSessionId != null && { requestedSessionId }),
-				});
-			});
-			return;
-		}
 		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
 			rpcRuntime
 				.runFork(
@@ -977,8 +1010,6 @@ export async function createRelayStack(
 				}
 			}
 			relays.clear();
-			for (const ws of wss.clients) ws.terminate();
-			await new Promise<void>((resolve) => wss.close(() => resolve()));
 			await server.stop();
 		},
 	};

@@ -1,8 +1,6 @@
 // Manages chat messages, streaming state, and processing.
 //
-// Two-tier per-session chat state. Handlers receive (activity, messages, event)
-// and write to per-session tiers. The routePerSession dispatcher in
-// ws-dispatch.ts resolves the correct session slot by event.sessionId.
+// Per-session activity follows shell rows; transcripts follow session detail.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
@@ -10,15 +8,14 @@ import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
-	RelayMessage,
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
-import { createFrontendLogger } from "../utils/logger.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { findSession, isBusy, sessionState } from "./session.svelte.js";
+import { refreshSessionSkills } from "./session-skills.svelte.js";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
@@ -33,7 +30,6 @@ export type SessionActivity = {
 	doneMessageIds: SvelteSet<string>;
 	seenMessageIds: SvelteSet<string>;
 	renderTimer: ReturnType<typeof setTimeout> | null;
-	thinkingStartTime: number;
 };
 
 // Tier 2 — Messages. LRU-capped. Holds only data safely reconstructable
@@ -91,7 +87,6 @@ export function createEmptySessionActivity(): SessionActivity {
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
 		renderTimer: null,
-		thinkingStartTime: 0,
 	};
 }
 
@@ -474,8 +469,6 @@ export function getMessageCount(): number {
 	return currentChat().messages.length;
 }
 
-const log = createFrontendLogger("chat");
-
 /** Append a new tool message to the session's message list. */
 function _applyToolCreate(
 	_activity: SessionActivity,
@@ -542,6 +535,38 @@ function flushAndFinalizeAssistant(
 	_messages.currentAssistantText = "";
 	_activity.currentPartId = null;
 	return finalizedMessageId;
+}
+
+/** Replace a truncated tool result with the full content returned by RPC. */
+export function applyToolContentResponse(response: {
+	readonly projectSlug?: string;
+	readonly toolId: string;
+	readonly content: string;
+	readonly sessionId?: string;
+}): void {
+	const sessionId = response.sessionId ?? sessionState.currentId;
+	if (sessionId == null) return;
+	const messages = getOrCreateSessionSlot(sessionId).messages;
+	const currentMsgs = [...getMessages(messages)];
+	const found = findMessage(
+		currentMsgs,
+		"tool",
+		(m) => m.id === response.toolId,
+	);
+	if (!found) return;
+	setMessages(
+		messages,
+		currentMsgs.map((m, i) => {
+			if (i !== found.index) return m;
+			const updated: ToolMessage = {
+				...found.message,
+				result: response.content,
+				isTruncated: false,
+			};
+			delete updated.fullContentLength;
+			return updated;
+		}),
+	);
 }
 
 export function getMessages(messages?: SessionMessages): ChatMessage[] {
@@ -695,51 +720,14 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 	}
 }
 
-export function handleDone(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "done" }>,
-): void {
-	// A done names the assistant message whose turn it ends. One already
-	// finalised, or one from before the message now streaming, is late: the
-	// queue may have started the next turn, which it must not end.
-	const id = msg.messageId;
-	if (
-		id &&
-		(activity.doneMessageIds.has(id) ||
-			(activity.currentMessageId !== null &&
-				id !== activity.currentMessageId &&
-				activity.seenMessageIds.has(id)))
-	)
-		return;
-	applyTerminalTurn(activity, messages);
-}
-
 /** Apply durable terminal state without delivering alerts. `turnId` must be
  * turns.id (the user message id), not the provider runtime's turnId.
- * Legacy push events lack that identity; their fallback identifies the
- * current monotone generation, not an old envelope.
+ * Shell idle transitions have no turn identity and use the current generation.
  * The turn projection currently has no per-turn revision. */
-/** Whether the current turn (since the last user message) already shows this
- *  error, e.g. from the projected turn error that landed first. */
-function turnShowsError(messages: SessionMessages, text: string): boolean {
-	const msgs = getMessages(messages);
-	for (let i = msgs.length - 1; i >= 0; i--) {
-		const m = msgs[i];
-		if (m?.type === "user") return false;
-		if (m?.type === "system" && m.variant === "error" && m.text === text)
-			return true;
-	}
-	return false;
-}
-
 export function applyTerminalTurn(
 	activity: SessionActivity,
 	messages: SessionMessages,
-	terminal?: {
-		readonly turnId?: string;
-		readonly error?: Extract<RelayMessage, { type: "error" }>;
-	},
+	terminal?: { readonly turnId?: string },
 ): boolean {
 	if (terminal?.turnId !== undefined) {
 		if (activity.terminalTurnIds.has(terminal.turnId)) return false;
@@ -790,15 +778,6 @@ export function applyTerminalTurn(
 		if (mutated) setMessages(messages, patched);
 	}
 
-	if (terminal?.error && !turnShowsError(messages, terminal.error.message)) {
-		const { code, message, statusCode, details } = terminal.error;
-		addSystemMessage(activity, messages, message, "error", {
-			code,
-			...(statusCode !== undefined ? { statusCode } : {}),
-			...(details !== undefined ? { details } : {}),
-		});
-	}
-
 	// NOTE: currentMessageId is intentionally NOT reset here. It must
 	// persist so that advanceTurnIfNewMessage can compare the next turn's
 	// messageId against it. Resetting to null makes every post-done turn
@@ -831,8 +810,8 @@ export function followSessionBusy(id: string, busy: boolean): void {
 		else phaseToIdle(activity);
 	}
 	activity.currentMessageId = null;
-	activity.thinkingStartTime = 0;
 	if (messages) messages.currentAssistantText = "";
+	refreshSessionSkills(id);
 	// seenMessageIds / doneMessageIds remain (cross-turn dedup)
 }
 
@@ -865,33 +844,19 @@ export function consumeScrollRequest(
 	return false;
 }
 
-export function handleError(
-	activity: SessionActivity,
-	messages: SessionMessages,
-	msg: Extract<RelayMessage, { type: "error" }>,
-): void {
-	if (msg.code === "RETRY") {
-		requestScrollOnNextContent();
-		addSystemMessage(activity, messages, msg.message, "info");
-	} else {
-		applyTerminalTurn(activity, messages, { error: msg });
-	}
-}
-
-/** Follow the shell row's compaction in progress (ni8.33, C1): show it as a
- *  transient notice. The transcript projects the outcome, which supersedes
- *  the notice once the row clears it. */
-export function followSessionCompaction(
+/** Show a shell-row status as a transient notice, replacing the previous one;
+ *  `undefined` removes it. */
+function followRowNotice(
 	id: string,
-	compacting: string | undefined,
+	text: string | undefined,
+	marker: Pick<SystemMessage, "compaction" | "retry">,
+	isNotice: (message: SystemMessage) => boolean,
 ): void {
 	const messages = sessionMessages.get(id);
 	if (!messages) return;
 	const current = getMessages(messages);
-	const settled = current.filter(
-		(m) => m.type !== "system" || m.compaction !== "started",
-	);
-	if (compacting === undefined) {
+	const settled = current.filter((m) => m.type !== "system" || !isNotice(m));
+	if (text === undefined) {
 		if (settled.length !== current.length) setMessages(messages, settled);
 		return;
 	}
@@ -901,12 +866,36 @@ export function followSessionCompaction(
 		{
 			type: "system",
 			uuid: generateUuid(),
-			text: compacting,
+			text,
 			variant: "info",
-			compaction: "started",
+			...marker,
 			createdAt: Date.now(),
 		},
 	]);
+}
+
+/** Follow the shell row's compaction in progress (ni8.33, C1): show it as a
+ *  transient notice. The transcript projects the outcome, which supersedes
+ *  the notice once the row clears it. */
+export function followSessionCompaction(
+	id: string,
+	compacting: string | undefined,
+): void {
+	followRowNotice(
+		id,
+		compacting,
+		{ compaction: "started" },
+		(m) => m.compaction === "started",
+	);
+}
+
+/** Follow the shell row's provider retry (C1): its reason shows while the
+ *  provider waits and leaves once the row clears it. */
+export function followSessionRetry(
+	id: string,
+	retrying: string | undefined,
+): void {
+	followRowNotice(id, retrying, { retry: true }, (m) => m.retry === true);
 }
 
 /** Prepend older messages (from history) before existing messages.

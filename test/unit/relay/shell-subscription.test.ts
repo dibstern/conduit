@@ -309,7 +309,12 @@ describe("subscribeShell", () => {
 						parentID: "parent",
 						forkMessageId: "fork-point",
 					});
-					expect(yield* Queue.take(q)).toMatchObject({
+					// The child leaves the sidebar as it joins its parent's family,
+					// and is not deleted: a device viewing it stays there.
+					const [removal, upsert] = yield* takeN(q, 2);
+					expect(removal).toMatchObject({ _tag: "remove", id: "child" });
+					expect(removal).not.toHaveProperty("deleted");
+					expect(upsert).toMatchObject({
 						_tag: "upsert",
 						item: { id: "parent" },
 					});
@@ -375,7 +380,7 @@ describe("subscribeShell", () => {
 						"sdk-parent",
 						expect.objectContaining({ upToMessageId: "transcript-boundary" }),
 					);
-					expect(yield* state.getState(child.id)).toMatchObject({
+					expect(yield* state.nativeThread(child.id, "claude")).toMatchObject({
 						resumeSessionId: "sdk-child",
 					});
 					expect(api.session.fork).not.toHaveBeenCalled();
@@ -720,7 +725,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"resume after a parent deletion rebases away both parent and child",
+		"resume after a parent deletion is told both it and its child are deleted",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -731,9 +736,17 @@ describe("subscribeShell", () => {
 				const cursor = yield* readModelVersion;
 				yield* deleteSession("shell-parent");
 				const { q } = yield* openShell({ resumeFromSequence: cursor });
-				expect(yield* takeN(q, 2)).toEqual([
-					{ _tag: "snapshot", rows: [], sequence: yield* readModelVersion },
-					{ _tag: "synchronized" },
+				const sequence = yield* readModelVersion;
+				const [first, second, last] = yield* takeN(q, 3);
+				expect(last).toEqual({ _tag: "synchronized" });
+				// A device viewing the child, away while it went, must leave it too.
+				expect(
+					[first, second].sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
+					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -761,14 +774,19 @@ describe("subscribeShell", () => {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				yield* persist.persistEvent(sessionDeleted("shell-c"));
 				const { q } = yield* openShell({ resumeFromSequence: 0 });
-				const [snapshot, synchronized] = yield* takeN(q, 2);
-				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
-				expect(snapshot.rows.map((row) => row.id).sort()).toEqual([
-					"shell-a",
-					"shell-b",
-				]);
-				expect(snapshot.sequence).toBe(yield* readModelVersion);
-				expect(synchronized).toEqual({ _tag: "synchronized" });
+				const envelopes = yield* takeN(q, 4);
+				expect(envelopes.at(-1)).toEqual({ _tag: "synchronized" });
+				expect(
+					envelopes
+						.flatMap((env) => (env._tag === "upsert" ? [env.item.id] : []))
+						.sort(),
+				).toEqual(["shell-a", "shell-b"]);
+				expect(envelopes[2]).toEqual({
+					_tag: "remove",
+					id: "shell-c",
+					sequence: yield* readModelVersion,
+					deleted: true,
+				});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 
@@ -896,6 +914,7 @@ describe("subscribeShell", () => {
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "remove") throw new Error("expected remove");
 				expect(delta.id).toBe(SID);
+				expect(delta.deleted).toBe(true);
 				// A deleted row leaves no version behind (§8), so the removal carries
 				// the advance's own version — the number the client resumes from.
 				expect(delta.sequence).toBe(yield* readModelVersion);
@@ -933,7 +952,7 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"deleting a parent emits remove(parent) AND remove(child) at one sequence, live",
+		"deleting a parent emits remove(parent) and remove(child) live, both deleted",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -954,17 +973,18 @@ describe("subscribeShell", () => {
 				// every removed row alongside the parent.
 				yield* deleteSession("shell-parent");
 
-				const [first, second] = yield* takeN(q, 2);
-				if (first?._tag !== "remove") throw new Error("expected remove first");
-				if (second?._tag !== "remove")
-					throw new Error("expected remove second");
-				expect([first.id, second.id].sort()).toEqual([
-					"shell-child",
-					"shell-parent",
+				// The child never had a row of its own, but a device viewing it
+				// must leave it: each deleted session is told, at the one version.
+				const sequence = yield* readModelVersion;
+				const removals = yield* takeN(q, 2);
+				expect(
+					removals.sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
+					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
 				]);
-				// One commit, one version: the pair is a group the client's resume
-				// cursor may only cross whole (T-3).
-				expect(second.sequence).toBe(first.sequence);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(
 				Effect.provide(
@@ -978,7 +998,39 @@ describe("subscribeShell", () => {
 	);
 
 	it.scoped(
-		"resume rebases: the reconnecting client is told what still exists, not what moved",
+		"a cursor the tombstones do not cover gets a snapshot, not a catch-up",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-a")]);
+				const before = yield* readModelVersion;
+				yield* commit([sessionCreated("shell-b")]);
+				const version = yield* readModelVersion;
+				// The store was upgraded after the device last read: removals before
+				// that left nothing behind.
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE session_sidebar_horizon SET version = ${version}`;
+				// And a cursor the store never reached: it was reset or restored.
+				for (const resumeFromSequence of [before, version + 100]) {
+					const { q } = yield* openShell({ resumeFromSequence });
+					const [snapshot, synchronized] = yield* takeN(q, 2);
+					if (snapshot?._tag !== "snapshot")
+						throw new Error("expected snapshot");
+					expect(snapshot.sequence).toBe(version);
+					expect(snapshot.rows.map(({ id }) => id).sort()).toEqual([
+						"shell-a",
+						"shell-b",
+					]);
+					expect(synchronized).toEqual({ _tag: "synchronized" });
+				}
+				// A covered cursor is still caught up.
+				const { q } = yield* openShell({ resumeFromSequence: version });
+				expect(yield* takeN(q, 1)).toEqual([{ _tag: "synchronized" }]);
+			}).pipe(Effect.provide(makeShellTestLayer())),
+	);
+
+	it.scoped(
+		"resume catches up: the reconnecting client is told what moved and what left",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -989,22 +1041,28 @@ describe("subscribeShell", () => {
 				const cursor = yield* readModelVersion;
 
 				// Both changes land while the client is away: one row moves, one
-				// disappears. A version-only catch-up could only report the first —
-				// the deleted row leaves nothing behind to find — so the client would
-				// reconnect still showing a session that is gone.
+				// disappears. The deleted family leaves a tombstone behind, so the
+				// catch-up reports both and nothing else.
 				yield* commit([sessionRenamed("shell-kept", "Kept")]);
+				const renamed = yield* readModelVersion;
 				yield* deleteSession("shell-doomed");
 
 				const { q } = yield* openShell({ resumeFromSequence: cursor });
-				const [snapshot, synchronized] = yield* takeN(q, 2);
-				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
-				expect(snapshot.rows.map((row) => row.id)).toEqual(["shell-kept"]);
-				expect(snapshot.rows[0]?.title).toBe("Kept");
-				expect(snapshot.sequence).toBe(yield* readModelVersion);
-				expect(snapshot.sequence).toBeGreaterThan(cursor);
-				expect(synchronized).toEqual({ _tag: "synchronized" });
+				expect(yield* takeN(q, 3)).toMatchObject([
+					{
+						_tag: "upsert",
+						sequence: renamed,
+						item: { id: "shell-kept", title: "Kept" },
+					},
+					{
+						_tag: "remove",
+						id: "shell-doomed",
+						sequence: yield* readModelVersion,
+					},
+					{ _tag: "synchronized" },
+				]);
 
-				// And live continues from the number that snapshot carried.
+				// And live continues past the catch-up.
 				yield* commit([sessionStatus("shell-kept", "busy")]);
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");

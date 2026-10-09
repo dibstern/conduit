@@ -77,6 +77,7 @@ const makeFakeSource = <T>(
 		const onNextRead = yield* Ref.make<Effect.Effect<void>>(Effect.void);
 
 		const source: SubscriptionSource<T> = {
+			name: "fake",
 			read: (range) =>
 				Effect.gen(function* () {
 					yield* Ref.update(calls, (seen) => [...seen, range]);
@@ -153,6 +154,7 @@ describe("ReadModelSubscription", () => {
 			Effect.gen(function* () {
 				const bus = yield* SessionEventBusTag;
 				const source: SubscriptionSource<Row> = {
+					name: "fake",
 					read: (range) =>
 						Effect.succeed({
 							rows: [],
@@ -834,5 +836,59 @@ describe("ReadModelSubscription", () => {
 				expect(removed.id).toBe("opaque-id-é");
 			}),
 		),
+	);
+});
+
+// Shared window reads. Failure mode under test: the subscriber that misses the
+// latest window publishes it for others to join, then is interrupted (its
+// device disconnects) before its read settles the answer. Every later joiner of
+// that source on that bus then waits forever on an answer nobody will give.
+describe("ReadModelSubscription shared windows", () => {
+	it.live("an asker interrupted mid-read never strands a joiner", () =>
+		Effect.gen(function* () {
+			const stranded: { readonly ops: number; readonly yields: number }[] = [];
+			// Sweep where the interrupt lands, between the miss and the settle.
+			for (const ops of [16, 23])
+				for (let yields = 0; yields < 40; yields++) {
+					const joined = yield* Effect.scoped(
+						Effect.gen(function* () {
+							const bus = yield* SessionEventBusTag;
+							const source: SubscriptionSource<number> = {
+								name: "shared",
+								shareReads: true,
+								resume: "rebase",
+								route: () => ({ moved: true, removed: [] }),
+								read: (range) =>
+									Effect.succeed(
+										range?.through === undefined
+											? { rows: [], version: 0 }
+											: {
+													rows: [
+														{ item: range.through, version: range.through },
+													],
+													version: range.through,
+												},
+									),
+							};
+							const pullA = yield* Stream.toPull(stream({ source, bus }));
+							const pullB = yield* Stream.toPull(stream({ source, bus }));
+							yield* pullA;
+							yield* pullB;
+							yield* bus.publishAdvance(advance(1));
+							const asker = yield* Effect.fork(
+								Effect.withMaxOpsBeforeYield(pullA, ops),
+							);
+							for (let i = 0; i < yields; i++) yield* Effect.yieldNow();
+							yield* Fiber.interrupt(asker);
+							return yield* pullB.pipe(
+								Effect.timeout("200 millis"),
+								Effect.option,
+							);
+						}).pipe(Effect.provide(SessionEventBusLive)),
+					);
+					if (joined._tag === "None") stranded.push({ ops, yields });
+				}
+			expect(stranded).toEqual([]);
+		}),
 	);
 });

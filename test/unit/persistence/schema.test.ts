@@ -43,6 +43,8 @@ describe("Schema Migration", () => {
 				"sent_alerts",
 				"session_goal_checks",
 				"session_providers",
+				"session_sidebar",
+				"session_sidebar_horizon",
 				"sessions",
 				"tool_content",
 				"turns",
@@ -183,12 +185,18 @@ describe("Schema Migration", () => {
 					table: "session_providers",
 					unique: false,
 				},
+				{
+					name: "idx_session_sidebar_version",
+					table: "session_sidebar",
+					unique: false,
+				},
 				{ name: "idx_sessions_parent", table: "sessions", unique: false },
 				{
 					name: "idx_sessions_provider",
 					table: "sessions",
 					unique: false,
 				},
+				{ name: "idx_sessions_root", table: "sessions", unique: false },
 				{ name: "idx_sessions_updated", table: "sessions", unique: false },
 				{ name: "idx_sessions_version", table: "sessions", unique: false },
 				{

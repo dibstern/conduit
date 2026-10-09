@@ -22,6 +22,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -65,7 +66,9 @@ describe("WsRpcServerLayer ResolveSession", () => {
 });
 
 describe("WsRpcServerLayer ListSessions", () => {
-	it.effect("publishes a root summary when a child wakes", () =>
+	// The root's row shows only its own snooze, so a child waking is not a
+	// visible change and the root is not resent.
+	it.effect("does not resend a root summary when only a child wakes", () =>
 		Effect.gen(function* () {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
@@ -76,15 +79,23 @@ describe("WsRpcServerLayer ListSessions", () => {
 				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
 				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
 			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
+			yield* sql`UPDATE sessions SET root_id = 'root'`;
+			yield* refreshSidebar(["root"], 1);
 			const reader = yield* ReadQueryEffectTag;
-			const before = yield* reader.readSessionList({ roots: true });
+			const before = yield* reader.readSessionList();
 			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
 			expect(before.rows[0]?.version).toBe(1);
 			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
 				WHERE id = 'child'`;
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
-			const after = yield* reader.readSessionList({ after: 1, roots: true });
-			expect(after.rows).toEqual([{ item: before.rows[0]?.item, version: 2 }]);
+			yield* refreshSidebar(["child"], 2);
+			const after = yield* reader.readSessionList({ after: 1 });
+			expect(after).toEqual({
+				rows: [],
+				version: 2,
+				removed: [],
+				removedSince: 0,
+			});
 		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
 	);
 
@@ -122,10 +133,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-new",
 			);
-			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-				"browser-tab-a",
-				expect.objectContaining({ type: "session_family" }),
-			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -160,10 +167,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				"browser-tab-a",
 				"session-1",
 			);
-			expect(wsHandler.sendTo).not.toHaveBeenCalledWith(
-				"browser-tab-a",
-				expect.objectContaining({ type: "session_family" }),
-			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -176,9 +179,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("deletes a session through the shared session handler", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(true));
-		const wsHandler = makeMockWebSocketHandler({
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
 		});
@@ -194,28 +194,18 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
-			expect(wsHandler.broadcast).toHaveBeenCalledTimes(1);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith({
-				type: "session_deleted",
-				sessionId: "session-1",
-			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);
 	});
 
-	it.effect("returns ok for a coalesced delete without rebroadcasting", () => {
+	it.effect("returns ok for a coalesced delete", () => {
 		const deleteSession = vi.fn(() => Effect.succeed(false));
-		const wsHandler = makeMockWebSocketHandler({
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession,
 		});
@@ -231,14 +221,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(deleteSession).toHaveBeenCalledWith("session-1");
-			expect(wsHandler.broadcast).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
-					),
+					Layer.provideMerge(makeTestHandlerLayer({ sessionManagerService })),
 				),
 			),
 		);
@@ -289,6 +276,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(result).toEqual({
 				projectSlug: "project-a",
 				sessionId: "session-forked",
+				parentId: "session-1",
+				forkMessageId: "message-1",
+				forkPointTimestamp: 9,
 			});
 			// OpenCode cuts before messageID, so the fork keeps message-1.
 			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
@@ -307,16 +297,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(
 				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked'`,
 			).toEqual([{ type: "session.created" }]);
-			expect(wsHandler.broadcast).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "session_forked",
-					sessionId: "session-forked",
-					parentId: "session-1",
-					parentTitle: "Original Session",
-					forkMessageId: "message-1",
-					forkPointTimestamp: 9,
-				}),
-			);
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
@@ -610,11 +590,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 					fork_point_message_id: "api-first",
 				});
 				expect(
-					(yield* providerState.getState(result.sessionId))["resumeSessionId"],
-				).toBe("sdk-fork");
-				expect(
-					(yield* providerState.getState(result.sessionId))["claudeConfigDir"],
-				).toBe(claudeConfigDir);
+					yield* providerState.nativeThread(result.sessionId, "my-claude"),
+				).toMatchObject({
+					resumeSessionId: "sdk-fork",
+					configDir: claudeConfigDir,
+				});
 				expect(api.session.fork).not.toHaveBeenCalled();
 				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
 					dir: "/project",
@@ -627,13 +607,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 					configDir: claudeConfigDir,
 				});
 				expect(readTranscript).toHaveBeenCalledTimes(1);
-				const forkNotice = vi
-					.mocked(wsHandler.broadcast)
-					.mock.calls.map(([message]) => message)
-					.find((message) => message.type === "session_forked");
-				expect(forkNotice).toMatchObject({
+				expect(result).toMatchObject({
 					parentId: "ses-parent",
-					sessionId: result.sessionId,
 					forkMessageId: "api-first",
 					forkPointTimestamp: expect.any(Number),
 				});
@@ -673,12 +648,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 						})),
 					})),
 				);
-				if (forkNotice?.type === "session_forked") {
-					expect(forkNotice.forkPointTimestamp).toBe(
-						parentHistory.find((message) => message.id === "api-first")
-							?.created_at,
-					);
-				}
+				expect(result.forkPointTimestamp).toBe(
+					parentHistory.find((message) => message.id === "api-first")
+						?.created_at,
+				);
 				const sql = yield* SqlClient.SqlClient;
 				const sessionCount = () =>
 					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;

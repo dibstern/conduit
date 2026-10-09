@@ -28,7 +28,7 @@ async function setup(page: import("@playwright/test").Page) {
 				draft: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
-			ForkSession: () => ({ projectSlug, sessionId: forked }),
+			ForkSession: () => ({ projectSlug, sessionId: forked, parentId: seed }),
 			"input.submit": () => ({ ok: true, sessionId: materialized }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
@@ -111,10 +111,10 @@ test("deleting the viewed session selects the next sidebar row and replaces hist
 	page,
 	harness,
 }) => {
-	const { relay } = await setup(page);
+	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	relay.sendMessage({ type: "session_deleted", sessionId: seed, id: seed });
+	rpc.removeShellRow(seed);
 	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 	await page.goBack();

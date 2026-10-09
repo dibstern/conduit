@@ -5,7 +5,11 @@
 
 import type { Effect, Scope } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
-import type { SessionGoalChangedPayload } from "../contracts/stored-event.js";
+import type {
+	SessionGoalChangedPayload,
+	SessionHandoffDeliveredPayload,
+} from "../contracts/stored-event.js";
+import type { NativeThread } from "../persistence/effect/provider-state-effect.js";
 import type {
 	ProviderPermissionUpdate,
 	SessionPermissionMode,
@@ -136,7 +140,10 @@ export interface TurnResult {
 	readonly tokens: TurnTokens;
 	readonly durationMs: number;
 	readonly error?: TurnError;
+	/** Claude rejected the resume at startup, before emitting system/init. */
+	readonly nativeResumeRejected?: boolean;
 	readonly providerStateUpdates: readonly ProviderStateUpdate[];
+	readonly handoff?: SessionHandoffDeliveredPayload;
 }
 
 export interface ModelSelection {
@@ -182,12 +189,26 @@ export interface HistoryMessage {
 export interface SendTurnInput {
 	/** Per-send identity, shared by the outbox command and Claude message/turn. */
 	readonly inputId: string;
+	/**
+	 * Resume an open cut-off with a hidden control prompt on its native thread.
+	 * No user message is placed; the turn belongs to the cut-off message.
+	 */
+	readonly continuation?: { readonly cutOffMessageId: string };
 	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
 	readonly commandAttempt?: number;
 	readonly sessionId: string;
 	readonly prompt: string;
+	readonly handoff?: SessionHandoffDeliveredPayload;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
+	readonly instanceId?: string;
+	readonly nativeThread?: NativeThread | undefined;
+	/** Server-resolved cursor; Claude adapters never infer it from history/state. */
+	readonly resumeSessionId?: string | undefined;
+	/** Server preparation requires replacing an idle SDK query. */
+	readonly startFreshNativeSession?: boolean;
+	/** The single fresh retry after a returning account's native resume failed. */
+	readonly nativeResumeFallback?: boolean;
 	/**
 	 * Optional shared model selection. OpenCode may omit the model from its
 	 * provider request. Claude's relay path infers a catalog model, and its
@@ -196,7 +217,7 @@ export interface SendTurnInput {
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
 	readonly extraFolders: readonly string[];
-	readonly configDir?: string;
+	readonly configDir?: string | undefined;
 	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
 	readonly goalState?: SessionGoalChangedPayload;
 	readonly cumulativeTokens?: number;
@@ -218,6 +239,9 @@ export type PreWarmSessionInput = Pick<
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
+	| "instanceId"
+	| "nativeThread"
+	| "resumeSessionId"
 	| "model"
 	| "configDir"
 	| "permissionMode"
@@ -262,6 +286,14 @@ export interface ProviderCapabilities {
 	readonly agents?: readonly ProviderAgentInfo[];
 }
 
+/** Live SDK facts can exist before the first completed native-thread receipt. */
+export interface ProviderNativeSession {
+	readonly instanceId: string;
+	readonly configDir?: string | undefined;
+	readonly agent?: string | undefined;
+	readonly resumeSessionId?: string | undefined;
+}
+
 /**
  * ProviderInstance -- the 7-method contract for provider execution.
  *
@@ -292,6 +324,14 @@ export interface ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
+
+	/** Report a live cursor, including its cleared state, without writing a receipt. */
+	readonly getNativeSessionEffect?: (
+		sessionId: string,
+	) => Effect.Effect<
+		ProviderNativeSession | undefined,
+		ProviderInstanceFailure
+	>;
 
 	/** Prepare an idle runtime without sending a prompt, when supported. */
 	readonly preWarmSessionEffect?: (

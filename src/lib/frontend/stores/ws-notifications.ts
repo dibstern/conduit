@@ -1,4 +1,4 @@
-// Extracted from ws.svelte.ts — handles sound/browser notifications when the
+// Handles sound/browser notifications when the
 // tab is hidden and a notable event arrives, plus push-active tracking.
 
 import { notificationContent } from "../../notification-content.js";
@@ -150,9 +150,6 @@ export function initSWMessageListener(): void {
 
 // Deliver through one channel when a notable event arrives.
 
-// Approvals (from the approvals subscription) always deserve an alert.
-export const NOTIF_TYPES = new Set(["done", "error"]);
-
 // The same ids the server's push ledger uses, so one receipt covers both.
 function alertIdentity(msg: RelayMessage | Approval): string {
 	const project = getCurrentSlug() ?? "";
@@ -195,11 +192,9 @@ let receiptStorageWarningLogged = false;
 export async function triggerNotifications(
 	msg: RelayMessage | Approval,
 ): Promise<void> {
-	if (!("_tag" in msg)) {
-		if (!NOTIF_TYPES.has(msg.type)) return;
-		// Idle hints update the UI; only an identified terminal event proves completion.
-		if (msg.type === "done" && !msg.alertId) return;
-	}
+	// Approvals (from the approvals subscription) always deserve an alert. Idle
+	// hints update the UI; only an identified terminal event proves completion.
+	if (!("_tag" in msg) && (msg.type !== "done" || !msg.alertId)) return;
 	// A subscription survives reload and can change in another tab. Resolve it
 	// before choosing a channel, including the first event after page load.
 	if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {

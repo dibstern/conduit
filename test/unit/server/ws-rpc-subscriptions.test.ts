@@ -213,9 +213,9 @@ describe("subscription RPC handlers", () => {
 				);
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
-					(yield* readQuery.readSessionList()).rows.find(
-						({ item }) => item.id === "fork-1",
-					)?.item,
+					(yield* readQuery.listSessionInfos()).find(
+						({ id }) => id === "fork-1",
+					),
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const envelopes = yield* Queue.unbounded<unknown>();
@@ -229,7 +229,9 @@ describe("subscription RPC handlers", () => {
 					rows: [expect.objectContaining({ id: "parent-1" })],
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
-				const renamedVersion = yield* commit(
+				// The fork's title is not on its root's row, so the rename moves
+				// nothing; the fork starting work does.
+				yield* commit(
 					canonicalEvent(
 						"session.renamed",
 						"fork-1",
@@ -237,14 +239,24 @@ describe("subscription RPC handlers", () => {
 						{ provider: "opencode", createdAt: 2 },
 					),
 				);
+				const busyVersion = yield* commit(
+					canonicalEvent(
+						"session.status",
+						"fork-1",
+						{ sessionId: "fork-1", status: "busy" },
+						{ provider: "opencode", createdAt: 3 },
+					),
+				);
 				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "upsert",
-					sequence: renamedVersion,
-					item: expect.objectContaining({ id: "parent-1" }),
+					sequence: busyVersion,
+					item: expect.objectContaining({
+						id: "parent-1",
+						attention: "working",
+					}),
 				});
-				// The shell rebases on resume rather than catching up: a deleted row
-				// leaves no version behind (§8), so the only honest answer to "what
-				// did I miss" is the current set.
+				// The shell catches up on resume: the family that moved past the
+				// cursor, and nothing else (conduit-test-y7eo.3).
 				const replay = yield* client
 					.SubscribeShell({
 						projectSlug: "project-a",
@@ -253,9 +265,9 @@ describe("subscription RPC handlers", () => {
 					.pipe(Stream.take(2), Stream.runCollect);
 				expect(Array.from(replay)).toMatchObject([
 					{
-						_tag: "snapshot",
-						sequence: renamedVersion,
-						rows: [expect.objectContaining({ id: "parent-1" })],
+						_tag: "upsert",
+						sequence: busyVersion,
+						item: expect.objectContaining({ id: "parent-1" }),
 					},
 					{ _tag: "synchronized" },
 				]);
@@ -437,16 +449,8 @@ describe("subscription RPC handlers", () => {
 						yield* subscribe(cursor).pipe(Stream.take(2), Stream.runCollect),
 					);
 					expect(resumed[1]).toEqual({ _tag: "synchronized" });
-					// Detail catches up from the cursor; the shell rebases on it.
-					expect(resumed[0]).toMatchObject(
-						member === "SubscribeShell"
-							? {
-									_tag: "snapshot",
-									sequence: liveVersion,
-									rows: [expect.objectContaining({ title: "Renamed" })],
-								}
-							: expected,
-					);
+					// Both catch up from the cursor.
+					expect(resumed[0]).toMatchObject(expected);
 				}).pipe(Effect.provide(makeLayer())),
 			{ timeout: 10000 },
 		);

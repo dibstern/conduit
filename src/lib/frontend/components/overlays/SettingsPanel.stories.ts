@@ -62,7 +62,6 @@ const meta = {
 	},
 	args: {
 		visible: true,
-		initialTab: "notifications",
 		onClose: fn(),
 	},
 	beforeEach: resetState,
@@ -71,9 +70,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** A generic open: Alerts on desktop, the section list on phone. */
 export const Default: Story = {};
 
+/** An explicit Alerts open: on phone it lands drilled in, past the list. */
 export const NotificationsEnabled: Story = {
+	args: { initialTab: "notifications" },
 	beforeEach: () => {
 		localStorage.setItem(
 			"notif-settings",
@@ -92,10 +94,10 @@ export const Composer: Story = {
 	globals: { theme: "dark" },
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
-		await expect(body.getByTestId("settings-tab-composer")).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
+		// On phone an explicit section opens drilled in, so the list is not shown.
+		const tab = body.queryByTestId("settings-tab-composer");
+		if (tab) await expect(tab).toHaveAttribute("aria-selected", "true");
+		else await expect(body.getByTestId("settings-back-btn")).toBeVisible();
 		const icons = body.getByRole("radio", { name: "Icons" });
 		const words = body.getByRole("radio", { name: "Words" });
 		await expect(icons).toHaveAttribute("aria-checked", "true");
@@ -129,24 +131,6 @@ export const Composer: Story = {
 
 export const ComposerLight: Story = {
 	...Composer,
-	tags: ["autodocs"],
-	globals: { theme: "light" },
-};
-
-export const ComposerPhone: Story = {
-	...Composer,
-	tags: ["autodocs"],
-	play: async (context) => {
-		const panel =
-			context.canvasElement.ownerDocument.getElementById("settings-panel");
-		if (!panel) throw new Error("Settings panel is missing");
-		panel.style.maxWidth = "361px";
-		await Composer.play?.(context);
-	},
-};
-
-export const ComposerPhoneLight: Story = {
-	...ComposerPhone,
 	tags: ["autodocs"],
 	globals: { theme: "light" },
 };

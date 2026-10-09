@@ -1,6 +1,6 @@
 // Extracted from relay-stack.ts: the pipeline that takes SSE events from
-// OpenCode, translates them, filters by session, records to cache, broadcasts
-// to browser clients, and sends push notifications.
+// OpenCode, persists them, maintains timeouts, and publishes alerts and push
+// notifications using RPC viewer presence.
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Data, Effect, Either, Option, Runtime, Schema } from "effect";
@@ -26,6 +26,8 @@ import { SessionManagerServiceTag } from "../domain/relay/Services/session-manag
 import {
 	getPermissionMode,
 	type OverridesStateTag,
+	PROCESSING_TIMEOUT_DURATION,
+	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
@@ -49,6 +51,7 @@ import {
 	hasInfoWithSessionID,
 	hasPartWithSessionID,
 	hasSessionID,
+	isPartUpdatedEvent,
 	isPermissionRepliedEvent,
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
@@ -83,15 +86,7 @@ export interface SSEWiringDeps {
 	translator: Translator;
 	readonly providerInstanceId: string;
 	wsHandler: {
-		broadcast: (msg: RelayMessage) => void;
-		sendToSession: (sessionId: string, msg: RelayMessage) => void;
 		getClientsForSession: (sessionId: string) => string[];
-		/**
-		 * Project-scoped per-session event firehose. Pipeline
-		 * routing uses this (via `applyPipelineResultEffect`) so per-session chat
-		 * events reach every client on `/p/<slug>` regardless of viewed session.
-		 */
-		broadcastPerSessionEvent: (sessionId: string, msg: RelayMessage) => void;
 	};
 	pushManager?: PushNotificationSender;
 	log: Logger;
@@ -199,16 +194,18 @@ export function sendPushForEvent(
 }
 
 /**
- * The push payload's `type`. Approvals keep the names the old relay messages
- * had, because the service worker (sw.ts) and the alert ledger's persisted
- * kinds still key on them.
+ * The push payload's `type`. Approvals and failed turns keep the names the old
+ * relay messages had, because the service worker (sw.ts) and the alert
+ * ledger's persisted kinds still key on them.
  */
 const pushKind = (msg: RelayMessage | Approval): string =>
 	"_tag" in msg
 		? msg._tag === "permission"
 			? "permission_request"
 			: "ask_user"
-		: msg.type;
+		: msg.type === "done" && msg.error !== undefined
+			? "error"
+			: msg.type;
 
 /** A push that did not reach the push layer. Tagged so the ledger's own failures are distinguishable. */
 class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
@@ -245,18 +242,15 @@ const pushAlert = (
 				};
 	switch (msg.type) {
 		case "done":
-			return msg.alertId
+			if (!msg.alertId) return undefined;
+			return msg.error === undefined
 				? { sessionId, kind: "done", originId: msg.alertId }
-				: undefined;
-		case "error":
-			return msg.alertId
-				? {
+				: {
 						sessionId,
 						kind: "error",
 						originId: msg.alertId,
-						detail: msg.message ?? "",
-					}
-				: undefined;
+						detail: msg.error,
+					};
 		default:
 			return undefined;
 	}
@@ -571,6 +565,14 @@ const handleSSEEventAfterPendingEffect = (
 			if (statusType === "idle" && eventSessionId && deps.statusPoller) {
 				yield* deps.statusPoller.notifySSEIdle(eventSessionId);
 			}
+			// A retry is shell-row status, not a relay message, but the provider
+			// is still working, so it keeps the turn's timeout alive.
+			if (statusType === "retry" && eventSessionId) {
+				yield* resetProcessingTimeout(
+					eventSessionId,
+					PROCESSING_TIMEOUT_DURATION,
+				);
+			}
 		}
 
 		if (event.type === "permission.asked") return;
@@ -578,6 +580,22 @@ const handleSSEEventAfterPendingEffect = (
 		const translateResult = translator.translate(event, {
 			sessionId: eventSessionId,
 		});
+		// These part updates still count as progress even though they no
+		// longer produce an internal relay message.
+		if (
+			eventSessionId &&
+			(!translateResult.ok || translateResult.messages.length === 0) &&
+			isPartUpdatedEvent(event) &&
+			((event.properties.part?.type === "tool" &&
+				event.properties.part.state?.status === "running") ||
+				(event.properties.part?.type === "reasoning" &&
+					event.properties.part.time?.end != null))
+		) {
+			yield* resetProcessingTimeout(
+				eventSessionId,
+				PROCESSING_TIMEOUT_DURATION,
+			);
+		}
 		if (!translateResult.ok) {
 			if (!translateResult.reason.startsWith("unhandled event type")) {
 				yield* Effect.sync(() =>
@@ -603,7 +621,6 @@ const handleSSEEventAfterPendingEffect = (
 			msg = pipeResult.msg;
 
 			yield* applyPipelineResultEffect(pipeResult, targetSessionId, {
-				wsHandler,
 				log: pipelineLog,
 			});
 

@@ -35,20 +35,16 @@ describe("SQLite transcript paging over WebSocket", () => {
 
 			first.clearReceived();
 			second.clearReceived();
-			const firstView = await first.viewSession(sessionId);
-			const secondView = await second.viewSession(sessionId);
-			for (const view of [firstView, secondView]) {
-				const history = view["history"];
-				if (
-					!history ||
-					typeof history !== "object" ||
-					!("messages" in history) ||
-					!Array.isArray(history.messages)
-				)
-					throw new Error(`missing projected history: ${JSON.stringify(view)}`);
-				expect(
-					history.messages.map((message: { id: string }) => message.id),
-				).toEqual(
+			await first.viewSession(sessionId);
+			await second.viewSession(sessionId);
+			expect(first.getActiveSessionId()).toBe(sessionId);
+			expect(second.getActiveSessionId()).toBe(sessionId);
+			const newestPages = await Promise.all([
+				first.loadMoreHistory(sessionId),
+				second.loadMoreHistory(sessionId),
+			]);
+			for (const history of newestPages) {
+				expect(history.messages.map((message) => message.id)).toEqual(
 					Array.from(
 						{ length: 50 },
 						(_, index) => `msg-${String(index + 71).padStart(3, "0")}`,

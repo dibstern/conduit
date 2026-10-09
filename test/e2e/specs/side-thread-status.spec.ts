@@ -6,11 +6,9 @@ import type {
 	OpenCodeMessage,
 	OpenCodeSession,
 } from "../../../src/lib/contracts/providers/opencode-sdk.js";
+import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import type {
-	RelayMessage,
-	SessionInfo,
-} from "../../../src/lib/shared-types.js";
+import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -33,20 +31,15 @@ function sessionId(page: Page): string {
 	return id;
 }
 
-/** Relay pushes from /ws, and every family row SubscribeSessionFamily delivers. */
+/** RPC subscription envelopes and every delivered session-family row. */
 function watchPushes(page: Page) {
-	const relay: RelayMessage[] = [];
+	const feeds: { subscription: string; envelope: unknown }[] = [];
 	const family: SessionInfo[] = [];
+	const detail: SessionDetailEnvelope[] = [];
 	page.on("websocket", (socket) => {
 		const path = new URL(socket.url()).pathname;
-		if (path === "/ws") {
-			socket.on("framereceived", ({ payload }) => {
-				relay.push(JSON.parse(String(payload)) as RelayMessage);
-			});
-			return;
-		}
 		if (!path.endsWith("/rpc")) return;
-		const familyRequests = new Set<string>();
+		const subscriptions = new Map<string, string>();
 		socket.on("framesent", ({ payload }) => {
 			for (const line of String(payload).split("\n").filter(Boolean)) {
 				const request = JSON.parse(line) as {
@@ -56,10 +49,10 @@ function watchPushes(page: Page) {
 				};
 				if (
 					request._tag === "Request" &&
-					request.tag === "SubscribeSessionFamily" &&
+					request.tag?.startsWith("Subscribe") &&
 					request.id
 				)
-					familyRequests.add(request.id);
+					subscriptions.set(request.id, request.tag);
 			}
 		});
 		socket.on("framereceived", ({ payload }) => {
@@ -67,26 +60,24 @@ function watchPushes(page: Page) {
 				const chunk = JSON.parse(line) as {
 					_tag?: string;
 					requestId?: string;
-					values?: ReadonlyArray<{
-						_tag: string;
-						rows?: SessionInfo[];
-						item?: SessionInfo;
-					}>;
+					values?: readonly unknown[];
 				};
-				if (
-					chunk._tag !== "Chunk" ||
-					!familyRequests.has(chunk.requestId ?? "")
-				)
-					continue;
-				for (const envelope of chunk.values ?? [])
-					family.push(
-						...(envelope.rows ?? []),
-						...(envelope.item ? [envelope.item] : []),
-					);
+				const subscription = subscriptions.get(chunk.requestId ?? "");
+				if (chunk._tag !== "Chunk" || !subscription) continue;
+				for (const envelope of chunk.values ?? []) {
+					feeds.push({ subscription, envelope });
+					if (subscription === "SubscribeSessionDetail")
+						detail.push(envelope as SessionDetailEnvelope);
+					if (subscription === "SubscribeSessionFamily") {
+						const row = envelope as Envelope<SessionInfo>;
+						if (row._tag === "snapshot") family.push(...row.rows);
+						if (row._tag === "upsert") family.push(row.item);
+					}
+				}
 			}
 		});
 	});
-	return { relay, family };
+	return { feeds, family, detail };
 }
 
 function storedFacts(dbPath: string) {
@@ -159,11 +150,7 @@ async function attachEvidence(
 				url: page.url(),
 				store: storedFacts(harness.eventsDbPath),
 				family: pushes.family,
-				pushes: pushes.relay.filter((message) =>
-					["status", "session_list", "permission_request", "ask_user"].includes(
-						message.type,
-					),
-				),
+				feeds: pushes.feeds,
 				mockDiagnostics: harness.mock.diagnostics,
 			},
 			null,
@@ -482,16 +469,6 @@ test.describe("OpenCode child family idle", () => {
 		]);
 		await expect
 			.poll(() =>
-				pushes.relay.some(
-					(message) =>
-						message.type === "result" &&
-						message.sessionId === childId &&
-						message.messageId === messageId,
-				),
-			)
-			.toBe(true);
-		await expect
-			.poll(() =>
 				storedFacts(harness.eventsDbPath).events.some(
 					(row) =>
 						row["session_id"] === childId && row["type"] === "turn.completed",
@@ -501,27 +478,9 @@ test.describe("OpenCode child family idle", () => {
 
 		// Reopening creates a fresh activity slot. The child's own busy family
 		// snapshot must seed Working with its completed transcript already loaded.
-		// OpenCode translates idle to done; drop only that child's late
-		// terminal notification so the real /rpc family feed has to clear it.
-		const suppressedDone: RelayMessage[] = [];
-		const delivered: RelayMessage[] = [];
-		await page.routeWebSocket(
-			(url) => url.pathname === "/ws",
-			(socket) => {
-				const server = socket.connectToServer();
-				server.onMessage((payload) => {
-					const message = JSON.parse(String(payload)) as RelayMessage;
-					if (message.type === "done" && message.sessionId === childId) {
-						suppressedDone.push(message);
-						return;
-					}
-					delivered.push(message);
-					socket.send(payload);
-				});
-			},
-		);
 		const familyBeforeOpen = family.length;
 		const shellBeforeOpen = shell.length;
+		const detailBeforeOpen = pushes.detail.length;
 		await app.goto(`${harness.relayBaseUrl}/s/${childId}`);
 		await expect
 			.poll(() =>
@@ -566,6 +525,21 @@ test.describe("OpenCode child family idle", () => {
 			page.locator(`#session-list [data-session-id="${childId}"]`),
 		).toHaveCount(0);
 		await expect(chat.assistantMessages.last()).toContainText(answer);
+		await expect
+			.poll(() =>
+				pushes.detail
+					.slice(detailBeforeOpen)
+					.some(
+						(envelope) =>
+							envelope._tag === "snapshot" &&
+							envelope.rows.some(
+								(item) =>
+									item._tag === "transcriptMessage" &&
+									item.message.id === messageId,
+							),
+					),
+			)
+			.toBe(true);
 		await expect(chat.stopBtn).toBeVisible();
 		await expect(page.getByTestId("composer-status-header")).toContainText(
 			"Working",
@@ -598,15 +572,9 @@ test.describe("OpenCode child family idle", () => {
 					),
 			)
 			.toBe(true);
-		await expect.poll(() => suppressedDone.length).toBeGreaterThan(0);
 		await expect(chat.stopBtn).toBeHidden();
 		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
 		await expect(page).toHaveURL(new RegExp(`/s/${childId}(?:\\?|$)`));
-		expect(
-			delivered.filter(
-				(message) => message.type === "done" && message.sessionId === childId,
-			),
-		).toEqual([]);
 		expect(
 			storedFacts(harness.eventsDbPath).events.filter(
 				(row) =>
@@ -630,8 +598,7 @@ test.describe("OpenCode child family idle", () => {
 					busySnapshot,
 					family: family.slice(familyBeforeOpen),
 					shell: shell.slice(shellBeforeOpen),
-					delivered,
-					suppressedDone,
+					detail: pushes.detail.slice(detailBeforeOpen),
 				},
 				null,
 				2,

@@ -10,7 +10,9 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -287,7 +289,14 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["sessionId"] = sessionId;
 		const prompt = "restart-upgrade-adopted";
 		const pending = initial.send(sessionId, prompt).catch(() => undefined);
-		await initial.waitFor((message) => message["type"] === "delta");
+		await initial.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
 		const old = runnerFor(harness, sessionId);
 		expect(old.buildId).toBe(OLD_BUILD);
 		await harness.kill();
@@ -334,9 +343,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await initial.preWarmSession(sessionId);
 		const baselinePrompt = "upgrade-baseline";
 		const baselineStart = process.hrtime.bigint();
-		expect((await initial.send(sessionId, baselinePrompt)).chunks).toEqual(
-			responseChunks(baselinePrompt),
-		);
+		expect(
+			(await initial.send(sessionId, baselinePrompt)).chunks.join(""),
+		).toBe(responseChunks(baselinePrompt).join(""));
 		const old = runnerFor(harness, sessionId);
 		const oldQuery = queryFor(harness, old.pid);
 		const baseline = sdkProof(harness).find(
@@ -382,8 +391,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toBe(false);
 		const racePrompt = "upgrade-racing-send";
 		const raceStart = process.hrtime.bigint();
-		expect((await browser.send(sessionId, racePrompt)).chunks).toEqual(
-			responseChunks(racePrompt),
+		expect((await browser.send(sessionId, racePrompt)).chunks.join("")).toBe(
+			responseChunks(racePrompt).join(""),
 		);
 		const enqueue = sdkProof(harness).find(
 			(mark) => mark.kind === "enqueue" && mark.prompt === racePrompt,
@@ -420,8 +429,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			),
 		).toEqual([]);
 		const after = "upgrade-after-race";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await completed(harness, sessionId, [baselinePrompt, racePrompt, after]);
 		details["latency"] = {
@@ -491,8 +500,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			oldQuery.optionsJson,
 		);
 		const after = "upgrade-after-settings-change";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await completed(harness, sessionId, [before, after]);
 		details["oldSnapshot"] = oldSnapshot;
@@ -511,7 +520,14 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["sessionId"] = sessionId;
 		const prompt = "upgrade-long-turn";
 		const pending = initial.send(sessionId, prompt).catch(() => undefined);
-		await initial.waitFor((message) => message["type"] === "delta");
+		await initial.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
 		const old = runnerFor(harness, sessionId);
 		const oldQuery = queryFor(harness, old.pid);
 		await harness.kill();
@@ -533,12 +549,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 				(mark) => mark.kind === "emit" && mark.prompt === prompt,
 			),
 		).toHaveLength(1);
-		const done = browser.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
-		);
+		const done = browser.waitForTurnEnd(sessionId);
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
-		expect((await done)["code"]).toBe(0);
+		expect((await done)["status"]).toBe("idle");
 		const replacement = await upgraded(harness, sessionId, old.pid);
 		await completed(harness, sessionId, [prompt]);
 		const emits = sdkProof(harness).filter(
@@ -598,8 +611,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(2);
 		const retry = "upgrade-retry-after-failure";
-		expect((await browser.send(sessionId, retry)).chunks).toEqual(
-			responseChunks(retry),
+		expect((await browser.send(sessionId, retry)).chunks.join("")).toBe(
+			responseChunks(retry).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -608,12 +621,18 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toMatchObject({ queryId: oldQuery.queryId });
 		const replacement = await upgraded(harness, sessionId, old.pid);
 		const after = "upgrade-after-warm-failure";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await completed(harness, sessionId, [before, retry, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "error",
+					) === true,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["replacement"] = replacement;
@@ -648,12 +667,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 				(mark) => mark.kind === "runner-upgrade" && mark.phase === "warming",
 			),
 		).toEqual([]);
-		const done = browser.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
-		);
+		const done = browser.waitForTurnEnd(sessionId);
 		await browser.answerApproval(request, "allow");
-		expect((await done)["code"]).toBe(0);
+		expect((await done)["status"]).toBe("idle");
 		const replacement = await upgraded(harness, sessionId, old.pid);
 		expect(
 			sdkProof(harness).filter(
@@ -661,8 +677,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			),
 		).toEqual([{ kind: "approval", prompt, behavior: "allow" }]);
 		const after = "upgrade-after-approval";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await completed(harness, sessionId, [prompt, after]);
 		const durable = persisted(harness, sessionId);
@@ -688,8 +704,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		details["sessionId"] = sessionId;
 		const prompt = "upgrade-background-work";
-		expect((await initial.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await initial.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		await completed(harness, sessionId, [prompt]);
 		const old = runnerFor(harness, sessionId);
@@ -719,8 +735,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			),
 		).toHaveLength(1);
 		const after = "upgrade-after-background";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await completed(harness, sessionId, [prompt, after]);
 		details["oldRunner"] = old;
@@ -743,8 +759,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			timing === "during-warm"
 				? "notification-parent-turn-during-warm"
 				: "notification-parent-turn";
-		expect((await initial.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await initial.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		await completed(harness, sessionId, [prompt]);
 		const old = runnerFor(harness, sessionId);
@@ -929,8 +945,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		if (held?.kind !== "query")
 			throw new Error("Missing held replacement after recovery");
 		const after = "upgrade-after-candidate-crash";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -981,8 +997,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		details["sessionId"] = sessionId;
 		const prompt = "review-subagent-finalizer";
-		expect((await initial.send(sessionId, prompt)).chunks).toEqual(
-			responseChunks(prompt),
+		expect((await initial.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
 		);
 		const old = runnerFor(harness, sessionId);
 		await vi.waitFor(
@@ -1060,7 +1076,14 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["sessionId"] = sessionId;
 		const prompt = "stall-review-first-interrupt";
 		const pending = initial.send(sessionId, prompt).catch(() => undefined);
-		await initial.waitFor((message) => message["type"] === "delta");
+		await initial.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
 		const old = runnerFor(harness, sessionId);
 		const originalQuery = queryFor(harness, old.pid);
 		await vi.waitFor(() =>
@@ -1100,8 +1123,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			originalQuery.sessionId,
 		);
 		const after = "review-resume-after-first-interrupt";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		await vi.waitFor(
 			() => {
@@ -1170,7 +1193,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await pending;
 		await vi.waitFor(
-			() => {
+			async () => {
 				const state = persisted(harness, sessionId);
 				expect(state.commands.map((command) => command.status)).toEqual([
 					"failed",
@@ -1179,7 +1202,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.interrupted"),
 				).toHaveLength(1);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId"),
+					await readNativeThread(harness.projectStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1206,8 +1229,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			}
 		}
 		const after = "merge-actual-first-upgraded-send";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		const enqueue = sdkProof(harness).find(
 			(mark) => mark.kind === "enqueue" && mark.prompt === after,
@@ -1301,7 +1324,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			}),
 		);
 		await vi.waitFor(
-			() => {
+			async () => {
 				expect(
 					sdkProof(harness).filter((mark) => mark.kind === "resume-rejected"),
 				).toEqual([
@@ -1318,7 +1341,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					"failed",
 				]);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId"),
+					await readNativeThread(harness.projectStorePath(), sessionId),
 				).toBeUndefined();
 			},
 			{ timeout: 10_000 },
@@ -1328,20 +1351,25 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sessionId,
 		).providerState;
 		const retried = "invalidated-resume-fresh-send";
+		const retrySuffix = `[End conduit context handoff]\n\n${retried}`;
 		const retry = browser.send(sessionId, retried).catch(() => undefined);
 		await vi.waitFor(
 			() =>
 				expect(
 					sdkProof(harness).some(
-						(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+						(mark) =>
+							mark.kind === "enqueue" && mark.prompt.endsWith(retrySuffix),
 					),
 				).toBe(true),
 			{ timeout: 10_000 },
 		);
 		const enqueue = sdkProof(harness).find(
-			(mark) => mark.kind === "enqueue" && mark.prompt === retried,
+			(mark) => mark.kind === "enqueue" && mark.prompt.endsWith(retrySuffix),
 		);
 		if (enqueue?.kind !== "enqueue") throw new Error("Missing retry enqueue");
+		expect(enqueue.prompt.startsWith("[Conduit context handoff]")).toBe(true);
+		expect(enqueue.prompt).toContain(interrupted);
+		expect(enqueue.prompt).toContain(rejected);
 		const actualQueryId = enqueue.queryId;
 		const fresh = sdkProof(harness).find(
 			(mark) => mark.kind === "query" && mark.queryId === actualQueryId,
@@ -1351,19 +1379,27 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["freshClaudeSessionId"] = fresh.sessionId;
 		details["replacement"] = replacement;
 		expect(fresh.sessionId).not.toBe(original.sessionId);
+		const freshOptions: unknown = JSON.parse(fresh.optionsJson);
+		expect(freshOptions).not.toHaveProperty("resume");
 		expect(fresh.pid).toBe(replacement.pid);
-		expect((await retry)?.chunks).toEqual(responseChunks(retried));
+		expect((await retry)?.chunks.join("")).toBe(
+			responseChunks(retried).join(""),
+		);
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "resume-rejected"),
 		).toHaveLength(1);
 		for (const prompt of [interrupted, rejected, retried])
 			expect(
 				sdkProof(harness).filter(
-					(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+					(mark) =>
+						mark.kind === "enqueue" &&
+						(prompt === retried
+							? mark.prompt.endsWith(retrySuffix)
+							: mark.prompt === prompt),
 				),
 			).toHaveLength(1);
 		await vi.waitFor(
-			() => {
+			async () => {
 				const state = persisted(harness, sessionId);
 				expect(state.commands.map(({ status }) => status)).toEqual([
 					"failed",
@@ -1374,8 +1410,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					state.events.filter((event) => event.type === "turn.completed"),
 				).toHaveLength(1);
 				expect(
-					state.providerState.find(({ key }) => key === "resumeSessionId")
-						?.value,
+					(await readNativeThread(harness.projectStorePath(), sessionId))
+						?.resumeSessionId,
 				).toBe(fresh.sessionId);
 			},
 			{ timeout: 10_000 },
@@ -1431,8 +1467,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		};
 		writeFileSync(settingsFile, JSON.stringify(unsupportedEdits));
 		const healthy = "merge-settings-healthy-query-after-unsupported-edit";
-		expect((await browser.send(sessionId, healthy)).chunks).toEqual(
-			responseChunks(healthy),
+		expect((await browser.send(sessionId, healthy)).chunks.join("")).toBe(
+			responseChunks(healthy).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -1481,8 +1517,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			{ timeout: 10_000 },
 		);
 		const after = "merge-settings-after-query-recreation";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		const enqueue = sdkProof(harness).find(
 			(mark) => mark.kind === "enqueue" && mark.prompt === after,
@@ -1574,8 +1610,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await pending;
 		const after = "unreplayable-after-query-recreation";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		const enqueue = sdkProof(harness).find(
 			(mark) => mark.kind === "enqueue" && mark.prompt === after,
@@ -1722,8 +1758,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).length;
 		expect(queryCount).toBe(3);
 		const boundary = "merge-controls-retry-boundary";
-		expect((await browser.send(sessionId, boundary)).chunks).toEqual(
-			responseChunks(boundary),
+		expect((await browser.send(sessionId, boundary)).chunks.join("")).toBe(
+			responseChunks(boundary).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -1731,8 +1767,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			),
 		).toMatchObject({ queryId: warmed.queryId, liveOptions: desiredControls });
 		const after = "merge-controls-actual-warm-send";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -1762,19 +1798,23 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["sessionId"] = sessionId;
 		const prompt = "upgrade-long-turn";
 		const pending = initial.send(sessionId, prompt).catch(() => undefined);
-		await initial.waitFor((message) => message["type"] === "delta");
+		await initial.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
 		const old = runnerFor(harness, sessionId);
 		await harness.kill();
 		await pending;
 		const recoveryCursor = harness.marks.length;
 		await harness.restart({ buildId: NEW_BUILD });
 		const browser = await harness.connect(sessionId);
-		const done = browser.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
-		);
+		const done = browser.waitForTurnEnd(sessionId);
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
-		expect((await done)["code"]).toBe(0);
+		expect((await done)["status"]).toBe("idle");
 		await vi.waitFor(
 			() =>
 				expect(
@@ -1816,8 +1856,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			{ timeout: 6000 },
 		);
 		const after = "review-send-after-sink-cleanup";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -1865,8 +1905,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			initial.rpc.SwitchPermissionMode({ ...payload, mode: "full" }),
 		);
 		const changed = "review-live-settings-applied";
-		expect((await initial.send(sessionId, changed)).chunks).toEqual(
-			responseChunks(changed),
+		expect((await initial.send(sessionId, changed)).chunks.join("")).toBe(
+			responseChunks(changed).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -1921,8 +1961,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(queriesBeforeSend.length);
 		const after = "review-live-settings-after-upgrade";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
@@ -1958,8 +1998,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			browser.rpc.SwitchPermissionMode({ ...replacementPayload, mode: "ask" }),
 		);
 		const pickerChanged = "review-picker-change-after-upgrade";
-		expect((await browser.send(sessionId, pickerChanged)).chunks).toEqual(
-			responseChunks(pickerChanged),
+		expect((await browser.send(sessionId, pickerChanged)).chunks.join("")).toBe(
+			responseChunks(pickerChanged).join(""),
 		);
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
@@ -2173,7 +2213,9 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		details["settingsMutatedDuringForegroundTurn"] = true;
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
-		expect((await firstTurn)?.chunks).toEqual(responseChunks(before));
+		expect((await firstTurn)?.chunks.join("")).toBe(
+			responseChunks(before).join(""),
+		);
 		await completed(harness, sessionId, [before]);
 		await harness.kill();
 		await harness.restart({ buildId: NEW_BUILD });
@@ -2182,8 +2224,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const newQuery = queryFor(harness, replacement.pid);
 		expect(newQuery.effectiveSettingsJson).toBe(oldQuery.effectiveSettingsJson);
 		const after = "review-after-file-settings-change";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
@@ -2252,8 +2294,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			),
 		).toBe(false);
 		const after = "review-old-runner-with-descendant-instructions";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -2265,7 +2307,13 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toHaveLength(1);
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "error",
+					) === true,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["descendantInstructions"] = {
@@ -2330,8 +2378,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(1);
 		const after = "review-old-runner-after-trust-change";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -2340,7 +2388,13 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toMatchObject({ queryId: oldQuery.queryId });
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "error",
+					) === true,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["changedTrustSettings"] = JSON.parse(
@@ -2398,8 +2452,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(1);
 		const after = "review-old-runner-with-legacy-mcp";
-		expect((await browser.send(sessionId, after)).chunks).toEqual(
-			responseChunks(after),
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
 		);
 		expect(
 			sdkProof(harness).find(
@@ -2411,7 +2465,13 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		).toHaveLength(1);
 		await completed(harness, sessionId, [before, after]);
 		expect(
-			browser.frames.filter(({ message }) => message["type"] === "error"),
+			browser.frames.filter(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) => part.type === "error",
+					) === true,
+			),
 		).toEqual([]);
 		details["oldRunner"] = old;
 		details["legacyMcpConfiguration"] = {

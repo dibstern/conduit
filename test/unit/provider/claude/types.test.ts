@@ -26,7 +26,7 @@ describe("Claude provider instance types", () => {
 		>();
 	});
 
-	it("ClaudeResumeCursor shape matches provider_state contract", () => {
+	it("ClaudeResumeCursor describes the live SDK query cursor", () => {
 		const cursor: ClaudeResumeCursor = {
 			resumeSessionId: "abc-123",
 			lastAssistantUuid: "def-456",

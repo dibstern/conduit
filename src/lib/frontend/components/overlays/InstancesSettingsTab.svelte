@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -255,11 +256,13 @@
 	</div>
 {/snippet}
 
-<div id="instances-settings">
-<div class="flex items-center justify-between mb-3">
-	<span class="text-xs text-text-muted font-medium uppercase tracking-wide font-brand">
+<UsageLimitsSettings />
+
+<div id="instances-settings" class="flex flex-col gap-[7px]">
+<div class="flex items-center justify-between gap-[10px]">
+	<h3 class="text-[12px] font-semibold text-text">
 		{instances.length} instance{instances.length !== 1 ? "s" : ""}
-	</span>
+	</h3>
 	<div class="flex items-center gap-2">
 	<!-- Icon stays a child rather than `icon=`: Button renders it at
 	     16, this is 12, and only a child can carry the spin class. -->
@@ -268,7 +271,7 @@
 		tone="muted"
 		hoverFill="none"
 		size="content"
-		class="gap-1.5 px-2.5 py-1 text-xs rounded hover:border-text-muted font-brand"
+		class="gap-1.5 px-2.5 py-1 text-xs rounded-[7px] hover:border-text-muted"
 		data-testid="scan-now-btn"
 		disabled={scanInFlight}
 		onclick={handleScanNow}
@@ -279,7 +282,7 @@
 	<Button
 		variant="ghost-accent"
 		size="content"
-		class="gap-1.5 px-2.5 py-1 text-xs rounded border border-accent font-brand"
+		class="gap-1.5 px-2.5 py-1 text-xs rounded-[7px] border border-accent"
 		data-testid="add-instance-btn"
 		onclick={() => openAddInstance()}
 	>
@@ -290,9 +293,9 @@
 </div>
 
 {#if state.instanceFormMode !== null}
-	<div class="mb-3 border border-border rounded-lg p-3 space-y-3 font-brand" data-testid="instance-form">
+	<div class="border border-border-subtle rounded-[7px] p-[10px] flex flex-col gap-[8px]" data-testid="instance-form">
 		<div class="flex items-center justify-between">
-			<span class="text-xs text-text-muted font-medium uppercase tracking-wide">
+			<span class="font-semibold text-text">
 				{state.instanceFormMode === "edit" ? "Edit instance" : "New instance"}
 			</span>
 		</div>
@@ -304,7 +307,7 @@
 			/>
 		{/if}
 		<label class="block space-y-1">
-			<span class="text-xs text-text-muted">Name</span>
+			<span>Name</span>
 			<TextInput
 				data-testid="instance-form-name"
 				placeholder={state.formDriver === "claude" ? "Work Claude" : "Staging OC"}
@@ -313,7 +316,7 @@
 		</label>
 		{#if state.formDriver === "claude"}
 			<label class="block space-y-1">
-				<span class="text-xs text-text-muted">Config directory <span class="opacity-60">(optional)</span></span>
+				<span>Config directory <span class="opacity-60">(optional)</span></span>
 				<TextInput
 					data-testid="instance-form-configdir"
 					placeholder="~/.config/claude/work"
@@ -321,27 +324,27 @@
 				/>
 			</label>
 		{:else}
-			<label class="flex items-center gap-2 text-sm text-text cursor-pointer">
+			<label class="flex items-center gap-2 text-text cursor-pointer">
 				<Checkbox data-testid="instance-form-managed" bind:checked={state.formManaged} />
-				<span>Managed <span class="text-xs text-text-muted">(conduit starts the server)</span></span>
+				<span>Managed <span class="text-text-secondary">(conduit starts the server)</span></span>
 			</label>
 			{#if state.formManaged}
 				<label class="block space-y-1">
-					<span class="text-xs text-text-muted">Port</span>
+					<span>Port</span>
 					<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={state.formPort} />
 				</label>
 			{:else}
 				<label class="block space-y-1">
-					<span class="text-xs text-text-muted">URL <span class="opacity-60">(or port)</span></span>
+					<span>URL <span class="opacity-60">(or port)</span></span>
 					<TextInput data-testid="instance-form-url" placeholder="http://127.0.0.1:4098" bind:value={state.formUrl} />
 				</label>
 				<label class="block space-y-1">
-					<span class="text-xs text-text-muted">Port <span class="opacity-60">(optional)</span></span>
+					<span>Port <span class="opacity-60">(optional)</span></span>
 					<TextInput inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={state.formPort} />
 				</label>
 			{/if}
 			<label class="block space-y-1">
-				<span class="text-xs text-text-muted">Environment <span class="opacity-60">(KEY=VALUE per line, optional)</span></span>
+				<span>Environment <span class="opacity-60">(KEY=VALUE per line, optional)</span></span>
 				<Textarea data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder="ANTHROPIC_API_KEY=sk-ant-..." bind:value={state.formEnv} />
 			</label>
 		{/if}
@@ -353,7 +356,7 @@
 {/if}
 
 {#if scanResult && !scanInFlight}
-<div class="mb-3 text-xs text-text-muted bg-white/[0.04] rounded px-2.5 py-1.5 font-brand">
+<div class="bg-bg-alt rounded-[7px] px-[8px] py-[6px]">
 		{#if scanResult.discovered.length > 0}
 			Found {scanResult.discovered.length} new instance{scanResult.discovered.length !== 1 ? "s" : ""} on port{scanResult.discovered.length !== 1 ? "s" : ""} {scanResult.discovered.join(", ")}.
 		{:else if scanResult.lost.length > 0}
@@ -367,11 +370,11 @@
 {/if}
 
 {#if instances.length > 0}
-<div id="instance-settings-list" class="space-y-1 font-brand">
+<div id="instance-settings-list" class="flex flex-col gap-[6px]">
 		{#each instances as inst}
 			{@const driver = instanceDriver(inst)}
-			<div class="border border-border rounded-lg" data-testid="instance-row-{inst.id}" data-driver={driver}>
-				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} chevron={false} look="row" density="split" class="justify-between">
+			<div class="border border-border-subtle rounded-[7px]" data-testid="instance-row-{inst.id}" data-driver={driver}>
+				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} chevron={false} look="row" density="list" class="justify-between">
 					<div class="flex items-center gap-2 min-w-0">
 						<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 						{#if state.renamingInstanceId === inst.id}
@@ -392,13 +395,13 @@
 						{/if}
 					</div>
 					{#if driver === "claude"}
-						<span class="text-text-muted text-xs shrink-0 ml-2 truncate max-w-[10rem]">{inst.configDir || "env"}</span>
+						<span class="text-text-secondary shrink-0 ml-2 truncate max-w-[10rem]">{inst.configDir || "env"}</span>
 					{:else}
-						<span class="text-text-muted text-xs shrink-0 ml-2">:{inst.port}</span>
+						<span class="text-text-secondary shrink-0 ml-2">:{inst.port}</span>
 					{/if}
 				</Disclosure>
 				{#if state.expandedInstanceId === inst.id}
-					<div class="flex flex-wrap gap-2 px-3 py-2 border-t border-border">
+					<div class="flex flex-wrap gap-2 p-[6px] border-t border-border-subtle">
 					{#if driver === "opencode" && inst.managed}
 						<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStart(inst.id)}>Start</Button>
 						<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStop(inst.id)}>Stop</Button>
@@ -417,59 +420,59 @@
 {/if}
 
 {#if instances.length === 0}
-<div class="mt-2 space-y-2 font-brand">
-		<p class="text-sm text-text-muted mb-3">No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
-		<div class="border border-border rounded-lg overflow-hidden">
-			<Disclosure expanded={state.expandedScenario === "direct"} onToggle={() => toggleScenario("direct")} chevron={false} look="section" density="roomy">
+<div class="flex flex-col gap-[6px]">
+		<p>No OpenCode instances detected. Start one from your terminal and it will appear here automatically.</p>
+		<div class="border border-border-subtle rounded-[7px] overflow-hidden">
+			<Disclosure expanded={state.expandedScenario === "direct"} onToggle={() => toggleScenario("direct")} chevron={false} look="section" density="list">
 				<Icon name={state.expandedScenario === "direct" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 				<span>Quick Start — Direct API Key</span>
 			</Disclosure>
 			{#if state.expandedScenario === "direct"}
-				<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
-					<p class="text-xs text-text-muted">1. Start an OpenCode server:</p>
+				<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+					<p>1. Start an OpenCode server:</p>
 					{@render cmdBlock("opencode serve --port 4098", "direct-1")}
-					<p class="text-xs text-text-muted">2. Configure your provider:</p>
+					<p>2. Configure your provider:</p>
 					{@render cmdBlock("opencode config set provider anthropic\nopencode config set anthropic.apiKey sk-ant-...", "direct-2")}
-					<p class="text-xs text-text-muted italic">It will appear here automatically.</p>
+					<p class="italic">It will appear here automatically.</p>
 				</div>
 			{/if}
 		</div>
-		<div class="border border-border rounded-lg overflow-hidden">
-			<Disclosure expanded={state.expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="roomy">
+		<div class="border border-border-subtle rounded-[7px] overflow-hidden">
+			<Disclosure expanded={state.expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="list">
 				<Icon name={state.expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 				<span>Multi-Provider — Via CCS</span>
 				{#if ccsDetected}<Icon name="circle-check" size={14} class="text-green-500 ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
 			</Disclosure>
 			{#if state.expandedScenario === "ccs"}
-				<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
-					<p class="text-xs text-text-muted">CCS manages OAuth tokens and API keys for 20+ providers.</p>
+				<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+					<p>CCS manages OAuth tokens and API keys for 20+ providers.</p>
 					{#if ccsDetected}
 						<div class="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 rounded px-2 py-1"><Icon name="circle-check" size={12} />CCS detected on port {proxyResult?.port ?? 8317}</div>
 					{/if}
-					<p class="text-xs text-text-muted">1. Install CCS:</p>
+					<p>1. Install CCS:</p>
 					{@render cmdBlock("npm install -g @anthropic-ai/ccs", "ccs-1")}
-					<p class="text-xs text-text-muted">2. Authenticate:</p>
+					<p>2. Authenticate:</p>
 					{@render cmdBlock("ccs claude --auth", "ccs-2")}
-					<p class="text-xs text-text-muted">3. Start proxy:</p>
+					<p>3. Start proxy:</p>
 					{@render cmdBlock("ccs cliproxy start", "ccs-3")}
-					<p class="text-xs text-text-muted">4. Start OpenCode:</p>
+					<p>4. Start OpenCode:</p>
 					{@render cmdBlock('ANTHROPIC_API_KEY="ccs-internal-managed" \\\n  ANTHROPIC_BASE_URL="http://127.0.0.1:8317/api/provider/claude/v1" \\\n  opencode serve --port 4098', "ccs-4")}
 				</div>
 			{/if}
 		</div>
-		<div class="border border-border rounded-lg overflow-hidden">
-			<Disclosure expanded={state.expandedScenario === "custom"} onToggle={() => toggleScenario("custom")} chevron={false} look="section" density="roomy">
+		<div class="border border-border-subtle rounded-[7px] overflow-hidden">
+			<Disclosure expanded={state.expandedScenario === "custom"} onToggle={() => toggleScenario("custom")} chevron={false} look="section" density="list">
 				<Icon name={state.expandedScenario === "custom" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 				<span>Custom Setup</span>
 			</Disclosure>
 			{#if state.expandedScenario === "custom"}
-				<div class="px-3 pb-3 space-y-2 border-t border-border pt-2.5">
-					<p class="text-xs text-text-muted">Configure with environment variables:</p>
+				<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+					<p>Configure with environment variables:</p>
 					{@render cmdBlock("ANTHROPIC_API_KEY=sk-ant-... opencode serve --port 4098", "custom-1")}
 				</div>
 			{/if}
 		</div>
-		<div class="flex items-center justify-center gap-2 pt-2 text-xs text-text-muted">
+		<div class="flex items-center justify-center gap-2 pt-[6px]">
 			<span>Already started?</span>
 			<TextButton type="button" tone="accent" class="font-medium" data-testid="scan-now-link" onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "Scan Now"}</TextButton>
 		</div>

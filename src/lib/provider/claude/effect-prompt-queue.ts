@@ -41,12 +41,15 @@ export class EffectPromptQueue implements PromptQueueController {
 	static make(): Effect.Effect<EffectPromptQueue> {
 		return Effect.gen(function* () {
 			const queue = yield* Queue.unbounded<PromptQueueItem>();
-			const iterable = yield* Stream.fromQueue(queue, { shutdown: true }).pipe(
+			// Not toAsyncIterableEffect: it captures the caller's runtime flags, and a
+			// queue made inside an uninterruptible region (pre-warm) would fork an
+			// uninterruptible reader whose return() hangs when the SDK stops reading.
+			const iterable = Stream.fromQueue(queue, { shutdown: true }).pipe(
 				Stream.takeWhile(
 					(item): item is PromptQueueMessage => item._tag === "Message",
 				),
 				Stream.map((item) => item.message),
-				Stream.toAsyncIterableEffect,
+				Stream.toAsyncIterable,
 			);
 			return new EffectPromptQueue(queue, iterable);
 		});

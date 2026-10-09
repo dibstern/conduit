@@ -1,6 +1,10 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import {
+	LimitRecoverySchema,
+	SessionResumeSchema,
+} from "./contracts/limit-recovery.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
@@ -289,6 +293,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),
+	resumes: Schema.optional(Schema.Array(SessionResumeSchema)),
 	/** The approval mode this session was last switched to; absent until one is. */
 	permissionMode: Schema.optional(SessionPermissionModeSchema),
 	/** The session's model, effort and context window; absent until set. "" follows the default. */
@@ -315,6 +321,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */
 	compacting: Schema.optional(Schema.String),
+	/** A provider retry's reason while it waits: transient status, never logged (C1). */
+	retrying: Schema.optional(Schema.String),
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),
@@ -559,32 +567,11 @@ const ThinkingDeltaSchema = Schema.Struct({
 	messageId: Schema.optional(Schema.String),
 });
 
-const ThinkingStopSchema = Schema.Struct({
-	type: Schema.Literal("thinking_stop"),
-	sessionId: Schema.String,
-	messageId: Schema.optional(Schema.String),
-});
-
 const ToolStartSchema = Schema.Struct({
 	type: Schema.Literal("tool_start"),
 	sessionId: Schema.String,
 	id: Schema.String,
 	name: Schema.String,
-	messageId: Schema.optional(Schema.String),
-});
-
-const ToolExecutingSchema = Schema.Struct({
-	type: Schema.Literal("tool_executing"),
-	sessionId: Schema.String,
-	id: Schema.String,
-	name: Schema.String,
-	input: Schema.Union(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-		Schema.Undefined,
-	),
-	metadata: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
 	messageId: Schema.optional(Schema.String),
 });
 
@@ -597,13 +584,6 @@ const ToolResultSchema = Schema.Struct({
 	isTruncated: Schema.optional(Schema.Boolean),
 	fullContentLength: Schema.optional(Schema.Number),
 	messageId: Schema.optional(Schema.String),
-});
-
-const ToolContentSchema = Schema.Struct({
-	type: Schema.Literal("tool_content"),
-	sessionId: Schema.String,
-	toolId: Schema.String,
-	content: Schema.String,
 });
 
 // What the approvals subscription serves (ni8.9): the pending permission
@@ -654,31 +634,8 @@ const DoneSchema = Schema.Struct({
 	alertId: Schema.optional(Schema.String),
 	sessionId: Schema.String,
 	code: Schema.Number,
-	/** The assistant message whose turn this ends, when known. A done for a
-	 *  message the browser already finalised is late and ends nothing. */
-	messageId: Schema.optional(Schema.String),
-});
-
-const SessionListSchema = Schema.Struct({
-	type: Schema.Literal("session_list"),
-	sessions: Schema.Array(SessionInfoSchema),
-	roots: Schema.Boolean,
-	search: Schema.optional(Schema.Boolean),
-	// No notification map beside the sessions: ni8.23 made the three badge facts
-	// columns on the session row itself, derived server-side.
-});
-
-const SessionForkedSchema = Schema.Struct({
-	type: Schema.Literal("session_forked"),
-	sessionId: Schema.String,
-	forkMessageId: Schema.optional(Schema.String),
-	forkPointTimestamp: Schema.optional(Schema.Number),
-	parentId: Schema.String,
-	parentTitle: Schema.String,
-});
-
-const DaemonSessionsChangedSchema = Schema.Struct({
-	type: Schema.Literal("daemon_sessions_changed"),
+	/** Why the turn failed. The transcript carries the notice; this is the alert's. */
+	error: Schema.optional(Schema.String),
 });
 
 const PartRemovedSchema = Schema.Struct({
@@ -702,57 +659,9 @@ const UserMessageSchema = Schema.Struct({
 	originId: Schema.optional(Schema.String),
 });
 
-const SessionDeletedSchema = Schema.Struct({
-	type: Schema.Literal("session_deleted"),
-	sessionId: Schema.String,
-});
-
-const ErrorSchema = Schema.Struct({
-	type: Schema.Literal("error"),
-	alertId: Schema.optional(Schema.String),
-	sessionId: Schema.String,
-	code: Schema.String,
-	message: Schema.String,
-	statusCode: Schema.optional(Schema.Number),
-	details: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
-});
-
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 3;
-
-const ProtocolVersionSchema = Schema.Struct({
-	type: Schema.Literal("protocol_version"),
-	version: Schema.Number,
-	buildId: Schema.optional(Schema.String),
-});
-
-const ServerUpdateSchema = Schema.Struct({
-	type: Schema.Literal("server_update"),
-	restartAvailable: Schema.Boolean,
-});
-
-const InstanceUpdateSchema = Schema.Struct({
-	type: Schema.Literal("instance_update"),
-	instanceId: Schema.String,
-	name: Schema.optional(Schema.String),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	port: Schema.optional(Schema.Number),
-});
-
-const ProviderSessionReloadedSchema = Schema.Struct({
-	type: Schema.Literal("provider_session_reloaded"),
-	sessionId: Schema.String,
-});
-
-const SessionGoalChangedSchema = Schema.Struct({
-	type: Schema.Literal("session.goal_changed"),
-	...SessionGoalChangedPayloadSchema.fields,
-});
+export const WS_PROTOCOL_VERSION = 5;
 
 // -- Combined RelayMessage schema union --
 
@@ -761,36 +670,17 @@ export const RelayMessageSchema = Schema.Union(
 	DeltaSchema,
 	ThinkingStartSchema,
 	ThinkingDeltaSchema,
-	ThinkingStopSchema,
 	// Tools
 	ToolStartSchema,
-	ToolExecutingSchema,
 	ToolResultSchema,
-	ToolContentSchema,
-	// Permissions / Questions
 	// Session lifecycle
 	ResultSchema,
 	DoneSchema,
-	SessionListSchema,
-	SessionForkedSchema,
-	// Projects
-	DaemonSessionsChangedSchema,
 	// Part lifecycle
 	PartRemovedSchema,
 	MessageRemovedSchema,
 	// Cache / Replay
 	UserMessageSchema,
-	// Session deletion
-	SessionDeletedSchema,
-	// Misc
-	ErrorSchema,
-	ProtocolVersionSchema,
-	ServerUpdateSchema,
-	// Instance Management
-	InstanceUpdateSchema,
-	// Provider session reload
-	ProviderSessionReloadedSchema,
-	SessionGoalChangedSchema,
 );
 
 export type RelayMessage = typeof RelayMessageSchema.Type;
@@ -806,24 +696,16 @@ export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
 // sessionId) from global events (which never do).
 
 export type PerSessionEventType =
-	| "session.goal_changed"
 	| "delta"
 	| "thinking_start"
 	| "thinking_delta"
-	| "thinking_stop"
 	| "tool_start"
-	| "tool_executing"
 	| "tool_result"
-	| "tool_content"
 	| "result"
 	| "done"
-	| "error"
 	| "user_message"
 	| "part_removed"
-	| "message_removed"
-	| "session_forked"
-	| "provider_session_reloaded"
-	| "session_deleted";
+	| "message_removed";
 
 export type PerSessionEvent = Extract<
 	RelayMessage,
@@ -836,7 +718,7 @@ export type GlobalRelayEvent = Exclude<
 
 // Untagged events (translator output before sessionId tagging)
 // The SSE translator and message poller produce events without sessionId.
-// These are tagged with sessionId at emission sites before broadcast.
+// These are tagged with sessionId before internal activity and notification handling.
 
 /**
  * A RelayMessage variant that may be missing sessionId.

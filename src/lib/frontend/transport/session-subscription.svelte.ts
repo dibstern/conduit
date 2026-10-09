@@ -10,14 +10,19 @@ import type { Stream } from "effect";
 import {
 	followSessionBusy,
 	followSessionCompaction,
+	followSessionRetry,
 } from "../stores/chat.svelte.js";
 import {
 	followSessionModelSettings,
 	handlePermissionModeInfo,
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
-import { forgetSession, sessionState } from "../stores/session.svelte.js";
-import { sessionActivityBridge } from "../stores/session-activity.svelte.js";
+import { followSessionResumes } from "../stores/handoff-review.svelte.js";
+import {
+	forgetSession,
+	leaveDeletedSession,
+	sessionState,
+} from "../stores/session.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
 import {
@@ -40,6 +45,14 @@ const identify = (session: SessionInfo): string => session.id;
 
 export const isBusy = (row: Pick<SessionInfo, "status"> | undefined): boolean =>
 	row?.status === "busy" || row?.status === "retry";
+
+/** The server ended a turn on this row since `previous` (never for a first sighting). */
+export const turnEnded = (
+	previous: Pick<SessionInfo, "lastTurnEndVersion"> | undefined,
+	next: Pick<SessionInfo, "lastTurnEndVersion">,
+): boolean =>
+	previous !== undefined &&
+	(next.lastTurnEndVersion ?? -1) > (previous.lastTurnEndVersion ?? -1);
 
 // `$state.raw`, not `$state`: the applier replaces the state whole and never
 // mutates it, so a deep proxy would cost work to track writes that cannot
@@ -101,43 +114,43 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 			handlePermissionModeInfo({ mode: row.permissionMode });
 		followSessionModelSettings(row, previous);
 	};
-	const receivedSequence = sessionActivityBridge.observe();
-	// Only accepted shell changes retire activity. A duplicate or stale
-	// envelope must not affect client state independently of the row applier.
 	if (change._tag === "upsert") {
-		sessionActivityBridge.retire(change.item.id, receivedSequence, "row");
 		hydrateSessionGoal(change.item);
 		followViewedSession(change.item);
 		// Only a transition moves the phase: an idle write (the user message)
 		// must not end the sender's optimistic turn, and a late busy write
-		// must not restart one `done` already ended.
+		// must not restart one already ended. A turn can start and end between
+		// two upserts, so an advanced turn-end version also ends it.
+		const previous = applied.rows.get(change.item.id);
 		const busy = isBusy(change.item);
-		if (busy !== isBusy(applied.rows.get(change.item.id)))
+		if (
+			busy !== isBusy(previous) ||
+			(!busy && turnEnded(previous, change.item))
+		)
 			followSessionBusy(change.item.id, busy);
 		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
+		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
+			followSessionRetry(change.item.id, change.item.retrying);
+		followSessionResumes(change.item, previous);
 	}
-	if (change._tag === "remove") {
-		sessionActivityBridge.retire(change.id, receivedSequence, "remove");
+	// A root that gained a parent only leaves the list; one that is gone, or a
+	// child that is, comes marked deleted, live or on catch-up.
+	if (change._tag === "remove" && change.deleted === true) {
+		leaveDeletedSession(change.id);
 		forgetSession(change.id);
 	}
 	if (change._tag === "snapshot") {
-		for (const id of new Set([
-			...applied.rows.keys(),
-			...sessionActivityBridge.pending.keys(),
-		])) {
-			if (!next.rows.has(id)) {
-				sessionActivityBridge.retire(id, receivedSequence, "omission");
-				if (applied.rows.has(id)) forgetSession(id);
-			}
-		}
+		for (const id of applied.rows.keys())
+			if (!next.rows.has(id)) forgetSession(id);
 		for (const row of next.rows.values()) {
-			sessionActivityBridge.retire(row.id, receivedSequence, "row");
 			hydrateSessionGoal(row);
 			followViewedSession(row);
 			// A snapshot (cold start, resume) is absolute.
 			followSessionBusy(row.id, isBusy(row));
 			followSessionCompaction(row.id, row.compacting);
+			followSessionRetry(row.id, row.retrying);
+			followSessionResumes(row, applied.rows.get(row.id));
 		}
 	}
 	applied = next;
@@ -145,7 +158,6 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 
 /** Forget the project we were watching. */
 export function resetSessionSubscription(): void {
-	sessionActivityBridge.clear();
 	sessionGoals.clear();
 	applied = emptySubscription();
 	feedStatus = { _tag: "cold" };

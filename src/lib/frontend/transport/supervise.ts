@@ -10,8 +10,8 @@
 // the feed from scratch, and a defect is only different in being logged as a
 // bug. Only the consumer letting go stops it.
 //
-// **Quietly, forever, on the old socket's schedule.** 1s, growing by half each
-// time, capped at 10s — the numbers `ws.svelte.ts` reconnects on — and reset
+// **Quietly, forever.** 1s, growing by half each
+// time, capped at 10s, and reset
 // once the feed says it is caught up. Giving up would freeze a phone's sidebar
 // for hours over one busy moment; waiting at most 10s costs nothing.
 //

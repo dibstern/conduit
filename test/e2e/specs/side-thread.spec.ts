@@ -8,6 +8,7 @@ import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import NodeWebSocket from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -534,20 +535,11 @@ test.describe("Claude Side Threads", () => {
 				await chat.waitForStreamingComplete();
 				// The SDK resume cursor commits after the completed-turn event.
 				await expect
-					.poll(() => {
-						const db = new DatabaseSync(harness.eventsDbPath, {
-							readOnly: true,
-						});
-						try {
-							return db
-								.prepare(
-									"SELECT value FROM provider_state WHERE session_id = ? AND key = 'resumeSessionId'",
-								)
-								.get(parentId)?.["value"];
-						} finally {
-							db.close();
-						}
-					})
+					.poll(
+						async () =>
+							(await readNativeThread(harness.eventsDbPath, parentId))
+								?.resumeSessionId,
+					)
 					.toBeTruthy();
 				// A non-default mode, so a leak from the Side Thread cannot pass.
 				await rpc(relayUrl, (client) =>

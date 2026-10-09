@@ -44,7 +44,6 @@ export interface SendMessageToSessionInput {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly commandId: string;
-	readonly errorDelivery?: "client" | "session";
 	/** A steer joins the running turn of a busy session, or is refused. */
 	readonly delivery?: InputDelivery;
 }
@@ -131,7 +130,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				...(variant ? { variant } : {}),
 				...(contextWindow ? { contextWindow } : {}),
 			},
-			...(input.errorDelivery ? { errorDelivery: input.errorDelivery } : {}),
 		});
 		// A refused steer admitted nothing: the text stays in the input box.
 		if ("refused" in submitted)

@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
@@ -49,21 +50,12 @@ function mockWsHandler(
 	sessionId = "session-provider-state",
 ): WebSocketHandlerShape {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => sessionId),
 		getClientsForSession: vi.fn(() => ["client-1"]),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 1),
-		getClientIds: vi.fn(() => ["client-1"]),
-		attach: vi.fn(() => () => {}),
+		registerSessionViewer: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
 	};
 }
 
@@ -95,22 +87,9 @@ const establishClaudeSession = (sessionId: string) =>
 // builds it from the daemon's always-present persistence DB.
 const makeIngestionLayer = (
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
-	ws: WebSocketHandlerShape,
 ) =>
 	makeProviderRuntimeIngestionLive({
-		relayPublisher: {
-			publish: (msg) =>
-				Effect.sync(() => {
-					ws.sendToSession(
-						"sessionId" in msg &&
-							typeof msg.sessionId === "string" &&
-							msg.sessionId.length > 0
-							? msg.sessionId
-							: "",
-						msg,
-					);
-				}),
-		},
+		relayPublisher: { publish: () => Effect.void },
 	}).pipe(Layer.provide(persistence));
 
 describe("handleMessage with Effect provider state persistence", () => {
@@ -134,7 +113,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 					tokens: { input: 0, output: 0 },
 					durationMs: 0,
 					providerStateUpdates: [
-						{ key: "resumeSessionId", value: "sdk-session-next" },
+						{
+							key: "nativeThread:claude",
+							value: JSON.stringify({
+								resumeSessionId: "sdk-session-next",
+								firstSequence: 0,
+								deliveredThrough: 0,
+							}),
+						},
 					],
 				})),
 			});
@@ -142,6 +128,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(LoggerTag, log),
@@ -155,13 +142,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "provider-state-test",
 						persistenceDbPath: filename,
+						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, engine),
 					persistence,
-					makeIngestionLayer(persistence, ws),
+					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),
 			);
@@ -187,9 +175,8 @@ describe("handleMessage with Effect provider state persistence", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
-							providerState: {
-								resumeSessionId: "sdk-session-prev",
-							},
+							instanceId: "claude",
+							providerState: { resumeSessionId: "sdk-session-prev" },
 						}),
 					}),
 				);
@@ -198,13 +185,17 @@ describe("handleMessage with Effect provider state persistence", () => {
 				const updated = yield* Effect.promise(() =>
 					vi.waitFor(async () => {
 						const state = await Effect.runPromise(
-							providerState.getState("session-provider-state"),
+							providerState.nativeThread("session-provider-state", "claude"),
 						);
-						expect(state["resumeSessionId"]).toBe("sdk-session-next");
+						expect(state?.resumeSessionId).toBe("sdk-session-next");
 						return state;
 					}),
 				);
-				expect(updated).toEqual({ resumeSessionId: "sdk-session-next" });
+				expect(updated).toEqual({
+					resumeSessionId: "sdk-session-next",
+					firstSequence: expect.any(Number),
+					deliveredThrough: expect.any(Number),
+				});
 			}).pipe(
 				Effect.provide(PassThroughSessionInbox),
 				Effect.provide(layer),
@@ -240,6 +231,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, log),
@@ -253,13 +245,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 					projectDir: MOCK_PROJECT_DIR,
 					slug: "history-test",
 					persistenceDbPath: filename,
+					publishGlobalSetting: () => Effect.void,
 				} satisfies ProjectRelayConfig),
 				PendingInteractionServiceLive,
 				Layer.succeed(AgentServiceTag, makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag, engine),
 				persistence,
-				makeIngestionLayer(persistence, ws),
+				makeIngestionLayer(persistence),
 				makeOverridesStateLive(),
 			),
 		);
@@ -347,6 +340,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(LoggerTag, log),
@@ -360,13 +354,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-user-effect-test",
 						persistenceDbPath: filename,
+						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, engine),
 					persistence,
-					makeIngestionLayer(persistence, ws),
+					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),
 			);
@@ -476,6 +471,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
+					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(LoggerTag, log),
@@ -489,13 +485,14 @@ describe("handleMessage with Effect provider state persistence", () => {
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-sink-effect-test",
 						persistenceDbPath: filename,
+						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag, makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag, engine),
 					persistence,
-					makeIngestionLayer(persistence, ws),
+					makeIngestionLayer(persistence),
 					makeOverridesStateLive(),
 				),
 			);
@@ -550,134 +547,4 @@ describe("handleMessage with Effect provider state persistence", () => {
 			);
 		},
 	);
-
-	it.effect("routes Claude event sink messages to their event session", () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-child-sink-"));
-		const filename = join(dir, "events.db");
-		const persistence = makePersistenceEffectLayer(filename);
-		const ws = mockWsHandler("parent-session");
-		const log = createSilentLogger();
-		const client = makeHandlerOpenCodeAPI({
-			session: {
-				messagesPage: vi.fn(async () => []),
-			},
-		});
-		const engine = withDispatchEffect({
-			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-			dispatch: vi.fn(async (command: SendTurnCommand) => {
-				await Effect.runPromise(
-					command.input.eventSink.push(
-						providerRuntimeEvent(
-							"session.created",
-							"child-session",
-							{
-								sessionId: "child-session",
-								title: "Child session",
-								provider: "claude",
-								parentId: "parent-session",
-							},
-							{ providerId: "claude", createdAt: Date.now() },
-						),
-					),
-				);
-				await Effect.runPromise(
-					command.input.eventSink.push(
-						providerRuntimeEvent(
-							"message.created",
-							"child-session",
-							{
-								messageId: "child-message-1",
-								role: "assistant",
-								sessionId: "child-session",
-							},
-							{ providerId: "claude", createdAt: Date.now() },
-						),
-					),
-				);
-				await Effect.runPromise(
-					command.input.eventSink.push(
-						providerRuntimeEvent(
-							"text.delta",
-							"child-session",
-							{
-								messageId: "child-message-1",
-								partId: "child-message-1-0",
-								text: "child live update",
-							},
-							{ providerId: "claude", createdAt: Date.now() },
-						),
-					),
-				);
-				return {
-					status: "completed" as const,
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-				};
-			}),
-		});
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, log),
-				Layer.succeed(
-					SessionManagerServiceTag,
-					makeMockSessionManagerService(),
-				),
-				Layer.succeed(ConfigTag, {
-					httpServer: createServer(),
-					opencodeUrl: "http://127.0.0.1:1",
-					projectDir: MOCK_PROJECT_DIR,
-					slug: "claude-child-sink-test",
-					persistenceDbPath: filename,
-				} satisfies ProjectRelayConfig),
-				PendingInteractionServiceLive,
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				persistence,
-				makeIngestionLayer(persistence, ws),
-				makeOverridesStateLive(),
-			),
-		);
-
-		return Effect.gen(function* () {
-			yield* establishClaudeSession("parent-session");
-			yield* setClaudeModel("parent-session");
-			yield* handleMessage("client-1", {
-				text: "trigger child event",
-				commandId: "cmd-provider-state-child-event",
-			});
-			const sendToSession = ws.sendToSession as ReturnType<typeof vi.fn>;
-			yield* Effect.promise(() =>
-				vi.waitFor(() =>
-					expect(
-						sendToSession.mock.calls.some((call: unknown[]) => {
-							const msg = call[1] as { readonly type?: string } | undefined;
-							return msg?.type === "delta";
-						}),
-					).toBe(true),
-				),
-			);
-
-			expect(sendToSession).toHaveBeenCalledWith(
-				"child-session",
-				expect.objectContaining({
-					type: "delta",
-					sessionId: "child-session",
-					text: "child live update",
-				}),
-			);
-		}).pipe(
-			Effect.provide(PassThroughSessionInbox),
-			Effect.provide(layer),
-			Effect.ensuring(
-				Effect.sync(() => {
-					rmSync(dir, { recursive: true, force: true });
-				}),
-			),
-		);
-	});
 });

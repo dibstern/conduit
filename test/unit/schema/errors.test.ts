@@ -57,18 +57,6 @@ describe("Schema.TaggedError errors", () => {
 		expect(json.error.message).toBe("Server error");
 	});
 
-	it("OpenCodeApiError serializes to WebSocket", () => {
-		const err = new OpenCodeApiError({
-			message: "Timeout",
-			endpoint: "/api/slow",
-			responseStatus: 504,
-			responseBody: null,
-		});
-		const ws = err.toWebSocket();
-		expect(ws.type).toBe("error");
-		expect(ws.code).toBe("OpenCodeApiError");
-	});
-
 	it("OpenCodeConnectionError has statusCode 502", () => {
 		const err = new OpenCodeConnectionError({ message: "refused" });
 		expect(err.statusCode).toBe(502);
@@ -85,13 +73,6 @@ describe("Schema.TaggedError errors", () => {
 			userVisible: true,
 		});
 		expect(err.userVisible).toBe(true);
-	});
-
-	it("toMessage wraps with sessionId", () => {
-		const err = new OpenCodeConnectionError({ message: "test" });
-		const msg = err.toMessage("s1");
-		expect(msg.sessionId).toBe("s1");
-		expect(msg.type).toBe("error");
 	});
 
 	it("fromCaught wraps unknown errors", () => {
@@ -165,20 +146,6 @@ describe("Schema.TaggedError errors", () => {
 		const json = err.toJSON();
 		expect(json.error.code).toBe("INTERNAL_ERROR");
 		expect(json.error.message).toBe("test error");
-	});
-
-	it("RelayError toWebSocket works", () => {
-		const err = new RelayError("test error", { code: "INTERNAL_ERROR" });
-		const ws = err.toWebSocket();
-		expect(ws.type).toBe("error");
-		expect(ws.code).toBe("INTERNAL_ERROR");
-	});
-
-	it("RelayError toMessage works", () => {
-		const err = new RelayError("test error", { code: "INTERNAL_ERROR" });
-		const msg = err.toMessage("s1");
-		expect(msg.sessionId).toBe("s1");
-		expect(msg.type).toBe("error");
 	});
 
 	it("RelayError.fromCaught still works for backward compat", () => {

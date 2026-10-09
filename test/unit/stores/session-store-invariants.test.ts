@@ -1,4 +1,3 @@
-import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applySessionChange,
 	applySessionRemoved,
@@ -45,18 +44,18 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import { sessionActivity } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import {
+	followSessionBusy,
+	getOrCreateSessionSlot,
+	sessionActivity,
+} from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	clearSessionState,
+	followFork,
 	getFilteredSessions,
-	handleSessionForked,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { handleMessage } from "../../../src/lib/frontend/stores/ws.svelte.js";
-import type {
-	RelayMessage,
-	SessionInfo,
-} from "../../../src/lib/frontend/types.js";
+import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const decodeSessionInfo = Schema.decodeUnknownSync(SessionInfoSchema);
 
@@ -85,13 +84,12 @@ describe("the server half holds only rows the server sent", () => {
 			[{ id: "ses_child", title: "Child", status: "idle" }],
 			"complete",
 		);
-		handleSessionForked({
-			type: "session_forked",
+		sessionState.currentId = "ses_child";
+		followFork({
+			projectSlug: "p",
 			sessionId: "ses_child",
 			parentId: "ses_parent",
-			parentTitle: "Parent",
 		});
-		sessionState.currentId = "ses_child";
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
 			id: "ses_child",
@@ -233,24 +231,8 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		expectWireValid(ROWS);
 	});
 
-	it("session_forked preserves the versioned row set", () => {
+	it("a deletion leaves membership to the feed's remove", () => {
 		applySessionSnapshot(ROWS, "complete");
-		handleMessage({
-			type: "session_forked",
-			sessionId: "forked",
-			parentId: "root",
-			parentTitle: "Root",
-		});
-		expect(sessionState.sessions.has("forked")).toBe(false);
-		expectWireValid(ROWS);
-	});
-
-	it("session_deleted leaves membership until the feed removes it", () => {
-		applySessionSnapshot(ROWS, "complete");
-		handleMessage({
-			type: "session_deleted",
-			sessionId: "child",
-		} as RelayMessage);
 		expect(sessionState.sessions.has("child")).toBe(true);
 		applySessionChange({ _tag: "remove", id: "child" });
 		expect(sessionState.sessions.has("child")).toBe(false);
@@ -281,43 +263,21 @@ describe("deleting the session being viewed", () => {
 		try {
 			applySessionUpsert({ id: "ses_doomed", title: "Doomed", status: "idle" });
 			sessionState.currentId = "ses_doomed";
-			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
+			getOrCreateSessionSlot("ses_doomed");
 			expect(sessionActivity.has("ses_doomed")).toBe(true);
 
 			// The server deletes it. Deleting the last session leaves no other to
 			// switch us to, so nothing else moves the selection.
-			handleMessage({
-				type: "session_deleted",
-				sessionId: "ses_doomed",
-			} as RelayMessage);
-			applySessionChange({ _tag: "remove", id: "ses_doomed" });
+			applySessionChange({ _tag: "remove", id: "ses_doomed", deleted: true });
 			expect(sessionState.sessions.has("ses_doomed")).toBe(false);
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 
 			// An event that was already in flight when it went.
-			handleMessage({ type: "thinking_stop", sessionId: "ses_doomed" });
+			followSessionBusy("ses_doomed", false);
 			await vi.advanceTimersByTimeAsync(200);
 
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 			expect(sessionState.currentId).toBeNull();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-});
-
-describe("event routing for the session being viewed", () => {
-	it("routes events for the selected session before its row arrives", async () => {
-		vi.useFakeTimers();
-		try {
-			routerState.path = "/s/ses_new";
-			sessionState.currentId = "ses_new";
-			expect(sessionState.sessions.has("ses_new")).toBe(false);
-
-			handleMessage({ type: "thinking_stop", sessionId: "ses_new" });
-			await vi.advanceTimersByTimeAsync(200);
-
-			expect(sessionActivity.has("ses_new")).toBe(true);
 		} finally {
 			vi.useRealTimers();
 		}

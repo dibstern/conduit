@@ -19,8 +19,23 @@
 // retire queued removals; each upsert retains its row version for resume dedup.
 // A dropped bus publication forces a fresh snapshot for sources whose live
 // removal signal may have been lost.
+//
+// Because every subscriber asks the same question, devices watching the same
+// thing ask it with the same window: subscribers of one shareable source share
+// its latest window read, and a subscriber that finds several advances queued
+// asks once, through the newest routed one. Neither waits for anything but the
+// read itself.
 
-import { Effect, Ref, type Schema, Stream } from "effect";
+import { channel } from "node:diagnostics_channel";
+import {
+	Chunk,
+	Deferred,
+	Effect,
+	FiberId,
+	Ref,
+	type Schema,
+	Stream,
+} from "effect";
 import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
 import type { EnvelopeSchema } from "../../../contracts/ws-rpc.js";
 import type { SessionEventBus } from "./session-event-bus.js";
@@ -71,6 +86,17 @@ export interface AdvanceRoute {
  */
 export interface SubscriptionSource<T, E = never> {
 	/**
+	 * Stable name of what `read` asks the store, parameters included
+	 * (`session-detail/<id>`). Diagnostics label each read with it.
+	 */
+	readonly name: string;
+	/**
+	 * Whether `read` is a pure function of the range and the store, keeping no
+	 * per-subscriber state. Subscribers of a source with this name then share
+	 * its latest live window read.
+	 */
+	readonly shareReads?: boolean;
+	/**
 	 * The rows this subscription serves that moved inside `range`, each with the
 	 * version it moved at, and the read-model version the answer is current
 	 * through. Omit `range` for a base read; a source may bound that base and
@@ -83,11 +109,21 @@ export interface SubscriptionSource<T, E = never> {
 			readonly version: number;
 			readonly hasMore?: boolean;
 			readonly cursor?: string;
-			/** Tombstones in a ranged read; a base snapshot represents absence directly. */
+			/**
+			 * Tombstones in a ranged read; a base snapshot represents absence
+			 * directly. `deleted` marks an item that is gone, not only out of
+			 * this collection.
+			 */
 			readonly removed?: readonly {
 				readonly id: string;
 				readonly version: number;
+				readonly deleted?: boolean;
 			}[];
+			/**
+			 * The oldest cursor the tombstones cover. A resume from below it, or
+			 * from above `version` (a reset or restored store), is rebased.
+			 */
+			readonly removedSince?: number;
 		},
 		E
 	>;
@@ -106,15 +142,54 @@ export interface SubscriptionSource<T, E = never> {
 	readonly resume: "catchUp" | "rebase";
 }
 
+/**
+ * One source read, published on `conduit:read-model-read` so a test harness can
+ * count reads per change (conduit-test-y7eo.1). A shared window is published
+ * once, by the subscriber that reads it. Nothing is built or published unless
+ * something subscribes.
+ */
+export interface ReadModelRead {
+	/** The source's {@link SubscriptionSource.name}. */
+	readonly source: string;
+	readonly kind: "base" | "resume" | "replacement" | "window";
+	readonly range?: VersionRange;
+}
+
+const readModelReads = channel("conduit:read-model-read");
+
+/**
+ * The latest live window read per shareable source name, per bus (its version
+ * space), kept while any subscriber of that source is. An answer stays valid
+ * once read: a row that moves again moves past `through`, into the next window
+ * every reader of this one will ask. So it serves everyone asking the same
+ * window, or a narrower one ending there, whether they ask during the read or
+ * after it, and however their streams are paced.
+ */
+const latestWindows = new WeakMap<
+	SessionEventBus,
+	Map<string, { holders: number; latest?: LatestWindow }>
+>();
+
+interface LatestWindow {
+	readonly after: number;
+	readonly through: number;
+	readonly read: Effect.Effect<unknown, unknown>;
+}
+
 const deltaEnvelopes = <T>(
 	rows: readonly VersionedRow<T>[],
-	removed: readonly { readonly id: string; readonly version: number }[],
+	removed: readonly {
+		readonly id: string;
+		readonly version: number;
+		readonly deleted?: boolean;
+	}[],
 ): Envelope<T>[] =>
 	[
-		...removed.map(({ id, version }) => ({
+		...removed.map(({ id, version, deleted }) => ({
 			_tag: "remove" as const,
 			id,
 			sequence: version,
+			...(deleted === true ? { deleted } : {}),
 		})),
 		...rows.map(({ item, version }) => ({
 			_tag: "upsert" as const,
@@ -154,13 +229,92 @@ export const stream = <T, E = never>(options: {
 		Effect.gen(function* () {
 			// Buffers from this instant.
 			const advances = yield* options.bus.subscribeAdvances();
+			const read = (kind: ReadModelRead["kind"], range?: VersionRange) =>
+				Effect.suspend(() => {
+					if (readModelReads.hasSubscribers)
+						readModelReads.publish({
+							source: options.source.name,
+							kind,
+							...(range === undefined ? {} : { range }),
+						} satisfies ReadModelRead);
+					return options.source.read(range);
+				});
+			type SourceRead = Effect.Effect.Success<ReturnType<typeof read>>;
+			const name = options.source.name;
+			const shared =
+				options.source.shareReads === true
+					? yield* Effect.acquireRelease(
+							Effect.sync(() => {
+								const sources =
+									latestWindows.get(options.bus) ??
+									new Map<string, { holders: number; latest?: LatestWindow }>();
+								latestWindows.set(options.bus, sources);
+								const entry = sources.get(name) ?? { holders: 0 };
+								sources.set(name, entry);
+								entry.holders += 1;
+								return entry;
+							}),
+							(entry) =>
+								Effect.sync(() => {
+									entry.holders -= 1;
+									if (entry.holders === 0)
+										latestWindows.get(options.bus)?.delete(name);
+								}),
+						)
+					: undefined;
+			const readWindow = (
+				after: number,
+				through: number,
+			): Effect.Effect<SourceRead, E> => {
+				if (shared === undefined) return read("window", { after, through });
+				// Uninterruptible from the miss until the read settles, so an asker
+				// interrupted after publishing its window cannot strand a joiner.
+				// Only a joiner's wait stays interruptible. A joiner shares the
+				// asker's answer, failure included.
+				return Effect.uninterruptibleMask((restore) =>
+					Effect.suspend(() => {
+						const latest = shared.latest;
+						if (latest?.through === through && latest.after <= after)
+							// Keyed by this source's name, so it holds this source's answer.
+							return restore(latest.read as Effect.Effect<SourceRead, E>).pipe(
+								Effect.map((window) => ({
+									...window,
+									rows: window.rows.filter((row) => row.version > after),
+									removed: (window.removed ?? []).filter(
+										(row) => row.version > after,
+									),
+								})),
+							);
+						const deferred = Deferred.unsafeMake<SourceRead, E>(FiberId.none);
+						const window = { after, through, read: Deferred.await(deferred) };
+						shared.latest = window;
+						// A failure is not kept for later readers.
+						return read("window", { after, through }).pipe(
+							Effect.exit,
+							Effect.tap((exit) => {
+								if (exit._tag === "Failure" && shared.latest === window)
+									delete shared.latest;
+								return Deferred.done(deferred, exit);
+							}),
+							Effect.flatten,
+						);
+					}),
+				);
+			};
 
+			const after = options.resumeFromSequence;
+			const resumed =
+				after !== undefined && options.source.resume === "catchUp"
+					? yield* read("resume", { after })
+					: undefined;
+			// Tombstones cannot cover a cursor older than they are, or one the
+			// store never reached: those get a fresh base instead.
 			const catchUp =
-				options.resumeFromSequence !== undefined &&
-				options.source.resume === "catchUp";
-			const base = yield* options.source.read(
-				catchUp ? { after: options.resumeFromSequence } : undefined,
-			);
+				resumed !== undefined &&
+				after !== undefined &&
+				after >= (resumed.removedSince ?? after) &&
+				after <= resumed.version;
+			const base = catchUp ? resumed : yield* read("base");
 			// The counter the base was read at, not the newest row in it: what the
 			// live arm must not re-read, and what a resuming client resumes from.
 			const seen = yield* Ref.make(base.version);
@@ -179,17 +333,19 @@ export const stream = <T, E = never>(options: {
 					];
 			opening.push({ _tag: "synchronized" as const });
 
-			const live = Stream.mapConcatEffect(
+			// A chunk is every advance already queued, so a burst costs one read.
+			const live = Stream.mapChunksEffect(
 				advances,
-				(advance): Effect.Effect<readonly Envelope<T>[], E> =>
+				(chunk): Effect.Effect<Chunk.Chunk<Envelope<T>>, E> =>
 					Effect.gen(function* () {
 						// A publication gap can hide a deletion, which a range read
-						// cannot recover. Replace the entire view before routing again.
-						if (advance.dropped) {
-							const replacement = yield* options.source.read();
+						// cannot recover. Replace the entire view; read after every
+						// advance in the chunk was published, it covers them all.
+						if (Chunk.some(chunk, (advance) => advance.dropped === true)) {
+							const replacement = yield* read("replacement");
 							yield* Ref.set(seen, replacement.version);
 							yield* Ref.set(baseFloor, replacement.version);
-							return [
+							return Chunk.unsafeFromArray<Envelope<T>>([
 								{
 									_tag: "snapshot",
 									rows: replacement.rows.map(({ item }) => item),
@@ -202,36 +358,39 @@ export const stream = <T, E = never>(options: {
 										: { cursor: replacement.cursor }),
 								},
 								{ _tag: "synchronized" },
-							];
+							]);
 						}
-						// Already accounted for in a coherent base, removals included.
-						if (advance.version <= (yield* Ref.get(baseFloor))) return [];
+						const floor = yield* Ref.get(baseFloor);
+						// The commit seam publishes in commit order. The chunk's window
+						// closes at its newest routed advance and opens where the last
+						// window closed, never past an unrouted advance: a commit that
+						// publishes nothing may still have stamped a row in between.
+						let through: number | undefined;
+						const removed: { id: string; version: number }[] = [];
+						for (const advance of chunk) {
+							// Already accounted for in a coherent base, removals included.
+							if (advance.version <= floor) continue;
+							const route = options.source.route(advance);
+							if (route.moved || route.removed.length > 0) {
+								through = advance.version;
+								for (const id of route.removed)
+									removed.push({ id, version: advance.version });
+							}
+						}
+						if (through === undefined) return Chunk.empty();
 
-						const route = options.source.route(advance);
-						if (!route.moved && route.removed.length === 0) return [];
-
-						const lastSeen = yield* Ref.get(seen);
-						// The commit seam publishes in commit order. A routed advance
-						// closes only its own bounded window.
-						const sequence = advance.version;
-						// A removal also closes this window, so catch up every row before
-						// moving the watermark past it.
-						const window = yield* options.source.read({
-							after: lastSeen,
-							through: advance.version,
-						});
-						yield* Ref.set(seen, sequence);
-
-						// Removals first: within a group the client should drop before it
-						// adds, so a delete and a re-create that land together settle on
-						// the row that survived.
-						return deltaEnvelopes(window.rows, [
-							...route.removed.map((id) => ({
-								id,
-								version: sequence,
-							})),
-							...(window.removed ?? []),
-						]);
+						// A removal also closes the window, so catch up every row before
+						// moving the watermark past it. Removals sort first within a
+						// version: the client should drop before it adds, so a delete
+						// and a re-create that land together settle on the survivor.
+						const window = yield* readWindow(yield* Ref.get(seen), through);
+						yield* Ref.set(seen, through);
+						return Chunk.unsafeFromArray(
+							deltaEnvelopes(window.rows, [
+								...removed,
+								...(window.removed ?? []),
+							]),
+						);
 					}),
 			);
 

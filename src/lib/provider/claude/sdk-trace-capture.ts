@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Raw Claude SDK wire capture — a Runtime Trace, per CONTEXT.md: optional
+// Raw Claude SDK wire capture — a Runtime Trace, per GLOSSARY.md: optional
 // diagnostics that may be absent or disabled without changing behavior.
 //
 // Set CONDUIT_CLAUDE_SDK_CAPTURE=1 (default dir below) or =<dir> to tee every

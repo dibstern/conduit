@@ -26,38 +26,69 @@ async function attachBuildEvidence(testInfo: TestInfo, evidence: object) {
 	});
 }
 
+/** The status values in one /rpc frame (effect-rpc JSON: one message or a batch). */
+function serverStatuses(
+	payload: string,
+): Array<{ requestId: string; buildId: string }> {
+	const parsed = JSON.parse(payload) as unknown;
+	const messages = (Array.isArray(parsed) ? parsed : [parsed]) as Array<{
+		_tag?: string;
+		requestId?: string;
+		values?: Array<{ buildId?: unknown; protocolVersion?: unknown }>;
+	}>;
+	return messages.flatMap((message) =>
+		message._tag === "Chunk"
+			? (message.values ?? []).flatMap((value) =>
+					typeof value.buildId === "string" &&
+					typeof value.protocolVersion === "number"
+						? [{ requestId: String(message.requestId), buildId: value.buildId }]
+						: [],
+				)
+			: [],
+	);
+}
+
+/** One build ID per SubscribeServerStatus subscription: the page's handshakes. */
 function captureBuildHandshakes(page: Page): string[] {
 	const handshakes: string[] = [];
+	let sockets = 0;
 	page.on("websocket", (socket) => {
-		if (new URL(socket.url()).pathname !== "/ws") return;
+		if (new URL(socket.url()).pathname !== "/rpc") return;
+		const socketId = sockets++;
+		const seen = new Set<string>();
 		socket.on("framereceived", ({ payload }) => {
-			const message = JSON.parse(String(payload)) as {
-				type: string;
-				buildId?: string;
-			};
-			if (message.type === "protocol_version" && message.buildId)
-				handshakes.push(message.buildId);
+			for (const { requestId, buildId } of serverStatuses(String(payload))) {
+				const key = `${socketId}:${requestId}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				handshakes.push(buildId);
+			}
 		});
 	});
 	return handshakes;
 }
 
 async function readServerBuildId(baseUrl: string): Promise<string> {
-	const socket = new WebSocket(
-		`${baseUrl.replace("http:", "ws:")}/ws?p=build-id-test`,
-	);
+	const socket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/rpc`);
 	try {
 		return await new Promise<string>((resolve, reject) => {
-			// Other relay bootstrap messages can precede the handshake.
+			socket.once("open", () =>
+				socket.send(
+					JSON.stringify({
+						_tag: "Request",
+						id: "1",
+						tag: "SubscribeServerStatus",
+						payload: {},
+						headers: [],
+					}),
+				),
+			);
 			socket.on("message", (data) => {
-				const message = JSON.parse(String(data)) as {
-					type: string;
-					buildId: string;
-				};
-				if (message.type === "protocol_version") resolve(message.buildId);
+				const [status] = serverStatuses(String(data));
+				if (status) resolve(status.buildId);
 			});
 			socket.once("error", reject);
-			socket.once("close", () => reject(new Error("No build handshake")));
+			socket.once("close", () => reject(new Error("No server status")));
 		});
 	} finally {
 		if (socket.readyState !== WebSocket.CLOSED) {
@@ -113,8 +144,12 @@ const test = base.extend<{
 				CLAUDE_CONFIG_DIR: join(root, "claude"),
 				CONDUIT_CONFIG_DIR: join(root, "config"),
 			};
-			// Never inherit a caller's override for the normal matching case.
+			// Never inherit a caller's override for the normal matching case, nor
+			// its service supervision: a supervised daemon offers a restart, and
+			// the server-update banner then hides the build-mismatch one.
 			delete env["CONDUIT_SERVER_BUILD_ID"];
+			delete env["CONDUIT_SERVICE"];
+			delete env["XPC_SERVICE_NAME"];
 			if (buildId) env["CONDUIT_SERVER_BUILD_ID"] = buildId;
 			child = fork(
 				resolve("dist/test/e2e/helpers/build-id-daemon.js"),
@@ -174,7 +209,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
 	await page.locator(".connect-overlay").waitFor({ state: "detached" });
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/s\//);
+	await expect(page).toHaveURL(/\/new\b/);
 	const input = page.locator("#input");
 	await expect(input).toBeVisible();
 	await page.evaluate(async () => {
@@ -196,7 +231,7 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	const draft = "Unsent draft typed immediately before a build mismatch";
 	await input.fill("Earlier unsent draft");
 	await expect(
-		page.getByText("Conduit was updated. Saving your draft and reloading…"),
+		page.getByText("Saving your draft and reloading…"),
 	).toBeVisible();
 	await page.waitForFunction(
 		() => navigator.serviceWorker.controller?.scriptURL.endsWith("/sw.js"),
@@ -212,9 +247,11 @@ test("mismatching builds reload once, preserve the latest composer draft, and re
 	await expect(
 		page.locator(".banner-text", { hasText: "different builds" }),
 	).toBeVisible();
+	// Before and after the reload. The reloaded page subscribes again when it
+	// attaches its project, so the count can exceed two; reloads stays one.
 	await expect
 		.poll(() => handshakes.filter((id) => id === buildB).length)
-		.toBe(2);
+		.toBeGreaterThanOrEqual(2);
 	await expect
 		.poll(() => page.evaluate(() => caches.keys()))
 		.not.toContain("conduit-legacy-shell");

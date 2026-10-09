@@ -26,32 +26,21 @@ import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-q
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
 
 function makeWebSocketHandler() {
-	const broadcast = vi.fn<(message: RelayMessage) => void>();
 	const handler: WebSocketHandlerShape = {
-		broadcast,
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => undefined),
 		getClientsForSession: vi.fn(() => []),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 0),
-		getClientIds: vi.fn(() => []),
-		attach: vi.fn(() => () => {}),
+		registerSessionViewer: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
 	};
-	return { handler, broadcast };
+	return { handler };
 }
 
 async function* makeQuery(
@@ -488,7 +477,6 @@ describe("SessionTitleService", () => {
 				expect(log.warn).toHaveBeenCalledWith(
 					"SESSION_TITLE_GENERATION_FAILED sessionId=session-1 reason=SDK unavailable",
 				);
-				expect(ws.broadcast).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
@@ -548,9 +536,7 @@ describe("SessionTitleService", () => {
 							try {
 								Effect.runSync(Deferred.succeed(queryStarted, undefined));
 								await new Promise<void>((resolve) => {
-									abortSignal?.addEventListener("abort", () => resolve(), {
-										once: true,
-									});
+									abortSignal?.addEventListener("abort", () => resolve(), {});
 								});
 							} finally {
 								Effect.runSync(Deferred.succeed(queryFinalized, undefined));

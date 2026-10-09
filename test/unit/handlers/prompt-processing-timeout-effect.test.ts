@@ -3,6 +3,7 @@ import { Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
@@ -45,16 +46,10 @@ const config = {
 
 function makeWsHandler() {
 	return {
-		broadcast: vi.fn(),
-		sendTo: vi.fn(),
 		setClientSession: vi.fn(),
 		getClientSession: vi.fn(() => "session-1"),
 		getClientsForSession: vi.fn(() => ["client-1"]),
-		sendToSession: vi.fn(),
-		broadcastPerSessionEvent: vi.fn(),
-		markClientBootstrapped: vi.fn(),
-		getClientCount: vi.fn(() => 1),
-		getClientIds: vi.fn(() => ["client-1"]),
+		registerSessionViewer: vi.fn(() => () => {}),
 		attach: vi.fn(() => () => {}),
 		close: vi.fn(),
 		drain: vi.fn(async () => undefined),
@@ -73,6 +68,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
@@ -124,6 +120,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			});
 			const persistence = makePersistenceEffectLayer(":memory:");
 			const baseLayer = Layer.mergeAll(
+				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),

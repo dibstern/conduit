@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudeEventPersistEffectError } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
-import type { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
+import type {
+	ClaudeProviderInstance,
+	ClaudeProviderInstanceDeps,
+} from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -28,6 +31,10 @@ import type {
 	ModelInfo,
 	SendTurnInput,
 } from "../../../../src/lib/provider/types.js";
+import {
+	provisionalLimitReply,
+	provisionalUsageLimitTurn,
+} from "../../../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { getClaudeRuntimeSessionForTest } from "../../../helpers/claude-runtime-state.js";
 import {
@@ -128,6 +135,195 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
+	});
+
+	it.each([
+		"rejected",
+		"assistant",
+		"result",
+		"non-limit",
+		"assistant-first",
+		"late-notice",
+	] as const)("classifies the independent %s signal before persisting synthetic output", async (signal) => {
+		const fixture = provisionalUsageLimitTurn("sdk-limited", {
+			type: "user",
+			message: { role: "user", content: "Finish the original request" },
+			parent_tool_use_id: null,
+		});
+		const messages = fixture.events.flatMap((message): SDKMessage[] => {
+			if (message.type === "rate_limit_event")
+				return signal === "rejected" ||
+					signal === "assistant-first" ||
+					signal === "late-notice"
+					? [message]
+					: [];
+			if (message.type === "assistant" && message.error === "rate_limit") {
+				if (
+					signal === "assistant" ||
+					signal === "assistant-first" ||
+					signal === "late-notice"
+				)
+					return [message];
+				const { error: _error, ...snapshot } = message;
+				return [snapshot];
+			}
+			if (
+				message.type === "result" &&
+				signal !== "result" &&
+				signal !== "assistant-first" &&
+				signal !== "late-notice"
+			) {
+				const { terminal_reason: _reason, ...result } = message;
+				return [{ ...result, is_error: signal !== "non-limit" }];
+			}
+			return [message];
+		});
+		if (signal === "assistant-first" || signal === "late-notice") {
+			const [notice] = messages.splice(
+				messages.findIndex((message) => message.type === "rate_limit_event"),
+				1,
+			);
+			if (!notice) throw new Error("No rejected notice in fixture");
+			messages.splice(
+				signal === "assistant-first" ? messages.length - 1 : messages.length,
+				0,
+				notice,
+			);
+		}
+		const sink = createMockEventSink();
+		let consumed = false;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createQueryFromGenerator(
+					(async function* () {
+						yield* messages;
+						consumed = true;
+					})(),
+				),
+		});
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "limited",
+					inputId: "cut-off-user",
+					instanceId: "account-1",
+					eventSink: sink,
+				}),
+			),
+		);
+		await waitForAssertion(() => expect(consumed).toBe(true));
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(result.status).toBe("completed");
+		expect(emitted.some((event) => event.type === "tool.completed")).toBe(true);
+		const limits = emitted.filter(
+			(event) => event.type === "session.usage_limited",
+		);
+		if (signal === "non-limit") {
+			expect(limits).toHaveLength(0);
+			expect(JSON.stringify(emitted)).toContain(provisionalLimitReply);
+		} else {
+			expect(limits).toHaveLength(signal === "late-notice" ? 2 : 1);
+			if (signal === "late-notice")
+				expect(limits[1]?.data).toEqual(limits[0]?.data);
+			expect(limits[0]?.data).toMatchObject({
+				instanceId: "account-1",
+				rateLimitType:
+					signal === "rejected" || signal === "assistant-first"
+						? "seven_day"
+						: "unknown",
+				cutOffMessageId: "cut-off-user",
+			});
+			expect(JSON.stringify(emitted)).not.toContain(provisionalLimitReply);
+		}
+		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it.each([
+		"end",
+		"throw",
+	] as const)("keeps ordinary synthetic output if the SDK %s without a result", async (termination) => {
+		const fixture = provisionalUsageLimitTurn("sdk-synthetic", {
+			type: "user",
+			message: { role: "user", content: "Run the command" },
+			parent_tool_use_id: null,
+		});
+		const messages = fixture.events.flatMap((message): SDKMessage[] => {
+			if (message.type === "result" || message.type === "rate_limit_event")
+				return [];
+			if (message.type === "assistant") {
+				const { error: _error, ...snapshot } = message;
+				return [snapshot];
+			}
+			return [message];
+		});
+		const sink = createMockEventSink();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createQueryFromGenerator(
+					(async function* () {
+						yield* messages;
+						if (termination === "throw")
+							throw new Error("SDK connection lost after synthetic output");
+					})(),
+				),
+		});
+		await Effect.runPromise(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "synthetic",
+						inputId: "command-user",
+						instanceId: "account-1",
+						eventSink: sink,
+					}),
+				)
+				.pipe(Effect.exit),
+		);
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(
+			emitted.filter((event) => event.type === "session.usage_limited"),
+		).toHaveLength(0);
+		expect(JSON.stringify(emitted)).toContain(provisionalLimitReply);
+		await Effect.runPromise(instance.shutdownEffect());
+	});
+
+	it("classifies an assistant limit when the SDK closes before a result", async () => {
+		const fixture = provisionalUsageLimitTurn("sdk-limited", {
+			type: "user",
+			message: { role: "user", content: "Finish the original request" },
+			parent_tool_use_id: null,
+		});
+		const sink = createMockEventSink();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () =>
+				createMockQuery(
+					fixture.events.filter(
+						(message) =>
+							message.type !== "result" && message.type !== "rate_limit_event",
+					),
+				),
+		});
+		await expect(
+			Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "limited",
+						inputId: "cut-off-user",
+						instanceId: "account-1",
+						eventSink: sink,
+					}),
+				),
+			),
+		).rejects.toThrow("SDK stream ended without result");
+		const emitted = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+		expect(
+			emitted.filter((event) => event.type === "session.usage_limited"),
+		).toHaveLength(1);
+		expect(JSON.stringify(emitted)).not.toContain(provisionalLimitReply);
+		await Effect.runPromise(instance.shutdownEffect());
 	});
 
 	it("first turn creates a new session, calls query(), and resolves with TurnResult", async () => {
@@ -1818,7 +2014,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}
 	});
 
-	it("injects prior conversation transcript into the restarted agent query", async () => {
+	it("sends the server-prepared handoff prompt verbatim when the agent changes", async () => {
 		const oldQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
 				string,
@@ -1853,80 +2049,48 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 
+		const preparedPrompt =
+			"Earlier investigation found the config bug.\n\nApply the same fix to the other file.";
+		const handoff = { included: 2, omitted: 1, tokens: 29 };
 		const secondResult = await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-agent-history",
 					inputId: "turn-2",
-					prompt: "Apply the same fix to the other file.",
+					prompt: preparedPrompt,
+					handoff,
 					agent: "Plan",
 					eventSink: sink,
-					history: [
-						{
-							role: "user",
-							content: "Find the config bug.",
-							parts: [{ type: "text", text: "Find the config bug." }],
-						},
-						{
-							role: "assistant",
-							content: "I will inspect the file.",
-							parts: [
-								{ type: "text", text: "I will inspect the file." },
-								{
-									type: "tool_use",
-									id: "toolu_1",
-									name: "Read",
-									input: { file_path: "/tmp/config.ts" },
-								},
-								{
-									type: "tool_result",
-									tool_use_id: "toolu_1",
-									content: "export const broken = true;",
-								},
-							],
-						},
-					],
 				}),
 			),
 		);
 
 		expect(secondResult.status).toBe("completed");
+		expect(secondResult.handoff).toEqual(handoff);
 		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
 		const promptText = await readFirstPromptText(
 			queryFactorySpy.mock.calls[1]?.[0],
 		);
 
-		expect(promptText.startsWith("<prior-conversation-transcript>")).toBe(true);
-		expect(promptText).toContain(
-			"The following is the conversation history before you took over this session.",
-		);
-		expect(promptText).toContain("[user]\nFind the config bug.");
-		expect(promptText).toContain("[assistant]\nI will inspect the file.");
-		expect(promptText).toContain("[tool-call:Read id=toolu_1]");
-		expect(promptText).toContain('{"file_path":"/tmp/config.ts"}');
-		expect(promptText).toContain(
-			"[tool-result id=toolu_1]\nexport const broken = true;",
-		);
-		expect(promptText.indexOf("[user]")).toBeLessThan(
-			promptText.indexOf("[assistant]"),
-		);
-		expect(promptText.indexOf("[tool-call:Read id=toolu_1]")).toBeLessThan(
-			promptText.indexOf("[tool-result id=toolu_1]"),
-		);
-		expect(
-			promptText.endsWith("\n\nApply the same fix to the other file."),
-		).toBe(true);
+		expect(promptText).toBe(preparedPrompt);
+		expect(promptText).not.toContain("[tool-call:");
+		expect(promptText).not.toContain("[tool-result");
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("does not rewrite the restarted agent query when history is empty", async () => {
-		const oldQuery = createMockQuery([
-			makeSuccessResult({ session_id: "sdk-session-1" } as Record<
-				string,
-				unknown
-			>),
-		]);
+	it("restarts an idle query when the server requires a fresh native session", async () => {
+		let releaseOldQuery: (() => void) | undefined;
+		const oldQueryFinished = new Promise<void>((resolve) => {
+			releaseOldQuery = resolve;
+		});
+		const oldQuery = createQueryFromGenerator(
+			(async function* () {
+				yield makeSuccessResult({ session_id: "sdk-session-1" });
+				await oldQueryFinished;
+			})(),
+		);
+		vi.mocked(oldQuery.close).mockImplementation(() => releaseOldQuery?.());
 		const newQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-2" } as Record<
 				string,
@@ -1960,9 +2124,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					sessionId: "session-agent-no-history",
 					inputId: "turn-2",
 					prompt: "Fresh agent prompt.",
-					agent: "Plan",
+					agent: "Explore",
+					startFreshNativeSession: true,
 					eventSink: sink,
-					history: [],
 				}),
 			),
 		);
@@ -1971,6 +2135,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			queryFactorySpy.mock.calls[1]?.[0],
 		);
 		expect(promptText).toBe("Fresh agent prompt.");
+		expect(queryFactorySpy).toHaveBeenCalledTimes(2);
+		expect(oldQuery.close).toHaveBeenCalledOnce();
+		expect(queryFactorySpy.mock.calls[1]?.[0]?.options.resume).toBeUndefined();
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
@@ -2056,7 +2223,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("resume uses SDK resume option when providerState has resumeSessionId", async () => {
+	it("resume uses the server-resolved SDK session", async () => {
 		const resultMsg = makeSuccessResult();
 		const mockQuery = createMockQuery([resultMsg]);
 		queryFactorySpy = vi.fn(() => mockQuery);
@@ -2068,7 +2235,13 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-resume",
-			providerState: { resumeSessionId: "prev-sdk-session-123" },
+			resumeSessionId: "prev-sdk-session-123",
+			nativeThread: {
+				configDir: "/claude/resume",
+				resumeSessionId: "legacy-native-thread-session",
+				firstSequence: 12,
+				deliveredThrough: 40,
+			},
 		});
 
 		await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3579,7 +3752,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(eventTypes).toContain("turn.error");
 	});
 
-	it("sendTurn evicts stopped session and creates fresh query", async () => {
+	it("sendTurn evicts stopped session and uses the server-resolved resume cursor", async () => {
 		const result1 = makeSuccessResult();
 		const result2 = makeSuccessResult({ total_cost_usd: 0.09 } as Record<
 			string,
@@ -3629,6 +3802,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			sessionId: "session-evict",
 			inputId: "turn-2",
 			prompt: "Second",
+			resumeSessionId: "server-resolved-resume",
 			eventSink: sink,
 		});
 		const r2 = await Effect.runPromise(instance.sendTurnEffect(input2));
@@ -3641,10 +3815,10 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			(queryFactorySpy.mock.calls[1]?.[0]?.options as Record<string, unknown>)[
 				"resume"
 			],
-		).toBe("sdk-resume-after-stop");
+		).toBe("server-resolved-resume");
 	});
 
-	it("clears resumeSessionId when stream error matches 'Invalid session'", async () => {
+	it("keeps resumeSessionId when an unrelated error mentions an expired session", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 		const gen = (async function* () {
 			throw new Error("Invalid session: session has expired or been deleted");
@@ -3688,25 +3862,34 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-stale-resume",
 			eventSink: sink,
-			providerState: { resumeSessionId: "stale-sdk-session-xyz" },
+			resumeSessionId: "stale-sdk-session-xyz",
+			nativeThread: {
+				resumeSessionId: "stale-sdk-session-xyz",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 
 		expect(result.status).toBe("error");
 
-		// Verify the resume cursor was cleared on the session context
+		// Generic session errors are not the CLI's stale-resume diagnostic.
 		const ctx = getClaudeRuntimeSessionForTest<
 			ClaudeSessionContext & { resumeSessionId: string | undefined }
 		>(instance, "session-stale-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx?.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBe("stale-sdk-session-xyz");
 	});
 
-	it("clears resumeSessionId for 'session not found' variant", async () => {
+	it.each([
+		"Session not found",
+		"Claude Code process exited with code 1\nStderr output:\nTool session not found",
+		"stderr: No conversation found with session ID: dead-sdk-session-abc",
+	])("keeps resumeSessionId for unrelated stderr: %s", async (message) => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
 		const gen = (async function* () {
-			throw new Error("Session not found");
+			throw new Error(message);
 		})();
 
 		const mockQuery = Object.assign(gen, {
@@ -3747,7 +3930,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-not-found-resume",
 			eventSink: sink,
-			providerState: { resumeSessionId: "dead-sdk-session-abc" },
+			resumeSessionId: "dead-sdk-session-abc",
+			nativeThread: {
+				resumeSessionId: "dead-sdk-session-abc",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3758,8 +3946,166 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			ClaudeSessionContext & { resumeSessionId: string | undefined }
 		>(instance, "session-not-found-resume");
 		expect(ctx).toBeDefined();
-		expect(ctx?.resumeSessionId).toBeUndefined();
+		expect(ctx?.resumeSessionId).toBe("dead-sdk-session-abc");
 	});
+
+	// Both SDK result errors and iterator failures must distinguish startup from
+	// a query that has already emitted init. Only startup rejection may retry.
+	it.each([
+		[false, false],
+		[false, true],
+		[true, false],
+		[true, true],
+	])("classifies stale resume only before init, initialized=%s result=%s", async (initialized, asResult) => {
+		const message = "No conversation found with session ID: stale-sdk-session";
+		const gen = (async function* (): AsyncGenerator<SDKMessage> {
+			if (initialized)
+				yield {
+					type: "system",
+					subtype: "init",
+					session_id: "stale-sdk-session",
+					uuid: "00000000-0000-0000-0000-000000000001",
+					cwd: workspace,
+					apiKeySource: "none",
+					claude_code_version: "test",
+					tools: [],
+					mcp_servers: [],
+					model: "claude-sonnet-4-5",
+					permissionMode: "default",
+					slash_commands: [],
+					output_style: "default",
+					skills: [],
+					plugins: [],
+				};
+			if (asResult) yield makeErrorResult({ errors: [message] });
+			else throw new Error(message);
+		})();
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: () => createQueryFromGenerator(gen),
+		});
+		const sink = createMockEventSink();
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					resumeSessionId: "stale-sdk-session",
+					handoff: {
+						included: 1,
+						omitted: 0,
+						firstMessageIncluded: false,
+						tokens: 10,
+					},
+					eventSink: sink,
+				}),
+			),
+		);
+		expect(result.status).toBe("error");
+		if (initialized) {
+			expect(result).not.toHaveProperty("nativeResumeRejected");
+			expect(sink.push).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "turn.error" }),
+			);
+		} else {
+			expect(result).toHaveProperty("nativeResumeRejected", true);
+			expect(sink.push).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "turn.error" }),
+			);
+		}
+	});
+
+	it("keeps permission and question replies bound during a native-resume fallback", async () => {
+		const permissions: unknown[] = [];
+		const queryFactory = ({
+			options,
+		}: Parameters<
+			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
+		>[0]) =>
+			createQueryFromGenerator(
+				(async function* (): AsyncGenerator<SDKMessage> {
+					if (options?.resume)
+						throw new Error(
+							`No conversation found with session ID: ${options.resume}`,
+						);
+					if (!options?.canUseTool) throw new Error("Missing canUseTool");
+					const signal = new AbortController().signal;
+					permissions.push(
+						await options.canUseTool(
+							"Bash",
+							{ command: "pwd" },
+							{
+								signal,
+								toolUseID: "fallback-tool",
+								requestId: "fallback-permission",
+							},
+						),
+					);
+					permissions.push(
+						await options.canUseTool(
+							"AskUserQuestion",
+							{
+								questions: [
+									{
+										question: "Continue?",
+										header: "Next",
+										options: [{ label: "Yes", description: "Continue" }],
+									},
+								],
+							},
+							{
+								signal,
+								toolUseID: "fallback-question",
+								requestId: "fallback-question",
+							},
+						),
+					);
+					yield makeSuccessResult();
+				})(),
+			);
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory,
+		});
+		const sink = createMockEventSink();
+		sink.requestQuestion = vi.fn(() => Effect.succeed({ "0": "Yes" }));
+		const input = makeBaseSendTurnInput({
+			inputId: "resume-command",
+			commandAttempt: 1,
+			eventSink: sink,
+		});
+		const rejected = await Effect.runPromise(
+			instance.sendTurnEffect({
+				...input,
+				resumeSessionId: "stale-sdk-session",
+				handoff: {
+					included: 1,
+					omitted: 0,
+					firstMessageIncluded: false,
+					tokens: 10,
+				},
+			}),
+		);
+		expect(rejected.status).toBe("error");
+		const fallback = await Effect.runPromise(
+			instance.sendTurnEffect({
+				...input,
+				startFreshNativeSession: true,
+				nativeResumeFallback: true,
+			}),
+		);
+		expect(fallback.status).toBe("completed");
+		expect(sink.requestPermission).toHaveBeenCalledOnce();
+		expect(sink.requestQuestion).toHaveBeenCalledOnce();
+		expect(permissions).toEqual([
+			{ behavior: "allow", updatedInput: { command: "pwd" } },
+			{
+				behavior: "allow",
+				updatedInput: {
+					questions: expect.any(Array),
+					answers: { "Continue?": "Yes" },
+				},
+			},
+		]);
+	}, 5000);
 
 	it("does NOT clear resumeSessionId for unrelated errors", async () => {
 		// biome-ignore lint/correctness/useYield: intentionally throws before yielding
@@ -3805,7 +4151,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-unrelated-err",
 			eventSink: sink,
-			providerState: { resumeSessionId: "valid-sdk-session-123" },
+			resumeSessionId: "valid-sdk-session-123",
+			nativeThread: {
+				resumeSessionId: "valid-sdk-session-123",
+				firstSequence: 3,
+				deliveredThrough: 8,
+			},
 		});
 
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
@@ -3861,7 +4212,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const sink = createMockEventSink();
-		// No resumeSessionId in providerState
+		// No native thread has been saved.
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-no-cursor",
 			eventSink: sink,

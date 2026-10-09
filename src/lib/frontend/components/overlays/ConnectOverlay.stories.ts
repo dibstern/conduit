@@ -6,7 +6,7 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { wsState } from "../../stores/ws.svelte.js";
+import { connectionState } from "../../transport/connection-status.svelte.js";
 import ConnectOverlay from "./ConnectOverlay.svelte";
 
 const meta = {
@@ -19,10 +19,10 @@ const meta = {
 		docs: { story: { inline: false, height: "400px" } },
 	},
 	beforeEach: () => {
-		wsState.status = "";
-		wsState.statusText = "";
-		wsState.relayStatus = undefined;
-		wsState.relayError = undefined;
+		connectionState.status = "";
+		connectionState.statusText = "";
+		connectionState.relayStatus = undefined;
+		connectionState.relayError = undefined;
 	},
 } satisfies Meta<typeof ConnectOverlay>;
 
@@ -40,8 +40,9 @@ export const Connecting: Story = {};
  */
 export const RelayError: Story = {
 	beforeEach: () => {
-		wsState.relayStatus = "error";
-		wsState.relayError = "Failed to bind port 4096: address already in use";
+		connectionState.relayStatus = "error";
+		connectionState.relayError =
+			"Failed to bind port 4096: address already in use";
 	},
 };
 
@@ -50,7 +51,7 @@ export const RelayError: Story = {
  */
 export const RelayRegistering: Story = {
 	beforeEach: () => {
-		wsState.relayStatus = "registering";
+		connectionState.relayStatus = "registering";
 	},
 };
 

@@ -53,6 +53,8 @@
 	 */
 	const TONE_CLASSES = {
 		muted: { rest: "text-text-muted", hover: "hover:text-text" },
+		// A link set in muted text, one step brighter than the words around it.
+		secondary: { rest: "text-text-secondary", hover: "hover:text-text" },
 		dimmer: { rest: "text-text-dimmer", hover: "hover:text-text" },
 		accent: { rest: "text-accent", hover: "hover:text-accent/80" },
 		inherit: { rest: "text-current", hover: "hover:opacity-80" },

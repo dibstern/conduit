@@ -185,9 +185,53 @@ describe("showToast", () => {
 		expect(uiState.toasts).toHaveLength(1);
 		const firstToast = uiState.toasts[0];
 		assert.exists(firstToast, "expected toast");
-		expect(firstToast.message).toBe("Hello");
+		expect(firstToast.title).toBe("Hello");
 		expect(firstToast.variant).toBe("default");
 		expect(firstToast.duration).toBe(7000);
+		expect(firstToast.actions).toEqual([]);
+	});
+
+	it("turns a legacy inline action into the card's primary action", () => {
+		const run = vi.fn();
+		showToast("Moved “Fix nav” to Settled", {
+			action: { label: "Undo", run },
+		});
+		expect(uiState.toasts[0]?.actions).toEqual([
+			{ label: "Undo", run, kind: "primary" },
+		]);
+	});
+
+	it("stores a titled card with its body, emphasis and actions", () => {
+		const undo = vi.fn();
+		showToast({
+			title: "Switched to personal",
+			body: "personal has 77% of its week left.",
+			emphasis: "personal",
+			actions: [
+				{ label: "Undo", run: undo, kind: "primary" },
+				{ label: "Later", kind: "dismiss" },
+			],
+		});
+		const toast = uiState.toasts[0];
+		assert.exists(toast, "expected toast");
+		expect(toast).toMatchObject({
+			title: "Switched to personal",
+			body: "personal has 77% of its week left.",
+			emphasis: "personal",
+			variant: "default",
+			duration: 7000,
+		});
+		expect(toast.actions.map((action) => action.kind)).toEqual([
+			"primary",
+			"dismiss",
+		]);
+	});
+
+	it("auto-dismisses a card after its duration", () => {
+		showToast({ title: "Saved", variant: "warn", duration: 500 });
+		expect(uiState.toasts[0]?.variant).toBe("warn");
+		vi.advanceTimersByTime(500);
+		expect(uiState.toasts).toHaveLength(0);
 	});
 
 	it("accepts custom options", () => {
@@ -204,6 +248,15 @@ describe("showToast", () => {
 		vi.advanceTimersByTime(1000);
 		expect(uiState.toasts).toHaveLength(0);
 	});
+
+	it("keeps only the two newest toasts, and the survivors still expire", () => {
+		showToast("A");
+		showToast("B");
+		showToast("C");
+		expect(uiState.toasts.map((toast) => toast.title)).toEqual(["B", "C"]);
+		vi.advanceTimersByTime(7000);
+		expect(uiState.toasts).toHaveLength(0);
+	});
 });
 
 describe("dismissToast", () => {
@@ -217,7 +270,7 @@ describe("dismissToast", () => {
 		expect(uiState.toasts).toHaveLength(1);
 		const remainingToast = uiState.toasts[0];
 		assert.exists(remainingToast, "expected remaining toast");
-		expect(remainingToast.message).toBe("B");
+		expect(remainingToast.title).toBe("B");
 	});
 });
 

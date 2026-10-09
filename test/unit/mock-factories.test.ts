@@ -9,12 +9,9 @@ describe("mock-factories", () => {
 	describe("createMockHandlerDeps", () => {
 		it("returns a fully-typed HandlerDeps object", () => {
 			const deps = createMockHandlerDeps();
-			expect(deps.wsHandler.broadcast).toBeDefined();
-			expect(deps.wsHandler.sendTo).toBeDefined();
 			expect(deps.wsHandler.setClientSession).toBeDefined();
 			expect(deps.wsHandler.getClientSession).toBeDefined();
 			expect(deps.wsHandler.getClientsForSession).toBeDefined();
-			expect(deps.wsHandler.sendToSession).toBeDefined();
 			expect(deps.client).toBeDefined();
 			expect(deps.sessionMgr).toBeDefined();
 			expect(deps.ptyManager).toBeDefined();
@@ -30,18 +27,15 @@ describe("mock-factories", () => {
 		});
 
 		it("accepts sub-object overrides", () => {
-			const customBroadcast = vi.fn();
+			const getClientsForSession = vi.fn(() => ["rpc-viewer"]);
 			const deps = createMockHandlerDeps({
 				wsHandler: {
-					broadcast: customBroadcast,
-					sendTo: vi.fn(),
 					setClientSession: vi.fn(),
 					getClientSession: vi.fn(),
-					getClientsForSession: vi.fn(),
-					sendToSession: vi.fn(),
+					getClientsForSession,
 				},
 			});
-			expect(deps.wsHandler.broadcast).toBe(customBroadcast);
+			expect(deps.wsHandler.getClientsForSession).toBe(getClientsForSession);
 		});
 	});
 
@@ -50,8 +44,6 @@ describe("mock-factories", () => {
 			const deps = createMockSSEWiringDeps();
 			expect(deps.translator.translate).toBeDefined();
 			expect(deps.translator.reset).toBeDefined();
-			expect(deps.wsHandler.broadcast).toBeDefined();
-			expect(deps.wsHandler.sendToSession).toBeDefined();
 			expect(deps.log).toBeDefined();
 		});
 
