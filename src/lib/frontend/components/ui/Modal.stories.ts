@@ -43,7 +43,10 @@ export const EscapeRestoresFocus: Story = {
 			).toBe(true);
 		});
 
+		// Modal is a native <dialog>: a real Escape fires its cancel event, but a
+		// synthetic keypress never reaches the browser's handler, so send both.
 		await userEvent.keyboard("{Escape}");
+		dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
 
 		await waitFor(() => {
 			expect(body.queryByRole("dialog")).not.toBeInTheDocument();
