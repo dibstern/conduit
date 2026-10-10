@@ -22,6 +22,7 @@ import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import { formatErrorDetail } from "../../errors.js";
 import {
 	listProjectWorktrees,
 	realWorkspacePath,
@@ -387,7 +388,7 @@ export const sessionsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `CreateSession failed: ${String(error)}`,
+						message: `CreateSession failed: ${formatErrorDetail(error)}`,
 					}),
 				),
 			),

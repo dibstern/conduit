@@ -229,9 +229,12 @@ describe("OpenCode Instances use", () => {
 			message,
 		};
 		expect(error).toBeDefined();
-		// The relay wraps the tagged OpenCodeUnavailable in SessionManagerError;
-		// the browser sees the operation failure, not a timeout.
+		// The browser retains the actionable cause through SessionManagerError.
 		expect(message).toContain("CreateSession failed");
+		expect(message).toContain(unreachable.id);
+		expect(message).toContain(`http://127.0.0.1:${closedPort}`);
+		expect(message).toContain("unreachable");
+		expect(message).toMatch(/refused|fetch failed|connect|ECONNREFUSED/i);
 		expect(message).not.toContain("Timeout");
 		expect(elapsedMs).toBeLessThan(15_000);
 		// The browser socket is still usable after the failure.
