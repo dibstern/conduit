@@ -84,6 +84,58 @@ function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 	);
 }
 
+/** Called inside the append transaction by both Claude persistence and runtime ingestion. */
+export const makeAppendEventsWithClaudeTurnCosts = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const eventStore = yield* EventStoreEffectTag;
+
+	return (events: readonly CanonicalEvent[]) =>
+		Effect.gen(function* () {
+			if (
+				!events.some(
+					(event) =>
+						event.provider === "claude" &&
+						event.type === "turn.completed" &&
+						event.data.providerCostTotalUsd !== undefined,
+				)
+			)
+				return yield* eventStore.appendBatch(events);
+
+			const stored: StoredEvent[] = [];
+			for (const event of events) {
+				let normalized = event;
+				if (
+					event.provider === "claude" &&
+					event.type === "turn.completed" &&
+					event.data.providerCostTotalUsd !== undefined
+				) {
+					const total = event.data.providerCostTotalUsd;
+					const [previous] = yield* sql<{ total: number }>`
+						SELECT json_extract(data, '$.providerCostTotalUsd') AS total
+						FROM events
+						WHERE session_id = ${event.sessionId} AND type = 'turn.completed'
+							AND provider = 'claude'
+							AND json_extract(data, '$.providerSessionId') = ${event.data.providerSessionId ?? null}
+							AND json_extract(data, '$.providerCostTotalUsd') IS NOT NULL
+						ORDER BY sequence DESC LIMIT 1`;
+					const delta = total - (previous?.total ?? 0);
+					if (delta < 0) {
+						yield* Effect.logWarning(
+							`Claude cost total went backwards: session=${event.sessionId} providerSessionId=${event.data.providerSessionId} previous=${previous?.total ?? 0} total=${total}`,
+						);
+					}
+					normalized = {
+						...event,
+						data: { ...event.data, cost: Math.max(0, delta) },
+					};
+				}
+				// Append before looking up the next total, including within one batch.
+				stored.push(...(yield* eventStore.appendBatch([normalized])));
+			}
+			return stored;
+		});
+});
+
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 
@@ -165,6 +217,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 	const commitAndSignal = yield* makeCommitAndSignal;
 	const eventStore = yield* EventStoreEffectTag;
+	const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 
 	const mapPersistError =
 		(operation: string) =>
@@ -186,7 +239,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						"existing-session",
 					)
 				: requireSession(event.sessionId, "persistEvent", "existing-session");
-			yield* commitAndSignal([event], options);
+			yield* commitAndSignal.write(
+				(project) => Effect.flatMap(appendEvents([event]), project),
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
@@ -226,7 +282,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
 				yield* requireSession(sessionId, "persistEvents", "existing-session");
 			}
-			yield* commitAndSignal(events, options);
+			yield* commitAndSignal.write(
+				(project) => Effect.flatMap(appendEvents(events), project),
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
 	const persistUserMessage = (

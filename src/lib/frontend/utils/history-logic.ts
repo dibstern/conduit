@@ -371,7 +371,10 @@ export function historyToChatMessages(
 				result.push({
 					type: "result",
 					uuid: uuidFor ? uuidFor(msg.id, "result") : generateUuid(),
-					...(msg.cost != null && { cost }),
+					// The projection includes all completions, including unloaded steps.
+					...((msg.turnCost ?? msg.cost) != null && {
+						cost: msg.turnCost ?? cost,
+					}),
 					duration,
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),
 					...(msg.tokens?.output != null && {

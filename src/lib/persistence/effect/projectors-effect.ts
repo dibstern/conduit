@@ -672,17 +672,16 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.completed")) {
-				// Cost and tokens are counted differently by the provider, which
-				// reads like a bug and is not: cost is cumulative for the whole
-				// SDK session (two completions in one turn read 38.53 then 39.84),
-				// so the latest value wins. Tokens are per-execution, so a turn
-				// that ran twice sums them.
+				// New Claude completions carry cost deltas, so repeated completions add.
+				// Other providers and historical Claude events retain latest-wins cost.
 				const tokens = event.data.tokens;
 				yield* closeThinking(event.data.messageId);
 				return ids(
 					yield* sql<{ id: string }>`
 					UPDATE messages SET
-					cost = ${event.data.cost ?? null},
+					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+						THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+						ELSE ${event.data.cost ?? null} END,
 					tokens_in = ${tokens?.input ?? null},
 					tokens_out = ${tokens?.output ?? null},
 					tokens_cache_read = ${tokens?.cacheRead ?? null},
@@ -1033,16 +1032,15 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// session is nowhere in the statement — `RETURNING session_id` is the
 			// only thing that knows which session row actually moved.
 			if (isEventType(event, "turn.completed")) {
-				// Cost and tokens are counted differently by the provider, which
-				// reads like a bug and is not: cost is cumulative for the whole
-				// SDK session (two completions in one turn read 38.53 then 39.84),
-				// so the latest value wins. Tokens are per-execution, so a turn
-				// that ran twice sums them.
+				// New Claude completions add their cost deltas, like per-execution tokens.
+				// Other providers and historical Claude events retain latest-wins cost.
 				const tokens = event.data.tokens;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'completed',
-							cost = COALESCE(${event.data.cost ?? null}, cost),
+							cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+								THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+								ELSE COALESCE(${event.data.cost ?? null}, cost) END,
 							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
 							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
