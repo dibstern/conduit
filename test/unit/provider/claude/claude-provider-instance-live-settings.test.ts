@@ -302,6 +302,52 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		expect(resolvedModels(sink)).toEqual([SONNET, OPUS]);
 	});
 
+	// Stop closes the prompt queue. A send already past its liveness check,
+	// waiting on setModel, must end with the Stop, not wait forever on a turn
+	// the SDK never receives (conduit-test-6ksg).
+	it("ends a send whose model change a Stop overtakes", async () => {
+		let releaseSetModel: (() => void) | undefined;
+		const gen = (async function* () {
+			yield initMessage(SONNET);
+			yield makeSuccessResult({ session_id: "sdk-1" });
+			await new Promise(() => {});
+		})();
+		const { query, setModel } = makeMockQuery(gen);
+		setModel.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseSetModel = resolve;
+				}),
+		);
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: vi.fn(() => query),
+			capabilitiesService: makeCapabilitiesService(),
+		});
+		const turnInput = (inputId: string, modelId: string) =>
+			makeBaseSendTurnInput({
+				sessionId: "s3",
+				inputId,
+				eventSink: createMockEventSink(),
+				model: { providerId: "claude", modelId },
+			});
+
+		const turn1 = await Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-1", SONNET)),
+		);
+		expect(turn1.status).toBe("completed");
+
+		const turn2 = Effect.runPromise(
+			instance.sendTurnEffect(turnInput("turn-2", OPUS)),
+		);
+		await waitForAssertion(() => {
+			expect(setModel).toHaveBeenCalledWith(OPUS);
+		});
+		await Effect.runPromise(instance.interruptTurnEffect("s3"));
+		releaseSetModel?.();
+		expect((await turn2).status).toBe("interrupted");
+	});
+
 	it("applies overlapping turn settings only at FIFO turn boundaries", async () => {
 		const release: Array<() => void> = [];
 		const gates = Array.from(

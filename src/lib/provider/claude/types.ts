@@ -22,6 +22,7 @@ import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
+import type { EffectPromptQueueClosed } from "./effect-prompt-queue.js";
 
 export const THREAD_READ_MCP_SERVER = "conduit";
 export const THREAD_READ_TOOL_NAME = "conduit_thread_read";
@@ -275,6 +276,9 @@ export interface ClaudeSessionContext {
  * here to decouple ClaudeSessionContext from the concrete class.
  */
 export interface PromptQueueController extends AsyncIterable<SDKUserMessage> {
-	enqueue(message: SDKUserMessage): Effect.Effect<void>;
+	/** Fails once the queue is closed, so a sender never waits on a lost prompt. */
+	enqueue(
+		message: SDKUserMessage,
+	): Effect.Effect<void, EffectPromptQueueClosed>;
 	close(): Effect.Effect<void>;
 }

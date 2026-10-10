@@ -3,6 +3,7 @@
 import type { SDKControlInterruptResponse } from "@anthropic-ai/claude-agent-sdk";
 import type { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { EffectPromptQueueClosed } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
 import type {
 	ClaudeResumeCursor,
 	ClaudeSessionContext,
@@ -84,7 +85,7 @@ describe("Claude provider instance types", () => {
 		expectTypeOf<PromptQueueController>().toHaveProperty("enqueue");
 		expectTypeOf<PromptQueueController>().toHaveProperty("close");
 		expectTypeOf<PromptQueueController["enqueue"]>().returns.toEqualTypeOf<
-			Effect.Effect<void>
+			Effect.Effect<void, EffectPromptQueueClosed>
 		>();
 		expectTypeOf<PromptQueueController["close"]>().returns.toEqualTypeOf<
 			Effect.Effect<void>
