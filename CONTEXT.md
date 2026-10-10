@@ -36,6 +36,9 @@ event through the session-command seam. An empty map projects to NULL, meaning
 the project's main folders. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Moves require the session provider's `supportsWorktree` capability. OpenCode
+moves are refused before recording an event; Claude supports moves.
+
 **Effective Working Directory** is the primary project folder's mapped worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
 session's git pill and next provider launch use it. Other launch folders are the

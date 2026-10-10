@@ -105,11 +105,14 @@ export const WorktreeMenu: Story = {
 	args: {
 		directory: "/src/conduit-one",
 		git: { branch: "feature/one", worktree: "conduit-one", dirty: true },
-		loadWorktrees: async () => [
-			{ path: "/src/conduit", branch: "main", main: true },
-			{ path: "/src/conduit-one", branch: "feature/one", main: false },
-			{ path: "/src/conduit-two", branch: "feature/two", main: false },
-		],
+		loadWorktrees: async () => ({
+			directory: "/src/conduit-one",
+			worktrees: [
+				{ path: "/src/conduit", branch: "main", main: true },
+				{ path: "/src/conduit-one", branch: "feature/one", main: false },
+				{ path: "/src/conduit-two", branch: "feature/two", main: false },
+			],
+		}),
 		onmove: async () => {},
 	},
 	play: async ({ canvasElement }) => {

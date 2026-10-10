@@ -174,7 +174,7 @@ export const StatusPollerLive: Layer.Layer<
 		);
 		const refreshGit = (
 			Option.isSome(sessionGit)
-				? sessionGit.value.refresh()
+				? sessionGit.value.refresh({ staleOnly: true })
 				: config.refreshSessionGit
 					? Effect.tryPromise(config.refreshSessionGit)
 					: Effect.void

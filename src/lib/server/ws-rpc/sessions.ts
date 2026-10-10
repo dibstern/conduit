@@ -22,7 +22,10 @@ import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
-import { listProjectWorktrees } from "../../git/worktrees.js";
+import {
+	listProjectWorktrees,
+	realWorkspacePath,
+} from "../../git/worktrees.js";
 import { rewindSessionToMessage } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
 import {
@@ -46,10 +49,24 @@ import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.j
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
-	ListWorktrees: (_request) =>
+	ListWorktrees: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			const directory =
+				request.sessionId === undefined
+					? undefined
+					: yield* workspace
+							.get(request.sessionId)
+							.pipe(
+								Effect.flatMap((path) =>
+									realWorkspacePath(path).pipe(
+										Effect.orElseSucceed(() => path),
+									),
+								),
+							);
 			return {
+				...(directory === undefined ? {} : { directory }),
 				worktrees: yield* listProjectWorktrees([
 					config.projectDir,
 					...(config.extraFolders ?? []),

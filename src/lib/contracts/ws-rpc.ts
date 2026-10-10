@@ -1267,8 +1267,14 @@ export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
 		failure: WsRpcError,
-		success: Schema.Struct({ worktrees: Schema.Array(WorktreeInfoSchema) }),
-		payload: { projectSlug: NonEmptyString },
+		success: Schema.Struct({
+			worktrees: Schema.Array(WorktreeInfoSchema),
+			directory: Schema.optional(Schema.String),
+		}),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
+		},
 	},
 ) {}
 

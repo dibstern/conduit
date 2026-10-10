@@ -14,30 +14,41 @@
 	let { directory, git, loadWorktrees, onmove }: {
 		directory: string;
 		git: SessionGit | undefined;
-		loadWorktrees?: (() => Promise<readonly WorktreeInfo[]>) | undefined;
+		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
 		onmove?: ((path: string) => Promise<void>) | undefined;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
+	let currentDirectory = $state<string | undefined>();
 	let moving = $state(false);
 
 	async function openWorktrees() {
 		showWorktrees = true;
 		worktrees = undefined;
+		currentDirectory = undefined;
 		try {
-			worktrees = await loadWorktrees?.() ?? [];
+			const result = await loadWorktrees?.();
+			worktrees = result?.worktrees ?? [];
+			currentDirectory = result?.directory;
 		} catch {
 			worktrees = [];
 			showToast("Could not list worktrees", { variant: "error" });
 		}
 	}
 
+	const moveFailures: Record<WorkspaceMoveError["reason"], string> = {
+		missing: "Could not move session: that folder no longer exists",
+		"not-a-worktree": "Could not move session: that folder is not a git worktree",
+		"other-repository": "Could not move session: that worktree belongs to another repository",
+		"unsupported-provider": "Could not move session: its provider cannot switch worktrees",
+	};
+
 	async function move(path: string) {
 		moving = true;
 		try {
 			await onmove?.(path);
 		} catch (error) {
-			showToast(Schema.is(WorkspaceMoveError)(error) ? `Could not move session: ${error.reason}` : "Could not move session", { variant: "error" });
+			showToast(Schema.is(WorkspaceMoveError)(error) ? moveFailures[error.reason] : "Could not move session", { variant: "error" });
 		} finally {
 			moving = false;
 		}
@@ -139,10 +150,10 @@
 					{#each worktrees as worktree (worktree.path)}
 						<MenuItem disabled={moving} onselect={() => void move(worktree.path)}>
 							<span class="flex min-w-0 flex-1 flex-col">
-								<span>{worktree.branch ?? "Detached HEAD"}{worktree.main ? " · main worktree" : ""}</span>
+								<span>{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
 								<span class="break-all text-text-muted">{worktree.path}</span>
 							</span>
-							{#if worktree.path === directory}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
+							{#if worktree.path === (currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
 						</MenuItem>
 					{/each}
 				{/if}

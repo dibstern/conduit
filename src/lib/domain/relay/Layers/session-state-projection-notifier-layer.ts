@@ -79,7 +79,7 @@ export const makeSessionStateProjectionNotifierLive = (
 							yield* Effect.forkIn(
 								Effect.interruptible(
 									(Option.isSome(sessionGit)
-										? sessionGit.value.refresh()
+										? sessionGit.value.refresh({ sessionId })
 										: Effect.tryPromise(() => refreshSessionGit())
 									).pipe(
 										Effect.catchAllCause((cause) =>

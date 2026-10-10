@@ -49,6 +49,7 @@ export const readWorktrees = (directory: string) =>
 		);
 		// -z avoids quoting or splitting paths containing spaces, newlines or quotes.
 		const listed = yield* git("worktree", "list", "--porcelain", "-z");
+		const root = yield* git("rev-parse", "--show-toplevel");
 		const worktrees: WorktreeInfo[] = [];
 		const entries = listed.stdout.split("\0\0").filter(Boolean);
 		for (const [index, entry] of entries.entries()) {
@@ -74,18 +75,36 @@ export const readWorktrees = (directory: string) =>
 				main: index === 0,
 			});
 		}
-		return { commonDir, worktrees };
+		return {
+			commonDir,
+			worktrees,
+			root: yield* realWorkspacePath(root.stdout.trim()),
+		};
 	});
 
 export const listProjectWorktrees = (folders: readonly string[]) =>
 	Effect.gen(function* () {
 		const repos = new Set<string>();
-		const worktrees: WorktreeInfo[] = [];
+		const worktrees = new Map<string, WorktreeInfo>();
 		for (const folder of folders) {
+			const path = yield* realWorkspacePath(folder).pipe(Effect.option);
+			if (path._tag === "None") continue;
 			const repo = yield* readWorktrees(folder).pipe(Effect.option);
+			const checkout =
+				repo._tag === "Some"
+					? repo.value.worktrees.find(({ path }) => path === repo.value.root)
+					: undefined;
+			// Configured folders are reset destinations, including repo subdirectories
+			// and folders outside git. List each once, even for a shared repository.
+			worktrees.set(path.value, {
+				...checkout,
+				path: path.value,
+				main: checkout?.main ?? true,
+			});
 			if (repo._tag === "None" || repos.has(repo.value.commonDir)) continue;
 			repos.add(repo.value.commonDir);
-			worktrees.push(...repo.value.worktrees);
+			for (const worktree of repo.value.worktrees)
+				worktrees.set(worktree.path, worktree);
 		}
-		return worktrees;
+		return [...worktrees.values()];
 	});

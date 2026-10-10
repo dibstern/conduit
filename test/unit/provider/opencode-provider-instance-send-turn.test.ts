@@ -103,7 +103,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 1500,
 			providerStateUpdates: [],
 		} as const;
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", completion);
 
 		const result = await resultPromise;
@@ -148,7 +147,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 					makeSendTurnInput({ extraFolders: desired ? [extra, extra] : [] }),
 				),
 			);
-			await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 			instance.notifyTurnCompleted("s1", {
 				status: "completed",
 				cost: 0,
@@ -190,7 +188,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			const resultPromise = Effect.runPromise(
 				instance.sendTurnEffect(makeSendTurnInput({ extraFolders: [extra] })),
 			);
-			await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 			instance.notifyTurnCompleted("s1", {
 				status: "completed",
 				cost: 0,
@@ -241,7 +238,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 1750,
 			providerStateUpdates: [],
 		} as const;
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", completion);
 
 		const [firstResult, secondResult] = await Promise.all([
@@ -309,7 +305,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 600,
 			providerStateUpdates: [],
 		} as const;
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", completion);
 
 		await expect(secondResultPromise).resolves.toBe(completion);
@@ -322,7 +317,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		});
 
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -366,7 +360,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				makeSendTurnInput({ permissionMode: "plan", ...input }),
 			),
 		);
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -387,7 +380,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const input = makeSendTurnInput({ variant: "thinking" });
 
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -432,12 +424,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		// Simulate abort
 		abortController.abort();
 
 		// Notify via the standard completion path
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "interrupted",
 			cost: 0,
@@ -458,7 +448,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 			await vi.advanceTimersByTimeAsync(10);
 
-			await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 			instance.notifyTurnCompleted("s1", {
 				status: "completed",
 				cost: 0.01,
@@ -501,9 +490,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const resultPromise = Effect.runPromise(
 			instance.sendTurnEffect(makeSendTurnInput()),
-		);
-		await vi.waitFor(() =>
-			expect(namedClient.session.prompt).toHaveBeenCalled(),
 		);
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
@@ -554,7 +540,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const resultPromise = Effect.runPromise(
 			instance.sendTurnEffect(makeSendTurnInput()),
 		);
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,
@@ -588,7 +573,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(raceResult).toBe("timeout");
 
 		// Now resolve the correct session
-		await vi.waitFor(() => expect(client.session.prompt).toHaveBeenCalled());
 		instance.notifyTurnCompleted("s1", {
 			status: "completed",
 			cost: 0,

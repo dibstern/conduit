@@ -1,14 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import {
-	Context,
-	Effect,
-	FiberMap,
-	Option,
-	type Ref,
-	Runtime,
-	Schema,
-} from "effect";
+import { Context, Effect, FiberMap, type Ref, Runtime, Schema } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import {
@@ -44,7 +36,6 @@ import {
 	setPermissionMode,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
-import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
@@ -70,12 +61,12 @@ export const resolveSessionFolders = (
 				}),
 			);
 		const extraFolders: string[] = [];
-		for (const mainFolder of [
-			config.projectDir,
-			...(config.extraFolders ?? []),
-		]) {
-			const folder = state?.worktrees[mainFolder] ?? mainFolder;
-			if (folder === workspaceRoot) continue;
+		const launchFolders = state
+			? [config.projectDir, ...(config.extraFolders ?? [])]
+					.map((folder) => state.worktrees[folder] ?? folder)
+					.filter((folder) => folder !== workspaceRoot)
+			: (config.extraFolders ?? []);
+		for (const folder of launchFolders) {
 			if (existsSync(folder)) extraFolders.push(folder);
 			else {
 				// Not the turn's failure: the launch goes on without the folder, so
@@ -391,16 +382,23 @@ const prepareEngineTurnInput = (
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
 		const readQuery = yield* ReadQueryEffectTag;
-		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
+		const sessionRow = yield* readQuery
+			.getSession(resolvedInput.sessionId)
+			.pipe(
+				Effect.catchAll((cause) =>
+					Effect.gen(function* () {
+						const log = yield* LoggerTag;
+						log.debug(
+							`Failed to read session ${resolvedInput.sessionId}: ${cause}`,
+						);
+						return undefined;
+					}),
+				),
+			);
 		const folders = yield* resolveSessionFolders({
 			id: resolvedInput.sessionId,
 			workspace: sessionRow?.workspace ?? null,
 		});
-		if (driver === "opencode") {
-			const events = yield* Effect.serviceOption(SSEStreamTag);
-			if (Option.isSome(events))
-				yield* events.value.followDirectory(folders.workspaceRoot);
-		}
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const userMessageId = isClaudeDriver(driver)

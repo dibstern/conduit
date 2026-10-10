@@ -21,7 +21,8 @@
 
 <script lang="ts">
 	import { followSessionBusy, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -227,8 +228,14 @@
 	// The project list can arrive after the bar; the git pill waits for its directory.
 	const directory = $derived(project ? effectiveWorkingDirectory(project.folders[0], session?.workspace) : undefined);
 	const git = $derived(session?.workspace ? session.git : session?.git ?? project?.git);
+	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
+	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
+	const supportsWorktree = $derived(
+		sessionInstance?.capabilities?.supportsWorktree
+			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsWorktree,
+	);
 	async function loadWorktrees() {
-		return project ? await listWorktreesRpc(project.slug) : [];
+		return project && session ? await listWorktreesRpc(project.slug, session.id) : { worktrees: [] };
 	}
 	async function moveWorkspace(path: string) {
 		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
@@ -413,7 +420,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} loadWorktrees={session ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} />{/if}
+			{#if directory}<GitIdentity {directory} {git} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button

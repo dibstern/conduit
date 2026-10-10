@@ -347,18 +347,23 @@ describe("Status poller → browser shell transitions", () => {
 		if (harness) await harness.stop();
 	}, 10_000);
 
-	it("refreshes git on the status poll cadence", async () => {
+	it("checks cache freshness on the poll cadence without rereading fresh git", async () => {
+		const isStale = vi
+			.spyOn(daemonSessionGitCache, "isStale")
+			.mockReturnValue(false);
 		const refresh = vi.spyOn(daemonSessionGitCache, "refresh");
 		try {
-			await vi.waitFor(() => expect(refresh).toHaveBeenCalled(), {
+			await vi.waitFor(() => expect(isStale).toHaveBeenCalled(), {
 				timeout: 3000,
 			});
-			const previousCalls = refresh.mock.calls.length;
+			const previousCalls = isStale.mock.calls.length;
 			await vi.waitFor(
-				() => expect(refresh.mock.calls.length).toBeGreaterThan(previousCalls),
+				() => expect(isStale.mock.calls.length).toBeGreaterThan(previousCalls),
 				{ timeout: 3000 },
 			);
+			expect(refresh).not.toHaveBeenCalled();
 		} finally {
+			isStale.mockRestore();
 			refresh.mockRestore();
 		}
 	});

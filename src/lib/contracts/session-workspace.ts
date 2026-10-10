@@ -26,6 +26,11 @@ export class WorkspaceMoveError extends Schema.TaggedError<WorkspaceMoveError>()
 	"WorkspaceMoveError",
 	{
 		path: Schema.String,
-		reason: Schema.Literal("missing", "not-a-worktree", "other-repository"),
+		reason: Schema.Literal(
+			"missing",
+			"not-a-worktree",
+			"other-repository",
+			"unsupported-provider",
+		),
 	},
 ) {}

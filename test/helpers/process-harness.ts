@@ -938,33 +938,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return `http://127.0.0.1:${this.port}`;
 	}
 
-	rejectNextOpenCodeWorkspaceMove(): void {
-		if (!this.recordedOpenCode) throw new Error("No recorded OpenCode server");
-		this.recordedOpenCode.rejectNextWorkspaceMove();
-	}
-
-	holdNextOpenCodePrompt(): () => void {
-		if (!this.recordedOpenCode) throw new Error("No recorded OpenCode server");
-		return this.recordedOpenCode.holdNextPrompt();
-	}
-
-	holdNextOpenCodePromptRequest(): () => void {
-		if (!this.recordedOpenCode) throw new Error("No recorded OpenCode server");
-		return this.recordedOpenCode.holdNextPromptRequest();
-	}
-
-	injectOpenCodeEvents(
-		events: Array<{ type: string; properties: Record<string, unknown> }>,
-		directory: string,
-	): void {
-		if (!this.recordedOpenCode) throw new Error("No recorded OpenCode server");
-		this.recordedOpenCode.injectSSEEvents(events, directory);
-	}
-
-	opencodeDiagnostics() {
-		return this.recordedOpenCode?.diagnostics ?? [];
-	}
-
 	opencodeRequestBodies() {
 		const file = join(this.configDir, "fake-opencode-request-bodies.jsonl");
 		return (

@@ -90,8 +90,6 @@ export class MockOpenCodeServer {
 	private sseClients = new Set<ServerResponse>();
 	private globalSseClients = new Set<ServerResponse>();
 	private sessionDirectories = new Map<string, string>();
-	private rejectWorkspaceMove = false;
-	private nextPromptRequestHold: Promise<void> | undefined;
 	private defaultDirectory = process.cwd();
 	private eventCounter = 0;
 	private keepaliveIntervals = new Set<ReturnType<typeof setInterval>>();
@@ -217,22 +215,6 @@ export class MockOpenCodeServer {
 		return release;
 	}
 
-	/** Pause prompt acceptance while another turn can still emit completion. */
-	holdNextPromptRequest(): () => void {
-		if (this.nextPromptRequestHold)
-			throw new Error("The next prompt request is already held");
-		let resume!: () => void;
-		this.nextPromptRequestHold = new Promise<void>((resolve) => {
-			resume = resolve;
-		});
-		const release = () => {
-			this.heldPromptReleases.delete(release);
-			resume();
-		};
-		this.heldPromptReleases.add(release);
-		return release;
-	}
-
 	/** Start the mock HTTP + WS server on a random port. */
 	async start(): Promise<void> {
 		const server = createServer((req, res) => {
@@ -263,7 +245,6 @@ export class MockOpenCodeServer {
 		this.cleanupSseClients();
 		for (const release of this.heldPromptReleases) release();
 		this.nextPromptHold = undefined;
-		this.nextPromptRequestHold = undefined;
 
 		if (this.wss) {
 			for (const client of this.wss.clients) {
@@ -287,7 +268,6 @@ export class MockOpenCodeServer {
 		this.cleanupSseClients();
 		for (const release of this.heldPromptReleases) release();
 		this.nextPromptHold = undefined;
-		this.nextPromptRequestHold = undefined;
 		this.receivedBodies.length = 0;
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
@@ -470,7 +450,6 @@ export class MockOpenCodeServer {
 	resetQueues(): void {
 		for (const release of this.heldPromptReleases) release();
 		this.nextPromptHold = undefined;
-		this.nextPromptRequestHold = undefined;
 		this.exactQueues.clear();
 		this.normalizedQueues.clear();
 		this.ptyQueues.clear();
@@ -656,7 +635,7 @@ export class MockOpenCodeServer {
 		if (typeof requestDirectory === "string") {
 			this.defaultDirectory = decodeURIComponent(requestDirectory);
 			const sessionId = /^\/session\/([^/?]+)(?:\/|\?|$)/.exec(path)?.[1];
-			if (sessionId && !this.sessionDirectories.has(sessionId))
+			if (sessionId)
 				this.sessionDirectories.set(sessionId, this.defaultDirectory);
 		}
 
@@ -689,41 +668,6 @@ export class MockOpenCodeServer {
 		const normalized = normalizedKey(method, path);
 
 		const basePath = path.split("?")[0] ?? path;
-		if (
-			method === "POST" &&
-			basePath.endsWith("/prompt_async") &&
-			this.nextPromptRequestHold
-		) {
-			const untilReleased = this.nextPromptRequestHold;
-			this.nextPromptRequestHold = undefined;
-			await untilReleased;
-		}
-		if (
-			method === "POST" &&
-			basePath === "/experimental/control-plane/move-session"
-		) {
-			if (this.rejectWorkspaceMove) {
-				this.rejectWorkspaceMove = false;
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(
-					JSON.stringify({
-						name: "MoveSessionError",
-						data: { message: "Workspace relocation refused" },
-					}),
-				);
-				return;
-			}
-			const move = JSON.parse(rawBody ?? "{}") as {
-				sessionID: string;
-				destination: { directory: string };
-			};
-			this.sessionDirectories.set(move.sessionID, move.destination.directory);
-			const session = this.injectedSessions.get(move.sessionID);
-			if (session) session["directory"] = move.destination.directory;
-			res.writeHead(204);
-			res.end();
-			return;
-		}
 
 		// The relay answers permissions on the session-scoped route.
 		const answered =
@@ -984,16 +928,12 @@ export class MockOpenCodeServer {
 		}
 
 		if (method === "GET" && /^\/session\/[^/]+$/.test(basePath)) {
-			const id = basePath.split("/").pop() ?? "";
-			const session = this.injectedSessions.get(id);
+			const session = this.injectedSessions.get(
+				basePath.split("/").pop() ?? "",
+			);
 			if (session) {
 				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(
-					JSON.stringify({
-						...session,
-						directory: this.sessionDirectories.get(id) ?? this.defaultDirectory,
-					}),
-				);
+				res.end(JSON.stringify(session));
 				return;
 			}
 		}
@@ -1287,10 +1227,6 @@ export class MockOpenCodeServer {
 		client.write(`data: ${JSON.stringify(envelope)}\n\n`);
 	}
 
-	public rejectNextWorkspaceMove(): void {
-		this.rejectWorkspaceMove = true;
-	}
-
 	/**
 	 * Inject SSE events directly into all connected SSE clients.
 	 * For use in tests that need to trigger relay behavior (e.g., done events)
@@ -1298,18 +1234,7 @@ export class MockOpenCodeServer {
 	 */
 	public injectSSEEvents(
 		events: Array<{ type: string; properties: Record<string, unknown> }>,
-		directory?: string,
 	): void {
-		if (directory) {
-			for (const { type, properties } of events) {
-				const info = properties["info"] as Record<string, unknown> | undefined;
-				const id =
-					properties["sessionID"] ?? info?.["sessionID"] ?? info?.["id"];
-				if (typeof id === "string") this.sessionDirectories.set(id, directory);
-				if (type === "session.created" && info && typeof id === "string")
-					this.injectedSessions.set(id, { ...info, directory });
-			}
-		}
 		const batch: SseEvent[] = events.map((e) => ({
 			type: e.type,
 			properties: e.properties,

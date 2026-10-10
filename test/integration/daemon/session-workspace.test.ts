@@ -11,13 +11,10 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	CancelSession,
-	CreateSession,
 	ListDaemonSessions,
 	ListWorktrees,
 	MoveSessionWorkspace,
 	SaveProject,
-	SendMessage,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
@@ -140,9 +137,7 @@ describe("Session workspace through the built daemon", () => {
 				? workspaceEvents(fixture)
 				: [];
 			evidence["logs"] = fixture.logTail;
-			evidence["opencodeDiagnostics"] = fixture.opencodeDiagnostics();
 			evidence["queries"] = fixture.claudeOptions();
-			evidence["opencodeRequests"] = fixture.opencodeRequestBodies();
 			evidence["errors"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
 		} finally {
@@ -371,10 +366,12 @@ describe("Session workspace through the built daemon", () => {
 
 	it("uses a secondary folder's worktree as cwd and maps the other launch folders", async () => {
 		const { harness: fixture, socket } = await start("extra-folder");
-		const extra = join(fixture.root, "extra-repo");
-		initRepo(extra);
+		const extraRepo = join(fixture.root, "extra-repo");
+		initRepo(extraRepo);
+		const extra = join(extraRepo, "packages", "library");
+		mkdirSync(extra, { recursive: true });
 		const linked = join(fixture.root, "extra-worktree");
-		git(extra, "worktree", "add", "-b", "feature/extra", linked);
+		git(extraRepo, "worktree", "add", "-b", "feature/extra", linked);
 		await sendRpcRequest(
 			socket,
 			new SaveProject({
@@ -403,8 +400,7 @@ describe("Session workspace through the built daemon", () => {
 		expect(workspaceEvents(fixture)[0]?.data.worktrees).toEqual({
 			[extra]: realpathSync(linked),
 		});
-		// Selecting this repository's main checkout must keep it as cwd; only
-		// selecting the primary project folder returns to the default workspace.
+		// Selecting a configured secondary folder removes its workspace entry.
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
@@ -413,15 +409,13 @@ describe("Session workspace through the built daemon", () => {
 				path: extra,
 			}),
 		);
-		expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({
-			[extra]: realpathSync(extra),
-		});
+		expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({});
 		expect(
 			(await browser.send(sessionId, "Reply with pong again.")).chunks.join(""),
 		).toBe("pong");
 		expect(sessionQueries(fixture, sessionId).at(-1)?.options).toMatchObject({
-			cwd: realpathSync(extra),
-			additionalDirectories: [fixture.projectDir],
+			cwd: fixture.projectDir,
+			additionalDirectories: [realpathSync(extra)],
 		});
 		// A missing primary checkout must not block a valid secondary repository.
 		rmSync(fixture.projectDir, { recursive: true, force: true });
@@ -442,326 +436,21 @@ describe("Session workspace through the built daemon", () => {
 		}
 	}, 60_000);
 
-	it("waits for an active OpenCode turn before relocating its next prompt", async () => {
+	it("resets to a configured primary folder inside its repository and lists it as a destination", async () => {
 		const {
 			harness: fixture,
 			first,
+			main,
 			socket,
-		} = await start("opencode-running", "chat-multi-turn");
-		const browser = await fixture.connect();
-		const sessionId = await browser.createSession(
-			"Queued OpenCode move",
-			undefined,
-			"opencode",
-		);
-		const release = fixture.holdNextOpenCodePrompt();
-		const reply = browser.send(
-			sessionId,
-			"Remember the word 'banana'. Reply with only: ok, remembered.",
-		);
-		await browser.waitFor(
-			(frame) =>
-				frame["type"] === "session_row" &&
-				frame["id"] === sessionId &&
-				frame["processing"] === true,
-		);
+		} = await start("subdirectory-reset");
+		const primary = join(main, "packages", "app");
+		mkdirSync(primary, { recursive: true });
 		await sendRpcRequest(
 			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId,
-				path: first,
-			}),
-		);
-		await sendRpcRequest(
-			socket,
-			new SendMessage({
-				projectSlug: "process-test",
-				sessionId,
-				commandId: "workspace-queued-turn",
-				text: "What word did I ask you to remember? Reply with just the word.",
-			}),
-		);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
-		try {
-			// The RPC acknowledges admission, while this gate keeps native work busy.
-			await new Promise<void>((resolve) => setTimeout(resolve, 250));
-			expect(
-				fixture
-					.opencodeRequestBodies()
-					.filter(
-						({ path }) => path === "/experimental/control-plane/move-session",
-					),
-			).toEqual([]);
-			expect(
-				fixture
-					.opencodeRequestBodies()
-					.filter(({ path }) => path === `/session/${sessionId}/prompt_async`),
-			).toHaveLength(1);
-		} finally {
-			db.close();
-			release();
-		}
-		await reply;
-		await vi.waitFor(
-			() =>
-				expect(
-					fixture
-						.opencodeRequestBodies()
-						.filter(
-							({ path }) => path === `/session/${sessionId}/prompt_async`,
-						),
-				).toHaveLength(2),
-			{ timeout: 5_000 },
-		);
-		expect(
-			fixture
-				.opencodeRequestBodies()
-				.filter(
-					({ path }) => path === "/experimental/control-plane/move-session",
-				)
-				.map(({ body }) => JSON.parse(body)),
-		).toEqual([
-			{
-				sessionID: sessionId,
-				destination: { directory: first },
-				moveChanges: false,
-			},
-		]);
-	}, 90_000);
-
-	it.each([
-		false,
-		true,
-	])("does not relocate past a prompt still being submitted in the old folder (cancel: %s)", async (cancel) => {
-		const {
-			harness: fixture,
-			first,
-			socket,
-		} = await start(
-			cancel ? "opencode-submission-cancelled" : "opencode-submission",
-			"chat-multi-turn",
+			new SaveProject({ slug: "process-test", folders: [primary] }),
 		);
 		const browser = await fixture.connect();
-		const sessionId = await browser.createSession(
-			"OpenCode submission barrier",
-			undefined,
-			"opencode",
-		);
-		const releaseTurn = fixture.holdNextOpenCodePrompt();
-		const reply = browser.send(
-			sessionId,
-			"Remember the word 'banana'. Reply with only: ok, remembered.",
-		);
-		await browser.waitFor(
-			(frame) =>
-				frame["type"] === "session_row" &&
-				frame["id"] === sessionId &&
-				frame["processing"] === true,
-		);
-		const releaseRequest = fixture.holdNextOpenCodePromptRequest();
-		const queue = (commandId: string, text: string) =>
-			sendRpcRequest(
-				socket,
-				new SendMessage({
-					projectSlug: "process-test",
-					sessionId,
-					commandId,
-					text,
-				}),
-			);
-		const prompts = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(({ path }) => path === `/session/${sessionId}/prompt_async`);
-		const moves = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(
-					({ path }) => path === "/experimental/control-plane/move-session",
-				);
-		try {
-			await queue(
-				"workspace-submitting-turn",
-				"What word did I ask you to remember? Reply with just the word.",
-			);
-			await vi.waitFor(() => expect(prompts()).toHaveLength(2), {
-				timeout: 5_000,
-			});
-			if (cancel) {
-				releaseTurn();
-				await reply;
-				await sendRpcRequest(
-					socket,
-					new CancelSession({
-						projectSlug: "process-test",
-						sessionId,
-						commandId: "workspace-cancel-submission",
-					}),
-				);
-			}
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					projectSlug: "process-test",
-					sessionId,
-					path: first,
-				}),
-			);
-			await queue(
-				"workspace-after-submission",
-				"This destination turn must wait for prompt acceptance.",
-			);
-			releaseTurn();
-			await reply;
-			await new Promise<void>((resolve) => setTimeout(resolve, 300));
-			expect(moves()).toEqual([]);
-			expect(prompts()).toHaveLength(2);
-		} finally {
-			releaseTurn();
-			releaseRequest();
-		}
-		await vi.waitFor(() => expect(moves()).toHaveLength(1), { timeout: 5_000 });
-		expect(JSON.parse(moves()[0]?.body ?? "{}")).toMatchObject({
-			sessionID: sessionId,
-			destination: { directory: first },
-		});
-	}, 90_000);
-
-	it("keeps unrelated OpenCode sessions out of followed worktrees and admits owned children", async () => {
-		const {
-			harness: fixture,
-			first,
-			socket,
-		} = await start("opencode-ownership", "chat-multi-turn");
-		const browser = await fixture.connect();
-		const sessionId = await browser.createSession(
-			"Owned OpenCode workspace",
-			undefined,
-			"opencode",
-		);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				projectSlug: "process-test",
-				sessionId,
-				path: first,
-			}),
-		);
-		await browser.send(
-			sessionId,
-			"Remember the word 'banana'. Reply with only: ok, remembered.",
-		);
-		// The same directory can be another project's primary folder. A child of
-		// this project's moved session must still remain with its owning parent.
-		const neighbour = await sendRpcRequest(
-			socket,
-			new SaveProject({ title: "Worktree neighbour", folders: [first] }),
-		);
-		await sendRpcRequest(
-			socket,
-			new CreateSession({
-				projectSlug: neighbour.savedSlug,
-				originId: "workspace-neighbour",
-				providerId: "claude",
-			}),
-		);
-		const release = fixture.holdNextOpenCodePrompt();
-		const running = browser.send(
-			sessionId,
-			"What was the word I asked you to remember?",
-		);
-		await vi.waitFor(() =>
-			expect(
-				fixture
-					.opencodeRequestBodies()
-					.filter(({ path }) => path.endsWith("/prompt_async")),
-			).toHaveLength(2),
-		);
-		const created = (id: string, parentID?: string) => ({
-			type: "session.created",
-			properties: {
-				sessionID: id,
-				info: {
-					id,
-					projectID: "project-workspace",
-					directory: first,
-					title: id,
-					version: "1.18.34",
-					time: { created: Date.now(), updated: Date.now() },
-					...(parentID ? { parentID } : {}),
-				},
-			},
-		});
-		fixture.injectOpenCodeEvents(
-			[
-				created("ses_workspace_foreign"),
-				created("ses_workspace_child", sessionId),
-				{
-					type: "session.created",
-					properties: {
-						info: created("ses_workspace_legacy_child", sessionId).properties
-							.info,
-					},
-				},
-			],
-			first,
-		);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
-		try {
-			await vi.waitFor(
-				() =>
-					expect(
-						db
-							.prepare("SELECT id FROM sessions WHERE id IN (?, ?)")
-							.all("ses_workspace_child", "ses_workspace_legacy_child"),
-					).toHaveLength(2),
-				{ timeout: 5_000 },
-			);
-			expect(
-				db
-					.prepare("SELECT id FROM sessions WHERE id = ?")
-					.get("ses_workspace_foreign"),
-			).toBeUndefined();
-			evidence["ownedChildren"] = db
-				.prepare("SELECT id, parent_id FROM sessions WHERE id IN (?, ?)")
-				.all("ses_workspace_child", "ses_workspace_legacy_child");
-			const otherDb = new Database(
-				fixture.projectStorePath(neighbour.savedSlug),
-				{ readonly: true },
-			);
-			try {
-				expect(
-					otherDb
-						.prepare("SELECT id FROM sessions WHERE id IN (?, ?)")
-						.all("ses_workspace_child", "ses_workspace_legacy_child"),
-				).toHaveLength(0);
-				evidence["neighbourSessions"] = otherDb
-					.prepare("SELECT id, parent_id FROM sessions")
-					.all();
-			} finally {
-				otherDb.close();
-			}
-		} finally {
-			db.close();
-			release();
-			await running;
-		}
-	}, 90_000);
-
-	it("relocates OpenCode before its next prompt and receives destination events", async () => {
-		const {
-			harness: fixture,
-			first,
-			second,
-			socket,
-		} = await start("opencode", "chat-multi-turn");
-		const browser = await fixture.connect();
-		const sessionId = await browser.createSession(
-			"OpenCode workspace",
-			undefined,
-			"opencode",
-		);
+		const sessionId = await browser.createSession("Subdirectory workspace");
 		const move = (path: string) =>
 			sendRpcRequest(
 				socket,
@@ -771,66 +460,78 @@ describe("Session workspace through the built daemon", () => {
 					path,
 				}),
 			);
+		await move(primary);
+		expect(workspaceEvents(fixture)).toEqual([]);
 		await move(first);
-		const remembered = await browser.send(
-			sessionId,
-			"Remember the word 'banana'. Reply with only: ok, remembered.",
+		expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({
+			[primary]: first,
+		});
+		await move(primary);
+		expect(workspaceEvents(fixture).at(-1)?.data.worktrees).toEqual({});
+		const count = workspaceEvents(fixture).length;
+		const alias = join(fixture.root, "primary-alias");
+		symlinkSync(primary, alias);
+		await move(alias);
+		expect(workspaceEvents(fixture)).toHaveLength(count);
+		const { worktrees, directory } = await sendRpcRequest(
+			socket,
+			new ListWorktrees({ projectSlug: "process-test", sessionId }),
 		);
-		expect(remembered.chunks.join("")).toContain("remembered");
-		await move(fixture.projectDir);
-		expect(
-			(
-				await browser.send(
-					sessionId,
-					"What word did I ask you to remember? Reply with just the word.",
-				)
-			).chunks.join(""),
-		).toContain("banana");
-		const nativeMoves = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(
-					({ path }) => path === "/experimental/control-plane/move-session",
-				)
-				.map(({ body }) => JSON.parse(body) as Record<string, unknown>);
-		expect(nativeMoves()).toEqual([
-			{
-				sessionID: sessionId,
-				destination: { directory: first },
-				moveChanges: false,
-			},
-			{
-				sessionID: sessionId,
-				destination: { directory: fixture.projectDir },
-				moveChanges: false,
-			},
-		]);
-		const prompts = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(({ path }) => path === `/session/${sessionId}/prompt_async`);
-		expect(prompts()).toHaveLength(2);
-		await move(second);
-		fixture.rejectNextOpenCodeWorkspaceMove();
-		await browser.send(
-			sessionId,
-			"This turn must not start in the wrong folder.",
+		expect(directory).toBe(primary);
+		expect(worktrees).toContainEqual({
+			path: primary,
+			branch: "main",
+			main: true,
+		});
+		expect(worktrees).toContainEqual({
+			path: main,
+			branch: "main",
+			main: true,
+		});
+		await browser.send(sessionId, "Reply with pong.");
+		expect(sessionQueries(fixture, sessionId).at(-1)?.options["cwd"]).toBe(
+			primary,
 		);
-		expect(prompts()).toHaveLength(2);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
-		try {
-			const errors = db
-				.prepare(
-					"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
-				)
-				.all(sessionId);
-			expect(errors).toHaveLength(1);
-			expect(errors[0]).toMatchObject({
-				data: expect.stringContaining("Workspace relocation refused"),
+	}, 60_000);
+
+	it("refuses workspace moves for an OpenCode session without recording anything", async () => {
+		const {
+			harness: fixture,
+			first,
+			main,
+			socket,
+		} = await start("unsupported-provider", "chat-multi-turn");
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"OpenCode workspace",
+			undefined,
+			"opencode",
+		);
+		for (const path of [first, main, join(fixture.root, "missing")]) {
+			await expect(
+				sendRpcRequest(
+					socket,
+					new MoveSessionWorkspace({
+						projectSlug: "process-test",
+						sessionId,
+						path,
+					}),
+				),
+			).rejects.toMatchObject({
+				_tag: "WorkspaceMoveError",
+				reason: "unsupported-provider",
 			});
-			evidence["turnErrors"] = errors;
-		} finally {
-			db.close();
+			expect(workspaceEvents(fixture)).toEqual([]);
 		}
-	}, 90_000);
+		const { sessions } = await sendRpcRequest(
+			socket,
+			new ListDaemonSessions({
+				projectSlug: "process-test",
+				scope: "process-test",
+			}),
+		);
+		expect(
+			sessions.find(({ id }) => id === sessionId)?.workspace ?? null,
+		).toBeNull();
+	}, 60_000);
 });
