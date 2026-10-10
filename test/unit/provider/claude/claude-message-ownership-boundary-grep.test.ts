@@ -18,21 +18,8 @@ const CHILD_METADATA_WRITE =
 const IMPLEMENTATION_CALLS = [
 	{
 		file: "src/lib/provider/claude/claude-provider-runtime.ts",
-		calls: [
-			'emit({ type: "ensure-subagent-session"',
-			"materializeSubagents?.(",
-		],
-		// Runner transport emits the ownership command; the daemon applies materialization.
-	},
-	{
-		file: "src/lib/persistence/effect/claude-event-persist-effect.ts",
-		calls: ["ensureClaudeSubagentSession("],
-		// Persistence implements the command through canonical session events (ADR-0004).
-	},
-	{
-		file: "src/lib/provider/claude/claude-subagent-materializer.ts",
-		calls: ["persistClaudeSubagent("],
-		// The materializer's implementation persists the requested transcript and lineage.
+		calls: ['emit({ type: "ensure-subagent-session"'],
+		// Runner transport emits only the ownership module's lineage command.
 	},
 ];
 
@@ -80,7 +67,6 @@ describe("Claude Child Session ownership boundary", () => {
 		const runtime = readFileSync(join(ROOT, RUNTIME), "utf8");
 		expect(core.match(/kind:\s*"open-child"/g)?.length ?? 0).toBeGreaterThan(1);
 		expect(runtime).toMatch(/ensureClaudeSubagentSession\(/);
-		expect(runtime).toMatch(/materializeSubagents\(/);
 		expect(runtime.match(CHILD_METADATA_WRITE)?.length ?? 0).toBeGreaterThan(0);
 	});
 });

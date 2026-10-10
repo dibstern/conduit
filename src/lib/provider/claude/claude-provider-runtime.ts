@@ -79,13 +79,16 @@ import {
 	ClaudeGoalTracker,
 	type ReadClaudeGoalStatus,
 } from "./claude-goal-tracker.js";
-import { createClaudeMessageOwnership } from "./claude-message-ownership.js";
+import {
+	type ClaudeOwnershipDecision,
+	createClaudeMessageOwnership,
+} from "./claude-message-ownership.js";
 import {
 	applyClaudeOwnershipDecisionEffect,
-	detachSubagentFinalizationContext,
-	endClaudeMessageOwnership,
-	finalizeSubagentsAfterResultEffect,
-	stopSubagentPollers,
+	decideClaudeMessageOwnershipEffect,
+	endClaudeMessageOwnershipEffect,
+	finalReadClaudeSubagentFeedEffect,
+	startClaudeSubagentFeedEffect,
 } from "./claude-message-ownership-runtime.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
@@ -139,11 +142,7 @@ import type {
 	ClaudeSessionOutputReply,
 	ClaudeSessionRunner,
 } from "./claude-session-runner.js";
-import type {
-	ClaudeSubagentSdk,
-	MaterializeClaudeSubagentsInput,
-	MaterializedClaudeSubagent,
-} from "./claude-subagent-materializer.js";
+import type { ClaudeSubagentSdk } from "./claude-subagent-materializer.js";
 import { claudeSubagentSessionId } from "./claude-subagent-materializer.js";
 import {
 	type ClaudeTranslationService,
@@ -165,7 +164,6 @@ import type {
 	PromptQueueController,
 	Query,
 	Options as SDKOptions,
-	SDKResultMessage,
 	SDKUserMessage,
 } from "./types.js";
 
@@ -198,9 +196,6 @@ export interface ClaudeProviderInstanceDeps {
 		options?: SDKOptions;
 	}) => Query;
 	readonly subagentSdk?: ClaudeSubagentSdk;
-	readonly materializeSubagents?: (
-		input: MaterializeClaudeSubagentsInput,
-	) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError>;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
@@ -223,7 +218,6 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "readGoalStatus"
 	| "persistHandoffDelivered"
 > & {
-	readonly materializeSubagents?: boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
 	readonly prepareQuery?: () => Promise<void>;
@@ -291,7 +285,6 @@ export const makeClaudeProviderRuntime = (
 				...(deps.subagentPollTimeoutMs !== undefined
 					? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 					: {}),
-				materializeSubagents: deps.materializeSubagents !== undefined,
 				capabilitiesService,
 				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
 				...(deps.persistHandoffDelivered
@@ -328,6 +321,7 @@ export const makeClaudeSessionRunner = (
 	) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
 ): Effect.Effect<ClaudeSessionRunner, never, Scope.Scope> =>
 	Effect.gen(function* () {
+		const scope = yield* Effect.scope;
 		const stateRef = yield* Ref.make<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),
 		);
@@ -353,6 +347,7 @@ export const makeClaudeSessionRunner = (
 			shutdownFibers,
 			warmedQueries,
 			emit,
+			scope,
 		);
 		yield* Effect.addFinalizer(() =>
 			runner.executeEffect({ type: "shutdown" }).pipe(Effect.ignore),
@@ -907,15 +902,6 @@ export class ClaudeProviderRuntime {
 						recoveredSessionId,
 					);
 					return;
-				case "materialize-subagents":
-					return yield* this.deps
-						.materializeSubagents?.({
-							...output.input,
-							knownTasks: new Map(output.input.knownTasks),
-						})
-						.pipe(
-							Effect.mapError((cause) => sessionFailure(output.type, cause)),
-						) ?? Effect.succeed([]);
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -931,7 +917,7 @@ export class ClaudeProviderRuntime {
 				}
 			}
 		}).pipe(
-			Effect.map((children) => (children ? { children } : {})),
+			Effect.as({}),
 			Effect.catchAllDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),
@@ -941,6 +927,7 @@ export class ClaudeProviderRuntime {
 
 class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	readonly providerId = "claude";
+	private readonly endingOwnership = new WeakSet<ClaudeSessionContext>();
 	/** The first send's abort signal stays linked for the query's lifetime. */
 	private readonly sessionAbortSources = new Map<string, EventSink>();
 	private readonly sinkBindings = new Map<
@@ -986,6 +973,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		private readonly emit: (
 			output: ClaudeSessionOutput,
 		) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
+		private readonly scope: Scope.Scope,
 	) {
 		this.queryFactory =
 			deps.queryFactory ??
@@ -1383,28 +1371,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return this.emit({ type: "background-task", transition }).pipe(
 			Effect.orDie,
 			Effect.asVoid,
-		);
-	}
-
-	private materializeSubagentsEffect(
-		ctx: ClaudeSessionContext,
-		input: MaterializeClaudeSubagentsInput,
-	): Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError> {
-		const sinkId = this.sinkId(ctx.eventSink);
-		if (!sinkId) return Effect.succeed([]);
-		return this.emit({
-			type: "materialize-subagents",
-			sinkId,
-			input: { ...input, knownTasks: Array.from(input.knownTasks) },
-		}).pipe(
-			Effect.map((reply) => reply.children ?? []),
-			Effect.mapError(
-				(cause) =>
-					new ClaudeBoundaryError({
-						operation: "materializeSubagents",
-						cause: new Error(cause.message),
-					}),
-			),
 		);
 	}
 
@@ -2048,44 +2014,47 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					setExpectedApiModelId(ctx, expectedApiModelId);
 
 					const turnDeferred = yield* Deferred.make<TurnResult, Error>();
-					yield* Effect.uninterruptible(
-						Effect.gen(this, function* () {
-							yield* pushTurnDeferred(
-								this.stateRef,
-								ctx.sessionId,
-								turnDeferred,
-							);
-							ctx.currentTurnId = input.turnId;
-							ctx.currentUserMessageId = input.userMessageId;
-							ctx.resumeFallbackAllowed =
-								!!input.resumeSessionId && !!input.handoff;
-							ctx.usageLimit = undefined;
-							ctx.usageLimitReported = undefined;
-							ctx.pendingSyntheticMessages = undefined;
-							// Marks the turn as started so a system/init arriving before
-							// the first assistant chunk cannot report the session idle.
-							ctx.turnInFlight = true;
-							const priorSink = ctx.eventSink;
-							this.retainSink(input.eventSink);
-							ctx.eventSink = input.eventSink;
-							ctx.cumulativeTokens =
-								input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
-							yield* this.releaseSinkEffect(priorSink);
-							// Marks the assistant-message boundary: if the SDK's streaming
-							// turn is still open, no `result` resets the translator, and
-							// this reply would otherwise merge into the previous message.
-							ctx.pendingAssistantBoundary = true;
-							yield* ctx.promptQueue.enqueue(userMessage).pipe(
-								Effect.catchAll((cause) =>
-									Effect.gen(this, function* () {
-										yield* shiftTurnDeferred(this.stateRef, ctx.sessionId);
-										ctx.turnInFlight = false;
-										return yield* Effect.fail(cause);
-									}),
-								),
-							);
-							ctx.settingsOutOfSync = false;
-						}),
+					yield* (ctx.messageOwnershipPermit ??=
+						Effect.unsafeMakeSemaphore(1)).withPermits(1)(
+						Effect.uninterruptible(
+							Effect.gen(this, function* () {
+								yield* pushTurnDeferred(
+									this.stateRef,
+									ctx.sessionId,
+									turnDeferred,
+								);
+								ctx.currentTurnId = input.turnId;
+								ctx.currentUserMessageId = input.userMessageId;
+								ctx.resumeFallbackAllowed =
+									!!input.resumeSessionId && !!input.handoff;
+								ctx.usageLimit = undefined;
+								ctx.usageLimitReported = undefined;
+								ctx.pendingSyntheticMessages = undefined;
+								// Marks the turn as started so a system/init arriving before
+								// the first assistant chunk cannot report the session idle.
+								ctx.turnInFlight = true;
+								const priorSink = ctx.eventSink;
+								this.retainSink(input.eventSink);
+								ctx.eventSink = input.eventSink;
+								ctx.cumulativeTokens =
+									input.cumulativeTokens ?? ctx.cumulativeTokens ?? 0;
+								yield* this.releaseSinkEffect(priorSink);
+								// Marks the assistant-message boundary: if the SDK's streaming
+								// turn is still open, no `result` resets the translator, and
+								// this reply would otherwise merge into the previous message.
+								ctx.pendingAssistantBoundary = true;
+								yield* ctx.promptQueue.enqueue(userMessage).pipe(
+									Effect.catchAll((cause) =>
+										Effect.gen(this, function* () {
+											yield* shiftTurnDeferred(this.stateRef, ctx.sessionId);
+											ctx.turnInFlight = false;
+											return yield* Effect.fail(cause);
+										}),
+									),
+								);
+								ctx.settingsOutOfSync = false;
+							}),
+						),
 					);
 
 					return turnDeferred;
@@ -2156,10 +2125,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		translator: ClaudeTranslationService,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
-			let resultFinalizationStarted = false;
-			yield* this.consumeStreamLoopEffect(ctx, translator, () => {
-				resultFinalizationStarted = true;
-			}).pipe(
+			yield* this.consumeStreamLoopEffect(ctx, translator).pipe(
 				Effect.catchAll((err) =>
 					ctx.resumeFallbackAllowed &&
 					!ctx.queryInitialized &&
@@ -2175,10 +2141,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							),
 				),
 				Effect.ensuring(
-					this.finalizeStreamConsumerEffect(
-						ctx,
-						() => resultFinalizationStarted,
-					).pipe(Effect.ignore),
+					this.finalizeStreamConsumerEffect(ctx).pipe(Effect.ignore),
 				),
 			);
 		});
@@ -2187,7 +2150,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	private consumeStreamLoopEffect(
 		ctx: ClaudeSessionContext,
 		translator: ClaudeTranslationService,
-		markResultFinalizationStarted: () => void,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const iterator = (ctx.query as AsyncIterable<unknown>)[
@@ -2247,61 +2209,130 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
 					break;
 				}
-				let parentChildLink: Effect.Effect<void> | undefined;
-				for (const decision of ctx.messageOwnership?.decide({
-					kind: "sdk",
-					message: decodedMessage,
-				}) ?? []) {
-					if (decision.kind !== "route" || decision.owner.kind !== "parent") {
-						const childLink = yield* applyClaudeOwnershipDecisionEffect(
-							(input) => this.ensureSubagentSessionEffect(ctx, input),
-							ctx,
-							decision,
-							ctx.resumeSessionId ?? decodedMessage.session_id,
-						);
-						if (childLink) parentChildLink = childLink;
-						continue;
-					}
-					const message = decision.message;
-					if (
-						(message.type === "system" &&
-							message.subtype === "task_notification") ||
-						((message.type === "assistant" ||
-							(message.type === "stream_event" &&
-								message.event.type === "message_start")) &&
-							message.parent_tool_use_id == null)
-					) {
-						ctx.turnInFlight = true;
-						this.deps.onTurnStateChanged?.(ctx.sessionId, true);
-					}
-					if (message.type === "result") ctx.turnInFlight = false;
-					const translatedMessages = yield* interceptClaudeUsageLimit(
+				if (
+					decodedMessage.type === "system" &&
+					decodedMessage.subtype === "background_tasks_changed"
+				) {
+					yield* decideClaudeMessageOwnershipEffect(
 						ctx,
-						message,
+						{
+							kind: "live-tasks",
+							taskIds: decodedMessage.tasks.map((task) => task.task_id),
+						},
+						(decisions) =>
+							this.applyClaudeOwnershipDecisionsEffect(
+								ctx,
+								translator,
+								decisions,
+							),
 					);
-					for (const translatedMessage of translatedMessages)
-						yield* translator.translate(ctx, translatedMessage);
-					if (parentChildLink) {
-						yield* parentChildLink;
-						parentChildLink = undefined;
-					}
-					if (message.type === "result") {
-						const translatedResult = translatedMessages.find(
-							(message) => message.type === "result",
-						);
-						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
-						const finalizationCtx = detachSubagentFinalizationContext(ctx);
-						markResultFinalizationStarted();
-						yield* this.runSubagentFinalizationEffect(finalizationCtx, message);
-						yield* resolveTurnEffect(
-							this.stateRef,
-							ctx,
-							translatedResult ?? message,
-						);
-					}
 				}
+				yield* decideClaudeMessageOwnershipEffect(
+					ctx,
+					{
+						kind: "sdk",
+						message: decodedMessage,
+					},
+					(decisions) =>
+						this.applyClaudeOwnershipDecisionsEffect(
+							ctx,
+							translator,
+							decisions,
+							ctx.resumeSessionId ?? decodedMessage.session_id,
+						),
+				);
 			}
 			yield* this.finishStreamOutputEffect(ctx, translator);
+		});
+	}
+
+	private applyClaudeOwnershipDecisionsEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+		decisions: readonly ClaudeOwnershipDecision[],
+		parentClaudeSessionId = ctx.resumeSessionId,
+	): Effect.Effect<void, ClaudeAdapterError> {
+		return Effect.gen(this, function* () {
+			let parentChildLink: Effect.Effect<void> | undefined;
+			for (const decision of decisions) {
+				if (decision.kind === "start-feed") {
+					yield* startClaudeSubagentFeedEffect(
+						this.deps,
+						this.scope,
+						ctx,
+						decision,
+						(decisions) =>
+							this.applyClaudeOwnershipDecisionsEffect(
+								ctx,
+								translator,
+								decisions,
+							),
+						parentClaudeSessionId,
+					);
+					continue;
+				}
+				if (decision.kind === "final-read") {
+					yield* this.runSubagentFinalizationEffect(
+						ctx,
+						finalReadClaudeSubagentFeedEffect(
+							this.deps,
+							ctx,
+							decision,
+							(decisions) =>
+								this.applyClaudeOwnershipDecisionsEffect(
+									ctx,
+									translator,
+									decisions,
+								),
+						),
+					);
+					continue;
+				}
+				if (decision.kind !== "route" || decision.owner.kind !== "parent") {
+					const childLink = yield* applyClaudeOwnershipDecisionEffect(
+						(input) => this.ensureSubagentSessionEffect(ctx, input),
+						ctx,
+						decision,
+						parentClaudeSessionId,
+					);
+					if (childLink) parentChildLink = childLink;
+					continue;
+				}
+				const message = decision.message;
+				if (
+					(message.type === "system" &&
+						message.subtype === "task_notification") ||
+					((message.type === "assistant" ||
+						(message.type === "stream_event" &&
+							message.event.type === "message_start")) &&
+						message.parent_tool_use_id == null)
+				) {
+					ctx.turnInFlight = true;
+					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
+				}
+				if (message.type === "result") ctx.turnInFlight = false;
+				const translatedMessages = yield* interceptClaudeUsageLimit(
+					ctx,
+					message,
+				);
+				for (const translatedMessage of translatedMessages)
+					yield* translator.translate(ctx, translatedMessage);
+				if (parentChildLink) {
+					yield* parentChildLink;
+					parentChildLink = undefined;
+				}
+				if (message.type === "result") {
+					const translatedResult = translatedMessages.find(
+						(message) => message.type === "result",
+					);
+					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					yield* resolveTurnEffect(
+						this.stateRef,
+						ctx,
+						translatedResult ?? message,
+					);
+				}
+			}
 		});
 	}
 
@@ -2323,36 +2354,29 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	private runSubagentFinalizationEffect(
 		ctx: ClaudeSessionContext,
-		result: SDKResultMessage,
+		finalization: Effect.Effect<void, ClaudeAdapterError>,
 	): Effect.Effect<void> {
 		const key: ClaudeSubagentFinalizationFiberKey = {
 			id: randomUUID(),
 			sessionId: ctx.sessionId,
 			turnId: ctx.currentTurnId ?? "unknown",
 		};
-		this.retainSink(ctx.eventSink);
+		const sink = ctx.eventSink;
+		this.retainSink(sink);
 		return FiberMap.run(
 			this.subagentFinalizationFibers,
 			key,
-			finalizeSubagentsAfterResultEffect(
-				{
-					...(this.deps.subagentSdk
-						? { subagentSdk: this.deps.subagentSdk }
-						: {}),
-					...(this.deps.subagentPollTimeoutMs !== undefined
-						? { subagentPollTimeoutMs: this.deps.subagentPollTimeoutMs }
-						: {}),
-					...(this.deps.materializeSubagents
-						? {
-								materializeSubagents: (
-									input: MaterializeClaudeSubagentsInput,
-								) => this.materializeSubagentsEffect(ctx, input),
-							}
-						: {}),
-				},
-				ctx,
-				result,
-			).pipe(Effect.ensuring(this.releaseSinkEffect(ctx.eventSink))),
+			finalization.pipe(
+				Effect.interruptible,
+				Effect.catchAll((err) =>
+					Effect.sync(() =>
+						log.warn(
+							`Claude subagent finalization failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
+						),
+					),
+				),
+				Effect.ensuring(this.releaseSinkEffect(sink)),
+			),
 		).pipe(
 			Effect.tap((fiber) =>
 				Effect.sync(() => {
@@ -2366,18 +2390,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
-	private interruptSubagentFinalizersForSession(
-		sessionId: string,
+	private endMessageOwnershipEffect(
+		ctx: ClaudeSessionContext,
 	): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
-			const keys = Array.from(
-				this.subagentFinalizationFibers,
-				([key]) => key,
-			).filter((key) => key.sessionId === sessionId);
-			yield* Effect.forEach(
-				keys,
-				(key) => FiberMap.remove(this.subagentFinalizationFibers, key),
-				{ discard: true },
+		return Effect.suspend(() => {
+			// Stop and the stream finalizer can both end the same query.
+			if (this.endingOwnership.has(ctx)) return Effect.void;
+			this.endingOwnership.add(ctx);
+			return this.runSubagentFinalizationEffect(
+				ctx,
+				endClaudeMessageOwnershipEffect(this.deps, ctx),
 			);
 		});
 	}
@@ -2388,7 +2410,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		err: unknown,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
-			stopSubagentPollers(ctx);
 			if (ctx.stopped || !(yield* isCurrentSession(this.stateRef, ctx))) return;
 			// Clear stale resume cursor so next turn starts a fresh SDK session
 			const errMsg = err instanceof Error ? err.message : String(err);
@@ -2423,13 +2444,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	private finalizeStreamConsumerEffect(
 		ctx: ClaudeSessionContext,
-		resultFinalizationStarted: () => boolean,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
-			endClaudeMessageOwnership(ctx);
-			if (!resultFinalizationStarted()) {
-				stopSubagentPollers(ctx);
-			}
 			if (!ctx.stopped && (yield* isCurrentSession(this.stateRef, ctx))) {
 				const current = yield* getSession(this.stateRef, ctx.sessionId);
 				if (current === ctx) {
@@ -2456,6 +2472,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							kind: "session-ended",
 						});
 					}
+					yield* this.endMessageOwnershipEffect(ctx);
 				}),
 			),
 		);
@@ -2524,12 +2541,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
 			ctx.stopped = true;
-			endClaudeMessageOwnership(ctx);
 			const turnInFlight = ctx.turnInFlight === true;
 			const messageId = ctx.activeAssistantMessageId ?? "";
-
-			stopSubagentPollers(ctx);
-			yield* this.interruptSubagentFinalizersForSession(ctx.sessionId);
 
 			for (const [, tool] of ctx.inFlightTools) {
 				if (recoverQuestions && tool.toolName === "AskUserQuestion") continue;
@@ -2614,6 +2627,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
+			yield* this.endMessageOwnershipEffect(ctx);
 		});
 	}
 

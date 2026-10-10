@@ -13,7 +13,7 @@
  * pending approvals, tool tracking, etc.) are defined here.
  */
 
-import type { Effect } from "effect";
+import type { Effect, Fiber } from "effect";
 import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
@@ -171,10 +171,8 @@ export interface ClaudeSubagentLivePoller {
 	readonly sdkSubagentId: string;
 	readonly childSessionId: string;
 	readonly parentClaudeSessionId: string;
-	readonly cursor: ClaudeSubagentTranscriptCursor;
-	readonly deliveryPermit: Effect.Semaphore;
-	sessionReady: boolean;
 	active: boolean;
+	fiber?: Fiber.RuntimeFiber<void, never>;
 }
 
 /**
@@ -202,14 +200,10 @@ export interface ClaudeSessionContext {
 	readonly subagentTasks?: Map<string, ClaudeSubagentTaskContext>;
 	readonly subagentPollers?: Map<string, ClaudeSubagentLivePoller>;
 	messageOwnership?: ClaudeMessageOwnership;
+	/** Serializes ownership decisions and their delivery across SDK and feed inputs. */
+	messageOwnershipPermit?: Effect.Semaphore;
 	/** Shared by stream routing and transcript reads, retained across parent results. */
-	subagentTranscripts?: Map<
-		string,
-		{
-			readonly cursor: ClaudeSubagentTranscriptCursor;
-			readonly deliveryPermit: Effect.Semaphore;
-		}
-	>;
+	subagentTranscripts?: Map<string, ClaudeSubagentTranscriptCursor>;
 	failedSubagentSessions?: Set<string>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;

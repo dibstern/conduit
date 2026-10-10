@@ -301,7 +301,6 @@ const persistentHandlerPersistence = Layer.merge(
 		persistEvent: () => Effect.void,
 		persistEvents: () => Effect.void,
 		persistUserMessage: () => Effect.void,
-		persistClaudeSubagent: () => Effect.void,
 		ensureClaudeSubagentSession: () => Effect.void,
 	} satisfies ClaudeEventPersistEffect),
 );

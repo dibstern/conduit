@@ -1,4 +1,4 @@
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Fiber, type Scope } from "effect";
 import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -12,20 +12,24 @@ import {
 	claudeTaskStartedMetadata,
 	claudeToolProgressMetadata,
 } from "./claude-event-translator.js";
-import type { ClaudeOwnershipDecision } from "./claude-message-ownership.js";
-import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
+import type {
+	ClaudeOwnershipDecision,
+	ClaudeOwnershipInput,
+} from "./claude-message-ownership.js";
+import type {
+	ClaudeProviderInstanceDeps,
+	ClaudeSessionRunnerDeps,
+} from "./claude-provider-runtime.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
 	type ClaudeSubagentSdk,
 	type ClaudeSubagentTranscriptCursor,
 	commitClaudeSubagentTranscriptCursor,
-	defaultClaudeSubagentSdk,
 	stageSessionMessagesToEvents,
 } from "./claude-subagent-materializer.js";
 import type {
 	ClaudeSessionContext,
 	ClaudeSubagentLivePoller,
-	SDKResultMessage,
 	SessionMessage,
 } from "./types.js";
 
@@ -33,11 +37,8 @@ const log = createLogger("claude-provider-runtime");
 const SUBAGENT_POLL_TIMEOUT_MS = 2000;
 
 type SubagentDeps = Pick<
-	ClaudeProviderInstanceDeps,
-	| "subagentSdk"
-	| "materializeSubagents"
-	| "ensureClaudeSubagentSession"
-	| "subagentPollTimeoutMs"
+	ClaudeSessionRunnerDeps,
+	"subagentSdk" | "subagentPollTimeoutMs"
 >;
 
 type EnsureSubagentSession = (
@@ -57,9 +58,8 @@ function subagentTranscript(ctx: ClaudeSessionContext, childSessionId: string) {
 		toolStarts: new Set(),
 		toolCompletions: new Set(),
 	};
-	const transcript = { cursor, deliveryPermit: Effect.unsafeMakeSemaphore(1) };
-	transcripts.set(childSessionId, transcript);
-	return transcript;
+	transcripts.set(childSessionId, cursor);
+	return cursor;
 }
 
 /** Prefer the Task's human description ("Audit auth flow") — the raw
@@ -75,66 +75,22 @@ function claudeSubagentTitle(task?: {
 	const first = subagentType[0]?.toUpperCase() ?? "";
 	return `${first}${subagentType.slice(1)} Agent`;
 }
-export function detachSubagentFinalizationContext(
-	ctx: ClaudeSessionContext,
-): ClaudeSessionContext {
-	const subagentPollers = new Map(ctx.subagentPollers ?? []);
-	const finalizationCtx = {
-		...ctx,
-		eventSink: ctx.eventSink,
-		resumeSessionId: ctx.resumeSessionId,
-		lastAssistantUuid: ctx.lastAssistantUuid,
-		subagentTasks: new Map(ctx.subagentTasks ?? []),
-		subagentPollers,
-		get stopped() {
-			return ctx.stopped;
-		},
-	} as ClaudeSessionContext;
-	(
-		ctx as { subagentPollers: Map<string, ClaudeSubagentLivePoller> }
-	).subagentPollers = new Map();
-	return finalizationCtx;
-}
 
-function materializeSubagentsAfterResultEffect(
-	materializeSubagents: ClaudeProviderInstanceDeps["materializeSubagents"],
+export function decideClaudeMessageOwnershipEffect(
 	ctx: ClaudeSessionContext,
-	result: SDKResultMessage,
+	input: ClaudeOwnershipInput,
+	applyDecisions: (
+		decisions: readonly ClaudeOwnershipDecision[],
+	) => Effect.Effect<void, ClaudeAdapterError>,
 ): Effect.Effect<void, ClaudeAdapterError> {
-	return Effect.gen(function* () {
-		if (!materializeSubagents) return;
-		const parentClaudeSessionId = ctx.resumeSessionId ?? result.session_id;
-		if (!parentClaudeSessionId) return;
-
-		yield* materializeSubagents({
-			parentConduitSessionId: ctx.sessionId,
-			parentClaudeSessionId,
-			workspaceRoot: ctx.workspaceRoot,
-			...(ctx.configDir !== undefined && { configDir: ctx.configDir }),
-			knownTasks: ctx.subagentTasks ?? new Map(),
-		});
-	});
-}
-
-export function finalizeSubagentsAfterResultEffect(
-	deps: SubagentDeps,
-	ctx: ClaudeSessionContext,
-	result: SDKResultMessage,
-): Effect.Effect<void, never> {
-	return Effect.gen(function* () {
-		yield* finalPollAndStopSubagentsEffect(deps, ctx);
-		yield* materializeSubagentsAfterResultEffect(
-			deps.materializeSubagents,
-			ctx,
-			result,
-		);
-	}).pipe(
-		Effect.catchAll((err) =>
-			Effect.sync(() => {
-				log.warn(
-					`Final Claude subagent catch-up failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
-				);
-			}),
+	const permit = (ctx.messageOwnershipPermit ??= Effect.unsafeMakeSemaphore(1));
+	return permit.withPermits(1)(
+		// Once an issuer is registered, deliver its tool before another input can
+		// use it. Finish reserved deliveries before a final read interrupts a poll.
+		Effect.uninterruptible(
+			Effect.suspend(() =>
+				applyDecisions(ctx.messageOwnership?.decide(input) ?? []),
+			),
 		),
 	);
 }
@@ -144,67 +100,74 @@ export function applyClaudeOwnershipDecisionEffect(
 	ctx: ClaudeSessionContext,
 	decision: ClaudeOwnershipDecision,
 	parentClaudeSessionId?: string,
+	options: { readonly allowStopped?: boolean } = {},
 ): Effect.Effect<Effect.Effect<void> | undefined, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (decision.kind === "hold" || decision.kind === "drop") {
 			logClaudeOwnershipDecision(ctx, decision);
 			return;
 		}
+		if (decision.kind === "start-feed" || decision.kind === "final-read")
+			return;
 		const failed = (ctx.failedSubagentSessions ??= new Set());
-		if (decision.kind === "route") {
-			if (decision.owner.kind === "parent") return;
-			const childSessionId = decision.owner.childSessionId;
+		if (decision.kind === "route" || decision.kind === "route-transcript") {
+			let childSessionId: string;
+			if (decision.kind === "route-transcript")
+				childSessionId = decision.childSessionId;
+			else {
+				if (decision.owner.kind === "parent") return;
+				childSessionId = decision.owner.childSessionId;
+			}
 			if (failed.has(childSessionId)) {
-				log.warn(
-					`Dropping Claude message ${decision.message.uuid} for failed child ${childSessionId}`,
-				);
+				log.warn(`Dropping Claude messages for failed child ${childSessionId}`);
 				return;
 			}
-			const sink = ctx.eventSink;
+			const sink =
+				ctx.stopped && !options.allowStopped ? undefined : ctx.eventSink;
 			if (!sink) return;
-			const message = decision.message;
-			if (message.type === "assistant" || message.type === "user") {
-				const transcriptMessage: SessionMessage = {
-					type: message.type,
-					uuid: message.uuid ?? "",
-					session_id: message.session_id ?? parentClaudeSessionId ?? "",
-					message: message.message,
-					parent_tool_use_id: message.parent_tool_use_id ?? null,
-					parent_agent_id: null,
-				};
-				const { cursor, deliveryPermit } = subagentTranscript(
-					ctx,
+			let messages: readonly SessionMessage[] | undefined;
+			if (decision.kind === "route-transcript") messages = decision.messages;
+			else {
+				const message = decision.message;
+				if (message.type === "assistant" || message.type === "user")
+					messages = [
+						{
+							type: message.type,
+							uuid: message.uuid ?? "",
+							session_id: message.session_id ?? parentClaudeSessionId ?? "",
+							message: message.message,
+							parent_tool_use_id: message.parent_tool_use_id ?? null,
+							parent_agent_id: null,
+						},
+					];
+			}
+			if (messages) {
+				const cursor = subagentTranscript(ctx, childSessionId);
+				const stage = stageSessionMessagesToEvents({
 					childSessionId,
-				);
-				yield* deliveryPermit.withPermits(1)(
-					Effect.gen(function* () {
-						const stage = stageSessionMessagesToEvents({
-							childSessionId,
-							messages: [transcriptMessage],
-							cursor,
-						});
-						// Reserve before pushing, but finish this delivery before a
-						// poll can observe the reservation and send a completion.
-						commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
-						for (const event of stage.events) yield* sink.push(event);
-					}),
-				);
+					messages,
+					cursor,
+				});
+				// Ownership holds its permit through reservation and every event push.
+				commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+				for (const event of stage.events) yield* sink.push(event);
 				return;
 			}
-			if (!decision.tool) return;
+			if (decision.kind !== "route" || !decision.tool) return;
+			const sdkMessage = decision.message;
 			let metadata: Record<string, unknown>;
-			if (message.type === "tool_progress") {
-				metadata = claudeToolProgressMetadata(message);
-			} else if (message.type === "system") {
-				switch (message.subtype) {
+			if (sdkMessage.type === "tool_progress") {
+				metadata = claudeToolProgressMetadata(sdkMessage);
+			} else if (sdkMessage.type === "system") {
+				switch (sdkMessage.subtype) {
 					case "task_started":
-						metadata = claudeTaskStartedMetadata(message);
+						metadata = claudeTaskStartedMetadata(sdkMessage);
 						break;
 					case "task_progress":
-						metadata = claudeTaskProgressMetadata(message);
+						metadata = claudeTaskProgressMetadata(sdkMessage);
 						break;
 					case "task_notification":
-						metadata = claudeTaskNotificationMetadata(message);
+						metadata = claudeTaskNotificationMetadata(sdkMessage);
 						break;
 					default:
 						return;
@@ -302,17 +265,6 @@ export function applyClaudeOwnershipDecisionEffect(
 			: undefined;
 		if (issuer.kind === "child" && childLink) yield* childLink;
 
-		if (parentClaudeSessionId) {
-			const poller: ClaudeSubagentLivePoller = {
-				sdkSubagentId: taskId,
-				childSessionId,
-				parentClaudeSessionId,
-				...subagentTranscript(ctx, childSessionId),
-				sessionReady: true,
-				active: true,
-			};
-			getSubagentPollers(ctx).set(taskId, poller);
-		}
 		// A parent task_started may create its tool part during translation.
 		// Publish its link after that route so the projector can merge it.
 		return issuer.kind === "parent" ? childLink : undefined;
@@ -334,12 +286,6 @@ function logClaudeOwnershipDecision(
 	}
 }
 
-export function endClaudeMessageOwnership(ctx: ClaudeSessionContext): void {
-	for (const decision of ctx.messageOwnership?.decide({ kind: "end" }) ?? []) {
-		if (decision.kind === "drop") logClaudeOwnershipDecision(ctx, decision);
-	}
-}
-
 function getSubagentPollers(
 	ctx: ClaudeSessionContext,
 ): Map<string, ClaudeSubagentLivePoller> {
@@ -349,13 +295,6 @@ function getSubagentPollers(
 		ctx as { subagentPollers: Map<string, ClaudeSubagentLivePoller> }
 	).subagentPollers = pollers;
 	return pollers;
-}
-
-function resolveSubagentSdk(deps: SubagentDeps): ClaudeSubagentSdk | undefined {
-	return (
-		deps.subagentSdk ??
-		(deps.materializeSubagents ? defaultClaudeSubagentSdk : undefined)
-	);
 }
 
 function resolveEnsureClaudeSubagentSessionEffect(
@@ -373,30 +312,177 @@ function resolveEnsureClaudeSubagentSessionEffect(
 	});
 }
 
+export function startClaudeSubagentFeedEffect(
+	deps: SubagentDeps,
+	scope: Scope.Scope,
+	ctx: ClaudeSessionContext,
+	decision: Extract<ClaudeOwnershipDecision, { kind: "start-feed" }>,
+	applyDecisions: (
+		decisions: readonly ClaudeOwnershipDecision[],
+	) => Effect.Effect<void, ClaudeAdapterError>,
+	parentClaudeSessionId?: string,
+): Effect.Effect<void> {
+	return Effect.gen(function* () {
+		const sdk = deps.subagentSdk;
+		if (
+			!sdk ||
+			!parentClaudeSessionId ||
+			ctx.stopped ||
+			ctx.failedSubagentSessions?.has(decision.childSessionId)
+		)
+			return;
+		const poller: ClaudeSubagentLivePoller = {
+			sdkSubagentId: decision.taskId,
+			childSessionId: decision.childSessionId,
+			parentClaudeSessionId,
+			active: true,
+		};
+		getSubagentPollers(ctx).set(decision.taskId, poller);
+		// A nested feed must outlive the poll that discovered its issuer.
+		poller.fiber = yield* Effect.forkIn(
+			Effect.gen(function* () {
+				while (canPollSubagent(ctx, poller, {})) {
+					yield* Effect.sleep("500 millis");
+					yield* pollClaudeSubagentOnceEffect(
+						deps,
+						ctx,
+						poller,
+						sdk,
+						applyDecisions,
+					).pipe(
+						Effect.catchAll((err) =>
+							Effect.sync(() =>
+								log.warn(
+									`Claude subagent poll failed for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
+								),
+							),
+						),
+					);
+				}
+			}).pipe(Effect.interruptible),
+			scope,
+		);
+	});
+}
+
+export function finalReadClaudeSubagentFeedEffect(
+	deps: SubagentDeps,
+	ctx: ClaudeSessionContext,
+	decision: Extract<ClaudeOwnershipDecision, { kind: "final-read" }>,
+	applyDecisions: (
+		decisions: readonly ClaudeOwnershipDecision[],
+	) => Effect.Effect<void, ClaudeAdapterError>,
+): Effect.Effect<void> {
+	return Effect.gen(function* () {
+		const poller = ctx.subagentPollers?.get(decision.taskId);
+		if (!poller) return;
+		poller.active = false;
+		ctx.subagentPollers?.delete(decision.taskId);
+		if (poller.fiber) yield* Fiber.interrupt(poller.fiber);
+		const sdk = deps.subagentSdk;
+		if (!sdk) return;
+		yield* pollClaudeSubagentOnceEffect(
+			deps,
+			ctx,
+			poller,
+			sdk,
+			applyDecisions,
+			{ allowInactive: true },
+		);
+	}).pipe(
+		Effect.catchAll((err) =>
+			Effect.sync(() =>
+				log.warn(
+					`Final Claude subagent poll failed for ${ctx.sessionId}/${decision.taskId}: ${err instanceof Error ? err.message : err}`,
+				),
+			),
+		),
+	);
+}
+
+export function endClaudeMessageOwnershipEffect(
+	deps: SubagentDeps,
+	ctx: ClaudeSessionContext,
+): Effect.Effect<void, ClaudeAdapterError> {
+	return Effect.gen(function* () {
+		for (const poller of ctx.subagentPollers?.values() ?? [])
+			poller.active = false;
+		const permit = (ctx.messageOwnershipPermit ??=
+			Effect.unsafeMakeSemaphore(1));
+		const decisions = yield* permit.withPermits(1)(
+			Effect.sync(() => ctx.messageOwnership?.decide({ kind: "end" }) ?? []),
+		);
+		// Final reads re-enter ownership with transcript inputs after end releases
+		// the permit; no SDK input can open another feed once the core has ended.
+		yield* Effect.forEach(
+			decisions,
+			(decision) =>
+				decision.kind === "final-read"
+					? finalReadClaudeSubagentFeedEffect(
+							deps,
+							ctx,
+							decision,
+							(decisions) =>
+								Effect.forEach(
+									decisions,
+									(route) =>
+										applyClaudeOwnershipDecisionEffect(
+											undefined,
+											ctx,
+											route,
+											ctx.resumeSessionId,
+											{ allowStopped: true },
+										),
+									{ discard: true },
+								),
+						)
+					: applyClaudeOwnershipDecisionEffect(undefined, ctx, decision).pipe(
+							Effect.asVoid,
+						),
+			{ concurrency: 2, discard: true },
+		);
+	}).pipe(
+		Effect.interruptible,
+		// One budget covers the permit wait and every end-time read, regardless
+		// of how many agents remain. Callers fork this after foreground cleanup.
+		Effect.timeoutFail({
+			duration: Duration.millis(subagentPollTimeoutMs(deps)),
+			onTimeout: () =>
+				new ClaudeRuntimeError({
+					message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+				}),
+		}),
+		Effect.catchAll((err) =>
+			Effect.sync(() =>
+				log.warn(
+					`Claude subagent finalization failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
+				),
+			),
+		),
+		Effect.ensuring(
+			Effect.gen(function* () {
+				// Timeout can leave decisions queued behind the concurrency limit.
+				const remaining = Array.from(ctx.subagentPollers?.values() ?? []);
+				for (const poller of remaining) poller.active = false;
+				ctx.subagentPollers?.clear();
+				for (const poller of remaining)
+					if (poller.fiber) yield* Fiber.interruptFork(poller.fiber);
+			}),
+		),
+	);
+}
+
 function pollClaudeSubagentOnceEffect(
 	deps: SubagentDeps,
 	ctx: ClaudeSessionContext,
 	poller: ClaudeSubagentLivePoller,
 	subagentSdk: ClaudeSubagentSdk,
+	applyDecisions: (
+		decisions: readonly ClaudeOwnershipDecision[],
+	) => Effect.Effect<void, ClaudeAdapterError>,
 	options: { readonly allowInactive?: boolean } = {},
 ): Effect.Effect<void, ClaudeAdapterError> {
 	if (!canPollSubagent(ctx, poller, options)) return Effect.void;
-	return pollClaudeSubagentSnapshotEffect(
-		deps,
-		ctx,
-		poller,
-		subagentSdk,
-		options,
-	);
-}
-
-function pollClaudeSubagentSnapshotEffect(
-	deps: SubagentDeps,
-	ctx: ClaudeSessionContext,
-	poller: ClaudeSubagentLivePoller,
-	subagentSdk: ClaudeSubagentSdk,
-	options: { readonly allowInactive?: boolean },
-): Effect.Effect<void, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (!canPollSubagent(ctx, poller, options)) return;
 		const messages = yield* Effect.tryPromise({
@@ -412,6 +498,7 @@ function pollClaudeSubagentSnapshotEffect(
 			catch: (cause) =>
 				new ClaudeBoundaryError({ operation: "getSubagentMessages", cause }),
 		}).pipe(
+			Effect.interruptible,
 			Effect.timeoutFail({
 				duration: Duration.millis(subagentPollTimeoutMs(deps)),
 				onTimeout: () =>
@@ -420,21 +507,15 @@ function pollClaudeSubagentSnapshotEffect(
 					}),
 			}),
 		);
-		yield* poller.deliveryPermit.withPermits(1)(
-			Effect.gen(function* () {
-				const sink = ctx.eventSink;
-				if (!sink || !canPollSubagent(ctx, poller, options)) return;
-				const stage = stageSessionMessagesToEvents({
-					childSessionId: poller.childSessionId,
-					messages,
-					cursor: poller.cursor,
-				});
-				commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
-				for (const event of stage.events) {
-					if (!canPollSubagent(ctx, poller, options)) return;
-					yield* sink.push(event);
-				}
-			}),
+		if (!canPollSubagent(ctx, poller, options)) return;
+		yield* decideClaudeMessageOwnershipEffect(
+			ctx,
+			{
+				kind: "transcript",
+				taskId: poller.sdkSubagentId,
+				messages,
+			},
+			applyDecisions,
 		);
 	});
 }
@@ -444,52 +525,9 @@ function canPollSubagent(
 	poller: ClaudeSubagentLivePoller,
 	options: { readonly allowInactive?: boolean },
 ): boolean {
-	return (
-		poller.sessionReady &&
-		!ctx.stopped &&
-		(poller.active || options.allowInactive === true)
-	);
+	return options.allowInactive === true || (!ctx.stopped && poller.active);
 }
 
 function subagentPollTimeoutMs(deps: SubagentDeps): number {
 	return deps.subagentPollTimeoutMs ?? SUBAGENT_POLL_TIMEOUT_MS;
-}
-
-function finalPollAndStopSubagentsEffect(
-	deps: SubagentDeps,
-	ctx: ClaudeSessionContext,
-): Effect.Effect<void, never> {
-	return Effect.gen(function* () {
-		const pollers = ctx.subagentPollers;
-		if (!pollers || pollers.size === 0) return;
-		const subagentSdk = resolveSubagentSdk(deps);
-		if (!subagentSdk) {
-			stopSubagentPollers(ctx);
-			return;
-		}
-
-		for (const poller of pollers.values()) {
-			yield* pollClaudeSubagentOnceEffect(deps, ctx, poller, subagentSdk, {
-				allowInactive: true,
-			}).pipe(
-				Effect.catchAll((err) =>
-					Effect.sync(() => {
-						log.warn(
-							`Final Claude subagent poll failed for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
-						);
-					}),
-				),
-			);
-		}
-		stopSubagentPollers(ctx);
-	});
-}
-
-export function stopSubagentPollers(ctx: ClaudeSessionContext): void {
-	const pollers = ctx.subagentPollers;
-	if (!pollers) return;
-	for (const poller of pollers.values()) {
-		poller.active = false;
-	}
-	pollers.clear();
 }

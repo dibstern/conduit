@@ -68,7 +68,6 @@ describe("WsRpcServerLayer SendMessage", () => {
 								persistEvent: () => Effect.void,
 								persistEvents: () => Effect.void,
 								persistUserMessage: () => Effect.void,
-								persistClaudeSubagent: () => Effect.void,
 								ensureClaudeSubagentSession: () => Effect.void,
 							},
 						}),

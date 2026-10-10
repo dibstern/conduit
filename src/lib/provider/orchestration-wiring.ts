@@ -21,10 +21,7 @@ import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
-import {
-	defaultClaudeSubagentSdk,
-	makeClaudeSubagentMaterializer,
-} from "./claude/claude-subagent-materializer.js";
+import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
@@ -173,10 +170,6 @@ const createOrchestrationComponentsEffect = (
 		registry.registerInstance(openCodeInstance);
 
 		const persist = yield* ClaudeEventPersistEffectTag;
-		const materializeSubagents = makeClaudeSubagentMaterializer({
-			sdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
-			persist,
-		});
 		let shellEnv = options.shellEnv;
 		let prepareShellEnv = options.prepareShellEnv;
 		if (!shellEnv) {
@@ -206,12 +199,9 @@ const createOrchestrationComponentsEffect = (
 				: {}),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
-			materializeSubagents,
+			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
-				: {}),
-			...(options.claudeSubagentSdk
-				? { subagentSdk: options.claudeSubagentSdk }
 				: {}),
 			...(options.claudeRunnerFactory
 				? { runnerFactory: options.claudeRunnerFactory }

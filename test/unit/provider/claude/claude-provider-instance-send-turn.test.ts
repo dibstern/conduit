@@ -12,6 +12,8 @@ import type {
 	ClaudeProviderInstance,
 	ClaudeProviderInstanceDeps,
 } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
+import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import type { ClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -797,59 +799,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("resolves the parent result before slow final subagent materialization finishes", async () => {
-		const result = makeSuccessResult({
-			session_id: "sdk-parent-slow-catchup",
-			uuid: "00000000-0000-0000-0000-000000000621" as `${string}-${string}-${string}-${string}-${string}`,
-		} as Record<string, unknown>);
-		const mockQuery = createMockQuery([result]);
-		queryFactorySpy = vi.fn(() => mockQuery);
-		let releaseMaterializer: (() => void) | undefined;
-		let markMaterializerStarted: (() => void) | undefined;
-		const materializerStarted = new Promise<void>((resolve) => {
-			markMaterializerStarted = resolve;
-		});
-		const materializeSubagents = vi.fn(() =>
-			Effect.promise(
-				() =>
-					new Promise<readonly []>((release) => {
-						markMaterializerStarted?.();
-						releaseMaterializer = () => release([]);
-					}),
-			),
-		);
-		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-			queryFactory: queryFactorySpy,
-			materializeSubagents,
-		});
-		const turnPromise = Effect.runPromise(
-			instance.sendTurnEffect(
-				makeBaseSendTurnInput({
-					sessionId: "parent-slow-catchup",
-					workspaceRoot: workspace,
-					eventSink: createMockEventSink(),
-				}),
-			),
-		);
-
-		try {
-			await materializerStarted;
-			const turnResult = await Promise.race([
-				turnPromise,
-				delay(50).then(() => "timeout" as const),
-			]);
-			expect(turnResult).not.toBe("timeout");
-			expect((turnResult as Awaited<typeof turnPromise>).status).toBe(
-				"completed",
-			);
-		} finally {
-			releaseMaterializer?.();
-			await turnPromise.catch(() => undefined);
-			await Effect.runPromise(instance.shutdownEffect());
-		}
-	});
-
 	it("does not expose deterministic child state when early child session ensure fails", async () => {
 		const parentSessionId = "parent-session-ensure-fails";
 		const parentClaudeSessionId = "sdk-parent-ensure-fails";
@@ -985,7 +934,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}
 	});
 
-	it("does not start periodic transcript polling when the SDK stream ends without a result", async () => {
+	it("final-reads the child and stops polling when the SDK stream ends without a result", async () => {
 		const parentClaudeSessionId = "sdk-parent-no-result";
 		const sdkSubagentId = "task-no-result";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1037,14 +986,22 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			),
 		);
 		expect(result._tag).toBe("Left");
-		// No subagent message poll may start after the parent fails during this window.
+		await vi.waitFor(() =>
+			expect(subagentSdk.getSubagentMessages).toHaveBeenCalled(),
+		);
+		const reads = vi.mocked(subagentSdk.getSubagentMessages).mock.calls.length;
+		// End performs a final read, then no periodic feed survives the stream.
 		await delay(650);
-		expect(subagentSdk.getSubagentMessages).not.toHaveBeenCalled();
+		expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(reads);
 
 		await Effect.runPromise(instance.shutdownEffect());
 	});
 
-	it("bounds final subagent polling so a hung snapshot does not hang the parent result", async () => {
+	it.each([
+		"parent result",
+		"Stop",
+		"stream-end",
+	] as const)("completes %s before hung reads and bounds all end finalization to two seconds", async (ending) => {
 		const parentClaudeSessionId = "sdk-parent-final-poll-timeout";
 		const sdkSubagentId = "task-final-poll-timeout";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1077,6 +1034,15 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			session_id: parentClaudeSessionId,
 			uuid: "00000000-0000-0000-0000-000000000635" as `${string}-${string}-${string}-${string}-${string}`,
 		} as Record<string, unknown>);
+		const taskIds = [sdkSubagentId, `${sdkSubagentId}-2`, `${sdkSubagentId}-3`];
+		let releaseStream = () => {};
+		const streamReleased = new Promise<void>((resolve) => {
+			releaseStream = resolve;
+		});
+		let markTasksStarted = () => {};
+		const tasksStarted = new Promise<void>((resolve) => {
+			markTasksStarted = resolve;
+		});
 		const finishPolls: Array<(messages: readonly SessionMessage[]) => void> =
 			[];
 		const releasePendingPolls = async () => {
@@ -1095,35 +1061,153 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					}),
 			),
 		};
-		queryFactorySpy = vi.fn(() =>
-			createMockQuery([taskToolUse, taskStarted, result]),
+		const query = createQueryFromGenerator(
+			(async function* () {
+				for (const [index, taskId] of taskIds.entries()) {
+					if (
+						taskToolUse.event.type !== "content_block_start" ||
+						taskStarted.type !== "system" ||
+						taskStarted.subtype !== "task_started"
+					)
+						throw new Error("Invalid task fixture");
+					yield {
+						...taskToolUse,
+						event: {
+							...taskToolUse.event,
+							index,
+							content_block: {
+								...taskToolUse.event.content_block,
+								id: `${taskId}-tool`,
+							},
+						},
+					};
+					yield {
+						...taskStarted,
+						task_id: taskId,
+						tool_use_id: `${taskId}-tool`,
+					};
+				}
+				markTasksStarted();
+				await streamReleased;
+				if (ending === "parent result") yield result;
+			})(),
 		);
+		query.close = vi.fn(releaseStream);
+		let runner: ClaudeSessionRunner | undefined;
+		const finalized = vi.fn();
+		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
-			queryFactory: queryFactorySpy,
+			queryFactory: () => query,
 			subagentSdk,
-			subagentPollTimeoutMs: 20,
+			onBackgroundTask,
+			runnerFactory: (deps, emit) =>
+				makeClaudeSessionRunner(
+					{ ...deps, onSubagentFinalizationComplete: finalized },
+					emit,
+				).pipe(
+					Effect.tap((created) =>
+						Effect.sync(() => {
+							runner = created;
+						}),
+					),
+				),
 		});
+		const sink = createMockEventSink();
 		const turnPromise = Effect.runPromise(
-			instance.sendTurnEffect(
-				makeBaseSendTurnInput({
-					sessionId: "parent-final-poll-timeout",
-					workspaceRoot: workspace,
-					eventSink: createMockEventSink(),
-				}),
+			Effect.either(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "parent-final-poll-timeout",
+						workspaceRoot: workspace,
+						eventSink: sink,
+					}),
+				),
 			),
 		);
 
 		try {
+			await tasksStarted;
+			await vi.waitFor(
+				() => expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3),
+				{ timeout: 1200 },
+			);
+			const ctx = getClaudeRuntimeSessionForTest(
+				instance,
+				"parent-final-poll-timeout",
+			);
+			if (!ctx) throw new Error("No runtime context");
+			const denyApproval = vi.fn(() => Effect.void);
+			ctx.pendingApprovals.set("pending-approval", {
+				requestId: "pending-approval",
+				toolName: "Bash",
+				toolInput: {},
+				createdAt: new Date().toISOString(),
+				resolve: denyApproval,
+				reject: () => Effect.void,
+			});
+			const startedAt = performance.now();
+			const stop =
+				ending === "Stop"
+					? Effect.runPromise(instance.interruptTurnEffect(ctx.sessionId))
+					: Promise.resolve(releaseStream());
 			const turnResult = await Promise.race([
 				turnPromise,
 				delay(150).then(() => "timeout" as const),
 			]);
 			expect(turnResult).not.toBe("timeout");
-			expect((turnResult as Awaited<typeof turnPromise>).status).toBe(
-				"completed",
+			if (turnResult === "timeout")
+				throw new Error("Turn cleanup waited for a transcript");
+			if (ending === "stream-end") expect(turnResult._tag).toBe("Left");
+			else {
+				expect(turnResult._tag).toBe("Right");
+				if (turnResult._tag === "Right")
+					expect(turnResult.right.status).toBe(
+						ending === "Stop" ? "interrupted" : "completed",
+					);
+			}
+			expect(
+				await Promise.race([
+					stop.then(() => "done"),
+					delay(150).then(() => "timeout"),
+				]),
+			).toBe("done");
+			if (ending === "Stop") {
+				expect(denyApproval).toHaveBeenCalledWith("reject");
+				expect(query.interrupt).toHaveBeenCalledOnce();
+				expect(query.close).toHaveBeenCalledOnce();
+				expect(
+					vi
+						.mocked(sink.push)
+						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
+				).toBe(true);
+			}
+			await vi.waitFor(() => {
+				expect(onBackgroundTask).toHaveBeenCalledWith({
+					sessionId: ctx.sessionId,
+					kind: "session-ended",
+				});
+				expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
+					true,
+				);
+			});
+			await vi.waitFor(
+				() =>
+					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
+						false,
+					),
+				{ timeout: 2600 },
 			);
+			expect(performance.now() - startedAt).toBeLessThan(2600);
+			expect(finalized).toHaveBeenCalled();
+			expect(ctx.subagentPollers?.size).toBe(0);
+			// Completing abandoned SDK promises cannot resurrect a feed or emit history.
+			const emitted = vi.mocked(sink.push).mock.calls.length;
+			await releasePendingPolls();
+			await delay(550);
+			expect(vi.mocked(sink.push).mock.calls).toHaveLength(emitted);
 		} finally {
+			releaseStream();
 			await releasePendingPolls();
 			await Promise.race([turnPromise.catch(() => undefined), delay(25)]);
 			await Effect.runPromise(instance.shutdownEffect());

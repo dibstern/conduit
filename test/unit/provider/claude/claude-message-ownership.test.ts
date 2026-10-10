@@ -11,7 +11,10 @@ import {
 	type ClaudeOwnershipDecision,
 	createClaudeMessageOwnership,
 } from "../../../../src/lib/provider/claude/claude-message-ownership.js";
-import type { SDKMessage } from "../../../../src/lib/provider/claude/types.js";
+import type {
+	SDKMessage,
+	SessionMessage,
+} from "../../../../src/lib/provider/claude/types.js";
 
 type Raw = Record<string, unknown>;
 
@@ -38,6 +41,21 @@ const field = (n: number, key: string): string => String(RAW[n - 1]?.[key]);
 const AGENT_A_TOOL = field(46, "tool_use_id");
 const CHILD_A = `child:${field(46, "task_id")}`;
 const CHILD_B = `child:${field(63, "task_id")}`;
+const TASK_A = field(46, "task_id");
+const TASK_B = field(63, "task_id");
+const READS = JSON.parse(
+	readFileSync(
+		join(
+			import.meta.dirname,
+			"../../../fixtures/claude-sdk-traces/concurrent-background-work-turn.subagent-reads.json",
+		),
+		"utf8",
+	),
+) as readonly {
+	readonly afterMessage: number;
+	readonly agentId: string;
+	readonly messages: readonly SessionMessage[];
+}[];
 
 const core = () =>
 	createClaudeMessageOwnership({
@@ -49,6 +67,13 @@ const feed = (
 	messages: readonly SDKMessage[],
 ): ClaudeOwnershipDecision[] =>
 	messages.flatMap((message) => [
+		...(message.type === "system" &&
+		message.subtype === "background_tasks_changed"
+			? ownership.decide({
+					kind: "live-tasks",
+					taskIds: message.tasks.map((task) => task.task_id),
+				})
+			: []),
 		...ownership.decide({ kind: "sdk", message }),
 	]);
 
@@ -77,6 +102,211 @@ const ofKind = <K extends ClaudeOwnershipDecision["kind"]>(
 	);
 
 describe("Claude message ownership", () => {
+	it("starts each agent feed immediately after opening its child, never a shell feed", () => {
+		const decisions = feed(core(), lines(1, RAW.length));
+		expect(ofKind(decisions, "start-feed")).toEqual([
+			{ kind: "start-feed", taskId: TASK_A, childSessionId: CHILD_A },
+			{ kind: "start-feed", taskId: TASK_B, childSessionId: CHILD_B },
+		]);
+		for (const [index, decision] of decisions.entries()) {
+			if (decision.kind !== "open-child") continue;
+			expect(decisions[index + 1]).toEqual({
+				kind: "start-feed",
+				taskId: decision.taskId,
+				childSessionId: decision.childSessionId,
+			});
+		}
+	});
+
+	it("keeps agent A feeding past result 85 and list removal 112, then final-reads only A at finish 113", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 84));
+		expect(ofKind(feed(ownership, lines(85, 112)), "final-read")).toEqual([]);
+		expect(ofKind(feed(ownership, lines(113, 114)), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+		expect(ofKind(feed(ownership, lines(115, 128)), "final-read")).toEqual([]);
+		expect(
+			ofKind(feed(ownership, lines(129, RAW.length)), "final-read"),
+		).toEqual([
+			{ kind: "final-read", taskId: TASK_B, childSessionId: CHILD_B },
+		]);
+		expect(ownership.decide({ kind: "end" })).toEqual([]);
+	});
+
+	it("final-reads a missing task without a finish at the next result while keeping the listed task", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 85));
+		expect(ownership.decide({ kind: "live-tasks", taskIds: [TASK_B] })).toEqual(
+			[],
+		);
+		expect(ofKind(feed(ownership, [line(124)]), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+		expect(ofKind(ownership.decide({ kind: "end" }), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_B, childSessionId: CHILD_B },
+		]);
+		expect(ownership.decide({ kind: "end" })).toEqual([]);
+	});
+
+	it("final-reads every remaining feed at end, including a missing task without a finish", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 85));
+		ownership.decide({ kind: "live-tasks", taskIds: [TASK_B] });
+		expect(ofKind(ownership.decide({ kind: "end" }), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+			{ kind: "final-read", taskId: TASK_B, childSessionId: CHILD_B },
+		]);
+	});
+
+	it.each([
+		"completed",
+		"failed",
+		"killed",
+	])("stops on terminal task_updated %s even while the SDK still lists the task", (status) => {
+		const ownership = core();
+		feed(ownership, lines(1, 85));
+		expect(
+			ofKind(feed(ownership, [line(113, { patch: { status } })]), "final-read"),
+		).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+		expect(
+			ofKind(feed(ownership, [line(114), line(46)]), "start-feed"),
+		).toEqual([]);
+		expect(ofKind(ownership.decide({ kind: "end" }), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_B, childSessionId: CHILD_B },
+		]);
+	});
+
+	it("keeps feeding through nonterminal updates and ends on task_notification alone", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 85));
+		for (const status of ["pending", "running", "paused"]) {
+			expect(
+				ofKind(
+					feed(ownership, [line(113, { patch: { status } })]),
+					"final-read",
+				),
+			).toEqual([]);
+		}
+		expect(ofKind(feed(ownership, [line(114)]), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+	});
+
+	it.each([
+		"finish",
+		"end",
+	])("keeps a never-listed agent past its parent's result until %s and ignores duplicate starts", (ending) => {
+		const ownership = core();
+		feed(ownership, [line(43), line(46)]);
+		ownership.decide({ kind: "live-tasks", taskIds: [] });
+		expect(ofKind(feed(ownership, [line(46)]), "start-feed")).toEqual([]);
+		expect(ofKind(feed(ownership, [line(85)]), "final-read")).toEqual([]);
+		expect(
+			ofKind(
+				ending === "finish"
+					? feed(ownership, [line(114)])
+					: ownership.decide({ kind: "end" }),
+				"final-read",
+			),
+		).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+	});
+
+	it("keeps a feed when task_started precedes its live-list entry with a parent result between them", () => {
+		const ownership = core();
+		feed(ownership, [line(43), line(46)]);
+		expect(ofKind(feed(ownership, [line(85)]), "final-read")).toEqual([]);
+		ownership.decide({ kind: "live-tasks", taskIds: [TASK_A] });
+		expect(ofKind(feed(ownership, [line(124)]), "final-read")).toEqual([]);
+		ownership.decide({ kind: "live-tasks", taskIds: [] });
+		expect(ofKind(feed(ownership, [line(124)]), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+	});
+
+	it("remembers a live-list entry even when it arrives before task_started", () => {
+		const ownership = core();
+		ownership.decide({ kind: "live-tasks", taskIds: [TASK_A] });
+		ownership.decide({ kind: "live-tasks", taskIds: [] });
+		feed(ownership, [line(43), line(46)]);
+		expect(ofKind(feed(ownership, [line(85)]), "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+	});
+
+	it("releases a held nested-shell start when its issuer arrives only in a transcript", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 74));
+		expect(ofKind(feed(ownership, [line(78)]), "hold")).toHaveLength(1);
+		const messages = READS.find(
+			(read) => read.agentId === TASK_A && read.afterMessage === 79,
+		)?.messages;
+		if (!messages) throw new Error("missing captured agent A transcript");
+		const decisions = ownership.decide({
+			kind: "transcript",
+			taskId: TASK_A,
+			messages,
+		});
+		expect(decisions[0]).toEqual({
+			kind: "route-transcript",
+			childSessionId: CHILD_A,
+			messages,
+		});
+		expect(ofKind(decisions, "route-transcript")).toHaveLength(1);
+		expect(routedTo(decisions)).toEqual([
+			{ uuid: field(78, "uuid"), to: CHILD_A },
+		]);
+		expect(ofKind(decisions, "route").at(-1)?.tool).toEqual({
+			toolUseId: field(78, "tool_use_id"),
+			issuingMessageId: field(75, "uuid"),
+		});
+		expect(ofKind(decisions, "open-child")).toEqual([]);
+		expect(ofKind(decisions, "start-feed")).toEqual([]);
+		// Snapshots deliberately route again: the runtime's shared cursor stages
+		// transcript and SDK copies once. Ownership must not reopen/re-release tasks.
+		const repeated = ownership.decide({
+			kind: "transcript",
+			taskId: TASK_A,
+			messages,
+		});
+		expect(repeated).toEqual([
+			{
+				kind: "route-transcript",
+				childSessionId: CHILD_A,
+				messages,
+			},
+		]);
+		expect(ofKind(repeated, "start-feed")).toEqual([]);
+	});
+
+	it("final-reads a feed when a terminal update held before task_started is released", () => {
+		const ownership = core();
+		feed(ownership, lines(1, 44));
+		expect(ofKind(feed(ownership, [line(113)]), "hold")).toHaveLength(1);
+		const decisions = feed(ownership, [line(46)]);
+		expect(ofKind(decisions, "start-feed")).toHaveLength(1);
+		expect(ofKind(decisions, "final-read")).toEqual([
+			{ kind: "final-read", taskId: TASK_A, childSessionId: CHILD_A },
+		]);
+	});
+
+	it("does not resume feeds on a fresh runner or route unknown/shell transcripts", () => {
+		const messages = READS[0]?.messages ?? [];
+		const ownership = core();
+		feed(ownership, lines(1, 27));
+		for (const taskId of [TASK_A, field(27, "task_id")]) {
+			expect(
+				ownership.decide({ kind: "transcript", taskId, messages }),
+			).toEqual([]);
+		}
+		ownership.decide({ kind: "live-tasks", taskIds: [TASK_A] });
+		expect(ownership.decide({ kind: "end" })).toEqual([]);
+	});
+
 	it("routes every message of the capture to the session that issued its tool call", () => {
 		const childA = [
 			75, 79, 82, 84, 86, 87, 89, 91, 95, 96, 97, 99, 100, 101, 107, 111,
@@ -388,6 +618,8 @@ describe("Claude message ownership", () => {
 		expect(ofKind(decisions, "open-child").map((open) => open.taskId)).toEqual([
 			"tX",
 		]);
-		expect(ownership.decide({ kind: "end" })).toEqual([]);
+		expect(ownership.decide({ kind: "end" })).toEqual([
+			{ kind: "final-read", taskId: "tX", childSessionId: "child:tX" },
+		]);
 	});
 });

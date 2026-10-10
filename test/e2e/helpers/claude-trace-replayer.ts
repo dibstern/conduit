@@ -57,6 +57,8 @@ export interface ClaudeReplayPlan {
 	 * there; replayed, the test decides when.
 	 */
 	readonly holdAfterResult?: boolean;
+	/** Deliver agent steps only through captured transcript reads, exercising feeds. */
+	readonly transcriptOnlySubagents?: boolean;
 	/**
 	 * Hold this sent turn (1-based) before its trace's message-th line
 	 * (1-based) until release(), e.g. mid-way through background work.
@@ -347,6 +349,14 @@ export function createClaudeTraceReplayer(
 					// Counted before the yield: the consumer reads transcripts while
 					// this generator is suspended there.
 					played.played = index + 1;
+					if (
+						plan.transcriptOnlySubagents &&
+						(message.type === "assistant" ||
+							message.type === "user" ||
+							message.type === "stream_event") &&
+						message.parent_tool_use_id != null
+					)
+						continue;
 					yield message;
 					if (
 						(message.type === "user" || message.type === "assistant") &&

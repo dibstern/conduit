@@ -167,7 +167,6 @@ describe("in-process Claude session runner", () => {
 				listSubagents: async () => [],
 				getSubagentMessages: async () => [],
 			},
-			materializeSubagents: true,
 			// Host callbacks must not be read, even if supplied as extra properties.
 			onBackgroundTask,
 			ensureClaudeSubagentSession,
@@ -184,26 +183,6 @@ describe("in-process Claude session runner", () => {
 									parentSessionId: "session-1",
 									providerSessionId: "agent-1",
 									title: "Audit auth",
-								});
-							}
-							if (message.type === "materialize-subagents") {
-								expect(message.input.knownTasks).toEqual([
-									[
-										"agent-1",
-										expect.objectContaining({
-											toolUseId: "tool-1",
-											description: "Audit auth",
-										}),
-									],
-								]);
-								return roundTrip({
-									children: [
-										{
-											sdkSubagentId: "agent-1",
-											childSessionId,
-											parentToolUseId: "tool-1",
-										},
-									],
 								});
 							}
 							return {};
