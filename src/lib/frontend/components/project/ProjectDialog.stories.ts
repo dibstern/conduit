@@ -323,6 +323,68 @@ const editedProject = {
 	folders: [app, docs] as const,
 };
 
+const capabilityInstances = [
+	{
+		id: "all-folders",
+		name: "Folder provider",
+		capabilities: { supportsMultiFolder: true, supportsWorktree: true },
+	},
+	{
+		id: "main-only",
+		name: "Main provider",
+		capabilities: { supportsMultiFolder: false, supportsWorktree: false },
+	},
+];
+
+export const MultiFolderProviderSupport: Story = {
+	args: { project: editedProject, instances: capabilityInstances },
+	play: async ({ canvasElement }) => {
+		const support = canvasFor(canvasElement).getByTestId(
+			"project-provider-capabilities",
+		);
+		await expect(support).toHaveTextContent(
+			/^Main provider works in the main folder only\.$/,
+		);
+	},
+};
+
+export const MultiFolderSupported: Story = {
+	args: { project: editedProject, instances: capabilityInstances.slice(0, 1) },
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.queryByTestId("project-provider-capabilities"),
+		).toBeNull();
+		await expect(
+			canvas.getByText("Folders · Sessions run in main and can edit all"),
+		).toBeVisible();
+	},
+};
+
+export const MultiFolderUnknown: Story = {
+	args: {
+		project: editedProject,
+		instances: [{ id: "unknown", name: "Unknown provider" }],
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasFor(canvasElement).queryByTestId("project-provider-capabilities"),
+		).toBeNull();
+	},
+};
+
+export const SingleFolderProviderSupport: Story = {
+	args: {
+		project: { ...editedProject, folders: [app] },
+		instances: capabilityInstances,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasFor(canvasElement).queryByTestId("project-provider-capabilities"),
+		).toBeNull();
+	},
+};
+
 export const Edit: Story = {
 	args: {
 		project: editedProject,

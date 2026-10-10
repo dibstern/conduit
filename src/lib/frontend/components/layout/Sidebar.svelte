@@ -11,9 +11,9 @@
 		collapseSidebar,
 	} from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { DRAFT_PROJECT_PARAM, SCOPE_PARAM, getCurrentSearchParams, getCurrentSlug, navigate } from "../../stores/router.svelte.js";
-	import { applyProjectList, projectState } from "../../stores/project.svelte.js";
+	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, navigate } from "../../stores/router.svelte.js";
 	import { setSessionScope } from "../../stores/session-scope.js";
+	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
@@ -35,9 +35,19 @@
 		collapseSidebar();
 	}
 
+	// A new project is where the next session goes: scope the list to it, then
+	// open a draft prefilled with it, so back returns to the scoped list.
 	function handleProjectAdded(response: SaveProjectResponse) {
 		applyProjectList(response);
 		setSessionScope(response.savedSlug);
+		const params = getCurrentSearchParams();
+		if (response.kind === "existing") {
+			params.delete(DRAFT_PROJECT_PARAM);
+			navigate(`/?${params}`);
+		} else {
+			params.set(DRAFT_PROJECT_PARAM, response.savedSlug);
+			navigate(`/new?${params}`);
+		}
 		addProjectOpen = false;
 	}
 
@@ -49,13 +59,11 @@
 		),
 	);
 
-	// Opens a draft; the session is created by its first send. The scoped
-	// project wins over the attached one: an open session keeps the tab attached
-	// to its own project after the list is scoped to another.
+	// Opens a draft; the session is created by its first send. Pins the
+	// prefilled project in the URL so a reload keeps it.
 	function handleNewSession() {
 		const params = getCurrentSearchParams();
-		const project =
-			params.get(SCOPE_PARAM) ?? getCurrentSlug() ?? projectState.projects.find((p) => !p.missing)?.slug;
+		const project = getDraftProject();
 		if (project) params.set(DRAFT_PROJECT_PARAM, project);
 		navigate(`/new?${params}`);
 	}

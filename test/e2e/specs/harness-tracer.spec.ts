@@ -1,5 +1,5 @@
 import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type { ProcessHarness } from "../../helpers/process-harness.js";
@@ -35,7 +35,7 @@ async function sendFromAddedProject(
 	const chat = new ChatPage(page);
 	await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/new\?/);
+	await app.chooseDraftProject(basename(directory));
 	expect(new URL(page.url()).searchParams.get("project")).toBe(slug);
 	await expect(app.input).toBeVisible();
 	const picker = page.locator(

@@ -16,7 +16,7 @@ import {
 	applyGetFileListResponse,
 } from "../../stores/ws-listeners.js";
 import { mockFileContent, mockFileTree } from "../../stories/mocks.js";
-import { connectedSocket } from "../../stories/sockets.js";
+import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import ChatLayout from "./ChatLayout.svelte";
 
 /**
@@ -25,7 +25,6 @@ import ChatLayout from "./ChatLayout.svelte";
  * number into every baseline here and break them all on the next release bump.
  */
 const STUB_VERSION = "0.0.0-storybook";
-let nativeWebSocket: typeof WebSocket;
 
 /**
  * Connecting is not enough to get off the network: ChatLayout also fetches the
@@ -75,7 +74,6 @@ const meta = {
 		routerState.search = "?p=test-project";
 		attachedProjectState.slug = null;
 		// Static Storybook hosting needs a socket that completes its connection.
-		nativeWebSocket = globalThis.WebSocket;
 		const restoreSocket = connectedSocket();
 		const restoreFetch = stubProjectFetches();
 		return () => {
@@ -221,15 +219,7 @@ export const FilesPreviewError: Story = {
 	},
 	play: async (context) => {
 		await showFilesTree(context);
-		const storySocket = globalThis.WebSocket;
-		globalThis.WebSocket = new Proxy(storySocket, {
-			construct(target, args) {
-				return Reflect.construct(
-					String(args[0]).includes("/rpc") ? nativeWebSocket : target,
-					args,
-				);
-			},
-		});
+		const restoreRpc = failRpc("GetFileContent");
 		try {
 			openFileViewer("src/lib/missing.ts");
 			await waitFor(
@@ -241,7 +231,7 @@ export const FilesPreviewError: Story = {
 				{ timeout: 5000 },
 			);
 		} finally {
-			globalThis.WebSocket = storySocket;
+			restoreRpc();
 		}
 	},
 };

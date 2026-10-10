@@ -45,7 +45,7 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getDraftProject, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, setAttachedProject, switchToSession } from "../../stores/session.svelte.js";
@@ -59,7 +59,7 @@
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { viewInputDraft } from "../../stores/input-draft.js";
 	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyProjectList, followDaemonLists } from "../../stores/project.svelte.js";
+	import { applyProjectList, followDaemonLists, getDraftProject } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";

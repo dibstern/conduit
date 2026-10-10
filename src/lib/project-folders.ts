@@ -9,6 +9,7 @@ export type FolderIssue =
 	| { readonly kind: "nested"; readonly path: string; readonly parent: string }
 	| { readonly kind: "unknown-project"; readonly slug: string }
 	| { readonly kind: "missing"; readonly path: string }
+	| { readonly kind: "permission-denied"; readonly path: string }
 	| { readonly kind: "not-a-folder"; readonly path: string }
 	| { readonly kind: "create-exists"; readonly path: string }
 	| {
@@ -22,6 +23,12 @@ export type FolderIssue =
 			readonly message: string;
 	  }
 	| { readonly kind: "sessions-running"; readonly count: number };
+
+export const isPermissionDenied = (cause: unknown): boolean =>
+	typeof cause === "object" &&
+	cause !== null &&
+	"code" in cause &&
+	(cause.code === "EACCES" || cause.code === "EPERM");
 
 export const checkFolders = (
 	folders: readonly string[],

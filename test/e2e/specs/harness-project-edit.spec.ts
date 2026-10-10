@@ -131,6 +131,9 @@ for (const provider of providers) {
 			// 3. Reload: the project and its folder order persisted.
 			await page.reload();
 			await app.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
+			// Adding opened a draft; on a phone the list is behind it.
+			const back = page.getByTestId("session-bar-back");
+			if (await back.isVisible()) await back.click();
 			await expect(page.getByTestId("session-scope-chip")).toHaveText(
 				"edit-app",
 			);
@@ -227,7 +230,7 @@ for (const provider of providers) {
 			// 6. A session runs in main and reads the marker; the provider was
 			// told about both extra folders.
 			await page.locator("#new-session-btn:visible").click();
-			await expect(page).toHaveURL(/\/new\?/);
+			await app.chooseDraftProject("edit-app");
 			expect(new URL(page.url()).searchParams.get("project")).toBe(slug);
 			const picker = page.locator(
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',

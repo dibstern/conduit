@@ -56,6 +56,42 @@ describe("getConfigDir", () => {
 });
 
 describe("loadDaemonConfig", () => {
+	it("round-trips per-folder repository identities and accepts old projects without them", async () => {
+		const project = {
+			path: "/tmp/repo",
+			folders: ["/tmp/repo", "/tmp/scratch"] as const,
+			slug: "repo",
+			addedAt: 0,
+		};
+		await saveDaemonConfig(makeSampleConfig({ projects: [project] }), tempDir);
+		expect(loadDaemonConfig(tempDir)?.projects[0]).not.toHaveProperty(
+			"repositoryIdentities",
+		);
+		const repositoryIdentities = {
+			"/tmp/repo": {
+				key: "github.com/owner/repo",
+				name: "Repo",
+				root: "/tmp/repo",
+			},
+		};
+		await saveDaemonConfig(
+			makeSampleConfig({ projects: [{ ...project, repositoryIdentities }] }),
+			tempDir,
+		);
+		expect(
+			loadDaemonConfig(tempDir)?.projects[0]?.repositoryIdentities,
+		).toEqual(repositoryIdentities);
+		await saveDaemonConfig(
+			makeSampleConfig({
+				projects: [{ ...project, repositoryIdentities: {} }],
+			}),
+			tempDir,
+		);
+		expect(
+			loadDaemonConfig(tempDir)?.projects[0]?.repositoryIdentities,
+		).toEqual({});
+	});
+
 	it("defaults legacy configs to three days and preserves Never", async () => {
 		const legacy = makeSampleConfig();
 		delete legacy.autoSettleAfterDays;

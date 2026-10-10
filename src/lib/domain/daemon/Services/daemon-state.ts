@@ -16,6 +16,9 @@ import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 export interface DaemonProject {
 	path: string;
 	folders: readonly [string, ...string[]];
+	repositoryIdentities?: Readonly<
+		Record<string, import("../../../shared-types.js").RepositoryIdentity>
+	>;
 	slug: string;
 	title?: string;
 	addedAt: number;

@@ -82,12 +82,18 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.claudeConfigDir !== undefined && {
 			claudeConfigDir: runtime.claudeConfigDir,
 		}),
+		...(runtime.newSessionProject !== undefined && {
+			newSessionProject: runtime.newSessionProject,
+		}),
 		projects: projects.map((project) => {
 			const sessionCount =
 				runtime.persistedSessionCounts.get(project.slug) ?? 0;
 			return {
 				path: project.folders[0],
 				folders: project.folders,
+				...(project.repositoryIdentities !== undefined && {
+					repositoryIdentities: project.repositoryIdentities,
+				}),
 				slug: project.slug,
 				title: project.title,
 				addedAt: project.lastUsed ?? Date.now(),

@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
@@ -33,7 +34,7 @@ import {
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
-	type DaemonConfigRefTag,
+	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -171,6 +172,19 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			);
 
 		const projectList = broadcastProjectList;
+		// The project every client's new session prefills: the last one added
+		// or given a session. Persisted, and sent out with the project list.
+		const rememberNewSessionProject = (slug: string) =>
+			Effect.gen(function* () {
+				const config = yield* DaemonConfigRefTag;
+				if ((yield* Ref.get(config)).newSessionProject === slug) return;
+				yield* commitDaemonRuntimeConfig((current) => ({
+					...current,
+					newSessionProject: slug,
+				}));
+				yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+				yield* requestConfigSave;
+			});
 		const instanceList = Effect.gen(function* () {
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* getInstances);
@@ -180,7 +194,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// per change.
 		const followList = <A, E>(
 			list: "instances" | "projects" | "serverStatus",
-			read: Effect.Effect<A, E, InstanceManagerStateTag | ProjectRegistryTag>,
+			read: Effect.Effect<
+				A,
+				E,
+				InstanceManagerStateTag | ProjectRegistryTag | DaemonConfigRefTag
+			>,
 		) =>
 			Stream.unwrapScoped(
 				Effect.gen(function* () {
@@ -202,12 +220,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					"instances",
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
+						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 					})),
 				),
 			SubscribeProjects: () =>
 				followList(
 					"projects",
-					Effect.map(projectInfos, (projects) => ({ projects })),
+					Effect.gen(function* () {
+						const projects = yield* projectInfos;
+						const { newSessionProject } = yield* Ref.get(
+							yield* DaemonConfigRefTag,
+						);
+						return {
+							projects,
+							...(newSessionProject !== undefined && { newSessionProject }),
+						};
+					}),
+				),
+			sessionCreated: (projectSlug) =>
+				run(rememberNewSessionProject(projectSlug)).pipe(
+					Effect.catchAll((error) =>
+						Effect.logWarning(
+							`Could not remember the new-session project: ${error.message}`,
+						),
+					),
 				),
 			SubscribeServerStatus: () =>
 				followList(
@@ -357,7 +393,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			GetInstances: () =>
 				run(
 					getInstances.pipe(
-						Effect.map((instances) => ({ instances: Array.from(instances) })),
+						Effect.map((instances) => ({
+							instances: Array.from(instances),
+							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						})),
 					),
 				),
 			GetInstanceStatus: (request) =>
@@ -378,7 +417,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SaveProject: (request) =>
 				Effect.gen(function* () {
-					const { project, warnings } = yield* handle.saveProject({
+					const { kind, project, warnings } = yield* handle.saveProject({
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
@@ -386,8 +425,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							instanceId: request.instanceId,
 						}),
 					});
+					// Saving without a slug adds a project; its first session goes there.
+					if (request.slug === undefined && kind !== "existing")
+						yield* rememberNewSessionProject(project.slug);
 					const projects = yield* projectList;
 					return {
+						kind,
 						projectSlug: request.projectSlug,
 						...(request.projectSlug ? { current: request.projectSlug } : {}),
 						projects,
@@ -647,16 +690,21 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					),
 				),
 			FindFolders: (request) =>
-				run(
-					Effect.gen(function* () {
-						const projects = yield* allProjects;
-						return yield* findFolders(request.query, {
-							recent: getRecent(loadRecentProjects(configDir)).map(
-								(project) => project.directory,
-							),
-							projectFolders: projects.flatMap((project) => project.folders),
-						});
-					}),
+				Effect.gen(function* () {
+					const projects = yield* allProjects;
+					return yield* findFolders(request.query, {
+						recent: getRecent(loadRecentProjects(configDir)).map(
+							(project) => project.directory,
+						),
+						projectFolders: projects.flatMap((project) => project.folders),
+					});
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof ProjectSaveRejected
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			DetectProxy: wsRpcHandlers.DetectProxy,
 			SetLogLevel: wsRpcHandlers.SetLogLevel,

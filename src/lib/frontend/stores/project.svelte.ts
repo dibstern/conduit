@@ -14,6 +14,8 @@ import type { ProjectInfo } from "../types.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import {
 	attachedProjectState,
+	DRAFT_PROJECT_PARAM,
+	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
@@ -26,7 +28,23 @@ import { confirm } from "./ui.svelte.js";
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	currentSlug: null as string | null,
+	/** The project the daemon says a new session prefills, on every client. */
+	newSessionProject: null as string | null,
 });
+
+/** The project a draft will be created in: its own pick, else the last one
+ *  added or given a session (on any client), else the first available. A draft
+ *  never inherits the project of whatever session happened to be open. */
+export function getDraftProject(): string | null {
+	const picked = getCurrentSearchParams().get(DRAFT_PROJECT_PARAM);
+	if (picked) return picked;
+	const available = projectState.projects.filter((p) => !p.missing);
+	return (
+		available.find((p) => p.slug === projectState.newSessionProject)?.slug ??
+		available[0]?.slug ??
+		null
+	);
+}
 
 /** Apply a full project list: the subscription's, or an RPC's reply. */
 export function applyProjectList(
@@ -134,7 +152,11 @@ export function followDaemonLists(connection: string | null): void {
 					Effect.flatMap(clients.forProject(connection), ({ subscriptions }) =>
 						Effect.all(
 							[
-								follow(subscriptions.projects, applyProjectList),
+								follow(subscriptions.projects, (list) => {
+									applyProjectList(list);
+									projectState.newSessionProject =
+										list.newSessionProject ?? null;
+								}),
 								follow(subscriptions.instances, applyInstanceListResponse),
 								follow(
 									() => serverStatusFeed(subscriptions),

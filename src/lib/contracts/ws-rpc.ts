@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
 	SessionInfoSchema,
@@ -27,7 +28,10 @@ import {
 	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
 } from "./limit-recovery.js";
-import { ProviderDriverKindSchema } from "./provider-instance.js";
+import {
+	ProviderDriverKindSchema,
+	ProviderSessionCapabilitiesSchema,
+} from "./provider-instance.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
@@ -160,6 +164,10 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	/** Keyed by Project Folder path; non-git folders have no entry. */
+	repositoryIdentities: Schema.optional(
+		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+	),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
@@ -179,6 +187,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	capabilities: Schema.optional(
+		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
+	),
 	configDir: Schema.optional(Schema.String),
 	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
@@ -529,6 +540,10 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		slug: Schema.String,
 	}),
 	Schema.Struct({ kind: Schema.Literal("missing"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("permission-denied"),
+		path: Schema.String,
+	}),
 	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
 	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
 	Schema.Struct({
@@ -583,13 +598,20 @@ export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>
 
 export const SaveProjectResponseSchema = Schema.Struct({
 	...ProjectMutationResponseSchema.fields,
+	kind: Schema.optional(Schema.Literal("existing")),
 	savedSlug: Schema.String,
 	warnings: Schema.Array(FolderIssueSchema),
+});
+
+const ProviderCapabilityMapSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 });
 
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
+	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -1146,7 +1168,7 @@ export class PtyInput extends Schema.TaggedRequest<PtyInput>()("PtyInput", {
 export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 	"FindFolders",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
 		success: FindFoldersResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
@@ -2190,14 +2212,21 @@ export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
  */
 export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	payload: {},
-	success: Schema.Struct({ instances: Schema.Array(OpenCodeInstanceSchema) }),
+	success: Schema.Struct({
+		instances: Schema.Array(OpenCodeInstanceSchema),
+		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	}),
 	error: WsRpcError,
 	stream: true,
 });
 
 export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	payload: {},
-	success: Schema.Struct({ projects: Schema.Array(ProjectInfoSchema) }),
+	success: Schema.Struct({
+		projects: Schema.Array(ProjectInfoSchema),
+		/** The project a new session prefills, on every client. */
+		newSessionProject: Schema.optional(Schema.String),
+	}),
 	error: WsRpcError,
 	stream: true,
 });

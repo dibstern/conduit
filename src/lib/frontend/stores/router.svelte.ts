@@ -149,11 +149,6 @@ export function getCurrentSlug(): string | null {
 	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
-/** The project a draft will be created in: its own choice, else the current one. */
-export function getDraftProject(): string | null {
-	return getCurrentSearchParams().get(DRAFT_PROJECT_PARAM) ?? getCurrentSlug();
-}
-
 /** Get the current session ID from the URL (null if not present). */
 export function getCurrentSessionId(): string | null {
 	const route = getCurrentRoute();

@@ -43,7 +43,11 @@ export default defineConfig({
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,
-	workers: "100%",
+	// Each worker runs Chromium, an in-process relay and real child processes
+	// (PTY hosts, shells). One worker per core saturated the machine, so a PTY
+	// host missed its 5 s start deadline and every terminal.spec test failed
+	// in full runs while passing alone (conduit-test-ni8.59).
+	workers: "50%",
 	// require-tests-reporter fails a run where every test skipped (conduit-test-g49a).
 	reporter: process.env["CI"]
 		? [

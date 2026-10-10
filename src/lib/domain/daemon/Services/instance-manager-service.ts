@@ -21,7 +21,11 @@ import {
 	Scope,
 } from "effect";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import {
+	defaultInstanceIdForDriver,
+	isKnownDriverKind,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../../contracts/provider-instance.js";
 import {
 	instanceAlreadyExists,
 	instanceLimitExceeded,
@@ -450,9 +454,18 @@ export const removeInstance = (instanceId: string) =>
 		}),
 	);
 
-/**
- * Get a single instance by ID, or fail with InstanceNotFound.
- */
+// Capabilities describe the adapter, not persisted instance configuration.
+function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
+	const driver = instance.driver ?? "opencode";
+	return {
+		...instance,
+		capabilities: isKnownDriverKind(driver)
+			? PROVIDER_SESSION_CAPABILITIES[driver]
+			: { supportsMultiFolder: false, supportsWorktree: false },
+	};
+}
+
+/** Get a single instance by ID, or fail with InstanceNotFound. */
 export const getInstance = (instanceId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* InstanceManagerStateTag;
@@ -462,7 +475,7 @@ export const getInstance = (instanceId: string) =>
 		if (instance._tag === "None") {
 			return yield* instanceNotFound(instanceId);
 		}
-		return instance.value;
+		return instanceInfo(instance.value);
 	}).pipe(
 		Effect.annotateLogs("instanceId", instanceId),
 		Effect.withSpan("instance.get", { attributes: { instanceId } }),
@@ -474,7 +487,7 @@ export const getInstance = (instanceId: string) =>
 export const getInstances = Effect.gen(function* () {
 	const ref = yield* InstanceManagerStateTag;
 	const state = yield* Ref.get(ref);
-	return HashMap.values(state.instances);
+	return Array.from(HashMap.values(state.instances), instanceInfo);
 }).pipe(Effect.withSpan("instance.getAll"));
 
 export const getManagedOpenCodeProcessEnv = (instanceId: string) =>

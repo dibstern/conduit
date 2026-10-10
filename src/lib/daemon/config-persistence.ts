@@ -31,6 +31,10 @@ import {
 	ProviderInstanceIdSchema,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+import {
+	type RepositoryIdentity,
+	RepositoryIdentitySchema,
+} from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
 import {
@@ -56,6 +60,8 @@ export interface DaemonConfig {
 	autoSettleAfterDays?: number | null;
 	/** What to do when a Claude account reaches its usage limit; absent means the defaults. */
 	usageLimits?: UsageLimitsSetting;
+	/** The project a new session prefills: the last one added or given a session. */
+	newSessionProject?: string;
 	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
 	keepAwakeCommand?: string;
 	/** Arguments for the keep-awake command override. */
@@ -69,6 +75,7 @@ export interface DaemonConfig {
 	projects: Array<{
 		path: string;
 		folders: readonly [string, ...string[]];
+		repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 		slug: string;
 		title?: string;
 		addedAt: number;
@@ -95,6 +102,9 @@ export interface DaemonConfig {
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	repositoryIdentities: Schema.optional(
+		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+	),
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
@@ -182,6 +192,7 @@ export const DaemonConfigSchema = Schema.Struct({
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
 	dangerouslySkipPermissions: Schema.Boolean,
 	claudeConfigDir: Schema.optional(Schema.String),
+	newSessionProject: Schema.optional(Schema.String),
 	projects: Schema.Array(DaemonProjectSchema),
 	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
 });

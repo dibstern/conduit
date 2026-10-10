@@ -18,6 +18,19 @@
 
 type Listener = (event?: unknown) => void;
 
+// Module scope, not per socket: the RPC client outlives a story and keeps the
+// socket an earlier story opened, so a story cannot swap in a failing one.
+const failingRequests = new Set<string>();
+
+/**
+ * Answers every `tag` request on the fake sockets with a WsRpcError until the
+ * returned cleanup runs.
+ */
+export function failRpc(tag: string): () => void {
+	failingRequests.add(tag);
+	return () => failingRequests.delete(tag);
+}
+
 /**
  * Replaces `globalThis.WebSocket` with a socket that opens on the next tick and
  * stays open. Returns a cleanup that restores the original, suitable for
@@ -71,6 +84,27 @@ export function connectedSocket(): () => void {
 					"message",
 					new MessageEvent("message", {
 						data: JSON.stringify({ _tag: "Pong" }),
+					}),
+				);
+			}
+			if (
+				request._tag === "Request" &&
+				failingRequests.has(request.tag ?? "")
+			) {
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({
+							_tag: "Exit",
+							requestId: request.id,
+							exit: {
+								_tag: "Failure",
+								cause: {
+									_tag: "Fail",
+									error: { _tag: "WsRpcError", message: "Story failure" },
+								},
+							},
+						}),
 					}),
 				);
 			}

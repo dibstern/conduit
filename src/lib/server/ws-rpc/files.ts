@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -18,11 +18,12 @@ export const filesHandlers = {
 			const directoryListing = yield* DirectoryListingServiceTag;
 			return yield* directoryListing.find(request.query);
 		}).pipe(
-			Effect.mapError(
-				(error) =>
-					new WsRpcError({
-						message: `FindFolders failed: ${formatErrorDetail(error)}`,
-					}),
+			Effect.mapError((error) =>
+				error instanceof ProjectSaveRejected
+					? error
+					: new WsRpcError({
+							message: `FindFolders failed: ${formatErrorDetail(error)}`,
+						}),
 			),
 		),
 	GetFileTree: (request) =>

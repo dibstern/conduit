@@ -90,6 +90,15 @@ export class AppPage {
 		await this.sendBtn.click();
 	}
 
+	/** Pick a draft's project in its chip; the phone sheet opens on a tap. */
+	async chooseDraftProject(title: string): Promise<void> {
+		const chip = this.page.getByTestId("draft-project-chip");
+		if (await this.isMobileViewport()) await chip.tap();
+		else await chip.click();
+		await this.page.getByRole("menuitemradio", { name: title }).click();
+		await expect(chip).toContainText(title);
+	}
+
 	async isMobileViewport(): Promise<boolean> {
 		const viewport = this.page.viewportSize();
 		return viewport ? viewport.width < 769 : false;

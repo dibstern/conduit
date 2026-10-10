@@ -113,6 +113,9 @@ export interface ConnectionHealth {
 export interface StoredProject {
 	readonly slug: string;
 	readonly folders: readonly [string, ...string[]];
+	readonly repositoryIdentities?: Readonly<
+		Record<string, import("./shared-types.js").RepositoryIdentity>
+	>;
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
@@ -203,6 +206,7 @@ export interface ProjectRelayConfig {
 	saveProject?: (
 		input: import("./contracts/ws-rpc.js").SaveProjectInput,
 	) => Promise<{
+		kind?: "existing" | undefined;
 		project: import("./shared-types.js").ProjectInfo;
 		warnings: readonly import("./project-folders.js").FolderIssue[];
 	}>;

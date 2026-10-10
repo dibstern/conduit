@@ -372,10 +372,15 @@ export type DaemonRpcHandlers = {
 		WsRpcError
 	>;
 	readonly SubscribeProjects: () => Stream.Stream<
-		{ readonly projects: readonly ProjectInfo[] },
+		{
+			readonly projects: readonly ProjectInfo[];
+			readonly newSessionProject?: string;
+		},
 		WsRpcError
 	>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
+	/** Told after a session is created in `projectSlug`. */
+	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
 };
 
 export const makeRoutedWsRpcServerLayer = (
@@ -406,6 +411,7 @@ export const makeRoutedWsRpcServerLayer = (
 			"SubscribeInstances",
 			"SubscribeProjects",
 			"SubscribeServerStatus",
+			"sessionCreated",
 		);
 	// Object.entries/fromEntries loses the key-to-payload/result correlation.
 	// Each wrapper preserves its original handler's payload and success type.
@@ -428,6 +434,20 @@ export const makeRoutedWsRpcServerLayer = (
 		>;
 	};
 	if (attachProject) handlers.AttachProject = attachProject;
+	if (daemonHandlers) {
+		const routeCreateSession = routeHandler(unaryHandlers.CreateSession);
+		handlers.CreateSession = (
+			payload: Parameters<(typeof unaryHandlers)["CreateSession"]>[0],
+		) =>
+			routeCreateSession(payload).pipe(
+				Effect.tap(() => {
+					const slug = payload.projectSlug ?? defaultProjectSlug;
+					return slug === undefined
+						? Effect.void
+						: daemonHandlers.sessionCreated(slug);
+				}),
+			);
+	}
 	const routeStream = <
 		A,
 		E,

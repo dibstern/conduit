@@ -1127,7 +1127,12 @@ export async function getSessionSkillsRpc(
 export async function findFoldersRpc(
 	input: FindFoldersRpcInput,
 ): Promise<FindFoldersResponse> {
-	return await runTransportEffect(callFindFolders(input));
+	// Keep the typed failure so the dialog can show permission issues by the field.
+	const result = await runTransportEffect(
+		Effect.either(callFindFolders(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function switchAgentRpc(

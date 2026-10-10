@@ -38,6 +38,7 @@
 		extractCommandQuery,
 		filterCommands,
 		getChosenModel,
+		getAvailableInstances,
 		getEffectiveInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
@@ -51,7 +52,8 @@
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSlug, getDraftProject } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
@@ -366,7 +368,12 @@
 	const HIGHLIGHT_MAX_CHARS = 20_000;
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
 
-	const canSend = $derived(inputText.trim().length > 0 || pendingImages.length > 0);
+	const draftProject = $derived(projectState.projects.find((project) => project.slug === getDraftProject()));
+	const unsupportedDraftFolders = $derived(
+		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
+		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
+	);
+	const canSend = $derived(!unsupportedDraftFolders && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
 			? "Reply"
@@ -518,6 +525,7 @@
 	let startingSideThread = false;
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
+		if (unsupportedDraftFolders) return false;
 		let text = textOverride ?? inputText.trim();
 		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
 		const builtins = providerBuiltinNameSet;
