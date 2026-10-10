@@ -130,6 +130,13 @@ vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 
 vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
 	viewTranscript: vi.fn(),
+	drawSavedTranscript: vi.fn(),
+	placeSavedDraw: vi.fn(),
+	savedDraw: { sessionId: null },
+}));
+
+vi.mock("../../../src/lib/frontend/stores/saved-transcripts.js", () => ({
+	openSavedTranscript: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({

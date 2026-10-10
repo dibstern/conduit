@@ -19,6 +19,7 @@ import { historyToChatMessages } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import {
 	advanceTurnIfNewMessage,
+	clearSessionChatState,
 	getOrCreateSessionSlot,
 	historyState,
 	type PendingInput,
@@ -28,6 +29,7 @@ import {
 	sessionMessages,
 } from "./chat.svelte.js";
 import {
+	forgetTranscript,
 	openSavedTranscript,
 	type SavedSnapshot,
 	type SavedTranscript,
@@ -546,6 +548,21 @@ let viewed: {
 } | null = null;
 let generation = 0;
 let fiber: RuntimeFiber<void, unknown> | null = null;
+/** The session drawn from its saved page at load, until the server places it. */
+export const savedDraw = $state({ sessionId: null as string | null });
+/** The record each drawn slot came from; its view resumes from it. */
+const drawn = new WeakMap<SessionMessages, SavedTranscript>();
+
+const emptyTranscript = (project: ProjectRef): TranscriptEntry => ({
+	rows: [],
+	hwm: null,
+	hasMore: false,
+	status: { _tag: "cold" },
+	project,
+	pending: [],
+	waiting: new Map(),
+	partOrder: new Map(),
+});
 let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
 const paging = new Map<string, Promise<void>>();
 
@@ -590,6 +607,42 @@ async function stopFeed(): Promise<void> {
 	if (old) await runTransportEffect(Fiber.interrupt(old));
 }
 
+/**
+ * Draw a session's saved page before the server has answered anything. It is
+ * provisional: `placeSavedDraw` keeps it once the server places the session in
+ * the record's project, and the view then resumes from it.
+ */
+export function drawSavedTranscript(record: SavedTranscript): void {
+	const slot = getOrCreateSessionSlot(record.sessionId);
+	if (slot.messages.transcript) return;
+	slot.messages.transcript = applyTranscriptEnvelope(
+		emptyTranscript(record.project),
+		record.snapshot,
+	);
+	drawn.set(slot.messages, record);
+	savedDraw.sessionId = record.sessionId;
+	sessionState.currentId = record.sessionId;
+	install(record.sessionId, slot);
+}
+
+/**
+ * The server has placed the drawn session in `project` (null: it does not
+ * exist). Anywhere but the record's project, the drawn page and its record go,
+ * leaving exactly what a load without one shows.
+ */
+export function placeSavedDraw(
+	sessionId: string,
+	project: ProjectRef | null,
+): void {
+	if (savedDraw.sessionId !== sessionId) return;
+	savedDraw.sessionId = null;
+	const slot = sessionMessages.get(sessionId);
+	if (slot && drawn.get(slot)?.project === project) return;
+	clearSessionChatState(sessionId);
+	void forgetTranscript(sessionId);
+	if (sessionState.currentId === sessionId) sessionState.currentId = null;
+}
+
 export function viewTranscript(
 	project: ProjectRef,
 	sessionId: string | null,
@@ -605,23 +658,20 @@ export function viewTranscript(
 	const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
 	// Only a session this page has not loaded yet opens from a saved page.
 	let saved: Promise<SavedTranscript | undefined> = Promise.resolve(undefined);
+	const draw = slot ? drawn.get(slot.messages) : undefined;
+	if (slot) drawn.delete(slot.messages);
 	if (slot && sessionId) {
-		if (
+		if (draw?.project === project) {
+			// Drawn at load and placed by the server: resume from that page.
+			saved = Promise.resolve(draw);
+			ledgers.delete(slot.messages);
+		} else if (
 			!slot.messages.transcript ||
 			slot.messages.transcript.project !== project
 		) {
 			saved = openSavedTranscript(sessionId);
 			ledgers.delete(slot.messages);
-			slot.messages.transcript = {
-				rows: [],
-				hwm: null,
-				hasMore: false,
-				status: { _tag: "cold" },
-				project,
-				pending: [],
-				waiting: new Map(),
-				partOrder: new Map(),
-			};
+			slot.messages.transcript = emptyTranscript(project);
 			slot.messages.loadLifecycle = "loading";
 		} else {
 			// The cached copy is only as current as the feed that stopped when we

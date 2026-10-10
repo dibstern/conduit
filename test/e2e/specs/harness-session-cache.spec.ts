@@ -6,6 +6,9 @@
 //
 // Ways it can fail, each checked below:
 // - the saved page is drawn only after the server answers, so it saves nothing;
+// - a drawn page outlives the server disowning it: the session no longer
+//   exists, or lives in another project than the record says, and the saved
+//   rows stay on screen or in the record, or are resumed from;
 // - a saved page is shown but never resumed from, so every open costs a full
 //   snapshot, or it is resumed from without the checksum confirming it;
 // - changes made while the daemon was down never reach a page drawn from a
@@ -148,8 +151,8 @@ const transcriptOf = (page: Page) =>
 		}
 	});
 
-/** A browser whose /rpc frames are recorded, and whose session detail replies
- * can be held back. */
+/** A browser whose /rpc frames are recorded, and whose replies can all be
+ * held back. */
 interface Tab {
 	readonly context: BrowserContext;
 	readonly sent: unknown[];
@@ -168,15 +171,6 @@ const detailRequests = (sent: readonly unknown[]) =>
 				found.tag === "SubscribeSessionDetail",
 		),
 	);
-
-const isDetailReply = (value: unknown, ids: ReadonlySet<string>) =>
-	find(
-		value,
-		(found) =>
-			tagged("Chunk")(found) &&
-			"requestId" in found &&
-			ids.has(String(found.requestId)),
-	).length > 0;
 
 /** The detail envelopes the page was given since `from`. */
 const detailEnvelopes = (tab: Tab, from: number) => {
@@ -247,17 +241,12 @@ test("a session opened from its saved page ends where a cold open does", async (
 					server.send(message);
 				});
 				server.onMessage((message) => {
-					const value = parse(message);
 					const deliver = () => {
-						tab.received.push(value);
+						tab.received.push(parse(message));
 						socket.send(message);
 					};
-					const ids = new Set(
-						detailRequests(tab.sent).map((request) =>
-							"id" in request ? String(request.id) : "",
-						),
-					);
-					if (tab.holding && isDetailReply(value, ids)) tab.held.push(deliver);
+					// Held in order, behind any reply already held.
+					if (tab.holding || tab.held.length > 0) tab.held.push(deliver);
 					else deliver();
 				});
 			},
@@ -314,11 +303,11 @@ test("a session opened from its saved page ends where a cold open does", async (
 			),
 		);
 
-	const coldOpen = async (sessionId: string, shown: string) => {
+	const coldOpen = async (href: string, shown: string) => {
 		const context = await browser.newContext({ viewport });
 		try {
 			const page = await context.newPage();
-			await page.goto(url(sessionId));
+			await page.goto(href);
 			await expect(page.locator("#messages")).toContainText(shown, {
 				timeout: 30_000,
 			});
@@ -331,10 +320,36 @@ test("a session opened from its saved page ends where a cold open does", async (
 	const records = async (page: Page): Promise<Record<string, SavedSummary>> =>
 		savedTranscripts(page).catch(() => ({}));
 
+	/** Release every held reply, in the order the server sent them. */
+	const release = (tab: Tab) => {
+		tab.holding = false;
+		while (tab.held.length > 0) tab.held.shift()?.();
+	};
+
+	/** With every reply held since the load began, is `text` drawn? */
+	const drawnWhileHeld = async (
+		tab: Tab,
+		page: Page,
+		text: string,
+		receivedFrom: number,
+	) => {
+		const drawn = await page
+			.locator("#messages .msg-assistant", { hasText: text })
+			.first()
+			.waitFor({ timeout: 30_000 })
+			.then(
+				() => true,
+				() => false,
+			);
+		const repliesDelivered = tab.received.length - receivedFrom;
+		release(tab);
+		return { drawn, repliesDelivered };
+	};
+
 	/**
 	 * Open `sessionId` in the tab until it shows `shown` and its detail
-	 * subscription synchronized, then compare it with a cold open.
-	 * `drawnHeld` holds every detail reply until that text is on screen;
+	 * subscription synchronized, then compare it with a cold open of the same
+	 * address. `drawnHeld` holds every reply until that text is on screen;
 	 * `settled` waits for the saved records to reach the expected state.
 	 */
 	const visit = async (
@@ -345,8 +360,10 @@ test("a session opened from its saved page ends where a cold open does", async (
 			readonly drawnHeld?: string;
 			readonly settled?: (saved: Record<string, SavedSummary>) => boolean;
 			readonly cold?: false;
+			readonly href?: string;
 		} = {},
 	) => {
+		const href = options.href ?? url(sessionId);
 		const sentFrom = tab.sent.length;
 		const receivedFrom = tab.received.length;
 		const page = await tab.context.newPage();
@@ -358,26 +375,11 @@ test("a session opened from its saved page ends where a cold open does", async (
 		page.on("pageerror", (error) => pageErrors.push(error.message));
 		try {
 			tab.holding = options.drawnHeld !== undefined;
-			await page.goto(url(sessionId));
-			let drawnBeforeReply:
-				| { readonly drawn: boolean; readonly repliesDelivered: number }
-				| undefined;
-			if (options.drawnHeld !== undefined) {
-				const drawn = await page
-					.locator("#messages .msg-assistant", { hasText: options.drawnHeld })
-					.first()
-					.waitFor({ timeout: 30_000 })
-					.then(
-						() => true,
-						() => false,
-					);
-				drawnBeforeReply = {
-					drawn,
-					repliesDelivered: detailEnvelopes(tab, receivedFrom).length,
-				};
-				tab.holding = false;
-				for (const deliver of tab.held.splice(0)) deliver();
-			}
+			await page.goto(href);
+			const drawnBeforeReply =
+				options.drawnHeld === undefined
+					? undefined
+					: await drawnWhileHeld(tab, page, options.drawnHeld, receivedFrom);
 			await expect(page.locator("#messages")).toContainText(shown, {
 				timeout: 30_000,
 			});
@@ -399,7 +401,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 						() => false,
 					));
 			const cold =
-				options.cold === false ? undefined : await coldOpen(sessionId, shown);
+				options.cold === false ? undefined : await coldOpen(href, shown);
 			const transcriptEqualsCold =
 				cold === undefined
 					? undefined
@@ -434,22 +436,27 @@ test("a session opened from its saved page ends where a cold open does", async (
 				},
 			};
 		} finally {
-			tab.holding = false;
-			for (const deliver of tab.held.splice(0)) deliver();
+			release(tab);
 			await page.close();
 		}
 	};
 
+	interface Result {
+		readonly sessionId: string;
+		readonly cached: string;
+		readonly cold: string | undefined;
+		readonly verdicts: Readonly<Record<string, unknown>>;
+	}
 	const scenarios: {
 		name: string;
-		result: Awaited<ReturnType<typeof visit>>;
+		result: Result;
 		expected: Record<string, unknown>;
 	}[] = [];
-	const run = async (
+	const run = async <R extends Result>(
 		name: string,
-		result: Promise<Awaited<ReturnType<typeof visit>>>,
+		result: Promise<R>,
 		expected: Record<string, unknown>,
-	) => {
+	): Promise<R> => {
 		const done = await result;
 		scenarios.push({ name, result: done, expected });
 		return done;
@@ -475,17 +482,130 @@ test("a session opened from its saved page ends where a cold open does", async (
 		{ ...clean, ...cold, settled: true },
 	);
 
-	// A reload draws the saved page while every detail reply is held, then
-	// resumes from it: no snapshot, and the checksum confirms it.
+	// A reload draws the saved page while every reply is held, then resumes
+	// from it: no snapshot, and the checksum confirms it.
+	const drawnFirst = { drawn: true, repliesDelivered: 0 };
 	await run(
 		"cached-open",
 		visit(tab, SESSION, replyEnd("base", 1), {
 			drawnHeld: replyEnd("base", 1),
 		}),
+		{ ...clean, ...resumed, drawnBeforeReply: drawnFirst },
+	);
+
+	// A record filed under another project, opened by an address that names
+	// none: drawn, then discarded once the server places the session, which
+	// then opens cold and is saved under its own project.
+	await edit(tab, SESSION, { project: "elsewhere" });
+	await run(
+		"record-in-other-project",
+		visit(tab, SESSION, replyEnd("base", 1), {
+			href: `${harness.baseUrl}/s/${SESSION}`,
+			drawnHeld: replyEnd("base", 1),
+			settled: (saved) => saved[SESSION]?.project === "process-test",
+		}),
 		{
 			...clean,
-			...resumed,
-			drawnBeforeReply: { drawn: true, repliesDelivered: 0 },
+			...cold,
+			drawnBeforeReply: drawnFirst,
+			settled: true,
+			record: { project: "process-test" },
+		},
+	);
+
+	// A saved page for a session the server does not have: drawn, then
+	// cleared with its record, leaving what a cold load of it shows.
+	const missing = `${SESSION}-deleted`;
+	await atOrigin(tab, (page) =>
+		page.evaluate(
+			([from, to]) =>
+				new Promise<void>((resolve, reject) => {
+					const request = indexedDB.open("conduit-saved-transcripts");
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => {
+						const db = request.result;
+						const transaction = db.transaction("transcripts", "readwrite");
+						const store = transaction.objectStore("transcripts");
+						const get = store.get(from);
+						get.onsuccess = () => store.put({ ...get.result, sessionId: to });
+						transaction.oncomplete = () => {
+							db.close();
+							resolve();
+						};
+						transaction.onabort = () => {
+							db.close();
+							reject(transaction.error);
+						};
+					};
+				}),
+			[SESSION, missing] as const,
+		),
+	);
+	const notFound = async (page: Page) => {
+		await expect(page.getByText("Session not found.")).toBeVisible({
+			timeout: 30_000,
+		});
+		const { pathname, search } = new URL(page.url());
+		return { address: pathname + search, transcript: await transcriptOf(page) };
+	};
+	await run(
+		"session-missing",
+		(async () => {
+			const sentFrom = tab.sent.length;
+			const receivedFrom = tab.received.length;
+			const href = url(missing);
+			const page = await tab.context.newPage();
+			const pageErrors: string[] = [];
+			page.on("pageerror", (error) => pageErrors.push(error.message));
+			try {
+				tab.holding = true;
+				await page.goto(href);
+				const drawnBeforeReply = await drawnWhileHeld(
+					tab,
+					page,
+					replyEnd("base", 1),
+					receivedFrom,
+				);
+				const cached = await notFound(page);
+				const context = await browser.newContext({ viewport });
+				const coldPage = await context.newPage();
+				await coldPage.goto(href);
+				const cold = await notFound(coldPage).finally(() => context.close());
+				const forgotten = await expect
+					.poll(async () => missing in (await records(page)), {
+						timeout: 10_000,
+					})
+					.toBe(false)
+					.then(
+						() => true,
+						() => false,
+					);
+				return {
+					sessionId: missing,
+					cached: cached.transcript,
+					cold: cold.transcript,
+					verdicts: {
+						drawnBeforeReply,
+						addressEqualsCold: cached.address === cold.address,
+						transcriptEqualsCold: cached.transcript === cold.transcript,
+						address: cached.address,
+						detailRequests: detailRequests(tab.sent.slice(sentFrom)).length,
+						forgotten,
+						pageErrors,
+					},
+				};
+			} finally {
+				release(tab);
+				await page.close();
+			}
+		})(),
+		{
+			drawnBeforeReply: drawnFirst,
+			addressEqualsCold: true,
+			transcriptEqualsCold: true,
+			detailRequests: 0,
+			forgotten: true,
+			pageErrors: [],
 		},
 	);
 
