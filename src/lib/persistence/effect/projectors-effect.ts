@@ -469,18 +469,23 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const isBackfilled = event.data.backfilled ? 1 : 0;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
-				// A live user message placed while another turn is open was read
-				// mid-turn: a steer. The turn projector closes that turn.
+				// A live user message whose input was sent as a steer, landing while
+				// another turn is open, was read mid-turn; the turn projector closes
+				// that turn. A steer landing after the turn ended ran as its own.
 				const steers = event.data.role === "user" && !isBackfilled;
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
 						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
 						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
-							${steers ? 1 : 0} AND EXISTS (SELECT 1 FROM turns
-								WHERE session_id = ${event.data.sessionId}
-								AND state IN ('pending', 'running')
-								AND id != ${event.data.messageId}))
+							${steers ? 1 : 0}
+								AND EXISTS (SELECT 1 FROM pending_inputs
+									WHERE input_id = ${event.data.inputId ?? null}
+									AND state = 'steering')
+								AND EXISTS (SELECT 1 FROM turns
+									WHERE session_id = ${event.data.sessionId}
+									AND state IN ('pending', 'running')
+									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
@@ -1464,17 +1469,13 @@ export const makeInputProjector = (): EffectProjector => ({
 				);
 			}
 
-			// Sent while another turn is open, the input steers that turn and stays
-			// in the tray until its message lands. Otherwise it leaves now.
+			// Sent as a steer, the input stays in the tray until its message lands.
+			// Otherwise it starts its own turn and leaves now.
 			if (isEventType(event, "input.sent")) {
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE pending_inputs
-						SET state = CASE WHEN EXISTS (
-								SELECT 1 FROM turns
-								WHERE session_id = ${event.data.sessionId}
-									AND state IN ('pending', 'running')
-							) THEN 'steering' ELSE 'removed' END,
+						SET state = ${event.data.steer ? "steering" : "removed"},
 							version = ${ctx.version}
 						WHERE input_id = ${event.data.inputId} AND state = 'queued'
 						RETURNING session_id`,
