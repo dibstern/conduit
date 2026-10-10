@@ -527,7 +527,13 @@ export function deriveTranscriptMessages(
 		.concat(atEnd);
 }
 
-let viewed: { project: ProjectRef; sessionId: string | null } | null = null;
+let viewed: {
+	project: ProjectRef;
+	sessionId: string | null;
+	/** Settles true once the first load completes, false if left first. */
+	loaded: Promise<boolean>;
+	settle: (loaded: boolean) => void;
+} | null = null;
 let generation = 0;
 let fiber: RuntimeFiber<void, unknown> | null = null;
 let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
@@ -579,7 +585,12 @@ export function viewTranscript(
 	sessionId: string | null,
 ): void {
 	if (viewed?.project === project && viewed.sessionId === sessionId) return;
-	viewed = { project, sessionId };
+	viewed?.settle(false);
+	let settle: (loaded: boolean) => void = () => {};
+	const loaded = new Promise<boolean>((resolve) => {
+		settle = resolve;
+	});
+	viewed = { project, sessionId, loaded, settle };
 	const currentGeneration = ++generation;
 	const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
 	if (slot && sessionId) {
@@ -683,6 +694,7 @@ export function viewTranscript(
 								) {
 									cancelFrame();
 									install(sessionId, slot);
+									if (envelope._tag === "synchronized") viewed?.settle(true);
 								} else if (pendingFrame === null) {
 									const render = () => {
 										pendingFrame = null;
@@ -702,6 +714,17 @@ export function viewTranscript(
 		if (currentGeneration === generation) fiber = next;
 		else runtime.runFork(Fiber.interrupt(next));
 	});
+}
+
+/** This session's view while it is open: the same promise throughout,
+ *  settling true once its first load completes and false if it is left first. */
+export function sessionViewLoaded(
+	project: ProjectRef,
+	sessionId: string,
+): Promise<boolean> | undefined {
+	return viewed?.project === project && viewed.sessionId === sessionId
+		? viewed.loaded
+		: undefined;
 }
 
 export function transcriptStatus(sessionId: string): FeedStatus {

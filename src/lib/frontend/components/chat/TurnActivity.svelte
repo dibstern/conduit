@@ -8,10 +8,15 @@
 <!--                                                                              -->
 <!-- Skills are the turn's chapters, so their count is a control of its own: it    -->
 <!-- lists which ran and when, picks them out on the strip, and jumps to the call.  -->
+<!--                                                                              -->
+<!-- Resting on the block for 2 s tells the tool-detail module its tools are       -->
+<!-- wanted soon, so expanding one is instant; scrolling past asks for nothing.    -->
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { revealedPart } from "../../stores/reveal.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { toolDetails } from "../../stores/tool-details.js";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -67,6 +72,31 @@
 			const i = segment.activity.findIndex((part) => part.uuid === uuid);
 			if (i >= 0) void jumpTo(i);
 		});
+	});
+
+	const PREFETCH_REST_MS = 2_000;
+
+	$effect(() => {
+		if (!panelEl) return;
+		let resting: ReturnType<typeof setTimeout> | undefined;
+		const observer = new IntersectionObserver((entries) => {
+			clearTimeout(resting);
+			if (!entries.at(-1)?.isIntersecting) return;
+			resting = setTimeout(() => {
+				const projectSlug = getCurrentSlug();
+				const sessionId = getCurrentSessionId();
+				if (projectSlug && sessionId)
+					toolDetails.wantSoon(
+						{ projectSlug, sessionId },
+						segment.activity.flatMap((part) => (part.type === "tool" ? [part] : [])),
+					);
+			}, PREFETCH_REST_MS);
+		});
+		observer.observe(panelEl);
+		return () => {
+			observer.disconnect();
+			clearTimeout(resting);
+		};
 	});
 
 	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */

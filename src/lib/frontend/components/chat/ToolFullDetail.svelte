@@ -7,8 +7,7 @@
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { type SessionRef, toolDetails } from "../../stores/tool-details.js";
-	import { toolCommand } from "../../utils/turns.js";
+	import { type SessionRef, shownCut, toolDetails } from "../../stores/tool-details.js";
 	import Button from "../ui/Button.svelte";
 
 	const loadFromServer = async (tool: ToolMessage, session: SessionRef | undefined) =>
@@ -33,19 +32,7 @@
 	let failed = $state(false);
 	let attempt = $state(0);
 
-	// The cards show a tool's result and a shell command; a cut elsewhere in the
-	// input (a written file's content) is nothing to load.
-	const cut = $derived.by(() => {
-		const output = message.preview?.resultBytes !== undefined;
-		const command =
-			toolCommand(message) !== undefined &&
-			(message.preview?.inputCuts ?? []).some(
-				({ path }) => path.length === 1 && path[0] === "command",
-			);
-		if (output && command) return "command and output";
-		if (output) return "output";
-		return command ? "command" : undefined;
-	});
+	const cut = $derived(shownCut(message));
 
 	// The session the tool is shown in: a fork repeats its parent's call ids.
 	const session = $derived.by((): SessionRef | undefined => {

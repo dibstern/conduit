@@ -5,7 +5,8 @@
 // counts: the browser shows some running tools as completed. Every finished
 // detail a reply carries is kept, even one that arrives after its asker gave
 // up. Asks for one session in the same tick share one GetToolDetails request,
-// and an ask for a tool already on its way joins that request.
+// and an ask for a tool already on its way joins that request. Prefetch waits
+// for the session's first load and spends about 5 MB per view of it.
 
 import {
 	ToolCallId,
@@ -15,6 +16,8 @@ import {
 import { getToolDetailsRpc } from "../transport/ws-rpc-client.js";
 import type { ToolMessage } from "../types.js";
 import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../ui-constants.js";
+import { toolCommand } from "../utils/turns.js";
+import { sessionViewLoaded } from "./transcript.svelte.js";
 
 export interface SessionRef {
 	readonly projectSlug: string;
@@ -40,6 +43,24 @@ const fullBytes = ({ preview }: ToolMessage): number =>
 	(preview?.resultBytes ?? 0) +
 	(preview?.inputCuts ?? []).reduce((sum, cut) => sum + cut.fullBytes, 0);
 
+/**
+ * What of a cut tool the cards show: its result and a shell command. A cut
+ * elsewhere in the input (a written file's content) is nothing to load.
+ */
+export const shownCut = (
+	tool: ToolMessage,
+): "command and output" | "output" | "command" | undefined => {
+	const output = tool.preview?.resultBytes !== undefined;
+	const command =
+		toolCommand(tool) !== undefined &&
+		(tool.preview?.inputCuts ?? []).some(
+			({ path }) => path.length === 1 && path[0] === "command",
+		);
+	if (output && command) return "command and output";
+	if (output) return "output";
+	return command ? "command" : undefined;
+};
+
 const sessionKey = ({ projectSlug, sessionId }: SessionRef) =>
 	`${projectSlug}\0${sessionId}`;
 
@@ -54,6 +75,12 @@ export function makeToolDetails(
 		session: SessionRef,
 		toolIds: readonly [ToolCallId, ...ToolCallId[]],
 	) => Promise<readonly ToolDetail[]>,
+	/**
+	 * This session's view while it is open: the same promise throughout,
+	 * settling true once its first load completes and false if it is left
+	 * first.
+	 */
+	viewLoaded: (session: SessionRef) => Promise<boolean> | undefined,
 ) {
 	const kept = new Map<string, { detail: SettledDetail; size: number }>();
 	let keptSize = 0;
@@ -142,51 +169,55 @@ export function makeToolDetails(
 
 	let prefetching = false;
 	let wanted:
-		| { session: SessionRef; tools: readonly ToolMessage[] }
+		| {
+				view: Promise<boolean>;
+				session: SessionRef;
+				tools: readonly ToolMessage[];
+		  }
 		| undefined;
-	let view: string | undefined;
-	let spent = 0;
+	let budget: { view: Promise<boolean>; spent: number } | undefined;
 
-	const prefetch = () => {
-		const next = wanted;
-		wanted = undefined;
-		if (!next) return;
-		if (sessionKey(next.session) !== view) {
-			view = sessionKey(next.session);
-			spent = 0;
-		}
-		const chosen = next.tools.filter((tool) => {
-			const bytes = fullBytes(tool);
-			if (
-				(tool.status !== "completed" && tool.status !== "error") ||
-				bytes === 0 ||
-				spent + bytes > PREFETCH_BYTES_PER_VIEW ||
-				kept.has(toolKey(next.session, tool.id)) ||
-				inFlight.has(flightKey(next.session, tool))
-			)
-				return false;
-			spent += bytes;
-			return true;
-		});
-		if (chosen.length === 0) return;
+	const prefetch = async () => {
+		if (prefetching) return;
 		prefetching = true;
-		void Promise.allSettled(chosen.map((tool) => get(next.session, tool))).then(
-			() => {
-				prefetching = false;
-				prefetch();
-			},
-		);
+		while (wanted) {
+			const next = wanted;
+			const loaded = await next.view;
+			// A newer set arrived while the view loaded; the left view's set is dropped.
+			if (wanted !== next) continue;
+			wanted = undefined;
+			if (!loaded) continue;
+			if (budget?.view !== next.view) budget = { view: next.view, spent: 0 };
+			const view = budget;
+			const chosen = next.tools.filter((tool) => {
+				const bytes = fullBytes(tool);
+				if (
+					(tool.status !== "completed" && tool.status !== "error") ||
+					shownCut(tool) === undefined ||
+					view.spent + bytes > PREFETCH_BYTES_PER_VIEW ||
+					kept.has(toolKey(next.session, tool.id)) ||
+					inFlight.has(flightKey(next.session, tool))
+				)
+					return false;
+				view.spent += bytes;
+				return true;
+			});
+			await Promise.allSettled(chosen.map((tool) => get(next.session, tool)));
+		}
+		prefetching = false;
 	};
 
 	/**
-	 * These tools are wanted soon: load the cut, settled ones in the
-	 * background. One prefetch runs at a time and the newest wanted set waits
-	 * for it; each session view stops after about 5 MB. Failures are silent and
-	 * not retried.
+	 * These tools are wanted soon: once the session's first load completes,
+	 * load the settled ones whose cut a card shows. One prefetch runs at a time
+	 * and the newest wanted set waits for it; each view of a session stops
+	 * after about 5 MB. Failures are silent and not retried.
 	 */
 	const wantSoon = (session: SessionRef, tools: readonly ToolMessage[]) => {
-		wanted = { session, tools };
-		if (!prefetching) prefetch();
+		const view = viewLoaded(session);
+		if (!view) return;
+		wanted = { view, session, tools };
+		void prefetch();
 	};
 
 	return { get, wantSoon };
@@ -195,4 +226,5 @@ export function makeToolDetails(
 export const toolDetails = makeToolDetails(
 	async (session, toolIds) =>
 		(await getToolDetailsRpc({ ...session, toolIds })).tools,
+	({ projectSlug, sessionId }) => sessionViewLoaded(projectSlug, sessionId),
 );

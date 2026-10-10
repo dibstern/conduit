@@ -389,12 +389,18 @@ test("opens the heavy session after a restart under load", async ({
 	await toolRow.locator("button").first().click();
 	// Every call waits seconds on a server this loaded.
 	await expect(toolRow).toContainText("END-OF-result", { timeout: 30_000 });
+	// This call's own detail: the heavy session's prefetches (conduit-test-y7eo.11)
+	// can land in this window too.
+	const toolId = completedTool()?.payload.match(
+		/"id":"([^"]+)","type":"tool"/,
+	)?.[1];
 	const toolPreviews = {
 		heavyFirstPageBytes,
 		liveToolUpdateBytes: completedTool()?.bytes ?? 0,
 		detailResponseBytes:
-			pinned.find(({ payload }) => payload.includes('"tools":[{"toolId"'))
-				?.bytes ?? 0,
+			pinned.find(({ payload }) =>
+				payload.includes(`"tools":[{"toolId":"${toolId}"`),
+			)?.bytes ?? 0,
 		limits: TOOL_PREVIEW_LIMITS,
 	};
 	pinned = undefined;

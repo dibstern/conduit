@@ -5,7 +5,10 @@
 // loads the rest, with a retry when that load fails. The tool-detail module
 // (conduit-test-y7eo.10) keeps what was loaded: expanding again asks nothing,
 // expands close together share one request, and a running tool's detail is
-// never kept as final.
+// never kept as final. Resting on a turn activity block for 2 s prefetches its
+// tools' details in one request, once the session has loaded; scrolling past
+// asks for nothing, and expanding a prefetched tool asks nothing
+// (conduit-test-y7eo.11).
 //
 //   CONDUIT_TEST_DIST=dist pnpm exec playwright test \
 //     --config test/e2e/playwright-harness.config.ts harness-tool-previews
@@ -44,6 +47,16 @@ const BASH_ID = `${SEEDED}-bash`;
 const TASK_ID = `${SEEDED}-task`;
 const WRITE_ID = `${SEEDED}-write`;
 const SEQ_IDS = [`${SEEDED}-seq-1`, `${SEEDED}-seq-2`] as const;
+const PREFETCH = "prefetch-seeded";
+/** Each turn's two finished tools with cut results. */
+const TURN_TOOLS = [0, 1, 2].map((turn) =>
+	[0, 1].map((i) => `${PREFETCH}-t${turn}-${i}`),
+);
+/** A reply taller than any screen, keeping turn activity blocks apart. */
+const TALL_REPLY = Array.from(
+	{ length: 80 },
+	(_, i) => `Paragraph ${i} of a reply.`,
+).join("\n\n");
 
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
@@ -148,6 +161,74 @@ const seed = (filename: string) =>
 				],
 				{ publish: false },
 			);
+			// Three turns, each a block of two finished tools with cut results.
+			// Every reply but the last is taller than a screen, so a block shows
+			// alone and the newest is the one on screen at the bottom.
+			const prefetchEvent = <T extends CanonicalEventType>(
+				type: T,
+				data: EventPayloadMap[T],
+			) =>
+				canonicalEvent(type, PREFETCH, data, {
+					provider: "claude",
+					createdAt: at,
+				});
+			yield* commit(
+				[
+					prefetchEvent("session.created", {
+						sessionId: PREFETCH,
+						title: "Prefetch",
+						provider: "claude",
+						providerSessionId: PREFETCH,
+					}),
+					...TURN_TOOLS.flatMap((ids, turn) => {
+						const messageId = `${PREFETCH}-a${turn}`;
+						return [
+							prefetchEvent("message.created", {
+								messageId: `${PREFETCH}-u${turn}`,
+								role: "user",
+								sessionId: PREFETCH,
+							}),
+							prefetchEvent("text.delta", {
+								messageId: `${PREFETCH}-u${turn}`,
+								partId: `${PREFETCH}-u${turn}-0`,
+								text: `Turn ${turn}`,
+							}),
+							prefetchEvent("message.created", {
+								messageId,
+								role: "assistant",
+								sessionId: PREFETCH,
+							}),
+							...ids.flatMap((partId) => [
+								prefetchEvent("tool.started", {
+									messageId,
+									partId,
+									toolName: "Bash",
+									callId: partId,
+									input: { tool: "Bash", command: "seq 1500" },
+								}),
+								prefetchEvent("tool.running", { messageId, partId }),
+								prefetchEvent("tool.completed", {
+									messageId,
+									partId,
+									result: LONG_RESULT,
+									duration: 250,
+								}),
+							]),
+							prefetchEvent("text.delta", {
+								messageId,
+								partId: `${messageId}-text`,
+								text: turn < 2 ? TALL_REPLY : "Done.",
+							}),
+							prefetchEvent("turn.completed", {
+								messageId,
+								tokens: { input: 10, output: 10 },
+								duration: 1000,
+							}),
+						];
+					}),
+				],
+				{ publish: false },
+			);
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
 		),
@@ -186,10 +267,18 @@ const toolsIn = (value: unknown): WireTool[] => {
 	return isTool(value) ? [value, ...nested] : nested;
 };
 
+const isSynchronized = (value: unknown) =>
+	typeof value === "object" &&
+	value !== null &&
+	"_tag" in value &&
+	value._tag === "synchronized";
+
 /**
  * Records every frame the server sends the page and the tool ids of each
  * GetToolDetails request. Fails the next one once `failNextDetails` is set,
- * and holds them back from the server while `holdDetails` is set.
+ * and holds them back from the server while `holdDetails` is set. While
+ * `holdLoad` is set, a session's transcript arrives but the word that it has
+ * finished loading (synchronized) waits for `releaseLoad`.
  */
 const watchRpc = async (page: Page) => {
 	const control = {
@@ -198,24 +287,57 @@ const watchRpc = async (page: Page) => {
 		holdDetails: false,
 		held: [] as (() => void)[],
 		detailRequests: [] as (readonly string[])[],
+		holdLoad: false,
+		heldLoad: [] as (() => void)[],
 		release() {
 			control.holdDetails = false;
 			for (const send of control.held.splice(0)) send();
 		},
+		releaseLoad() {
+			control.holdLoad = false;
+			for (const send of control.heldLoad.splice(0)) send();
+		},
 	};
+	const transcriptStreams = new Set<string>();
 	await page.routeWebSocket(
 		(url) => url.pathname === "/rpc",
 		(socket) => {
 			const server = socket.connectToServer();
 			server.onMessage((message) => {
-				control.frames.push({
-					bytes: Buffer.byteLength(message),
-					value: JSON.parse(message.toString()),
-				});
-				socket.send(message);
+				const value: unknown = JSON.parse(message.toString());
+				control.frames.push({ bytes: Buffer.byteLength(message), value });
+				if (
+					!control.holdLoad ||
+					typeof value !== "object" ||
+					value === null ||
+					!("requestId" in value) ||
+					!transcriptStreams.has(String(value.requestId)) ||
+					!("values" in value) ||
+					!Array.isArray(value.values) ||
+					!value.values.some(isSynchronized)
+				)
+					return socket.send(message);
+				const values: unknown[] = value.values;
+				const rest = values.filter((item) => !isSynchronized(item));
+				if (rest.length > 0)
+					socket.send(JSON.stringify({ ...value, values: rest }));
+				control.heldLoad.push(() =>
+					socket.send(
+						JSON.stringify({ ...value, values: values.filter(isSynchronized) }),
+					),
+				);
 			});
 			socket.onMessage((message) => {
 				const sent: unknown = JSON.parse(message.toString());
+				for (const item of [sent].flat())
+					if (
+						typeof item === "object" &&
+						item !== null &&
+						"tag" in item &&
+						item.tag === "SubscribeSessionDetail" &&
+						"id" in item
+					)
+						transcriptStreams.add(String(item.id));
 				const request = [sent].flat().find(
 					(
 						item,
@@ -316,6 +438,24 @@ test("tools open as previews and expand to full detail", async ({
 		...(hasTouch === undefined ? {} : { hasTouch }),
 	});
 	const page = await context.newPage();
+	// Prefetch has its own test below. Here no turn activity block reports
+	// itself on screen, so every detail request is an expand's.
+	await page.addInitScript(() => {
+		const Observer = window.IntersectionObserver;
+		window.IntersectionObserver = class extends Observer {
+			constructor(
+				callback: IntersectionObserverCallback,
+				options?: IntersectionObserverInit,
+			) {
+				super((entries, observer) => {
+					const shown = entries.filter(
+						({ target }) => !target.matches(".turn-activity"),
+					);
+					if (shown.length > 0) callback(shown, observer);
+				}, options);
+			}
+		};
+	});
 	const rpc = await watchRpc(page);
 	const app = new AppPage(page);
 
@@ -504,4 +644,67 @@ test("tools open as previews and expand to full detail", async ({
 		expect(frame.bytes).toBeLessThan(bytes(LONG_RESULT));
 	await context.close();
 	await driver.close();
+});
+
+test("resting on a turn activity block prefetches its tools, once loaded", async ({
+	browser,
+	harness,
+}, testInfo) => {
+	test.setTimeout(120_000);
+	await harness.terminate();
+	await seed(harness.projectStorePath());
+	await harness.restart({ keepPort: true });
+
+	const { viewport, isMobile, hasTouch } = testInfo.project.use;
+	const context = await browser.newContext({
+		...(viewport ? { viewport } : {}),
+		...(isMobile === undefined ? {} : { isMobile }),
+		...(hasTouch === undefined ? {} : { hasTouch }),
+	});
+	const page = await context.newPage();
+	const rpc = await watchRpc(page);
+	const app = new AppPage(page);
+	const blocks = page.locator(".turn-activity");
+	/** Let a block rest on screen well past 2 s. */
+	const rest = () => page.waitForTimeout(3_000);
+	const [, middle = [], newest = []] = TURN_TOOLS;
+
+	// None before the session's initial load completes: the transcript is on
+	// screen, but the word that it has loaded is held back.
+	rpc.holdLoad = true;
+	await app.goto(`${harness.baseUrl}/s/${PREFETCH}?p=process-test`);
+	await expect(blocks).toHaveCount(3);
+	await expect(blocks.last()).toBeInViewport();
+	await expect(blocks.nth(1)).not.toBeInViewport();
+	await rest();
+	expect(rpc.detailRequests).toEqual([]);
+	rpc.releaseLoad();
+	await expect.poll(() => rpc.detailRequests).toEqual([newest]);
+
+	// Resting on a block for 2 s: exactly one batched request, for its tools.
+	await blocks.nth(1).scrollIntoViewIfNeeded();
+	await expect(blocks.last()).not.toBeInViewport();
+	await expect.poll(() => rpc.detailRequests).toEqual([newest, middle]);
+	await rest();
+	expect(rpc.detailRequests).toEqual([newest, middle]);
+
+	// Scrolling past a block within 1 s asks for nothing; the one scrolled
+	// back to is already loaded.
+	await page.evaluate(async () => {
+		const [first, second] = document.querySelectorAll(".turn-activity");
+		first?.scrollIntoView({ block: "center" });
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		second?.scrollIntoView({ block: "center" });
+	});
+	await expect(blocks.first()).not.toBeInViewport();
+	await rest();
+	expect(rpc.detailRequests).toEqual([newest, middle]);
+
+	// Expanding a prefetched tool shows it whole and asks nothing.
+	await blocks.nth(1).locator(".turn-activity-toggle").click();
+	const row = await expandTool(page, toolRow(page, middle[0] ?? "missing"));
+	await expect(row.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(row.locator(".tool-full-detail")).toHaveCount(0);
+	expect(rpc.detailRequests).toEqual([newest, middle]);
+	await context.close();
 });

@@ -34,6 +34,17 @@
 //     call id has the same status, keeps showing the parent's detail; the
 //     load asks under whichever session is current when it runs, not the
 //     one the tool was shown in.
+// Prefetch after 2 s on a turn activity block (conduit-test-y7eo.11), written
+// before the change:
+// 14. A prefetch starts before the session's initial load completes, or a
+//     set wanted during the load is dropped once the load completes.
+// 15. A view left before its load completes still prefetches, or holds up
+//     prefetch for the next view for good.
+// 16. The budget follows the session, not the view: leaving a session and
+//     coming back (A to B to A, nothing wanted in B) keeps what A spent.
+// 17. A session that is not open is prefetched.
+// 18. Prefetch asks for a tool whose only cut is one no card shows (a written
+//     file's content), spending budget on a load no expand would make.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -51,6 +62,21 @@ import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 const MB = 1_000_000;
 const session: SessionRef = { projectSlug: "p", sessionId: "s1" };
 const fork: SessionRef = { projectSlug: "p", sessionId: "s2" };
+
+/** A view of each session whose first load has completed. */
+const views = new Map(
+	[session, fork].map((ref) => [ref, Promise.resolve(true)]),
+);
+const opened = (ref: SessionRef) => views.get(ref);
+
+/** A view of `session` that has not loaded yet, settled on demand. */
+const loading = () => {
+	let settle: (loaded: boolean) => void = () => {};
+	const view = new Promise<boolean>((resolve) => {
+		settle = resolve;
+	});
+	return { view, settle };
+};
 
 const tool = (
 	id: string,
@@ -115,7 +141,7 @@ afterEach(() => vi.useRealTimers());
 describe("expand", () => {
 	it("keeps a settled tool's detail: the second ask makes no request", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const first = details.get(session, tool("a"));
 		await tick();
 		await s.answer();
@@ -126,7 +152,7 @@ describe("expand", () => {
 
 	it("never keeps a running tool's detail, and asks again once it settles", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		// The browser already says completed; the server says still running.
 		for (const status of ["running", "completed"] as const) {
 			const early = details.get(session, tool("a", status));
@@ -144,7 +170,7 @@ describe("expand", () => {
 
 	it("does not join a request sent while the tool was running", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const running = details.get(session, tool("a", "running"));
 		await tick();
 		const settled = details.get(session, tool("a"));
@@ -160,7 +186,7 @@ describe("expand", () => {
 
 	it("makes one request for two asks of the same tool at once", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const both = Promise.all([
 			details.get(session, tool("a")),
 			details.get(session, tool("a")),
@@ -177,7 +203,7 @@ describe("expand", () => {
 
 	it("batches asks close together, one request per session", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const asks = [
 			details.get(session, tool("a")),
 			details.get(session, tool("b")),
@@ -204,7 +230,7 @@ describe("expand", () => {
 
 	it("keeps nothing from a failed request, so a retry asks again", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const failed = details.get(session, tool("a")).catch((e: unknown) => e);
 		await tick();
 		await s.fail();
@@ -218,7 +244,7 @@ describe("expand", () => {
 
 	it("gives up on a request that never answers, so a retry asks again", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const stuck = details.get(session, tool("a"));
 		const outcome = stuck.catch((error: unknown) => error);
 		await vi.advanceTimersByTimeAsync(10_000);
@@ -232,7 +258,7 @@ describe("expand", () => {
 	});
 
 	it("answers undefined for a tool the server does not know", async () => {
-		const details = makeToolDetails(async () => []);
+		const details = makeToolDetails(async () => [], opened);
 		const ask = details.get(session, tool("gone"));
 		await tick();
 		expect(await ask).toBeUndefined();
@@ -244,7 +270,7 @@ describe("memory", () => {
 
 	it("weighs what came back, staying within about 50 MB, least recently used out first", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const { preview: _cut, ...uncut } = tool("a", "running");
 		// Each asker's preview says a few KB, or nothing; each reply is 20 MB.
 		const load = async (ask: ToolMessage) => {
@@ -271,7 +297,7 @@ describe("memory", () => {
 
 	it("does not empty itself for a detail bigger than the whole cache", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const small = details.get(session, tool("a"));
 		await tick();
 		await s.answer();
@@ -291,7 +317,7 @@ describe("memory", () => {
 
 	it("keeps a finished detail that arrives after its asker gave up", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const late = details.get(session, tool("a")).catch((e: unknown) => e);
 		await vi.advanceTimersByTimeAsync(10_000);
 		expect(await late).toBeInstanceOf(Error);
@@ -304,7 +330,7 @@ describe("memory", () => {
 describe("wanted soon", () => {
 	it("prefetches cut, settled tools in one request, and an expand then asks nothing", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const { preview: _cut, ...uncut } = tool("whole");
 		details.wantSoon(session, [
 			tool("a"),
@@ -322,7 +348,7 @@ describe("wanted soon", () => {
 
 	it("skips tools already kept or on their way", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		const kept = details.get(session, tool("kept"));
 		const coming = details.get(session, tool("coming"));
 		await tick();
@@ -340,7 +366,7 @@ describe("wanted soon", () => {
 
 	it("keeps one prefetch in flight, then runs the newest wanted set", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		details.wantSoon(session, [tool("a")]);
 		await tick();
 		details.wantSoon(session, [tool("b")]);
@@ -356,7 +382,7 @@ describe("wanted soon", () => {
 	// Vitest fails the run on an unhandled rejection, so a surfaced failure shows.
 	it("is silent on failure and does not retry", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		details.wantSoon(session, [tool("a")]);
 		await tick();
 		await s.fail();
@@ -366,7 +392,7 @@ describe("wanted soon", () => {
 
 	it("stops after about 5 MB per session view, and a new view starts afresh", async () => {
 		const s = server();
-		const details = makeToolDetails(s.fetch);
+		const details = makeToolDetails(s.fetch, opened);
 		details.wantSoon(session, [
 			tool("a", "completed", 3 * MB),
 			tool("too-big", "completed", 3 * MB),
@@ -382,5 +408,88 @@ describe("wanted soon", () => {
 		await tick();
 		expect(s.requests.at(-1)).toEqual({ session: fork, ids: ["x"] });
 		await s.answer();
+	});
+	it("asks only for cuts a card shows: a written file's content is not one", async () => {
+		const s = server();
+		const details = makeToolDetails(s.fetch, opened);
+		const cut = (
+			id: string,
+			name: string,
+			input: Record<string, unknown>,
+			field: string,
+		): ToolMessage => ({
+			type: "tool",
+			uuid: id,
+			id,
+			name,
+			status: "completed",
+			input,
+			preview: {
+				inputCuts: [{ path: [field], fullBytes: Utf8Bytes.make(MB) }],
+			},
+		});
+		details.wantSoon(session, [
+			cut("write", "Write", { filePath: "a.md", content: "…" }, "content"),
+			cut("bash", "Bash", { command: "…" }, "command"),
+		]);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["bash"] }]);
+		await s.answer();
+	});
+
+	it("waits for the session's first load, then runs the newest set wanted meanwhile", async () => {
+		const s = server();
+		const { view, settle } = loading();
+		const details = makeToolDetails(s.fetch, () => view);
+		details.wantSoon(session, [tool("a")]);
+		details.wantSoon(session, [tool("b")]);
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(s.requests).toHaveLength(0);
+		settle(true);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["b"] }]);
+		await s.answer();
+	});
+
+	it("drops what a view left before loading wanted, and serves the next view", async () => {
+		const s = server();
+		const left = loading();
+		let view = left.view;
+		const details = makeToolDetails(s.fetch, () => view);
+		details.wantSoon(session, [tool("a")]);
+		await tick();
+		left.settle(false);
+		await tick();
+		expect(s.requests).toHaveLength(0);
+		view = Promise.resolve(true);
+		details.wantSoon(session, [tool("b")]);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["b"] }]);
+		await s.answer();
+	});
+
+	it("starts each view of a session afresh, with nothing wanted in between", async () => {
+		const s = server();
+		let view = Promise.resolve(true);
+		const details = makeToolDetails(s.fetch, () => view);
+		details.wantSoon(session, [tool("a", "completed", 4 * MB)]);
+		await tick();
+		await s.answer();
+		details.wantSoon(session, [tool("b", "completed", 4 * MB)]);
+		await tick();
+		expect(s.requests).toHaveLength(1);
+		view = Promise.resolve(true);
+		details.wantSoon(session, [tool("b", "completed", 4 * MB)]);
+		await tick();
+		expect(s.requests.map(({ ids }) => ids)).toEqual([["a"], ["b"]]);
+		await s.answer();
+	});
+
+	it("prefetches nothing for a session that is not open", async () => {
+		const s = server();
+		const details = makeToolDetails(s.fetch, () => undefined);
+		details.wantSoon(session, [tool("a")]);
+		await tick();
+		expect(s.requests).toHaveLength(0);
 	});
 });
