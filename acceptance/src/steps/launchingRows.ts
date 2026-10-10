@@ -11,6 +11,9 @@ const sessionIdOf = (page: Page): string => {
 
 const created = PINNED_CLOCK_MS - 10 * 60_000;
 
+/** The flaky-test agent's Child Session, named as the Claude provider names them. */
+export const FLAKY_TEST_SESSION = "claude-subagent-flaky-test";
+
 /** One launching tool call per row state, named and shaped as the Claude
  *  provider persists them (an Agent call is stored as canonical Task). */
 const LAUNCHES = [
@@ -33,6 +36,7 @@ const LAUNCHES = [
 		tool: "Task",
 		metadata: {
 			providerTaskId: "task-agent",
+			sessionId: FLAKY_TEST_SESSION,
 			backgrounded: true,
 			taskStartedAt: PINNED_CLOCK_MS - 42_000,
 			currentStep: "Running pnpm test",
@@ -92,7 +96,7 @@ const callIdOf = (description: string): string => {
 	return `call-launch-${index}`;
 };
 
-const rowOf = (page: Page, description: string) =>
+export const rowOf = (page: Page, description: string) =>
 	page.locator(`#messages .tool-item[data-tool-id="${callIdOf(description)}"]`);
 
 const STATES: Record<string, string> = {
@@ -139,7 +143,7 @@ export const launchingRowsHandlers: StepHandler[] = [
 							type: "local_agent",
 							description: "Fix the flaky test",
 							firstSeenAt: PINNED_CLOCK_MS - 42_000,
-							childSessionId: "sess-flaky-test",
+							childSessionId: FLAKY_TEST_SESSION,
 						},
 						{
 							id: "task-nested",
@@ -164,6 +168,7 @@ export const launchingRowsHandlers: StepHandler[] = [
 			);
 			// undefined drops out of the JSON snapshot, clearing the tasks.
 			rpc.setShellRows([
+				...(rpc.shellRows ?? []).filter((candidate) => candidate !== row),
 				{
 					...(row as object | undefined),
 					id,

@@ -1,5 +1,5 @@
 <!-- One step in the expanded log: icon · verb · subject · how long it took.      -->
-<!-- Click to see the command and its output.                                     -->
+<!-- Click to see foreground output or open a background agent's task.            -->
 <!--                                                                              -->
 <!-- Skills and subagents used to render full cards here, which broke the log's    -->
 <!-- rhythm and nested a second transcript gutter inside the panel. They are rows  -->
@@ -30,6 +30,7 @@
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
+	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
 	import SkillDoc from "./SkillDoc.svelte";
@@ -56,10 +57,9 @@
 	const railed = $derived(part.type === "tool" && isSoloTool(part));
 	// A step that launched a background task tracks that task. Foreground tasks
 	// stay ordinary steps.
+	const taskId = $derived(part.type === "tool" ? part.metadata?.["providerTaskId"] : undefined);
 	const launch = $derived.by(() => {
-		if (part.type !== "tool") return undefined;
-		const taskId = part.metadata?.["providerTaskId"];
-		if (typeof taskId !== "string") return undefined;
+		if (part.type !== "tool" || typeof taskId !== "string") return undefined;
 		const row = launchRow(part, liveTasks, clock.now, taskListedAt.get(taskId));
 		return row?.state.kind === "foreground" ? undefined : row;
 	});
@@ -73,6 +73,14 @@
 	const childSession = $derived(
 		part.type === "tool" && isSubagentToolName(part.name) ? subagentSessionId(part) : null,
 	);
+
+	function openChildSession(description: string) {
+		if (!childSession) return;
+		if (!launch || typeof taskId !== "string") return switchToSession(childSession);
+		// Transcript step uuids read "<message id>/<part id>".
+		const [messageId = part.uuid, partId] = part.uuid.split(/\/(.*)/s);
+		openTask({ id: taskId, sessionId: childSession, description }, { messageId, partId });
+	}
 
 	const rowClass =
 		"flex items-center gap-2 w-full min-w-0 py-1 px-2 rounded text-xs text-left cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.04)]";
@@ -103,7 +111,8 @@
 		<div class="flex items-center gap-1.5">
 			<button
 				type="button"
-				class="{rowClass} {launch ? '@container' : ''} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
+				class="{rowClass} {launch ? '@container min-h-[24px]' : ''} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
+				disabled={!!launch && !childSession}
 				aria-label={launch
 					? [
 							`${verb} ${subject}`,
@@ -116,6 +125,7 @@
 							.join(", ")
 					: undefined}
 				onclick={() => {
+					if (launch) return openChildSession(subject);
 					expanded = !expanded;
 				}}
 			>
@@ -160,22 +170,22 @@
 				{/if}
 			</button>
 			{#if childSession}
-				<!-- Opening the child session is its own action, so it gets its own
-				     control rather than stealing the row's click from expansion. -->
+				<!-- Foreground rows expand; their arrow opens the child session.
+				     Background rows and arrows both open the task. -->
 				<button
 					type="button"
-					class="subagent-link shrink-0 self-center px-1.5 py-1 rounded text-text-dimmer hover:text-accent hover:bg-[rgba(var(--overlay-rgb),0.04)] cursor-pointer [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
+					class="subagent-link min-w-[24px] min-h-[24px] shrink-0 self-center px-1.5 py-1 rounded text-text-dimmer hover:text-accent hover:bg-[rgba(var(--overlay-rgb),0.04)] cursor-pointer [&_.lucide]:w-3.5 [&_.lucide]:h-3.5"
 					title="Open subagent session"
 					aria-label="Open subagent session"
-					onclick={() => switchToSession(childSession)}
+					onclick={() => openChildSession(subject)}
 				>
 					<Icon name="arrow-right" size={14} />
 				</button>
 			{/if}
 		</div>
-		{#if expanded && isSkill}
+		{#if !launch && expanded && isSkill}
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
-		{:else if expanded && (part.result || command)}
+		{:else if !launch && expanded && (part.result || command)}
 			<div
 				class="tool-result ml-7 mr-1 my-1 py-2 px-2.5 font-mono text-xs whitespace-pre-wrap break-all bg-code-bg border rounded-lg max-h-[300px] overflow-y-auto {part.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
 			>{#if command}<span class="text-text-muted">$ {command}</span>{#if part.result}{"\n\n"}{/if}{/if}{part.result ?? ""}</div>

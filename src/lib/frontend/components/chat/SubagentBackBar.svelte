@@ -6,6 +6,7 @@
 	import { findSession, isSessionBusy, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import { returnFromTask } from "../session/background-tasks.svelte.js";
 
 	// Find the active session and check if it has a parent
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
@@ -31,7 +32,8 @@
 	const visible = $derived(!!parentId && (activeSession?.sideThread || (!activeSession?.forkMessageId && !activeSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId && !sessionState.currentFork?.forkPointTimestamp)));
 
 	function navigateBack() {
-		if (parentId) {
+		// A task opened from the pull-down or a launching row goes back there.
+		if (parentId && !returnFromTask()) {
 			switchToSession(parentId);
 		}
 	}

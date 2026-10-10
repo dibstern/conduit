@@ -25,6 +25,7 @@ const TASKS = [
 		type: "local_agent",
 		description: "Explore route guard usage",
 		age: 40,
+		childSessionId: "claude-subagent-explore",
 		kind: "subagent",
 		ageText: "40s",
 	},
@@ -46,6 +47,7 @@ const NESTED_TASKS = [
 		type: "local_agent",
 		description: "Fix the flaky router test",
 		age: 5 * 60,
+		childSessionId: "claude-subagent-flaky-router",
 	},
 	{
 		id: "b1",
@@ -69,12 +71,13 @@ const NESTED_TASKS = [
 	},
 ];
 
-type LiveTask = {
+export type LiveTask = {
 	id: string;
 	type: string;
 	description: string;
 	age: number;
 	parentTaskId?: string;
+	childSessionId?: string;
 };
 
 const sessionIdOf = (url: string): string => {
@@ -83,7 +86,7 @@ const sessionIdOf = (url: string): string => {
 	return sessionId;
 };
 
-async function setLiveTasks(
+export async function setLiveTasks(
 	page: import("@playwright/test").Page,
 	tasks: readonly LiveTask[],
 ): Promise<void> {
@@ -106,13 +109,23 @@ async function setLiveTasks(
 			backgroundWork: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
 				tasks.length > 0
-					? tasks.map(({ id, type, description, age, parentTaskId }) => ({
-							id,
-							type,
-							description,
-							firstSeenAt: now - age * 1000,
-							...(parentTaskId ? { parentTaskId } : {}),
-						}))
+					? tasks.map(
+							({
+								id,
+								type,
+								description,
+								age,
+								parentTaskId,
+								childSessionId,
+							}) => ({
+								id,
+								type,
+								description,
+								firstSeenAt: now - age * 1000,
+								...(parentTaskId ? { parentTaskId } : {}),
+								...(childSessionId ? { childSessionId } : {}),
+							}),
+						)
 					: undefined,
 		},
 	]);
