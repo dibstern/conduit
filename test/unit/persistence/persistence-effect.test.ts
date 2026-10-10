@@ -161,6 +161,7 @@ describe("Persistence Effect", () => {
 					"provider_state",
 					"read_model_counter",
 					"sent_alerts",
+					"session_git_published",
 					"session_goal_checks",
 					"session_providers",
 					"session_sidebar",
@@ -306,6 +307,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 44, name: "sessions_last_turn_end_input_id" },
 				{ migration_id: 45, name: "project_provenance" },
 				{ migration_id: 46, name: "message_part_versions" },
+				{ migration_id: 47, name: "session_git_published" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

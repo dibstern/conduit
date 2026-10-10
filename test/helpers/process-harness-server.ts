@@ -37,6 +37,12 @@ function recordServerMetrics(
 			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
 		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
 	});
+	const gitRefreshes: { at: number; read: number; changed: number }[] = [];
+	subscribe("conduit:session-git-refresh", (message) => {
+		const refresh =
+			message as import("../../src/lib/domain/relay/Layers/session-git-layer.js").SessionGitRefresh;
+		gitRefreshes.push({ at: Date.now(), ...refresh });
+	});
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
@@ -98,6 +104,7 @@ function recordServerMetrics(
 					]),
 				),
 				sidebarReads,
+				gitRefreshes,
 				...(timed && { familyReads: timed.familyReads }),
 			}),
 		);

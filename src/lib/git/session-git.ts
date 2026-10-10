@@ -176,6 +176,11 @@ export function createSessionGitCache(
 	const inFlight = new Map<string, Promise<SessionGit | undefined>>();
 	return {
 		peek: (directory: string) => entries.get(directory)?.value,
+		/** Serve `value`, already stale, until the folder is first read. */
+		seed: (directory: string, value: SessionGit | undefined) => {
+			if (!entries.has(directory))
+				entries.set(directory, { value, refreshedAt: 0 });
+		},
 		isStale: (directory: string) => {
 			const entry = entries.get(directory);
 			return (

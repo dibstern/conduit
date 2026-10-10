@@ -28,6 +28,7 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
@@ -1117,6 +1118,9 @@ export const effectMigrationEntries = {
 		"message_parts",
 		"version",
 		readMigrationSql(MESSAGE_PART_VERSIONS_MIGRATION),
+	),
+	"0047_session_git_published": executeSqlStatements(
+		readMigrationSql(SESSION_GIT_PUBLISHED_MIGRATION),
 	),
 } satisfies Record<
 	string,

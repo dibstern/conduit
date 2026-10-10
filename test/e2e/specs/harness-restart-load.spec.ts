@@ -10,7 +10,10 @@
 // restart is sent only the sidebar changes it missed (conduit-test-y7eo.3). A
 // long turn's live frames stay flat, and a resume after a restart brings only
 // the parts that moved yet lands on the transcript a cold open shows
-// (conduit-test-y7eo.8). Tool-detail prefetch (conduit-test-y7eo.11) is kept
+// (conduit-test-y7eo.8). A restart with no git change stamps no row: every
+// session or sidebar row versioned past the stopped store's counter belongs to
+// a session that took an event since, or to the one the device opened
+// (conduit-test-y7eo.16). Tool-detail prefetch (conduit-test-y7eo.11) is kept
 // out: no device sees a turn activity block on screen, so the numbers measure
 // the open alone.
 //
@@ -37,6 +40,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import {
@@ -500,6 +504,19 @@ test("opens the heavy session after a restart under load", async ({
 	const restartAt = Date.now();
 	await harness.terminate();
 	const stoppedAt = Date.now();
+	const storeRow = (query: string, ...params: (number | string)[]) => {
+		const db = new DatabaseSync(harness.projectStorePath(), { readOnly: true });
+		try {
+			return db.prepare(query).get(...params) as {
+				n: number;
+				ids?: string | null;
+			};
+		} finally {
+			db.close();
+		}
+	};
+	const counterAtStop = storeRow("SELECT value AS n FROM read_model_counter").n;
+	const seqAtStop = storeRow("SELECT max(sequence) AS n FROM events").n;
 	await harness.restart({
 		keepPort: true,
 		metricsFile: restartMetrics,
@@ -550,6 +567,29 @@ test("opens the heavy session after a restart under load", async ({
 	).toBeVisible();
 	await opener.waitForTimeout(SETTLE_MS);
 	const restartTo = Date.now();
+	// Rows versioned past the stopped store whose session took no event since:
+	// only a stamp, such as a git refresh, moves those. Opening the heavy
+	// session marks it seen, a stamp of its own, so it is left out.
+	const moved =
+		"SELECT session_id FROM events WHERE sequence > ? AND session_id IS NOT NULL UNION SELECT ?";
+	const stamped = storeRow(
+		`SELECT count(*) AS n, group_concat(id) AS ids FROM sessions WHERE version > ? AND id NOT IN (${moved})`,
+		counterAtStop,
+		seqAtStop,
+		HEAVY_SESSION_ID,
+	);
+	const restartStamps = {
+		counterAtStop,
+		counterAfter: storeRow("SELECT value AS n FROM read_model_counter").n,
+		sessions: stamped.n,
+		sessionIds: stamped.ids ?? "",
+		sidebarRows: storeRow(
+			`SELECT count(*) AS n FROM session_sidebar WHERE version > ? AND session_id NOT IN (SELECT root_id FROM sessions WHERE id IN (${moved}))`,
+			counterAtStop,
+			seqAtStop,
+			HEAVY_SESSION_ID,
+		).n,
+	};
 
 	const restarted = await serverMetrics(restartMetrics);
 
@@ -792,6 +832,7 @@ test("opens the heavy session after a restart under load", async ({
 		devices: DEVICES,
 		streamingSessions: STREAMS,
 		restart: { stopMs: stoppedAt - restartAt, startMs: readyAt - stoppedAt },
+		restartStamps,
 		// Per device: from the old server stopping to the new one's first frame.
 		reconnectMs: pages.map(
 			(_, device) =>
@@ -907,6 +948,9 @@ test("opens the heavy session after a restart under load", async ({
 	expect(afterRestart.bySource["shell"]?.reads).not.toHaveProperty("base");
 	expect(afterRestart.bySource["shell"]?.reads["resume"]).toBe(DEVICES);
 	expect(afterRestart.sidebarReads.rows).toBeLessThan(fixture.families);
+	// Git did not move while the daemon was down, so the restart stamped
+	// nothing (conduit-test-y7eo.16).
+	expect(restartStamps).toMatchObject({ sessions: 0, sidebarRows: 0 });
 	for (const [name, limit] of Object.entries(TOOL_PREVIEW_LIMITS)) {
 		const bytes = toolPreviews[name as keyof typeof TOOL_PREVIEW_LIMITS];
 		expect(bytes, name).toBeGreaterThan(0);

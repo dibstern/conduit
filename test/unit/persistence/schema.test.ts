@@ -42,6 +42,7 @@ describe("Schema Migration", () => {
 				"provider_state",
 				"read_model_counter",
 				"sent_alerts",
+				"session_git_published",
 				"session_goal_checks",
 				"session_providers",
 				"session_sidebar",

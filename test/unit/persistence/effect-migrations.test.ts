@@ -80,6 +80,7 @@ const expectedNames = [
 	"sessions_last_turn_end_input_id",
 	"project_provenance",
 	"message_part_versions",
+	"session_git_published",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -632,6 +633,7 @@ describe("Effect migration lineage", () => {
 				[44, "sessions_last_turn_end_input_id"],
 				[45, "project_provenance"],
 				[46, "message_part_versions"],
+				[47, "session_git_published"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -715,6 +717,7 @@ describe("Effect migration lineage", () => {
 					[44, "sessions_last_turn_end_input_id"],
 					[45, "project_provenance"],
 					[46, "message_part_versions"],
+					[47, "session_git_published"],
 				]);
 				const rows = yield* sql<{
 					id: string;

@@ -15,11 +15,19 @@
 //   is ignored because it is no newer than what the tab holds;
 // - a catch-up over the page budget is sent as deltas;
 // - a tab ahead of a server whose store went back keeps rows the server no
-//   longer has.
+//   longer has;
+// - a restart re-stamps every session for git that did not move, so the read
+//   model counter advances with nothing to show (conduit-test-y7eo.16);
+// - a branch switch or dirty file made while the daemon is down is never
+//   stamped, because the server remembers the git it last published, so the
+//   open tab keeps the old branch until a reload;
+// - a folder that becomes a git repository while down is still published as
+//   no git.
 //
 //   CONDUIT_TEST_DIST=dist pnpm exec playwright test \
 //     --config test/e2e/playwright-harness.config.ts --workers=1 harness-resume-checksum
 
+import { execFileSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -29,6 +37,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
@@ -189,8 +198,44 @@ test("a resume is checked against the server, and the server wins", async ({
 		testInfo.project.name !== "desktop",
 		"The wire is the same on every device; desktop shows the sidebar beside the transcript.",
 	);
-	test.setTimeout(240_000);
+	test.setTimeout(300_000);
 	const store = harness.projectStorePath();
+	const counter = () => {
+		const db = new DatabaseSync(store, { readOnly: true });
+		try {
+			return (
+				db.prepare("SELECT value FROM read_model_counter").get() as {
+					value: number;
+				}
+			).value;
+		} finally {
+			db.close();
+		}
+	};
+	// Git in the project folder, without the runner's or the user's settings.
+	const git = (...args: string[]) =>
+		execFileSync(
+			"git",
+			[
+				"-c",
+				"user.name=conduit",
+				"-c",
+				"user.email=conduit@example.invalid",
+				"-c",
+				"core.hooksPath=/dev/null",
+				"-c",
+				"commit.gpgsign=false",
+				...args,
+			],
+			{
+				cwd: harness.projectDir,
+				env: Object.fromEntries(
+					Object.entries(process.env).filter(
+						([key]) => !key.startsWith("GIT_"),
+					),
+				),
+			},
+		);
 
 	await harness.terminate();
 	await seed(store, [
@@ -253,6 +298,7 @@ test("a resume is checked against the server, and the server wins", async ({
 	) => {
 		await harness.terminate();
 		await change();
+		const counterAtStop = counter();
 		const metricsFile = join(harness.root, `server-metrics-${name}.json`);
 		const from = Date.now();
 		const mismatchesBefore = mismatches.length;
@@ -292,6 +338,7 @@ test("a resume is checked against the server, and the server wins", async ({
 		return {
 			name,
 			reads,
+			counterMoved: counter() !== counterAtStop,
 			frames: frames.length,
 			bytes: frames.reduce(
 				(total, { text }) => total + Buffer.byteLength(text),
@@ -470,6 +517,75 @@ test("a resume is checked against the server, and the server wins", async ({
 		},
 	);
 
+	// F. Git moves only while the daemon is down, and the open tab is never
+	// reloaded. The folder becomes a repository on main; then a restart with
+	// nothing changed; then a switch to a new branch with an untracked file.
+	const branch = page.locator(
+		'[data-testid="session-bar-identity"] [data-part="branch"]',
+	);
+	const dirty = page.locator(
+		'[data-testid="session-bar-identity"] [data-part="dirty"]',
+	);
+	const gitInit = await restartWith(
+		"git-init",
+		async () => {
+			git("init", "-q", "-b", "main");
+			git("commit", "-q", "--allow-empty", "-m", "init");
+		},
+		async () => {
+			await expect(branch).toHaveText("main", { timeout: 30_000 });
+			await expect(dirty).toHaveCount(0);
+		},
+	);
+	let unchangedFrom = 0;
+	const gitUnchanged = await restartWith(
+		"git-unchanged",
+		async () => {
+			unchangedFrom = Date.now();
+		},
+		async () => {
+			await expect
+				.poll(
+					() =>
+						received.filter(
+							({ at, text }) =>
+								at >= unchangedFrom &&
+								text.includes('"_tag":"synchronized"') &&
+								text.includes('"checksum"'),
+						).length,
+					{ timeout: 30_000 },
+				)
+				.toBeGreaterThanOrEqual(2);
+			// The counter is read next, so the refresh that must not move it
+			// has to have read the folder first.
+			await expect
+				.poll(
+					() =>
+						(
+							JSON.parse(
+								readFileSync(
+									join(harness.root, "server-metrics-git-unchanged.json"),
+									"utf8",
+								),
+							) as { gitRefreshes: { read: number }[] }
+						).gitRefreshes.some(({ read }) => read > 0),
+					{ timeout: 30_000 },
+				)
+				.toBe(true);
+		},
+	);
+	const gitAway = await restartWith(
+		"git-away",
+		async () => {
+			git("checkout", "-q", "-b", "away");
+			writeFileSync(join(harness.projectDir, "away.txt"), "while down\n");
+		},
+		async () => {
+			await expect(branch).toHaveText("away", { timeout: 30_000 });
+			await expect(dirty).toBeVisible();
+		},
+	);
+
 	const report = {
 		schema: 1,
 		project: testInfo.project.name,
@@ -482,6 +598,9 @@ test("a resume is checked against the server, and the server wins", async ({
 			overBudget,
 			ahead,
 			behind,
+			gitInit,
+			gitUnchanged,
+			gitAway,
 		],
 		flagCleared,
 	};
@@ -550,4 +669,22 @@ test("a resume is checked against the server, and the server wins", async ({
 	});
 	expect(behind.reads.shell).toMatchObject({ resume: 1, base: 1 });
 	expect(behind.reads.detail).toMatchObject({ resume: 1, base: 1 });
+	// F: git that moved while down is stamped on the first refresh and reaches
+	// the open tab as a change; git that did not move stamps nothing.
+	for (const moved of [gitInit, gitAway])
+		expect(moved, moved.name).toMatchObject({
+			counterMoved: true,
+			mismatches: 0,
+			snapshots: { shell: 0, detail: 0 },
+		});
+	expect(gitUnchanged).toMatchObject({
+		counterMoved: false,
+		mismatches: 0,
+		snapshots: { shell: 0, detail: 0 },
+		checkedSyncs: 2,
+	});
+	for (const phase of [gitInit, gitUnchanged, gitAway]) {
+		expect(phase.reads.shell, phase.name).not.toHaveProperty("base");
+		expect(phase.reads.detail, phase.name).not.toHaveProperty("base");
+	}
 });
