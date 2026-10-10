@@ -38,6 +38,45 @@ const TASKS = [
 	},
 ] as const;
 
+// An agent that started two shells of its own, beside a shell of the parent's.
+// The relay lists them in the order the SDK first reported them.
+const NESTED_TASKS = [
+	{
+		id: "a1",
+		type: "local_agent",
+		description: "Fix the flaky router test",
+		age: 5 * 60,
+	},
+	{
+		id: "b1",
+		type: "local_bash",
+		description: "Start the Vite dev server",
+		age: 4 * 60,
+	},
+	{
+		id: "n1",
+		type: "local_bash",
+		description: "pnpm test --watch",
+		age: 3 * 60,
+		parentTaskId: "a1",
+	},
+	{
+		id: "n2",
+		type: "local_bash",
+		description: "tail -f router.log",
+		age: 90,
+		parentTaskId: "a1",
+	},
+];
+
+type LiveTask = {
+	id: string;
+	type: string;
+	description: string;
+	age: number;
+	parentTaskId?: string;
+};
+
 const sessionIdOf = (url: string): string => {
 	const sessionId = new URL(url).pathname.split("/")[2];
 	if (!sessionId) throw new Error("Background tasks require an open session");
@@ -46,7 +85,7 @@ const sessionIdOf = (url: string): string => {
 
 async function setLiveTasks(
 	page: import("@playwright/test").Page,
-	count: number,
+	tasks: readonly LiveTask[],
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
@@ -64,14 +103,15 @@ async function setLiveTasks(
 			...(row as object | undefined),
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier tasks.
-			backgroundWork: count > 0 ? "working" : undefined,
+			backgroundWork: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
-				count > 0
-					? TASKS.slice(0, count).map(({ id, type, description, age }) => ({
+				tasks.length > 0
+					? tasks.map(({ id, type, description, age, parentTaskId }) => ({
 							id,
 							type,
 							description,
 							firstSeenAt: now - age * 1000,
+							...(parentTaskId ? { parentTaskId } : {}),
 						}))
 					: undefined,
 		},
@@ -83,7 +123,18 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "seed live background tasks",
 		match: /^the session has ([1-4]) live background tasks?$/,
 		run: async ({ world, match }) => {
-			await setLiveTasks(world.page, Number(match[1]));
+			await setLiveTasks(world.page, TASKS.slice(0, Number(match[1])));
+			await expect(
+				world.page.getByTestId("background-tasks-row"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "seed an agent with nested tasks",
+		match:
+			/^the session's live background tasks are an agent with 2 nested shells and a shell$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, NESTED_TASKS);
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
 			).toBeVisible();
@@ -93,7 +144,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "end the last background task",
 		match: /^the session's last background task ends$/,
 		run: async ({ world }) => {
-			await setLiveTasks(world.page, 0);
+			await setLiveTasks(world.page, []);
 		},
 	},
 	{
@@ -178,6 +229,39 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			await expect(items.getByTestId("background-task-age")).toHaveText(
 				TASKS.map((task) => task.ageText),
 			);
+		},
+	},
+	{
+		name: "assert pull-down nesting",
+		match:
+			/^the background tasks pull-down lists the agent's 2 shells indented under it$/,
+		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toContainText("4 background tasks");
+			const items = panel.getByTestId("background-task");
+			await expect(items.getByTestId("background-task-description")).toHaveText(
+				[
+					"Fix the flaky router test",
+					"pnpm test --watch",
+					"tail -f router.log",
+					"Start the Vite dev server",
+				],
+			);
+			await expect(items.getByTestId("background-task-kind")).toHaveText([
+				"subagent",
+				"shell",
+				"shell",
+				"shell",
+			]);
+			const depths = await items.evaluateAll((nodes) =>
+				nodes.map((node) => node.getAttribute("data-depth")),
+			);
+			expect(depths).toEqual(["0", "1", "1", "0"]);
+			const [agent, nested] = await Promise.all([
+				items.nth(0).boundingBox(),
+				items.nth(1).boundingBox(),
+			]);
+			expect(agent && nested && nested.x > agent.x).toBe(true);
 		},
 	},
 	{

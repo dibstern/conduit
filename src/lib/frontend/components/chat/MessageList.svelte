@@ -7,7 +7,8 @@
 	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
 	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
@@ -29,10 +30,18 @@
 		publishAtBottom,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { economics, forkMessageIdAtReply, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
+	import {
+		economics,
+		forkMessageIdAtReply,
+		lastResult,
+		liveLaunchedTasks,
+		segmentTurns,
+		type Turn,
+	} from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import ToolItem from "./ToolItem.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
@@ -53,6 +62,19 @@
 	let messagesEl: HTMLDivElement | undefined = $state();
 	let { topClearance = 0 }: { topClearance?: number } = $props();
 	let sentinelEl: HTMLElement | undefined = $state();
+	// Rows, pills and strips share when this view last observed each live task.
+	const taskListedAt = new Map<string, number>();
+	let taskSessionId: string | null | undefined;
+	const liveTasks = $derived.by(() => {
+		const id = sessionState.currentId;
+		if (id !== taskSessionId) {
+			taskListedAt.clear();
+			taskSessionId = id;
+		}
+		const tasks = rootBackgroundTasks(id ?? "");
+		for (const task of tasks) taskListedAt.set(task.id, clock.now);
+		return tasks;
+	});
 
 	const scrollCtrl = createScrollController(
 		() => currentChat().loadLifecycle,
@@ -402,7 +424,7 @@
 				{@render resumed(segment.activity[0].uuid)}
 			{/if}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
-				<TurnActivity {turn} {segment} {final} />
+				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -436,6 +458,7 @@
 				<!-- Same query container as the ledger, so the bill sheds the gauge and
 				     the token counts in the same order rather than overflowing. -->
 				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
+					<RunningPill count={liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt).size} />
 					<TurnEconomics economics={bill} showDuration />
 				</div>
 			</div>

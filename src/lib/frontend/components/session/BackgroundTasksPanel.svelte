@@ -10,7 +10,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TaskGlyph from "./TaskGlyph.svelte";
-	import { taskAge, taskClock, taskKind } from "./background-tasks.svelte.js";
+	import { nestTasks, taskAge, taskClock, taskKind } from "./background-tasks.svelte.js";
 
 	let { tasks, compact, onstopall }: { tasks: readonly BackgroundTask[]; compact: boolean; onstopall: () => void } = $props();
 
@@ -22,8 +22,9 @@
 		<TaskGlyph />{tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
 	</div>
 	<ul data-testid="background-tasks-list" class="m-0 mt-2 list-none p-0">
-		{#each tasks as task (task.id)}
-			<li data-testid="background-task" class="grid grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 border-t border-border-subtle py-1.5 text-text">
+		{#each nestTasks(tasks) as { task, depth } (task.id)}
+			<!-- A nested task indents under the agent that started it, on a tool-blue rule. -->
+			<li data-testid="background-task" data-depth={depth} style:margin-left={depth ? `${depth * 18}px` : undefined} class="grid grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 border-t border-border-subtle py-1.5 text-text {depth ? 'border-l-2 border-l-tool/35 pl-2' : ''}">
 				<Icon name={taskKind(task).icon} size={14} class="text-tool" />
 				<span class="flex min-w-0 flex-col">
 					<span data-testid="background-task-description" class="truncate">{task.description}</span>

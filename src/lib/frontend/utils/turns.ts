@@ -498,9 +498,10 @@ function turnStart(turn: Turn): number | undefined {
 	return undefined;
 }
 
-/** Observed stamps keep settled turns independent of the render clock. */
+/** A stamped result closes the segment even if background tasks finish later. */
 export function latestStamp(segment: Segment): number | undefined {
 	let end = segment.end?.createdAt;
+	if (end !== undefined) return end;
 	for (const part of segment.activity) {
 		for (const stamp of [
 			part.createdAt,
@@ -874,6 +875,52 @@ export function launchRow(
 		...(toolCalls ? { toolCalls } : {}),
 		nested: live.filter((task) => task.parentTaskId === taskId).length,
 	};
+}
+
+/**
+ * The live tasks a turn launched, nested tasks included: what its "N running"
+ * pill counts and which launching steps keep breathing. A launched task counts
+ * while its row reads running; a nested task counts while it is on the list and
+ * its parent chain reaches a task this turn launched, whether or not that task
+ * still runs. Direct launches use the same observed settle window as their rows.
+ */
+export function liveLaunchedTasks(
+	turn: Turn,
+	live: readonly {
+		readonly id: string;
+		readonly parentTaskId?: string | undefined;
+		readonly ancestorTaskIds?: readonly string[] | undefined;
+	}[],
+	now: number,
+	listedAt?: ReadonlyMap<string, number>,
+): ReadonlySet<string> {
+	const launches = turn.segments.flatMap((segment) =>
+		segment.activity.flatMap((part) => {
+			if (part.type !== "tool") return [];
+			const taskId = part.metadata?.["providerTaskId"];
+			return typeof taskId === "string" ? [{ taskId, tool: part }] : [];
+		}),
+	);
+	const launched = new Set(launches.map(({ taskId }) => taskId));
+	const running = launches.flatMap(({ taskId, tool }) =>
+		launchRow(tool, live, now, listedAt?.get(taskId))?.state.kind === "running"
+			? [taskId]
+			: [],
+	);
+	const parents = new Map(live.map((task) => [task.id, task.parentTaskId]));
+	const nested = live.flatMap((task) => {
+		if (launched.has(task.id)) return [];
+		if (task.ancestorTaskIds?.some((parent) => launched.has(parent)))
+			return [task.id];
+		const seen = new Set([task.id]);
+		for (let parent = task.parentTaskId; parent && !seen.has(parent); ) {
+			if (launched.has(parent)) return [task.id];
+			seen.add(parent);
+			parent = parents.get(parent);
+		}
+		return [];
+	});
+	return new Set([...running, ...nested]);
 }
 
 export function launchStatus(state: LaunchState): string {

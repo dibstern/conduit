@@ -618,6 +618,7 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 >() {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	message_completed_at: number | null;
 	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
@@ -698,6 +699,7 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			message_completed_at,
 			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
@@ -710,6 +712,9 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(message_completed_at === null
+				? {}
+				: { completedAt: message_completed_at }),
 			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
@@ -748,6 +753,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
 	const turnMetadataColumns = sql`
+		CASE WHEN messages.role = 'assistant' THEN (SELECT e.created_at FROM events e
+			WHERE e.session_id = messages.session_id AND e.type = 'turn.completed'
+				AND e.provider = 'claude'
+				AND json_extract(e.data, '$.messageId') = messages.id
+			ORDER BY e.sequence DESC LIMIT 1) END AS message_completed_at,
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
 		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p

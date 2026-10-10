@@ -268,6 +268,8 @@ export const BackgroundTaskSchema = Schema.Struct({
 	childSessionId: Schema.optional(Schema.String),
 	/** The task that started this one, for a task started inside an agent. */
 	parentTaskId: Schema.optional(Schema.String),
+	/** Ancestors beyond the live list, nearest first; supplied by task ownership. */
+	ancestorTaskIds: Schema.optional(Schema.Array(Schema.String)),
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 

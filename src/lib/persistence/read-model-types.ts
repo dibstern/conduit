@@ -122,6 +122,8 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	/** Result boundary, independent of later message or tool revisions. */
+	completedAt?: number;
 	turnCost?: number;
 	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {

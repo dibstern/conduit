@@ -23,6 +23,32 @@ export function taskKind(task: BackgroundTask): {
 	);
 }
 
+/**
+ * Tasks in list order with each nested task right under the agent that started
+ * it, one level deeper. A task whose parent is off the list stands on its own.
+ */
+export function nestTasks(
+	tasks: readonly BackgroundTask[],
+): { task: BackgroundTask; depth: number }[] {
+	const listed = new Set(tasks.map((task) => task.id));
+	const placed = new Set<string>();
+	const nested: { task: BackgroundTask; depth: number }[] = [];
+	const place = (task: BackgroundTask, depth: number): void => {
+		if (placed.has(task.id)) return;
+		placed.add(task.id);
+		nested.push({ task, depth });
+		for (const child of tasks) {
+			if (child.parentTaskId === task.id) place(child, depth + 1);
+		}
+	};
+	for (const task of tasks) {
+		if (!task.parentTaskId || !listed.has(task.parentTaskId)) place(task, 0);
+	}
+	// A parent cycle has no root; still list every task once.
+	for (const task of tasks) place(task, 0);
+	return nested;
+}
+
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */
 export function taskAge(task: BackgroundTask, now: number): string {
 	const seconds = Math.max(0, Math.floor((now - task.firstSeenAt) / 1000));

@@ -103,6 +103,12 @@ const STATES: Record<string, string> = {
 	"no longer running": "gone",
 };
 
+const breathing = (page: Page) =>
+	page
+		.locator("#messages .turn-activity")
+		.first()
+		.locator('[aria-label^="Activity timeline"] button.animate-pulse');
+
 export const launchingRowsHandlers: StepHandler[] = [
 	{
 		name: "seed the root session's live background tasks",
@@ -145,6 +151,56 @@ export const launchingRowsHandlers: StepHandler[] = [
 					],
 				},
 			]);
+		},
+	},
+	{
+		name: "end every live background task",
+		match: /^the session's live background tasks all finish$/,
+		run: ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const id = sessionIdOf(world.page);
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === id,
+			);
+			// undefined drops out of the JSON snapshot, clearing the tasks.
+			rpc.setShellRows([
+				{
+					...(row as object | undefined),
+					id,
+					backgroundWork: undefined,
+					backgroundTasks: undefined,
+				},
+			]);
+		},
+	},
+	{
+		name: "advance the launching row clock",
+		match: /^the launching row clock advances by ([0-9]+) seconds$/,
+		run: async ({ world, match }) => {
+			await world.page.clock.setFixedTime(
+				new Date(PINNED_CLOCK_MS + Number(match[1]) * 1000),
+			);
+		},
+	},
+	{
+		name: "assert the turn head's running pill",
+		match: /^the turn head shows (?:"([0-9]+) running"|no running pill)$/,
+		run: async ({ world, match }) => {
+			const pill = world.page.locator("#messages .turn-running");
+			if (match[1] === undefined) await expect(pill).toHaveCount(0);
+			else
+				await expect(pill).toHaveText(
+					new RegExp(`^\\s*${match[1]}\\s+running\\s*$`),
+				);
+		},
+	},
+	{
+		name: "assert breathing launching steps",
+		match: /^(no|[0-9]+) launching steps breathe on the activity strip$/,
+		run: async ({ world, match }) => {
+			await expect(breathing(world.page)).toHaveCount(
+				match[1] === "no" ? 0 : Number(match[1]),
+			);
 		},
 	},
 	{

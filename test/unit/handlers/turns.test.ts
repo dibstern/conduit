@@ -1,6 +1,7 @@
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
 import { assert, describe, expect, it } from "vitest";
+import { segmentClass } from "../../../src/lib/frontend/components/chat/activity-style.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
@@ -11,6 +12,7 @@ import type {
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
 import {
+	type ActivityPart,
 	appendActivity,
 	type ClosedSegment,
 	type CompactionPart,
@@ -24,12 +26,14 @@ import {
 	launchMeta,
 	launchRow,
 	launchUsage,
+	liveLaunchedTasks,
 	partLabel,
 	segmentTurns,
 	skillChapters,
 	skillName,
 	stepDurations,
 	stepWeights,
+	type Turn,
 	turnStats,
 	workingTime,
 } from "../../../src/lib/frontend/utils/turns.js";
@@ -744,6 +748,29 @@ describe("workingTime", () => {
 		expect(workingTime(turn, 50_000)).toBe(expected);
 	});
 
+	it("keeps the result boundary when a background task completes after it", () => {
+		const launch = read("/a.ts", 1_000);
+		launch.metadata = {
+			backgrounded: true,
+			providerTaskId: "task-shell",
+			outcome: "completed",
+		};
+		launch.endedAt = 9_000;
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				launch,
+				result({ createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(4_000);
+		expect(economics(turn, 50_000).duration).toBe(4_000);
+	});
+
 	it("uses a tool's completion when the preceding result has no stamp", () => {
 		const work = read("/a.ts", 1_000);
 		work.endedAt = 4_000;
@@ -1410,6 +1437,128 @@ describe("launchRow", () => {
 			T,
 		);
 		expect(row?.nested).toBe(2);
+	});
+});
+
+describe("liveLaunchedTasks", () => {
+	const T = 1_800_000_000_000;
+	const launch = (taskId: string, metadata: Record<string, unknown> = {}) => ({
+		...tool("Task", { tool: "Task", description: taskId, prompt: "go" }),
+		metadata: { providerTaskId: taskId, backgrounded: true, ...metadata },
+	});
+	const turnOf = (...segments: ActivityPart[][]): Turn => ({
+		id: id(),
+		segments: segments.map((activity) => ({ activity, reply: [] })),
+		notices: [],
+		live: false,
+	});
+	const ids = (set: ReadonlySet<string>) => [...set].sort();
+
+	it("counts the turn's running launches across segments, not another turn's", () => {
+		const turn = turnOf([launch("shell"), read("a.ts")], [launch("agentA")]);
+		const live = [{ id: "shell" }, { id: "agentA" }, { id: "elsewhere" }];
+		expect(ids(liveLaunchedTasks(turn, live, T))).toEqual(["agentA", "shell"]);
+	});
+
+	it("counts each nested task once, however deep and however often reached", () => {
+		const turn = turnOf([launch("agentA"), launch("agentB")]);
+		const live = [
+			{ id: "agentA" },
+			{ id: "agentB" },
+			{ id: "inner", parentTaskId: "agentA" },
+			{ id: "deeper", parentTaskId: "inner" },
+			{ id: "foreign", parentTaskId: "agentX" },
+		];
+		expect(ids(liveLaunchedTasks(turn, live, T))).toEqual([
+			"agentA",
+			"agentB",
+			"deeper",
+			"inner",
+		]);
+	});
+
+	it("keeps a nested task after its agent finished, and a foreground agent's", () => {
+		const turn = turnOf([
+			launch("agentA", { outcome: "completed" }),
+			launch("fg", { backgrounded: false }),
+		]);
+		const live = [
+			{ id: "agentA" },
+			{ id: "fg" },
+			{ id: "inner", parentTaskId: "agentA" },
+			{ id: "fgShell", parentTaskId: "fg" },
+		];
+		expect(ids(liveLaunchedTasks(turn, live, T))).toEqual(["fgShell", "inner"]);
+	});
+
+	it("does not invent liveness after a reload or restart with an empty list", () => {
+		const turn = turnOf([launch("shell")]);
+		expect(liveLaunchedTasks(turn, [], T).size).toBe(0);
+	});
+
+	it("uses the launching row's settle window and lets an outcome end it immediately", () => {
+		const pending = launch("shell");
+		const turn = turnOf([pending]);
+		const listedAt = new Map([["shell", T]]);
+		for (const now of [T + 1, T + LAUNCH_SETTLE_MS - 1]) {
+			expect(
+				launchRow(pending, [], now, listedAt.get("shell"))?.state.kind,
+			).toBe("running");
+			expect(ids(liveLaunchedTasks(turn, [], now, listedAt))).toEqual([
+				"shell",
+			]);
+		}
+		expect(
+			liveLaunchedTasks(turn, [], T + LAUNCH_SETTLE_MS, listedAt).size,
+		).toBe(0);
+		const finished = turnOf([launch("shell", { outcome: "completed" })]);
+		expect(liveLaunchedTasks(finished, [], T + 1, listedAt).size).toBe(0);
+	});
+
+	it("does not count a finished launch again through its live parent", () => {
+		const turn = turnOf([
+			launch("agentA"),
+			launch("inner", { outcome: "completed" }),
+		]);
+		const live = [{ id: "agentA" }, { id: "inner", parentTaskId: "agentA" }];
+		expect(ids(liveLaunchedTasks(turn, live, T))).toEqual(["agentA"]);
+	});
+
+	it("keeps a deeper task when its middle parent has left the live list", () => {
+		const turn = turnOf([launch("agentA", { outcome: "completed" })]);
+		const live = [
+			{
+				id: "deeper",
+				parentTaskId: "middle",
+				ancestorTaskIds: ["middle", "agentA"],
+			},
+			{
+				id: "elsewhere",
+				parentTaskId: "foreign",
+				ancestorTaskIds: ["foreign", "agentX"],
+			},
+		];
+		expect(ids(liveLaunchedTasks(turn, live, T))).toEqual(["deeper"]);
+	});
+
+	it("stops a finished launching step breathing even if its tool status is stale", () => {
+		const finished: ToolMessage = {
+			...launch("agentA", { outcome: "completed" }),
+			status: "running",
+		};
+		const turn = turnOf([finished]);
+		const running = liveLaunchedTasks(turn, [{ id: "agentA" }], T);
+		expect(segmentClass(finished, running)).not.toContain("animate-pulse");
+	});
+
+	it("survives a parent cycle", () => {
+		const turn = turnOf([read("a.ts")]);
+		const live = [
+			{ id: "x", parentTaskId: "y" },
+			{ id: "y", parentTaskId: "x" },
+			{ id: "z", parentTaskId: "z" },
+		];
+		expect(liveLaunchedTasks(turn, live, T).size).toBe(0);
 	});
 });
 

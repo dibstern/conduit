@@ -29,34 +29,38 @@
 	} from "../../utils/turns.js";
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { rootBackgroundTasks, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { switchToSession } from "../../stores/session.svelte.js";
+	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolOutputMore from "./ToolOutputMore.svelte";
 
 	let {
 		part,
+		liveTasks,
+		taskListedAt,
 		duration,
 		highlight = false,
-	}: { part: ActivityPart; duration?: number | undefined; highlight?: boolean } = $props();
+	}: {
+		part: ActivityPart;
+		liveTasks: readonly BackgroundTask[];
+		taskListedAt: ReadonlyMap<string, number>;
+		duration?: number | undefined;
+		highlight?: boolean;
+	} = $props();
 
 	let expanded = $state(false);
 
 	const style = $derived(partStyle(part));
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	const railed = $derived(part.type === "tool" && isSoloTool(part));
-	// When this row's task was last on the live list. Plain, not $state: it only
-	// bridges the moment between the task leaving the list and its outcome.
-	let listedAt: number | undefined;
 	// A step that launched a background task tracks that task. Foreground tasks
 	// stay ordinary steps.
 	const launch = $derived.by(() => {
 		if (part.type !== "tool") return undefined;
 		const taskId = part.metadata?.["providerTaskId"];
-		if (taskId === undefined) return undefined;
-		const live = rootBackgroundTasks(sessionState.currentId ?? "");
-		if (live.some((task) => task.id === taskId)) listedAt = clock.now;
-		const row = launchRow(part, live, clock.now, listedAt);
+		if (typeof taskId !== "string") return undefined;
+		const row = launchRow(part, liveTasks, clock.now, taskListedAt.get(taskId));
 		return row?.state.kind === "foreground" ? undefined : row;
 	});
 	const launchTone = $derived(

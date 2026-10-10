@@ -965,12 +965,20 @@ export class ClaudeEventTranslator {
 			kind: "snapshot",
 			tasks: this.backgroundTasks.map((task) => {
 				const known = ctx.subagentTasks?.get(task.id);
+				const ancestorTaskIds: string[] = [];
+				const seen = new Set([task.id]);
+				for (let parent = known?.parentTaskId; parent && !seen.has(parent); ) {
+					seen.add(parent);
+					ancestorTaskIds.push(parent);
+					parent = ctx.subagentTasks?.get(parent)?.parentTaskId;
+				}
 				return {
 					...task,
 					...(known?.childSessionId
 						? { childSessionId: known.childSessionId }
 						: {}),
 					...(known?.parentTaskId ? { parentTaskId: known.parentTaskId } : {}),
+					...(ancestorTaskIds.length > 1 ? { ancestorTaskIds } : {}),
 				};
 			}),
 		});

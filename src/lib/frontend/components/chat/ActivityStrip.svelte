@@ -26,6 +26,7 @@
 		segment,
 		final,
 		now,
+		running,
 		active = null,
 		emphasis = null,
 		height = "h-1.5",
@@ -36,6 +37,8 @@
 		segment: Segment;
 		final: boolean;
 		now: number;
+		/** Live tasks the turn launched: their launching steps keep breathing. */
+		running: ReadonlySet<string>;
 		/** Segment to highlight — owned by the parent so the caption can't drift. */
 		active?: number | null;
 		/** Steps to pick out while the rest recede, e.g. the skills in a breakdown. */
@@ -86,7 +89,7 @@
 	{#each segment.activity as part, i (part.uuid)}
 		<button
 			type="button"
-			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part)} {partWidthClass(part, i)}"
+			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part, running)} {partWidthClass(part, i)}"
 			style={part.type === "system" ? undefined : `flex-grow: ${weights[i] ?? 1}`}
 			title={title(part, i)}
 			aria-label={title(part, i)}

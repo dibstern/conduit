@@ -225,7 +225,17 @@ export function messageRowsToHistory(
 
 	const messages: HistoryMessage[] = pageRows.map((row) => {
 		const snapshot = snapshotRowToHistory(row);
-		if (snapshot) return snapshot;
+		if (snapshot)
+			return row.completedAt === undefined
+				? snapshot
+				: {
+						...snapshot,
+						time: {
+							created: row.created_at,
+							...snapshot.time,
+							completed: row.completedAt,
+						},
+					};
 		const parts = row.parts.map((part) =>
 			partRowToHistoryPart(part, opts.toolOutputPreview === true),
 		);
@@ -238,7 +248,7 @@ export function messageRowsToHistory(
 			...(row.steered === 1 ? { steered: true } : {}),
 			time: {
 				created: row.created_at,
-				completed: row.updated_at,
+				completed: row.completedAt ?? row.updated_at,
 			},
 			...(row.text ? { text: row.text } : {}),
 			parts,

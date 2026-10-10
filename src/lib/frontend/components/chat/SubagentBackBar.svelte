@@ -13,7 +13,16 @@
 	const parentId = $derived(sessionState.currentParentId);
 
 	const parentSession = $derived(parentId ? findSession(parentId) : null);
-	const parentWorking = $derived(!!parentId && (isSessionBusy(parentId) || parentSession?.processing === true || parentSession?.backgroundWork === "working"));
+	// Matches the sidebar: a parent whose turn is over but whose background agents or shells run reads as monitoring, not idle.
+	const parentStatus = $derived(
+		!parentId
+			? "idle"
+			: isSessionBusy(parentId) || parentSession?.processing === true || parentSession?.backgroundWork === "working"
+				? "working"
+				: parentSession?.backgroundWork === "monitoring"
+					? "monitoring"
+					: "idle",
+	);
 
 	const parentTitle = $derived(
 		parentSession?.title ?? "parent session"
@@ -44,9 +53,9 @@
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
 				{activeSession?.sideThread ? "Side Thread" : "Subagent"} of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
 			</span>
-			<span data-testid="parent-session-status" aria-label="Parent {parentWorking ? 'working' : 'idle'}" class="flex items-center gap-1.5 shrink-0 text-xs font-mono text-text-muted">
-				<DitherGlyph state={parentWorking ? "working" : "idle"} size={12} />
-				{parentWorking ? "Working" : "Idle"}
+			<span data-testid="parent-session-status" aria-label="Parent {parentStatus}" class="flex items-center gap-1.5 shrink-0 text-xs font-mono text-text-muted">
+				<DitherGlyph state={parentStatus} size={12} />
+				{parentStatus === "working" ? "Working" : parentStatus === "monitoring" ? "Monitoring" : "Idle"}
 			</span>
 			<Button
 				variant="ghost"

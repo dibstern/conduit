@@ -60,6 +60,33 @@ function makeMessageWithParts(
 }
 
 describe("messageRowsToHistory", () => {
+	it.each([
+		false,
+		true,
+	])("uses the canonical completion instead of a late revision timestamp (snapshot: %s)", (snapshot) => {
+		const row = {
+			...makeMessageWithParts("m1", {
+				role: "assistant",
+				created_at: 1000,
+				updated_at: 9000,
+				...(snapshot
+					? {
+							rest_payload: JSON.stringify({
+								id: "m1",
+								role: "assistant",
+								time: { created: 1000, completed: 9000 },
+								parts: [],
+							}),
+						}
+					: {}),
+			}),
+			completedAt: 2000,
+		};
+		expect(
+			messageRowsToHistory([row], { pageSize: 50 }).messages[0]?.time,
+		).toEqual({ created: 1000, completed: 2000 });
+	});
+
 	it("converts message rows to HistoryMessage format", () => {
 		const rows: MessageWithParts[] = [
 			makeMessageWithParts("m1", {

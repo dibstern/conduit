@@ -2636,6 +2636,37 @@ describe("ClaudeEventTranslator", () => {
 		expect(metadata["pausedAt"]).toBeNull();
 	});
 
+	it("publishes a live task's ancestry even after its parents leave the list", async () => {
+		const liveness = makeSessionBackgroundLiveness();
+		const trackingTranslator = new ClaudeEventTranslator({
+			getSink: () => sink,
+			onBackgroundTask: liveness.record,
+		});
+		const nestedCtx = makeCtx({
+			subagentTasks: new Map([
+				["agentA", { toolUseId: "launch-a" }],
+				["middle", { toolUseId: "launch-middle", parentTaskId: "agentA" }],
+				["deeper", { toolUseId: "launch-deeper", parentTaskId: "middle" }],
+			]),
+		});
+		await runTranslate(trackingTranslator, nestedCtx, {
+			type: "system",
+			subtype: "background_tasks_changed",
+			tasks: [
+				{ task_id: "deeper", task_type: "local_bash", description: "Watch" },
+			],
+			uuid: "ancestry-snapshot",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		expect(liveness.backgroundOf(nestedCtx.sessionId)?.tasks).toMatchObject([
+			{
+				id: "deeper",
+				parentTaskId: "middle",
+				ancestorTaskIds: ["middle", "agentA"],
+			},
+		]);
+	});
+
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {
 		const liveness = makeSessionBackgroundLiveness(undefined, () => 200);
 		const trackingTranslator = new ClaudeEventTranslator({

@@ -128,6 +128,74 @@ describe("Claude turn economics through SQLite persistence", () => {
 		return yield* costs;
 	});
 
+	it("keeps the latest completion event as the result boundary after late task updates and reopening", async () => {
+		stamp = 1000;
+		let beforeUpdate = 0;
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const read = yield* ReadQueryEffectTag;
+				yield* seedSession("s1");
+				yield* seedTurn("s1", "u1", "a1");
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"tool.started",
+						"s1",
+						{
+							messageId: "a1",
+							partId: "task1",
+							toolName: "Task",
+							callId: "task1",
+							input: { tool: "Task", description: "Audit", prompt: "Go" },
+						},
+						{ provider: "claude", createdAt: 1100 },
+					),
+					completion("s1", "a1", 0.1, "sdk-session", 3000),
+					completion("s1", "a1", 0.2, "sdk-session", 2000),
+				]);
+				beforeUpdate = (yield* read.readSessionTranscript("s1")).version;
+				yield* persist.persistEvent(
+					canonicalEvent(
+						"tool.running",
+						"s1",
+						{
+							messageId: "a1",
+							partId: "task1",
+							metadata: { backgrounded: true, providerTaskId: "task1" },
+						},
+						{ provider: "claude", createdAt: 9000 },
+					),
+				);
+			}),
+		);
+		const assertBoundary = Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const histories = [
+				yield* read.getSessionMessagesWithParts("s1"),
+				(yield* read.readSessionTranscriptPage("s1", { limit: 50 })).messages,
+				(yield* read.readSessionTranscript("s1")).messages,
+				(yield* read.readSessionTranscript("s1", { after: beforeUpdate }))
+					.messages,
+			];
+			for (const rows of histories) {
+				const assistant = rows.find((row) => row.id === "a1");
+				expect(assistant?.updated_at).toBe(9000);
+				expect(assistant?.parts[0]?.updated_at).toBe(9000);
+				const history = messageRowsToHistory(rows, { pageSize: 50 });
+				expect(
+					history.messages.find((message) => message.id === "a1")?.time
+						?.completed,
+				).toBe(2000);
+			}
+		});
+		await runtime.runPromise(assertBoundary);
+		await runtime.dispose();
+		runtime = makeCostRuntime(filename);
+		await runtime.runPromise(assertBoundary);
+		await runtime.runPromise(rebuildCosts);
+		await runtime.runPromise(assertBoundary);
+	});
+
 	it("keeps usage and context independent through history, reopening and rebuilding, including legacy rows", async () => {
 		const snapshot = Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
