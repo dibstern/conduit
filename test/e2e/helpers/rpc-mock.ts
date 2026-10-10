@@ -1,4 +1,5 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
 	type Alert,
 	type ProjectSetting,
@@ -692,7 +693,7 @@ async function handleMessage(
 			});
 			if (raw.tag === "SendMessage") control.onSendMessage?.(raw.payload ?? {});
 		} catch (error) {
-			if (error instanceof WsRpcError) {
+			if (error instanceof WsRpcError || error instanceof WorkspaceMoveError) {
 				sendJson(ws, {
 					_tag: "Exit",
 					requestId: raw.id,
@@ -700,7 +701,14 @@ async function handleMessage(
 						_tag: "Failure",
 						cause: {
 							_tag: "Fail",
-							error: { _tag: "WsRpcError", message: error.message },
+							error:
+								error instanceof WorkspaceMoveError
+									? {
+											_tag: "WorkspaceMoveError",
+											path: error.path,
+											reason: error.reason,
+										}
+									: { _tag: "WsRpcError", message: error.message },
 						},
 					},
 				});

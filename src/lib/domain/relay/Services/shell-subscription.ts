@@ -22,6 +22,7 @@
 import { channel } from "node:diagnostics_channel";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Duration, Effect, Option, Stream } from "effect";
+import { withCachedSessionGit } from "../../../git/session-git.js";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
@@ -30,6 +31,7 @@ import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import {
 	BackgroundLivenessTag,
+	ConfigTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
 } from "./services.js";
@@ -67,6 +69,9 @@ export const subscribeShell = (
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
+			const config = Option.getOrUndefined(
+				yield* Effect.serviceOption(ConfigTag),
+			);
 			// Optional so read-only hosts need not wire it; the relay always does.
 			const compactingOf = Option.getOrUndefined(
 				yield* Effect.serviceOption(SessionCompactionsTag),
@@ -95,16 +100,16 @@ export const subscribeShell = (
 								rows: list.rows.map((row) => {
 									const compacting = compactingOf?.(row.item.id);
 									const retrying = retryingOf?.(row.item.id);
-									return compacting === undefined && retrying === undefined
-										? row
-										: {
-												...row,
-												item: {
-													...row.item,
-													...(compacting === undefined ? {} : { compacting }),
-													...(retrying === undefined ? {} : { retrying }),
-												},
-											};
+									return {
+										...row,
+										item: {
+											...(config
+												? withCachedSessionGit(row.item, config.projectDir)
+												: row.item),
+											...(compacting === undefined ? {} : { compacting }),
+											...(retrying === undefined ? {} : { retrying }),
+										},
+									};
 								}),
 							})),
 						),

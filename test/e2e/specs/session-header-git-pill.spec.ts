@@ -1,5 +1,10 @@
 import type { Page, TestInfo } from "@playwright/test";
-import type { SessionGit } from "../../../src/lib/shared-types.js";
+import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import type {
+	SessionGit,
+	SessionWorkspace,
+	WorktreeInfo,
+} from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -22,6 +27,10 @@ async function openHeader(
 		directory?: string;
 		git?: SessionGit;
 		sessionGit?: SessionGit;
+		workspace?: SessionWorkspace;
+		worktrees?: readonly WorktreeInfo[];
+		moveError?: WorkspaceMoveError;
+		onmove?: (path: string) => void;
 		skills?: boolean;
 		viewActivity?: boolean;
 	},
@@ -42,11 +51,18 @@ async function openHeader(
 			status: "idle",
 			projectSlug: "e2e-replay",
 			...(options.sessionGit ? { git: options.sessionGit } : {}),
+			...(options.workspace ? { workspace: options.workspace } : {}),
 		},
 	];
 	await mockWsRpc(page, {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			ListWorktrees: () => ({ worktrees: options.worktrees ?? [] }),
+			MoveSessionWorkspace: ({ path }) => {
+				options.onmove?.(String(path));
+				if (options.moveError) throw options.moveError;
+				return { directory: String(path) };
+			},
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
@@ -210,6 +226,72 @@ for (const mode of [
 				page.getByRole("menuitem", { name: "Copy branch name" }),
 			).toHaveCount(0);
 			await capture(page, testInfo, `${mode.name}-no-git-details`);
+		});
+
+		test("a moved session shows its folder and lists worktrees with the current one ticked", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const main = "/workspace/conduit";
+			const moved = "/workspace/conduit-one";
+			const other = "/workspace/conduit-two";
+			const moves: string[] = [];
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				git: { branch: "main" },
+				sessionGit: {
+					branch: "feature/one",
+					worktree: "conduit-one",
+					dirty: true,
+				},
+				workspace: {
+					cause: "user",
+					worktrees: { [main]: moved },
+					origin: "existing",
+				},
+				worktrees: [
+					{ path: main, branch: "main", main: true },
+					{ path: moved, branch: "feature/one", main: false },
+					{ path: other, branch: "feature/two", main: false },
+				],
+				onmove: (path) => moves.push(path),
+			});
+			await expect(pill).toHaveAttribute("title", "conduit-one / feature/one");
+			await expect(pill.locator('[data-icon="worktree"] svg')).toBeVisible();
+			await pill.click();
+			const details = page.getByRole("menu", { name: "Checkout" });
+			await expect(details.getByText(moved, { exact: true })).toBeVisible();
+			await details
+				.getByRole("menuitem", { name: "Move to worktree…" })
+				.click();
+			const current = details.getByRole("menuitem", { name: /feature\/one/ });
+			await expect(
+				current.locator('[data-testid="current-worktree"]'),
+			).toBeVisible();
+			await expect(
+				details.getByRole("menuitem", { name: /main/ }),
+			).toBeVisible();
+			await capture(page, testInfo, `${mode.name}-worktree-list`);
+			await details.getByRole("menuitem", { name: /feature\/two/ }).click();
+			await expect.poll(() => moves).toEqual([other]);
+		});
+
+		test("an invalid workspace move shows the typed reason in a toast", async ({
+			page,
+			harness,
+		}) => {
+			const path = "/workspace/removed";
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				git: { branch: "main" },
+				worktrees: [{ path, branch: "feature/removed", main: false }],
+				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
+			});
+			await pill.click();
+			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
+			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
+			await expect(
+				page.getByText("Could not move session: missing", { exact: true }),
+			).toBeVisible();
+			await expect(pill).toHaveAttribute("title", "conduit / main");
 		});
 
 		test("long project names keep four letters plus the ellipsis and a visible branch", async ({

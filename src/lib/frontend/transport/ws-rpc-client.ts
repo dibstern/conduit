@@ -2,6 +2,7 @@ import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import type { WorktreeInfo } from "../../contracts/session-workspace.js";
 import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
@@ -499,6 +500,30 @@ const callControl = <A, E>(
 		);
 		return yield* call(control);
 	});
+
+export async function listWorktreesRpc(
+	projectSlug: string,
+): Promise<readonly WorktreeInfo[]> {
+	const result = await runTransportEffect(
+		callControl(projectSlug, (client) => client.ListWorktrees({ projectSlug })),
+	);
+	return result.worktrees;
+}
+
+export async function moveSessionWorkspaceRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly path: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.MoveSessionWorkspace(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>

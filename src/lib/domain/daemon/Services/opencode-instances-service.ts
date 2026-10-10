@@ -14,7 +14,11 @@ export type OpenCodeInstanceEvent = {
 	readonly instanceId: string;
 	readonly health: ConnectionHealth;
 } & (
-	| { readonly _tag: "event"; readonly payload: unknown }
+	| {
+			readonly _tag: "event";
+			readonly payload: unknown;
+			readonly directory?: string;
+	  }
 	| { readonly _tag: "heartbeat" }
 	| {
 			/** Lifecycle transition; repeats are never emitted. */
@@ -41,7 +45,7 @@ export interface OpenCodeInstances {
 	 * never keeps a stream open; the instance's demand does.
 	 */
 	readonly events: (
-		directories: readonly string[],
+		directories: readonly string[] | (() => readonly string[]),
 		instanceId?: string,
 	) => Stream.Stream<OpenCodeInstanceEvent>;
 	/**

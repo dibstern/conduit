@@ -3,6 +3,10 @@ import {
 	type ContinuationReason,
 	ContinuationReasonSchema,
 } from "./limit-recovery.js";
+import {
+	type SessionWorkspace,
+	SessionWorkspaceSchema,
+} from "./session-workspace.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
 export type EventId = typeof EventId.Type;
@@ -54,6 +58,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"session.created",
 	"session.renamed",
+	"session.workspace_changed",
 	"session.read",
 	"session.unread",
 	"session.settled",
@@ -308,6 +313,10 @@ export interface SessionRenamedPayload {
 	readonly title: string;
 }
 
+export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
+	readonly sessionId: string;
+}
+
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
 }
@@ -516,6 +525,7 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.workspace_changed": SessionWorkspaceChangedPayload;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
 	"session.settled": SessionSettledPayload;
@@ -876,6 +886,11 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	...SessionWorkspaceSchema.fields,
+});
+
 const SessionReadPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
@@ -1149,6 +1164,10 @@ const SessionRenamedEventSchema = eventEnvelope(
 	"session.renamed",
 	SessionRenamedPayloadSchema,
 );
+const SessionWorkspaceChangedEventSchema = eventEnvelope(
+	"session.workspace_changed",
+	SessionWorkspaceChangedPayloadSchema,
+);
 const SessionReadEventSchema = eventEnvelope(
 	"session.read",
 	SessionReadPayloadSchema,
@@ -1292,6 +1311,7 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	SessionWorkspaceChangedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
 	SessionSettledEventSchema,

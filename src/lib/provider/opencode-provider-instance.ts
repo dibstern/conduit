@@ -27,6 +27,18 @@ import type {
 
 const log = createLogger("opencode-provider-instance");
 
+interface PendingOpenCodeTurn {
+	readonly deferred: Deferred.Deferred<TurnResult, Error>;
+	readonly workspaceRoot: string;
+	inFlight: number;
+}
+
+interface OpenCodePromptSubmissions {
+	readonly workspaceRoot: string;
+	readonly settled: Deferred.Deferred<void>;
+	remaining: number;
+}
+
 /**
  * OpenCode session rules for a Side Thread in the given mode. Session rules
  * append and the last match wins, so every mode change sends the full set.
@@ -89,13 +101,15 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				sessionId: string,
 		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
-	private readonly pendingTurns = new Map<
+	private readonly pendingTurns = new Map<string, PendingOpenCodeTurn>();
+	private readonly promptGates = new Map<string, Effect.Semaphore>();
+	// Native idle can precede a concurrent prompt's HTTP acceptance. Relocation
+	// must wait for those submissions even after the old completion is delivered.
+	private readonly promptSubmissions = new Map<
 		string,
-		{
-			readonly deferred: Deferred.Deferred<TurnResult, Error>;
-			inFlight: number;
-		}
+		OpenCodePromptSubmissions
 	>();
+	private closed = false;
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
@@ -222,6 +236,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		};
 
 		return Effect.gen(this, function* () {
+			const shutdownError = new Error(
+				`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
+			);
+			if (this.closed) return yield* Effect.fail(shutdownError);
 			// Resolve the owning client first: a session bound to a NAMED
 			// OpenCode instance must be prompted on THAT instance's server. A
 			// resolution failure (unknown/unconfigured instance) becomes a clean
@@ -230,6 +248,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			const clientResult = yield* Effect.either(
 				this.resolveClientEffect(sessionId),
 			);
+			if (this.closed) return yield* Effect.fail(shutdownError);
 			if (clientResult._tag === "Left") {
 				const message = clientResult.left.message;
 				log.error(
@@ -238,15 +257,24 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				return sendFailedTurnResult(message);
 			}
 			const client = clientResult.right;
+			const gate =
+				this.promptGates.get(sessionId) ?? Effect.unsafeMakeSemaphore(1);
+			this.promptGates.set(sessionId, gate);
 
-			let pendingTurn = this.pendingTurns.get(sessionId);
-			if (pendingTurn) {
-				pendingTurn.inFlight += 1;
-			} else {
-				const deferred = yield* Deferred.make<TurnResult, Error>();
-				pendingTurn = { deferred, inFlight: 1 };
-				this.pendingTurns.set(sessionId, pendingTurn);
-			}
+			let pendingTurn: PendingOpenCodeTurn | undefined;
+			let submission: OpenCodePromptSubmissions | undefined;
+			let submissionStarted = false;
+			const finishSubmission = () => {
+				if (!submission) return;
+				const finished = submission;
+				submission = undefined;
+				finished.remaining -= 1;
+				if (finished.remaining === 0) {
+					if (this.promptSubmissions.get(sessionId) === finished)
+						this.promptSubmissions.delete(sessionId);
+					Deferred.unsafeDone(finished.settled, Effect.void);
+				}
+			};
 
 			const onAbort = () => {
 				log.info(`Turn aborted for session ${sessionId}`);
@@ -254,16 +282,22 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					log.warn(`Failed to abort session ${sessionId}: ${err}`);
 				});
 			};
-			abortSignal.addEventListener("abort", onAbort, { once: true });
 
 			const cleanup = Effect.sync(() => {
+				if (!submissionStarted) finishSubmission();
 				abortSignal.removeEventListener("abort", onAbort);
+				if (!pendingTurn) return;
 				pendingTurn.inFlight -= 1;
 				if (
 					pendingTurn.inFlight === 0 &&
 					this.pendingTurns.get(sessionId) === pendingTurn
 				) {
 					this.pendingTurns.delete(sessionId);
+					// Failed/aborted prompt admission can end without an SSE completion.
+					Deferred.unsafeDone(
+						pendingTurn.deferred,
+						Effect.succeed(interruptedTurnResult()),
+					);
 				}
 			});
 
@@ -271,64 +305,157 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				if (abortSignal.aborted) return interruptedTurnResult();
 
 				const promptResult = yield* Effect.either(
-					Effect.tryPromise({
-						try: async () => {
-							const session = await client.session.get(sessionId);
-							const current = new Map<
-								string,
-								PermissionRuleset[number]["action"]
-							>();
-							for (const rule of session.permission ?? []) {
-								// Leave catch-alls untouched when reconciling folder rules.
+					gate
+						.withPermits(1)(
+							Effect.gen(this, function* () {
+								const submitting = this.promptSubmissions.get(sessionId);
 								if (
-									rule.permission === "external_directory" &&
-									rule.pattern !== "*"
+									submitting &&
+									submitting.workspaceRoot !== input.workspaceRoot
+								)
+									yield* Deferred.await(submitting.settled);
+								let previous = this.pendingTurns.get(sessionId);
+								while (
+									previous &&
+									previous.workspaceRoot !== input.workspaceRoot
 								) {
-									current.set(rule.pattern, rule.action);
+									// Folder changes start a new native loop after the old one finishes.
+									yield* Deferred.await(previous.deferred).pipe(Effect.ignore);
+									if (abortSignal.aborted || this.closed) return;
+									previous = this.pendingTurns.get(sessionId);
 								}
-							}
-							const desired = new Set<string>();
-							for (const folder of extraFolders) {
-								let directory: string;
-								try {
-									directory = realpathSync(folder).replaceAll("\\", "/");
-								} catch {
-									// A folder can disappear after launch-folder resolution.
-									continue;
-								}
-								// Permission wildcards cannot escape a literal * or ?.
-								if (/[?*]/.test(directory)) continue;
-								desired.add(join(directory, "*").replaceAll("\\", "/"));
-							}
-							// Updates append rules, so unchanged patterns need no patch.
-							const permission: PermissionRuleset = [];
-							for (const [pattern, action] of current) {
-								if (action === "allow" && !desired.has(pattern)) {
-									permission.push({
-										permission: "external_directory",
-										pattern,
-										action: "ask",
+								if (abortSignal.aborted || this.closed) return;
+								const session = yield* Effect.tryPromise({
+									try: () => client.session.get(sessionId),
+									catch: (cause) => cause,
+								});
+								if (this.closed) return;
+								if (
+									session.directory &&
+									session.directory !== input.workspaceRoot
+								) {
+									// A native turn can outlive the relay's local completion deferred.
+									while (!abortSignal.aborted && !this.closed) {
+										const statuses = yield* Effect.tryPromise({
+											try: () => client.session.statuses(session.directory),
+											catch: (cause) => cause,
+										});
+										const status = statuses[sessionId]?.type;
+										if (status !== "busy" && status !== "retry") break;
+										yield* Effect.sleep("100 millis");
+									}
+									if (abortSignal.aborted || this.closed) return;
+									yield* Effect.tryPromise({
+										try: () =>
+											client.session.moveWorkspace(
+												sessionId,
+												input.workspaceRoot,
+											),
+										catch: (cause) => cause,
 									});
 								}
-							}
-							for (const pattern of desired) {
-								if (current.get(pattern) !== "allow") {
-									permission.push({
-										permission: "external_directory",
-										pattern,
-										action: "allow",
-									});
+								if (abortSignal.aborted || this.closed) return;
+								pendingTurn = this.pendingTurns.get(sessionId);
+								if (pendingTurn) pendingTurn.inFlight += 1;
+								else {
+									pendingTurn = {
+										deferred: yield* Deferred.make<TurnResult, Error>(),
+										workspaceRoot: input.workspaceRoot,
+										inFlight: 1,
+									};
+									this.pendingTurns.set(sessionId, pendingTurn);
 								}
-							}
-							if (permission.length > 0) {
-								await client.session.update(sessionId, { permission });
-							}
-							if (!abortSignal.aborted)
-								await client.session.prompt(sessionId, promptOptions);
-						},
-						catch: (cause) => cause,
-					}),
+								submission = this.promptSubmissions.get(sessionId);
+								if (submission) submission.remaining += 1;
+								else {
+									submission = {
+										workspaceRoot: input.workspaceRoot,
+										settled: yield* Deferred.make<void>(),
+										remaining: 1,
+									};
+									this.promptSubmissions.set(sessionId, submission);
+								}
+								abortSignal.addEventListener("abort", onAbort, { once: true });
+								return session;
+							}),
+						)
+						.pipe(
+							Effect.flatMap((session) => {
+								if (!session) return Effect.void;
+								// Release admission before prompt IO: unchanged-folder prompts may
+								// overlap, while a different folder waits for this registered loop.
+								return Effect.tryPromise({
+									try: async (runtimeSignal) => {
+										submissionStarted = true;
+										try {
+											const current = new Map<
+												string,
+												PermissionRuleset[number]["action"]
+											>();
+											for (const rule of session.permission ?? []) {
+												// Leave catch-alls untouched when reconciling folder rules.
+												if (
+													rule.permission === "external_directory" &&
+													rule.pattern !== "*"
+												) {
+													current.set(rule.pattern, rule.action);
+												}
+											}
+											const desired = new Set<string>();
+											for (const folder of extraFolders) {
+												let directory: string;
+												try {
+													directory = realpathSync(folder).replaceAll(
+														"\\",
+														"/",
+													);
+												} catch {
+													// A folder can disappear after launch-folder resolution.
+													continue;
+												}
+												// Permission wildcards cannot escape a literal * or ?.
+												if (/[?*]/.test(directory)) continue;
+												desired.add(join(directory, "*").replaceAll("\\", "/"));
+											}
+											// Updates append rules, so unchanged patterns need no patch.
+											const permission: PermissionRuleset = [];
+											for (const [pattern, action] of current) {
+												if (action === "allow" && !desired.has(pattern)) {
+													permission.push({
+														permission: "external_directory",
+														pattern,
+														action: "ask",
+													});
+												}
+											}
+											for (const pattern of desired) {
+												if (current.get(pattern) !== "allow") {
+													permission.push({
+														permission: "external_directory",
+														pattern,
+														action: "allow",
+													});
+												}
+											}
+											if (permission.length > 0) {
+												await client.session.update(sessionId, { permission });
+											}
+											if (
+												!abortSignal.aborted &&
+												!runtimeSignal.aborted &&
+												!this.closed
+											)
+												await client.session.prompt(sessionId, promptOptions);
+										} finally {
+											finishSubmission();
+										}
+									},
+									catch: (cause) => cause,
+								});
+							}),
+						),
 				);
+				if (this.closed) return yield* Effect.fail(shutdownError);
 				if (promptResult._tag === "Left") {
 					const cause = promptResult.left;
 					const baseMessage =
@@ -348,7 +475,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					return sendFailedTurnResult(message);
 				}
 
-				if (abortSignal.aborted) return interruptedTurnResult();
+				if (abortSignal.aborted || !pendingTurn) return interruptedTurnResult();
 				return yield* Deferred.await(pendingTurn.deferred);
 			}).pipe(Effect.ensuring(cleanup));
 			// The client stays valid for the whole turn, abort included.
@@ -503,6 +630,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.sync(() => {
+			this.closed = true;
 			log.info("OpenCodeProviderInstance shutting down");
 
 			for (const [sessionId, pendingTurn] of this.pendingTurns) {
@@ -518,6 +646,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				);
 			}
 			this.pendingTurns.clear();
+			this.promptGates.clear();
+			for (const submission of this.promptSubmissions.values())
+				Deferred.unsafeDone(submission.settled, Effect.void);
+			this.promptSubmissions.clear();
 		});
 	}
 }

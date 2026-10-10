@@ -1,5 +1,14 @@
 import { SqlClient } from "@effect/sql";
-import { Cause, Duration, Effect, HashMap, Layer, PubSub, Ref } from "effect";
+import {
+	Cause,
+	Duration,
+	Effect,
+	HashMap,
+	Layer,
+	Option,
+	PubSub,
+	Ref,
+} from "effect";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -12,6 +21,7 @@ import {
 import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
+import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
@@ -67,6 +77,7 @@ export const StatusPollerLive: Layer.Layer<
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
+		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 		// The corrective event is the poller's only write, and it moves the read
 		// model, so it goes through the seam that projects and announces together.
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
@@ -161,13 +172,17 @@ export const StatusPollerLive: Layer.Layer<
 				reportFailure("Status poller poll failed", cause),
 			),
 		);
-		const refreshGit = config.refreshSessionGit
-			? Effect.tryPromise(config.refreshSessionGit).pipe(
-					Effect.catchAllCause((cause) =>
-						reportFailure("Git state refresh failed", cause),
-					),
-				)
-			: Effect.void;
+		const refreshGit = (
+			Option.isSome(sessionGit)
+				? sessionGit.value.refresh()
+				: config.refreshSessionGit
+					? Effect.tryPromise(config.refreshSessionGit)
+					: Effect.void
+		).pipe(
+			Effect.catchAllCause((cause) =>
+				reportFailure("Git state refresh failed", cause),
+			),
+		);
 		const forkPoll = runPoll.pipe(Effect.fork, Effect.asVoid);
 		const invokeChangedCallback = (
 			callback: StatusPollerChangedCallback,

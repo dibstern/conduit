@@ -39,6 +39,7 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
@@ -463,6 +464,7 @@ const appendedSessionColumns = [
 	"limit_recovery",
 	"resumes",
 	"root_id",
+	"workspace",
 ] as const;
 
 function sameStrings(
@@ -1071,6 +1073,11 @@ export const effectMigrationEntries = {
 			counter?.value ?? 0,
 		);
 	}),
+	"0040_sessions_workspace": runAddColumnMigrationIfMissing(
+		"sessions",
+		"workspace",
+		readMigrationSql(SESSIONS_WORKSPACE_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

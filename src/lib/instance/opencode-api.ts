@@ -375,6 +375,20 @@ class SessionNamespace {
 		);
 	}
 
+	/** Relocate the native session; request directory headers do not override it. */
+	async moveWorkspace(sessionId: string, directory: string): Promise<void> {
+		await this.api.sdk(
+			"session.moveWorkspace",
+			decodeOpenCodeUndefinedResponse,
+			() =>
+				this.api._sdk.experimental.controlPlane.moveSession({
+					sessionID: sessionId,
+					destination: { directory },
+					moveChanges: false,
+				}),
+		);
+	}
+
 	async fork(
 		sessionId: string,
 		options?: { messageID?: string },

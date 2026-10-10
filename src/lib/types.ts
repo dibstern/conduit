@@ -189,6 +189,8 @@ export interface ProjectRelayConfig {
 	listDaemonSessions?: (
 		options: DaemonSessionQueryOptions,
 	) => MaybePromise<DaemonSessionQueryResult>;
+	/** Existing canonical owner, without starting a relay or warming git. */
+	resolveSessionProject?: (sessionId: string) => Promise<string | null>;
 	/** Notify browsers on other project relays that the daemon list changed. */
 	broadcastSessionListChanged?: () => Promise<void>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */

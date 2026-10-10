@@ -6,6 +6,7 @@ import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
+	withCachedSessionGit,
 } from "../../../git/session-git.js";
 import {
 	makeReadQueryEffect,
@@ -14,6 +15,7 @@ import {
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
+import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -110,14 +112,26 @@ const readProjectSessions = (
 				...(options.cursor !== undefined ? { before: options.cursor } : {}),
 			});
 		}).pipe(Effect.provide(readQueryLayer));
-		const gitContext = gitCache.peek(projectDirectory);
+		const directories = new Set(
+			sessions.map((session) =>
+				effectiveWorkingDirectory(projectDirectory, session.workspace),
+			),
+		);
+		yield* Effect.tryPromise({
+			try: () =>
+				Promise.all(
+					[...directories]
+						.filter((path) => gitCache.isStale(path))
+						.map((path) => gitCache.refresh(path)),
+				),
+			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
+		});
 		return sessions.map(
 			(session): ProjectSessionCandidate => ({
 				sortKey: { updatedAt: session.updatedAt, id: session.id },
 				session: {
-					...session,
+					...withCachedSessionGit(session, projectDirectory, gitCache),
 					projectSlug,
-					...(gitContext ? { git: gitContext } : {}),
 				},
 			}),
 		);

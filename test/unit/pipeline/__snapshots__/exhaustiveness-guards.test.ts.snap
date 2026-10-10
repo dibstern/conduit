@@ -39,6 +39,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.unsnoozed",
   "session.usage_limited",
   "session.variant_changed",
+  "session.workspace_changed",
   "text.delta",
   "thinking.delta",
   "thinking.end",

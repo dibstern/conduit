@@ -114,6 +114,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.forked",
 			"session.permission_mode_changed",
 			"session.model_changed",
+			"session.workspace_changed",
 			"session.variant_changed",
 			"session.context_window_changed",
 			"session.read",

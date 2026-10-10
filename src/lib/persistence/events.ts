@@ -49,6 +49,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	// sideThread and permissionMode are optional so historical creations still decode.
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.workspace_changed": ["sessionId", "cause", "worktrees", "origin"],
 	"session.read": ["sessionId"],
 	"session.unread": ["sessionId"],
 	"session.settled": ["sessionId"],

@@ -6,6 +6,13 @@ import {
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
 import type { ProviderDriverKind } from "./contracts/provider-instance.js";
+import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+
+export type {
+	SessionWorkspace,
+	WorktreeInfo,
+} from "./contracts/session-workspace.js";
+
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -332,6 +339,7 @@ export const SessionInfoSchema = Schema.Struct({
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
+	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
 	snoozedUntil: Schema.optional(Schema.Number),
 	wokenAt: Schema.optional(Schema.Number),
 	wokeBecause: Schema.optional(

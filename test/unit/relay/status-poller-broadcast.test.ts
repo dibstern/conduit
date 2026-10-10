@@ -13,6 +13,7 @@ import { Effect, Ref } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -347,18 +348,19 @@ describe("Status poller → browser shell transitions", () => {
 	}, 10_000);
 
 	it("refreshes git on the status poll cadence", async () => {
-		await vi.waitFor(
-			() => expect(harness.refreshSessionGit).toHaveBeenCalled(),
-			{ timeout: 3000 },
-		);
-		const previousCalls = harness.refreshSessionGit.mock.calls.length;
-		await vi.waitFor(
-			() =>
-				expect(harness.refreshSessionGit.mock.calls.length).toBeGreaterThan(
-					previousCalls,
-				),
-			{ timeout: 3000 },
-		);
+		const refresh = vi.spyOn(daemonSessionGitCache, "refresh");
+		try {
+			await vi.waitFor(() => expect(refresh).toHaveBeenCalled(), {
+				timeout: 3000,
+			});
+			const previousCalls = refresh.mock.calls.length;
+			await vi.waitFor(
+				() => expect(refresh.mock.calls.length).toBeGreaterThan(previousCalls),
+				{ timeout: 3000 },
+			);
+		} finally {
+			refresh.mockRestore();
+		}
 	});
 
 	it("publishes an idle shell row when a viewed session becomes idle", async () => {

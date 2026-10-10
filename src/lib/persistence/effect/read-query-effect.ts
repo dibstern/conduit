@@ -5,6 +5,7 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "../../contracts/limit-recovery.js";
+import { SessionWorkspaceSchema } from "../../contracts/session-workspace.js";
 import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
@@ -214,6 +215,13 @@ export const sessionRowsToSessionInfoList = (
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			messageCount: 0,
+			...(row.workspace == null
+				? {}
+				: {
+						workspace: Schema.decodeUnknownSync(
+							Schema.parseJson(SessionWorkspaceSchema),
+						)(row.workspace),
+					}),
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }

@@ -3,7 +3,8 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_RECONCILIATION_INTERVAL_MS } from "../domain/relay/Services/session-status-poller.js";
-import type { ProjectInfo, SessionGit } from "../shared-types.js";
+import { effectiveWorkingDirectory } from "../session/session-workspace.js";
+import type { ProjectInfo, SessionGit, SessionInfo } from "../shared-types.js";
 
 const execFileAsync = promisify(execFile);
 const GIT_COMMAND_TIMEOUT_MS = 2_000;
@@ -13,10 +14,18 @@ const git = async (
 	...args: string[]
 ): Promise<string | undefined> => {
 	try {
+		const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+		for (const key of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			delete env[key];
 		const { stdout } = await execFileAsync("git", args, {
 			cwd: directory,
 			timeout: GIT_COMMAND_TIMEOUT_MS,
-			env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+			env,
 		});
 		return stdout.trim();
 	} catch {
@@ -199,6 +208,15 @@ export function createSessionGitCache(
 }
 
 export const daemonSessionGitCache = createSessionGitCache();
+
+export function withCachedSessionGit(
+	session: SessionInfo,
+	primary: string,
+	cache = daemonSessionGitCache,
+): SessionInfo {
+	const git = cache.peek(effectiveWorkingDirectory(primary, session.workspace));
+	return git ? { ...session, git } : session;
+}
 
 export const withCachedProjectGit = <T extends ProjectInfo>(
 	projects: ReadonlyArray<T>,

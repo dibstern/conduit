@@ -60,6 +60,7 @@ export const SESSIONS_RESUMES_MIGRATION = "0036_sessions_resumes.sql";
 export const SESSION_SIDEBAR_MIGRATION = "0037_session_sidebar.sql";
 export const SESSION_SIDEBAR_TOMBSTONES_MIGRATION =
 	"0038_session_sidebar_tombstones.sql";
+export const SESSIONS_WORKSPACE_MIGRATION = "0039_sessions_workspace.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

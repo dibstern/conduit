@@ -28,6 +28,7 @@ import {
 	UsageLimitsSettingSchema,
 } from "./limit-recovery.js";
 import { ProviderDriverKindSchema } from "./provider-instance.js";
+import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
 import { StoredEventSchema } from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
@@ -1240,6 +1241,28 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
+	"ListWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ worktrees: Schema.Array(WorktreeInfoSchema) }),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
+export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorkspace>()(
+	"MoveSessionWorkspace",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			path: NonEmptyString,
+		},
+	},
+) {}
+
 export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
 	"RenameSession",
 	{
@@ -1913,6 +1936,8 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListWorktrees,
+	MoveSessionWorkspace,
 	MarkSessionUnread,
 	MarkSessionRead,
 	MarkSessionSeen,
@@ -2298,6 +2323,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(MarkSessionRead),
 	Rpc.fromTaggedRequest(MarkSessionSeen),
