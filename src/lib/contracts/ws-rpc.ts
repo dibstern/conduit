@@ -1215,7 +1215,8 @@ export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
 		success: SwitchModelResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: NonEmptyString,
+			// A draft has no session yet: it asks only for the model's efforts.
+			sessionId: Schema.optional(NonEmptyString),
 			modelId: NonEmptyString,
 			providerId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
