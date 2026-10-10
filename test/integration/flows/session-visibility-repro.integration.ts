@@ -242,7 +242,7 @@ async function projectedHistory(
  * pattern). Without this the default session runs on the Claude provider and
  * never touches the mock — the "differential" would silently compare the
  * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session returned by input.submit.
+ * to it materializes an OpenCode session returned by SendMessage.
  */
 async function bindOpenCodeSession(
 	client: TestWsClient,
