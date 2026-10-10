@@ -80,6 +80,7 @@ const expectedNames = [
 	"sessions_last_turn_end_input_id",
 	"project_provenance",
 	"sessions_claude_worktree_state",
+	"sessions_workspace_hint",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -99,6 +100,48 @@ const legacyNames = [
 
 describe("Effect migration lineage", () => {
 	it.effect(
+		"hint columns must remain nullable without inventing historical generations",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(46));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('kept-hint', 'claude', 'Preserved', 'idle', 1, 1)`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[47, "sessions_workspace_hint"],
+				]);
+				expect(
+					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
+						FROM sessions WHERE id = 'kept-hint'`,
+				).toEqual([
+					{
+						title: "Preserved",
+						workspace_hint: null,
+						workspace_hint_sequence: null,
+					},
+				]);
+				expect(
+					yield* sql`SELECT name, type, "notnull", dflt_value
+						FROM pragma_table_info('sessions')
+						WHERE name IN ('workspace_hint', 'workspace_hint_sequence')`,
+				).toEqual([
+					{
+						name: "workspace_hint",
+						type: "TEXT",
+						notnull: 0,
+						dflt_value: null,
+					},
+					{
+						name: "workspace_hint_sequence",
+						type: "INTEGER",
+						notnull: 0,
+						dflt_value: null,
+					},
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+	it.effect(
 		"adds nullable Claude worktree state without inventing historical facts",
 		() =>
 			Effect.gen(function* () {
@@ -108,6 +151,7 @@ describe("Effect migration lineage", () => {
 				VALUES ('kept-workspace', 'claude', 'Preserved', 'idle', 1, 1)`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[46, "sessions_claude_worktree_state"],
+					[47, "sessions_workspace_hint"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -651,6 +695,7 @@ describe("Effect migration lineage", () => {
 				[44, "sessions_last_turn_end_input_id"],
 				[45, "project_provenance"],
 				[46, "sessions_claude_worktree_state"],
+				[47, "sessions_workspace_hint"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -734,6 +779,7 @@ describe("Effect migration lineage", () => {
 					[44, "sessions_last_turn_end_input_id"],
 					[45, "project_provenance"],
 					[46, "sessions_claude_worktree_state"],
+					[47, "sessions_workspace_hint"],
 				]);
 				const rows = yield* sql<{
 					id: string;

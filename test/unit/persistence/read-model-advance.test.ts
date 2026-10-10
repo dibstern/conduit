@@ -27,6 +27,10 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import {
+	ReadQueryEffectTag,
+	sessionRowsToSessionInfoList,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockConfig,
@@ -103,6 +107,187 @@ it("a committed session write announces the session and stamps its row", async (
 				{ version: 1, sessionIds: ["s1"], removedSessionIds: [] },
 			]);
 			expect(rows).toEqual([{ version: 1 }]);
+		}),
+	);
+});
+
+it("a changed workspace hint must stamp and announce its session row", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Hint",
+					provider: "claude",
+				}),
+			]);
+			advances.length = 0;
+			yield* commit([
+				canonicalEvent("session.workspace_hint_changed", "s1", {
+					path: "/repo/linked",
+				}),
+			]);
+			const row = yield* read.getSession("s1");
+			expect(row).toMatchObject({
+				workspace_hint: "/repo/linked",
+				workspace_hint_sequence: 2,
+				version: 2,
+			});
+			expect(sessionRowsToSessionInfoList(row ? [row] : [])[0]).toMatchObject({
+				workspaceHint: "/repo/linked",
+			});
+			expect(advances).toEqual([
+				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
+
+			yield* commit([
+				canonicalEvent("session.workspace_hint_changed", "s1", {
+					path: "/repo/linked",
+				}),
+			]);
+			expect(yield* read.getSession("s1")).toMatchObject({
+				workspace_hint_sequence: 3,
+				version: 3,
+			});
+			expect(advances).toEqual([
+				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+				{ version: 3, sessionIds: ["s1"], removedSessionIds: [] },
+			]);
+			yield* commit([
+				canonicalEvent("session.workspace_hint_changed", "s1", { path: null }),
+			]);
+			const cleared = yield* read.getSession("s1");
+			expect(cleared).toMatchObject({
+				workspace_hint: null,
+				workspace_hint_sequence: null,
+				version: 4,
+			});
+			expect(
+				sessionRowsToSessionInfoList(cleared ? [cleared] : [])[0],
+			).not.toHaveProperty("workspaceHint");
+			yield* commit([
+				canonicalEvent("session.workspace_hint_changed", "s1", {
+					path: "/repo/linked",
+				}),
+			]);
+			expect(yield* read.getSession("s1")).toMatchObject({
+				workspace_hint: "/repo/linked",
+				workspace_hint_sequence: 5,
+				version: 5,
+			});
+		}),
+	);
+});
+
+it("replaying the same hint event must not create another generation or row notification", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const store = yield* EventStoreEffectTag;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Hint",
+					provider: "claude",
+				}),
+				canonicalEvent("session.workspace_hint_changed", "s1", {
+					path: "/repo/linked",
+				}),
+			]);
+			const event = (yield* store.readBySession("s1")).find(
+				(stored) => stored.type === "session.workspace_hint_changed",
+			);
+			if (!event) throw new Error("Seeded hint event was not stored");
+			advances.length = 0;
+			yield* commit.write((project) => project([event]));
+			expect(yield* read.getSession("s1")).toMatchObject({
+				workspace_hint: "/repo/linked",
+				workspace_hint_sequence: 2,
+				version: 1,
+			});
+			expect(advances).toEqual([]);
+		}),
+	);
+});
+
+it.each([
+	{
+		cause: "user",
+		path: "/repo/linked",
+		worktrees: { "/repo/main": "/repo/linked" },
+	},
+	{
+		cause: "agent",
+		path: "/repo/linked",
+		worktrees: { "/repo/main": "/repo/linked" },
+	},
+	{ cause: "user", path: "/repo/main", worktrees: {} },
+] as const)("a $cause move to $path must clear the matching workspace hint", async ({
+	cause,
+	path,
+	worktrees,
+}) => {
+	await withPersistence(() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Hint",
+					provider: "claude",
+				}),
+				canonicalEvent("session.workspace_hint_changed", "s1", { path }),
+			]);
+			yield* commit([
+				canonicalEvent("session.workspace_changed", "s1", {
+					sessionId: "s1",
+					cause,
+					path,
+					worktrees,
+					origin: "existing",
+				}),
+			]);
+			expect(yield* read.getSession("s1")).toMatchObject({
+				workspace_hint: null,
+				workspace_hint_sequence: null,
+				version: 2,
+			});
+		}),
+	);
+});
+
+it("a move to another folder must retain the unmatched workspace hint", async () => {
+	await withPersistence(() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Hint",
+					provider: "claude",
+				}),
+				canonicalEvent("session.workspace_hint_changed", "s1", {
+					path: "/repo/linked",
+				}),
+			]);
+			yield* commit([
+				canonicalEvent("session.workspace_changed", "s1", {
+					sessionId: "s1",
+					cause: "user",
+					path: "/repo/other",
+					worktrees: { "/repo/main": "/repo/other" },
+					origin: "existing",
+				}),
+			]);
+			expect(yield* read.getSession("s1")).toMatchObject({
+				workspace_hint: "/repo/linked",
+				workspace_hint_sequence: 2,
+			});
 		}),
 	);
 });

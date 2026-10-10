@@ -11,17 +11,20 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, workspaceMismatch, loadWorktrees, onmove }: {
+	let { directory, git, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
 		directory: string;
 		git: SessionGit | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
+		workspaceHint?: string | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
 		onmove?: ((path: string) => Promise<void>) | undefined;
+		ondismiss?: ((path: string) => Promise<void>) | undefined;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	let currentDirectory = $state<string | undefined>();
 	let moving = $state(false);
+	let dismissing = $state(false);
 
 	async function openWorktrees() {
 		showWorktrees = true;
@@ -54,7 +57,19 @@
 			moving = false;
 		}
 	}
+	async function dismiss(path: string) {
+		dismissing = true;
+		try {
+			await ondismiss?.(path);
+		} catch {
+			showToast("Could not dismiss workspace hint", { variant: "error" });
+		} finally {
+			dismissing = false;
+		}
+	}
 	const project = $derived(directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory);
+	const hintFolder = $derived(workspaceHint?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspaceHint);
+	const hintLabel = $derived(`working in ${hintFolder}?`);
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
 	const upstream = $derived(`↑${git?.ahead ?? 0} ↓${git?.behind ?? 0}`);
@@ -76,7 +91,7 @@
 			showMerged ? "6ch" : null,
 		].filter((width) => width !== null);
 		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length);
-		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${marks.map((width) => ` + ${width}`).join("")})`;
+		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
 	});
 
 	async function copy(text: string) {
@@ -94,7 +109,7 @@
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
 		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
 			style={`min-width: ${minimumWidth}`}
-			title={label} ariaLabel={`Checkout: ${label}`} data-testid="session-bar-identity">
+			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}`} data-testid="session-bar-identity">
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -117,6 +132,9 @@
 			{/if}
 			{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
 			{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
+			{#if sessionViewState.compact && workspaceHint}
+				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={hintLabel} title={hintLabel} data-testid="workspace-hint"><Icon name="circle-alert" size={12} /></span>
+			{/if}
 		</Button></span>
 	{/snippet}
 	<MenuGroup label="Checkout">
@@ -139,6 +157,12 @@
 		<MenuSeparator />
 		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
 		{#if onmove}<MenuItem disabled={moving} onselect={() => void move(directory)}>Retry move</MenuItem>{/if}
+	{/if}
+	{#if sessionViewState.compact && workspaceHint}
+		<MenuSeparator />
+		<p class="px-[8px] py-[6px] text-[10px] text-warning">{hintLabel}<span class="mt-[4px] block break-all text-text-muted">{workspaceHint}</span></p>
+		{#if onmove}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-move" onselect={() => workspaceHint && void move(workspaceHint)}>Move</MenuItem>{/if}
+		{#if ondismiss}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onselect={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</MenuItem>{/if}
 	{/if}
 	<MenuSeparator />
 	{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "")}>Copy branch name</MenuItem>{/if}
@@ -167,6 +191,15 @@
 		{/if}
 	{/if}
 </Menu>
+
+{#if !sessionViewState.compact && workspaceHint}
+	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-hint" title={workspaceHint}>
+		<Icon name="circle-alert" size={12} />
+		<span class="max-w-[180px] truncate">{hintLabel}</span>
+	</span>
+	{#if onmove}<Button variant="ghost" size="segment" disabled={moving || dismissing} data-testid="workspace-hint-move" onclick={() => workspaceHint && void move(workspaceHint)}>Move</Button>{/if}
+	{#if ondismiss}<Button variant="ghost" size="segment" disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onclick={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</Button>{/if}
+{/if}
 
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */

@@ -45,6 +45,7 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	SESSIONS_WORKSPACE_HINT_MIGRATION,
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
@@ -475,6 +476,8 @@ const appendedSessionColumns = [
 	"workspace",
 	"last_turn_end_input_id",
 	"claude_worktree_state",
+	"workspace_hint",
+	"workspace_hint_sequence",
 ] as const;
 
 function sameStrings(
@@ -1118,6 +1121,11 @@ export const effectMigrationEntries = {
 		"sessions",
 		"claude_worktree_state",
 		readMigrationSql(SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION),
+	),
+	"0047_sessions_workspace_hint": runAddColumnMigrationIfMissing(
+		"sessions",
+		"workspace_hint",
+		readMigrationSql(SESSIONS_WORKSPACE_HINT_MIGRATION),
 	),
 } satisfies Record<
 	string,

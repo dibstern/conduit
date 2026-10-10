@@ -15,6 +15,10 @@ export function lookupSummarizer(name: string): ToolSummarizer {
 }
 
 /** Register a summarizer (used by per-tool modules at import time). */
-export function registerSummarizer(summarizer: ToolSummarizer): void {
+export function registerSummarizer(
+	summarizer: ToolSummarizer,
+	aliases: readonly string[] = [],
+): void {
 	SUMMARIZERS.set(summarizer.tool, summarizer);
+	for (const name of aliases) SUMMARIZERS.set(name, summarizer);
 }

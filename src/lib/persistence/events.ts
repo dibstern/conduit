@@ -50,6 +50,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
 	"session.workspace_changed": ["sessionId", "cause", "worktrees", "origin"],
+	"session.workspace_hint_changed": ["path"],
 	"session.workspace_started": ["sessionId", "path"],
 	"session.read": ["sessionId"],
 	"session.unread": ["sessionId"],

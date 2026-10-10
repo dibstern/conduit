@@ -91,6 +91,8 @@ import type { SessionManagerServiceTag } from "../domain/relay/Services/session-
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
+import { SessionWorkspaceHintStateLive } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceLive,
@@ -328,7 +330,7 @@ export function createProjectRelayLayers({
 		config.slug,
 		undefined,
 		SessionEventBusLive,
-	);
+	).pipe(Layer.provideMerge(SessionWorkspaceHintStateLive));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
@@ -678,7 +680,10 @@ export function createProjectRelayLayers({
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
 	const fullLayer = Layer.provideMerge(
 		RpcSubscriptionScopeLive,
-		Layer.provideMerge(Layer.merge(wiringLayers, inboxLayer), fullBaseLayers),
+		Layer.provideMerge(
+			Layer.mergeAll(wiringLayers, inboxLayer, SessionWorkspaceHintReactorLive),
+			fullBaseLayers,
+		),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

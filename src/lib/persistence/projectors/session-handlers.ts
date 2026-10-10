@@ -92,6 +92,7 @@ type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
 	| "session.workspace_changed"
+	| "session.workspace_hint_changed"
 	| "session.workspace_started"
 	| "input.sent"
 	| "session.settled"
@@ -321,7 +322,10 @@ export const sessionHandlers: {
 
 	"session.workspace_changed": (event) => [
 		{
-			sql: "UPDATE sessions SET workspace = ? WHERE id = ?",
+			sql: `UPDATE sessions SET workspace = ?,
+				workspace_hint = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint END,
+				workspace_hint_sequence = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint_sequence END
+				WHERE id = ?`,
 			params: [
 				Object.keys(event.data.worktrees).length === 0
 					? null
@@ -330,10 +334,28 @@ export const sessionHandlers: {
 							worktrees: event.data.worktrees,
 							origin: event.data.origin,
 						}),
+				event.data.path ?? null,
+				event.data.path ?? null,
 				event.data.sessionId,
 			],
 		},
 	],
+	"session.workspace_hint_changed": (event) => {
+		const sequence = event.data.path === null ? null : event.sequence;
+		return [
+			{
+				sql: `UPDATE sessions SET workspace_hint = ?, workspace_hint_sequence = ?
+					WHERE id = ? AND (workspace_hint IS NOT ? OR workspace_hint_sequence IS NOT ?)`,
+				params: [
+					event.data.path,
+					sequence,
+					event.sessionId,
+					event.data.path,
+					sequence,
+				],
+			},
+		];
+	},
 	"session.workspace_started": () => [],
 	"input.sent": () => [],
 

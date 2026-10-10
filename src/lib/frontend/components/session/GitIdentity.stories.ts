@@ -161,6 +161,59 @@ export const WorkspaceMismatch: Story = {
 	},
 };
 
+export const WorkspaceHint: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit",
+		git: { branch: "main" },
+		workspaceHint: "/src/conduit-hint",
+		onmove: fn(async (_path: string) => {}),
+		ondismiss: fn(async (_path: string) => {}),
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-hint")).toHaveTextContent(
+			"working in conduit-hint?",
+		);
+		await userEvent.click(canvas.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+		await userEvent.click(canvas.getByTestId("workspace-hint-dismiss"));
+		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
+export const WorkspaceHintPhone: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const hint = canvas.getByTestId("workspace-hint");
+		await expect(hint).toHaveAttribute(
+			"aria-label",
+			"working in conduit-hint?",
+		);
+		await expect(hint).toHaveTextContent(/^$/);
+		await expect(
+			canvas.queryByTestId("workspace-hint-move"),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("workspace-hint-dismiss"),
+		).not.toBeInTheDocument();
+		const identity = canvas.getByTestId("session-bar-identity");
+		await userEvent.click(identity);
+		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
+		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+		await userEvent.click(identity);
+		await userEvent.click(body.getByTestId("workspace-hint-dismiss"));
+		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
 async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);

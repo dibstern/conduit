@@ -119,6 +119,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				...daemonOnlyHandlers,
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				DismissWorkspaceHint: () => Effect.succeed({ ok: true }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
 				SubscribeSessionTodos: () => Stream.empty,

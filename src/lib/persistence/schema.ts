@@ -69,6 +69,8 @@ export const SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION =
 export const PROJECT_PROVENANCE_MIGRATION = "0044_project_provenance.sql";
 export const SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION =
 	"0045_sessions_claude_worktree_state.sql";
+export const SESSIONS_WORKSPACE_HINT_MIGRATION =
+	"0046_sessions_workspace_hint.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",
