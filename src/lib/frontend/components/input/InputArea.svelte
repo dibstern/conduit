@@ -667,7 +667,10 @@
 		const { activity, messages } = getOrCreateSessionSlot(sid);
 		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
 			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
-		if (startsTurn) phaseToProcessing(activity);
+		if (startsTurn) {
+			phaseToProcessing(activity);
+			activity.awaitingInputId = commandId;
+		}
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
 			sendMessageRpc({
