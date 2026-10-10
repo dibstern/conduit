@@ -114,6 +114,7 @@ import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
+import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
@@ -134,14 +135,15 @@ import { PermissionTimeoutLive } from "./timer-wiring.js";
 const relayOpenCodeInstances = (
 	instances: OpenCodeInstances,
 	config: ProjectRelayConfig,
+	persistedInstanceIds: readonly string[],
 ): OpenCodeInstances => {
 	const defaultId = defaultInstanceIdForDriver("opencode");
 	const selectedId = config.openCodeInstanceId ?? defaultId;
 	const target = (instanceId: string) =>
 		instanceId === defaultId ? selectedId : instanceId;
 	const scope = config.noServer ? config.projectDir : undefined;
-	// Other instances' events reach this relay only once it has used them.
-	const used = new Set<string>();
+	// Restored sessions receive events before the relay first uses their instance.
+	const used = new Set(persistedInstanceIds.map(target));
 	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
 		instances.use(target(instanceId), directory).pipe(
 			Effect.tap(() => {
@@ -321,28 +323,39 @@ export function createProjectRelayLayers({
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
 	const sharedInstances = config.openCodeInstances;
-	const openCodeInstancesLayer = Layer.map(
-		sharedInstances
-			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-			: makeStandaloneOpenCodeInstancesLive(config),
-		(context) =>
-			Context.make(
-				OpenCodeInstancesTag,
-				relayOpenCodeInstances(
-					Context.get(context, OpenCodeInstancesTag),
-					config,
-				),
-			),
-	);
-	// The relay's default client resolves its endpoint through that view.
-	const openCodeApiLayer = OpenCodeAPILive.pipe(
-		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
-	);
 	const persistenceEffectLayer = makePersistenceEffectLayer(
 		config.persistenceDbPath,
 		config.slug,
 		undefined,
 		SessionEventBusLive,
+	);
+	const openCodeInstancesLayer = Layer.effect(
+		OpenCodeInstancesTag,
+		Effect.gen(function* () {
+			const instances = yield* OpenCodeInstancesTag;
+			const sql = yield* SqlClient.SqlClient;
+			const bindings = yield* new SqliteProviderSessionBindingReadModel(
+				sql,
+			).listBoundSessions();
+			return relayOpenCodeInstances(
+				instances,
+				config,
+				bindings.map(({ providerId }) => providerId),
+			);
+		}),
+	).pipe(
+		Layer.provide(
+			Layer.merge(
+				sharedInstances
+					? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+					: makeStandaloneOpenCodeInstancesLive(config),
+				persistenceEffectLayer,
+			),
+		),
+	);
+	// The relay's default client resolves its endpoint through that view.
+	const openCodeApiLayer = OpenCodeAPILive.pipe(
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),

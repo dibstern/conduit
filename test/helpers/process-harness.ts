@@ -1089,12 +1089,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 		directory: string,
 		sessionID: string,
 		status: { type: "busy" | "idle" | "retry"; [key: string]: unknown },
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
 	): Promise<void> {
-		await this.openCodeTestCommand("set-status", {
-			directory,
-			sessionID,
-			status,
-		});
+		await this.openCodeTestCommand(
+			"set-status",
+			{ directory, sessionID, status },
+			instanceId,
+		);
 	}
 
 	/** Serve a pending prompt from /permission or /question and emit it as asked. */
@@ -1102,8 +1103,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 		kind: "permission" | "question",
 		directory: string,
 		item: { id: string; sessionID: string; [key: string]: unknown },
+		instanceId: string = defaultInstanceIdForDriver("opencode"),
 	): Promise<void> {
-		await this.openCodeTestCommand(`add-${kind}`, { directory, item });
+		await this.openCodeTestCommand(
+			`add-${kind}`,
+			{ directory, item },
+			instanceId,
+		);
 	}
 
 	/** Record but do not emit matching events from then on. */
