@@ -49,6 +49,8 @@ appendFileSync(
 const streams = new Map();
 let streamId = 0;
 let silenceReconnect = false;
+// While set, /session/status samples at arrival but answers only on release.
+let statusHold;
 // Multiple instances in one harness can opt into separate provider stores.
 const statePrefix = process.env.CONDUIT_TEST_OPENCODE_STATE_PREFIX;
 const stateStem = statePrefix
@@ -197,6 +199,21 @@ const server = createServer(async (request, response) => {
 		response.end("{}");
 		return;
 	}
+	if (path === "/test/hold-status" && request.method === "POST") {
+		let release;
+		const released = new Promise((done) => {
+			release = done;
+		});
+		statusHold = { released, release };
+		response.end("{}");
+		return;
+	}
+	if (path === "/test/release-status" && request.method === "POST") {
+		statusHold?.release();
+		statusHold = undefined;
+		response.end("{}");
+		return;
+	}
 	if (path === "/test/drop-events" && request.method === "POST") {
 		const input = JSON.parse(body);
 		updateState((state) => {
@@ -299,9 +316,17 @@ const server = createServer(async (request, response) => {
 			streamLog("close", stream);
 		});
 	} else if (path === "/session/status") {
-		response.end(
-			JSON.stringify((directory && readState().statuses[directory]) || {}),
+		const statuses = JSON.stringify(
+			(directory && readState().statuses[directory]) || {},
 		);
+		if (statusHold) {
+			appendFileSync(
+				join(configDir, "fake-opencode-held-status.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), directory, statuses })}\n`,
+			);
+			await statusHold.released;
+		}
+		response.end(statuses);
 	} else if (
 		(path === "/permission" || path === "/question") &&
 		request.method === "GET"

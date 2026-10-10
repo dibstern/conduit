@@ -53,28 +53,84 @@
 		) || FONT_SIZE_DEFAULT,
 	);
 
-	function decreaseFontSize() {
-		const next = Math.max(FONT_SIZE_MIN, termFontSize - FONT_SIZE_STEP);
-		if (next !== termFontSize) {
-			termFontSize = next;
-			persistFontSize();
-		}
-	}
-
-	function increaseFontSize() {
-		const next = Math.min(FONT_SIZE_MAX, termFontSize + FONT_SIZE_STEP);
-		if (next !== termFontSize) {
-			termFontSize = next;
-			persistFontSize();
-		}
-	}
-
-	function persistFontSize() {
+	function stepFontSize(steps: number) {
+		const next = Math.min(
+			FONT_SIZE_MAX,
+			Math.max(FONT_SIZE_MIN, termFontSize + steps * FONT_SIZE_STEP),
+		);
+		if (next === termFontSize) return;
+		termFontSize = next;
 		try {
 			localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(termFontSize));
 		} catch {
 			/* ignore */
 		}
+	}
+
+	// Pinch input is measured in Chromium's trackpad-pinch wheel units,
+	// deltaY = -100·ln(scale), so trackpads and touchscreens step alike:
+	// one font step per ~10% change in pinch scale.
+	const PINCH_STEP_DELTA = 10;
+
+	/**
+	 * Pinch over the terminal steps the font size. Trackpad pinch arrives as a
+	 * ctrl+wheel (Chromium, Firefox, and Safari since WebKit r277772); touch pinch
+	 * as two-finger touches. Elsewhere the browser keeps its own pinch behaviour.
+	 */
+	function pinchFontSize(node: HTMLElement) {
+		let pending = 0;
+		let pinchDistance = 0;
+
+		function zoomBy(delta: number) {
+			pending += delta;
+			const steps = Math.trunc(pending / PINCH_STEP_DELTA);
+			pending -= steps * PINCH_STEP_DELTA;
+			if (steps !== 0) stepFontSize(steps);
+		}
+
+		function onWheel(e: WheelEvent) {
+			if (!e.ctrlKey) return;
+			e.preventDefault();
+			// Captured before xterm, which would scroll or send arrow keys.
+			e.stopPropagation();
+			// Line or page deltas (a mouse wheel in Firefox) count as one step, and a
+			// ctrl+mouse-wheel notch (~100px) is capped there, like the +/- buttons.
+			const delta =
+				e.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+					? -e.deltaY
+					: -Math.sign(e.deltaY) * PINCH_STEP_DELTA;
+			zoomBy(Math.max(-PINCH_STEP_DELTA, Math.min(PINCH_STEP_DELTA, delta)));
+		}
+
+		// One-finger swipes stay with TerminalTab's scrollback handler.
+		function onTouch(e: TouchEvent) {
+			const a = e.touches.item(0);
+			const b = e.touches.item(1);
+			const distance =
+				e.touches.length === 2 && a && b
+					? Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+					: 0;
+			if (distance > 0 && e.type === "touchmove") {
+				// Stops the page zooming: iOS ignores the viewport's user-scalable=no.
+				e.preventDefault();
+				if (pinchDistance > 0) zoomBy(100 * Math.log(distance / pinchDistance));
+			}
+			pinchDistance = distance;
+		}
+
+		// Safari starts its own page zoom from GestureEvents.
+		const preventPageZoom = (e: Event) => e.preventDefault();
+
+		const listeners = new AbortController();
+		const { signal } = listeners;
+		node.addEventListener("wheel", onWheel, { signal, passive: false, capture: true });
+		node.addEventListener("touchstart", onTouch, { signal, passive: true });
+		node.addEventListener("touchmove", onTouch, { signal, passive: false });
+		node.addEventListener("touchend", onTouch, { signal, passive: true });
+		node.addEventListener("touchcancel", onTouch, { signal, passive: true });
+		node.addEventListener("gesturestart", preventPageZoom, { signal });
+		node.addEventListener("gesturechange", preventPageZoom, { signal });
+		return () => listeners.abort();
 	}
 
 	function handleFontSizeResize(size: { cols: number; rows: number }) {
@@ -331,11 +387,11 @@
 					title="Decrease font size"
 					ariaLabel="Decrease font size"
 					disabled={termFontSize <= FONT_SIZE_MIN}
-					onclick={decreaseFontSize}
+					onclick={() => stepFontSize(-1)}
 				>
 					&#8722;
 				</Button>
-				<span class="text-xs text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none">{termFontSize}</span>
+				<span class="text-xs text-text-dimmer font-mono tabular-nums min-w-[2ch] text-center select-none" data-testid="terminal-font-size">{termFontSize}</span>
 				<Button
 					variant="ghost"
 					size="content"
@@ -346,7 +402,7 @@
 					title="Increase font size"
 					ariaLabel="Increase font size"
 					disabled={termFontSize >= FONT_SIZE_MAX}
-					onclick={increaseFontSize}
+					onclick={() => stepFontSize(1)}
 				>
 					+
 				</Button>
@@ -364,7 +420,7 @@
 		</div>
 
 		<!-- Terminal body area -->
-		<div class="term-body flex-1 relative overflow-hidden bg-code-bg">
+		<div class="term-body flex-1 relative overflow-hidden bg-code-bg" {@attach pinchFontSize}>
 			{#if pendingTitle && activeTabId === null}
 				<p class="term-starting p-2 font-mono text-xs text-text-dimmer" role="status">
 					Starting terminal…

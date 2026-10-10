@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	EffectPromptQueueAlreadyIterating,
+	EffectPromptQueueClosed,
 	makeEffectPromptQueue,
 } from "../../../../src/lib/provider/claude/effect-prompt-queue.js";
 import type {
@@ -123,13 +124,25 @@ describe("EffectPromptQueue", () => {
 		expect(items).toEqual([]);
 	});
 
-	it("enqueue after close is a no-op", async () => {
+	// A prompt nothing will read must fail its sender: dropped silently, the
+	// turn waiting on it never ends (conduit-test-6ksg).
+	it("enqueue after close fails and delivers nothing", async () => {
 		const q = await makeQueue();
 		await close(q);
-		await enqueue(q, msg("ignored"));
+		await expect(
+			Effect.runPromise(Effect.flip(q.enqueue(msg("lost")))),
+		).resolves.toBeInstanceOf(EffectPromptQueueClosed);
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
 		expect(items).toEqual([]);
+	});
+
+	it("enqueue after the consumer returned fails", async () => {
+		const q = await makeQueue();
+		await q[Symbol.asyncIterator]().return?.();
+		await expect(
+			Effect.runPromise(Effect.flip(q.enqueue(msg("lost")))),
+		).resolves.toBeInstanceOf(EffectPromptQueueClosed);
 	});
 
 	it("throws on second iteration attempt (single-consumer guard)", async () => {
@@ -161,7 +174,6 @@ describe("EffectPromptQueue", () => {
 		await enqueue(q, msg("first"));
 		await enqueue(q, msg("second"));
 		await close(q);
-		await enqueue(q, msg("ignored")); // after close
 
 		const items: SDKUserMessage[] = [];
 		for await (const m of q) items.push(m);
