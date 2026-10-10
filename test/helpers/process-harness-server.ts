@@ -1,5 +1,7 @@
 import { subscribe } from "node:diagnostics_channel";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { Session } from "node:inspector/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Effect, Fiber } from "effect";
@@ -39,6 +41,45 @@ function recordServerMetrics(file: string): void {
 			source.ranges.add(`${read.range.after}-${read.range.through}`);
 		}
 	});
+	// Every SQLite statement that held the loop for 1ms or more, timed around
+	// better-sqlite3's synchronous calls, the ones the store client makes.
+	const statements: { at: number; ms: number; method: string; sql: string }[] =
+		[];
+	const sqlite = createRequire(
+		createRequire(import.meta.url).resolve("@effect/sql-sqlite-node"),
+	)("better-sqlite3") as typeof import("better-sqlite3");
+	const probe = new sqlite(":memory:");
+	const prototype = Object.getPrototypeOf(probe.prepare("select 1")) as Record<
+		"all" | "get" | "run",
+		(this: { source: string }, ...params: unknown[]) => unknown
+	>;
+	probe.close();
+	for (const method of ["all", "get", "run"] as const) {
+		const original = prototype[method];
+		prototype[method] = function (...params) {
+			const started = performance.now();
+			try {
+				return original.apply(this, params);
+			} finally {
+				const ms = performance.now() - started;
+				if (ms >= 1)
+					statements.push({
+						at: Date.now(),
+						ms: Math.round(ms * 100) / 100,
+						method,
+						sql: this.source.replace(/\s+/g, " ").trim().slice(0, 160),
+					});
+			}
+		};
+	}
+	// A CPU profile from start until the spec asks for it with `<file>.stop`;
+	// `stoppedAt` lets it place samples on the wall clock.
+	const profiler = new Session();
+	profiler.connect();
+	void profiler
+		.post("Profiler.enable")
+		.then(() => profiler.post("Profiler.start"));
+	let profiling = true;
 	const tickMs = 10;
 	let last = performance.now();
 	setInterval(() => {
@@ -50,6 +91,17 @@ function recordServerMetrics(file: string): void {
 	// Written beside the file and renamed over it: past one 8 KB write, a spec
 	// polling the file would otherwise read it half written.
 	setInterval(() => {
+		if (profiling && existsSync(`${file}.stop`)) {
+			profiling = false;
+			const stoppedAt = Date.now();
+			void profiler.post("Profiler.stop").then(({ profile }) => {
+				writeFileSync(
+					`${file}.cpuprofile.tmp`,
+					JSON.stringify({ stoppedAt, profile }),
+				);
+				renameSync(`${file}.cpuprofile.tmp`, `${file}.cpuprofile`);
+			});
+		}
 		writeFileSync(
 			`${file}.tmp`,
 			JSON.stringify({
@@ -70,6 +122,7 @@ function recordServerMetrics(file: string): void {
 					]),
 				),
 				sidebarReads,
+				statements,
 			}),
 		);
 		renameSync(`${file}.tmp`, file);

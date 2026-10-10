@@ -12,6 +12,11 @@
 // out: no device sees a turn activity block on screen, so the numbers measure
 // the open alone.
 //
+// The heavy session is also opened cold on a fresh device, and the report
+// records what held the server's event loop during each open: stalls, the
+// longest SQLite statements and a CPU profile's top costs; they decide the two
+// gated follow-ups (conduit-test-y7eo.12).
+//
 // Wire sizes are WebSocket payloads as the page sees them, so after any
 // permessage-deflate inflation. Event-loop stalls come from a 10ms sampler in
 // the server process; read counts from the read-model-read diagnostics channel.
@@ -22,7 +27,13 @@
 //     --config test/e2e/playwright-harness.config.ts --workers=1 harness-restart-load
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
@@ -60,7 +71,33 @@ interface ServerMetrics extends Reads {
 		readonly ms: number;
 		readonly rows: number;
 	}[];
+	/** SQLite statements that held the loop 1ms or more, by end time. */
+	readonly statements: readonly {
+		readonly at: number;
+		readonly ms: number;
+		readonly method: string;
+		readonly sql: string;
+	}[];
 	readonly flushedAt: number;
+}
+
+interface CpuProfile {
+	readonly stoppedAt: number;
+	readonly profile: {
+		readonly nodes: readonly {
+			readonly id: number;
+			readonly callFrame: {
+				readonly functionName: string;
+				readonly url: string;
+				readonly lineNumber: number;
+			};
+			readonly children?: readonly number[];
+		}[];
+		readonly startTime: number;
+		readonly endTime: number;
+		readonly samples: readonly number[];
+		readonly timeDeltas: readonly number[];
+	};
 }
 
 const DEVICES = 4;
@@ -150,19 +187,15 @@ const readsSince = (start: Reads | undefined, end: Reads) => {
 	};
 };
 
-// Stalls inside [from, to], and reads since `start` (or since server start).
-// Totals sum every subscription source: shell, detail, family, approvals and
-// todos; `bySource` splits them by source name.
-const serverWindow = (
-	start: ServerMetrics | undefined,
-	end: ServerMetrics,
-	from: number,
-	to: number,
-) => {
-	const stalls = end.stalls.filter(({ at }) => at >= from && at <= to);
-	const sidebar = end.sidebarReads.filter(({ at }) => at >= from && at <= to);
-	const sidebarMs = sidebar.map(({ ms }) => ms).sort((a, b) => a - b);
-	const round = (ms: number) => Math.round(ms * 100) / 100;
+const round = (ms: number) => Math.round(ms * 100) / 100;
+
+// What held the server's event loop inside [from, to]: stalls, and the SQLite
+// statements that ran 1ms or more, longest first (conduit-test-y7eo.12).
+const blocking = (end: ServerMetrics, from: number, to: number) => {
+	const inside = <T extends { readonly at: number }>(items: readonly T[]) =>
+		items.filter(({ at }) => at >= from && at <= to);
+	const stalls = inside(end.stalls);
+	const statements = inside(end.statements);
 	return {
 		stalls: {
 			count: stalls.length,
@@ -172,6 +205,101 @@ const serverWindow = (
 				.slice(0, 5)
 				.map(({ at, ms }) => ({ atMs: at - from, ms })),
 		},
+		database: {
+			count: statements.length,
+			totalMs: round(statements.reduce((total, { ms }) => total + ms, 0)),
+			longest: [...statements]
+				.sort((a, b) => b.ms - a.ms)
+				.slice(0, 5)
+				.map(({ at, ...statement }) => ({ atMs: at - from, ...statement })),
+		},
+	};
+};
+
+// Where the server's CPU went inside [from, to], from the sampled profile:
+// busy and idle time, time under the SQLite client, and the ten frames with
+// the most self time and the ten conduit frames with the most total time.
+const cpuCosts = (
+	{ stoppedAt, profile }: CpuProfile,
+	from: number,
+	to: number,
+) => {
+	const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
+	const parents = new Map(
+		profile.nodes.flatMap(({ id, children = [] }) =>
+			children.map((child) => [child, id] as const),
+		),
+	);
+	const frame = (id: number) => {
+		const { functionName, url, lineNumber } = nodes.get(id)?.callFrame ?? {
+			functionName: "?",
+			url: "",
+			lineNumber: 0,
+		};
+		const file = url.split("/").slice(-2).join("/");
+		return `${functionName || "(anonymous)"}${file ? ` ${file}:${lineNumber + 1}` : ""}`;
+	};
+	const self = new Map<string, number>();
+	const total = new Map<string, number>();
+	const add = (into: Map<string, number>, key: string, ms: number) =>
+		into.set(key, (into.get(key) ?? 0) + ms);
+	let busyMs = 0;
+	let idleMs = 0;
+	let databaseMs = 0;
+	// Sample times are profile microseconds; the profile ends at `stoppedAt`.
+	let sampledAt = profile.startTime;
+	profile.samples.forEach((id, index) => {
+		sampledAt += profile.timeDeltas[index] ?? 0;
+		const at = stoppedAt - (profile.endTime - sampledAt) / 1000;
+		const ms = (profile.timeDeltas[index + 1] ?? 0) / 1000;
+		if (at < from || at > to) return;
+		if (nodes.get(id)?.callFrame.functionName === "(idle)") {
+			idleMs += ms;
+			return;
+		}
+		busyMs += ms;
+		add(self, frame(id), ms);
+		const stack = new Set<string>();
+		let underDatabase = false;
+		for (
+			let node: number | undefined = id;
+			node !== undefined;
+			node = parents.get(node)
+		) {
+			const url = nodes.get(node)?.callFrame.url ?? "";
+			underDatabase ||= url.includes("sql-sqlite-node");
+			if (url.includes("/dist/src/")) stack.add(frame(node));
+		}
+		if (underDatabase) databaseMs += ms;
+		for (const key of stack) add(total, key, ms);
+	});
+	const top = (costs: Map<string, number>) =>
+		[...costs]
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 10)
+			.map(([frame, ms]) => ({ frame, ms: round(ms) }));
+	return {
+		busyMs: round(busyMs),
+		idleMs: round(idleMs),
+		databaseMs: round(databaseMs),
+		topSelf: top(self),
+		topConduitTotal: top(total),
+	};
+};
+
+// Stalls inside [from, to], and reads since `start` (or since server start).
+// Totals sum every subscription source: shell, detail, family, approvals and
+// todos; `bySource` splits them by source name.
+const serverWindow = (
+	start: ServerMetrics | undefined,
+	end: ServerMetrics,
+	from: number,
+	to: number,
+) => {
+	const sidebar = end.sidebarReads.filter(({ at }) => at >= from && at <= to);
+	const sidebarMs = sidebar.map(({ ms }) => ms).sort((a, b) => a - b);
+	return {
+		...blocking(end, from, to),
 		...readsSince(start, end),
 		bySource: Object.fromEntries(
 			Object.entries(end.sources).map(([name, source]) => [
@@ -371,6 +499,44 @@ test("opens the heavy session after a restart under load", async ({
 	const restartTo = Date.now();
 
 	const restarted = await serverMetrics(restartMetrics);
+
+	// The heavy session opened cold, as a reload or a relaunched phone app does
+	// it: a fresh device, timed in the page from navigation to the newest reply.
+	const coldOpener = await (
+		await browser.newContext({
+			...(viewport ? { viewport } : {}),
+			...(isMobile === undefined ? {} : { isMobile }),
+			...(hasTouch === undefined ? {} : { hasTouch }),
+		})
+	).newPage();
+	const coldFrom = Date.now();
+	await coldOpener.goto(
+		`${harness.baseUrl}/s/${HEAVY_SESSION_ID}?p=process-test`,
+	);
+	const coldOpenMs = await (
+		await coldOpener.waitForFunction(
+			(text) =>
+				[...document.querySelectorAll(".msg-assistant")].some((message) =>
+					message.textContent?.includes(text),
+				) && Math.round(performance.now()),
+			HEAVY_FINAL_TEXT,
+			{ polling: "raf", timeout: 30_000 },
+		)
+	).jsonValue();
+	const coldTo = Date.now();
+	await coldOpener.context().close();
+
+	writeFileSync(`${restartMetrics}.stop`, "");
+	const opened = await serverMetrics(restartMetrics);
+	await expect
+		.poll(() => existsSync(`${restartMetrics}.cpuprofile`))
+		.toBe(true);
+	const profile = JSON.parse(
+		readFileSync(`${restartMetrics}.cpuprofile`, "utf8"),
+	) as CpuProfile;
+	await testInfo.attach("restart-server-cpuprofile", {
+		path: `${restartMetrics}.cpuprofile`,
+	});
 
 	// Encoded sizes tool previews keep small (conduit-test-y7eo.6): the heavy
 	// session's first page above, then one live update of a Bash call with a
@@ -588,6 +754,24 @@ test("opens the heavy session after a restart under load", async ({
 					({ device }) => device === DEVICES - 1,
 				),
 			),
+			server: {
+				...blocking(opened, clickAt, visibleAt),
+				cpu: cpuCosts(profile, clickAt, visibleAt),
+			},
+			// The settle after it: the load a cold open below arrives into.
+			settle: {
+				ms: restartTo - visibleAt,
+				...blocking(opened, visibleAt, restartTo),
+				cpu: cpuCosts(profile, visibleAt, restartTo),
+			},
+		},
+		coldOpen: {
+			sessionId: HEAVY_SESSION_ID,
+			ms: coldOpenMs,
+			server: {
+				...serverWindow(restarted, opened, coldFrom, coldTo),
+				cpu: cpuCosts(profile, coldFrom, coldTo),
+			},
 		},
 		wire: {
 			warm: {
@@ -625,6 +809,7 @@ test("opens the heavy session after a restart under load", async ({
 	// Sanity only; targets arrive with the tickets that move them.
 	expect(fixture.sessions).toBeGreaterThanOrEqual(10_000);
 	expect(openMs).toBeGreaterThan(0);
+	expect(coldOpenMs).toBeGreaterThan(0);
 	expect(report.open.wire.received.frames).toBeGreaterThan(0);
 	for (const device of report.wire.restart.byDevice)
 		expect(device.frames).toBeGreaterThan(0);
