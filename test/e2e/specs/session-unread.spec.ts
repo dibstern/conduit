@@ -18,13 +18,34 @@
 // golden holds a normalised copy, because stream versions depend on how many
 // text deltas the relay coalesced and so vary from run to run.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Browser, Page, TestInfo, WebSocketRoute } from "@playwright/test";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import {
+	expect,
+	gotoRelay,
+	test as replayTest,
+} from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
+
+// The row screenshots include the project's git label. A folder outside git
+// keeps it empty; the default (this checkout) shows its branch off main.
+const test = replayTest.extend({
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructuring even for a fixture with no dependencies.
+	projectDir: async ({}, use) => {
+		const projectDir = mkdtempSync(join(tmpdir(), "e2e-session-unread-"));
+		try {
+			await use(projectDir);
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	},
+});
 
 type Provider = "opencode" | "claude";
 type Windows = { readonly A: Page; readonly B: Page };
@@ -950,6 +971,7 @@ test.describe("Session unread dot", () => {
 			browser,
 			relayUrl,
 			harness,
+			projectDir,
 		}, testInfo) => {
 			const rootId = "ses_e2e_root";
 			const forkId = "ses_e2e_fork";
@@ -957,7 +979,7 @@ test.describe("Session unread dot", () => {
 			harness.mock.setExactResponse("POST", `/session/${rootId}/fork`, 200, {
 				id: forkId,
 				projectID: "e2e",
-				directory: process.cwd(),
+				directory: projectDir,
 				title: "Fork",
 				version: "1",
 				time: { created: now, updated: now },
