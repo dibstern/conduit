@@ -97,6 +97,74 @@ export function claudeTurnErrorEvent(
 	});
 }
 
+export function claudeTaskStartedMetadata(
+	message: SDKSystemLike & { subtype: "task_started" },
+): Record<string, unknown> {
+	return {
+		providerTaskId: message.task_id,
+		status: "running",
+		description: message.description,
+		...(message.task_type ? { subagentType: message.task_type } : {}),
+		...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
+		...(message.prompt ? { prompt: message.prompt } : {}),
+		...(message.skip_transcript !== undefined
+			? { skipTranscript: message.skip_transcript }
+			: {}),
+	};
+}
+
+export function claudeTaskProgressMetadata(
+	message: SDKSystemLike & { subtype: "task_progress" },
+): Record<string, unknown> {
+	const usage = message.usage as Record<string, unknown>;
+	const subagentType: unknown = Reflect.get(message, "subagent_type");
+	return {
+		providerTaskId: message.task_id,
+		status: "running",
+		description: message.description,
+		...(typeof subagentType === "string" ? { subagentType } : {}),
+		totalTokens: usage["total_tokens"] ?? 0,
+		toolUses: usage["tool_uses"] ?? 0,
+		durationMs: usage["duration_ms"] ?? 0,
+		...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
+		...(message.summary ? { summary: message.summary } : {}),
+	};
+}
+
+export function claudeTaskNotificationMetadata(
+	message: SDKSystemLike & { subtype: "task_notification" },
+): Record<string, unknown> {
+	const usage = message.usage as Record<string, unknown> | undefined;
+	return {
+		providerTaskId: message.task_id,
+		status: message.status,
+		outputFile: message.output_file,
+		summary: message.summary,
+		...(usage
+			? {
+					totalTokens: usage["total_tokens"] ?? 0,
+					toolUses: usage["tool_uses"] ?? 0,
+					durationMs: usage["duration_ms"] ?? 0,
+				}
+			: {}),
+		...(message.skip_transcript !== undefined
+			? { skipTranscript: message.skip_transcript }
+			: {}),
+	};
+}
+
+export function claudeToolProgressMetadata(
+	message: SDKMessage & { type: "tool_progress" },
+): Record<string, unknown> {
+	return {
+		...(message.task_id ? { providerTaskId: message.task_id } : {}),
+		parentToolUseId: message.parent_tool_use_id,
+		activeToolUseId: message.tool_use_id,
+		activeToolName: message.tool_name,
+		elapsedTimeSeconds: message.elapsed_time_seconds,
+	};
+}
+
 type CanonicalItemType =
 	| "assistant_message"
 	| "command_execution"
@@ -809,19 +877,11 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
-		const childSessionId: unknown = Reflect.get(message, "child_session_id");
-		return this.pushTaskMetadata(ctx, message.tool_use_id, {
-			providerTaskId: message.task_id,
-			status: "running",
-			description: message.description,
-			...(message.task_type ? { subagentType: message.task_type } : {}),
-			...(typeof childSessionId === "string" ? { childSessionId } : {}),
-			...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
-			...(message.prompt ? { prompt: message.prompt } : {}),
-			...(message.skip_transcript !== undefined
-				? { skipTranscript: message.skip_transcript }
-				: {}),
-		});
+		return this.pushTaskMetadata(
+			ctx,
+			message.tool_use_id,
+			claudeTaskStartedMetadata(message),
+		);
 	}
 
 	private translateTaskProgress(
@@ -829,23 +889,11 @@ export class ClaudeEventTranslator {
 		message: SDKSystemLike & { subtype: "task_progress" },
 	): Effect.Effect<void, EventSinkError> {
 		if (!message.tool_use_id) return Effect.void;
-		const usage = message.usage as Record<string, unknown>;
-		const subagentType: unknown = Reflect.get(message, "subagent_type");
-		const childSessionId: unknown = Reflect.get(message, "child_session_id");
-		return this.pushTaskMetadata(ctx, message.tool_use_id, {
-			providerTaskId: message.task_id,
-			status: "running",
-			description: message.description,
-			...(typeof subagentType === "string" ? { subagentType } : {}),
-			...(typeof childSessionId === "string" ? { childSessionId } : {}),
-			totalTokens: usage["total_tokens"] ?? 0,
-			toolUses: usage["tool_uses"] ?? 0,
-			durationMs: usage["duration_ms"] ?? 0,
-			...(message.last_tool_name
-				? { lastToolName: message.last_tool_name }
-				: {}),
-			...(message.summary ? { summary: message.summary } : {}),
-		});
+		return this.pushTaskMetadata(
+			ctx,
+			message.tool_use_id,
+			claudeTaskProgressMetadata(message),
+		);
 	}
 
 	private translateTaskNotification(
@@ -854,25 +902,7 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			if (!message.tool_use_id) return;
-			const usage = message.usage as Record<string, unknown> | undefined;
-			const childSessionId: unknown = Reflect.get(message, "child_session_id");
-			const metadata = {
-				providerTaskId: message.task_id,
-				status: message.status,
-				outputFile: message.output_file,
-				summary: message.summary,
-				...(typeof childSessionId === "string" ? { childSessionId } : {}),
-				...(usage
-					? {
-							totalTokens: usage["total_tokens"] ?? 0,
-							toolUses: usage["tool_uses"] ?? 0,
-							durationMs: usage["duration_ms"] ?? 0,
-						}
-					: {}),
-				...(message.skip_transcript !== undefined
-					? { skipTranscript: message.skip_transcript }
-					: {}),
-			};
+			const metadata = claudeTaskNotificationMetadata(message);
 			yield* this.pushTaskMetadata(ctx, message.tool_use_id, metadata);
 			if (message.status === "completed") {
 				yield* this.completeTaskTool(
@@ -890,13 +920,11 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		const parentToolUseId = message.parent_tool_use_id;
 		if (!parentToolUseId) return Effect.void;
-		return this.pushTaskMetadata(ctx, parentToolUseId, {
-			...(message.task_id ? { providerTaskId: message.task_id } : {}),
+		return this.pushTaskMetadata(
+			ctx,
 			parentToolUseId,
-			activeToolUseId: message.tool_use_id,
-			activeToolName: message.tool_name,
-			elapsedTimeSeconds: message.elapsed_time_seconds,
-		});
+			claudeToolProgressMetadata(message),
+		);
 	}
 
 	private pushTaskMetadata(
@@ -921,17 +949,12 @@ export class ClaudeEventTranslator {
 				...(task?.subagentType != null
 					? { subagentType: task.subagentType }
 					: {}),
-				...(task?.childSessionId != null
-					? { childSessionId: task.childSessionId }
-					: {}),
 				...metadata,
 			};
 			if (typeof providerTaskId === "string" && subagentTasks) {
 				subagentTasks.set(providerTaskId, {
+					...task,
 					toolUseId: parentToolUseId,
-					...(typeof mergedMetadata["childSessionId"] === "string"
-						? { childSessionId: mergedMetadata["childSessionId"] }
-						: {}),
 					...(parentMessageId ? { parentMessageId } : {}),
 					...(typeof mergedMetadata["description"] === "string"
 						? { description: mergedMetadata["description"] }
@@ -1081,7 +1104,6 @@ export class ClaudeEventTranslator {
 				providerTaskId,
 				...(task.description ? { description: task.description } : {}),
 				...(task.subagentType ? { subagentType: task.subagentType } : {}),
-				...(task.childSessionId ? { childSessionId: task.childSessionId } : {}),
 			};
 		}
 		return undefined;

@@ -9,6 +9,7 @@ import type {
 	ClaudeSessionCommand,
 	ClaudeSessionOutput,
 } from "../../../../src/lib/provider/claude/claude-session-runner.js";
+import { claudeSubagentSessionId } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	PermissionResult,
 	SDKMessage,
@@ -110,7 +111,29 @@ describe("in-process Claude session runner", () => {
 		const outputs: ClaudeSessionOutput[] = [];
 		const onBackgroundTask = vi.fn();
 		const ensureClaudeSubagentSession = vi.fn(() => Effect.void);
+		const childSessionId = claudeSubagentSessionId({
+			parentConduitSessionId: "session-1",
+			parentClaudeSessionId: "sdk-parent",
+			sdkSubagentId: "agent-1",
+		});
 		const query = createMockQuery([
+			{
+				type: "stream_event",
+				session_id: "sdk-parent",
+				uuid: "00000000-0000-0000-0000-000000000499",
+				parent_tool_use_id: null,
+				event: {
+					type: "content_block_start",
+					index: 0,
+					content_block: {
+						type: "tool_use",
+						id: "tool-1",
+						name: "Agent",
+						input: {},
+						caller: { type: "direct" },
+					},
+				},
+			},
 			{
 				type: "system",
 				subtype: "task_started",
@@ -177,7 +200,7 @@ describe("in-process Claude session runner", () => {
 									children: [
 										{
 											sdkSubagentId: "agent-1",
-											childSessionId: "child-1",
+											childSessionId,
 											parentToolUseId: "tool-1",
 										},
 									],
@@ -198,7 +221,7 @@ describe("in-process Claude session runner", () => {
 										type: "tool.running",
 										data: expect.objectContaining({
 											metadata: expect.objectContaining({
-												childSessionId: "child-1",
+												childSessionId,
 											}),
 										}),
 									}),

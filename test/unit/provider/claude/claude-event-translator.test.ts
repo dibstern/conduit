@@ -1,6 +1,5 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
-import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema, TestClock, TestContext } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,8 +13,6 @@ import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claud
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
-	SDKPartialAssistantMessage,
-	SDKTaskProgressMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
@@ -412,73 +409,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(statusEvent)["status"]).toBe("idle");
 	});
 
-	// 3. system (subtype task_progress)
-
-	it("does not translate system/task_progress to main turn completion", async () => {
-		await runTranslate(translator, ctx, {
-			type: "system",
-			subtype: "task_progress",
-			task_id: "task-1",
-			tool_use_id: "tool-task-1",
-			description: "Working...",
-			usage: {
-				total_tokens: 500,
-				tool_uses: 3,
-				duration_ms: 2000,
-				input_tokens: 300,
-				output_tokens: 200,
-				cache_read_input_tokens: 50,
-			},
-			uuid: "00000000-0000-0000-0000-000000000003",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
-
-		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
-		expect(turnCompleted).toBeUndefined();
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-1");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-1",
-			status: "running",
-			description: "Working...",
-			totalTokens: 500,
-			toolUses: 3,
-			durationMs: 2000,
-		});
-	});
-
-	it("maps system/task_started to child task metadata", async () => {
-		const taskStarted: SDKTaskStartedMessage = {
-			type: "system",
-			subtype: "task_started",
-			task_id: "task-2",
-			tool_use_id: "tool-task-2",
-			description: "Explore code",
-			task_type: "explore",
-			prompt: "Find the route",
-			uuid: "00000000-0000-0000-0000-000000000026",
-			session_id: "sdk-sess",
-		};
-
-		await runTranslate(translator, ctx, taskStarted);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-2");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-2",
-			status: "running",
-			description: "Explore code",
-			subagentType: "explore",
-			prompt: "Find the route",
-		});
-		expect(data["metadata"]).not.toHaveProperty("subagent_type");
-	});
-
 	it("starts each live Agent tool before task_started metadata updates it", async () => {
 		await runTranslate(
 			translator,
@@ -570,35 +500,6 @@ describe("ClaudeEventTranslator", () => {
 			description: "Audit frontend rendering",
 			subagentType: "explore",
 		});
-	});
-
-	it("maps system/task_progress to canonical task metadata names", async () => {
-		const taskProgress = {
-			type: "system",
-			subtype: "task_progress",
-			task_id: "task-1",
-			tool_use_id: "tool-task-1",
-			description: "Exploring...",
-			subagent_type: "explore",
-			usage: {
-				total_tokens: 500,
-				tool_uses: 3,
-				duration_ms: 2000,
-			},
-			uuid: "00000000-0000-0000-0000-000000000027",
-			session_id: "sdk-sess",
-		} satisfies SDKTaskProgressMessage & { subagent_type: string };
-
-		await runTranslate(translator, ctx, taskProgress);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const metadata = dataOf(running)["metadata"] as Record<string, unknown>;
-		expect(metadata).toMatchObject({
-			providerTaskId: "task-1",
-			subagentType: "explore",
-		});
-		expect(metadata).not.toHaveProperty("subagent_type");
 	});
 
 	it("completes the live Agent tool when Claude reports task completion", async () => {
@@ -693,163 +594,6 @@ describe("ClaudeEventTranslator", () => {
 		});
 		expect(completed).toHaveLength(1);
 		expect(dataOf(completed[0])["partId"]).toBe("toolu-local-bash");
-	});
-
-	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {
-		const harness = makeEffectProjectionHarness();
-		try {
-			await harness.query(
-				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-				["sess-contract", "claude", "Test", "idle", Date.now(), Date.now()],
-			);
-			const relaySink = createRelayEventSink({
-				sessionId: "sess-contract",
-				persist: {
-					persistEvent: (event) =>
-						Effect.promise(() =>
-							harness
-								.ingest(providerRuntimeEventFromCanonical(event))
-								.then(() => undefined),
-						),
-				},
-			});
-			const relayTranslator = new ClaudeEventTranslator({
-				getSink: () => relaySink,
-			});
-			const relayCtx = makeCtx({
-				sessionId: "sess-contract",
-				eventSink: relaySink,
-			});
-
-			const messageStart: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "message_start",
-					message: {
-						id: "msg-contract",
-						type: "message",
-						role: "assistant",
-						content: [],
-						diagnostics: null,
-						container: null,
-						context_management: null,
-						model: "claude-sonnet-4-5",
-						stop_details: null,
-						stop_reason: null,
-						stop_sequence: null,
-						usage: {
-							cache_creation: null,
-							cache_creation_input_tokens: null,
-							cache_read_input_tokens: null,
-							fallback_credit: null,
-							inference_geo: null,
-							input_tokens: 0,
-							iterations: null,
-							output_tokens: 0,
-							output_tokens_details: null,
-							server_tool_use: null,
-							service_tier: null,
-							speed: null,
-						},
-					},
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000201",
-				session_id: "sdk-sess-contract",
-			};
-			const taskToolUse: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "content_block_start",
-					index: 0,
-					content_block: {
-						type: "tool_use",
-						id: "tool-task-1",
-						name: "Task",
-						input: {
-							description: "Audit Claude provider",
-							prompt: "Find SDK mapping gaps",
-							subagent_type: "explore",
-						},
-					},
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000202",
-				session_id: "sdk-sess-contract",
-			};
-			const taskToolStop: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "content_block_stop",
-					index: 0,
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000203",
-				session_id: "sdk-sess-contract",
-			};
-			const taskStarted = {
-				type: "system",
-				subtype: "task_started",
-				task_id: "task-1",
-				tool_use_id: "tool-task-1",
-				description: "Audit Claude provider",
-				task_type: "explore",
-				prompt: "Find SDK mapping gaps",
-				child_session_id: "claude-subagent-abc",
-				uuid: "00000000-0000-0000-0000-000000000204",
-				session_id: "sdk-sess-contract",
-			} satisfies SDKTaskStartedMessage & { child_session_id: string };
-			const taskProgress = {
-				type: "system",
-				subtype: "task_progress",
-				task_id: "task-1",
-				tool_use_id: "tool-task-1",
-				description: "Audit Claude provider",
-				subagent_type: "explore",
-				child_session_id: "claude-subagent-abc",
-				usage: {
-					total_tokens: 12,
-					tool_uses: 1,
-					duration_ms: 300,
-				},
-				uuid: "00000000-0000-0000-0000-000000000205",
-				session_id: "sdk-sess-contract",
-			} satisfies SDKTaskProgressMessage & {
-				child_session_id: string;
-				subagent_type: string;
-			};
-
-			await runTranslate(relayTranslator, relayCtx, messageStart);
-			await runTranslate(relayTranslator, relayCtx, taskToolUse);
-			await runTranslate(relayTranslator, relayCtx, taskToolStop);
-			await runTranslate(relayTranslator, relayCtx, taskStarted);
-			await runTranslate(relayTranslator, relayCtx, taskProgress);
-
-			const rows = await harness.sessionMessagesWithParts("sess-contract");
-			const history = messageRowsToHistory(rows, { pageSize: 50 });
-			const messages = historyToChatMessages(history.messages);
-			const taskMessage = messages.find(
-				(message) => message.type === "tool" && message.name === "Task",
-			);
-
-			expect(taskMessage).toBeDefined();
-			if (taskMessage?.type === "tool") {
-				expect(taskMessage.input).toMatchObject({
-					tool: "Task",
-					description: "Audit Claude provider",
-					prompt: "Find SDK mapping gaps",
-					subagentType: "explore",
-				});
-				expect(taskMessage.input).not.toHaveProperty("taskId");
-				expect(taskMessage.input).not.toHaveProperty("task_id");
-				expect(taskMessage.metadata?.["providerTaskId"]).toBe("task-1");
-				expect(taskMessage.metadata?.["childSessionId"]).toBe(
-					"claude-subagent-abc",
-				);
-			}
-		} finally {
-			await harness.dispose();
-		}
 	});
 
 	it("maps assistant snapshot thinking blocks through relay, history, and frontend messages", async () => {
@@ -2173,32 +1917,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	it("maps tool_progress messages to child task metadata", async () => {
-		await runTranslate(translator, ctx, {
-			type: "tool_progress",
-			tool_use_id: "tool-1",
-			tool_name: "Bash",
-			parent_tool_use_id: "tool-task-1",
-			elapsed_time_seconds: 5,
-			task_id: "task-1",
-			uuid: "00000000-0000-0000-0000-000000000023",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-1");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-1",
-			parentToolUseId: "tool-task-1",
-			activeToolUseId: "tool-1",
-			activeToolName: "Bash",
-			elapsedTimeSeconds: 5,
-		});
-	});
-
-	it("silently ignores system/task_notification messages", async () => {
+	it("ignores system/task_notification messages without a tool_use_id", async () => {
 		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_notification",
@@ -2210,7 +1929,6 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
-		// system/task_notification is not init, status, or task_progress, so it's ignored
 		expect(sink.events).toHaveLength(0);
 	});
 

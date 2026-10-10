@@ -19,6 +19,7 @@ import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
+import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 
 export const THREAD_READ_MCP_SERVER = "conduit";
@@ -74,7 +75,6 @@ import type {
 	Query as SDKQuery,
 	SDKMessage as SDKStreamMessage,
 	SDKUserMessage,
-	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 // active_goal is declared by the SDK separately from its iterator's union.
@@ -171,8 +171,8 @@ export interface ClaudeSubagentLivePoller {
 	readonly sdkSubagentId: string;
 	readonly childSessionId: string;
 	readonly parentClaudeSessionId: string;
-	readonly parentToolUseId: string;
 	readonly cursor: ClaudeSubagentTranscriptCursor;
+	readonly deliveryPermit: Effect.Semaphore;
 	sessionReady: boolean;
 	active: boolean;
 }
@@ -201,7 +201,16 @@ export interface ClaudeSessionContext {
 	readonly inFlightTools: Map<number, ToolInFlight>;
 	readonly subagentTasks?: Map<string, ClaudeSubagentTaskContext>;
 	readonly subagentPollers?: Map<string, ClaudeSubagentLivePoller>;
-	readonly pendingSubagentMessages?: Map<string, SessionMessage[]>;
+	messageOwnership?: ClaudeMessageOwnership;
+	/** Shared by stream routing and transcript reads, retained across parent results. */
+	subagentTranscripts?: Map<
+		string,
+		{
+			readonly cursor: ClaudeSubagentTranscriptCursor;
+			readonly deliveryPermit: Effect.Semaphore;
+		}
+	>;
+	failedSubagentSessions?: Set<string>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;

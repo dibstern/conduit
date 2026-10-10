@@ -6,12 +6,18 @@ import {
 	ClaudeBoundaryError,
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
+import {
+	claudeTaskNotificationMetadata,
+	claudeTaskProgressMetadata,
+	claudeTaskStartedMetadata,
+	claudeToolProgressMetadata,
+} from "./claude-event-translator.js";
+import type { ClaudeOwnershipDecision } from "./claude-message-ownership.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
 import {
 	type ClaudeSubagentSdk,
 	type ClaudeSubagentTranscriptCursor,
-	claudeSubagentSessionId,
 	commitClaudeSubagentTranscriptCursor,
 	defaultClaudeSubagentSdk,
 	stageSessionMessagesToEvents,
@@ -19,9 +25,7 @@ import {
 import type {
 	ClaudeSessionContext,
 	ClaudeSubagentLivePoller,
-	SDKMessage,
 	SDKResultMessage,
-	SDKSystemLike,
 	SessionMessage,
 } from "./types.js";
 
@@ -42,32 +46,20 @@ type EnsureSubagentSession = (
 	>[0],
 ) => Effect.Effect<void, ClaudeAdapterError>;
 
-function isClaudeTaskStartedMessage(
-	message: SDKMessage,
-): message is SDKSystemLike & {
-	readonly subtype: "task_started";
-	readonly task_id: string;
-	readonly tool_use_id: string;
-	readonly session_id?: string;
-} {
-	if (message.type !== "system" || message.subtype !== "task_started") {
-		return false;
-	}
-	const task = message as Record<string, unknown>;
-	return (
-		typeof task["task_id"] === "string" &&
-		typeof task["tool_use_id"] === "string"
-	);
-}
-
-function createClaudeSubagentTranscriptCursor(): ClaudeSubagentTranscriptCursor {
-	return {
+function subagentTranscript(ctx: ClaudeSessionContext, childSessionId: string) {
+	const transcripts = (ctx.subagentTranscripts ??= new Map());
+	const existing = transcripts.get(childSessionId);
+	if (existing) return existing;
+	const cursor: ClaudeSubagentTranscriptCursor = {
 		messageRoles: new Map(),
 		textOffsets: new Map(),
 		thinkingOffsets: new Map(),
 		toolStarts: new Set(),
 		toolCompletions: new Set(),
 	};
+	const transcript = { cursor, deliveryPermit: Effect.unsafeMakeSemaphore(1) };
+	transcripts.set(childSessionId, transcript);
+	return transcript;
 }
 
 /** Prefer the Task's human description ("Audit auth flow") — the raw
@@ -101,9 +93,6 @@ export function detachSubagentFinalizationContext(
 	(
 		ctx as { subagentPollers: Map<string, ClaudeSubagentLivePoller> }
 	).subagentPollers = new Map();
-	(
-		ctx as { pendingSubagentMessages: Map<string, SessionMessage[]> }
-	).pendingSubagentMessages = new Map();
 	return finalizationCtx;
 }
 
@@ -117,32 +106,13 @@ function materializeSubagentsAfterResultEffect(
 		const parentClaudeSessionId = ctx.resumeSessionId ?? result.session_id;
 		if (!parentClaudeSessionId) return;
 
-		const materialized = yield* materializeSubagents({
+		yield* materializeSubagents({
 			parentConduitSessionId: ctx.sessionId,
 			parentClaudeSessionId,
 			workspaceRoot: ctx.workspaceRoot,
 			...(ctx.configDir !== undefined && { configDir: ctx.configDir }),
 			knownTasks: ctx.subagentTasks ?? new Map(),
 		});
-		if (ctx.stopped) return;
-
-		for (const child of materialized) {
-			if (!child.parentToolUseId || !ctx.eventSink) continue;
-			const task = ctx.subagentTasks?.get(child.sdkSubagentId);
-			yield* ctx.eventSink.push(
-				claudeRuntimeEvent("tool.running", ctx.sessionId, {
-					messageId: result.uuid ?? ctx.lastAssistantUuid ?? "",
-					partId: child.parentToolUseId,
-					metadata: {
-						...(task?.description ? { description: task.description } : {}),
-						...(task?.subagentType ? { subagentType: task.subagentType } : {}),
-						childSessionId: child.childSessionId,
-						sdkSubagentId: child.sdkSubagentId,
-						providerTaskId: child.sdkSubagentId,
-					},
-				}),
-			);
-		}
 	});
 }
 
@@ -169,215 +139,205 @@ export function finalizeSubagentsAfterResultEffect(
 	);
 }
 
-export function handleSubagentTaskStartedEffect(
+export function applyClaudeOwnershipDecisionEffect(
 	ensureSession: EnsureSubagentSession | undefined,
 	ctx: ClaudeSessionContext,
-	message: SDKMessage,
-): Effect.Effect<void, ClaudeAdapterError> {
+	decision: ClaudeOwnershipDecision,
+	parentClaudeSessionId?: string,
+): Effect.Effect<Effect.Effect<void> | undefined, ClaudeAdapterError> {
 	return Effect.gen(function* () {
-		if (!isClaudeTaskStartedMessage(message)) return;
+		if (decision.kind === "hold" || decision.kind === "drop") {
+			logClaudeOwnershipDecision(ctx, decision);
+			return;
+		}
+		const failed = (ctx.failedSubagentSessions ??= new Set());
+		if (decision.kind === "route") {
+			if (decision.owner.kind === "parent") return;
+			const childSessionId = decision.owner.childSessionId;
+			if (failed.has(childSessionId)) {
+				log.warn(
+					`Dropping Claude message ${decision.message.uuid} for failed child ${childSessionId}`,
+				);
+				return;
+			}
+			const sink = ctx.eventSink;
+			if (!sink) return;
+			const message = decision.message;
+			if (message.type === "assistant" || message.type === "user") {
+				const transcriptMessage: SessionMessage = {
+					type: message.type,
+					uuid: message.uuid ?? "",
+					session_id: message.session_id ?? parentClaudeSessionId ?? "",
+					message: message.message,
+					parent_tool_use_id: message.parent_tool_use_id ?? null,
+					parent_agent_id: null,
+				};
+				const { cursor, deliveryPermit } = subagentTranscript(
+					ctx,
+					childSessionId,
+				);
+				yield* deliveryPermit.withPermits(1)(
+					Effect.gen(function* () {
+						const stage = stageSessionMessagesToEvents({
+							childSessionId,
+							messages: [transcriptMessage],
+							cursor,
+						});
+						// Reserve before pushing, but finish this delivery before a
+						// poll can observe the reservation and send a completion.
+						commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+						for (const event of stage.events) yield* sink.push(event);
+					}),
+				);
+				return;
+			}
+			if (!decision.tool) return;
+			let metadata: Record<string, unknown>;
+			if (message.type === "tool_progress") {
+				metadata = claudeToolProgressMetadata(message);
+			} else if (message.type === "system") {
+				switch (message.subtype) {
+					case "task_started":
+						metadata = claudeTaskStartedMetadata(message);
+						break;
+					case "task_progress":
+						metadata = claudeTaskProgressMetadata(message);
+						break;
+					case "task_notification":
+						metadata = claudeTaskNotificationMetadata(message);
+						break;
+					default:
+						return;
+				}
+			} else return;
+			yield* sink.push(
+				claudeRuntimeEvent("tool.running", childSessionId, {
+					messageId: decision.tool.issuingMessageId ?? "",
+					partId: decision.tool.toolUseId,
+					metadata,
+				}),
+			);
+			return;
+		}
 
-		const parentClaudeSessionId = ctx.resumeSessionId ?? message.session_id;
-		if (!parentClaudeSessionId) return;
-
-		const pollers = getSubagentPollers(ctx);
-		const existingPoller = pollers.get(message.task_id);
-		const childSessionId =
-			existingPoller?.childSessionId ??
-			claudeSubagentSessionId({
-				parentConduitSessionId: ctx.sessionId,
-				parentClaudeSessionId,
-				sdkSubagentId: message.task_id,
-			});
-		const task = ctx.subagentTasks?.get(message.task_id);
-		let sessionReady = false;
+		const { childSessionId, taskId, toolUseId, issuer } = decision;
+		if (issuer.kind === "child" && failed.has(issuer.childSessionId)) {
+			failed.add(childSessionId);
+			log.warn(
+				`Dropping Claude child ${childSessionId}: issuer ${issuer.childSessionId} failed`,
+			);
+			return;
+		}
+		const task = {
+			toolUseId,
+			...(decision.issuingMessageId
+				? { parentMessageId: decision.issuingMessageId }
+				: {}),
+			...(decision.description ? { description: decision.description } : {}),
+			...(decision.taskType ? { subagentType: decision.taskType } : {}),
+		};
 		const ensureClaudeSubagentSession =
 			yield* resolveEnsureClaudeSubagentSessionEffect(ensureSession);
-		sessionReady = ensureClaudeSubagentSession == null;
 		if (ensureClaudeSubagentSession) {
-			// UX alternative: delay creating the child session until the first forwarded subagent message or final catch-up returns content.
 			const ensured = yield* ensureClaudeSubagentSession({
 				childSessionId,
 				parentSessionId: ctx.sessionId,
-				providerSessionId: message.task_id,
+				providerSessionId: taskId,
 				title: claudeSubagentTitle(task),
 			}).pipe(
 				Effect.as(true),
 				Effect.catchAll((err) =>
 					Effect.sync(() => {
 						log.warn(
-							`Failed to ensure Claude subagent session for ${ctx.sessionId}/${message.task_id}: ${err instanceof Error ? err.message : err}`,
+							`Failed to ensure Claude subagent session for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
 						);
 						return false;
 					}),
 				),
 			);
-			sessionReady = ensured;
-		}
-		if (!sessionReady) return;
-
-		if (ctx.subagentTasks) {
-			ctx.subagentTasks.set(message.task_id, {
-				toolUseId: message.tool_use_id,
-				childSessionId,
-				...(task?.parentMessageId
-					? { parentMessageId: task.parentMessageId }
-					: {}),
-				...(task?.description ? { description: task.description } : {}),
-				...(task?.subagentType ? { subagentType: task.subagentType } : {}),
-			});
-		}
-
-		if (ctx.eventSink) {
-			yield* ctx.eventSink
-				.push(
-					claudeRuntimeEvent("tool.running", ctx.sessionId, {
-						messageId: task?.parentMessageId ?? ctx.lastAssistantUuid ?? "",
-						partId: message.tool_use_id,
-						metadata: {
-							...(task?.description ? { description: task.description } : {}),
-							...(task?.subagentType
-								? { subagentType: task.subagentType }
-								: {}),
-							childSessionId,
-							sdkSubagentId: message.task_id,
-							providerTaskId: message.task_id,
-						},
-					}),
-				)
-				.pipe(
-					Effect.catchAll((err) =>
-						Effect.sync(() => {
-							log.warn(
-								`Failed to push Claude subagent metadata for ${ctx.sessionId}/${message.task_id}: ${err instanceof Error ? err.message : err}`,
-							);
-						}),
-					),
-				);
-		}
-
-		if (existingPoller) {
-			if (sessionReady) {
-				existingPoller.sessionReady = true;
-				yield* flushPendingSubagentMessagesEffect(ctx, existingPoller);
+			if (!ensured) {
+				failed.add(childSessionId);
+				return;
 			}
-			return;
 		}
+		ctx.subagentTasks?.set(taskId, { ...task, childSessionId });
 
-		const poller: ClaudeSubagentLivePoller = {
-			sdkSubagentId: message.task_id,
-			childSessionId,
-			parentClaudeSessionId,
-			parentToolUseId: message.tool_use_id,
-			cursor: createClaudeSubagentTranscriptCursor(),
-			sessionReady,
-			active: true,
-		};
-		pollers.set(message.task_id, poller);
-		if (sessionReady) {
-			yield* flushPendingSubagentMessagesEffect(ctx, poller);
+		const childLink = ctx.eventSink
+			? ctx.eventSink
+					.push(
+						claudeRuntimeEvent(
+							"tool.running",
+							issuer.kind === "parent" ? ctx.sessionId : issuer.childSessionId,
+							{
+								messageId:
+									decision.issuingMessageId ??
+									(issuer.kind === "parent"
+										? ctx.lastAssistantUuid
+										: undefined) ??
+									"",
+								partId: toolUseId,
+								metadata: {
+									...(task?.description
+										? { description: task.description }
+										: {}),
+									...(task?.subagentType
+										? { subagentType: task.subagentType }
+										: {}),
+									childSessionId,
+									sdkSubagentId: taskId,
+									providerTaskId: taskId,
+								},
+							},
+						),
+					)
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.sync(() => {
+								log.warn(
+									`Failed to push Claude subagent metadata for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
+								);
+							}),
+						),
+					)
+			: undefined;
+		if (issuer.kind === "child" && childLink) yield* childLink;
+
+		if (parentClaudeSessionId) {
+			const poller: ClaudeSubagentLivePoller = {
+				sdkSubagentId: taskId,
+				childSessionId,
+				parentClaudeSessionId,
+				...subagentTranscript(ctx, childSessionId),
+				sessionReady: true,
+				active: true,
+			};
+			getSubagentPollers(ctx).set(taskId, poller);
 		}
+		// A parent task_started may create its tool part during translation.
+		// Publish its link after that route so the projector can merge it.
+		return issuer.kind === "parent" ? childLink : undefined;
 	});
 }
 
-export function pushForwardedSubagentMessageEffect(
+function logClaudeOwnershipDecision(
 	ctx: ClaudeSessionContext,
-	message: SDKMessage,
-): Effect.Effect<boolean, ClaudeAdapterError> {
-	return Effect.gen(function* () {
-		if (message.type !== "assistant" && message.type !== "user") return false;
-		const parentToolUseId =
-			"parent_tool_use_id" in message &&
-			typeof message.parent_tool_use_id === "string"
-				? message.parent_tool_use_id
-				: undefined;
-		if (!parentToolUseId) return false;
-
-		const poller = findSubagentPollerByParentToolUseId(ctx, parentToolUseId);
-		if (!poller?.sessionReady) {
-			queuePendingSubagentMessage(
-				ctx,
-				parentToolUseId,
-				message as unknown as SessionMessage,
-			);
-			return true;
-		}
-
-		yield* pushForwardedSubagentMessagesEffect(ctx, poller, [
-			message as unknown as SessionMessage,
-		]);
-		return true;
-	});
-}
-
-function queuePendingSubagentMessage(
-	ctx: ClaudeSessionContext,
-	parentToolUseId: string,
-	message: SessionMessage,
+	decision: Extract<ClaudeOwnershipDecision, { kind: "hold" | "drop" }>,
 ): void {
-	const pending = getPendingSubagentMessages(ctx);
-	const messages = pending.get(parentToolUseId);
-	if (messages) {
-		messages.push(message);
+	if (decision.kind === "hold") {
+		log.debug(
+			`Holding Claude message ${decision.message.uuid} for ${ctx.sessionId}, awaiting ${decision.awaiting}`,
+		);
 	} else {
-		pending.set(parentToolUseId, [message]);
+		log.warn(
+			`Dropping Claude message ${decision.message.uuid} for ${ctx.sessionId}: ${decision.reason}`,
+		);
 	}
 }
 
-function flushPendingSubagentMessagesEffect(
-	ctx: ClaudeSessionContext,
-	poller: ClaudeSubagentLivePoller,
-): Effect.Effect<void, ClaudeAdapterError> {
-	return Effect.gen(function* () {
-		const pending = getPendingSubagentMessages(ctx);
-		const messages = pending.get(poller.parentToolUseId);
-		if (!messages || messages.length === 0) return;
-		pending.delete(poller.parentToolUseId);
-		yield* pushForwardedSubagentMessagesEffect(ctx, poller, messages);
-	});
-}
-
-function pushForwardedSubagentMessagesEffect(
-	ctx: ClaudeSessionContext,
-	poller: ClaudeSubagentLivePoller,
-	messages: readonly SessionMessage[],
-): Effect.Effect<void, ClaudeAdapterError> {
-	return Effect.gen(function* () {
-		const stage = stageSessionMessagesToEvents({
-			childSessionId: poller.childSessionId,
-			messages,
-			cursor: poller.cursor,
-		});
-		const sink = ctx.eventSink;
-		if (!sink) return;
-		for (const event of stage.events) {
-			yield* sink.push(event);
-		}
-		commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
-	});
-}
-
-function findSubagentPollerByParentToolUseId(
-	ctx: ClaudeSessionContext,
-	parentToolUseId: string,
-): ClaudeSubagentLivePoller | undefined {
-	const pollers = ctx.subagentPollers;
-	if (!pollers) return undefined;
-	for (const poller of pollers.values()) {
-		if (poller.parentToolUseId === parentToolUseId) return poller;
+export function endClaudeMessageOwnership(ctx: ClaudeSessionContext): void {
+	for (const decision of ctx.messageOwnership?.decide({ kind: "end" }) ?? []) {
+		if (decision.kind === "drop") logClaudeOwnershipDecision(ctx, decision);
 	}
-	return undefined;
-}
-
-function getPendingSubagentMessages(
-	ctx: ClaudeSessionContext,
-): Map<string, SessionMessage[]> {
-	if (ctx.pendingSubagentMessages) return ctx.pendingSubagentMessages;
-	const pending = new Map<string, SessionMessage[]>();
-	(
-		ctx as { pendingSubagentMessages: Map<string, SessionMessage[]> }
-	).pendingSubagentMessages = pending;
-	return pending;
 }
 
 function getSubagentPollers(
@@ -460,20 +420,22 @@ function pollClaudeSubagentSnapshotEffect(
 					}),
 			}),
 		);
-		if (!canPollSubagent(ctx, poller, options)) return;
-		const stage = stageSessionMessagesToEvents({
-			childSessionId: poller.childSessionId,
-			messages,
-			cursor: poller.cursor,
-		});
-		const sink = ctx.eventSink;
-		if (!sink || !canPollSubagent(ctx, poller, options)) return;
-		for (const event of stage.events) {
-			if (!canPollSubagent(ctx, poller, options)) return;
-			yield* sink.push(event);
-		}
-		if (!canPollSubagent(ctx, poller, options)) return;
-		commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
+		yield* poller.deliveryPermit.withPermits(1)(
+			Effect.gen(function* () {
+				const sink = ctx.eventSink;
+				if (!sink || !canPollSubagent(ctx, poller, options)) return;
+				const stage = stageSessionMessagesToEvents({
+					childSessionId: poller.childSessionId,
+					messages,
+					cursor: poller.cursor,
+				});
+				commitClaudeSubagentTranscriptCursor(poller.cursor, stage.cursor);
+				for (const event of stage.events) {
+					if (!canPollSubagent(ctx, poller, options)) return;
+					yield* sink.push(event);
+				}
+			}),
+		);
 	});
 }
 

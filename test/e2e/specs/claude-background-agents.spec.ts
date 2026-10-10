@@ -34,36 +34,35 @@ const NESTED_SHELL_IDS = [
 	"toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
 ];
 
-// Agent A's tool calls streamed after the parent's result ("launched.").
-const agentLateToolIds = (): string[] => {
-	const lines = readFileSync(
-		join(process.cwd(), "test/fixtures/claude-sdk-traces", `${TRACE}.jsonl`),
-		"utf8",
-	)
-		.trim()
-		.split("\n")
-		.map(
-			(line) =>
-				JSON.parse(line) as {
-					type: string;
-					subtype?: string;
-					parent_tool_use_id?: string | null;
-					message?: { content?: { type: string; id?: string }[] };
-				},
-		);
-	const resultAt = lines.findIndex((line) => line.type === "result");
-	return lines
-		.slice(resultAt + 1)
-		.filter(
-			(line) =>
-				line.type === "assistant" && line.parent_tool_use_id === AGENT_A_TOOL,
-		)
+type TraceLine = {
+	type: string;
+	parent_tool_use_id?: string | null;
+	message?: { content?: { type: string; id?: string }[] };
+};
+const traceLines = readFileSync(
+	join(process.cwd(), "test/fixtures/claude-sdk-traces", `${TRACE}.jsonl`),
+	"utf8",
+)
+	.trim()
+	.split("\n")
+	.map((line) => JSON.parse(line) as TraceLine);
+const toolIds = (lines: TraceLine[], issued: (line: TraceLine) => boolean) =>
+	lines
+		.filter((line) => line.type === "assistant" && issued(line))
 		.flatMap((line) =>
 			(line.message?.content ?? []).flatMap((block) =>
 				block.type === "tool_use" && block.id ? [block.id] : [],
 			),
 		);
-};
+// The parent issued these tool calls itself; every other tool call in the
+// trace was issued by an agent.
+const PARENT_TOOL_IDS = toolIds(traceLines, (line) => !line.parent_tool_use_id);
+const AGENT_TOOL_IDS = toolIds(traceLines, (line) => !!line.parent_tool_use_id);
+// Agent A's tool calls streamed after the parent's result ("launched.").
+const AGENT_A_LATE_TOOL_IDS = toolIds(
+	traceLines.slice(traceLines.findIndex((line) => line.type === "result") + 1),
+	(line) => line.parent_tool_use_id === AGENT_A_TOOL,
+);
 
 test.describe("Claude background agents", () => {
 	test.use({
@@ -80,12 +79,7 @@ test.describe("Claude background agents", () => {
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
-		test.fail(
-			true,
-			"conduit-test-i7fy.3/.4: agent A's steps stop after the parent's result and its nested shells land in the parent",
-		);
 		const parentId = decodeURIComponent(harness.projectUrl.slice("/s/".length));
-		const lateToolIds = agentLateToolIds();
 		// Which stored sessions mention each id: "parent", a child id, or none.
 		const placement = () => {
 			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
@@ -106,7 +100,9 @@ test.describe("Claude background agents", () => {
 					Number(
 						db
 							.prepare(
-								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND instr(data, ?) > 0",
+								// The id as a whole JSON string value, not inside free text
+								// such as a progress description.
+								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND instr(data, '\"' || ? || '\"') > 0",
 							)
 							.get(sessionId, id)?.["n"],
 					);
@@ -116,10 +112,20 @@ test.describe("Claude background agents", () => {
 						.map((sessionId) =>
 							sessionId === parentId ? "parent" : sessionId,
 						);
+				const parentTools = db
+					.prepare(
+						"SELECT DISTINCT json_extract(data, '$.partId') AS id FROM events WHERE session_id = ? AND type = 'tool.started' ORDER BY id",
+					)
+					.all(parentId)
+					.map((row) => String(row["id"]));
 				return {
 					children: childRows,
+					parentTools,
+					agentToolsInParent: AGENT_TOOL_IDS.filter(
+						(id) => mentions(parentId, id) > 0,
+					),
 					agentLateSteps: Object.fromEntries(
-						lateToolIds.map((id) => [id, where(id)]),
+						AGENT_A_LATE_TOOL_IDS.map((id) => [id, where(id)]),
 					),
 					nestedShell: Object.fromEntries(
 						NESTED_SHELL_IDS.map((id) => [id, where(id)]),
@@ -138,25 +144,33 @@ test.describe("Claude background agents", () => {
 			await testInfo.attach(`${step}.png`, { path, contentType: "image/png" });
 		};
 
-		// Exactly one Child Session holds each of agent A's late steps.
+		// Exactly one Child Session holds each of agent A's late steps, and the
+		// parent holds only its own tool calls.
 		const expectAgentStepsInChild = (
 			step: string,
 			found: ReturnType<typeof placement>,
 		) => {
-			for (const id of lateToolIds)
+			for (const id of AGENT_A_LATE_TOOL_IDS)
 				expect
 					.soft(
-						found.agentLateSteps[id]?.filter((where) => where !== "parent"),
-						`${step}: agent A's step ${id} after the parent's result is not in its Child Session`,
+						found.agentLateSteps[id],
+						`${step}: agent A's step ${id} after the parent's result is not in exactly one Child Session`,
 					)
-					.toHaveLength(1);
+					.toEqual([expect.not.stringMatching(/^parent$/)]);
+			// The parent shows only the tool calls it issued itself.
+			expect
+				.soft(found.parentTools, `${step}: parent tool parts`)
+				.toEqual([...PARENT_TOOL_IDS].sort());
+			expect
+				.soft(found.agentToolsInParent, `${step}: agent tool ids in the parent`)
+				.toEqual([]);
 		};
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
-		expect(lateToolIds.length).toBeGreaterThan(0);
+		expect(AGENT_A_LATE_TOOL_IDS.length).toBeGreaterThan(0);
 		try {
 			await app.goto(relayUrl);
 			await app.sendMessage("Launch the background work");

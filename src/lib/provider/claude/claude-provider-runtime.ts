@@ -79,6 +79,14 @@ import {
 	ClaudeGoalTracker,
 	type ReadClaudeGoalStatus,
 } from "./claude-goal-tracker.js";
+import { createClaudeMessageOwnership } from "./claude-message-ownership.js";
+import {
+	applyClaudeOwnershipDecisionEffect,
+	detachSubagentFinalizationContext,
+	endClaudeMessageOwnership,
+	finalizeSubagentsAfterResultEffect,
+	stopSubagentPollers,
+} from "./claude-message-ownership-runtime.js";
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
@@ -136,13 +144,7 @@ import type {
 	MaterializeClaudeSubagentsInput,
 	MaterializedClaudeSubagent,
 } from "./claude-subagent-materializer.js";
-import {
-	detachSubagentFinalizationContext,
-	finalizeSubagentsAfterResultEffect,
-	handleSubagentTaskStartedEffect,
-	pushForwardedSubagentMessageEffect,
-	stopSubagentPollers,
-} from "./claude-subagent-runtime.js";
+import { claudeSubagentSessionId } from "./claude-subagent-materializer.js";
 import {
 	type ClaudeTranslationService,
 	makeClaudeTranslationService,
@@ -1717,7 +1719,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					inFlightTools: new Map(),
 					subagentTasks: new Map(),
 					subagentPollers: new Map(),
-					pendingSubagentMessages: new Map(),
+					subagentTranscripts: new Map(),
+					failedSubagentSessions: new Set<string>(),
 					eventSink: input.eventSink,
 					currentTurnId: input.turnId,
 					currentUserMessageId: input.userMessageId,
@@ -1755,6 +1758,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							join(options.env?.["HOME"] ?? homedir(), ".claude"),
 					),
 				};
+				const ownershipContext = ctx;
+				ctx.messageOwnership = createClaudeMessageOwnership({
+					childSessionIdFor: (taskId, message) =>
+						claudeSubagentSessionId({
+							parentConduitSessionId: ownershipContext.sessionId,
+							parentClaudeSessionId:
+								ownershipContext.resumeSessionId ?? message.session_id ?? "",
+							sdkSubagentId: taskId,
+						}),
+				});
 				warmed?.bindContext(ctx);
 				if (warmed) yield* queue.enqueue(userMessage);
 
@@ -2234,48 +2247,58 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					yield* resolveTurnEffect(this.stateRef, ctx, decodedMessage);
 					break;
 				}
-				if (yield* pushForwardedSubagentMessageEffect(ctx, decodedMessage)) {
-					continue;
-				}
-				if (
-					(decodedMessage.type === "system" &&
-						decodedMessage.subtype === "task_notification") ||
-					((decodedMessage.type === "assistant" ||
-						(decodedMessage.type === "stream_event" &&
-							decodedMessage.event.type === "message_start")) &&
-						decodedMessage.parent_tool_use_id == null)
-				) {
-					ctx.turnInFlight = true;
-					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
-				}
-				if (decodedMessage.type === "result") ctx.turnInFlight = false;
-				const translatedMessages = yield* interceptClaudeUsageLimit(
-					ctx,
-					decodedMessage,
-				);
-				for (const message of translatedMessages)
-					yield* translator.translate(ctx, message);
-				yield* handleSubagentTaskStartedEffect(
-					(input) => this.ensureSubagentSessionEffect(ctx, input),
-					ctx,
-					decodedMessage,
-				);
-				if (decodedMessage.type === "result") {
-					const translatedResult = translatedMessages.find(
-						(message) => message.type === "result",
-					);
-					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
-					const finalizationCtx = detachSubagentFinalizationContext(ctx);
-					markResultFinalizationStarted();
-					yield* this.runSubagentFinalizationEffect(
-						finalizationCtx,
-						decodedMessage,
-					);
-					yield* resolveTurnEffect(
-						this.stateRef,
+				let parentChildLink: Effect.Effect<void> | undefined;
+				for (const decision of ctx.messageOwnership?.decide({
+					kind: "sdk",
+					message: decodedMessage,
+				}) ?? []) {
+					if (decision.kind !== "route" || decision.owner.kind !== "parent") {
+						const childLink = yield* applyClaudeOwnershipDecisionEffect(
+							(input) => this.ensureSubagentSessionEffect(ctx, input),
+							ctx,
+							decision,
+							ctx.resumeSessionId ?? decodedMessage.session_id,
+						);
+						if (childLink) parentChildLink = childLink;
+						continue;
+					}
+					const message = decision.message;
+					if (
+						(message.type === "system" &&
+							message.subtype === "task_notification") ||
+						((message.type === "assistant" ||
+							(message.type === "stream_event" &&
+								message.event.type === "message_start")) &&
+							message.parent_tool_use_id == null)
+					) {
+						ctx.turnInFlight = true;
+						this.deps.onTurnStateChanged?.(ctx.sessionId, true);
+					}
+					if (message.type === "result") ctx.turnInFlight = false;
+					const translatedMessages = yield* interceptClaudeUsageLimit(
 						ctx,
-						translatedResult ?? decodedMessage,
+						message,
 					);
+					for (const translatedMessage of translatedMessages)
+						yield* translator.translate(ctx, translatedMessage);
+					if (parentChildLink) {
+						yield* parentChildLink;
+						parentChildLink = undefined;
+					}
+					if (message.type === "result") {
+						const translatedResult = translatedMessages.find(
+							(message) => message.type === "result",
+						);
+						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+						const finalizationCtx = detachSubagentFinalizationContext(ctx);
+						markResultFinalizationStarted();
+						yield* this.runSubagentFinalizationEffect(finalizationCtx, message);
+						yield* resolveTurnEffect(
+							this.stateRef,
+							ctx,
+							translatedResult ?? message,
+						);
+					}
 				}
 			}
 			yield* this.finishStreamOutputEffect(ctx, translator);
@@ -2403,6 +2426,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		resultFinalizationStarted: () => boolean,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
+			endClaudeMessageOwnership(ctx);
 			if (!resultFinalizationStarted()) {
 				stopSubagentPollers(ctx);
 			}
@@ -2500,6 +2524,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return Effect.gen(this, function* () {
 			if (ctx.stopped) return;
 			ctx.stopped = true;
+			endClaudeMessageOwnership(ctx);
 			const turnInFlight = ctx.turnInFlight === true;
 			const messageId = ctx.activeAssistantMessageId ?? "";
 
