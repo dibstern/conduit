@@ -155,7 +155,7 @@
 		{/if}
 	</Menu>
 
-	{#if worktree || branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-dimmer">{worktree ? "existing worktree" : "current checkout"}</span>{/if}
+	{#if worktree || branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>{/if}
 </div>
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
