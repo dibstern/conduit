@@ -9,6 +9,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,7 +17,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { homedir, userInfo } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
 import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
@@ -28,8 +29,10 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	ParseResult,
 	Stream,
 } from "effect";
+import type { Request } from "effect/Request";
 import WebSocket from "ws";
 import {
 	defaultInstanceIdForDriver,
@@ -42,6 +45,7 @@ import {
 	type PtyEnvelope,
 	Shutdown,
 	WsRpcGroup,
+	type WsRpcRequest,
 } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
@@ -70,6 +74,10 @@ import {
 } from "./claude-runner-cleanup.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "./mock-opencode-server.js";
+import {
+	type RpcBuildIdentity,
+	RpcDecodeDiagnostics,
+} from "./rpc-decode-diagnostics.js";
 
 export { responseChunks };
 
@@ -86,6 +94,7 @@ class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
 function browserRpcRuntime(
 	port: number,
 	onDisconnect?: (error: Error) => void,
+	diagnostics?: RpcDecodeDiagnostics,
 ) {
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
@@ -99,7 +108,13 @@ function browserRpcRuntime(
 				return socket as unknown as globalThis.WebSocket;
 			}),
 		),
-		Layer.provide(RpcSerialization.layerJson),
+		Layer.provide(
+			Layer.succeed(
+				RpcSerialization.RpcSerialization,
+				diagnostics?.serialization(`ws://127.0.0.1:${port}/rpc`) ??
+					RpcSerialization.json,
+			),
+		),
 	);
 	return ManagedRuntime.make(
 		Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
@@ -140,6 +155,7 @@ export class ProcessHarness {
 	readonly generations: Generation[] = [];
 	readonly browsers: ProcessBrowser[] = [];
 	readonly cliPids: number[] = [];
+	readonly rpcDiagnostics: RpcDecodeDiagnostics;
 	private child: ChildProcess | undefined;
 	private exit: Promise<void> | undefined;
 	private logs = "";
@@ -218,6 +234,14 @@ export class ProcessHarness {
 		private continuationSweepIntervalMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
+		this.rpcDiagnostics = new RpcDecodeDiagnostics(
+			this.rpcBuildIdentity(),
+			join(
+				"test-results",
+				"process-harness",
+				`rpc-decode-${basename(this.root)}.json`,
+			),
+		);
 		this.projectDir = join(this.root, "process-test");
 		this.configDir = join(
 			this.root,
@@ -544,6 +568,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
+		this.rpcDiagnostics.buildIdentity = this.rpcBuildIdentity();
 		this.continuationSweepIntervalMs =
 			options.continuationSweepIntervalMs ?? this.continuationSweepIntervalMs;
 		this.logs = "";
@@ -922,15 +947,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				void (async () => {
 					while (!finished) {
 						try {
-							const socketPath = join(this.configDir, "relay.sock");
-							const status = await sendRpcRequest(
-								socketPath,
-								new GetStatus({}),
-							);
-							const instances = await sendRpcRequest(
-								socketPath,
-								new GetInstances({}),
-							);
+							const status = await this.requestRpc(new GetStatus({}));
+							const instances = await this.requestRpc(new GetInstances({}));
 							if (child.pid && status.port === this.port) {
 								ready({
 									pid: child.pid,
@@ -959,7 +977,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
 		if (options.skipBrowserProbe || this.realSdk) return;
-		const probe = await ProcessBrowser.connect(this.port);
+		const probe = await ProcessBrowser.connect(
+			this.port,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			this.rpcDiagnostics,
+		);
 		try {
 			// With no OpenCode listening, relay startup spends one SDK retry
 			// window (~3s) confirming that before it acks. A second window means
@@ -1158,6 +1183,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			originId,
 			projectSlug,
 			followRows,
+			this.rpcDiagnostics,
 		);
 		this.browsers.push(browser);
 		return browser;
@@ -1165,7 +1191,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	/** Close before any SubscribePtys or ListPtys can discover hosted terminals. */
 	async closePtyWithoutBrowser(ptyId: string): Promise<void> {
-		const runtime = browserRpcRuntime(this.port);
+		const runtime = browserRpcRuntime(
+			this.port,
+			undefined,
+			this.rpcDiagnostics,
+		);
 		try {
 			const rpc = await runtime.runPromise(
 				BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)),
@@ -1250,10 +1280,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		let rpcFailure: unknown;
 		if (child.exitCode === null && child.signalCode === null) {
 			try {
-				await sendRpcRequest(
-					join(this.configDir, "relay.sock"),
-					new Shutdown({}),
-				);
+				await this.requestRpc(new Shutdown({}));
 			} catch (cause) {
 				// A startup failure can remove IPC before its owned child exits.
 				rpcFailure = cause;
@@ -1340,7 +1367,48 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return this.logs;
 	}
 
-	proof(): unknown {
+	private rpcBuildIdentity(): RpcBuildIdentity {
+		const stamp = this.dist ? join(this.dist, "src/lib/build-id.js") : null;
+		return {
+			client: "source",
+			server: this.dist ? "dist" : "source",
+			dist: this.dist ?? null,
+			buildId:
+				this.buildId ??
+				(stamp
+					? existsSync(stamp)
+						? (readFileSync(stamp, "utf8").match(
+								/BUILD_ID\s*=\s*["']([^"']+)["']/,
+							)?.[1] ?? null)
+						: null
+					: "dev"),
+			builtAt:
+				stamp && existsSync(stamp) ? statSync(stamp).mtime.toISOString() : null,
+		};
+	}
+
+	/** Keep the original IPC error, and retain its undecoded payload for proof. */
+	async requestRpc<R extends WsRpcRequest>(
+		request: R,
+	): Promise<Request.Success<R>> {
+		const endpoint = join(this.configDir, "relay.sock");
+		try {
+			return await sendRpcRequest(endpoint, request);
+		} catch (error) {
+			if (ParseResult.isParseError(error)) {
+				this.rpcDiagnostics.capture(
+					endpoint,
+					request._tag,
+					JSON.stringify("actual" in error.issue ? error.issue.actual : null) ??
+						"null",
+					error,
+				);
+			}
+			throw error;
+		}
+	}
+
+	proof() {
 		return {
 			root: this.root,
 			configDir: this.configDir,
@@ -1355,6 +1423,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				isProcessAlive,
 			),
 			generations: this.generations,
+			buildIdentity: this.rpcDiagnostics.buildIdentity,
+			rpcDecodeFailures: this.rpcDiagnostics.failures,
 			marks: this.marks,
 			cliPids: this.cliPids,
 			frames: this.browsers.map((browser) =>
@@ -1711,13 +1781,18 @@ export class ProcessBrowser {
 		originId: string = randomUUID(),
 		projectSlug = "process-test",
 		followRows = true,
+		diagnostics?: RpcDecodeDiagnostics,
 	): Promise<ProcessBrowser> {
 		let browser: ProcessBrowser | undefined;
 		let connectionFailure: Error | undefined;
-		const runtime = browserRpcRuntime(port, (error) => {
-			connectionFailure = error;
-			browser?.fail(error);
-		});
+		const runtime = browserRpcRuntime(
+			port,
+			(error) => {
+				connectionFailure = error;
+				browser?.fail(error);
+			},
+			diagnostics,
+		);
 		const rpc = await runtime
 			.runPromise(BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)))
 			.catch(async (error: unknown) => {
