@@ -32,6 +32,7 @@ describe("file reads with Effect-native file service", () => {
 					expect(fileService.read).toHaveBeenCalledWith(
 						".gitignore",
 						undefined,
+						{ startIfStopped: true },
 					);
 					expect(reply).toEqual({
 						path: ".",

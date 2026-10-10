@@ -14,12 +14,12 @@ const FILE_TREE_FOLDER_TIMEOUT_MS = 5_000;
 const FILE_TREE_TIMEOUT_MS = 15_000;
 
 /** Load .gitignore rules via Effect. */
-const loadGitignore = (directory?: string) =>
+const loadGitignore = (directory?: string, startIfStopped = true) =>
 	Effect.gen(function* () {
 		const files = yield* OpenCodeFileServiceTag;
 		const ig = ignore();
 		const readResult = yield* Effect.either(
-			files.read(".gitignore", directory),
+			files.read(".gitignore", directory, { startIfStopped }),
 		);
 		if (readResult._tag === "Right" && readResult.right.content) {
 			ig.add(readResult.right.content);
@@ -83,7 +83,7 @@ export const getFileTreeEntries = (directory?: string) =>
 
 		const walkResult = yield* Effect.either(
 			Effect.gen(function* () {
-				const ig = yield* loadGitignore(directory);
+				const ig = yield* loadGitignore(directory, false);
 				const queue: Array<{ dir: string; depth: number }> = [
 					{ dir: ".", depth: 0 },
 				];
@@ -95,7 +95,7 @@ export const getFileTreeEntries = (directory?: string) =>
 					currentPath = dir;
 					const folderStartedAt = yield* Clock.currentTimeMillis;
 					const items = yield* files
-						.list(dir, directory)
+						.list(dir, directory, { startIfStopped: false })
 						.pipe(Effect.timeoutOption(FILE_TREE_FOLDER_TIMEOUT_MS));
 					if (Option.isNone(items)) {
 						const elapsed = (yield* Clock.currentTimeMillis) - folderStartedAt;

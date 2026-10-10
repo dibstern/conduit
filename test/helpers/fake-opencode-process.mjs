@@ -333,6 +333,42 @@ const server = createServer(async (request, response) => {
 				{ sessionID: pending?.sessionID, requestID },
 			);
 		response.end("true");
+	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
+		const sessionID = path.split("/")[2];
+		const failureFile = join(configDir, "fake-opencode-history-failures.json");
+		const failures = existsSync(failureFile)
+			? JSON.parse(readFileSync(failureFile, "utf8"))
+			: {};
+		// true keeps failures active until the test removes the entry.
+		if (failures[sessionID] === true || failures[sessionID] > 0) {
+			if (failures[sessionID] !== true) {
+				failures[sessionID]--;
+				writeFileSync(failureFile, JSON.stringify(failures));
+			}
+			appendFileSync(
+				join(configDir, "fake-opencode-history-failures.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), sessionID })}\n`,
+			);
+			response.writeHead(503).end('{"message":"Injected history failure"}');
+		} else {
+			response.end("[]");
+		}
+	} else if (["/agent", "/command", "/file", "/file/content"].includes(path)) {
+		const discoveryFile = join(configDir, "fake-opencode-discovery.json");
+		const discovery = existsSync(discoveryFile)
+			? JSON.parse(readFileSync(discoveryFile, "utf8"))
+			: {};
+		response.end(
+			JSON.stringify(
+				path === "/agent"
+					? (discovery.agents ?? [])
+					: path === "/command"
+						? (discovery.commands ?? [])
+						: path === "/file/content"
+							? { type: "text", content: "" }
+							: (discovery.files ?? []),
+			),
+		);
 	} else if (/^\/session\/[^/]+$/.test(path)) {
 		const session = sessions().find(({ id }) => path === `/session/${id}`);
 		if (request.method === "DELETE") {

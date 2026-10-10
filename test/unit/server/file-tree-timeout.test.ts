@@ -3,6 +3,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { Cause, Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
@@ -18,6 +19,7 @@ import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 describe("file tree time limits", () => {
@@ -248,7 +250,15 @@ describe("file tree time limits", () => {
 				Effect.provideService(LoggerTag, log),
 				Effect.provide(
 					OpenCodeFileServiceLive.pipe(
-						Layer.provide(Layer.succeed(OpenCodeAPITag, api)),
+						Layer.provide(
+							Layer.mergeAll(
+								Layer.succeed(OpenCodeAPITag, api),
+								Layer.succeed(
+									OpenCodeInstancesTag,
+									makeOpenCodeInstancesStub({ opencode: api }),
+								),
+							),
+						),
 					),
 				),
 			);
@@ -288,7 +298,15 @@ describe("file tree time limits", () => {
 			}).pipe(
 				Effect.provide(
 					OpenCodeFileServiceLive.pipe(
-						Layer.provide(Layer.succeed(OpenCodeAPITag, api)),
+						Layer.provide(
+							Layer.mergeAll(
+								Layer.succeed(OpenCodeAPITag, api),
+								Layer.succeed(
+									OpenCodeInstancesTag,
+									makeOpenCodeInstancesStub({ opencode: api }),
+								),
+							),
+						),
 					),
 				),
 			);

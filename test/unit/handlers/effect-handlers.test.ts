@@ -232,7 +232,13 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 }
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.merge(
 		apiLayer,
 		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
@@ -255,7 +261,13 @@ function projectManagementLayer(
 }
 
 function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.mergeAll(
 		apiLayer,
 		OpenCodeModelServiceLive.pipe(

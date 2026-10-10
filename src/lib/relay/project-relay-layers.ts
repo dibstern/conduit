@@ -486,7 +486,7 @@ export function createProjectRelayLayers({
 		Layer.provide(providerOrchestrationDeps),
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(
@@ -499,7 +499,7 @@ export function createProjectRelayLayers({
 		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const sseStreamLayer = SSEStreamLive.pipe(
 		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),

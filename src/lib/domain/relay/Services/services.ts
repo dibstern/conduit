@@ -5,7 +5,7 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { Cause, Context, Effect, Layer, Option } from "effect";
+import { type Cause, Context, Effect, Layer, Option } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 
 import type {
@@ -136,10 +136,12 @@ export interface OpenCodeFileService {
 	list(
 		path: string,
 		directory?: string,
+		options?: { readonly startIfStopped?: boolean },
 	): Effect.Effect<OpenCodeFileEntry[], Cause.UnknownException>;
 	read(
 		path: string,
 		directory?: string,
+		options?: { readonly startIfStopped?: boolean },
 	): Effect.Effect<OpenCodeFileContent, Cause.UnknownException>;
 }
 
@@ -151,26 +153,48 @@ export class OpenCodeFileServiceTag extends Context.Tag("OpenCodeFileService")<
 export const OpenCodeFileServiceLive: Layer.Layer<
 	OpenCodeFileServiceTag,
 	never,
-	OpenCodeAPITag
+	OpenCodeAPITag | OpenCodeInstancesTag
 > = Layer.effect(
 	OpenCodeFileServiceTag,
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
+		const instanceId = defaultInstanceIdForDriver("opencode");
 		return {
-			list: (path: string, directory?: string) =>
-				Effect.tryPromise((signal) =>
-					client.file.list(path, { signal, directory }),
-				),
-			read: (path: string, directory?: string) =>
-				Effect.tryPromise((signal) =>
-					client.file.read(path, { signal, directory }),
-				),
+			list: (
+				path: string,
+				directory?: string,
+				{ startIfStopped = true } = {},
+			) =>
+				Effect.gen(function* () {
+					const available = startIfStopped
+						? Option.some(client)
+						: yield* instances.ifRunning(instanceId);
+					if (Option.isNone(available)) return [];
+					return yield* Effect.tryPromise((signal) =>
+						available.value.file.list(path, { signal, directory }),
+					);
+				}).pipe(Effect.scoped),
+			read: (
+				path: string,
+				directory?: string,
+				{ startIfStopped = true } = {},
+			) =>
+				Effect.gen(function* () {
+					const available = startIfStopped
+						? Option.some(client)
+						: yield* instances.ifRunning(instanceId);
+					if (Option.isNone(available)) return { content: "" };
+					return yield* Effect.tryPromise((signal) =>
+						available.value.file.read(path, { signal, directory }),
+					);
+				}).pipe(Effect.scoped),
 		};
 	}),
 );
 
 export interface OpenCodeModelService {
-	/** Refreshes the catalog from a running instance; reaches OpenCode only when nothing is cached. */
+	/** Refreshes a running instance's catalog; returns cached/empty data while stopped. */
 	listProviders(): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
 	/** The last catalog listProviders returned. Never contacts OpenCode. */
 	cachedProviders(): Effect.Effect<Option.Option<OpenCodeProviderList>>;
@@ -213,14 +237,7 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 				Effect.gen(function* () {
 					const running = yield* instances.ifRunning(instanceId);
 					if (Option.isSome(running)) return yield* refresh(running.value);
-					if (catalog) return catalog;
-					return yield* refresh(
-						yield* instances
-							.use(instanceId)
-							.pipe(
-								Effect.mapError((error) => new Cause.UnknownException(error)),
-							),
-					);
+					return catalog ?? { providers: [], defaults: {}, connected: [] };
 				}).pipe(Effect.scoped),
 			cachedProviders: () => Effect.sync(() => Option.fromNullable(catalog)),
 			persistDefaultModel: (providerID: string, modelID: string) =>
@@ -233,7 +250,9 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 );
 
 export interface OpenCodeSettingsService {
-	listCommands(): Effect.Effect<OpenCodeCommandList, Cause.UnknownException>;
+	listCommands(options?: {
+		readonly startIfStopped?: boolean;
+	}): Effect.Effect<OpenCodeCommandList, Cause.UnknownException>;
 	listProjects(): Effect.Effect<OpenCodeProjectList, Cause.UnknownException>;
 }
 
@@ -244,13 +263,22 @@ export class OpenCodeSettingsServiceTag extends Context.Tag(
 export const OpenCodeSettingsServiceLive: Layer.Layer<
 	OpenCodeSettingsServiceTag,
 	never,
-	OpenCodeAPITag
+	OpenCodeAPITag | OpenCodeInstancesTag
 > = Layer.effect(
 	OpenCodeSettingsServiceTag,
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
+		const instanceId = defaultInstanceIdForDriver("opencode");
 		return {
-			listCommands: () => Effect.tryPromise(() => client.app.commands()),
+			listCommands: ({ startIfStopped = true } = {}) =>
+				Effect.gen(function* () {
+					const available = startIfStopped
+						? Option.some(client)
+						: yield* instances.ifRunning(instanceId);
+					if (Option.isNone(available)) return [];
+					return yield* Effect.tryPromise(() => available.value.app.commands());
+				}).pipe(Effect.scoped),
 			listProjects: () => Effect.tryPromise(() => client.app.projects()),
 		};
 	}),

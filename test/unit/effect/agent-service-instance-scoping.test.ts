@@ -5,6 +5,7 @@ import {
 	defaultInstanceIdForDriver,
 	ProviderInstanceIdSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceLive,
@@ -21,6 +22,7 @@ import type { OrchestrationEngine } from "../../../src/lib/provider/orchestratio
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 const makeDiscoverCapabilities = (
@@ -62,6 +64,10 @@ const makeLayer = ({
 } = {}) => {
 	const baseDependencies = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, api),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: api }),
+		),
 		makeOverridesStateLive(),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(OrchestrationEngineTag, engine),

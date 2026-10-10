@@ -59,7 +59,9 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		}
 
 		const settingsService = yield* OpenCodeSettingsServiceTag;
-		const openCodeResult = yield* Effect.either(settingsService.listCommands());
+		const openCodeResult = yield* Effect.either(
+			settingsService.listCommands({ startIfStopped: false }),
+		);
 		if (openCodeResult._tag === "Right") {
 			return openCodeResult.right.map((command) => ({
 				name: command.name,

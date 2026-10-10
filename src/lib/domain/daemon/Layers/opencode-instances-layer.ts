@@ -305,6 +305,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Deferred.unsafeDone(stream.connected, Exit.void);
 						if (!current()) return;
 						setState(instanceId, "connected");
+						broadcast({
+							_tag: "connected",
+							instanceId,
+							health: source.getHealth(),
+						});
 						if (stream.reconcileClient)
 							void stream.reconciler.reconcile(
 								stream.reconcileClient,
@@ -834,6 +839,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												health: stream?.source.getHealth() ?? NO_STREAM_HEALTH,
 											});
 										if (stream) {
+											if (stream.source.isConnected())
+												subscriber.send({
+													_tag: "connected",
+													instanceId,
+													health: stream.source.getHealth(),
+												});
 											// A late subscriber gets its own replay; others never see it.
 											if (stream.source.isConnected() && stream.reconcileClient)
 												void stream.reconciler.reconcile(

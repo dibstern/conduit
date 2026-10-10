@@ -1248,6 +1248,39 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 	}
 
+	it("warns for each failed history fetch and retries until history completes", async () => {
+		// Failed reads must leave history incomplete, log the scheduled retry,
+		// and retry without another SSE event before completing a successful read.
+		const fetch = vi.fn(
+			(): Effect.Effect<readonly Message[], Error> => Effect.succeed([]),
+		);
+		fetch.mockReturnValueOnce(Effect.fail(new Error("first history failure")));
+		fetch.mockReturnValueOnce(Effect.fail(new Error("second history failure")));
+		await disposeRuntime();
+		await startRuntime(createAllEffectProjectors(), undefined, fetch);
+		await ingest(makeSSEEvent("session.created", { info: { id: SESSION_ID } }));
+
+		await vi.waitFor(() => expect(log.warn).toHaveBeenCalledTimes(2), {
+			timeout: 3_000,
+		});
+		expect(await historyFlag()).toBe(0);
+		expect(fetch).toHaveBeenCalledTimes(2);
+		for (const [message, details] of log.warn.mock.calls) {
+			expect(message).toBe(
+				"opencode-runtime-ingress: history backfill failed, retry scheduled",
+			);
+			expect(details).toMatchObject({
+				sessionId: SESSION_ID,
+				error: expect.any(String),
+			});
+		}
+		await vi.waitFor(async () => expect(await historyFlag()).toBe(1), {
+			timeout: 3_000,
+		});
+		expect(fetch).toHaveBeenCalledTimes(3);
+		expect(log.warn).toHaveBeenCalledTimes(2);
+	});
+
 	async function waitForCondition(check: () => Promise<boolean>) {
 		for (let attempt = 0; attempt < 200; attempt++) {
 			if (await check()) return;
