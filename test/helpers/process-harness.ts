@@ -1118,6 +1118,34 @@ Object.assign(ClaudeDriver, { create: deps => {
 		);
 	}
 
+	/** Sample /session/status reads on arrival but answer them only on release. */
+	async holdOpenCodeStatusReads(): Promise<void> {
+		await this.openCodeTestCommand("hold-status", {});
+	}
+
+	async releaseOpenCodeStatusReads(): Promise<void> {
+		await this.openCodeTestCommand("release-status", {});
+	}
+
+	/** Status reads held so far, with the statuses each one sampled. */
+	opencodeHeldStatusReads() {
+		const file = join(this.configDir, "fake-opencode-held-status.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								at: number;
+								directory?: string;
+								statuses: string;
+							},
+					)
+			: [];
+	}
+
 	/** Serve a pending prompt from /permission or /question and emit it as asked. */
 	async addOpenCodePrompt(
 		kind: "permission" | "question",

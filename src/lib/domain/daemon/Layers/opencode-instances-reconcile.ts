@@ -63,6 +63,13 @@ export const createOpenCodeReconciler = (options: {
 	const pending = new Map<string, Set<string>>();
 	// A removed and re-added directory must not accept its previous reads.
 	const generations = new Map<string, symbol>();
+	// Order of each session's latest streamed status. A status read answers
+	// with the state when it was sent, so it must not overwrite a session whose
+	// status streamed in after that.
+	let statusOrder = 0;
+	const statusChanged = new Map<string, Map<string, number>>();
+	const changedSince = (directory: string, sessionID: string, sent: number) =>
+		(statusChanged.get(directory)?.get(sessionID) ?? 0) > sent;
 	let client: OpenCodeReconcileClient | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let wasActive = false;
@@ -100,18 +107,19 @@ export const createOpenCodeReconciler = (options: {
 	const correct = (
 		directory: string,
 		statuses: Record<string, SessionStatus>,
+		sent: number,
 		snapshot?: EmitToDirectory,
 	) => {
 		const tracked = new Map(busy.get(directory));
 		for (const sessionID of tracked.keys()) {
 			// OpenCode omits idle sessions from the status map.
 			const status = statuses[sessionID] ?? { type: "idle" };
-			if (isBusy(status)) continue;
+			if (isBusy(status) || changedSince(directory, sessionID, sent)) continue;
 			track(directory, sessionID, status);
 			options.emit(directory, statusPayload(sessionID, status));
 		}
 		for (const [sessionID, status] of Object.entries(statuses)) {
-			if (!isBusy(status)) continue;
+			if (!isBusy(status) || changedSince(directory, sessionID, sent)) continue;
 			const changed = tracked.get(sessionID)?.type !== status.type;
 			track(directory, sessionID, status);
 			if (snapshot) snapshot(directory, statusPayload(sessionID, status));
@@ -127,6 +135,7 @@ export const createOpenCodeReconciler = (options: {
 			timer = undefined;
 			const current = client;
 			if (!current) return;
+			const sent = statusOrder;
 			void Promise.all(
 				[...busy.keys()].map((directory) => {
 					const generation = generations.get(directory);
@@ -136,7 +145,7 @@ export const createOpenCodeReconciler = (options: {
 								client === current &&
 								generations.get(directory) === generation
 							)
-								correct(directory, statuses);
+								correct(directory, statuses, sent);
 						},
 						(error: unknown) =>
 							options.log.debug("OpenCode status poll failed", {
@@ -187,6 +196,8 @@ export const createOpenCodeReconciler = (options: {
 					status.type !== "retry")
 			)
 				return;
+			const changed = statusChanged.get(directory) ?? new Map<string, number>();
+			statusChanged.set(directory, changed.set(sessionID, ++statusOrder));
 			track(directory, sessionID, status as SessionStatus);
 			settle();
 			schedule();
@@ -208,6 +219,7 @@ export const createOpenCodeReconciler = (options: {
 				[...new Set(directories)].map(async (directory) => {
 					const generation = generations.get(directory) ?? Symbol();
 					generations.set(directory, generation);
+					const sent = statusOrder;
 					const lists = await Promise.all([
 						next.session.statuses(directory),
 						next.permission.list(directory),
@@ -220,7 +232,7 @@ export const createOpenCodeReconciler = (options: {
 						return true;
 					if (!lists) return false;
 					const [statuses, permissions, questions] = lists;
-					correct(directory, statuses, emit);
+					correct(directory, statuses, sent, emit);
 					setPending(directory, [
 						...permissions.map(({ id }) => `permission:${id}`),
 						...questions.map(({ id }) => `question:${id}`),
@@ -240,6 +252,7 @@ export const createOpenCodeReconciler = (options: {
 		/** Release all demand when a directory loses its last subscriber. */
 		forget(directory: string) {
 			generations.delete(directory);
+			statusChanged.delete(directory);
 			busy.delete(directory);
 			pending.delete(directory);
 			if (busy.size === 0 && timer) {
@@ -256,6 +269,7 @@ export const createOpenCodeReconciler = (options: {
 			busy.clear();
 			pending.clear();
 			generations.clear();
+			statusChanged.clear();
 			wasActive = false;
 		},
 	};

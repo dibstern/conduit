@@ -7,6 +7,7 @@
 // addInstance uses atomic Ref.modify for capacity enforcement — two
 // concurrent addInstance calls cannot both pass the capacity check.
 
+import { existsSync } from "node:fs";
 import {
 	Clock,
 	Context,
@@ -51,6 +52,7 @@ import type {
 	InstanceConfig,
 	OpenCodeInstance,
 } from "../../../shared-types.js";
+import { isRecord } from "../../../utils.js";
 
 export {
 	InstanceAlreadyExists,
@@ -716,6 +718,7 @@ const markManagedInstanceUnhealthy = (
 const startManagedOpenCodeServer = (
 	instance: OpenCodeInstance,
 	configDir: string,
+	socketPath: string,
 	adoptOnly: boolean,
 ) =>
 	Effect.acquireRelease(
@@ -787,6 +790,44 @@ const startManagedOpenCodeServer = (
 					catch: (cause) => cause,
 				});
 				const env = managedOpenCodeEnv(record.env ?? instance.env);
+				const compiledPlugin = new URL(
+					"../../../provider/opencode-worktree-plugin.js",
+					import.meta.url,
+				);
+				const plugin = existsSync(compiledPlugin)
+					? compiledPlugin
+					: new URL(
+							"../../../provider/opencode-worktree-plugin.ts",
+							import.meta.url,
+						);
+				const content =
+					env["OPENCODE_CONFIG_CONTENT"] ??
+					process.env["OPENCODE_CONFIG_CONTENT"];
+				const config = yield* Effect.try({
+					try: (): unknown => (content ? JSON.parse(content) : {}),
+					catch: () =>
+						new ManagedOpenCodeProcessError({
+							message: "OPENCODE_CONFIG_CONTENT must be valid JSON",
+						}),
+				});
+				if (
+					!isRecord(config) ||
+					(config["plugin"] !== undefined && !Array.isArray(config["plugin"]))
+				)
+					return yield* new ManagedOpenCodeProcessError({
+						message:
+							"OPENCODE_CONFIG_CONTENT must be an object with a plugin array",
+					});
+				const spawnEnv = {
+					...env,
+					OPENCODE_CONFIG_CONTENT: JSON.stringify({
+						...config,
+						plugin: [...(config["plugin"] ?? []), plugin.href],
+					}),
+					CONDUIT_DAEMON_SOCKET: socketPath,
+					CONDUIT_OPENCODE_INSTANCE_ID: instance.id,
+					CONDUIT_OPENCODE_WORKTREE_PLUGIN: plugin.href,
+				};
 				yield* Ref.update(ref, (state) => ({
 					...state,
 					instances: HashMap.modify(state.instances, instance.id, (current) => {
@@ -801,7 +842,8 @@ const startManagedOpenCodeServer = (
 				}));
 				yield* save;
 				const spawned = yield* Effect.tryPromise({
-					try: () => spawnManagedOpenCode(instance.id, port, env, configDir),
+					try: () =>
+						spawnManagedOpenCode(instance.id, port, spawnEnv, configDir),
 					catch: (cause) => cause,
 				});
 				owned = {
@@ -985,12 +1027,21 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 		ManagedOpenCodeLifecycleTag,
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
+			const daemonState = yield* Effect.serviceOption(DaemonStateTag);
+			const socketPath = Option.isSome(daemonState)
+				? (yield* Ref.get(daemonState.value)).socketPath
+				: `${configDir}/relay.sock`;
 			const context = yield* Effect.context<
 				InstanceManagerStateTag | ConfigPersistenceTag | DaemonEventBusTag
 			>();
 			const semaphore = yield* Effect.makeSemaphore(1);
 			const start = (instance: OpenCodeInstance, adoptOnly: boolean) =>
-				startManagedOpenCodeServer(instance, configDir, adoptOnly).pipe(
+				startManagedOpenCodeServer(
+					instance,
+					configDir,
+					socketPath,
+					adoptOnly,
+				).pipe(
 					// RPC scopes end after each request; ownership lasts with the daemon.
 					Scope.extend(scope),
 					Effect.provide(context),

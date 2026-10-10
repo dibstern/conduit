@@ -21,6 +21,14 @@ const portArg = args.find((arg) => arg.startsWith("--port="));
 const port = Number(portArg?.split("=")[1] ?? args[args.indexOf("--port") + 1]);
 const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
 const password = process.env.OPENCODE_SERVER_PASSWORD;
+writeFileSync(
+	join(configDir, "fake-opencode-worktree-env.json"),
+	JSON.stringify({
+		OPENCODE_CONFIG_CONTENT: process.env.OPENCODE_CONFIG_CONTENT,
+		CONDUIT_DAEMON_SOCKET: process.env.CONDUIT_DAEMON_SOCKET,
+		CONDUIT_OPENCODE_INSTANCE_ID: process.env.CONDUIT_OPENCODE_INSTANCE_ID,
+	}),
+);
 const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 const groupPid = Number(process.env.CONDUIT_OPENCODE_GROUP_PID ?? process.pid);
 let healthy = true;
@@ -41,6 +49,8 @@ appendFileSync(
 const streams = new Map();
 let streamId = 0;
 let silenceReconnect = false;
+// While set, /session/status samples at arrival but answers only on release.
+let statusHold;
 // Multiple instances in one harness can opt into separate provider stores.
 const statePrefix = process.env.CONDUIT_TEST_OPENCODE_STATE_PREFIX;
 const stateStem = statePrefix
@@ -189,6 +199,21 @@ const server = createServer(async (request, response) => {
 		response.end("{}");
 		return;
 	}
+	if (path === "/test/hold-status" && request.method === "POST") {
+		let release;
+		const released = new Promise((done) => {
+			release = done;
+		});
+		statusHold = { released, release };
+		response.end("{}");
+		return;
+	}
+	if (path === "/test/release-status" && request.method === "POST") {
+		statusHold?.release();
+		statusHold = undefined;
+		response.end("{}");
+		return;
+	}
 	if (path === "/test/drop-events" && request.method === "POST") {
 		const input = JSON.parse(body);
 		updateState((state) => {
@@ -291,9 +316,17 @@ const server = createServer(async (request, response) => {
 			streamLog("close", stream);
 		});
 	} else if (path === "/session/status") {
-		response.end(
-			JSON.stringify((directory && readState().statuses[directory]) || {}),
+		const statuses = JSON.stringify(
+			(directory && readState().statuses[directory]) || {},
 		);
+		if (statusHold) {
+			appendFileSync(
+				join(configDir, "fake-opencode-held-status.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), directory, statuses })}\n`,
+			);
+			await statusHold.released;
+		}
+		response.end(statuses);
 	} else if (
 		(path === "/permission" || path === "/question") &&
 		request.method === "GET"

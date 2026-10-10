@@ -1870,8 +1870,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					stopped: false,
 				};
 
+				// A warmed query's queue may already be closed under us.
+				const admitPrompt = queue
+					.enqueue(userMessage)
+					.pipe(
+						Effect.mapError(
+							(cause) => new ClaudeRuntimeError({ message: cause.message }),
+						),
+					);
 				// Cold creation retains the SDK's original first-prompt admission.
-				if (!warmed) yield* queue.enqueue(userMessage);
+				if (!warmed) yield* admitPrompt;
 				const query =
 					warmed?.query ??
 					(yield* Effect.try({
@@ -1890,7 +1898,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					),
 				};
 				warmed?.bindContext(ctx);
-				if (warmed) yield* queue.enqueue(userMessage);
+				if (warmed) yield* admitPrompt;
 
 				this.retainSink(ctx.eventSink);
 				this.retainSink(input.eventSink);
@@ -2218,8 +2226,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 							// Marks the turn as started so a system/init arriving before
 							// the first assistant chunk cannot report the session idle.
 							ctx.turnInFlight = true;
+							// The queue closes when a Stop or stream end overtakes this
+							// send during the settings sync above. The SDK will never
+							// read the prompt, so end the turn here rather than wait.
 							yield* ctx.promptQueue.enqueue(userMessage).pipe(
-								Effect.catchAll((cause) =>
+								Effect.catchTag("EffectPromptQueueClosed", () =>
 									Effect.gen(this, function* () {
 										yield* removeTurnWaiter(
 											this.stateRef,
@@ -2227,7 +2238,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 											input.inputId,
 										);
 										ctx.turnInFlight = false;
-										return yield* Effect.fail(cause);
+										// As above: a Stop already sent done for this turn.
+										if (ctx.stopped)
+											return yield* Deferred.succeed(
+												turnDeferred,
+												INTERRUPTED_TURN,
+											);
+										return yield* Effect.fail(
+											new ClaudeRuntimeError({
+												message: `Claude session is no longer active: ${ctx.sessionId}`,
+											}),
+										);
 									}),
 								),
 							);
