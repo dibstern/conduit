@@ -47,11 +47,19 @@ session immediately and takes effect on the next turn, leaving a running turn
 undisturbed.
 
 Claude's successful `EnterWorktree` and `ExitWorktree` results emit the provider
-event `workspace.changed`. The Session Workspace service validates and records
-these agent moves during the turn, and the runner updates its saved launch
-folder so the next turn reuses it. Claude-created `.claude/worktrees` folders are
-validated as linked git worktrees of a configured project repository. Startup
-cwd reports reconcile unrecorded agent moves unless a user move is pending.
+event `workspace.changed`. The Session Workspace service resolves paths, folder
+ownership, provider capability and git cache state outside commit permits, then
+re-reads the session and records the move through the session-command seam.
+Provider ingestion resolves before its write and records inside the receipt
+transaction. The runner updates its saved launch folder so the next turn reuses
+it. Claude-created `.claude/worktrees` folders are validated as linked git
+worktrees of a configured project repository.
+
+Startup cwd reports reconcile unrecorded agent moves unless a user move is
+pending. `session.workspace_started` records the normalized reported cwd as an
+observation, without changing the workspace. A matching startup after a user
+move acknowledges it durably; a mismatching startup leaves that move pending.
+Successful tool declarations also acknowledge a user move to the same path.
 
 `claudeWorktreeState` derives the active EnterWorktree state from recorded tool
 metadata. A user move remains pending until a later startup cwd or successful

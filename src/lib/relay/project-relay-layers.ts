@@ -7,11 +7,9 @@ import {
 	ManagedRuntime,
 	Option,
 	Ref,
-	Schema,
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
-import { ProviderWorkspaceChangedDataSchema } from "../contracts/providers/provider-runtime-event.js";
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
@@ -102,6 +100,8 @@ import {
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { realWorkspacePath } from "../git/worktrees.js";
+import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
@@ -366,20 +366,41 @@ export function createProjectRelayLayers({
 			const log = yield* LoggerTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return makeProviderRuntimeIngestionLive({
-				workspaceChanged: (event, project) =>
+				workspaceChanged: (event) =>
 					Effect.gen(function* () {
-						const { path, source } = yield* Schema.decodeUnknown(
-							ProviderWorkspaceChangedDataSchema,
-						)(event.data);
-						if (
-							source === "start" &&
-							(yield* workspace.claudeWorktreeState(event.sessionId))
-								.pendingUserMove
-						)
-							return;
-						yield* workspace
-							.move(event.sessionId, path, "agent", { project })
-							.pipe(
+						const { path, source } = event.data;
+						if (source === "start") {
+							const recorded = yield* workspace.get(event.sessionId);
+							const current = yield* realWorkspacePath(recorded).pipe(
+								Effect.orElseSucceed(() => recorded),
+							);
+							// The common case needs no history query, git discovery or cache refresh.
+							if (current === path) return;
+							if (
+								(yield* workspace.claudeWorktreeState(event.sessionId))
+									.pendingUserMove
+							)
+								return;
+						}
+						const target = yield* workspace.resolve(
+							event.sessionId,
+							path,
+							"agent",
+						);
+						return (project: CommitAndSignalProject) =>
+							Effect.gen(function* () {
+								// A user can move while resolution is in flight. Recheck intent under
+								// the commit permit; this state check does only database reads.
+								if (
+									source === "start" &&
+									(yield* workspace.claudeWorktreeState(event.sessionId))
+										.pendingUserMove
+								)
+									return;
+								yield* workspace.record(event.sessionId, target, "agent", {
+									project,
+								});
+							}).pipe(
 								Effect.catchTag("WorkspaceMoveError", (error) =>
 									Effect.sync(() => {
 										log.warn("Invalid agent workspace move", {
@@ -389,8 +410,25 @@ export function createProjectRelayLayers({
 										});
 									}),
 								),
+								Effect.mapError(
+									(cause) =>
+										new EventStoreError({
+											operation: "workspace.changed",
+											cause,
+										}),
+								),
 							);
 					}).pipe(
+						Effect.catchTag("WorkspaceMoveError", (error) =>
+							Effect.sync(() => {
+								log.warn("Invalid agent workspace move", {
+									sessionId: event.sessionId,
+									path: event.data.path,
+									reason: error.reason,
+								});
+								return undefined;
+							}),
+						),
 						Effect.mapError(
 							(cause) =>
 								new EventStoreError({ operation: "workspace.changed", cause }),

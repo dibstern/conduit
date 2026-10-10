@@ -197,11 +197,14 @@ export const AgentEntersWorktree: Story = {
 
 export const AgentExitsWorktree: Story = {
 	...AgentEntersWorktree,
+	// Storybook indexes tags statically, so a spread one is not seen.
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => playAgentMove(canvasElement, true),
 };
 
 export const PhoneAgentEntersWorktree: Story = {
 	...AgentEntersWorktree,
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		sessionViewState.compact = true;
 	},
@@ -209,6 +212,7 @@ export const PhoneAgentEntersWorktree: Story = {
 
 export const PhoneAgentExitsWorktree: Story = {
 	...AgentExitsWorktree,
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		sessionViewState.compact = true;
 	},

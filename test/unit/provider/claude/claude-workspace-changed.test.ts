@@ -1,22 +1,23 @@
 // Failure modes, listed before implementation:
 // - Workspace ingress accepts blank paths or an unknown source, or writes a canonical move directly.
+// - Startup reports lose the dedicated durable observation needed to acknowledge user moves.
 // - Captured Enter/Exit results are attributed by payload shape instead of tool call ID.
-// - Snapshot-only tool calls, reordered results, or duplicate delivery lose their correlation.
+// - Snapshot-only tool calls invent correlation, or reordered/duplicate streamed results lose theirs.
 // - Failed tools, malformed or ambiguous results, unrelated tools, or subagents move the parent session.
-// - Repeated init messages move the session again or acknowledge cwd before the start report.
-// - Declared moves retarget SDK transcript readers or drop durable worktree evidence.
-// - The query prompt omits the instruction to declare moves with EnterWorktree.
+// - Ambiguous batched worktree results are silently discarded.
+// - Repeated init messages move the session again or reset a running turn's status.
+// - Declared moves retarget SDK transcript readers or add workspace evidence to unrelated events.
+// - The query prompt omits the worktree instruction or switches to the Claude Code preset.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Effect, Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
+import { describe, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { CanonicalEventSchema } from "../../../../src/lib/contracts/stored-event.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import {
@@ -65,6 +66,8 @@ function runtimeMove(data: unknown): ProviderRuntimeEvent {
 
 function harness(readGoalStatus?: ReadClaudeGoalStatus) {
 	const events: ProviderRuntimeEvent[] = [];
+	const logger = createTestLogger();
+	logger.warn = vi.fn();
 	const sink = partialFake<EventSink>({
 		push: (event) =>
 			Effect.sync(() => {
@@ -88,12 +91,13 @@ function harness(readGoalStatus?: ReadClaudeGoalStatus) {
 	});
 	const translator = new ClaudeEventTranslator({
 		getSink: () => sink,
-		logger: createTestLogger(),
+		logger,
 		...(readGoalStatus ? { readGoalStatus } : {}),
 	});
 	return {
 		ctx,
 		events,
+		logger,
 		translator,
 		replay: async (messages: readonly SDKMessage[]) => {
 			for (const message of messages)
@@ -124,37 +128,24 @@ function moves(events: readonly ProviderRuntimeEvent[]) {
 }
 
 describe("workspace provider ingress", () => {
-	it("retains worktree and runner cwd evidence through canonical decoding", () => {
-		const metadata = {
-			workspaceCwd: mainFolder,
-			claudeWorktree: { entered: true, path: worktreeFolder },
-		};
-		const runtime = decodeProviderRuntimeEvent({
-			eventId: "status-with-workspace-evidence",
-			type: "session.status",
-			providerId: "claude",
-			sessionId: "workspace-session",
-			providerRefs: {},
-			rawSource: { kind: "claude.sdk.translator" },
-			createdAt: 1,
-			data: { sessionId: "workspace-session", status: "busy" },
-			metadata,
-		});
-		const event = translateProviderRuntimeEventToDomain(runtime).events[0];
-		const decoded = Schema.decodeUnknownSync(CanonicalEventSchema)(event);
-		expect(decoded.metadata).toMatchObject(metadata);
-	});
-
 	it.each([
 		"tool",
 		"start",
-	])("accepts %s reports without writing canonical events", (source) => {
+	])("accepts %s reports without writing canonical workspace moves", (source) => {
 		const event = runtimeMove({ path: worktreeFolder, source });
 		expect(event.data).toEqual({ path: worktreeFolder, source });
-		expect(translateProviderRuntimeEventToDomain(event)).toEqual({
-			events: [],
-			state: emptyProviderRuntimeDomainMapperState,
-		});
+		const result = translateProviderRuntimeEventToDomain(event);
+		expect(result.state).toEqual(emptyProviderRuntimeDomainMapperState);
+		expect(result.events).toEqual(
+			source === "start"
+				? [
+						expect.objectContaining({
+							type: "session.workspace_started",
+							data: { sessionId: "workspace-session", path: worktreeFolder },
+						}),
+					]
+				: [],
+		);
 	});
 
 	it.each([
@@ -176,18 +167,15 @@ describe("Claude declared workspace reports", () => {
 			name: "EnterWorktree",
 			messages: enterTrace,
 			path: worktreeFolder,
-			entered: true,
 		},
 		{
 			name: "ExitWorktree",
 			messages: exitTrace,
 			path: mainFolder,
-			entered: false,
 		},
-	])("replays captured $name traffic with durable tool evidence", async ({
+	])("replays captured $name traffic without workspace metadata on tool events", async ({
 		messages,
 		path,
-		entered,
 	}) => {
 		const h = harness();
 		await h.replay(messages);
@@ -198,14 +186,12 @@ describe("Claude declared workspace reports", () => {
 			},
 			{ path, source: "tool" },
 		]);
-		const completion = h.events.find(
-			(event) =>
-				event.type === "tool.completed" && event.metadata?.["claudeWorktree"],
+		const completions = h.events.filter(
+			(event) => event.type === "tool.completed",
 		);
-		expect(completion?.metadata?.["claudeWorktree"]).toEqual({ entered, path });
-		const canonical =
-			completion && translateProviderRuntimeEventToDomain(completion).events[0];
-		expect(canonical?.metadata?.["claudeWorktree"]).toEqual({ entered, path });
+		expect(completions.length).toBeGreaterThan(0);
+		for (const completion of completions)
+			expect(completion.metadata?.["claudeWorktree"]).toBeUndefined();
 	});
 
 	it("keeps goal transcript lookup in the SDK query's original project folder", async () => {
@@ -227,13 +213,21 @@ describe("Claude declared workspace reports", () => {
 		expect(roots).toEqual([mainFolder]);
 	});
 
-	it("correlates snapshot-only tool calls and ignores duplicate result delivery", async () => {
+	it("ignores snapshot-only workspace tool calls", async () => {
 		const h = harness();
 		await h.replay(
 			beforeResult().filter((message) => message.type === "assistant"),
 		);
+		await h.replay([declaredToolResult()]);
+		expect(moves(h.events)).toEqual([]);
+	});
+
+	it("ignores duplicate delivery of a streamed tool result", async () => {
+		const h = harness();
+		await h.replay(beforeResult());
 		await h.replay([declaredToolResult(), declaredToolResult()]);
 		expect(moves(h.events).map((event) => event.data)).toEqual([
+			{ path: mainFolder, source: "start" },
 			{ path: worktreeFolder, source: "tool" },
 		]);
 	});
@@ -307,7 +301,7 @@ describe("Claude declared workspace reports", () => {
 		);
 	});
 
-	it("does not attribute one declared payload to an envelope with multiple tool results", async () => {
+	it("warns when a declared workspace result cannot be attributed in a batch", async () => {
 		const h = harness();
 		await h.replay(beforeResult());
 		const captured = declaredToolResult();
@@ -327,6 +321,12 @@ describe("Claude declared workspace reports", () => {
 		]);
 		expect(moves(h.events)).toHaveLength(1);
 		expect(h.ctx.workspaceRoot).toBe(mainFolder);
+		expect(h.logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining("EnterWorktree"),
+		);
+		expect(h.logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining("multiple tool results"),
+		);
 	});
 
 	it("does not trust an unrelated tool's workspace-shaped result", async () => {
@@ -367,7 +367,7 @@ describe("Claude declared workspace reports", () => {
 		expect(h.ctx.workspaceRoot).toBe(mainFolder);
 	});
 
-	it("reports start once before acknowledging the running query's cwd", async () => {
+	it("reports start once without emitting a redundant running status", async () => {
 		const h = harness();
 		const init = enterTrace.find(
 			(message) => message.type === "system" && message.subtype === "init",
@@ -375,17 +375,25 @@ describe("Claude declared workspace reports", () => {
 		if (!init) throw new Error("Captured init is missing");
 		await h.replay([init, init]);
 		expect(moves(h.events)).toHaveLength(1);
+		expect(h.events.filter((event) => event.type === "session.status")).toEqual(
+			[],
+		);
+	});
+
+	it("clears a stranded status when init arrives without a running turn", async () => {
+		const h = harness();
+		h.ctx.turnInFlight = false;
+		const init = enterTrace.find(
+			(message) => message.type === "system" && message.subtype === "init",
+		);
+		if (!init) throw new Error("Captured init is missing");
+		await h.replay([init]);
 		const status = h.events.find((event) => event.type === "session.status");
 		expect(status?.data).toEqual({
 			sessionId: h.ctx.sessionId,
-			status: "busy",
+			status: "idle",
 		});
-		expect(status?.metadata?.["workspaceCwd"]).toBe(mainFolder);
-		expect(
-			h.events.findIndex((event) => event.type === "workspace.changed"),
-		).toBeLessThan(
-			h.events.findIndex((event) => event.type === "session.status"),
-		);
+		expect(status?.metadata).toBeUndefined();
 	});
 
 	it("does not report or acknowledge a blank runner cwd", async () => {
@@ -415,10 +423,8 @@ describe("Claude declared workspace reports", () => {
 			undefined,
 			undefined,
 		);
-		expect(options.systemPrompt).toEqual({
-			type: "preset",
-			preset: "claude_code",
-			append: "To work in another worktree, use EnterWorktree instead of cd.",
-		});
+		expect(options.systemPrompt).toBe(
+			"To work in another worktree, use EnterWorktree instead of cd.",
+		);
 	});
 });

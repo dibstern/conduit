@@ -36,11 +36,9 @@ export function buildClaudeQueryOptions(
 		}),
 		includePartialMessages: true,
 		forwardSubagentText: true,
-		systemPrompt: {
-			type: "preset",
-			preset: "claude_code",
-			append: "To work in another worktree, use EnterWorktree instead of cd.",
-		},
+		// A string is a custom prompt; the claude_code preset changes every query.
+		systemPrompt:
+			"To work in another worktree, use EnterWorktree instead of cd.",
 		settings: buildClaudeFlagSettings(claudeSettingsOverrides),
 		settingSources: ["user", "project", "local"],
 		canUseTool,

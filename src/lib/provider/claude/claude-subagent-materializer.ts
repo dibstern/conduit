@@ -269,14 +269,12 @@ function runtimeEventsToDomain(
 	return domainEvents;
 }
 
-function providerRuntimeEvent<
-	K extends Exclude<ProviderRuntimeEventType, "workspace.changed">,
->(
+function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
 	options: { readonly provider?: typeof PROVIDER; readonly createdAt: number },
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: `evt_${createHash("sha256")
 			.update(

@@ -2,15 +2,16 @@ import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
 } from "../../src/lib/contracts/providers/provider-runtime-event.js";
-import { PROVIDER_RUNTIME_EVENT_TYPES } from "../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	decodeProviderRuntimeEvent,
+	PROVIDER_RUNTIME_EVENT_TYPES,
+} from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
 } from "../../src/lib/persistence/events.js";
 
-export function providerRuntimeEvent<
-	K extends ProviderRuntimeEventType & keyof EventPayloadMap,
->(
+export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -21,7 +22,7 @@ export function providerRuntimeEvent<
 		readonly metadata?: Record<string, unknown>;
 		readonly rawSourceKind?: string;
 	} = {},
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: options.eventId ?? `evt_${type}`,
 		type,
@@ -45,9 +46,9 @@ export function providerRuntimeEventFromCanonical(
 	if (!PROVIDER_RUNTIME_EVENT_TYPES.some((type) => type === event.type)) {
 		throw new Error(`${event.type} is not a provider runtime event`);
 	}
-	return {
+	return decodeProviderRuntimeEvent({
 		eventId: event.eventId,
-		type: event.type as ProviderRuntimeEventType,
+		type: event.type,
 		providerId: event.provider,
 		sessionId: event.sessionId,
 		providerRefs: {},
@@ -55,7 +56,7 @@ export function providerRuntimeEventFromCanonical(
 		createdAt: event.createdAt,
 		data: event.data,
 		...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-	};
+	});
 }
 
 function metadataRecord(metadata: CanonicalEvent["metadata"]) {

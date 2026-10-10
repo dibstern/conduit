@@ -11,9 +11,8 @@ import {
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { NodeRuntime } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, FiberSet, Schema, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, FiberSet, Scope } from "effect";
 import { z } from "zod";
-import { ProviderWorkspaceChangedDataSchema } from "../lib/contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../lib/logger.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -475,9 +474,6 @@ const main = Effect.gen(function* () {
 										if (
 											output.type === "event" &&
 											output.event.type === "workspace.changed" &&
-											Schema.is(ProviderWorkspaceChangedDataSchema)(
-												output.event.data,
-											) &&
 											snapshot
 										) {
 											let workspaceRoot = output.event.data.path;

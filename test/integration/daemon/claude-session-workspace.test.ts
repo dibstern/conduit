@@ -60,7 +60,7 @@ function events(fixture: ProcessHarness) {
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, type, data, metadata FROM events WHERE type IN ('session.workspace_changed', 'tool.completed', 'session.status', 'turn.completed') ORDER BY sequence",
+				"SELECT session_id, type, data, metadata FROM events WHERE type IN ('session.workspace_changed', 'session.workspace_started', 'tool.completed', 'session.status', 'turn.completed') ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -104,6 +104,7 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		replay: NonNullable<
 			Parameters<typeof ProcessHarness.create>[0]
 		>["claudeReplay"],
+		beforeRestart?: (fixture: ProcessHarness) => void,
 	) {
 		for (const key of [
 			"GIT_DIR",
@@ -133,6 +134,7 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		writeFileSync(join(entered, "dirty.txt"), "agent workspace\n");
 		const user = join(harness.root, "user-worktree");
 		git(harness.projectDir, "worktree", "add", "-b", "user-destination", user);
+		beforeRestart?.(harness);
 		await harness.restart();
 		const socket = join(harness.configDir, "relay.sock");
 		return {
@@ -171,6 +173,7 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		} finally {
 			// Release a paused trace even when its assertion fails.
 			writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
+			writeFileSync(join(fixture.root, "git-resolution-release"), "release\n");
 			try {
 				await fixture.dispose();
 				expect(fixture.remainingRunnerPids()).toEqual([]);
@@ -331,18 +334,145 @@ describe("Claude declared workspace moves through the built daemon", () => {
 			},
 			{ sessionId, cause: "agent", worktrees: {}, origin: "existing" },
 		]);
-		const declarations = events(fixture).filter(
-			({ type, metadata }) =>
-				type === "tool.completed" && metadata["claudeWorktree"] !== undefined,
-		);
+		const recorded = events(fixture);
 		expect(
-			declarations.map(({ metadata }) => metadata["claudeWorktree"]),
-		).toEqual([
-			{ entered: true, path: entered },
-			{ entered: false, path: main },
-		]);
+			recorded.filter(({ type }) => type === "tool.completed"),
+		).toHaveLength(4);
+		expect(
+			recorded
+				.filter(({ type }) => type === "session.workspace_started")
+				.map(({ data }) => data),
+		).toEqual([{ sessionId, path: main }]);
+		for (const { metadata } of recorded) {
+			expect(metadata).not.toHaveProperty("claudeWorktree");
+			expect(metadata).not.toHaveProperty("workspaceCwd");
+		}
+		for (const { options } of fixture
+			.claudeOptions()
+			.filter(({ options }) => options["includePartialMessages"] === true)) {
+			expect(options["systemPrompt"]).toBeTypeOf("string");
+			expect(options["systemPrompt"]).toContain("EnterWorktree");
+		}
 		evidence["runnerStarts"] = runnerStarts();
 	});
+
+	it.each([
+		"user",
+		"agent",
+	] as const)("lets another session append provider events while a %s move resolves slow git", async (cause) => {
+		const realGit = execFileSync("/bin/sh", ["-c", "command -v git"], {
+			env: gitEnv,
+			encoding: "utf8",
+		}).trim();
+		const { fixture, entered, user, socket } = await start(
+			`slow-git-${cause}`,
+			{
+				turns: [
+					"pong-thinking-text-turn",
+					"enter-worktree-turn",
+					"pong-thinking-text-turn",
+				],
+			},
+			(fixture) => {
+				const bin = join(fixture.root, "git-bin");
+				mkdirSync(bin);
+				const arm = join(fixture.root, "git-resolution-arm");
+				const started = join(fixture.root, "git-resolution-started");
+				const release = join(fixture.root, "git-resolution-release");
+				const target =
+					cause === "user"
+						? join(fixture.root, "user-worktree")
+						: join(fixture.projectDir, ".claude", "worktrees", "contract");
+				// Block just worktree discovery, not git polling. All paths are harness-owned.
+				writeFileSync(
+					join(bin, "git"),
+					`#!/bin/sh
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR
+if [ "$PWD" = '${target}' ] && [ "$*" = 'rev-parse --git-common-dir' ] && [ -f '${arm}' ]; then
+  touch '${started}'
+  while [ ! -f '${release}' ]; do sleep 0.01; done
+fi
+exec '${realGit}' "$@"
+`,
+					{ mode: 0o755 },
+				);
+				vi.stubEnv("PATH", `${bin}:${gitEnv["PATH"] ?? ""}`);
+			},
+		);
+		const arm = join(fixture.root, "git-resolution-arm");
+		const started = join(fixture.root, "git-resolution-started");
+		const release = join(fixture.root, "git-resolution-release");
+		const target = cause === "user" ? user : entered;
+		const moving = await fixture.connect();
+		const sessionId = await moving.createSession("Slow workspace resolution");
+		await moving.send(sessionId, "Reply with pong before moving.");
+		const other = await fixture.connect();
+		const otherSessionId = await other.createSession("Independent session");
+		await other.send(
+			otherSessionId,
+			"Reply with pong before the other session moves.",
+		);
+		await other.send(
+			otherSessionId,
+			"Enter the worktree before the slow resolution.",
+		);
+		const completedBefore = events(fixture).filter(
+			({ sessionId: id, type }) =>
+				id === otherSessionId && type === "turn.completed",
+		).length;
+		writeFileSync(arm, "arm\n");
+		const move =
+			cause === "user"
+				? sendRpcRequest(
+						socket,
+						new MoveSessionWorkspace({
+							projectSlug: "process-test",
+							sessionId,
+							path: user,
+						}),
+					)
+				: moving.send(
+						sessionId,
+						"Enter the worktree while git resolution is slow.",
+					);
+		void move.catch(() => {});
+		try {
+			await vi.waitFor(() => expect(existsSync(started)).toBe(true), {
+				timeout: 10_000,
+				interval: 10,
+			});
+			const otherTurn = other.send(
+				otherSessionId,
+				"Continue while the other session resolves git.",
+			);
+			void otherTurn.catch(() => {});
+			await vi.waitFor(
+				() => {
+					expect(
+						events(fixture).filter(
+							({ sessionId: id, type }) =>
+								id === otherSessionId && type === "turn.completed",
+						),
+					).toHaveLength(completedBefore + 1);
+				},
+				{ timeout: 1_200, interval: 10 },
+			);
+			await otherTurn;
+			expect(existsSync(release)).toBe(false);
+			expect(moves(fixture, sessionId)).toEqual([]);
+			evidence["concurrency"] = {
+				otherSessionAppendedDuringResolution: true,
+				cause,
+			};
+		} finally {
+			writeFileSync(release, "release\n");
+		}
+		await move;
+		expect(moves(fixture, sessionId).at(-1)).toMatchObject({
+			cause,
+			worktrees: { [fixture.projectDir]: target },
+		});
+	}, 60_000);
 
 	it("restarts when a configured extra folder is replaced after a declared move", async () => {
 		const { fixture, entered, socket } = await start("configured-replacement", {
@@ -385,11 +515,59 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		);
 		const updated = await fixture.connect(sessionId);
 		await updated.send(sessionId, "Use the updated project folders.");
+		evidence["runnerStarts"] = runnerStarts();
+		evidence["additionalDirectories"] = fixture
+			.claudeOptions()
+			.map(({ options }) => options["additionalDirectories"]);
 		expect(runnerStarts()).toBe(2);
 		expect(
 			fixture.claudeOptions().at(-1)?.options["additionalDirectories"],
 		).toEqual([entered]);
 		evidence["runnerStarts"] = runnerStarts();
+	});
+
+	it("reuses the runner when configured extra folders are only reordered", async () => {
+		const { fixture, socket } = await start("reordered-folders", {
+			turns: ["enter-worktree-turn", "pong-thinking-text-turn"],
+		});
+		const extraA = join(fixture.root, "extra-a");
+		const extraB = join(fixture.root, "extra-b");
+		initRepo(extraA);
+		initRepo(extraB);
+		await sendRpcRequest(
+			socket,
+			new SaveProject({
+				slug: "process-test",
+				folders: [fixture.projectDir, extraA, extraB],
+			}),
+		);
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession("Reordered extra folders");
+		await browser.send(sessionId, "Enter a worktree.");
+		await sendRpcRequest(
+			socket,
+			new SaveProject({
+				slug: "process-test",
+				folders: [fixture.projectDir, extraB, extraA],
+			}),
+		);
+		const reordered = await fixture.connect(sessionId);
+		await reordered.send(
+			sessionId,
+			"Continue with the same set of extra folders.",
+		);
+		const runnerStarts = new Set(
+			fixture.marks.flatMap((mark) =>
+				mark.kind === "runner-started" && mark.sessionId === sessionId
+					? [mark.pid]
+					: [],
+			),
+		).size;
+		evidence["runnerStarts"] = runnerStarts;
+		evidence["additionalDirectories"] = fixture
+			.claudeOptions()
+			.map(({ options }) => options["additionalDirectories"]);
+		expect(runnerStarts).toBe(1);
 	});
 
 	it.each([
@@ -525,6 +703,147 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		});
 		expect(moves(fixture, sessionId)).toHaveLength(1);
 	});
+
+	it.each([
+		"worktree",
+		"main",
+	] as const)("acknowledges a pending user move to %s through a matching tool declaration", async (destination) => {
+		const { fixture, main, entered, socket, list } = await start(
+			`tool-ack-${destination}`,
+			{
+				turns: [
+					destination === "main"
+						? "exit-worktree-keep-turn"
+						: "enter-worktree-turn",
+				],
+				reportedCwd:
+					destination === "main" ? ".claude/worktrees/contract" : ".",
+			},
+		);
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession("Matching declaration");
+		await sendRpcRequest(
+			socket,
+			new MoveSessionWorkspace({
+				projectSlug: "process-test",
+				sessionId,
+				path: entered,
+			}),
+		);
+		if (destination === "main")
+			await sendRpcRequest(
+				socket,
+				new MoveSessionWorkspace({
+					projectSlug: "process-test",
+					sessionId,
+					path: main,
+				}),
+			);
+		await browser.send(sessionId, "Declare the requested workspace.");
+		expect(moves(fixture, sessionId).at(-1)).toEqual({
+			sessionId,
+			cause: "agent",
+			worktrees: destination === "main" ? {} : { [main]: entered },
+			origin: "existing",
+		});
+		const workspace = (await list()).sessions.find(
+			({ id }) => id === sessionId,
+		)?.workspace;
+		if (destination === "main") expect(workspace ?? null).toBeNull();
+		else expect(workspace?.cause).toBe("agent");
+	});
+
+	it.each([
+		["matching", "worktree"],
+		["mismatching", "worktree"],
+		["matching", "main"],
+		["mismatching", "main"],
+	] as const)(
+		"remembers a %s startup acknowledgment of a user move to %s after daemon restart",
+		async (acknowledgment, destination) => {
+			const replay = {
+				turns: ["pong-thinking-text-turn"] as const,
+				reportedCwd:
+					acknowledgment === "matching"
+						? "user-alias"
+						: ".claude/worktrees/contract",
+			};
+			const { fixture, main, user, entered, socket, list } = await start(
+				`user-ack-${acknowledgment}-${destination}`,
+				replay,
+			);
+			const requested = destination === "main" ? main : user;
+			symlinkSync(requested, join(fixture.projectDir, "user-alias"));
+			const browser = await fixture.connect();
+			const sessionId = await browser.createSession(
+				"Durable user acknowledgment",
+			);
+			if (destination === "main")
+				await sendRpcRequest(
+					socket,
+					new MoveSessionWorkspace({
+						projectSlug: "process-test",
+						sessionId,
+						path: user,
+					}),
+				);
+			await sendRpcRequest(
+				socket,
+				new MoveSessionWorkspace({
+					projectSlug: "process-test",
+					sessionId,
+					path: requested,
+				}),
+			);
+			await browser.send(
+				sessionId,
+				"Reply with pong in the requested worktree.",
+			);
+			const userMoves = destination === "main" ? 2 : 1;
+			expect(moves(fixture, sessionId)).toHaveLength(userMoves);
+			expect(
+				events(fixture)
+					.filter(({ type }) => type === "session.workspace_started")
+					.map(({ data }) => data["path"]),
+			).toEqual([acknowledgment === "matching" ? requested : entered]);
+			await fixture.kill();
+			replay.reportedCwd = ".claude/worktrees/contract";
+			await fixture.restart();
+			const extra = join(fixture.root, "extra-repo");
+			initRepo(extra);
+			await sendRpcRequest(
+				socket,
+				new SaveProject({
+					slug: "process-test",
+					folders: [fixture.projectDir, extra],
+				}),
+			);
+			const restored = await fixture.connect(sessionId);
+			await restored.send(
+				sessionId,
+				"Reply with pong after restarting the runner.",
+			);
+			const expected = acknowledgment === "matching" ? entered : requested;
+			const workspace = (await list()).sessions.find(
+				({ id }) => id === sessionId,
+			)?.workspace;
+			if (expected === main) expect(workspace ?? null).toBeNull();
+			else
+				expect(workspace).toMatchObject({
+					cause: acknowledgment === "matching" ? "agent" : "user",
+					worktrees: { [fixture.projectDir]: expected },
+				});
+			expect(moves(fixture, sessionId)).toHaveLength(
+				userMoves + (acknowledgment === "matching" ? 1 : 0),
+			);
+			evidence["acknowledgment"] = {
+				acknowledgment,
+				retainedAcrossRestart: true,
+				path: expected,
+			};
+		},
+		60_000,
+	);
 
 	it.each([
 		"missing",

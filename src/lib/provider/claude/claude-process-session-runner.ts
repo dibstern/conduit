@@ -1299,27 +1299,25 @@ export const makeProcessClaudeSessionRunner = (
 								) {
 									const snapshot = existing.upgrade.state?.snapshot;
 									const launch = snapshot?.input;
-									const previousExtra = launch?.extraFolders ?? [];
-									const nextExtra = command.input.extraFolders ?? [];
+									const previousExtra = new Set(launch?.extraFolders ?? []);
+									const nextExtra = new Set(command.input.extraFolders ?? []);
 									const extraFoldersChanged =
-										previousExtra.length !== nextExtra.length ||
-										previousExtra.some(
-											(folder, index) => folder !== nextExtra[index],
-										);
-									const removedExtra = previousExtra.filter(
-										(folder) => !nextExtra.includes(folder),
+										previousExtra.size !== nextExtra.size ||
+										[...previousExtra].some((folder) => !nextExtra.has(folder));
+									const removedExtra = [...previousExtra].filter(
+										(folder) => !nextExtra.has(folder),
 									);
-									const addedExtra = nextExtra.filter(
-										(folder) => !previousExtra.includes(folder),
+									const addedExtra = [...nextExtra].filter(
+										(folder) => !previousExtra.has(folder),
 									);
-									// A reported move can swap the primary and extra folders.
-									// Enter adds the old cwd; Exit removes the restored cwd.
+									// Secondary Enter/Exit swaps a configured folder's role. The
+									// captured secondary-folder integration requires this reconciliation.
 									const canReconcileExtraFolders =
 										snapshot?.workspacePreviousRoot !== undefined &&
-										previousExtra.length === nextExtra.length &&
+										previousExtra.size === nextExtra.size &&
 										removedExtra.length === 1 &&
 										addedExtra.length === 1 &&
-										nextExtra.every((folder) =>
+										[...nextExtra].every((folder) =>
 											snapshot.workspaceDirectories?.includes(folder),
 										) &&
 										(addedExtra[0] === snapshot.workspacePreviousRoot ||
