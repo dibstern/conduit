@@ -105,6 +105,7 @@ export interface DiscoverCommand {
 	readonly type: "discover";
 	readonly commandId?: string;
 	readonly providerId: string;
+	readonly workspaceRoot?: string;
 }
 
 export interface EndSessionCommand {
@@ -709,7 +710,7 @@ export class OrchestrationEngine {
 				command.providerId,
 			);
 			return yield* instance
-				.discoverEffect()
+				.discoverEffect(command.workspaceRoot)
 				.pipe(
 					Effect.tapError((error) =>
 						Effect.sync(() =>

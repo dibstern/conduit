@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
@@ -99,9 +100,13 @@ export const filesHandlers = {
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
+			const primaryFolder = config.projectDir;
+			const directory = request.sessionId
+				? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
+				: primaryFolder;
 			const result = yield* getSkillContentValue(
 				request.name,
-				config.slug === request.projectSlug ? config.projectDir : undefined,
+				config.slug === request.projectSlug ? directory : undefined,
 			);
 			if (result === undefined) {
 				return yield* Effect.fail(

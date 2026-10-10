@@ -259,6 +259,12 @@ export const makeProcessClaudeSessionRunner = (
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const lock = yield* Effect.makeSemaphore(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
+		const startupTimeoutMs =
+			process.env["NODE_ENV"] === "test"
+				? Number(
+						process.env["CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS"] ?? 10_000,
+					)
+				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
 		const receipts = sql
@@ -435,7 +441,7 @@ export const makeProcessClaudeSessionRunner = (
 				sessionId,
 				runnerId: entry.runnerId,
 				...(entry.pid !== undefined ? { pid: entry.pid } : {}),
-				helloTimeoutMs: entry.child ? 10_000 : 2000,
+				helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 				...(entry.candidate ? { preserveRole: true } : {}),
 				deps: { ...deps, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
@@ -706,7 +712,7 @@ export const makeProcessClaudeSessionRunner = (
 									),
 								),
 							),
-						10_000,
+						startupTimeoutMs,
 					);
 					const failed = (cause: unknown) => {
 						clearTimeout(timer);

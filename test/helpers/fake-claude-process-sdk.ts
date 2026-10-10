@@ -21,6 +21,7 @@ import {
 	type CallToolResult,
 	CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/session-title-service.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
@@ -1501,7 +1502,13 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 			return { sessionId };
 		},
 	},
-	titleQuery: async function* () {
+	titleQuery: async function* (params: Parameters<ClaudeTitleQueryFactory>[0]) {
+		const file = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
+		if (file)
+			appendFileSync(
+				file,
+				`${JSON.stringify({ pid: process.pid, prompt: params.prompt, options: { cwd: params.options?.cwd, persistSession: params.options?.persistSession } })}\n`,
+			);
 		yield {
 			type: "result",
 			subtype: "success",

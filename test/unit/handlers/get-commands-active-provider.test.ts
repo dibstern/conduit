@@ -1,27 +1,41 @@
+// Failure modes: Claude discovery uses the session directory; sessionless
+// fallback uses primary; OpenCode is kept separate; discovery failures retain
+// the existing empty-list/failure behaviour.
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { getCommandsForSession } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	makeHandlerLogger,
 	makeHandlerOpenCodeAPI,
 } from "../../helpers/handler-fakes.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
 	return Layer.merge(
 		apiLayer,
-		Layer.merge(
+		Layer.mergeAll(
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
 			Layer.succeed(LoggerTag, makeHandlerLogger()),
+			Layer.succeed(
+				ConfigTag,
+				makeMockConfig({ projectDir: "/primary-folder" }),
+			),
+			Layer.succeed(SessionWorkspaceTag, {
+				get: () => Effect.succeed("/session-worktree"),
+				move: () => Effect.succeed("/session-worktree"),
+			}),
 		),
 	);
 }
@@ -65,6 +79,7 @@ describe("getCommandsForSession active provider", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					workspaceRoot: "/session-worktree",
 				});
 				expect(client.app.commands).not.toHaveBeenCalled();
 				expect(commands).toEqual([
@@ -166,6 +181,7 @@ describe("getCommandsForSession active provider", () => {
 					expect(engine.dispatchEffect).toHaveBeenCalledWith({
 						type: "discover",
 						providerId: "claude",
+						workspaceRoot: "/primary-folder",
 					});
 					expect(commands).toEqual([
 						{ name: "init", description: "Init Claude", args: "[path]" },

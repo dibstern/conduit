@@ -531,12 +531,11 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return discoverCapabilitiesEffect(
-			this.deps.workspaceRoot,
+			workspaceRoot ?? this.deps.workspaceRoot,
 			this.deps.capabilitiesService,
 		).pipe(
 			Effect.mapError(
@@ -684,7 +683,7 @@ export class ClaudeProviderRuntime {
 			if (!model) {
 				// Discovery is shared with sends; cancellation only stops this waiter.
 				const discovery = yield* Effect.forkIn(
-					this.discoverEffect(),
+					this.discoverEffect(input.workspaceRoot),
 					this.providerScope,
 				);
 				const { models } = yield* Fiber.join(discovery);
@@ -1599,14 +1598,13 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
 			discoverCapabilitiesEffect(
-				this.deps.workspaceRoot,
+				workspaceRoot ?? this.deps.workspaceRoot,
 				this.deps.capabilitiesService,
 			),
 		);

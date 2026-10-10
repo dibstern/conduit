@@ -101,6 +101,27 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
+	const commandSessionId = $derived(getCurrentSessionId());
+	const commandWorkspace = $derived(JSON.stringify(commandSessionId ? findSession(commandSessionId)?.workspace ?? null : null));
+	let previousCommandContext: { sessionId: string | null; workspace: string } | undefined;
+	$effect(() => {
+		const sessionId = commandSessionId;
+		const workspace = commandWorkspace;
+		const previous = previousCommandContext;
+		previousCommandContext = { sessionId, workspace };
+		// Selection and connect fetch commands; moves and leaving a session
+		// also change which folder supplies the catalog.
+		const moved = previous?.sessionId === sessionId && previous.workspace !== workspace;
+		const leftSession = previous?.sessionId != null && sessionId === null;
+		if (!moved && !leftSession) return;
+		const projectSlug = attachedProjectState.slug;
+		if (!projectSlug) return;
+		let active = true;
+		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) }).then((response) => {
+			if (active) applyGetCommandsResponse(response);
+		}).catch(() => undefined);
+		return () => { active = false; };
+	});
 
 	const phoneListScreen = $derived.by(() => {
 		const route = getCurrentRoute();
@@ -369,6 +390,7 @@
 			if (slug !== previousSlug) return;
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
+			const workspace = commandWorkspace;
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
 			// picker's pre-creation selection after a reload.
@@ -396,7 +418,7 @@
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetCommandsResponse(response);
+					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace) applyGetCommandsResponse(response);
 				})
 				.catch(() => undefined);
 			void getProjectsRpc({ projectSlug: slug })

@@ -30,11 +30,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		this.runtime = runtime;
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
-		return this.runtime.discoverEffect();
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
+		return this.runtime.discoverEffect(workspaceRoot);
 	}
 
 	sendTurnEffect(

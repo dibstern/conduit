@@ -1292,6 +1292,7 @@ export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSet
 		payload: {
 			projectSlug: NonEmptyString,
 			instanceId: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1660,6 +1661,7 @@ export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			name: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}

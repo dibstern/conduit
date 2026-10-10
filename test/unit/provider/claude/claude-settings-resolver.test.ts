@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
 import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../../../src/lib/domain/relay/Services/session-workspace.js";
 import { resolveClaudeSettingsForInstance } from "../../../../src/lib/handlers/claude-settings.js";
 import {
 	type ClaudeSettingsChildRunner,
@@ -140,6 +141,10 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				{ instanceId: "work-claude" },
 				runner,
 			).pipe(
+				Effect.provideService(SessionWorkspaceTag, {
+					get: () => Effect.succeed("/workspace/project"),
+					move: () => Effect.succeed("/workspace/project"),
+				}),
 				Effect.provideService(
 					ConfigTag,
 					makeMockConfig({

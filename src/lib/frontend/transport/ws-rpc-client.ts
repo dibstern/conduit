@@ -265,6 +265,7 @@ export interface GetToolContentRpcInput {
 export interface GetSkillContentRpcInput {
 	readonly projectSlug: string;
 	readonly name: string;
+	readonly sessionId?: string;
 }
 
 export interface GetSessionSkillsRpcInput {
@@ -332,6 +333,7 @@ export interface SetClaudeSettingsRpcInput {
 export interface ResolveClaudeSettingsRpcInput {
 	readonly projectSlug: string;
 	readonly instanceId: string;
+	readonly sessionId?: string;
 }
 
 export interface ReloadProviderSessionRpcInput {

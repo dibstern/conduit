@@ -505,6 +505,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	async restart(
 		options: {
+			/** Allow slow module loading without extending RPC or turn deadlines. */
+			startupTimeoutMs?: number;
+			/** A process fixture may need longer to load the test SDK in a runner. */
+			runnerStartupTimeoutMs?: number;
 			skipBrowserProbe?: boolean;
 			cliArgs?: string[];
 			buildId?: string;
@@ -692,6 +696,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(options.runnerStartupTimeoutMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS: String(
+									options.runnerStartupTimeoutMs,
+								),
+							}),
 					CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
 						this.root,
 						"claude-options.jsonl",
@@ -834,7 +845,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				finished = true;
 				fail(new Error(`Server startup timeout\n${this.logs}`));
-			}, TIMEOUT_MS);
+			}, options.startupTimeoutMs ?? TIMEOUT_MS);
 			const onExit = () => {
 				finished = true;
 				clearTimeout(timer);
@@ -2077,10 +2088,14 @@ export class ProcessBrowser {
 		await this.followFamily(sessionId);
 	}
 
-	async preWarmSession(sessionId: string): Promise<void> {
+	async preWarmSession(
+		sessionId: string,
+		timeoutMs = TIMEOUT_MS,
+	): Promise<void> {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
+			timeoutMs,
 		);
 	}
 
