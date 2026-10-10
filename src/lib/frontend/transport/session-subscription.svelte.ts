@@ -120,14 +120,15 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		// Only a transition moves the phase: an idle write (the user message)
 		// must not end the sender's optimistic turn, and a late busy write
 		// must not restart one already ended. A turn can start and end between
-		// two upserts, so an advanced turn-end version also ends it.
+		// two upserts, so an advanced turn-end version also ends it, unless it
+		// names an earlier send than the one waiting.
 		const previous = applied.rows.get(change.item.id);
 		const busy = isBusy(change.item);
 		if (
 			busy !== isBusy(previous) ||
 			(!busy && turnEnded(previous, change.item))
 		)
-			followSessionBusy(change.item.id, busy);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
 		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
