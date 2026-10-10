@@ -894,6 +894,7 @@ test("opens the heavy session after a restart under load", async ({
 			?.reads["window"],
 	).toBeGreaterThan(0);
 	expect(report.coldOpen.server.familyReads?.unchanged).toBeGreaterThan(0);
+	expect(report.server.restart.familyReads?.changed).toBeGreaterThan(0);
 	for (const [phase, server] of Object.entries({
 		restart: report.server.restart,
 		coldOpen: report.coldOpen.server,
