@@ -25,6 +25,7 @@ export type CommandTombstoneScopeKind =
 	| "interaction";
 
 export interface CommandReceiptSnapshot {
+	readonly projectId: string;
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly status: CommandReceiptStatus;
@@ -34,12 +35,14 @@ export interface CommandReceiptSnapshot {
 }
 
 export interface CommandReadModelSnapshot {
+	readonly projectId: string;
 	readonly lastEventSequence: number;
 	readonly receipts: ReadonlyMap<string, CommandReceiptSnapshot>;
 	readonly tombstones: ReadonlySet<string>;
 }
 
 interface CommandReceiptRow {
+	readonly project_id: string;
 	readonly command_id: string;
 	readonly session_id: string;
 	readonly status: string;
@@ -78,6 +81,7 @@ function toCommandReceiptStatus(status: string): CommandReceiptStatus {
 
 function rowToReceipt(row: CommandReceiptRow): CommandReceiptSnapshot {
 	return {
+		projectId: row.project_id,
 		commandId: row.command_id,
 		sessionId: row.session_id,
 		status: toCommandReceiptStatus(row.status),
@@ -90,6 +94,7 @@ function rowToReceipt(row: CommandReceiptRow): CommandReceiptSnapshot {
 }
 
 export interface CommandReceiptCheck {
+	readonly projectId: string;
 	readonly status: CommandReceiptStatus;
 	readonly fingerprintHash: string | undefined;
 	/** Scheme version the stored hash was computed under. Hashes are only
@@ -99,7 +104,10 @@ export interface CommandReceiptCheck {
 }
 
 export class CommandReadModelRepository {
-	constructor(private readonly sql: SqlClient.SqlClient) {}
+	constructor(
+		private readonly sql: SqlClient.SqlClient,
+		private readonly projectId: string,
+	) {}
 
 	/**
 	 * Narrow point read of a single command receipt for the durable dedupe /
@@ -110,13 +118,15 @@ export class CommandReadModelRepository {
 		commandId: string,
 	): Effect.Effect<CommandReceiptCheck | undefined, SqlError> {
 		return this.sql<{
+			readonly project_id: string;
 			readonly status: string;
 			readonly fingerprint_hash: string | null;
 			readonly fingerprint_version: number | null;
-		}>`SELECT status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+		}>`SELECT project_id, status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${commandId}`.pipe(
 			Effect.map(([row]) =>
 				row
 					? {
+							projectId: row.project_id,
 							status: toCommandReceiptStatus(row.status),
 							fingerprintHash: row.fingerprint_hash ?? undefined,
 							fingerprintVersion: row.fingerprint_version ?? undefined,
@@ -129,7 +139,7 @@ export class CommandReadModelRepository {
 	bootstrap(): Effect.Effect<CommandReadModelSnapshot, SqlError> {
 		return Effect.all({
 			receiptRows: this.sql<CommandReceiptRow>`
-				SELECT command_id, session_id, status, result_sequence, error, created_at
+				SELECT project_id, command_id, session_id, status, result_sequence, error, created_at
 				FROM command_receipts
 				ORDER BY command_id`,
 			lastSequence: this.sql<LastSequenceRow>`
@@ -140,6 +150,7 @@ export class CommandReadModelRepository {
 			}>`SELECT scope_kind, scope_id FROM provider_command_tombstones`,
 		}).pipe(
 			Effect.map(({ receiptRows, lastSequence, tombstoneRows }) => ({
+				projectId: this.projectId,
 				lastEventSequence: lastSequence[0]?.last_sequence ?? 0,
 				receipts: new Map(
 					receiptRows.map((row) => {

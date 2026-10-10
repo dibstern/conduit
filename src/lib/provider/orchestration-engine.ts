@@ -138,6 +138,7 @@ export interface SessionBinding {
  * engine is constructed.
  */
 export interface DurableCommandStoreOptions {
+	readonly projectId: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly snapshot: CommandReadModelSnapshot;
 	readonly projectKey: string;
@@ -226,8 +227,14 @@ export class OrchestrationEngine {
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
-				commit: new DurableCommandCommitRepository(durable.sql),
-				receipts: new CommandReadModelRepository(durable.sql),
+				commit: new DurableCommandCommitRepository(
+					durable.sql,
+					durable.projectId,
+				),
+				receipts: new CommandReadModelRepository(
+					durable.sql,
+					durable.projectId,
+				),
 				// Single provider executor. Shares the durable DB, registry, and
 				// wall-clock with the engine; provider output streams to the shared
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).

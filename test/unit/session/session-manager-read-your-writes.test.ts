@@ -310,6 +310,7 @@ describe("SessionManager read-your-writes parity", () => {
 				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 				const persistenceLayer = makePersistenceEffectLayer(
 					join(dir, "events.db"),
+					"test-project",
 				);
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,

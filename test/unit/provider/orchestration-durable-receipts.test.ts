@@ -95,15 +95,18 @@ function makeDurableOptions(fixture: {
 	readonly now?: () => number;
 	readonly generateId?: () => string;
 }): Effect.Effect<DurableCommandStoreOptions, SqlError> {
-	return new CommandReadModelRepository(fixture.sql).bootstrap().pipe(
-		Effect.map((snapshot) => ({
-			sql: fixture.sql,
-			snapshot,
-			projectKey: "project-1",
-			now: fixture.now ?? (() => 1000),
-			generateId: fixture.generateId ?? (() => "disp-1"),
-		})),
-	);
+	return new CommandReadModelRepository(fixture.sql, "test-project")
+		.bootstrap()
+		.pipe(
+			Effect.map((snapshot) => ({
+				sql: fixture.sql,
+				snapshot,
+				projectId: "test-project",
+				projectKey: "project-1",
+				now: fixture.now ?? (() => 1000),
+				generateId: fixture.generateId ?? (() => "disp-1"),
+			})),
+		);
 }
 
 function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
@@ -151,7 +154,11 @@ describe("OrchestrationEngine durable receipts", () => {
 						userMessageId: "current-user",
 					});
 					expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
-				}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
 		);
 	}
 
@@ -178,7 +185,9 @@ describe("OrchestrationEngine durable receipts", () => {
 			expect(row?.status).toBe("side_effect_completed");
 			expect(row?.fingerprint_hash).toMatch(/^sha256:/);
 			expect(row?.updated_at).toBe(4242);
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect("preserves a Claude config dir through durable dispatch", () =>
@@ -204,7 +213,9 @@ describe("OrchestrationEngine durable receipts", () => {
 					configDir: "/instances/work-claude",
 				}),
 			);
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect(
@@ -252,7 +263,9 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect((yield* receiptRow(sql, "cmd-durable-1"))?.status).toBe(
 					"side_effect_completed",
 				);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect("id generation failure does not consume command receipt", () =>
@@ -281,7 +294,9 @@ describe("OrchestrationEngine durable receipts", () => {
 			}
 			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 			expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect(
@@ -313,7 +328,9 @@ describe("OrchestrationEngine durable receipts", () => {
 
 				expect(replayed).toMatchObject({ status: "completed" });
 				expect(secondInstance.sendTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -362,7 +379,9 @@ describe("OrchestrationEngine durable receipts", () => {
 				);
 				expect(rejectedAgain._tag).toBe("Left");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -405,7 +424,9 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect((yield* receiptRow(sql, "cmd-durable-1"))?.status).toBe(
 					"side_effect_completed",
 				);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -458,7 +479,9 @@ describe("OrchestrationEngine durable receipts", () => {
 					["cmd-durable-1"],
 				);
 				expect(rows.map((r) => r.status)).toEqual(["completed"]);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -500,7 +523,9 @@ describe("OrchestrationEngine durable receipts", () => {
 				});
 				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
 				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -544,7 +569,9 @@ describe("OrchestrationEngine durable receipts", () => {
 				expect(result.status).toBe("interrupted");
 				expect(result.status).not.toBe("completed");
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -626,7 +653,9 @@ describe("OrchestrationEngine durable receipts", () => {
 							r.status !== "retryable_failed",
 					),
 				).toBe(true);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -675,7 +704,9 @@ describe("OrchestrationEngine durable receipts", () => {
 					);
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -709,6 +740,8 @@ describe("OrchestrationEngine durable receipts", () => {
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 				expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 });

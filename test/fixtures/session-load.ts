@@ -260,7 +260,9 @@ export const seedSessionLoadFixture = async (
 			))
 				yield* write(batch);
 			return count;
-		}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+		),
 	);
 	return {
 		families,

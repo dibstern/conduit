@@ -54,8 +54,13 @@ const withRepository = <A, E>(
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		return yield* body(sql, new DurableCommandCommitRepository(sql));
-	}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:")));
+		return yield* body(
+			sql,
+			new DurableCommandCommitRepository(sql, "test-project"),
+		);
+	}).pipe(
+		Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+	);
 
 describe("DurableCommandCommitRepository", () => {
 	it.effect(

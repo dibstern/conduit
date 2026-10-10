@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type EventStoreError,
 	makeEventStoreEffect,
@@ -17,7 +18,10 @@ export interface DurableCommandCommitInput extends DurableCommandCommitPlan {
 }
 
 export class DurableCommandCommitRepository {
-	constructor(private readonly sql: SqlClient.SqlClient) {}
+	constructor(
+		private readonly sql: SqlClient.SqlClient,
+		private readonly projectId: string,
+	) {}
 
 	/** Events, receipt, outbox requests and meta commit atomically or not at all. */
 	commit(
@@ -27,11 +31,20 @@ export class DurableCommandCommitRepository {
 			Effect.gen(this, function* () {
 				const eventStore = yield* makeEventStoreEffect.pipe(
 					Effect.provideService(SqlClient.SqlClient, this.sql),
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: this.projectId,
+					}),
 				);
 				const storedEvents = yield* eventStore.appendBatch(input.events);
-				yield* this.recordReceipt(input.receipt);
+				yield* this.recordReceipt({
+					...input.receipt,
+					projectId: this.projectId,
+				});
 				for (const request of input.outboxRequests) {
-					yield* this.recordOutboxRequest(request, input.receipt.updatedAt);
+					yield* this.recordOutboxRequest(
+						{ ...request, projectId: this.projectId },
+						input.receipt.updatedAt,
+					);
 				}
 				yield* this.recordMeta(
 					input.receipt.projectKey,
@@ -48,10 +61,11 @@ export class DurableCommandCommitRepository {
 	): Effect.Effect<void, SqlError> {
 		return this.sql`
 			INSERT INTO command_receipts (
-				command_id, session_id, status, result_sequence, error, created_at,
+				project_id, command_id, session_id, status, result_sequence, error, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version,
 				accepted_sequence, side_effect_sequence, error_code, updated_at
 			) VALUES (
+				${receipt.projectId},
 				${receipt.commandId}, ${receipt.sessionId}, ${receipt.status},
 				${receipt.resultSequence ?? null}, ${receipt.errorCode ?? null},
 				${receipt.createdAt}, ${receipt.commandType}, ${receipt.projectKey},
@@ -101,9 +115,10 @@ export class DurableCommandCommitRepository {
 				  AND status IN ('pending', 'retryable_failed')`;
 			yield* this.sql`
 				INSERT INTO provider_command_outbox (
-					request_sequence, command_id, project_key, session_id, provider_id,
+					project_id, request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, status, attempt_count, requested_at, updated_at
 				) VALUES (
+					${request.projectId},
 					${request.requestSequence}, ${request.commandId}, ${request.projectKey},
 					${request.sessionId}, ${request.providerId}, ${request.effectType},
 					${request.payloadJson}, 'pending', 0, ${updatedAt}, ${updatedAt}
@@ -118,8 +133,8 @@ export class DurableCommandCommitRepository {
 	): Effect.Effect<void, SqlError> {
 		return this.sql`
 			INSERT INTO provider_command_meta (
-				project_key, last_applied_sequence, schema_version, rebuilt_at
-			) VALUES (${projectKey}, ${lastAppliedSequence}, 1, ${updatedAt})
+				project_id, project_key, last_applied_sequence, schema_version, rebuilt_at
+			) VALUES (${this.projectId}, ${projectKey}, ${lastAppliedSequence}, 1, ${updatedAt})
 			ON CONFLICT (project_key) DO UPDATE SET
 				last_applied_sequence = excluded.last_applied_sequence,
 				schema_version = excluded.schema_version,

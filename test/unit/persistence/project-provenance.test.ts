@@ -1,0 +1,269 @@
+// Failure modes beyond the process harness:
+// - A store is constructed without an id or with an empty id.
+// - Empty command tables hide an omitted migration/stamping target.
+// - Stamping changes event ids, sequences or payloads, or overwrites an owner.
+// - Reopening runs UPDATEs despite every row already being stamped.
+// - A failed stamp commits only a prefix of the tables.
+// - Stored event, receipt and cursor contracts omit their project's identity.
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
+import { SqliteClient } from "@effect/sql-sqlite-node";
+import Database from "better-sqlite3";
+import { Effect, ManagedRuntime, Schema } from "effect";
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
+import { StoredEventSchema } from "../../../src/lib/contracts/stored-event.js";
+import { PersistenceError } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../../../src/lib/persistence/effect/migrations.js";
+import { ProjectorCursorEffectTag } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
+import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
+import type { DurableCommandReceiptWrite } from "../../../src/lib/provider/orchestration-command-contracts.js";
+import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
+import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
+
+const tables = [
+	"events",
+	"command_receipts",
+	"provider_command_sessions",
+	"provider_command_turns",
+	"provider_command_interactions",
+	"provider_command_tombstones",
+	"provider_command_outbox",
+	"provider_command_meta",
+] as const;
+const directories: string[] = [];
+afterEach(() => {
+	for (const dir of directories.splice(0))
+		rmSync(dir, { recursive: true, force: true });
+});
+
+async function oldStore() {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-provenance-"));
+	directories.push(dir);
+	const filename = join(dir, "events.db");
+	await Effect.runPromise(
+		Effect.scoped(
+			makeEffectSqlMigrator(
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 40)),
+			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
+		),
+	);
+	const db = new Database(filename);
+	try {
+		db.exec(`
+			INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+			VALUES ('old-event', 'old-session', 0, 'session.created', '{"sessionId":"old-session","title":"Old history","provider":"claude"}', '{}', 'claude', 1000);
+			INSERT INTO command_receipts (command_id, session_id, status, created_at) VALUES ('old-command', 'old-session', 'accepted', 1000);
+			INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at)
+			VALUES ('old-folder', 'old-session', 'claude', 'claude', 'idle', 1000, 1000);
+			INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at)
+			VALUES ('old-folder', 'old-session', 'turn-1', 'old-command', 'completed', 1000, 1000);
+			INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at)
+			VALUES ('old-folder', 'old-session', 'interaction-1', 'permission', 'resolved', 1000, 1000);
+			INSERT INTO provider_command_tombstones (project_key, scope_kind, scope_id, event_sequence, reason_code, tombstoned_at)
+			VALUES ('old-folder', 'session', 'gone-session', 1, 'deleted', 1000);
+			INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, requested_at, updated_at)
+			VALUES (1, 'old-command', 'old-folder', 'old-session', 'claude', 'send_turn', '{}', 1000, 1000);
+			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES ('old-folder', 1, 1, 1000);
+		`);
+	} finally {
+		db.close();
+	}
+	return filename;
+}
+
+describe("Bound project provenance", () => {
+	it("requires a project id at construction and in stored contracts", () => {
+		expectTypeOf<
+			Parameters<typeof makePersistenceEffectLayer>[1]
+		>().toEqualTypeOf<string>();
+		expectTypeOf<
+			DurableCommandReceiptWrite["projectId"]
+		>().toEqualTypeOf<string>();
+		expect(() => makePersistenceEffectLayer(":memory:", "")).toThrow(
+			PersistenceError,
+		);
+		const event = {
+			...makeSessionCreatedEvent("session-1"),
+			sequence: 1,
+			streamVersion: 0,
+		};
+		expect(Schema.is(StoredEventSchema)(event)).toBe(false);
+		expect(Schema.is(StoredEventSchema)({ ...event, projectId: "alpha" })).toBe(
+			true,
+		);
+	});
+
+	it("binds append, receipt, outbox, metadata and cursor ownership without per-write ids", async () => {
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(":memory:", "alpha"),
+		);
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const store = yield* EventStoreEffectTag;
+					const stored = yield* store.append(
+						makeSessionCreatedEvent("session-1"),
+					);
+					expect(stored.projectId).toBe("alpha");
+					expect((yield* store.readBySession("session-1"))[0]?.projectId).toBe(
+						"alpha",
+					);
+					const cursors = yield* ProjectorCursorEffectTag;
+					yield* cursors.upsert("session", stored.sequence);
+					expect((yield* cursors.get("session"))?.projectId).toBe("alpha");
+				}),
+			);
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const repository = new DurableCommandCommitRepository(sql, "alpha");
+					yield* repository.commit({
+						events: [],
+						readModelRows: [],
+						receipt: {
+							commandId: "command-1",
+							commandType: "send_turn",
+							projectKey: "legacy-key",
+							sessionId: "session-1",
+							status: "accepted",
+							fingerprintHash: "hash",
+							fingerprintVersion: 2,
+							createdAt: 1,
+							updatedAt: 1,
+						},
+						outboxRequests: [
+							{
+								requestSequence: 1,
+								commandId: "command-1",
+								projectKey: "legacy-key",
+								sessionId: "session-1",
+								providerId: "claude",
+								effectType: "send_turn",
+								payloadJson: "{}",
+							},
+						],
+					});
+					const snapshot = yield* new CommandReadModelRepository(
+						sql,
+						"alpha",
+					).bootstrap();
+					expect(snapshot.projectId).toBe("alpha");
+					expect(snapshot.receipts.get("command-1")?.projectId).toBe("alpha");
+					for (const table of [
+						"command_receipts",
+						"provider_command_outbox",
+						"provider_command_meta",
+					])
+						expect(
+							yield* sql.unsafe(`SELECT project_id FROM ${table}`),
+						).toEqual([{ project_id: "alpha" }]);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it("stamps every legacy command table, preserving sequences and existing owners; reopens without updates", async () => {
+		const filename = await oldStore();
+		const before = new Database(filename);
+		const events = before
+			.prepare("SELECT * FROM events ORDER BY sequence")
+			.all();
+		before.close();
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "alpha"),
+		);
+		try {
+			await runtime.runPromise(EventStoreEffectTag);
+		} finally {
+			await runtime.dispose();
+		}
+		const db = new Database(filename);
+		try {
+			for (const table of tables)
+				expect(
+					db.prepare(`SELECT project_id FROM ${table}`).all(),
+					table,
+				).toEqual([{ project_id: "alpha" }]);
+			expect(
+				db
+					.prepare(
+						"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events ORDER BY sequence",
+					)
+					.all(),
+			).toEqual(events);
+			// A populated owner survives even when a caller supplies a different
+			// scope; the expand migration never relabels an already stamped row.
+			db.exec(
+				"UPDATE provider_command_sessions SET project_id = 'existing-owner'",
+			);
+			for (const table of tables)
+				db.exec(
+					`CREATE TRIGGER no_stamp_${table} BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'already stamped'); END`,
+				);
+		} finally {
+			db.close();
+		}
+		const reopened = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "alpha"),
+		);
+		try {
+			await reopened.runPromise(EventStoreEffectTag);
+		} finally {
+			await reopened.dispose();
+		}
+	});
+
+	it("rolls all stamping back on failure and retries an unstamped store", async () => {
+		const filename = await oldStore();
+		await Effect.runPromise(
+			Effect.scoped(
+				makeEffectSqlMigrator().pipe(
+					Effect.provide(SqliteClient.layer({ filename })),
+				),
+			),
+		);
+		const db = new Database(filename);
+		db.exec(
+			"UPDATE events SET project_id = ''; CREATE TRIGGER reject_stamp BEFORE UPDATE ON command_receipts BEGIN SELECT RAISE(ABORT, 'stamp failure'); END",
+		);
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "alpha"),
+		);
+		try {
+			await expect(runtime.runPromise(EventStoreEffectTag)).rejects.toThrow();
+		} finally {
+			await runtime.dispose();
+		}
+		expect(db.prepare("SELECT project_id FROM events").get()).toEqual({
+			project_id: "",
+		});
+		db.exec("DROP TRIGGER reject_stamp");
+		db.close();
+		const retried = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "alpha"),
+		);
+		try {
+			expect(
+				(
+					await retried.runPromise(
+						EventStoreEffectTag.pipe(
+							Effect.flatMap((store) => store.readAllBySession("old-session")),
+						),
+					)
+				)[0]?.projectId,
+			).toBe("alpha");
+		} finally {
+			await retried.dispose();
+		}
+	});
+});

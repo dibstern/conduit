@@ -98,7 +98,7 @@ describe("SessionManager Effect", () => {
 			makeSessionManagerStateLive(),
 			PendingSendOwnershipLive,
 			Layer.succeed(OpenCodeAPITag, mockApi),
-			makePersistenceEffectLayer(":memory:"),
+			makePersistenceEffectLayer(":memory:", "test-project"),
 			configLayer,
 			loggerLayer,
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
@@ -119,7 +119,10 @@ describe("SessionManager Effect", () => {
 		configDir?: string,
 		projectors?: readonly EffectProjector[],
 	) => {
-		const persistenceLayer = makePersistenceEffectLayer(filename);
+		const persistenceLayer = makePersistenceEffectLayer(
+			filename,
+			"test-project",
+		);
 		const projectionRunnerOverride = projectors
 			? Layer.effect(
 					ProjectionRunnerEffectTag,
@@ -633,7 +636,7 @@ describe("SessionManager Effect", () => {
 					"full",
 				);
 			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename)),
+				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -666,7 +669,7 @@ describe("SessionManager Effect", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.merge(
-						makePersistenceEffectLayer(filename),
+						makePersistenceEffectLayer(filename, "test-project"),
 						Layer.fresh(makeOverridesStateLive()),
 					),
 				),

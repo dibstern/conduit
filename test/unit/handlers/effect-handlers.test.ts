@@ -295,7 +295,7 @@ function mockConfig(
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = Layer.merge(
-	makePersistenceEffectLayer(":memory:"),
+	makePersistenceEffectLayer(":memory:", "test-project"),
 	Layer.succeed(ClaudeEventPersistEffectTag, {
 		persistHandoffDelivered: () => Effect.void,
 		persistEvent: () => Effect.void,
@@ -1232,7 +1232,7 @@ function makeForkSessionLayer(options?: {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:")));
+	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")));
 
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
@@ -2827,7 +2827,7 @@ describe("sendMessageToSession", () => {
 						makeSessionManagerStateLive(),
 						PendingSendOwnershipLive,
 						DaemonEventBusLive,
-						makePersistenceEffectLayer(dbFile),
+						makePersistenceEffectLayer(dbFile, "test-project"),
 						Layer.succeed(
 							OrchestrationEngineTag,
 							new OrchestrationEngine({ registry: new ProviderRegistry() }),

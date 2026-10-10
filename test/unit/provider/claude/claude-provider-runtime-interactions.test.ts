@@ -75,7 +75,10 @@ afterEach(async () => {
 
 async function persistentInteractions(permissionTimeoutMs?: number) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-interaction-resolution-"));
-	const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
+	const persistenceLayer = makePersistenceEffectLayer(
+		join(dir, "events.db"),
+		"test-project",
+	);
 	const persistence = ManagedRuntime.make(
 		Layer.merge(
 			makeProviderRuntimeIngestionLive().pipe(

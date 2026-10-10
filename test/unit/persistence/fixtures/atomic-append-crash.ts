@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect } from "effect";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -26,8 +27,16 @@ await Effect.runPromise(
 		yield* makeEffectSqlMigrator();
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES ('crash-session', 'opencode', 'Before', 1, 1)`;
-		const store = yield* makeEventStoreEffect;
-		const cursors = yield* makeProjectorCursorEffect;
+		const store = yield* makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		);
+		const cursors = yield* makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		);
 		const runner = yield* makeProjectionRunnerEffect([
 			{
 				name: "kill-before-projection",

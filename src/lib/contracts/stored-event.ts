@@ -599,6 +599,7 @@ export type CanonicalEvent = {
 }[CanonicalEventType];
 
 export type StoredEvent = CanonicalEvent & {
+	readonly projectId: string;
 	readonly sequence: number;
 	readonly streamVersion: number;
 };
@@ -1347,6 +1348,7 @@ export const CanonicalEventSchema = Schema.Union(
 export const StoredEventSchema = Schema.extend(
 	CanonicalEventSchema,
 	Schema.Struct({
+		projectId: Schema.NonEmptyString,
 		sequence: Schema.Number,
 		streamVersion: Schema.Number,
 	}),

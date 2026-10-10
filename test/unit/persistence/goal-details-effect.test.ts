@@ -8,7 +8,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
-const testLayer = makePersistenceEffectLayer(":memory:");
+const testLayer = makePersistenceEffectLayer(":memory:", "test-project");
 const goal = {
 	condition: "All checks pass",
 	iterations: 0,

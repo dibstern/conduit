@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -34,6 +35,7 @@ const REACTOR_COMPLETED_RESULT: TurnResult = {
 };
 
 interface ProviderCommandOutboxRow {
+	readonly project_id: string;
 	readonly request_sequence: number;
 	readonly command_id: string;
 	readonly project_key: string;
@@ -325,7 +327,7 @@ export class ProviderSideEffectReactor {
 		ProviderCommandStoreFailure
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
-			SELECT request_sequence, command_id, project_key, session_id, provider_id,
+			SELECT project_id, request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
 			WHERE status = 'pending'
@@ -409,7 +411,11 @@ export class ProviderSideEffectReactor {
 				const result =
 					driver === "claude"
 						? yield* Effect.gen(function* () {
-								const state = yield* makeProviderStateEffect;
+								const state = yield* makeProviderStateEffect.pipe(
+									Effect.provideService(PersistenceProjectTag, {
+										projectId: row.project_id,
+									}),
+								);
 								const read = yield* makeReadQueryEffect;
 								return yield* sendPreparedClaudeTurn({
 									sessionId: payload.sessionId,
@@ -464,6 +470,9 @@ export class ProviderSideEffectReactor {
 					result.providerStateUpdates?.length
 				) {
 					yield* makeProviderStateEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, {
+							projectId: row.project_id,
+						}),
 						Effect.flatMap((state) =>
 							state.saveUpdates(
 								payload.sessionId,
@@ -499,7 +508,7 @@ export class ProviderSideEffectReactor {
 		ProviderCommandStoreFailure
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
-			SELECT request_sequence, command_id, project_key, session_id, provider_id,
+			SELECT project_id, request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
 			WHERE command_id = ${commandId} AND status IN ('pending', 'retryable_failed')

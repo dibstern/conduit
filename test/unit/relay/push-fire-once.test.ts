@@ -57,6 +57,7 @@ const withStore = <A>(
 	const dir = mkdtempSync(join(tmpdir(), "conduit-push-fire-once-"));
 	const layer = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors(),
 		silentBus,
 	);

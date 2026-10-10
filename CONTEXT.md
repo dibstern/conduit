@@ -1,5 +1,14 @@
 # Conduit project model
 
+## Project Provenance
+
+A stored event or durable command belongs to the project's stable slug, its
+`projectId`. Folder edits keep that identity. The store binds it at construction,
+so event and command writers inherit it. Opening a per-project store stamps
+legacy event and command rows with its slug without changing ids, order or
+payloads. Event sequences, command receipts and projector cursors carry that
+owner in their in-memory contracts. Reads and projections remain per-store.
+
 ## Repository Identity
 
 A Project Folder's Repository Identity is its canonical repository `key`, display

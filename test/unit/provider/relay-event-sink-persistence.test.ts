@@ -23,7 +23,10 @@ describe("RelayEventSink Effect persistence integration", () => {
 		"persisted Claude events are readable through ReadQueryEffect",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
-			const layer = makePersistenceEffectLayer(join(dir, "events.db"));
+			const layer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+				"test-project",
+			);
 
 			return Effect.gen(function* () {
 				const eventStore = yield* EventStoreEffectTag;
@@ -74,7 +77,10 @@ describe("RelayEventSink Effect persistence integration", () => {
 		"does not create a session row for a missing compatibility event",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-sink-effect-"));
-			const layer = makePersistenceEffectLayer(join(dir, "events.db"));
+			const layer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+				"test-project",
+			);
 
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;

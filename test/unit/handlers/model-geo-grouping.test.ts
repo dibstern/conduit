@@ -35,7 +35,7 @@ const bedrockModel = (id: string, name: string) => ({
 
 layer(
 	Layer.merge(
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(ConfigTag, makeMockConfig()),
 	),
 )("groupGeoRoutingModels", (it) => {

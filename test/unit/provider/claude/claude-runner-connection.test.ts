@@ -86,6 +86,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 				Layer.merge(
 					makePersistenceEffectLayer(
 						join(directory, "events.db"),
+						"test-project",
 						undefined,
 						bus,
 					),

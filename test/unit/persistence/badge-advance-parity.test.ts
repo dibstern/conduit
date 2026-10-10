@@ -77,6 +77,7 @@ const withPersistence = async <A>(
 	const bus = recordingBus(advances, join(dir, "events.db"));
 	const persistence = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors(),
 		bus,
 	);

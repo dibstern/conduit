@@ -98,6 +98,7 @@ it.each([
 	});
 	const persistence = makePersistenceEffectLayer(
 		filename,
+		"test-project",
 		createAllEffectProjectors(),
 		bus,
 	);
@@ -162,6 +163,7 @@ it("failed establishment validation rolls back the seed, event and projections",
 	const dir = mkdtempSync(join(tmpdir(), "conduit-atomic-establish-"));
 	const persistence = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors().filter(
 			(projector) => projector.name !== "provider",
 		),

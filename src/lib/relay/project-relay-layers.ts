@@ -337,6 +337,7 @@ export function createProjectRelayLayers({
 	);
 	const persistenceEffectLayer = makePersistenceEffectLayer(
 		config.persistenceDbPath,
+		config.slug,
 		undefined,
 		SessionEventBusLive,
 	);

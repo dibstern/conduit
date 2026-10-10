@@ -42,7 +42,12 @@ describe("routed RPC server", () => {
 					Layer.mergeAll(
 						RpcSubscriptionScopeLive,
 						bus,
-						makePersistenceEffectLayer(":memory:", undefined, bus),
+						makePersistenceEffectLayer(
+							":memory:",
+							"test-project",
+							undefined,
+							bus,
+						),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 					),
 				);
@@ -100,7 +105,12 @@ describe("routed RPC server", () => {
 						Layer.mergeAll(
 							RpcSubscriptionScopeLive,
 							bus,
-							makePersistenceEffectLayer(":memory:", undefined, bus),
+							makePersistenceEffectLayer(
+								":memory:",
+								"test-project",
+								undefined,
+								bus,
+							),
 							Layer.succeed(BackgroundLivenessTag, () => undefined),
 						),
 					);

@@ -3,6 +3,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { makeProviderStateEffect } from "../../../src/lib/persistence/effect/provider-state-effect.js";
@@ -16,7 +17,9 @@ const setup = Effect.gen(function* () {
 	yield* sql`
 		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 		VALUES ('s1', 'personal', 'Test', 'idle', 1, 1), ('s2', 'work', 'Other', 'idle', 1, 1)`;
-	const events = yield* makeEventStoreEffect;
+	const events = yield* makeEventStoreEffect.pipe(
+		Effect.provideService(PersistenceProjectTag, { projectId: "test-project" }),
+	);
 	yield* events.appendBatch([
 		canonicalEvent("session.created", "s2", {
 			sessionId: "s2",
@@ -37,7 +40,14 @@ const setup = Effect.gen(function* () {
 			title: "Test renamed",
 		}),
 	]);
-	return { state: yield* makeProviderStateEffect, events };
+	return {
+		state: yield* makeProviderStateEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
+		events,
+	};
 });
 
 describe("nativeThread", () => {
@@ -52,6 +62,7 @@ describe("nativeThread", () => {
 				]);
 
 				expect(yield* state.nativeThread("s1", "personal")).toEqual({
+					projectId: "test-project",
 					configDir: "/accounts/personal",
 					resumeSessionId: "legacy-sdk-session",
 					firstSequence: 2,
@@ -92,8 +103,14 @@ describe("nativeThread", () => {
 					{ key: "nativeThread:work", value: JSON.stringify(work) },
 				]);
 
-				expect(yield* state.nativeThread("s1", "personal")).toEqual(personal);
-				expect(yield* state.nativeThread("s1", "work")).toEqual(work);
+				expect(yield* state.nativeThread("s1", "personal")).toEqual({
+					...personal,
+					projectId: "test-project",
+				});
+				expect(yield* state.nativeThread("s1", "work")).toEqual({
+					...work,
+					projectId: "test-project",
+				});
 				expect(yield* state.nativeThread("s2", "work")).toBeUndefined();
 				const stored = yield* state.getState("s1");
 				expect(stored["resumeSessionId"]).toBeUndefined();
@@ -119,6 +136,7 @@ describe("nativeThread", () => {
 					},
 				]);
 				expect(yield* state.nativeThread("s1", "personal")).toEqual({
+					projectId: "test-project",
 					configDir: "/accounts/personal",
 					resumeSessionId: "personal-sdk-session",
 					firstSequence: 2,
@@ -147,6 +165,7 @@ describe("nativeThread", () => {
 					},
 				]);
 				expect(yield* state.nativeThread("s1", "work")).toEqual({
+					projectId: "test-project",
 					configDir: "/accounts/work",
 					resumeSessionId: "work-sdk-session",
 					firstSequence: 5,

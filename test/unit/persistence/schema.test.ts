@@ -227,6 +227,7 @@ describe("Schema Migration", () => {
 				"metadata",
 				"provider",
 				"created_at",
+				"project_id",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
 	);
@@ -284,6 +285,7 @@ describe("Schema Migration", () => {
 				"side_effect_sequence",
 				"error_code",
 				"updated_at",
+				"project_id",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
 	);

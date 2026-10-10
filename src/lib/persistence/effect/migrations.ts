@@ -15,6 +15,7 @@ import {
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PENDING_APPROVALS_VERSION_MIGRATION,
+	PROJECT_PROVENANCE_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -133,6 +134,7 @@ const expectedTableColumns = {
 		"side_effect_sequence",
 		"error_code",
 		"updated_at",
+		"project_id",
 	],
 	events: [
 		"sequence",
@@ -144,6 +146,7 @@ const expectedTableColumns = {
 		"metadata",
 		"provider",
 		"created_at",
+		"project_id",
 	],
 	message_parts: [
 		"id",
@@ -216,12 +219,14 @@ const expectedTableColumns = {
 		"tombstoned_at",
 		"tombstone_reason",
 		"retain_until",
+		"project_id",
 	],
 	provider_command_meta: [
 		"project_key",
 		"last_applied_sequence",
 		"schema_version",
 		"rebuilt_at",
+		"project_id",
 	],
 	provider_command_outbox: [
 		"request_sequence",
@@ -238,6 +243,7 @@ const expectedTableColumns = {
 		"next_attempt_at",
 		"requested_at",
 		"updated_at",
+		"project_id",
 	],
 	provider_command_sessions: [
 		"project_key",
@@ -253,6 +259,7 @@ const expectedTableColumns = {
 		"tombstoned_at",
 		"tombstone_reason",
 		"retain_until",
+		"project_id",
 	],
 	provider_command_tombstones: [
 		"project_key",
@@ -266,6 +273,7 @@ const expectedTableColumns = {
 		"tombstoned_at",
 		"retain_until",
 		"details_json",
+		"project_id",
 	],
 	provider_command_turns: [
 		"project_key",
@@ -283,6 +291,7 @@ const expectedTableColumns = {
 		"tombstoned_at",
 		"tombstone_reason",
 		"retain_until",
+		"project_id",
 	],
 	provider_state: ["session_id", "key", "value"],
 	session_providers: [
@@ -569,6 +578,10 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		const actualColumns = columns.map((column) => column.name);
 		const matchesKnownSchema =
 			sameStrings(actualColumns, expectedColumns) ||
+			// Before the provenance expand step, these write tables have the
+			// identical schema minus the final project_id column.
+			(expectedColumns.at(-1) === "project_id" &&
+				sameStrings(actualColumns, expectedColumns.slice(0, -1))) ||
 			((tableName === "sessions" || tableName === "messages") &&
 				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
 			(tableName === "command_receipts" &&
@@ -1077,6 +1090,11 @@ export const effectMigrationEntries = {
 		"sessions",
 		"workspace",
 		readMigrationSql(SESSIONS_WORKSPACE_MIGRATION),
+	),
+	"0041_project_provenance": runAddColumnMigrationIfMissing(
+		"events",
+		"project_id",
+		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),
 	),
 } satisfies Record<
 	string,

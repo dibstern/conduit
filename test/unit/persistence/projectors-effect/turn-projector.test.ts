@@ -31,6 +31,7 @@ function makeStored<T extends StoredEvent["type"]>(
 ): StoredEvent {
 	return {
 		sequence,
+		projectId: "test-project",
 		streamVersion: sequence - 1,
 		eventId: createEventId(),
 		sessionId,
@@ -137,6 +138,7 @@ describe("TurnProjector", () => {
 				...recorded,
 				eventId: `recorded-${recorded.sequence}`,
 				sessionId,
+				projectId: "test-project",
 				streamVersion: index,
 				metadata: {},
 			} as StoredEvent;

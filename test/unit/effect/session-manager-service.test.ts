@@ -373,7 +373,7 @@ const sessionConfigLayer = Layer.succeed(
 const sessionLoggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const requiredSessionServices = Layer.mergeAll(
-	makePersistenceEffectLayer(":memory:"),
+	makePersistenceEffectLayer(":memory:", "test-project"),
 	PendingSendOwnershipLive,
 	Layer.succeed(AgentServiceTag, makeMockAgentService()),
 	sessionConfigLayer,
@@ -442,7 +442,7 @@ describe("SessionManagerService", () => {
 					]),
 				}),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(dbFile),
+				makePersistenceEffectLayer(dbFile, "test-project"),
 			),
 		);
 
@@ -485,7 +485,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -531,7 +531,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -592,7 +592,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -722,7 +722,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -813,7 +813,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile, projectors),
+					makePersistenceEffectLayer(dbFile, "test-project", projectors),
 				),
 			);
 
@@ -872,7 +872,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -936,7 +936,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -1012,7 +1012,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1120,7 +1120,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
@@ -1202,7 +1202,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -1250,7 +1250,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1320,7 +1320,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
@@ -1434,7 +1434,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, logger),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1555,7 +1555,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1646,7 +1646,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
@@ -1746,7 +1746,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OpenCodeInstancesTag, instanceClients),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
@@ -1817,7 +1817,7 @@ describe("SessionManagerService", () => {
 				Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(dbFile),
+				makePersistenceEffectLayer(dbFile, "test-project"),
 				Layer.succeed(OpenCodeInstancesTag, instanceClients),
 				Layer.succeed(OrchestrationEngineTag, engine),
 			),
@@ -1874,7 +1874,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
@@ -1969,7 +1969,10 @@ describe("SessionManagerService", () => {
 			};
 			const registry = new ProviderRegistry([providerInstance]);
 			const daemonConfig = makeNamedOpenCodeDaemonConfig();
-			const persistenceLayer = makePersistenceEffectLayer(dbFile);
+			const persistenceLayer = makePersistenceEffectLayer(
+				dbFile,
+				"test-project",
+			);
 			const engineLayer = Layer.effect(
 				OrchestrationEngineTag,
 				Effect.map(
@@ -2079,7 +2082,7 @@ describe("SessionManagerService", () => {
 						Layer.succeed(ConfigTag, makeRelayConfig(tmpDir)),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
-						makePersistenceEffectLayer(dbFile),
+						makePersistenceEffectLayer(dbFile, "test-project"),
 						Layer.succeed(OpenCodeInstancesTag, instanceClients),
 						Layer.succeed(OrchestrationEngineTag, engine),
 					),
@@ -2175,7 +2178,7 @@ describe("SessionManagerService", () => {
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					RelayStatusSnapshotLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
@@ -2382,7 +2385,7 @@ describe("SessionManagerService", () => {
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(dbFile),
+				makePersistenceEffectLayer(dbFile, "test-project"),
 			),
 		);
 
@@ -2454,7 +2457,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 			return Effect.gen(function* () {
@@ -2518,7 +2521,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 			return Effect.gen(function* () {
@@ -2630,7 +2633,7 @@ describe("SessionManagerService", () => {
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
-				makePersistenceEffectLayer(dbFile),
+				makePersistenceEffectLayer(dbFile, "test-project"),
 			),
 		);
 
@@ -2871,7 +2874,7 @@ describe("snooze session commands", () => {
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(dbFile),
+					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			),
 		};

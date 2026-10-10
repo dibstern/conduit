@@ -162,6 +162,7 @@ const makeLayer = (options: {
 					getLatestTurnModelExecution: () => Effect.succeed(undefined),
 				}),
 				Layer.succeed(EventStoreEffectTag, {
+					projectId: "test-project",
 					append: () => Effect.die("unused append"),
 					appendBatch: () => Effect.succeed([]),
 					readFromSequence: () => Effect.succeed([]),

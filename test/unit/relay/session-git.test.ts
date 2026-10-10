@@ -25,7 +25,7 @@ async function fixture() {
 		SessionGitLive.pipe(
 			Layer.provideMerge(
 				Layer.merge(
-					makePersistenceEffectLayer(path),
+					makePersistenceEffectLayer(path, "test-project"),
 					Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/primary" })),
 				),
 			),

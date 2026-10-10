@@ -748,7 +748,7 @@ async function createEffectHarness(
 		makePollerStateLive(),
 		makeOverridesStateLive(),
 	);
-	const persistence = makePersistenceEffectLayer(dbPath);
+	const persistence = makePersistenceEffectLayer(dbPath, "test-project");
 	const monitoring = wireMonitoringEffect({
 		client: { session: { messages } },
 		wsHandler: {

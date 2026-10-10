@@ -96,7 +96,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				removed: [],
 				removedSince: 0,
 			});
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect("creates a session for the originating browser tab", () => {
@@ -256,7 +258,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 			setForkEntry,
 		});
-		const persistenceLayer = makePersistenceEffectLayer(":memory:");
+		const persistenceLayer = makePersistenceEffectLayer(
+			":memory:",
+			"test-project",
+		);
 
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -404,6 +409,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				.mockResolvedValueOnce({ sessionId: "sdk-rollback" });
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
+				"test-project",
 			);
 			const layer = WsRpcServerLayer.pipe(
 				Layer.provideMerge(
@@ -851,7 +857,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 	});
 
 	it.effect("returns older history pages from SQLite", () => {
-		const persistenceLayer = makePersistenceEffectLayer(":memory:");
+		const persistenceLayer = makePersistenceEffectLayer(
+			":memory:",
+			"test-project",
+		);
 		return Effect.gen(function* () {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();

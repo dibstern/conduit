@@ -70,7 +70,7 @@ describe("relay automatic settlement sweep", () => {
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
-					makePersistenceEffectLayer(join(dir, "events.db")),
+					makePersistenceEffectLayer(join(dir, "events.db"), "test-project"),
 					Layer.succeed(
 						OrchestrationEngineTag,
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),

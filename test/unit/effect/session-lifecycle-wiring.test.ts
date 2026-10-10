@@ -169,7 +169,10 @@ function makeServiceLifecycleTestLayer(
 	api = makeMockOpenCodeAPI(),
 	dbFile?: string,
 ) {
-	const persistenceLayer = makePersistenceEffectLayer(dbFile ?? ":memory:");
+	const persistenceLayer = makePersistenceEffectLayer(
+		dbFile ?? ":memory:",
+		"test-project",
+	);
 	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
 		services,
 		deps,
@@ -189,7 +192,7 @@ function makeDurableServiceLifecycleTestLayer(
 		services,
 		deps,
 		api,
-		makePersistenceEffectLayer(dbFile),
+		makePersistenceEffectLayer(dbFile, "test-project"),
 	);
 	return Layer.provideMerge(serviceLayer, baseLayer);
 }

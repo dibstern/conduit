@@ -124,7 +124,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					],
 				})),
 			});
-			const persistence = makePersistenceEffectLayer(filename);
+			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
@@ -193,6 +193,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					}),
 				);
 				expect(updated).toEqual({
+					projectId: "test-project",
 					resumeSessionId: "sdk-session-next",
 					firstSequence: expect.any(Number),
 					deliveredThrough: expect.any(Number),
@@ -227,7 +228,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		});
-		const persistence = makePersistenceEffectLayer(filename);
+		const persistence = makePersistenceEffectLayer(filename, "test-project");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -330,7 +331,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				durationMs: 0,
 			})),
 		});
-		const persistence = makePersistenceEffectLayer(filename);
+		const persistence = makePersistenceEffectLayer(filename, "test-project");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -401,7 +402,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-sink-effect-"));
 			const filename = join(dir, "events.db");
-			const persistence = makePersistenceEffectLayer(filename);
+			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const ws = mockWsHandler("session-claude-sink-effect");
 			const log = createSilentLogger();
 			const client = makeHandlerOpenCodeAPI({

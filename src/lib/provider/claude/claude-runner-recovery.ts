@@ -4,6 +4,7 @@ import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -27,6 +28,7 @@ import { sendPreparedClaudeTurn } from "./prepare-turn.js";
 
 const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 	sql<{
+		project_id: string;
 		session_id: string;
 		provider_id: string;
 		command_id: string;
@@ -35,7 +37,7 @@ const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 		attempt_count: number;
 		assistant_message_id: string | null;
 		state: string | null;
-	}>`SELECT outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
+	}>`SELECT outbox.project_id, outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
 		json_extract(outbox.payload_json, '$.userMessageId') AS user_message_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
@@ -91,7 +93,11 @@ export const recoverClaudeRunnerCommands = (
 					wait: Effect.gen(function* () {
 						const execution = yield* Effect.either(
 							Effect.gen(function* () {
-								const state = yield* makeProviderStateEffect;
+								const state = yield* makeProviderStateEffect.pipe(
+									Effect.provideService(PersistenceProjectTag, {
+										projectId: row.project_id,
+									}),
+								);
 								const read = yield* makeReadQueryEffect;
 								return yield* sendPreparedClaudeTurn({
 									sessionId,
@@ -260,8 +266,9 @@ const settleClaudeRunnerCommand = (
 		.withTransaction(
 			Effect.gen(function* () {
 				const rows = yield* sql<{
+					project_id: string;
 					attempt_count: number;
-				}>`SELECT attempt_count FROM provider_command_outbox WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
+				}>`SELECT project_id, attempt_count FROM provider_command_outbox WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
 				const row = rows[0];
 				if (!row) return;
 				const succeeded = !failure && result?.status === "completed";
@@ -282,6 +289,9 @@ const settleClaudeRunnerCommand = (
 				if (succeeded && result?.providerStateUpdates.length) {
 					const providerState = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(PersistenceProjectTag, {
+							projectId: row.project_id,
+						}),
 					);
 					yield* providerState.saveUpdates(
 						sessionId,

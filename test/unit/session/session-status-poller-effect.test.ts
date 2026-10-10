@@ -44,7 +44,7 @@ describe("SessionStatusPoller Effect", () => {
 			const filename = join(dir, "events.db");
 			const layer = Layer.merge(
 				makeTestLayer(),
-				makePersistenceEffectLayer(filename),
+				makePersistenceEffectLayer(filename, "test-project"),
 			);
 
 			return Effect.gen(function* () {

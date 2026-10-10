@@ -124,6 +124,7 @@ describe("Canonical Event Types", () => {
 			sequence: 1,
 			eventId: createEventId(),
 			sessionId: "s1",
+			projectId: "test-project",
 			streamVersion: 0,
 			type: "session.created",
 			data: {

@@ -233,7 +233,10 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 
 	it("EffectOpenCodeRuntimeIngress can process SSE events with Effect persistence", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-runtime-ingress-"));
-		const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
+		const persistenceLayer = makePersistenceEffectLayer(
+			join(dir, "events.db"),
+			"test-project",
+		);
 		const runtime = ManagedRuntime.make(
 			Layer.mergeAll(
 				persistenceLayer,

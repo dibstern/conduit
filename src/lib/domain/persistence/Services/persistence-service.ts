@@ -8,6 +8,7 @@ import {
 	makeEffectSqlMigrator,
 	selectLegacySkeletonSessionIds,
 } from "../../../persistence/effect/migrations.js";
+import { PROJECT_PROVENANCE_TABLES } from "../../../persistence/schema.js";
 
 export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 	operation: string;
@@ -15,6 +16,7 @@ export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 }> {}
 
 export interface PersistenceService {
+	readonly projectId: string;
 	readonly migrate: Effect.Effect<void, PersistenceError>;
 	readonly healthCheck: Effect.Effect<boolean, PersistenceError>;
 	readonly sql: SqlClient.SqlClient;
@@ -25,17 +27,49 @@ export class PersistenceServiceTag extends Context.Tag("PersistenceService")<
 	PersistenceService
 >() {}
 
+/** Required when constructing a store; write call sites inherit its owner. */
+export class PersistenceProjectTag extends Context.Tag("PersistenceProject")<
+	PersistenceProjectTag,
+	{ readonly projectId: string }
+>() {}
+
 export const makePersistenceServiceLive: Layer.Layer<
 	PersistenceServiceTag,
 	PersistenceError,
-	SqlClient.SqlClient
+	SqlClient.SqlClient | PersistenceProjectTag
 > = Layer.effect(
 	PersistenceServiceTag,
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
+		if (projectId.trim().length === 0) {
+			return yield* new PersistenceError({
+				operation: "stampProjectProvenance",
+				cause: "A store requires a non-empty project id",
+			});
+		}
+
+		// Schema expansion cannot know the slug. Stamp legacy rows before any
+		// consumer can obtain this store, atomically across every write table.
+		const stampProjectProvenance = sql.withTransaction(
+			Effect.gen(function* () {
+				for (const table of PROJECT_PROVENANCE_TABLES) {
+					const unstamped = "project_id IS NULL OR project_id = ''";
+					const rows = yield* sql.unsafe(
+						`SELECT 1 FROM ${table} WHERE ${unstamped} LIMIT 1`,
+					);
+					if (rows.length === 0) continue;
+					yield* sql.unsafe(
+						`UPDATE ${table} SET project_id = ? WHERE ${unstamped}`,
+						[projectId],
+					);
+				}
+			}),
+		);
 
 		const migrate = makeEffectSqlMigrator().pipe(
 			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.zipRight(stampProjectProvenance),
 			Effect.asVoid,
 			Effect.mapError(
 				(e) => new PersistenceError({ operation: "migrate", cause: e }),
@@ -85,7 +119,7 @@ export const makePersistenceServiceLive: Layer.Layer<
 			Effect.withSpan("persistence.healthCheck"),
 		);
 
-		return { migrate, healthCheck, sql };
+		return { projectId, migrate, healthCheck, sql };
 	}),
 );
 

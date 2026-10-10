@@ -100,7 +100,7 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { seedSessionLoadFixture } from "../../fixtures/session-load.js";
 
 const openStore = (filename: string) =>
-	ManagedRuntime.make(makePersistenceEffectLayer(filename));
+	ManagedRuntime.make(makePersistenceEffectLayer(filename, "test-project"));
 type Store = ReturnType<typeof openStore>;
 
 type Command =
