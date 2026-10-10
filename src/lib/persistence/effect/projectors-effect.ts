@@ -982,6 +982,23 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 			}
 
+			// Idle means the provider has nothing in flight, so an open turn
+			// still waiting for its reply never got one (sent from another
+			// client, or ended before replying), and no result will close it.
+			// It settles; a later reply reopens it.
+			if (
+				isEventType(event, "session.status") &&
+				event.data.status === "idle"
+			) {
+				const written = yield* sql<OwnedRow & { id: string }>`
+						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
+						WHERE session_id = ${event.sessionId}
+						AND state IN ('pending', 'running') AND assistant_message_id IS NULL
+						AND requested_at <= ${event.createdAt}
+						RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
 			// A result may arrive before the provider continues the same turn.
 			if (
 				(isEventType(event, "session.status") &&
@@ -1030,6 +1047,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 							AND state NOT IN ('pending', 'running'))) DESC,
 						requested_at DESC, rowid DESC LIMIT 1`;
 				if (!turn) return { sessions: [], messages: [] };
+				const reopening = turn.state !== "pending" && turn.state !== "running";
+				// A tool no message of ours owns (a background task restarting
+				// between turns) joins an open turn only. Reopened, a settled turn
+				// would run with no reply whose result could close it.
+				if (
+					reopening &&
+					isEventType(event, "tool.started") &&
+					!parentTurn.length
+				)
+					return { sessions: [], messages: [] };
 				// Turns run one at a time, so a reply starting ends every earlier
 				// turn still running.
 				const superseded = isEventType(event, "message.created")
@@ -1044,7 +1071,6 @@ export const makeTurnProjector = (): EffectProjector => ({
 						parent_id = COALESCE(parent_id, ${turn.id})
 						WHERE id = ${event.data.messageId}`;
 				}
-				const reopening = turn.state !== "pending" && turn.state !== "running";
 				const assistantMessageId = reopening ? null : turn.assistant_message_id;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
