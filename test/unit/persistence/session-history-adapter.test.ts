@@ -1,5 +1,10 @@
 // test/unit/persistence/session-history-adapter.test.ts
+
 import { describe, expect, it } from "vitest";
+import {
+	MessageVersion,
+	PartVersion,
+} from "../../../src/lib/contracts/tool-wire.js";
 import type {
 	MessagePartRow,
 	MessageWithParts,
@@ -27,6 +32,7 @@ function makePartRow(
 		duration: null,
 		status: null,
 		sort_order: 0,
+		version: PartVersion.make(0),
 		created_at: 1_000_000_000_000,
 		updated_at: 1_000_000_000_000,
 		...overrides,
@@ -49,7 +55,7 @@ function makeMessageWithParts(
 		tokens_cache_read: null,
 		tokens_cache_write: null,
 		context_window: null,
-		version: 0,
+		version: MessageVersion.make(0),
 		is_streaming: 0,
 		is_backfilled: 0,
 		created_at: 1_000_000_000_000,

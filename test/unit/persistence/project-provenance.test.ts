@@ -90,7 +90,9 @@ async function oldStore() {
 describe("Bound project provenance", () => {
 	it("registers provenance after main's migrations with the file/key offset", () => {
 		expect(PROJECT_PROVENANCE_MIGRATION).toBe("0044_project_provenance.sql");
-		expect(Object.keys(effectMigrationEntries).slice(-5)).toEqual([
+		const keys = Object.keys(effectMigrationEntries);
+		const first = keys.indexOf("0041_messages_input_id");
+		expect(keys.slice(first, first + 5)).toEqual([
 			"0041_messages_input_id",
 			"0042_pending_inputs",
 			"0043_messages_steered",

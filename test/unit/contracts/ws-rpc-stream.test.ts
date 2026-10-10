@@ -21,6 +21,7 @@ import {
 } from "effect";
 import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type SessionEventBus,
@@ -55,7 +56,7 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 
 const messageRow = (id: string, version = 0): MessageWithParts => ({
 	id,
-	version,
+	version: MessageVersion.make(version),
 	session_id: "session-1",
 	turn_id: null,
 	role: "assistant",
@@ -77,8 +78,6 @@ const historyMessage = (id: string) => ({
 	id,
 	role: "assistant",
 	time: { created: 1, completed: 1 },
-	text: id,
-	parts: [],
 });
 
 const readFailure = new ReadQueryEffectError({
@@ -246,7 +245,7 @@ const deltas = (member: Member) =>
 		: [1, 2].map((version) => ({
 				_tag: "upsert",
 				item: {
-					_tag: "transcriptMessage",
+					_tag: "message",
 					message: historyMessage(`message-${version}`),
 				},
 				sequence: version,

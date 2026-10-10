@@ -519,9 +519,11 @@ export interface ReadQueryEffect {
 
 	/**
 	 * As {@link readSessionList}, for one session's projected transcript. A
-	 * message part carries no version of its own, so a part write advances the
-	 * message that owns it and the whole message comes back. Each row carries
-	 * its own `version`. Tool outputs come back as the browser opens them
+	 * message and each of its parts carry their own `version`. A ranged read
+	 * returns the parts that moved inside `range` with the message that owns
+	 * each, which may itself have moved past it; the message moved in `range`
+	 * when its own version is inside it. Removed messages and removed parts
+	 * come back separately. Tool outputs come back as the browser opens them
 	 * (`previewTools`).
 	 */
 	readonly readSessionTranscript: (
@@ -533,6 +535,11 @@ export interface ReadQueryEffect {
 			readonly version: number;
 			readonly removed?: readonly {
 				readonly id: string;
+				readonly version: number;
+			}[];
+			readonly removedParts?: readonly {
+				readonly messageId: string;
+				readonly partId: string;
 				readonly version: number;
 			}[];
 		},
@@ -788,7 +795,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// `source` is the FROM clause over `message_parts mp`.
 	const previewParts = (source: Fragment) => sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
-			duration, status, sort_order, created_at, updated_at,
+			duration, status, sort_order, created_at, updated_at, version,
 			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,
@@ -1576,6 +1583,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly id: string;
 				readonly version: number;
 			}[];
+			readonly removedParts?: readonly {
+				readonly messageId: string;
+				readonly partId: string;
+				readonly version: number;
+			}[];
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1585,6 +1597,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					// A part write stamps its message too, so a message is never older
+					// than its parts: every message with a part in the window is past
+					// the floor. Its own version may be past the ceiling; it then
+					// comes back only as the parent of the parts that moved.
 					const messages = yield* sql<MessageWithTurnModelRow>`
 						SELECT messages.*,
 							turns.requested_model AS turn_requested_model,
@@ -1595,7 +1611,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						LEFT JOIN turns ON turns.id = messages.turn_id
 						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 						WHERE messages.session_id = ${sessionId}
-							AND messages.version > ${floor} AND messages.version <= ${ceiling}
+							AND messages.version > ${floor}
 						ORDER BY messages.created_at ASC, messages.id ASC`;
 
 					let parts: readonly MessagePartRow[] = [];
@@ -1603,11 +1619,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						parts = yield* sql<MessagePartRow>`
 							WITH target_messages AS (
 								SELECT id FROM messages
-								WHERE session_id = ${sessionId}
-									AND version > ${floor} AND version <= ${ceiling}
+								WHERE session_id = ${sessionId} AND version > ${floor}
 							)
 							${previewParts(
-								sql`FROM message_parts mp JOIN target_messages tm ON mp.message_id = tm.id`,
+								sql`FROM message_parts mp JOIN target_messages tm ON mp.message_id = tm.id
+									WHERE mp.version > ${floor} AND mp.version <= ${ceiling}`,
 							)}`;
 					}
 					const removed =
@@ -1620,11 +1636,24 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						WHERE session_id = ${sessionId}
 						AND version > ${floor} AND version <= ${ceiling}
 						ORDER BY version, message_id`;
+					const removedParts =
+						range === undefined
+							? undefined
+							: yield* sql<{
+									messageId: string;
+									partId: string;
+									version: number;
+								}>`SELECT message_id AS messageId, part_id AS partId, version
+						FROM message_part_tombstones
+						WHERE session_id = ${sessionId}
+						AND version > ${floor} AND version <= ${ceiling}
+						ORDER BY version, part_id`;
 
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(messages, parts),
 						version,
 						...(removed === undefined ? {} : { removed }),
+						...(removedParts === undefined ? {} : { removedParts }),
 					};
 				}),
 			)

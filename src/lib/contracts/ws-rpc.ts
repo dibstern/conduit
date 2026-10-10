@@ -37,7 +37,6 @@ import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
 	STEER_BLOCKERS,
-	StoredEventSchema,
 } from "./stored-event.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 
@@ -228,7 +227,7 @@ export const PtyInfoSchema = Schema.Struct({
 	pid: Schema.Number,
 });
 
-const HistoryMessagePartSchema = Schema.Struct({
+export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
 	text: Schema.optional(Schema.String),
@@ -285,14 +284,24 @@ export const HistoryMessageSchema = Schema.Struct({
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
 
+/**
+ * A transcript row: a message, or one of its parts. Each moves on its own, so
+ * a live update carries only what changed.
+ * - `message`: a message without `parts` or `text`; its parts are rows of
+ *   their own, and a message row leaves the parts already held in place.
+ * - `part`: one part of the message `messageId`, placed among that message's
+ *   parts by `sortOrder`.
+ */
 export const SessionDetailItemSchema = Schema.Union(
 	Schema.Struct({
-		_tag: Schema.Literal("transcriptMessage"),
+		_tag: Schema.Literal("message"),
 		message: HistoryMessageSchema,
 	}),
 	Schema.Struct({
-		_tag: Schema.Literal("event"),
-		event: StoredEventSchema,
+		_tag: Schema.Literal("part"),
+		messageId: Schema.String,
+		sortOrder: Schema.Int,
+		part: HistoryMessagePartSchema,
 	}),
 	// One input conduit is holding for the session: queued behind a running
 	// turn, or sent as a steer and not yet placed. Its row id is
@@ -318,9 +327,16 @@ export const SessionDetailItemSchema = Schema.Union(
 	}),
 );
 
+/**
+ * A detail `remove` names a message by its id, and a part by this JSON pair of
+ * its message's id and its own: a part may share its message's id.
+ */
+export const PartRemovalId = Schema.parseJson(
+	Schema.Tuple(Schema.String, Schema.String),
+);
+
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
 const TextSuffixSchema = Schema.Struct({
-	partId: Schema.optional(Schema.String),
 	from: Schema.NonNegativeInt,
 	total: Schema.NonNegativeInt,
 });
@@ -331,7 +347,8 @@ export const SessionDetailEnvelopeSchema = Schema.Union(
 	DetailEnvelope.members[2].pipe(
 		Schema.extend(
 			Schema.Struct({
-				textSuffixes: Schema.optional(Schema.Array(TextSuffixSchema)),
+				// On a part row: its text is the suffix past what was last sent.
+				textSuffix: Schema.optional(TextSuffixSchema),
 			}),
 		),
 	),
@@ -2141,7 +2158,7 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
-		// Only clients that decode textSuffixes may opt into compressed live rows.
+		// Only clients that decode textSuffix may opt into compressed live parts.
 		textSuffixes: Schema.optional(Schema.Boolean),
 	},
 	success: SessionDetailEnvelopeSchema,

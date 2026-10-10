@@ -4,8 +4,11 @@
 // tickets assert against: it holds today's numbers and only sanity is checked,
 // except that devices watching the same thing share its reads: every device
 // holds the sidebar, two watch the same stream, and no sidebar or detail window
-// is read twice (conduit-test-y7eo.4); and a device reconnecting after the
-// restart is sent only the sidebar changes it missed (conduit-test-y7eo.3).
+// is read twice (conduit-test-y7eo.4); a device reconnecting after the
+// restart is sent only the sidebar changes it missed (conduit-test-y7eo.3). A
+// long turn's live frames stay flat, and a resume after a restart brings only
+// the parts that moved yet lands on the transcript a cold open shows
+// (conduit-test-y7eo.8).
 //
 // Wire sizes are WebSocket payloads as the page sees them, so after any
 // permessage-deflate inflation. Event-loop stalls come from a 10ms sampler in
@@ -64,6 +67,9 @@ const STREAMS = 3;
 // Two devices share a stream, and every device holds the sidebar.
 const WATCHED_STREAM: readonly number[] = [0, 0, 1];
 const SETTLE_MS = 2_000;
+// The long turn's tool calls, and the follow-up's that lands while away.
+const LONG_TURN_CALLS = 40;
+const FOLLOW_UP_CALLS = 3;
 // Fixed ceilings, in encoded bytes, for the frames tool previews shape
 // (conduit-test-y7eo.6), each a little over what it measured: a live update
 // 4,945 to 5,516, and a detail response 46,608, which carries the whole result
@@ -192,7 +198,7 @@ test("opens the heavy session after a restart under load", async ({
 	browser,
 	harness,
 }, testInfo) => {
-	test.setTimeout(180_000);
+	test.setTimeout(300_000);
 	const { viewport, isMobile, hasTouch } = testInfo.project.use;
 
 	// Seed into the store the first daemon created, then start on it.
@@ -394,6 +400,142 @@ test("opens the heavy session after a restart under load", async ({
 	pinned = undefined;
 	await toolDriver.close();
 
+	// A long turn sends each change as the parts it moved (conduit-test-y7eo.8):
+	// its live frames stay flat however many tool calls the message holds.
+	const longDriver = await harness.connect(
+		undefined,
+		undefined,
+		undefined,
+		false,
+	);
+	const longSession = await longDriver.createSession("Long turn");
+	await new AppPage(opener).goto(
+		`${harness.baseUrl}/s/${longSession}?p=process-test`,
+	);
+	pinned = [];
+	// A loaded server takes a few hundred ms a call.
+	await longDriver.send(longSession, `load-tools-${LONG_TURN_CALLS}`, 120_000);
+	const lastResult = `load-tool-${LONG_TURN_CALLS}-${LONG_TURN_CALLS}-result`;
+	await expect
+		.poll(() => pinned?.some(({ payload }) => payload.includes(lastResult)))
+		.toBe(true);
+	const turnFrames = pinned
+		.filter(
+			({ payload }) =>
+				payload.includes('"_tag":"upsert"') &&
+				payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
+		)
+		.map(({ bytes, payload }) => ({
+			bytes,
+			// One read can carry several changed parts; size each by its parts.
+			parts: payload.split('"_tag":"part"').length - 1,
+		}));
+	const perPart = turnFrames.map(
+		({ bytes, parts }) => bytes / Math.max(1, parts),
+	);
+	const quarter = Math.max(1, Math.floor(perPart.length / 4));
+	const median = (sizes: readonly number[]) =>
+		[...sizes].sort((a, b) => a - b)[Math.floor(sizes.length / 2)] ?? 0;
+
+	// Away from the session, a follow-up turn lands and the server restarts;
+	// coming back resumes from the cursor the device holds.
+	const pick = (page: Page, id: string) =>
+		page.evaluate(
+			(id) =>
+				document
+					.querySelector<HTMLElement>(
+						`[data-session-id="${id}"] .session-item-title`,
+					)
+					?.click(),
+			id,
+		);
+	await pick(opener, toolSession);
+	await expect(opener).toHaveURL(new RegExp(toolSession));
+	await longDriver.send(longSession, `load-tools-${FOLLOW_UP_CALLS}`, 60_000);
+	await longDriver.close();
+	await harness.terminate();
+	const longRestartAt = Date.now();
+	await harness.restart({ keepPort: true, skipBrowserProbe: true });
+	await expect
+		.poll(
+			() =>
+				frames.some(
+					(frame) =>
+						frame.device === DEVICES - 1 &&
+						frame.direction === "received" &&
+						frame.at > longRestartAt,
+				),
+			{ timeout: 30_000 },
+		)
+		.toBe(true);
+	await opener.waitForTimeout(SETTLE_MS);
+	pinned = [];
+	await pick(opener, longSession);
+	const followUp = `load-tools-${FOLLOW_UP_CALLS}`;
+	await expect(opener.locator("#messages")).toContainText(followUp);
+	await opener.waitForTimeout(SETTLE_MS);
+	const resumed = pinned;
+	pinned = undefined;
+
+	// The same session opened cold, on a fresh device.
+	const cold = await (
+		await browser.newContext({
+			...(viewport ? { viewport } : {}),
+			...(isMobile === undefined ? {} : { isMobile }),
+			...(hasTouch === undefined ? {} : { hasTouch }),
+		})
+	).newPage();
+	let wholeMessageBytes = 0;
+	cold.on("websocket", (socket) =>
+		socket.on("framereceived", ({ payload }) => {
+			if (payload.toString().includes(lastResult))
+				wholeMessageBytes = Math.max(
+					wholeMessageBytes,
+					Buffer.byteLength(payload),
+				);
+		}),
+	);
+	await new AppPage(cold).goto(
+		`${harness.baseUrl}/s/${longSession}?p=process-test`,
+	);
+	await expect(cold.locator("#messages")).toContainText(followUp);
+	await cold.waitForTimeout(SETTLE_MS);
+	const transcriptOf = async (page: Page) => {
+		const collapsed = page.locator(
+			'#messages .turn-activity-toggle[aria-expanded="false"]',
+		);
+		while ((await collapsed.count()) > 0) await collapsed.first().click();
+		return page.locator("#messages").innerText();
+	};
+	const [resumedTranscript, coldTranscript] = [
+		await transcriptOf(opener),
+		await transcriptOf(cold),
+	];
+	const longTurn = {
+		calls: LONG_TURN_CALLS,
+		liveFrames: turnFrames.length,
+		partsSent: turnFrames.reduce((total, { parts }) => total + parts, 0),
+		firstQuartileMedianBytesPerPart: Math.round(
+			median(perPart.slice(0, quarter)),
+		),
+		lastQuartileMedianBytesPerPart: Math.round(median(perPart.slice(-quarter))),
+		maxFrameBytes: Math.max(0, ...turnFrames.map(({ bytes }) => bytes)),
+		// What each late frame carried when a change re-sent the whole message.
+		wholeMessageBytes,
+		resume: {
+			frames: resumed.length,
+			bytes: resumed.reduce((total, { bytes }) => total + bytes, 0),
+			resentEarlierTurn: resumed.some(({ payload }) =>
+				payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
+			),
+			carriedFollowUp: resumed.some(({ payload }) =>
+				payload.includes(`load-tool-${FOLLOW_UP_CALLS}-`),
+			),
+		},
+		resumedEqualsCold: resumedTranscript === coldTranscript,
+	};
+	await cold.context().close();
+
 	const report = {
 		schema: 1,
 		project: testInfo.project.name,
@@ -441,6 +583,7 @@ test("opens the heavy session after a restart under load", async ({
 			},
 		},
 		toolPreviews,
+		longTurn,
 		server: {
 			warm: serverWindow(warmStart, warm, warmFrom, warmTo),
 			restart: serverWindow(undefined, restarted, stoppedAt, restartTo),
@@ -481,5 +624,20 @@ test("opens the heavy session after a restart under load", async ({
 		expect(bytes, name).toBeGreaterThan(0);
 		expect(bytes, name).toBeLessThanOrEqual(limit);
 	}
+	// Flat: a part late in the turn costs about what one early in it did (a
+	// completed call carries its result, so a little more), though the message
+	// grew 40 calls; re-sending the message grew ~7x over the same span. And no
+	// frame comes near the message it belongs to.
+	expect(longTurn.liveFrames).toBeGreaterThanOrEqual(LONG_TURN_CALLS / 4);
+	expect(longTurn.lastQuartileMedianBytesPerPart).toBeLessThanOrEqual(
+		longTurn.firstQuartileMedianBytesPerPart * 1.5,
+	);
+	expect(longTurn.maxFrameBytes * 5).toBeLessThan(longTurn.wholeMessageBytes);
+	// Resume brings only what moved, and lands where a cold open does.
+	expect(longTurn.resume).toMatchObject({
+		resentEarlierTurn: false,
+		carriedFollowUp: true,
+	});
+	expect(resumedTranscript).toBe(coldTranscript);
 	for (const page of pages) await page.context().close();
 });

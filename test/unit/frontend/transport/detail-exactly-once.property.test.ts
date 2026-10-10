@@ -10,25 +10,37 @@ import {
 import { resumeStream } from "../../../../src/lib/frontend/transport/resume.js";
 import { decodeSessionDetail } from "../../../../src/lib/frontend/transport/session-detail-wire.js";
 
+// Each message holds at most one text part: `clear` deletes that part alone.
 type Change = {
 	readonly id: "a" | "b" | "c";
-	readonly kind: "grow" | "remove";
+	readonly kind: "grow" | "remove" | "clear";
 	readonly text: string;
 };
 type Event = readonly Change[];
-type Row = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"] & {
-	_tag: "transcriptMessage";
-};
+type Row = Extract<
+	Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"],
+	{ _tag: "message" | "part" }
+>;
 
-const item = (id: string, text: string): Row => ({
-	_tag: "transcriptMessage",
-	message: {
-		id,
-		role: "assistant",
-		time: { created: id.charCodeAt(0) },
-		parts: [{ id: `${id}-text`, type: "text", text }],
-	},
+const header = (id: string): Row => ({
+	_tag: "message",
+	message: { id, role: "assistant", time: { created: id.charCodeAt(0) } },
 });
+const part = (id: string, text: string): Row => ({
+	_tag: "part",
+	messageId: id,
+	sortOrder: 0,
+	part: { id: `${id}-text`, type: "text", text },
+});
+const partKey = (id: string) => JSON.stringify([id, `${id}-text`]);
+// The name a row shares with its own removal.
+const keyOf = (
+	row: Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"],
+) => {
+	if (row._tag === "message") return row.message.id;
+	if (row._tag === "part") return partKey(row.messageId);
+	throw new Error(`unexpected ${row._tag} row`);
+};
 const empty = (): TranscriptEntry => ({
 	project: "project",
 	rows: [],
@@ -36,6 +48,7 @@ const empty = (): TranscriptEntry => ({
 	hasMore: false,
 	status: { _tag: "live" },
 	pending: [],
+	waiting: new Map(),
 });
 const lost = () =>
 	new RpcClientError({ reason: "Protocol", message: "scripted drop" });
@@ -43,25 +56,37 @@ const lost = () =>
 // The event log owns state independently of the client. One event can fan out to
 // multiple envelopes with one sequence, and removals are durable tombstones.
 function logOf(events: readonly Event[]) {
-	const state = new Map<string, Row>();
+	// Message id to its text part's text, absent when the part is deleted.
+	const state = new Map<string, { text?: string }>();
 	const log: SessionDetailEnvelope[] = [];
 	for (const [index, changes] of events.entries()) {
 		const sequence = index + 1;
 		const changed = new Map<string, SessionDetailEnvelope>();
+		const upsert = (item: Row) =>
+			changed.set(keyOf(item), { _tag: "upsert", item, sequence });
 		for (const change of changes) {
+			const held = state.get(change.id);
 			if (change.kind === "remove") {
 				state.delete(change.id);
 				changed.set(change.id, { _tag: "remove", id: change.id, sequence });
+				changed.delete(partKey(change.id));
+			} else if (change.kind === "clear") {
+				if (held) state.set(change.id, {});
+				const id = partKey(change.id);
+				changed.set(id, { _tag: "remove", id, sequence });
 			} else {
-				const previous = state.get(change.id)?.message.parts?.[0]?.text ?? "";
-				const next = item(change.id, previous + change.text);
-				state.set(change.id, next);
-				changed.set(change.id, { _tag: "upsert", item: next, sequence });
+				const text = (held?.text ?? "") + change.text;
+				state.set(change.id, { text });
+				if (!held) upsert(header(change.id));
+				upsert(part(change.id, text));
 			}
 		}
 		log.push(...changed.values());
 	}
-	return { log, rows: [...state.values()], head: events.length };
+	const rows = [...state].flatMap(([id, { text }]) =>
+		text === undefined ? [header(id)] : [header(id), part(id, text)],
+	);
+	return { log, rows, head: events.length };
 }
 
 // Sent prefixes belong to this subscription only. Replay is whole rows;
@@ -74,8 +99,7 @@ function wire(envelopes: readonly SessionDetailEnvelope[], corrupt: boolean) {
 		if (envelope._tag === "snapshot") {
 			sent.clear();
 			for (const row of envelope.rows)
-				if (row._tag === "transcriptMessage")
-					sent.set(row.message.id, row.message.parts?.[0]?.text ?? "");
+				if (row._tag === "part") sent.set(row.messageId, row.part.text ?? "");
 			live = false;
 			return envelope;
 		}
@@ -84,28 +108,28 @@ function wire(envelopes: readonly SessionDetailEnvelope[], corrupt: boolean) {
 			return envelope;
 		}
 		if (envelope._tag === "remove") {
-			sent.delete(envelope.id);
+			const pair: unknown = envelope.id.startsWith("[")
+				? JSON.parse(envelope.id)
+				: [envelope.id];
+			if (Array.isArray(pair)) sent.delete(String(pair[0]));
 			return envelope;
 		}
-		if (envelope.item._tag !== "transcriptMessage") return envelope;
-		const row = envelope.item.message;
-		const text = row.parts?.[0]?.text ?? "";
-		const before = sent.get(row.id);
-		sent.set(row.id, text);
+		const row = envelope.item;
+		if (row._tag !== "part") return envelope;
+		const text = row.part.text ?? "";
+		const before = sent.get(row.messageId);
+		sent.set(row.messageId, text);
 		if (!live || before === undefined || !text.startsWith(before))
 			return envelope;
 		const wrong = corrupt && !injected;
 		if (wrong) injected = true;
 		return {
 			...envelope,
-			item: item(row.id, text.slice(before.length)),
-			textSuffixes: [
-				{
-					partId: `${row.id}-text`,
-					from: wrong ? text.length + 1 : before.length,
-					total: text.length,
-				},
-			],
+			item: part(row.messageId, text.slice(before.length)),
+			textSuffix: {
+				from: wrong ? text.length + 1 : before.length,
+				total: text.length,
+			},
 		};
 	});
 }
@@ -114,11 +138,7 @@ function coalesce(envelopes: readonly SessionDetailEnvelope[]) {
 	const latest = new Map<string, SessionDetailEnvelope>();
 	for (const envelope of envelopes) {
 		if (envelope._tag === "remove") latest.set(envelope.id, envelope);
-		if (
-			envelope._tag === "upsert" &&
-			envelope.item._tag === "transcriptMessage"
-		)
-			latest.set(envelope.item.message.id, envelope);
+		if (envelope._tag === "upsert") latest.set(keyOf(envelope.item), envelope);
 	}
 	return [...latest.values()].sort((a, b) => {
 		const left = "sequence" in a ? a.sequence : 0;
@@ -138,7 +158,7 @@ describe("session detail exactly once", () => {
 	it("converges to the canonical transcript across drops, replay shapes and corrupt suffixes", async () => {
 		const change = fc.record({
 			id: fc.constantFrom("a", "b", "c"),
-			kind: fc.constantFrom("grow", "remove"),
+			kind: fc.constantFrom("grow", "remove", "clear"),
 			text: fc.constantFrom("x", "y", "💡"),
 		});
 		await fc.assert(
@@ -217,9 +237,8 @@ describe("session detail exactly once", () => {
 								.some(
 									(envelope) =>
 										envelope._tag === "upsert" &&
-										envelope.textSuffixes?.some(
-											(suffix) => suffix.from > suffix.total,
-										),
+										envelope.textSuffix !== undefined &&
+										envelope.textSuffix.from > envelope.textSuffix.total,
 								)
 						)
 							mismatchInjected = true;

@@ -14,6 +14,7 @@ import {
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
+import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
 	vi.clearAllMocks();
@@ -34,29 +35,26 @@ function projectedTurn() {
 		hasMore: false,
 		status: { _tag: "live" },
 		pending: [],
+		waiting: new Map(),
 	};
-	const entry = applyTranscriptEnvelope(empty, {
-		_tag: "upsert",
-		sequence: 1,
-		item: {
-			_tag: "transcriptMessage",
-			message: {
-				id: "assistant-x",
-				role: "assistant",
-				parts: [
-					{ id: "thinking", type: "thinking", text: "reasoning" },
-					{
-						id: "tool",
-						type: "tool",
-						tool: "Read",
-						callID: "call",
-						state: { status: "running" },
-					},
-					{ id: "text", type: "text", text: "answer" },
-				],
-			},
+	const entry = detailUpserts(
+		{
+			id: "assistant-x",
+			role: "assistant",
+			parts: [
+				{ id: "thinking", type: "thinking", text: "reasoning" },
+				{
+					id: "tool",
+					type: "tool",
+					tool: "Read",
+					callID: "call",
+					state: { status: "running" },
+				},
+				{ id: "text", type: "text", text: "answer" },
+			],
 		},
-	});
+		1,
+	).reduce(applyTranscriptEnvelope, empty);
 	slot.messages.messages = deriveTranscriptMessages(entry, []);
 	chat.seedRegistryFromMessages(
 		slot.activity,

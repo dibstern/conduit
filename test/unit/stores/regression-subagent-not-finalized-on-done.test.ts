@@ -19,6 +19,7 @@ import {
 	deriveTranscriptMessages,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { detailUpserts } from "../../helpers/detail-rows.js";
 
 const sessionId = "sub-parent";
 beforeEach(() => {
@@ -40,36 +41,33 @@ function projectTool(name: "Task" | "Read") {
 		hasMore: false,
 		status: { _tag: "live" },
 		pending: [],
+		waiting: new Map(),
 	};
-	const projected = applyTranscriptEnvelope(entry, {
-		_tag: "upsert",
-		sequence: 1,
-		item: {
-			_tag: "transcriptMessage",
-			message: {
-				id: "assistant",
-				role: "assistant",
-				parts: [
-					{
-						id: "tool",
-						type: "tool",
-						tool: name,
-						callID: "call",
-						state: {
-							status: "running",
-							input: {
-								_tag: "whole",
-								value:
-									name === "Task"
-										? { subagent_type: "explore" }
-										: { path: "foo.ts" },
-							},
+	const projected = detailUpserts(
+		{
+			id: "assistant",
+			role: "assistant",
+			parts: [
+				{
+					id: "tool",
+					type: "tool",
+					tool: name,
+					callID: "call",
+					state: {
+						status: "running",
+						input: {
+							_tag: "whole",
+							value:
+								name === "Task"
+									? { subagent_type: "explore" }
+									: { path: "foo.ts" },
 						},
 					},
-				],
-			},
+				},
+			],
 		},
-	});
+		1,
+	).reduce(applyTranscriptEnvelope, entry);
 	slot.messages.messages = deriveTranscriptMessages(projected, []);
 	seedRegistryFromMessages(
 		slot.activity,

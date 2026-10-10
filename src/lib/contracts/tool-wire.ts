@@ -29,6 +29,13 @@ export const MessageVersion = Schema.NonNegativeInt.pipe(
 );
 export type MessageVersion = typeof MessageVersion.Type;
 
+/** The read-model version a message part was last written at. A part moves on
+ *  its own, so its version is never borrowed from the message that owns it. */
+export const PartVersion = Schema.NonNegativeInt.pipe(
+	Schema.brand("PartVersion"),
+);
+export type PartVersion = typeof PartVersion.Type;
+
 export const WholeText = Schema.TaggedStruct("whole", { text: Schema.String });
 export type WholeText = typeof WholeText.Type;
 

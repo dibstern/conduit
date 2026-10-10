@@ -534,8 +534,7 @@ test.describe("OpenCode child family idle", () => {
 							envelope._tag === "snapshot" &&
 							envelope.rows.some(
 								(item) =>
-									item._tag === "transcriptMessage" &&
-									item.message.id === messageId,
+									item._tag === "message" && item.message.id === messageId,
 							),
 					),
 			)

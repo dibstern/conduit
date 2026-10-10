@@ -1022,6 +1022,44 @@ function query(params: {
 					},
 				} as unknown as SDKMessage;
 			}
+			// A long turn of `load-tools-<n>` Bash calls in one message, each call
+			// and each result its own live change.
+			if (request.startsWith("load-tools-")) {
+				const count = Number(request.slice("load-tools-".length));
+				for (let call = 1; call <= count && !closed; call++) {
+					const toolUseID = randomUUID();
+					const marker = `load-tool-${count}-${call}`;
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index: call,
+						content_block: {
+							type: "tool_use",
+							id: toolUseID,
+							name: "Bash",
+							input: { command: `printf ${marker} ${"x".repeat(400)}` },
+						},
+					});
+					yield stream(sessionId, { type: "content_block_stop", index: call });
+					await new Promise<void>((done) => setTimeout(done, 50));
+					yield {
+						type: "user",
+						uuid: randomUUID(),
+						session_id: sessionId,
+						parent_tool_use_id: null,
+						message: {
+							role: "user",
+							content: [
+								{
+									type: "tool_result",
+									tool_use_id: toolUseID,
+									content: `${marker}-result ${"y".repeat(800)}`,
+									is_error: false,
+								},
+							],
+						},
+					} as unknown as SDKMessage;
+				}
+			}
 			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();
 				const handoffHistory =

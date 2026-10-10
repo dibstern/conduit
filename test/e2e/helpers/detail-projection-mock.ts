@@ -12,7 +12,13 @@ type PendingInput = {
 	admittedAt: number;
 };
 type DetailItem =
-	| { _tag: "transcriptMessage"; message: HistoryMessage }
+	| { _tag: "message"; message: HistoryMessage }
+	| {
+			_tag: "part";
+			messageId: string;
+			sortOrder: number;
+			part: HistoryMessagePart;
+	  }
 	| { _tag: "pendingInput"; input: PendingInput }
 	| { _tag: "inbox"; inbox: Inbox };
 type Inbox = { paused: boolean; steer: "no_steering" | "prompt_open" | null };
@@ -94,10 +100,16 @@ const toWire = (message: HistoryMessage): HistoryMessage => ({
 	}),
 });
 
-const item = (message: HistoryMessage): DetailItem => ({
-	_tag: "transcriptMessage",
-	message,
-});
+// A message travels as its header, then each part as a row of its own.
+const items = ({ parts = [], ...message }: HistoryMessage): DetailItem[] => [
+	{ _tag: "message", message },
+	...parts.map((part, sortOrder) => ({
+		_tag: "part" as const,
+		messageId: message.id,
+		sortOrder,
+		part,
+	})),
+];
 
 const sortedRows = (state: SessionProjection): HistoryMessage[] =>
 	[...state.rows.values()].sort(
@@ -111,7 +123,7 @@ const snapshot = (state: SessionProjection): DetailEnvelope => {
 	return {
 		_tag: "snapshot",
 		rows: [
-			...rows.slice(-50).map(item),
+			...rows.slice(-50).flatMap(items),
 			...[...state.pending.values()].map(
 				(input): DetailItem => ({ _tag: "pendingInput", input }),
 			),
@@ -126,11 +138,8 @@ function upsert(page: Page, sessionId: string, message: HistoryMessage): void {
 	const state = session(page, sessionId);
 	state.rows.set(message.id, message);
 	const sequence = ++state.sequence;
-	listeners.get(page)?.(sessionId, {
-		_tag: "upsert",
-		item: item(message),
-		sequence,
-	});
+	for (const item of items(message))
+		listeners.get(page)?.(sessionId, { _tag: "upsert", item, sequence });
 }
 
 function replacePart(

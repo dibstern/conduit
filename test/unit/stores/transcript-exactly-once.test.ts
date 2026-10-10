@@ -19,6 +19,7 @@ import {
 } from "../../../src/lib/frontend/transport/shared-client.js";
 import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
+import { detailRowsOf, detailUpserts } from "../../helpers/detail-rows.js";
 
 const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
@@ -132,18 +133,12 @@ it("applies each detail update once", async () => {
 	await wire.emit({
 		_tag: "snapshot",
 		sequence: 4,
-		rows: [user, assistant("hello")].map((message) => ({
-			_tag: "transcriptMessage",
-			message,
-		})),
+		rows: [user, assistant("hello")].flatMap(detailRowsOf),
 	});
 	await wire.emit({ _tag: "synchronized" });
 	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
-	await wire.emit({
-		_tag: "upsert",
-		sequence: 5,
-		item: { _tag: "transcriptMessage", message: assistant("hello world") },
-	});
+	for (const envelope of detailUpserts(assistant("hello world"), 5))
+		await wire.emit(envelope);
 	await vi.waitFor(() =>
 		expect(
 			getOrCreateSessionSlot("A").messages.messages.some(

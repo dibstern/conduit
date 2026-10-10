@@ -45,8 +45,8 @@ const prose = (label: string, bytes: number) =>
 // Each earlier reply is ~20 KB, so 50 messages would weigh ~500 KB.
 const reply = (turn: number) =>
 	`${prose(`Reply ${turn}`, 20_000)}\n${replyEnd(turn)}`;
-// Bigger than a whole page on its own.
-const HUGE_REPLY = `${prose("Huge", 300_000)}\n${HUGE_END}`;
+// Bigger than a whole page on its own: ~310 KB, sent once as its text part.
+const HUGE_REPLY = `${prose("Huge", 400_000)}\n${HUGE_END}`;
 
 const userId = (turn: number) => `${SESSION}-u${turn}`;
 const assistantId = (turn: number) => `${SESSION}-a${turn}`;

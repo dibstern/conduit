@@ -1,4 +1,5 @@
 import { SqlClient } from "@effect/sql";
+import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -2718,7 +2719,7 @@ describe("loadMoreHistoryForSession", () => {
 							tokens_cache_read: null,
 							tokens_cache_write: null,
 							context_window: null,
-							version: 0,
+							version: MessageVersion.make(0),
 							is_streaming: 0,
 							is_backfilled: 0,
 							created_at: 1,
@@ -2755,7 +2756,7 @@ describe("loadMoreHistoryForSession", () => {
 						tokens_cache_read: null,
 						tokens_cache_write: null,
 						context_window: null,
-						version: 0,
+						version: MessageVersion.make(0),
 						is_streaming: 0,
 						is_backfilled: 0,
 						created_at: 1,

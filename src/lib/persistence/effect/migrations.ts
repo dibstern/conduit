@@ -9,6 +9,7 @@ import {
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGE_TOMBSTONES_MIGRATION,
@@ -1111,6 +1112,11 @@ export const effectMigrationEntries = {
 		"events",
 		"project_id",
 		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),
+	),
+	"0046_message_part_versions": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"version",
+		readMigrationSql(MESSAGE_PART_VERSIONS_MIGRATION),
 	),
 } satisfies Record<
 	string,

@@ -72,6 +72,7 @@ import {
 	cleanupTestClaudeRunners,
 	testRunnerAlive,
 } from "./claude-runner-cleanup.js";
+import { assembleDetailRows } from "./detail-rows.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "./mock-opencode-server.js";
 import {
@@ -1989,6 +1990,7 @@ export class ProcessBrowser {
 		if (existing) return existing;
 		const ready = (async () => {
 			const cursor = this.frames.length;
+			const assemble = assembleDetailRows();
 			this.detailFibers.add(
 				this.watch(
 					this.rpc.SubscribeSessionDetail({
@@ -2004,19 +2006,15 @@ export class ProcessBrowser {
 									: envelope._tag === "upsert"
 										? [envelope.item]
 										: [];
-							for (const item of items)
-								if (item._tag === "event")
+							for (const item of items) {
+								const message = assemble(item);
+								if (message)
 									this.record({
-										...item.event,
-										type: item.event.type,
-										sessionId,
-									});
-								else if (item._tag === "transcriptMessage")
-									this.record({
-										...item.message,
+										...message,
 										type: "transcript_message",
 										sessionId,
 									});
+							}
 						}),
 				),
 			);

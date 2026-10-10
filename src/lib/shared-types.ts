@@ -680,7 +680,7 @@ const UserMessageSchema = Schema.Struct({
 
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 6;
+export const WS_PROTOCOL_VERSION = 7;
 
 // -- Combined RelayMessage schema union --
 

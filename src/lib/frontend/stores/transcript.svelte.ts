@@ -1,6 +1,9 @@
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Option, Schema, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
-import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
+import {
+	PartRemovalId,
+	type SessionDetailEnvelope,
+} from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { type FeedStatus, supervise } from "../transport/supervise.js";
@@ -28,9 +31,9 @@ import { refreshSessionSkills } from "./session-skills.svelte.js";
 
 type ProjectRef = string;
 export type TranscriptEntry = NonNullable<SessionMessages["transcript"]>;
-type DetailRow = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"] & {
-	_tag: "transcriptMessage";
-};
+type DetailItem = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"];
+type WireMessage = Extract<DetailItem, { _tag: "message" }>["message"];
+type WirePart = Extract<DetailItem, { _tag: "part" }>["part"];
 
 const FRAME_FALLBACK_DELAY_MS = 16;
 
@@ -62,64 +65,64 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 		? Object.fromEntries(Object.entries(value))
 		: undefined;
 
-function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
-	const parts = source.parts?.flatMap((part): HistoryMessagePart[] => {
-		if (!isPartType(part.type)) return [];
-		const {
-			type,
-			state,
-			time,
-			text,
-			renderedHtml,
-			callID,
-			tool,
-			preTokens,
-			postTokens,
-			failed,
-			code,
-			...base
-		} = part;
-		const partTime = record(time);
-		return [
-			{
-				...base,
-				type,
-				...(text === undefined ? {} : { text }),
-				...(renderedHtml === undefined ? {} : { renderedHtml }),
-				...(callID === undefined ? {} : { callID }),
-				...(tool === undefined ? {} : { tool }),
-				...(state === undefined
-					? {}
-					: {
-							state: {
-								...state,
-								...(isToolStatus(state["status"])
-									? { status: state["status"] }
-									: {}),
-								...(typeof state["error"] === "string"
-									? { error: state["error"] }
-									: {}),
-							},
-						}),
-				...(partTime === undefined
-					? {}
-					: {
-							time: {
-								...(typeof partTime["start"] === "number"
-									? { start: partTime["start"] }
-									: {}),
-								...(typeof partTime["end"] === "number"
-									? { end: partTime["end"] }
-									: {}),
-							},
-						}),
-				...(typeof preTokens === "number" ? { preTokens } : {}),
-				...(typeof postTokens === "number" ? { postTokens } : {}),
-				...(failed === true ? { failed } : {}),
-				...(typeof code === "string" ? { code } : {}),
-			},
-		];
-	});
+function toHistoryPart(part: WirePart): HistoryMessagePart | undefined {
+	if (!isPartType(part.type)) return undefined;
+	const {
+		type,
+		state,
+		time,
+		text,
+		renderedHtml,
+		callID,
+		tool,
+		preTokens,
+		postTokens,
+		failed,
+		code,
+		...base
+	} = part;
+	const partTime = record(time);
+	return {
+		...base,
+		type,
+		...(text === undefined ? {} : { text }),
+		...(renderedHtml === undefined ? {} : { renderedHtml }),
+		...(callID === undefined ? {} : { callID }),
+		...(tool === undefined ? {} : { tool }),
+		...(state === undefined
+			? {}
+			: {
+					state: {
+						...state,
+						...(isToolStatus(state["status"])
+							? { status: state["status"] }
+							: {}),
+						...(typeof state["error"] === "string"
+							? { error: state["error"] }
+							: {}),
+					},
+				}),
+		...(partTime === undefined
+			? {}
+			: {
+					time: {
+						...(typeof partTime["start"] === "number"
+							? { start: partTime["start"] }
+							: {}),
+						...(typeof partTime["end"] === "number"
+							? { end: partTime["end"] }
+							: {}),
+					},
+				}),
+		...(typeof preTokens === "number" ? { preTokens } : {}),
+		...(typeof postTokens === "number" ? { postTokens } : {}),
+		...(failed === true ? { failed } : {}),
+		...(typeof code === "string" ? { code } : {}),
+	};
+}
+
+function toHistoryMessage(source: WireMessage): HistoryMessage {
+	const parts = source.parts?.flatMap((part) => toHistoryPart(part) ?? []);
 	const {
 		parts: _sourceParts,
 		tokens: sourceTokens,
@@ -217,74 +220,156 @@ const rowOrder = (a: HistoryMessage, b: HistoryMessage): number =>
 const pendingOrder = (a: PendingInput, b: PendingInput): number =>
 	a.admittedAt - b.admittedAt || a.inputId.localeCompare(b.inputId);
 
-/** The server sends whole rows. Keep the held page contiguous below its floor. */
-export function applyTranscriptEnvelope(
+// Where a held part sits among its message's parts. A part an older page
+// brought has no order and sorts first: that page brought its message whole.
+const partOrder = new WeakMap<HistoryMessagePart, number>();
+const orderOf = (part: HistoryMessagePart): number => partOrder.get(part) ?? -1;
+
+/** `parts` with `part` replacing its namesake, or placed by its order. */
+const placePart = (
+	parts: readonly HistoryMessagePart[],
+	part: HistoryMessagePart,
+): HistoryMessagePart[] => {
+	const rest = parts.filter((old) => old.id !== part.id);
+	const at = rest.findIndex((old) => orderOf(old) > orderOf(part));
+	return at === -1
+		? [...rest, part]
+		: [...rest.slice(0, at), part, ...rest.slice(at)];
+};
+
+/** The entry with `messageId`'s parts rewritten, held or still waiting for it. */
+const withParts = (
 	entry: TranscriptEntry,
-	envelope: SessionDetailEnvelope,
-): TranscriptEntry {
-	switch (envelope._tag) {
-		case "snapshot": {
-			const inbox = envelope.rows.flatMap((item) =>
-				item._tag === "inbox" ? [item.inbox] : [],
-			)[0];
-			return {
+	messageId: string,
+	change: (parts: readonly HistoryMessagePart[]) => HistoryMessagePart[],
+): TranscriptEntry =>
+	entry.rows.some((row) => row.id === messageId)
+		? {
 				...entry,
-				rows: envelope.rows
-					.filter((item) => item._tag === "transcriptMessage")
-					.map((item) => toHistoryMessage(item.message))
-					.sort(rowOrder),
-				pending: envelope.rows
-					.flatMap((item) => (item._tag === "pendingInput" ? [item.input] : []))
-					.sort(pendingOrder),
-				paused: inbox?.paused ?? false,
-				steer: inbox?.steer,
-				hwm: envelope.sequence,
-				hasMore: envelope.hasMore ?? false,
-				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
-			};
-		}
-		case "upsert": {
-			const hwm = Math.max(entry.hwm ?? 0, envelope.sequence);
-			if (envelope.item._tag === "pendingInput") {
-				const input = envelope.item.input;
-				return {
-					...entry,
-					hwm,
-					pending: [
-						...entry.pending.filter((old) => old.inputId !== input.inputId),
-						input,
-					].sort(pendingOrder),
-				};
+				rows: entry.rows.map((row) =>
+					row.id === messageId
+						? { ...row, parts: change(row.parts ?? []) }
+						: row,
+				),
 			}
-			if (envelope.item._tag === "inbox")
-				return { ...entry, hwm, ...envelope.item.inbox };
-			if (envelope.item._tag !== "transcriptMessage") return { ...entry, hwm };
-			const row = toHistoryMessage(envelope.item.message);
-			const held = entry.rows.some((old) => old.id === row.id);
+		: {
+				...entry,
+				waiting: new Map(entry.waiting).set(
+					messageId,
+					change(entry.waiting.get(messageId) ?? []),
+				),
+			};
+
+const withoutWaiting = (
+	waiting: TranscriptEntry["waiting"],
+	messageId: string,
+): TranscriptEntry["waiting"] => {
+	if (!waiting.has(messageId)) return waiting;
+	const next = new Map(waiting);
+	next.delete(messageId);
+	return next;
+};
+
+const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
+	switch (item._tag) {
+		case "message": {
+			const header = toHistoryMessage(item.message);
+			const held = entry.rows.find((old) => old.id === header.id);
+			const waiting = withoutWaiting(entry.waiting, header.id);
+			// Keep the held page contiguous below its floor.
 			if (
 				entry.hasMore &&
 				!held &&
 				entry.rows[0] &&
-				rowOrder(row, entry.rows[0]) < 0
+				rowOrder(header, entry.rows[0]) < 0
 			)
-				return { ...entry, hwm };
+				return { ...entry, waiting };
+			// A message row leaves its parts in place: they move as rows of their own.
+			const row = {
+				...header,
+				parts: held?.parts ?? entry.waiting.get(header.id) ?? [],
+			};
 			return {
 				...entry,
-				hwm,
+				waiting,
 				rows: [...entry.rows.filter((old) => old.id !== row.id), row].sort(
 					rowOrder,
 				),
 			};
 		}
-		case "remove":
+		case "part": {
+			const part = toHistoryPart(item.part);
+			if (part === undefined) return entry;
+			partOrder.set(part, item.sortOrder);
+			// A part can outrun its message: rows arrive in version order, and a
+			// part that moved before its message's last write sorts ahead of it.
+			return withParts(entry, item.messageId, (parts) =>
+				placePart(parts, part),
+			);
+		}
+		case "pendingInput": {
+			const input = item.input;
 			return {
 				...entry,
-				hwm: Math.max(entry.hwm ?? 0, envelope.sequence),
-				rows: entry.rows.filter((row) => row.id !== envelope.id),
-				pending: entry.pending.filter(
-					(input) => `input:${input.inputId}` !== envelope.id,
-				),
+				pending: [
+					...entry.pending.filter((old) => old.inputId !== input.inputId),
+					input,
+				].sort(pendingOrder),
 			};
+		}
+		case "inbox":
+			return { ...entry, ...item.inbox };
+	}
+};
+
+/** The server sends a message's header and each part as separate rows. */
+export function applyTranscriptEnvelope(
+	entry: TranscriptEntry,
+	envelope: SessionDetailEnvelope,
+): TranscriptEntry {
+	switch (envelope._tag) {
+		case "snapshot":
+			// The page is whole: no floor applies while it is laid down.
+			return {
+				...envelope.rows.reduce(withRow, {
+					...entry,
+					rows: [],
+					waiting: new Map(),
+					hasMore: false,
+					pending: [],
+					paused: false,
+					steer: undefined,
+				}),
+				hwm: envelope.sequence,
+				hasMore: envelope.hasMore ?? false,
+				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
+			};
+		case "upsert":
+			return withRow(
+				{ ...entry, hwm: Math.max(entry.hwm ?? 0, envelope.sequence) },
+				envelope.item,
+			);
+		case "remove": {
+			const hwm = Math.max(entry.hwm ?? 0, envelope.sequence);
+			return Option.match(
+				Schema.decodeUnknownOption(PartRemovalId)(envelope.id),
+				{
+					onSome: ([messageId, partId]) =>
+						withParts({ ...entry, hwm }, messageId, (parts) =>
+							parts.filter((part) => part.id !== partId),
+						),
+					onNone: () => ({
+						...entry,
+						hwm,
+						rows: entry.rows.filter((row) => row.id !== envelope.id),
+						waiting: withoutWaiting(entry.waiting, envelope.id),
+						pending: entry.pending.filter(
+							(input) => `input:${input.inputId}` !== envelope.id,
+						),
+					}),
+				},
+			);
+		}
 		case "synchronized":
 			return entry;
 	}
@@ -467,6 +552,7 @@ export function viewTranscript(
 				status: { _tag: "cold" },
 				project,
 				pending: [],
+				waiting: new Map(),
 			};
 			slot.messages.loadLifecycle = "loading";
 		} else {
@@ -509,57 +595,45 @@ export function viewTranscript(
 								)
 									return;
 								const before = slot.messages.transcript;
-								let newUserMessage = false;
-								let newAssistantId: string | null = null;
+								const item =
+									envelope._tag === "upsert" ? envelope.item : undefined;
+								const messageId =
+									item?._tag === "part"
+										? item.messageId
+										: item?._tag === "message"
+											? item.message.id
+											: undefined;
+								const was = before.rows.find((row) => row.id === messageId);
+								// Skill names and running state follow the tool's input,
+								// output and status, which can arrive in separate updates.
 								if (
-									envelope._tag === "upsert" &&
-									envelope.item._tag === "transcriptMessage"
-								) {
-									const row = envelope.item.message;
-									const held = before.rows.find((old) => old.id === row.id);
-									// Skill names and running state follow the tool's input,
-									// output and status, which can arrive in separate updates.
-									if (
-										row.parts?.some(
-											(part) =>
-												part.tool?.toLowerCase() === "skill" &&
-												JSON.stringify(part.state) !==
-													JSON.stringify(
-														held?.parts?.find((old) => old.id === part.id)
-															?.state,
-													),
+									item?._tag === "part" &&
+									item.part.tool?.toLowerCase() === "skill" &&
+									JSON.stringify(item.part.state) !==
+										JSON.stringify(
+											(was?.parts ?? before.waiting.get(item.messageId))?.find(
+												(old) => old.id === item.part.id,
+											)?.state,
 										)
-									)
-										refreshSessionSkills(sessionId);
-									// A user row is new when it first has parts to show.
-									newUserMessage =
-										row.role === "user" &&
-										!!row.parts?.length &&
-										!held?.parts?.length;
-									if (
-										!held &&
-										row.role === "assistant" &&
-										before.status._tag === "live"
-									)
-										newAssistantId = row.id;
-								}
-								slot.messages.transcript = applyTranscriptEnvelope(
-									before,
-									envelope,
-								);
-								if (
-									newAssistantId &&
-									slot.messages.transcript.rows.some(
-										(row) => row.id === newAssistantId,
-									)
 								)
-									advanceTurnIfNewMessage(
-										slot.activity,
-										slot.messages,
-										newAssistantId,
-									);
-								// A message may name a skill; the chip reloads the session's skills.
-								if (newUserMessage) refreshSessionSkills(sessionId);
+									refreshSessionSkills(sessionId);
+								const after = applyTranscriptEnvelope(before, envelope);
+								slot.messages.transcript = after;
+								const now = after.rows.find((row) => row.id === messageId);
+								if (
+									now?.role === "assistant" &&
+									!was &&
+									before.status._tag === "live"
+								)
+									advanceTurnIfNewMessage(slot.activity, slot.messages, now.id);
+								// A user row is new when it first has parts to show. A message
+								// may name a skill; the chip reloads the session's skills.
+								if (
+									now?.role === "user" &&
+									now.parts?.length &&
+									!was?.parts?.length
+								)
+									refreshSessionSkills(sessionId);
 								if (
 									envelope._tag === "snapshot" ||
 									envelope._tag === "synchronized"

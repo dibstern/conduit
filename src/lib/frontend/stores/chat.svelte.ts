@@ -8,6 +8,7 @@ import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
+	HistoryMessagePart,
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
@@ -52,6 +53,8 @@ export type SessionMessages = {
 		/** Why no draft can steer now, or null when one can. Undefined until the
 		 *  session's inbox arm arrives: a session that never held an input. */
 		steer?: InboxState["steer"] | undefined;
+		/** Parts that arrived before their message, by message id. */
+		waiting: ReadonlyMap<string, HistoryMessagePart[]>;
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;

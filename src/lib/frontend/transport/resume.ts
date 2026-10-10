@@ -138,13 +138,22 @@ const tagOf = (envelope: object): string | undefined =>
 		? envelope._tag
 		: undefined;
 
-/** What an `upsert` wraps: a session row, or a transcript message or event. */
+/** What an `upsert` wraps: a session row, or a transcript message or part. */
 const payloadOf = (envelope: object): unknown => {
 	if (!("item" in envelope)) return undefined;
 	const item = envelope.item;
 	if (typeof item !== "object" || item === null) return undefined;
 	if ("message" in item) return item.message;
 	if ("event" in item) return item.event;
+	// A part is named by its message and its own id, as its removal is.
+	if (
+		"part" in item &&
+		typeof item.part === "object" &&
+		item.part !== null &&
+		"id" in item.part &&
+		"messageId" in item
+	)
+		return { id: JSON.stringify([item.messageId, item.part.id]) };
 	return item;
 };
 
