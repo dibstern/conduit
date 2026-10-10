@@ -536,6 +536,12 @@ const prepareEngineTurnInput = (
 				}
 			}
 		}
+		// An effort belongs to its model. One inherited with the other harness's
+		// default model would run on a model that may not offer it.
+		const sendVariant =
+			resolvedInput.model === undefined ||
+			isClaudeDriver(driver) ===
+				(resolvedInput.model.providerID === CLAUDE_PROVIDER_ID);
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
@@ -573,7 +579,9 @@ const prepareEngineTurnInput = (
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
 			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),
+			...(sendVariant && resolvedInput.variant
+				? { variant: resolvedInput.variant }
+				: {}),
 			...(resolvedInput.contextWindow
 				? { contextWindow: resolvedInput.contextWindow }
 				: {}),

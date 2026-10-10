@@ -55,6 +55,7 @@ import type {
 	Agent,
 	Message,
 	PermissionRuleset,
+	PromptOptions,
 	Provider,
 	ProviderListResult,
 	SessionDetail,
@@ -349,22 +350,23 @@ class SessionNamespace {
 		return flattenMessage(data);
 	}
 
-	async prompt(
-		sessionId: string,
-		options: {
-			text: string;
-			system?: string;
-			model?: { providerID: string; modelID: string };
-			agent?: string;
-		},
-	): Promise<void> {
+	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
-				parts: [{ type: "text", text: options.text }],
+				parts: [
+					{ type: "text", text: options.text },
+					// Images arrive as data URLs, which name their own mime type.
+					...(options.images ?? []).map((url) => ({
+						type: "file" as const,
+						mime: /^data:([^;,]+)/.exec(url)?.[1] ?? "image/png",
+						url,
+					})),
+				],
 				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),
 				...(options.agent != null ? { agent: options.agent } : {}),
+				...(options.variant ? { variant: options.variant } : {}),
 			}),
 		);
 	}
