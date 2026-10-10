@@ -58,6 +58,11 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 					"SELECT id, type, status, decision FROM pending_approvals WHERE session_id = ?",
 				)
 				.all(sessionId),
+			queued: db
+				.prepare(
+					"SELECT input_id AS inputId FROM pending_inputs WHERE session_id = ? AND state = 'queued' ORDER BY admitted_at",
+				)
+				.all(sessionId) as Array<{ inputId: string }>,
 			events: (
 				db
 					.prepare(
@@ -529,11 +534,13 @@ describe("built-dist Claude runner lifecycle", () => {
 		runnerLifecycle?: NonNullable<
 			Parameters<typeof ProcessHarness.start>[0]
 		>["runnerLifecycle"],
+		queryInitializationDelayMs?: number,
 	) {
 		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
 		const harness = await ProcessHarness.start({
 			dist: resolve("dist"),
 			...(runnerLifecycle ? { runnerLifecycle } : {}),
+			...(queryInitializationDelayMs ? { queryInitializationDelayMs } : {}),
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {
 			harness,
@@ -864,14 +871,32 @@ describe("built-dist Claude runner lifecycle", () => {
 					"Claude runner failed",
 				),
 			);
-		} else await browser.reloadSession(sessionId);
-		const cursor = browser.frames.length;
+		} else {
+			await browser.reloadSession(sessionId);
+			// The reload interrupts the turn, and an interrupted turn advances no
+			// turn-end version, so this send never settles; the ledger shows it.
+			failed.catch(() => undefined);
+		}
+		let cursor = browser.frames.length;
 		const replacement = browser.send(sessionId, "approval-overlap-recovery");
+		if (phase === "crash") {
+			// The crashed turn stays open until its cleanup ends it, so the send
+			// queues behind it and the turn's failure pauses the queue. Resume
+			// is what starts the replacement, once that cleanup has finished.
+			await failed;
+			const paused = snapshot(harness, sessionId);
+			expect(paused.session).toEqual({ status: "idle" });
+			expect(paused.turns).toEqual([{ state: "error" }]);
+			expect(paused.queued).toHaveLength(1);
+			const [queued] = paused.queued;
+			if (!queued) throw new Error("Missing the queued replacement");
+			cursor = browser.frames.length;
+			await browser.sendNow(sessionId, queued.inputId);
+		}
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
-		await failed;
 		const enqueue = harness.marks.find(
 			(mark) =>
 				mark.kind === "enqueue" &&
@@ -952,13 +977,19 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(harness.marks.some((mark) => mark.kind === "query")).toBe(false);
 	}, 30_000);
 
-	it("fails every queued turn when startup refuses the protocol", async () => {
+	// A send queued behind a busy session stays in the inbox, paused once the
+	// turn ahead fails, so a steer is what hands the runner a second turn.
+	it("fails every turn handed to the runner when startup refuses the protocol", async () => {
 		const { harness, browser, sessionId } = await start({
 			serverProtocolVersion: 999,
 		});
+		const first = browser.send(sessionId, "protocol-queued-first");
+		await vi.waitFor(() =>
+			expect(snapshot(harness, sessionId).commands).toHaveLength(1),
+		);
 		const turns = await Promise.all([
-			browser.send(sessionId, "protocol-queued-first"),
-			browser.send(sessionId, "protocol-queued-second"),
+			first,
+			browser.send(sessionId, "protocol-steered-second", undefined, "steer"),
 		]);
 		for (const turn of turns)
 			expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
@@ -973,16 +1004,27 @@ describe("built-dist Claude runner lifecycle", () => {
 			expect(
 				state.events.filter((event) => event.type === "turn.error"),
 			).toHaveLength(2);
+			expect(state.queued).toEqual([]);
 		});
 	}, 30_000);
 
-	it("persists adapter failures for every queued turn without duplicate errors", async () => {
-		const { harness, browser, sessionId } = await start();
+	it("persists adapter failures for every turn the runner holds without duplicate errors", async () => {
+		// The slow SDK start leaves room to steer before the approval opens: an
+		// open prompt refuses a steer.
+		const { harness, browser, sessionId } = await start(undefined, 1000);
 		const first = browser.send(sessionId, "approval-failure-queued-first");
+		await vi.waitFor(() =>
+			expect(snapshot(harness, sessionId).commands).toHaveLength(1),
+		);
+		const second = browser.send(
+			sessionId,
+			"stall-steered-second",
+			undefined,
+			"steer",
+		);
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 		);
-		const second = browser.send(sessionId, "stall-queued-second");
 		await vi.waitFor(() =>
 			expect(
 				harness.marks.filter(
@@ -1003,6 +1045,7 @@ describe("built-dist Claude runner lifecycle", () => {
 			expect(
 				state.events.filter((event) => event.type === "turn.error"),
 			).toHaveLength(2);
+			expect(state.queued).toEqual([]);
 		});
 	}, 30_000);
 });

@@ -42,6 +42,7 @@ export function failClaudeRunnerTurn(
 	turn: {
 		sessionId: string;
 		userMessageId?: string;
+		placement?: { inputId: string; text: string };
 		messageId: string;
 		terminal: boolean;
 	},
@@ -63,6 +64,14 @@ export function failClaudeRunnerTurn(
 			recoverQuestions: false,
 		});
 		if (!turn.terminal) {
+			// A held send the SDK never started has no message yet, and an error
+			// naming it would end no turn. Placing is a no-op once it is placed.
+			if (turn.placement)
+				yield* emit({
+					type: "place-user-message",
+					sinkId,
+					input: { sessionId: turn.sessionId, ...turn.placement },
+				});
 			yield* emit({
 				type: "event",
 				sinkId,

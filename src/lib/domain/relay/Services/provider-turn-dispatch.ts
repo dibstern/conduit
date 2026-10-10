@@ -131,15 +131,16 @@ const loadClaudeHistoryMetadata = (sessionId: string) =>
 
 /**
  * End a send that failed. Each failure gets exactly one turn.error: a provider
- * that failed the turn it was handed records its own, through this send's
- * sink. A handoff that ended before its message was placed still shows the
- * send, and its turn ends failed so a queue behind it pauses instead of
- * draining. A continuation places nothing: its turn is the cut-off's.
+ * that already ended the turn it was handed (failed, interrupted or completed
+ * it) recorded that end through this send's sink. A handoff that ended before
+ * its message was placed still shows the send, and its turn ends failed so a
+ * queue behind it pauses instead of draining. A continuation places nothing:
+ * its turn is the cut-off's.
  */
 const failUnfinishedSend = (
 	input: ProviderTurnServiceSendInput,
 	driver: ProviderDriverKind | undefined,
-	recordedByProvider: boolean,
+	endedByProvider: boolean,
 	error: string,
 	code: string,
 ) =>
@@ -177,8 +178,8 @@ const failUnfinishedSend = (
 					),
 				);
 		}
-		// A provider's own turn.error cannot have ended a turn placed only now.
-		if (recordedByProvider && !unplaced) return;
+		// A provider's own turn end cannot have ended a turn placed only now.
+		if (endedByProvider && !unplaced) return;
 		yield* failTurn(input.sessionId, error, code, inputId);
 	});
 
@@ -238,11 +239,17 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		});
 	});
 
+const TURN_END_TYPES = new Set([
+	"turn.completed",
+	"turn.error",
+	"turn.interrupted",
+]);
+
 const handleDispatchFailure = (
 	input: ProviderTurnServiceSendInput,
 	sendErr: unknown,
 	driver: ProviderDriverKind | undefined,
-	recordedByProvider = false,
+	endedByProvider = false,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -258,7 +265,7 @@ const handleDispatchFailure = (
 		yield* failUnfinishedSend(
 			input,
 			driver,
-			recordedByProvider,
+			endedByProvider,
 			error.message,
 			error.code,
 		);
@@ -268,7 +275,7 @@ const handleDispatchResult = (
 	input: ProviderTurnServiceSendInput,
 	result: TurnResult,
 	driver: ProviderDriverKind,
-	recordedByProvider: boolean,
+	endedByProvider: boolean,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -280,8 +287,8 @@ const handleDispatchResult = (
 
 		// Other non-`completed` terminal statuses (error / cancelled / orphaned)
 		// must finalize the turn: a completed turn's `done` arrives via the
-		// streamed provider events. A provider that streamed its own turn.error
-		// already sent the failed `done`; otherwise the browser would stay
+		// streamed provider events. A provider that streamed its own turn end
+		// already finalized it; otherwise the browser would stay
 		// "processing" until the 2-minute PROCESSING_TIMEOUT, so record it here.
 		if (result.status !== "completed") {
 			const msg =
@@ -293,7 +300,7 @@ const handleDispatchResult = (
 			yield* failUnfinishedSend(
 				input,
 				driver,
-				recordedByProvider,
+				endedByProvider,
 				msg,
 				"SEND_FAILED",
 			);
@@ -515,11 +522,13 @@ const dispatchEngineTurn = (
 		// one reads the committed handoff, not the moment before it.
 		const accepted = yield* Deferred.make<void>();
 
-		// Each failure gets exactly one turn.error. A provider that failed the
-		// turn it was handed records its own, through this send's sink: `push`
+		// Each failure gets exactly one turn.error. A provider that ended the
+		// turn it was handed records that end through this send's sink: `push`
 		// on the inline path, `noteActivity` where the reactor ingests output.
-		// Only a failure it did not record is Conduit's to record.
-		let recordedByProvider = false;
+		// Only a turn it left open is Conduit's to fail: a send that fails after
+		// its turn was interrupted (a reload ends the session) must not turn
+		// that interrupted turn into an error.
+		let endedByProvider = false;
 		const { eventSink } = sendTurnInput;
 		const watchedInput: SendTurnInput = {
 			...sendTurnInput,
@@ -528,11 +537,11 @@ const dispatchEngineTurn = (
 				push: (event) =>
 					eventSink.push(event).pipe(
 						Effect.tap(() => {
-							if (event.type === "turn.error") recordedByProvider = true;
+							if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
 						}),
 					),
 				noteActivity: (event) => {
-					if (event.type === "turn.error") recordedByProvider = true;
+					if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
 					eventSink.noteActivity?.(event);
 				},
 			},
@@ -551,7 +560,7 @@ const dispatchEngineTurn = (
 		}).pipe(
 			Effect.flatten,
 			Effect.flatMap((result) =>
-				handleDispatchResult(resolvedInput, result, driver, recordedByProvider),
+				handleDispatchResult(resolvedInput, result, driver, endedByProvider),
 			),
 			Effect.catchAll((error) =>
 				restorePreviousBinding.pipe(
@@ -560,7 +569,7 @@ const dispatchEngineTurn = (
 							resolvedInput,
 							error,
 							driver,
-							recordedByProvider,
+							endedByProvider,
 						),
 					),
 				),

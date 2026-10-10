@@ -272,6 +272,8 @@ export const makeProcessClaudeSessionRunner = (
 				sessionId: string;
 				/** The turn's user message: a continuation's is its cut-off message. */
 				userMessageId?: string;
+				/** What a failed send places when the SDK never started it. */
+				placement?: { inputId: string; text: string };
 				messageId: string;
 				terminal: boolean;
 				pending: boolean;
@@ -1237,6 +1239,14 @@ export const makeProcessClaudeSessionRunner = (
 								userMessageId:
 									command.input.continuation?.cutOffMessageId ??
 									command.input.inputId,
+								...(command.input.continuation
+									? {}
+									: {
+											placement: {
+												inputId: command.input.inputId,
+												text: command.input.text ?? command.input.prompt,
+											},
+										}),
 								messageId: "",
 								terminal: false,
 								pending: true,

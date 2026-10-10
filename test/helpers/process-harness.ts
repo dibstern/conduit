@@ -2088,6 +2088,7 @@ export class ProcessBrowser {
 		sessionId: string,
 		prompt: string,
 		timeoutMs = TIMEOUT_MS,
+		delivery: "queue" | "steer" = "queue",
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
 		await this.followSession(sessionId);
 		await this.followFamily(sessionId);
@@ -2106,7 +2107,7 @@ export class ProcessBrowser {
 				sessionId,
 				originId: this.originId,
 				inputId: randomUUID(),
-				delivery: "queue",
+				delivery,
 				text: prompt,
 			}),
 			timeoutMs,
@@ -2231,6 +2232,19 @@ export class ProcessBrowser {
 				originId: this.originId,
 			}),
 		);
+	}
+
+	/** The tray's Send now, and Resume on the oldest queued input. */
+	async sendNow(sessionId: string, inputId: string): Promise<void> {
+		const result = await this.run(
+			this.rpc.input.sendNow({
+				projectSlug: this.projectSlug,
+				sessionId,
+				originId: this.originId,
+				inputId,
+			}),
+		);
+		if (!result.ok) throw new Error(`send now refused: ${result.reason}`);
 	}
 
 	async reloadSession(sessionId: string, signal?: AbortSignal): Promise<void> {
