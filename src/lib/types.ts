@@ -203,6 +203,7 @@ export interface ProjectRelayConfig {
 	saveProject?: (
 		input: import("./contracts/ws-rpc.js").SaveProjectInput,
 	) => Promise<{
+		kind?: "existing" | undefined;
 		project: import("./shared-types.js").ProjectInfo;
 		warnings: readonly import("./project-folders.js").FolderIssue[];
 	}>;
