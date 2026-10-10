@@ -1,12 +1,14 @@
 <script lang="ts">
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { usageState } from "../../stores/usage.svelte.js";
+	import { orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { usageDisplay } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import { openSettings } from "./chrome-actions.js";
 
 	let { phone = false, height = $bindable(0) }: { phone?: boolean; height?: number } = $props();
 
@@ -16,19 +18,7 @@
 	type WindowKind = keyof typeof windowLabels;
 	const kinds: readonly WindowKind[] = ["five_hour", "seven_day", "month"];
 	const defaultAccount = $derived(projectState.projects.find((project) => project.slug === getCurrentSlug())?.instanceId);
-	const accounts = $derived.by(() => {
-		const order = usageState.order;
-		const rank = (id: string) => {
-			const index = order.indexOf(id);
-			return index === -1 ? order.length : index;
-		};
-		return usageState.readings.filter((reading) => {
-			const instance = getInstanceById(reading.accountId);
-			if (!instance) return false;
-			const env = instance.env;
-			return reading.harness !== "claude" || (!env?.["ANTHROPIC_API_KEY"] && !env?.["ANTHROPIC_AUTH_TOKEN"]);
-		}).sort((a, b) => rank(a.accountId) - rank(b.accountId) || instanceState.instances.findIndex((instance) => instance.id === a.accountId) - instanceState.instances.findIndex((instance) => instance.id === b.accountId));
-	});
+	const accounts = $derived(orderedUsageAccounts());
 	const groups = $derived(harnesses.flatMap((harness) => {
 		const rows = accounts.filter((account) => account.harness === harness);
 		if (rows.length === 0) return [];
@@ -39,7 +29,7 @@
 		const chips = accounts.flatMap((reading) => {
 			const isDefault = reading.accountId === defaultAccount;
 			// The default chip shows its fuller window; another account only gets a chip when its binding window warns.
-			const { level, binding } = usageDisplay(reading, isDefault ? "off" : undefined);
+			const { level, binding } = usageDisplay(reading, isDefault ? "off" : usageState.limits.warnAt);
 			if (!isDefault && level !== "warn" && level !== "limited") return [];
 			return [{ reading, isDefault, binding, display: binding ? displayWindow(reading, binding) : undefined }];
 		});
@@ -50,7 +40,7 @@
 
 	function displayWindow(reading: UsageReading, window: UsageWindow) {
 		// A limited 5h window must not turn a healthy week red.
-		const display = usageDisplay({ ...reading, status: window.utilization >= 100 ? "limited" : "available", windows: [window] });
+		const display = usageDisplay({ ...reading, status: window.utilization >= 100 ? "limited" : "available", windows: [window] }, usageState.limits.warnAt);
 		const percentage = `${Math.round(window.utilization)}%`;
 		return {
 			...display,
@@ -72,6 +62,7 @@
 		{#if window && display}
 			<QuotaMeter
 				used={window.utilization}
+				warnAt={usageState.limits.warnAt}
 				caption={display.label}
 				variant="usage"
 				trackWidth={width}
@@ -96,7 +87,7 @@
 		{#if accounts.length === 1 && phoneSingle}
 			{@const reading = accounts[0]}
 			{#if reading}
-				<div data-testid="usage-phone-single" class="flex flex-wrap items-center gap-[10px] whitespace-nowrap">
+				<TextButton tone="inherit" data-testid="usage-phone-single" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="pointer-events-auto flex flex-wrap items-center gap-[10px] whitespace-nowrap text-left">
 					{#each kinds.filter((kind) => reading.windows.some((window) => window.kind === kind)) as kind, index (kind)}
 						{#if index > 0}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 						<span class="flex min-w-0 items-center gap-[5px]">
@@ -104,34 +95,38 @@
 							{@render cell(reading, kind, kind === "seven_day" ? 32 : 40, 5)}
 						</span>
 					{/each}
-				</div>
+				</TextButton>
 			{/if}
 		{:else if accounts.length > 1}
 			{#each phoneChips as { reading, isDefault, binding, display } (reading.accountId)}
-				<span
+				<TextButton
+					tone="inherit"
+					type="button"
+					aria-label="Open Usage settings for {getInstanceById(reading.accountId)?.name ?? reading.accountId}"
+					onclick={() => openSettings("usage")}
 					data-testid="usage-phone-chip-{reading.accountId}"
 					data-account={reading.accountId}
 					data-default={isDefault}
 					data-level={display?.level ?? "unknown"}
 					title={isDefault ? "Default for this project" : getInstanceById(reading.accountId)?.name ?? reading.accountId}
-					class="inline-flex h-[22px] items-center gap-[4px] rounded-full px-[7px] {isDefault ? 'bg-bg-alt' : ''}"
+					class="pointer-events-auto inline-flex h-[22px] items-center gap-[4px] rounded-full px-[7px] {isDefault ? 'bg-bg-alt' : ''}"
 				>
 					<AccountDot instanceId={reading.accountId} size={7} data-testid="usage-phone-dot-{reading.accountId}" />
 					{#if binding}
 						<span data-testid="usage-phone-window-{reading.accountId}" class="font-mono text-text-dimmer">{phoneWindowLabels[binding.kind]}</span>
 					{/if}
 					<span data-testid="usage-phone-value-{reading.accountId}" class="whitespace-nowrap font-mono {display?.level === 'limited' ? 'text-error' : display?.level === 'warn' ? 'text-fill-amber' : display ? 'text-text-secondary' : 'text-text-dimmer'}">{display?.label ?? "—"}</span>
-				</span>
+				</TextButton>
 			{/each}
 			{#if phoneRemaining > 0}
-				<span data-testid="usage-phone-more" class="inline-flex h-[22px] items-center rounded-full px-[7px] font-mono text-text-dimmer">+{phoneRemaining}</span>
+				<TextButton tone="dimmer" data-testid="usage-phone-more" aria-label="Open Usage settings for all accounts" onclick={() => openSettings("usage")} class="pointer-events-auto inline-flex h-[22px] items-center rounded-full px-[7px] font-mono">+{phoneRemaining}</TextButton>
 			{/if}
 		{/if}
 	</div>
 {:else if accounts.length === 1}
 	{@const reading = accounts[0]}
 	{#if reading && reading.windows.some((window) => window.kind in windowLabels)}
-		<div data-testid="usage-footer-meter" class="shrink-0 border-t border-border-subtle p-[10px] text-[10.5px]">
+		<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="shrink-0 border-t border-border-subtle p-[10px] text-left text-[10.5px]">
 			<div data-testid="usage-footer-single" class="flex items-center gap-[10px] whitespace-nowrap">
 				{#each kinds.filter((kind) => reading.windows.some((window) => window.kind === kind)) as kind, index (kind)}
 					<span class="flex min-w-0 items-center gap-[5px] {index === 1 ? 'second-window' : ''}">
@@ -140,10 +135,10 @@
 					</span>
 				{/each}
 			</div>
-		</div>
+		</TextButton>
 	{/if}
 {:else if accounts.length > 1}
-	<div data-testid="usage-footer-meter" class="flex shrink-0 flex-col border-t border-border-subtle px-[4px] pt-[5px] pb-[7px] text-[10.5px]">
+	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex shrink-0 flex-col border-t border-border-subtle px-[4px] pt-[5px] pb-[7px] text-left text-[10.5px]">
 		{#each groups as group (group.harness)}
 			<div data-testid="usage-footer-group-{group.harness}">
 				<div class="account-row grid items-center gap-[6px] rounded-[7px] px-[6px] py-[3px]">
@@ -165,7 +160,7 @@
 				{/each}
 			</div>
 		{/each}
-	</div>
+	</TextButton>
 {/if}
 
 <style>

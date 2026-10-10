@@ -92,7 +92,7 @@ function setAccounts(
 	});
 }
 
-async function themeColour(page: Page, token: string): Promise<string> {
+export async function themeColour(page: Page, token: string): Promise<string> {
 	return page.evaluate((variable) => {
 		const probe = document.createElement("span");
 		probe.style.color = `var(${variable})`;

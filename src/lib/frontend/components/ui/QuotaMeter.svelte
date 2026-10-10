@@ -17,9 +17,9 @@
 
 	type QuotaUsed = number | "checking" | "unknown";
 
-	function tone(used: QuotaUsed): "normal" | "high" | "full" | "checking" | "unknown" {
+	function tone(used: QuotaUsed, warnAt: number | "off"): "normal" | "high" | "full" | "checking" | "unknown" {
 		if (typeof used !== "number") return used;
-		return used >= 100 ? "full" : used >= 80 ? "high" : "normal";
+		return used >= 100 ? "full" : used >= (warnAt === "off" ? 80 : warnAt) ? "high" : "normal";
 	}
 
 	const FILL_CLASSES = {
@@ -47,6 +47,7 @@
 	let {
 		used,
 		caption,
+		warnAt = 80,
 		size = "md",
 		track = true,
 		variant = "headroom",
@@ -60,6 +61,7 @@
 		used: QuotaUsed;
 		/** Replaces the default caption, e.g. "limited · Mon 9:00". */
 		caption?: string | undefined;
+		warnAt?: number | "off";
 		size?: keyof typeof TRACK_WIDTH_CLASSES | undefined;
 		/** false keeps only the caption, for rows too narrow for the track. */
 		track?: boolean | undefined;
@@ -74,7 +76,7 @@
 		class?: string | undefined;
 	} = $props();
 
-	const level = $derived(tone(used));
+	const level = $derived(tone(used, warnAt));
 	const share = $derived(typeof used === "number" ? Math.max(0, Math.min(100, used)) : 0);
 </script>
 
@@ -86,7 +88,7 @@
 			{/if}
 		</span>
 	{/if}
-	<span data-testid={captionTestId} class="whitespace-nowrap font-mono text-[10.5px] {variant === 'usage' && level === 'high' ? 'text-fill-amber' : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
+	<span data-testid={captionTestId} class="whitespace-nowrap font-mono text-[10.5px] {variant === 'usage' && level === 'high' && warnAt !== 'off' ? 'text-fill-amber' : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
 </span>
 
 <style>

@@ -1291,7 +1291,11 @@ export async function setAutoSettleSettingRpc(
 	return result.autoSettleAfterDays;
 }
 
+// Saves stay ordered across Settings tab mounts, and loads wait for their flush.
+let usageLimitsSaves: Promise<void> = Promise.resolve();
+
 export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+	await usageLimitsSaves;
 	const result = await runTransportEffect(
 		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
 	);
@@ -1302,11 +1306,18 @@ export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
 export async function setUsageLimitsSettingRpc(
 	usageLimits: UsageLimitsSetting,
 ): Promise<UsageLimitsSetting> {
-	const result = await runTransportEffect(
-		callControl(undefined, (client) =>
-			client.SetUsageLimitsSetting({ usageLimits }),
+	const request = usageLimitsSaves.then(() =>
+		runTransportEffect(
+			callControl(undefined, (client) =>
+				client.SetUsageLimitsSetting({ usageLimits }),
+			),
 		),
 	);
+	usageLimitsSaves = request.then(
+		() => undefined,
+		() => undefined,
+	);
+	const result = await request;
 	applyUsageLimitsSetting(result.usageLimits);
 	return result.usageLimits;
 }

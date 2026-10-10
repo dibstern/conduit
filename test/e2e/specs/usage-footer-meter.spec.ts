@@ -64,6 +64,7 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 		browser.rpc.SetUsageLimitsSetting({
 			usageLimits: {
 				autoResume: false,
+				warnAt: 80,
 				autoSwitch: false,
 				order: accounts.map((account) => account.id),
 			},

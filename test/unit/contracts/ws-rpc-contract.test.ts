@@ -486,7 +486,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
 				GetUsageLimitsSetting: () =>
 					Effect.succeed({
-						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+						usageLimits: {
+							autoResume: false,
+							autoSwitch: false,
+							warnAt: 80 as const,
+							order: [],
+						},
 					}),
 				SetUsageLimitsSetting: (request) =>
 					Effect.succeed({ usageLimits: request.usageLimits }),

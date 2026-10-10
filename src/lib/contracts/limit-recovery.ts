@@ -106,6 +106,9 @@ export type SessionResume = typeof SessionResumeSchema.Type;
 export const UsageLimitsSettingSchema = Schema.Struct({
 	autoResume: Schema.Boolean,
 	autoSwitch: Schema.Boolean,
+	warnAt: Schema.optionalWith(Schema.Literal(70, 80, 90, "off"), {
+		default: () => 80 as const,
+	}),
 	/** Claude instance IDs, in the order auto-switch tries them. */
 	order: Schema.Array(Schema.String),
 });
@@ -115,6 +118,7 @@ export type UsageLimitsSetting = typeof UsageLimitsSettingSchema.Type;
 export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 	autoResume: false,
 	autoSwitch: false,
+	warnAt: 80,
 	order: [],
 };
 

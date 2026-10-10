@@ -25,6 +25,7 @@ import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
+import { usageSettingsHandlers } from "./steps/usageSettings.js";
 import { visualHandlers } from "./steps/visual.js";
 
 const driver = new PlaywrightDriver();
@@ -40,6 +41,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...modelDriftHandlers,
 	...usageLimitStripHandlers,
 	...usageFooterMeterHandlers,
+	...usageSettingsHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".

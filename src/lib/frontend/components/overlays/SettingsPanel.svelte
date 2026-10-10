@@ -10,6 +10,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
+	import UsageSettingsTab from "./UsageSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
@@ -59,6 +60,7 @@
 		{ value: "composer", label: "Composer", testId: "settings-tab-composer" },
 		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
+		{ value: "usage", label: "Usage", testId: "settings-tab-usage" },
 		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
 		{ value: "debug", label: "Debug", testId: "settings-tab-debug" },
 	];
@@ -134,9 +136,10 @@
 	});
 </script>
 
-<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle">
+<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={phone.current && section === "usage" ? "sheet" : "center"}>
 	<div
 		id="settings-panel"
+		class:usage-phone={phone.current && shown === "usage" && section !== null}
 		class="bg-bg border border-border rounded-xl shadow-2xl w-[calc(100vw-2rem)] md:w-[min(720px,calc(100vw-2rem))] h-[80vh] md:h-[min(600px,80vh)] flex flex-col overflow-hidden font-brand"
 	>
 		<div class="shrink-0 flex items-center gap-[6px] px-[14px] py-[10px] border-b border-border-subtle">
@@ -203,7 +206,7 @@
 			{/if}
 
 			{#if !phone.current || section !== null}
-				<div class="flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
+				<div class="settings-content flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
 					{#if shown === "notifications"}
 						<NotificationsSettingsTab bind:state={notificationState} />
 					{:else if shown === "appearance"}
@@ -214,6 +217,8 @@
 						<VisibilitySettingsTab {visible} bind:state={visibilityState} />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
+					{:else if shown === "usage"}
+						<UsageSettingsTab />
 					{:else if shown === "instances"}
 						<InstancesSettingsTab bind:state={instanceState} />
 					{:else if shown === "debug"}
@@ -236,6 +241,18 @@
 	@media (min-width: 768px) {
 		#settings-panel {
 			height: min(600px, round(down, 80vh, 1px));
+		}
+	}
+	@media (max-width: 767px) {
+		#settings-panel.usage-phone {
+			width: 100vw;
+			height: 100dvh;
+			border: 0;
+			border-radius: 0;
+			padding-top: env(safe-area-inset-top, 0px);
+		}
+		.usage-phone .settings-content {
+			padding: 12px 14px calc(26px + env(safe-area-inset-bottom, 0px));
 		}
 	}
 </style>

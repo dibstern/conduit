@@ -116,6 +116,7 @@ test("usage limits and auto-settle survive another config save", async ({
 	const usageLimits = {
 		autoResume: true,
 		autoSwitch: true,
+		warnAt: 80 as const,
 		order: ["config-save-account", "claude"],
 	};
 	const autoSettleAfterDays = null;
@@ -1081,9 +1082,15 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			? {
 					autoResume: false,
 					autoSwitch: false,
+					warnAt: 80 as const,
 					order: [target.id, preferred.id],
 				}
-			: { autoResume: false, autoSwitch: true, order: [target.id, source.id] };
+			: {
+					autoResume: false,
+					autoSwitch: true,
+					warnAt: 80 as const,
+					order: [target.id, source.id],
+				};
 		expect(
 			await Effect.runPromise(
 				browser.rpc.SetUsageLimitsSetting({ usageLimits }),
@@ -1133,10 +1140,10 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		const openUsageLimitSettings = async () => {
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "instances" } }),
+					new CustomEvent("settings:open", { detail: { tab: "usage" } }),
 				),
 			);
-			const section = page.locator("#usage-limit-settings");
+			const section = page.locator("#usage-settings");
 			await expect(section.getByTestId("sortable-row").first()).toBeVisible();
 			return section;
 		};
@@ -1788,7 +1795,12 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 						readFileSync(join(harness.configDir, "daemon.json"), "utf8"),
 					)
 				: undefined;
-		const defaults = { autoResume: false, autoSwitch: false, order: [] };
+		const defaults = {
+			autoResume: false,
+			autoSwitch: false,
+			warnAt: 80 as const,
+			order: [],
+		};
 		expect(
 			(await Effect.runPromise(browser.rpc.GetUsageLimitsSetting({})))
 				.usageLimits,

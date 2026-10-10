@@ -348,6 +348,7 @@ for (const scenario of [
 				usageLimits: {
 					autoSwitch: scenario !== "off",
 					autoResume: true,
+					warnAt: 80,
 					order: ["target"],
 				},
 			}),
