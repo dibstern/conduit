@@ -7,6 +7,8 @@
 </script>
 
 <script lang="ts">
+	import { Schema } from "effect";
+	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { tick, untrack } from "svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -66,12 +68,19 @@
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
+	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 
 	let inputText = $state("");
+	let draftWorktree = $state<WorktreeInfo | null>(null);
+	const draftContext = $derived(`${getDraftProject() ?? ""}:${getEffectiveInstanceId()}:${sessionState.currentId ?? ""}`);
+	$effect(() => {
+		draftContext;
+		draftWorktree = null;
+	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let pendingImages = $state<PendingImage[]>([]);
@@ -623,13 +632,23 @@
 					originId: getBrowserClientId(),
 					instanceId,
 					...(model ? { model } : {}),
+					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
-			} catch {
-				showToast("Failed to create session", { variant: "error" });
+			} catch (error) {
+				let message = "Failed to create session";
+				if (Schema.is(WorkspaceMoveError)(error)) {
+					switch (error.reason) {
+						case "missing": message = "Could not start session: that worktree no longer exists"; break;
+						case "not-a-worktree": message = "Could not start session: that folder is not a git worktree"; break;
+						case "other-repository": message = "Could not start session: that worktree belongs to another repository"; break;
+						case "unsupported-provider": message = "Could not start session: this provider does not support worktrees"; break;
+					}
+				}
+				showToast(message, { variant: "error" });
 				return false;
 			} finally {
 				creatingSession = false;
@@ -936,7 +955,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1171,7 +1190,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} /></div>
 		{/if}
 	</div>
 </div>

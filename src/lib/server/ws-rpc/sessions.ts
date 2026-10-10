@@ -373,23 +373,39 @@ export const sessionsHandlers = {
 			),
 		),
 	CreateSession: (request) =>
-		createSessionForClient({
-			clientId: request.originId,
-			...(request.title != null ? { title: request.title } : {}),
-			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
-			...(request.providerId != null ? { providerId: request.providerId } : {}),
-			...(request.model != null ? { model: request.model } : {}),
-		}).pipe(
-			Effect.map((session) => ({
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			const path = request.worktreePath;
+			const create = createSessionForClient({
+				clientId: request.originId,
+				...(request.title != null ? { title: request.title } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
+				...(request.providerId != null
+					? { providerId: request.providerId }
+					: {}),
+				...(request.model != null ? { model: request.model } : {}),
+				...(path === undefined
+					? {}
+					: {
+							initializeWorkspace: (sessionId: string) =>
+								workspace.move(sessionId, path, "launch").pipe(Effect.asVoid),
+						}),
+			});
+			const session = yield* path === undefined
+				? create
+				: workspace.withLaunch(create);
+			return {
 				projectSlug: request.projectSlug,
 				sessionId: session.id,
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `CreateSession failed: ${String(error)}`,
-					}),
-				),
+			};
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
+					error instanceof WorkspaceMoveError
+						? Effect.fail(error)
+						: mapRpcFailure("CreateSession")(error),
 			),
 		),
 	ViewSession: (request) =>

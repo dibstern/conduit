@@ -1659,7 +1659,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 	"CreateSession",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
 		success: CreateSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -1669,6 +1669,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
 			),
 			providerId: Schema.optional(Schema.String),
+			worktreePath: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.

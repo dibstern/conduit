@@ -109,6 +109,7 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -117,6 +118,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../src/lib/persistence/effect/read-query-effect.js";
+import type { CanonicalEvent } from "../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import {
@@ -785,6 +787,8 @@ export interface TestHandlerLayerOptions {
 	orchestrationEngine?: OrchestrationEngine;
 	providerRegistry?: ProviderRegistry;
 	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
+	/** Committed to the store when the layer builds, e.g. the session a test sends to. */
+	seedEvents?: readonly CanonicalEvent[];
 	readQueryEffect?: ReadQueryEffect;
 	claudeEventPersistEffect?: ClaudeEventPersistEffect;
 }
@@ -862,8 +866,18 @@ export function makeTestHandlerLayer(
 		ProviderRegistryTag,
 		opts?.providerRegistry ?? new ProviderRegistry(),
 	);
-	const persistenceLayer =
+	const basePersistenceLayer =
 		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
+	const seedEvents = opts?.seedEvents;
+	const persistenceLayer = seedEvents
+		? basePersistenceLayer.pipe(
+				Layer.tap((context) =>
+					Effect.flatMap(makeCommitAndSignal, (commit) =>
+						commit(seedEvents),
+					).pipe(Effect.provide(context), Effect.orDie),
+				),
+			)
+		: basePersistenceLayer;
 	const providerTurnPersistenceLayer = Layer.mergeAll(
 		persistenceLayer,
 		...(opts?.readQueryEffect

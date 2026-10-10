@@ -35,6 +35,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
 function mockWsHandler(
 	overrides?: Partial<WebSocketHandlerShape>,
@@ -201,6 +202,7 @@ describe("model handlers with Effect override state", () => {
 							sessionManagerService,
 							orchestrationEngine: withDispatchEffect(engine),
 							config: makeMockConfig({ configDir }),
+							seedEvents: [makeSessionCreatedEvent("session-1")],
 						}),
 					),
 				),

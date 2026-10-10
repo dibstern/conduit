@@ -38,6 +38,7 @@ export const SessionWorkspaceLive = Layer.effect(
 		// Retain the relay's ambient bus and notifier along with command dependencies.
 		const services = yield* Effect.context<Dependencies>();
 		const moves = yield* Effect.makeSemaphore(1);
+		const launches = yield* Effect.makeSemaphore(1);
 		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -71,6 +72,7 @@ export const SessionWorkspaceLive = Layer.effect(
 				return { row, workspace };
 			});
 		return {
+			withLaunch: launches.withPermits(1),
 			get: (sessionId) =>
 				readWorkspace(sessionId).pipe(
 					Effect.map(({ workspace }) =>
@@ -106,11 +108,17 @@ export const SessionWorkspaceLive = Layer.effect(
 						}
 						let worktrees: Record<string, string>;
 						if (resetFolder !== undefined) {
-							worktrees =
-								resetFolder === config.projectDir
-									? {}
-									: { ...previous?.worktrees };
-							delete worktrees[resetFolder];
+							// A draft choosing a secondary checkout starts there; a later
+							// move back to a configured folder still resets its mapping.
+							if (cause === "launch" && resetFolder !== config.projectDir) {
+								worktrees = { [resetFolder]: target };
+							} else {
+								worktrees =
+									resetFolder === config.projectDir
+										? {}
+										: { ...previous?.worktrees };
+								delete worktrees[resetFolder];
+							}
 						} else {
 							const repo = yield* readWorktrees(target);
 							if (!repo.worktrees.some((worktree) => worktree.path === target))

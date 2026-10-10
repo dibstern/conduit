@@ -170,6 +170,7 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	readonly worktreePath?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -500,10 +501,16 @@ const callControl = <A, E>(
 		return yield* call(control);
 	});
 
-export async function listWorktreesRpc(projectSlug: string, sessionId: string) {
+export async function listWorktreesRpc(
+	projectSlug: string,
+	sessionId?: string,
+) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) =>
-			client.ListWorktrees({ projectSlug, sessionId }),
+			client.ListWorktrees({
+				projectSlug,
+				...(sessionId ? { sessionId } : {}),
+			}),
 		),
 	);
 }
@@ -612,6 +619,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),
+			...(input.worktreePath != null
+				? { worktreePath: input.worktreePath }
+				: {}),
 		}),
 	);
 
@@ -1045,7 +1055,11 @@ export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
 export async function createSessionRpc(
 	input: CreateSessionRpcInput,
 ): Promise<CreateSessionResponse> {
-	return await runTransportEffect(callCreateSession(input));
+	const result = await runTransportEffect(
+		Effect.either(callCreateSession(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function viewSessionRpc(

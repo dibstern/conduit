@@ -6,6 +6,10 @@ import type {
 import type { SessionCommandError } from "./session-command.js";
 
 export interface SessionWorkspace {
+	/** Serialize launch-folder reads with draft workspace initialization. */
+	readonly withLaunch: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
 	readonly get: (
 		sessionId: string,
 	) => Effect.Effect<string, SessionCommandError>;
