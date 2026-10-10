@@ -641,12 +641,14 @@ export function getSessionStatements<K extends CanonicalEventType>(
 	if (event.type !== "session.created" && event.type !== "session.forked") {
 		return statements;
 	}
-	// Both projector implementations execute this writer before publishing the
-	// session. Reads never need the parent message again.
+	// A fork's own boundary copy is authoritative when already projected.
+	// Claude forks reference the parent row; retain that captured fallback.
 	return [
 		...statements,
 		{
 			sql: `UPDATE sessions SET fork_point_timestamp = COALESCE(
+			(SELECT created_at FROM messages
+			 WHERE session_id = sessions.id AND id = sessions.fork_point_event),
 			fork_point_timestamp, ?,
 			(SELECT created_at FROM messages
 			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)

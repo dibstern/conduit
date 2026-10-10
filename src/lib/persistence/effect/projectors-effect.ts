@@ -175,10 +175,18 @@ const stampMessage = (
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
 		for (const messageId of new Set(messageIds)) {
-			const rows = yield* sql<OwnedRow>`
+			const rows = yield* sql<OwnedRow & { readonly created_at: number }>`
 				UPDATE messages SET version = ${version}
 				WHERE id = ${messageId}
-				RETURNING session_id`;
+				RETURNING session_id, created_at`;
+			// The fork split uses the copy's stored clock, including when a
+			// snapshot replaces a streamed row with a provider timestamp.
+			for (const row of rows) {
+				yield* sql`UPDATE sessions SET fork_point_timestamp = ${row.created_at},
+					version = ${version}
+					WHERE id = ${row.session_id} AND fork_point_event = ${messageId}
+					AND fork_point_timestamp IS NOT ${row.created_at}`;
+			}
 			stamped.push(...owners(rows));
 		}
 		// A message row that vanished under its own event went with the session
