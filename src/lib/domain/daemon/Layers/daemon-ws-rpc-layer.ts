@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
@@ -219,6 +220,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					"instances",
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
+						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 					})),
 				),
 			SubscribeProjects: () =>
@@ -391,7 +393,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			GetInstances: () =>
 				run(
 					getInstances.pipe(
-						Effect.map((instances) => ({ instances: Array.from(instances) })),
+						Effect.map((instances) => ({
+							instances: Array.from(instances),
+							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						})),
 					),
 				),
 			GetInstanceStatus: (request) =>

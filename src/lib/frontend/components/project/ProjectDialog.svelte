@@ -17,7 +17,9 @@
 		rename,
 		type ProjectDraft,
 	} from "../../../project-draft.js";
-	import type { ProjectInfo } from "../../types.js";
+	import type { OpenCodeInstance, ProjectInfo } from "../../types.js";
+	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import {
 		findFoldersRpc,
 		saveProjectRpc,
@@ -37,6 +39,7 @@
 		open,
 		project,
 		projects = [],
+		instances,
 		onclose,
 		onsaved,
 		returnFocus,
@@ -47,6 +50,7 @@
 		/** Opens the dialog in Edit mode for this project. */
 		project?: ProjectInfo | undefined;
 		projects?: readonly ProjectInfo[];
+		instances?: readonly Pick<OpenCodeInstance, "id" | "name" | "capabilities">[];
 		onclose: () => void;
 		onsaved?: (response: SaveProjectResponse) => void;
 		returnFocus?: () => HTMLElement | null;
@@ -88,6 +92,9 @@
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
 	const original = $derived(createDraft(project));
+	const unsupportedProviders = $derived((instances ?? getAvailableInstances().map(({ id, label, capabilities }) => ({
+		id, name: getInstanceById(id)?.name ?? label, capabilities,
+	}))).filter((instance) => instance.capabilities?.supportsMultiFolder === false));
 	const issues = $derived(check(draft, project ? projects.filter(({ slug }) => slug !== project.slug) : []));
 	const permissionIssues = $derived([...lookupIssues, ...saveIssues].filter((issue) => issue.kind === "permission-denied"));
 	const errors = $derived([
@@ -367,6 +374,13 @@
 							</li>
 						{/each}
 					</ul>
+				{/if}
+				{#if draft.folders.length > 1 && unsupportedProviders.length > 0}
+					<section aria-label="Provider folder support" data-testid="project-provider-capabilities" class="text-[11px] text-text-secondary">
+						{#each unsupportedProviders as instance (instance.id)}
+							<p>{instance.name} works in the main folder only.</p>
+						{/each}
+					</section>
 				{/if}
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">
