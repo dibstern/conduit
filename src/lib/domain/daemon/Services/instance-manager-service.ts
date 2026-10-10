@@ -67,6 +67,7 @@ import {
 	type DaemonEventBusTag,
 	publishInstanceError,
 	publishInstanceStatusChanged,
+	publishProviderInstanceRemoved,
 } from "./daemon-pubsub.js";
 import { type DaemonInstanceConfig, DaemonStateTag } from "./daemon-state.js";
 import { InstanceHealthCheckTag } from "./instance-health-service.js";
@@ -445,6 +446,7 @@ export const removeInstance = (instanceId: string) =>
 
 		yield* FiberMap.remove(fiberMap, pollerKey(instanceId));
 		yield* FiberMap.remove(fiberMap, restartKey(instanceId));
+		yield* publishProviderInstanceRemoved(instanceId);
 		yield* requestConfigSave;
 	}).pipe(
 		withManagedOpenCodeLock,
@@ -644,7 +646,7 @@ export const stopHealthPoller = (instanceId: string) =>
 const stopRecordedManagedOpenCode = (record: ManagedOpenCodeRecord) =>
 	Effect.tryPromise({
 		try: async () => {
-			if (await stopManagedOpenCode(record)) return;
+			if (await stopManagedOpenCode(record)) return true;
 			// A recycled worker PID cannot keep a dead supervisor's record alive.
 			if (
 				record.processIdentity &&
@@ -654,6 +656,11 @@ const stopRecordedManagedOpenCode = (record: ManagedOpenCodeRecord) =>
 					message:
 						"Cannot verify OpenCode ownership; retaining its recovery record",
 				});
+			return (
+				record.processIdentity !== undefined ||
+				record.pid === undefined ||
+				!isProcessAlive(record.pid)
+			);
 		},
 		catch: (cause) => cause,
 	});
@@ -1219,20 +1226,23 @@ export const startInstance = (instanceId: string) =>
 	);
 
 /**
- * Stop an instance — interrupt its fibers and mark it "stopped".
+ * Stop an instance and report whether its recorded managed process is gone.
  */
 export const stopInstance = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
 		const state = yield* Ref.get(stateRef);
 		const instance = HashMap.get(state.instances, instanceId);
-		if (Option.isSome(instance) && instance.value.driver === "claude") return;
+		if (Option.isSome(instance) && instance.value.driver === "claude")
+			return false;
 		yield* cancelInstanceFibers(instanceId);
 		const record = HashMap.get(
 			state.managedProcesses ?? HashMap.empty(),
 			instanceId,
 		);
-		if (Option.isSome(record)) yield* stopRecordedManagedOpenCode(record.value);
+		const terminated = Option.isSome(record)
+			? yield* stopRecordedManagedOpenCode(record.value)
+			: false;
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
 			instances: HashMap.modify(s.instances, instanceId, (inst) => {
@@ -1250,6 +1260,7 @@ export const stopInstance = (instanceId: string) =>
 		}));
 		yield* publishInstanceStatusChanged(instanceId);
 		yield* requestConfigSave;
+		return terminated && Option.isSome(instance) && instance.value.managed;
 	}).pipe(
 		withManagedOpenCodeLock,
 		Effect.annotateLogs("instanceId", instanceId),

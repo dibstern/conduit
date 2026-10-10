@@ -336,9 +336,10 @@ const executeMonitoringEffectsEffect = (
 					// the effects that follow it (other sessions' stops and dones).
 					yield* Effect.forkDaemon(
 						Effect.gen(function* () {
-							const messages = yield* Effect.tryPromise(() =>
-								deps.client.session.messages(sessionId),
-							).pipe(
+							const messages = yield* Effect.tryPromise({
+								try: () => deps.client.session.messages(sessionId),
+								catch: (error) => error,
+							}).pipe(
 								Effect.catchAll((err) =>
 									Effect.sync(() => {
 										if (isOpenCodeNotRunningError(err)) return;

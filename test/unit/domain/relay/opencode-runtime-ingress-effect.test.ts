@@ -1,11 +1,26 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqlError } from "@effect/sql/SqlError";
-import { Deferred, Effect, Layer, ManagedRuntime } from "effect";
+import {
+	Deferred,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Queue,
+	Stream,
+} from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProviderInstanceIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	type OpenCodeInstanceEvent,
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	EffectOpenCodeRuntimeIngress,
 	makeEffectOpenCodeRuntimeIngress,
@@ -17,18 +32,215 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
+import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { createSilentLogger } from "../../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
-import {
-	type ProjectionRunnerEffect,
-	ProjectionRunnerEffectTag,
-} from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
+import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
+import { createProjectRelay } from "../../../../src/lib/relay/relay-stack.js";
+import {
+	makeMockConfig,
+	makeMockOpenCodeAPI,
+} from "../../../helpers/mock-factories.js";
 import {
 	makeSSEEvent,
 	makeUnknownSSEEvent,
 } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-effect-runtime-ingress-001";
+
+// Failure modes: the selected instance's lifecycle uses the default alias while
+// established sessions retain its named binding, alias sessions also need to
+// settle, secondary stops must stay isolated, and permission/question waits
+// must remain pending. The real relay graph runs without listening on sockets.
+describe("selected OpenCode stop through the relay graph", () => {
+	it.each([
+		{ selectedId: "managed-test", stoppedId: "managed-test" },
+		{ selectedId: "opencode", stoppedId: "opencode" },
+		{ selectedId: "managed-test", stoppedId: "secondary" },
+	])("settles $stoppedId with selected $selectedId while preserving other bindings and waits", async ({
+		selectedId,
+		stoppedId,
+	}) => {
+		mkdirSync("test-results", { recursive: true });
+		const dir = mkdtempSync(
+			join(process.cwd(), "test-results", "rqbc-named-stop-"),
+		);
+		const server = createServer();
+		const events = await Effect.runPromise(
+			Queue.unbounded<OpenCodeInstanceEvent>(),
+		);
+		const client = makeMockOpenCodeAPI();
+		const send = (
+			instanceId: string,
+			payload: ReturnType<typeof makeSSEEvent>,
+		) =>
+			Queue.offer(events, {
+				_tag: "event",
+				instanceId: instanceId === "opencode" ? selectedId : instanceId,
+				payload,
+				health: {
+					connected: false,
+					stale: false,
+					lastEventAt: null,
+					reconnectCount: 0,
+				},
+			});
+		const instances: OpenCodeInstances = {
+			events: () => Stream.fromQueue(events),
+			use: () => Effect.succeed(client),
+			ifRunning: () => Effect.succeed(Option.none()),
+			stop: (instanceId) =>
+				Queue.offer(events, {
+					_tag: "connection",
+					instanceId,
+					state: "stopped",
+					managedStopped: true,
+					health: {
+						connected: false,
+						stale: false,
+						lastEventAt: null,
+						reconnectCount: 0,
+					},
+				}).pipe(Effect.asVoid),
+		};
+		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		try {
+			relay = await createProjectRelay({
+				httpServer: server,
+				noServer: true,
+				projectDir: dir,
+				configDir: dir,
+				persistenceDbPath: join(dir, "events.db"),
+				slug: "named-stop",
+				openCodeInstanceId: selectedId,
+				openCodeInstances: instances,
+				publishGlobalSetting: () => Effect.void,
+				log: createSilentLogger(),
+			});
+			const runtime = relay.effectRuntime.runtime;
+			const rows = [
+				{ id: "selected-work", provider: selectedId },
+				{ id: "alias-work", provider: "opencode" },
+				{ id: "secondary-work", provider: "secondary" },
+				{ id: "selected-permission", provider: selectedId },
+				{ id: "alias-question", provider: "opencode" },
+			];
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const manager = yield* SessionManagerServiceTag;
+					const view = yield* OpenCodeInstancesTag;
+					// Receiving secondary lifecycle events requires a used/restored binding.
+					yield* view.use("secondary").pipe(Effect.scoped);
+					for (const row of rows) {
+						yield* manager.establishOpenCodeSession(
+							{
+								id: row.id,
+								projectID: "named-stop",
+								directory: dir,
+								title: row.id,
+								version: "test",
+								time: { created: 0, updated: 0 },
+							},
+							ProviderInstanceIdSchema.make(row.provider),
+						);
+						yield* send(
+							row.provider,
+							makeSSEEvent("session.status", {
+								sessionID: row.id,
+								status: { type: "busy" },
+							}),
+						);
+					}
+					yield* send(
+						selectedId,
+						makeSSEEvent("permission.asked", {
+							id: "stop-permission",
+							sessionID: "selected-permission",
+							permission: "bash",
+							patterns: ["git *"],
+							metadata: {},
+							always: [],
+						}),
+					);
+					yield* send(
+						"opencode",
+						makeSSEEvent("question.asked", {
+							id: "stop-question",
+							sessionID: "alias-question",
+							questions: [],
+						}),
+					);
+				}),
+			);
+			const snapshot = () =>
+				runtime.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql<{ id: string; provider: string; status: string }>`
+					SELECT id, provider, status FROM sessions ORDER BY id`;
+					}),
+				);
+			await vi.waitFor(async () => {
+				expect(await snapshot()).toEqual(
+					rows
+						.map((row) => ({ ...row, status: "busy" }))
+						.sort((a, b) => a.id.localeCompare(b.id)),
+				);
+				expect(
+					await runtime.runPromise(
+						Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							return yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM pending_approvals WHERE status = 'pending'`;
+						}),
+					),
+				).toEqual([{ count: 2 }]);
+			});
+			await runtime.runPromise(
+				Effect.flatMap(OpenCodeInstancesTag, (view) => view.stop(stoppedId)),
+			);
+			await vi.waitFor(async () => {
+				expect(await snapshot()).toEqual(
+					rows
+						.map((row) => ({
+							...row,
+							status:
+								row.id.endsWith("work") &&
+								(stoppedId === selectedId
+									? row.provider === selectedId || row.provider === "opencode"
+									: row.provider === stoppedId)
+									? "idle"
+									: "busy",
+						}))
+						.sort((a, b) => a.id.localeCompare(b.id)),
+				);
+			});
+			const proof = await runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						pending: yield* sql<{ type: string; status: string }>`
+						SELECT type, status FROM pending_approvals ORDER BY type`,
+						completed: yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM events WHERE type = 'turn.completed'`,
+					};
+				}),
+			);
+			expect(proof.pending).toEqual([
+				{ type: "permission", status: "pending" },
+				{ type: "question", status: "pending" },
+			]);
+			expect(proof.completed).toEqual([{ count: 0 }]);
+		} finally {
+			await relay?.stop();
+			server.close();
+			await Effect.runPromise(Queue.shutdown(events));
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
 
 function makeRuntime(filename: string) {
 	const persistenceLayer = makePersistenceEffectLayer(filename, "test-project");
@@ -194,7 +406,10 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 		]);
 	});
 
-	it("rolls back stop settlement when a new instance lifecycle starts before commit", async () => {
+	it.each([
+		"opencode",
+		"managed-test",
+	])("rolls back %s stop settlement when a new instance lifecycle starts before commit", async (selectedId) => {
 		if (!hook || !runtime) throw new Error("test runtime not initialized");
 		await Effect.runPromise(
 			hook.onSSEEventEffect(
@@ -203,7 +418,7 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 					status: { type: "busy" },
 				}),
 				SESSION_ID,
-				"opencode",
+				selectedId,
 			),
 		);
 		const entered = await Effect.runPromise(Deferred.make<void>());
@@ -211,11 +426,8 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 		const stopIngress = await runtime.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
-				return new EffectOpenCodeRuntimeIngress({
-					sql: yield* SqlClient.SqlClient,
-					projectionRunner: yield* ProjectionRunnerEffectTag,
-					log: makeLogger(),
-					ingestion: {
+				return yield* makeEffectOpenCodeRuntimeIngress(makeLogger()).pipe(
+					Effect.provideService(ProviderRuntimeIngestionTag, {
 						...ingestion,
 						ingestBatch: (events, options = {}) =>
 							ingestion.ingestBatch(events, {
@@ -225,8 +437,12 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 									Effect.zipRight(options.beforeCommit ?? Effect.void),
 								),
 							}),
-					},
-				});
+					}),
+					Effect.provideService(
+						ConfigTag,
+						makeMockConfig({ openCodeInstanceId: selectedId }),
+					),
+				);
 			}),
 		);
 		let current = true;

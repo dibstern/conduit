@@ -3,6 +3,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addInstance,
 	InstanceManagerStateTag,
@@ -11,7 +12,9 @@ import {
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 
 const testLayer = makeInstanceManagerStateLive().pipe(
-	Layer.provideMerge(ConfigPersistenceNoopLive),
+	Layer.provideMerge(
+		Layer.merge(ConfigPersistenceNoopLive, DaemonEventBusLive),
+	),
 );
 
 describe("InstanceManager Effect", () => {

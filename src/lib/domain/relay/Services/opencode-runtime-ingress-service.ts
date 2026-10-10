@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
@@ -26,7 +27,7 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
-import { SessionRetriesTag } from "./services.js";
+import { ConfigTag, SessionRetriesTag } from "./services.js";
 
 export interface OpenCodeRuntimeIngressLog {
 	warn(msg: string, context?: Record<string, unknown>): void;
@@ -99,6 +100,8 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		messageId: string,
 	) => string | undefined;
 	readonly retryingOf?: (sessionId: string) => string | undefined;
+	/** The default OpenCode binding aliases this relay's selected instance. */
+	readonly selectedInstanceId?: string;
 }
 
 const BACKFILL_TIMEOUT = "15 seconds";
@@ -143,6 +146,7 @@ export class EffectOpenCodeRuntimeIngress
 		| EffectOpenCodeRuntimeIngressOptions["retryingOf"]
 		| undefined;
 	private readonly log: OpenCodeRuntimeIngressLog;
+	private readonly selectedInstanceId: string;
 	private stopped = false;
 	private readonly fetchSessionMessages:
 		| EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"]
@@ -196,6 +200,8 @@ export class EffectOpenCodeRuntimeIngress
 		this.ingestion = opts.ingestion;
 		this.retryingOf = opts.retryingOf;
 		this.log = opts.log;
+		this.selectedInstanceId =
+			opts.selectedInstanceId ?? defaultInstanceIdForDriver("opencode");
 		this.sessionCreationGate =
 			opts.sessionCreationGate ?? Effect.unsafeMakeSemaphore(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
@@ -824,9 +830,23 @@ export class EffectOpenCodeRuntimeIngress
 			Effect.gen(this, function* () {
 				if (this.stopped || !isCurrent()) return;
 				const sql = yield* SqlClient.SqlClient;
-				const candidates = yield* sql<{ id: string; status: string }>`
-					SELECT id, status FROM sessions WHERE provider = ${providerInstanceId}`;
-				for (const { id: sessionId, status } of candidates) {
+				const defaultId = defaultInstanceIdForDriver("opencode");
+				const instanceIds =
+					providerInstanceId === defaultId ||
+					providerInstanceId === this.selectedInstanceId
+						? [defaultId, this.selectedInstanceId]
+						: [providerInstanceId];
+				const candidates = yield* sql<{
+					id: string;
+					provider: string;
+					status: string;
+				}>`
+					SELECT id, provider, status FROM sessions WHERE provider IN ${sql.in(instanceIds)}`;
+				for (const {
+					id: sessionId,
+					provider: boundInstanceId,
+					status,
+				} of candidates) {
 					if (
 						status !== "busy" &&
 						status !== "retry" &&
@@ -843,10 +863,10 @@ export class EffectOpenCodeRuntimeIngress
 								status: string;
 							}>`
 								SELECT s.provider_sid, s.status FROM sessions s
-								WHERE s.id = ${sessionId} AND s.provider = ${providerInstanceId}
+								WHERE s.id = ${sessionId} AND s.provider = ${boundInstanceId}
 									AND EXISTS (
 										SELECT 1 FROM session_providers sp
-										WHERE sp.session_id = s.id AND sp.provider = ${providerInstanceId}
+											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
 											AND sp.status = 'active')
 									AND NOT EXISTS (
 										SELECT 1 FROM pending_approvals pa
@@ -1077,6 +1097,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			OpenCodeSessionCreationGateTag,
 		);
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
 		const ingress = new EffectOpenCodeRuntimeIngress({
 			sql,
 			projectionRunner,
@@ -1088,6 +1109,9 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
 			...(retries._tag === "Some" ? { retryingOf: retries.value } : {}),
+			...(config._tag === "Some" && config.value.openCodeInstanceId
+				? { selectedInstanceId: config.value.openCodeInstanceId }
+				: {}),
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.

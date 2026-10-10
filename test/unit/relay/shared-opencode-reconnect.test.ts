@@ -25,11 +25,13 @@ import { makeSSETestServices } from "../../helpers/sse-effect-harness.js";
 // health probe blocks another instance, and stopped metadata is lost on replay
 // or before a secondary instance's first provider event. A refused process stop
 // must not settle sessions whose managed endpoint is still running.
+// Transport loss must not duplicate a probe, a held probe must not overlap the
+// next reconnect, and stopping one instance must cancel only its own probe.
 describe("Shared OpenCode stream reconnect", () => {
 	let runtime: ManagedRuntime.ManagedRuntime<OpenCodeInstancesTag, never>;
 	let endpoints: Map<string, OpenCodeEndpoint>;
 	let checkHealth = vi.fn((_instanceId: string) => Effect.void);
-	let stopProcess = vi.fn((_instanceId: string) => Effect.void);
+	let stopProcess = vi.fn((_instanceId: string) => Effect.succeed(true));
 	let streams: {
 		instanceId: string;
 		send: (frame: unknown) => void;
@@ -56,6 +58,7 @@ describe("Shared OpenCode stream reconnect", () => {
 				const endpoint = endpoints.get(instanceId);
 				if (endpoint)
 					endpoints.set(instanceId, { ...endpoint, status: "stopped" });
+				return true;
 			}),
 		);
 		vi.stubGlobal(
@@ -219,6 +222,82 @@ describe("Shared OpenCode stream reconnect", () => {
 			),
 		);
 
+	it.each([
+		false,
+		true,
+	])("coalesces transport-loss health probes and permits a later probe (held=%s)", async (held) => {
+		const release = await Effect.runPromise(Deferred.make<void>());
+		checkHealth.mockImplementation((instanceId) =>
+			instanceId === "opencode" && held ? Deferred.await(release) : Effect.void,
+		);
+		try {
+			await start();
+			await start("secondary");
+			streams.find(({ instanceId }) => instanceId === "opencode")?.close();
+			await vi.waitFor(() =>
+				expect(checkHealth).toHaveBeenCalledWith("opencode"),
+			);
+			streams.find(({ instanceId }) => instanceId === "secondary")?.close();
+			await vi.waitFor(() =>
+				expect(checkHealth).toHaveBeenCalledWith("secondary"),
+			);
+			expect(
+				checkHealth.mock.calls.filter(([id]) => id === "opencode"),
+			).toHaveLength(1);
+			expect(
+				checkHealth.mock.calls.filter(([id]) => id === "secondary"),
+			).toHaveLength(1);
+
+			await vi.waitFor(
+				() => {
+					expect(
+						streams.filter(({ instanceId }) => instanceId === "opencode"),
+					).toHaveLength(2);
+					expect(
+						streams.filter(({ instanceId }) => instanceId === "secondary"),
+					).toHaveLength(2);
+				},
+				{ timeout: 3_000 },
+			);
+			streams.filter(({ instanceId }) => instanceId === "opencode")[1]?.close();
+			streams
+				.filter(({ instanceId }) => instanceId === "secondary")[1]
+				?.close();
+			await vi.waitFor(() =>
+				expect(
+					checkHealth.mock.calls.filter(([id]) => id === "secondary"),
+				).toHaveLength(2),
+			);
+			expect(
+				checkHealth.mock.calls.filter(([id]) => id === "opencode"),
+			).toHaveLength(held ? 1 : 2);
+		} finally {
+			await Effect.runPromise(Deferred.succeed(release, undefined));
+		}
+	});
+
+	it("interrupts only the stopped instance's in-flight health probe", async () => {
+		const interrupted = vi.fn((_instanceId: string) => {});
+		checkHealth.mockImplementation((instanceId) =>
+			Effect.never.pipe(
+				Effect.onInterrupt(() => Effect.sync(() => interrupted(instanceId))),
+			),
+		);
+		await start();
+		await start("secondary");
+		for (const stream of streams) stream.close();
+		await vi.waitFor(() => {
+			expect(checkHealth).toHaveBeenCalledWith("opencode");
+			expect(checkHealth).toHaveBeenCalledWith("secondary");
+		});
+		await runtime.runPromise(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.stop("opencode"),
+			),
+		);
+		expect(interrupted.mock.calls).toEqual([["opencode"]]);
+	});
+
 	it("checks another managed instance while the first instance's health probe is held", async () => {
 		const release = await Effect.runPromise(Deferred.make<void>());
 		checkHealth.mockImplementation((instanceId) =>
@@ -288,7 +367,7 @@ describe("Shared OpenCode stream reconnect", () => {
 		await vi.waitFor(() => expect(project.connected).toHaveBeenCalledOnce());
 		// Production catches a rejected ownership/termination check. The stream
 		// closes, but the instance manager retains its healthy process status.
-		stopProcess.mockImplementation(() => Effect.void);
+		stopProcess.mockImplementation(() => Effect.succeed(false));
 		await runtime.runPromise(
 			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
 				instances.stop("opencode"),
