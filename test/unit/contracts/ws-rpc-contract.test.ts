@@ -4,7 +4,7 @@ import { Array as Arr, Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
-	MessageVersion,
+	PartVersion,
 	ToolCallId,
 } from "../../../src/lib/contracts/tool-wire.js";
 import {
@@ -503,7 +503,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						tools: request.toolIds.map((toolId) => ({
 							toolId,
-							version: MessageVersion.make(1),
+							version: PartVersion.make(1),
 							output: { _tag: "whole" as const, text: "full output" },
 						})),
 					}),

@@ -335,6 +335,16 @@ export const PartRemovalId = Schema.parseJson(
 	Schema.Tuple(Schema.String, Schema.String),
 );
 
+/**
+ * How many parts' last text each end of a detail subscription keeps, least
+ * recently written first out. Both ends see the same part writes in the same
+ * order, so the decoder still holds every part the encoder sends a suffix of.
+ * Usually only the streaming part grows; eight slots keep it plus seven nearby
+ * interleaved parts warm. An evicted part goes whole, so eviction only costs
+ * compression.
+ */
+export const SENT_PART_LIMIT = 8;
+
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
 const TextSuffixSchema = Schema.Struct({
 	from: Schema.NonNegativeInt,

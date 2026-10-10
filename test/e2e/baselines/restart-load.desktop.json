@@ -1,44 +1,44 @@
 {
 	"schema": 1,
 	"project": "desktop",
-	"recordedAt": "2026-10-08T07:08:09.268Z",
+	"recordedAt": "2026-10-08T07:54:26.252Z",
 	"fixture": {
 		"families": 2500,
 		"sessions": 10001,
 		"events": 60841,
 		"heavySessionId": "load-heavy",
 		"heavyFinalText": "Heavy session complete: all steps verified.",
-		"seedMs": 11740,
-		"storeBytes": 55963648
+		"seedMs": 15376,
+		"storeBytes": 55988224
 	},
 	"devices": 4,
 	"streamingSessions": 3,
 	"restart": {
-		"stopMs": 413,
-		"startMs": 2609
+		"stopMs": 460,
+		"startMs": 1695
 	},
-	"reconnectMs": [3463, 3376, 3435, 3042],
+	"reconnectMs": [2389, 2397, 2402, 2120],
 	"open": {
 		"sessionId": "load-heavy",
-		"ms": 390,
-		"fromReadyMs": 436,
+		"ms": 438,
+		"fromReadyMs": 501,
 		"wire": {
 			"received": {
-				"frames": 1,
-				"bytes": 255375,
+				"frames": 4,
+				"bytes": 255933,
 				"maxFrameBytes": 255375,
 				"p95FrameBytes": 255375
 			},
 			"sent": {
-				"frames": 2,
-				"bytes": 277,
+				"frames": 8,
+				"bytes": 1044,
 				"maxFrameBytes": 246,
 				"p95FrameBytes": 246
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 1,
-					"bytes": 255375,
+					"frames": 4,
+					"bytes": 255933,
 					"maxFrameBytes": 255375,
 					"p95FrameBytes": 255375
 				}
@@ -48,30 +48,48 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"95\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"message\",\"message\":{\"id\":\"load-heavy-u176"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"87\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 340,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"90\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"load-heavy\",\"title\":\"Heavy session\",\"status"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 150,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"88\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"sessionId\":\"load-heavy\",\"items\":[]}],\"sequence\":"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 68,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"89\",\"values\":[{\"_tag\":\"synchronized\"}]}"
 				}
 			]
 		}
 	},
 	"wire": {
 		"warm": {
-			"ms": 2003,
+			"ms": 2001,
 			"received": {
-				"frames": 36,
-				"bytes": 15233,
+				"frames": 33,
+				"bytes": 16214,
 				"maxFrameBytes": 747,
 				"p95FrameBytes": 747
 			},
 			"sent": {
-				"frames": 32,
-				"bytes": 981,
+				"frames": 28,
+				"bytes": 862,
 				"maxFrameBytes": 31,
 				"p95FrameBytes": 31
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 36,
-					"bytes": 15233,
+					"frames": 33,
+					"bytes": 16214,
 					"maxFrameBytes": 747,
 					"p95FrameBytes": 747
 				}
@@ -84,6 +102,12 @@
 					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				},
 				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
+				{
 					"device": 0,
 					"socket": "/rpc",
 					"bytes": 747,
@@ -93,40 +117,34 @@
 					"device": 2,
 					"socket": "/rpc",
 					"bytes": 747,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"27\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				},
 				{
 					"device": 0,
 					"socket": "/rpc",
-					"bytes": 560,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"message\",\"message\":{\"id\":\"2a619891-e0a3-4846"
-				},
-				{
-					"device": 1,
-					"socket": "/rpc",
-					"bytes": 560,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"message\",\"message\":{\"id\":\"2a619891-e0a3-4846"
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"27\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				}
 			]
 		},
 		"restart": {
-			"ms": 5499,
+			"ms": 4699,
 			"received": {
-				"frames": 161,
-				"bytes": 359739,
+				"frames": 173,
+				"bytes": 365998,
 				"maxFrameBytes": 255375,
 				"p95FrameBytes": 920
 			},
 			"sent": {
-				"frames": 218,
-				"bytes": 29161,
-				"maxFrameBytes": 306,
+				"frames": 219,
+				"bytes": 29301,
+				"maxFrameBytes": 305,
 				"p95FrameBytes": 297
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 161,
-					"bytes": 359739,
+					"frames": 173,
+					"bytes": 365998,
 					"maxFrameBytes": 255375,
 					"p95FrameBytes": 920
 				}
@@ -136,55 +154,55 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"95\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"message\",\"message\":{\"id\":\"load-heavy-u176"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"87\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
+				},
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 8568,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"111\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_c"
-				},
-				{
-					"device": 1,
-					"socket": "/rpc",
-					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"129\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_c"
-				},
-				{
-					"device": 0,
-					"socket": "/rpc",
-					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"129\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_c"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"100\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 2,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"129\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_c"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+				},
+				{
+					"device": 1,
+					"socket": "/rpc",
+					"bytes": 8547,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				}
 			],
 			"byDevice": [
 				{
-					"frames": 41,
-					"bytes": 27604,
+					"frames": 47,
+					"bytes": 29837,
+					"maxFrameBytes": 8568,
+					"p95FrameBytes": 920
+				},
+				{
+					"frames": 45,
+					"bytes": 30205,
 					"maxFrameBytes": 8547,
 					"p95FrameBytes": 920
 				},
 				{
-					"frames": 42,
-					"bytes": 28088,
+					"frames": 45,
+					"bytes": 29123,
 					"maxFrameBytes": 8547,
 					"p95FrameBytes": 920
 				},
 				{
-					"frames": 43,
-					"bytes": 28161,
-					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
-				},
-				{
-					"frames": 35,
-					"bytes": 275886,
+					"frames": 36,
+					"bytes": 276833,
 					"maxFrameBytes": 255375,
 					"p95FrameBytes": 8547
 				}
@@ -193,7 +211,7 @@
 	},
 	"toolPreviews": {
 		"heavyFirstPageBytes": 255375,
-		"liveToolUpdateBytes": 5116,
+		"liveToolUpdateBytes": 4811,
 		"detailResponseBytes": 46608,
 		"limits": {
 			"heavyFirstPageBytes": 262144,
@@ -203,15 +221,15 @@
 	},
 	"longTurn": {
 		"calls": 40,
-		"liveFrames": 26,
-		"partsSent": 58,
-		"firstQuartileMedianBytesPerPart": 1915,
+		"liveFrames": 28,
+		"partsSent": 62,
+		"firstQuartileMedianBytesPerPart": 1485,
 		"lastQuartileMedianBytesPerPart": 1551,
-		"maxFrameBytes": 4652,
+		"maxFrameBytes": 7179,
 		"wholeMessageBytes": 72350,
 		"resume": {
-			"frames": 12,
-			"bytes": 9618,
+			"frames": 13,
+			"bytes": 9633,
 			"resentEarlierTurn": false,
 			"carriedFollowUp": true
 		},
@@ -220,57 +238,75 @@
 	"server": {
 		"warm": {
 			"stalls": {
-				"count": 41,
-				"totalMs": 1595,
+				"count": 46,
+				"totalMs": 1569,
 				"longest": [
 					{
-						"atMs": 424,
-						"ms": 80
+						"atMs": 766,
+						"ms": 46
 					},
 					{
-						"atMs": 1894,
-						"ms": 77
+						"atMs": 1997,
+						"ms": 45
 					},
 					{
-						"atMs": 134,
-						"ms": 76
+						"atMs": 907,
+						"ms": 42
 					},
 					{
-						"atMs": 1807,
-						"ms": 59
+						"atMs": 1943,
+						"ms": 42
 					},
 					{
-						"atMs": 333,
-						"ms": 57
+						"atMs": 57,
+						"ms": 36
 					}
 				]
 			},
 			"reads": {
 				"base": 0,
-				"window": 498
+				"window": 476
 			},
-			"changesRead": 53,
-			"windowReadsPerChange": 9.4,
+			"changesRead": 50,
+			"windowReadsPerChange": 9.5,
 			"bySource": {
 				"approvals": {
 					"reads": {
 						"base": 0,
-						"window": 212
+						"window": 200
 					},
-					"changesRead": 53,
+					"changesRead": 50,
 					"windowReadsPerChange": 4,
-					"windowsRead": 53
+					"windowsRead": 50
 				},
 				"shell": {
 					"reads": {
 						"base": 0,
-						"window": 53
+						"window": 50
 					},
-					"changesRead": 53,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 53
+					"windowsRead": 50
 				},
-				"session-detail/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"session-detail/ses_f5548a75dae649afb3c691dac765d2e1": {
+					"reads": {
+						"base": 0,
+						"window": 17
+					},
+					"changesRead": 12,
+					"windowReadsPerChange": 1.4,
+					"windowsRead": 17
+				},
+				"session-family/ses_f5548a75dae649afb3c691dac765d2e1": {
+					"reads": {
+						"base": 0,
+						"window": 100
+					},
+					"changesRead": 50,
+					"windowReadsPerChange": 2,
+					"windowsRead": 50
+				},
+				"session-detail/ses_e44cbe73d9f54b6cb644d922955b9c97": {
 					"reads": {
 						"base": 0,
 						"window": 9
@@ -279,34 +315,16 @@
 					"windowReadsPerChange": 1,
 					"windowsRead": 9
 				},
-				"session-family/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"session-family/ses_e44cbe73d9f54b6cb644d922955b9c97": {
 					"reads": {
 						"base": 0,
-						"window": 106
+						"window": 50
 					},
-					"changesRead": 53,
-					"windowReadsPerChange": 2,
-					"windowsRead": 53
-				},
-				"session-detail/ses_f2263f08090d4b32aa0630666f3415a2": {
-					"reads": {
-						"base": 0,
-						"window": 11
-					},
-					"changesRead": 11,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 11
+					"windowsRead": 50
 				},
-				"session-family/ses_f2263f08090d4b32aa0630666f3415a2": {
-					"reads": {
-						"base": 0,
-						"window": 53
-					},
-					"changesRead": 53,
-					"windowReadsPerChange": 1,
-					"windowsRead": 53
-				},
-				"session-detail/ses_cfe5fa7ea0624f0981dd03fc15b47512": {
+				"session-detail/ses_b321a66400544d06aca92081a88383bf": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -315,7 +333,7 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"session-family/ses_cfe5fa7ea0624f0981dd03fc15b47512": {
+				"session-family/ses_b321a66400544d06aca92081a88383bf": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -324,67 +342,67 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"todos/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"todos/ses_e44cbe73d9f54b6cb644d922955b9c97": {
 					"reads": {
 						"base": 0,
-						"window": 36
+						"window": 16
 					},
-					"changesRead": 18,
-					"windowReadsPerChange": 2,
-					"windowsRead": 18
-				},
-				"todos/ses_f2263f08090d4b32aa0630666f3415a2": {
-					"reads": {
-						"base": 0,
-						"window": 18
-					},
-					"changesRead": 18,
+					"changesRead": 16,
 					"windowReadsPerChange": 1,
-					"windowsRead": 18
+					"windowsRead": 16
+				},
+				"todos/ses_f5548a75dae649afb3c691dac765d2e1": {
+					"reads": {
+						"base": 0,
+						"window": 34
+					},
+					"changesRead": 17,
+					"windowReadsPerChange": 2,
+					"windowsRead": 17
 				}
 			},
 			"sidebarReads": {
 				"count": 45,
-				"totalMs": 4.64,
+				"totalMs": 4.86,
 				"medianMs": 0.1,
-				"maxMs": 0.17,
+				"maxMs": 0.16,
 				"rows": 0
 			}
 		},
 		"restart": {
 			"stalls": {
-				"count": 23,
-				"totalMs": 3079,
+				"count": 30,
+				"totalMs": 2467,
 				"longest": [
 					{
-						"atMs": 1891,
-						"ms": 1324
+						"atMs": 1068,
+						"ms": 713
 					},
 					{
-						"atMs": 2564,
-						"ms": 305
+						"atMs": 1673,
+						"ms": 327
 					},
 					{
-						"atMs": 2085,
-						"ms": 167
+						"atMs": 1220,
+						"ms": 142
 					},
 					{
-						"atMs": 4893,
-						"ms": 122
+						"atMs": 4112,
+						"ms": 115
 					},
 					{
-						"atMs": 4649,
-						"ms": 104
+						"atMs": 4230,
+						"ms": 107
 					}
 				]
 			},
 			"reads": {
 				"base": 13,
-				"window": 317,
+				"window": 445,
 				"resume": 7
 			},
-			"changesRead": 44,
-			"windowReadsPerChange": 7.2,
+			"changesRead": 59,
+			"windowReadsPerChange": 7.5,
 			"bySource": {
 				"session-detail/load-heavy": {
 					"reads": {
@@ -407,91 +425,91 @@
 				"session-family/load-heavy": {
 					"reads": {
 						"base": 1,
-						"window": 39
+						"window": 58
 					},
-					"changesRead": 39,
+					"changesRead": 58,
 					"windowReadsPerChange": 1,
-					"windowsRead": 39
+					"windowsRead": 58
 				},
-				"session-detail/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"session-detail/ses_f5548a75dae649afb3c691dac765d2e1": {
 					"reads": {
 						"resume": 2,
-						"window": 8
-					},
-					"changesRead": 8,
-					"windowReadsPerChange": 1,
-					"windowsRead": 8
-				},
-				"session-detail/ses_f2263f08090d4b32aa0630666f3415a2": {
-					"reads": {
-						"resume": 1,
-						"window": 9
-					},
-					"changesRead": 9,
-					"windowReadsPerChange": 1,
-					"windowsRead": 9
-				},
-				"shell": {
-					"reads": {
-						"resume": 4,
-						"window": 35
-					},
-					"changesRead": 32,
-					"windowReadsPerChange": 1.1,
-					"windowsRead": 35
-				},
-				"approvals": {
-					"reads": {
-						"base": 4,
-						"window": 114
-					},
-					"changesRead": 30,
-					"windowReadsPerChange": 3.8,
-					"windowsRead": 31
-				},
-				"todos/ses_f2263f08090d4b32aa0630666f3415a2": {
-					"reads": {
-						"base": 1,
 						"window": 12
 					},
 					"changesRead": 12,
 					"windowReadsPerChange": 1,
 					"windowsRead": 12
 				},
-				"todos/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"session-detail/ses_e44cbe73d9f54b6cb644d922955b9c97": {
+					"reads": {
+						"resume": 1,
+						"window": 13
+					},
+					"changesRead": 13,
+					"windowReadsPerChange": 1,
+					"windowsRead": 13
+				},
+				"shell": {
+					"reads": {
+						"resume": 4,
+						"window": 56
+					},
+					"changesRead": 50,
+					"windowReadsPerChange": 1.1,
+					"windowsRead": 56
+				},
+				"approvals": {
+					"reads": {
+						"base": 4,
+						"window": 156
+					},
+					"changesRead": 42,
+					"windowReadsPerChange": 3.7,
+					"windowsRead": 44
+				},
+				"todos/ses_f5548a75dae649afb3c691dac765d2e1": {
 					"reads": {
 						"base": 2,
-						"window": 18
+						"window": 33
 					},
-					"changesRead": 9,
-					"windowReadsPerChange": 2,
-					"windowsRead": 10
+					"changesRead": 18,
+					"windowReadsPerChange": 1.8,
+					"windowsRead": 19
 				},
-				"session-family/ses_f2263f08090d4b32aa0630666f3415a2": {
+				"session-family/ses_f5548a75dae649afb3c691dac765d2e1": {
+					"reads": {
+						"base": 2,
+						"window": 67
+					},
+					"changesRead": 41,
+					"windowReadsPerChange": 1.6,
+					"windowsRead": 42
+				},
+				"todos/ses_e44cbe73d9f54b6cb644d922955b9c97": {
 					"reads": {
 						"base": 1,
-						"window": 28
+						"window": 11
 					},
-					"changesRead": 28,
+					"changesRead": 11,
 					"windowReadsPerChange": 1,
-					"windowsRead": 28
+					"windowsRead": 11
 				},
-				"session-family/ses_67cd7d8b0afe40e692b5cdeef5ad8fd4": {
+				"session-family/ses_e44cbe73d9f54b6cb644d922955b9c97": {
 					"reads": {
-						"base": 2,
-						"window": 52
+						"base": 1,
+						"window": 37
 					},
-					"changesRead": 28,
-					"windowReadsPerChange": 1.9,
-					"windowsRead": 29
+					"changesRead": 37,
+					"windowReadsPerChange": 1,
+					"windowsRead": 37
 				}
 			},
 			"sidebarReads": {
-				"count": 37,
-				"totalMs": 6.04,
-				"medianMs": 0.13,
-				"maxMs": 0.47,
-				"rows": 5
+				"count": 48,
+				"totalMs": 10.04,
+				"medianMs": 0.17,
+				"maxMs": 1.59,
+				"rows": 6
 			}
 		}
 	}

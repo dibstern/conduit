@@ -10,7 +10,7 @@
 
 import {
 	CodePoints,
-	MessageVersion,
+	PartVersion,
 	SUBAGENT_TOOL_NAMES,
 	ToolCallId,
 	type ToolDetail,
@@ -161,7 +161,7 @@ export function toolDetail(stored: {
 }): ToolDetail {
 	return {
 		toolId: ToolCallId.make(stored.toolId),
-		version: MessageVersion.make(stored.version),
+		version: PartVersion.make(stored.version),
 		...(stored.input == null
 			? {}
 			: { input: { _tag: "whole", value: parseInput(stored.input) } }),

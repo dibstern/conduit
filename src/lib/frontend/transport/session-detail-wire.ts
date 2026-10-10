@@ -1,6 +1,7 @@
 import { Data, Effect, Option, Schema, Stream } from "effect";
 import {
 	PartRemovalId,
+	SENT_PART_LIMIT,
 	type SessionDetailEnvelope,
 } from "../../contracts/ws-rpc.js";
 
@@ -14,11 +15,18 @@ export const decodeSessionDetail = <E, R>(
 	input: Stream.Stream<SessionDetailEnvelope, E, R>,
 ): Stream.Stream<SessionDetailEnvelope, E | DetailLengthMismatch, R> =>
 	Stream.suspend(() => {
-		// Part id → its whole text as last received, and the message that holds it.
+		// Part id → its whole text as last received, and the message that holds
+		// it. Evicts exactly as the encoder does, so it never drops a part the
+		// encoder still sends a suffix of.
 		const received = new Map<string, { messageId: string; text: string }>();
 		const remember = (messageId: string, partId: string, text?: string) => {
-			if (text === undefined) received.delete(partId);
-			else received.set(partId, { messageId, text });
+			received.delete(partId);
+			if (text === undefined) return;
+			received.set(partId, { messageId, text });
+			if (received.size > SENT_PART_LIMIT) {
+				const oldest = received.keys().next();
+				if (!oldest.done) received.delete(oldest.value);
+			}
 		};
 		return input.pipe(
 			Stream.mapEffect((envelope) =>

@@ -844,6 +844,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 							const sql = yield* SqlClient.SqlClient;
 							for (const messageId of new Set(written)) {
 								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
+								// Likewise a part written now, a snapshot's kept parts included.
+								yield* sql`DELETE FROM message_part_tombstones WHERE part_id IN (
+									SELECT id FROM message_parts
+									WHERE message_id = ${messageId} AND version = ${ctx.version})`;
 							}
 							return yield* stampMessage(written, ctx.version);
 						}),

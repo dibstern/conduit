@@ -826,7 +826,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				version: number;
 			}>`
 				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
-					${toolOutput} AS output, messages.version
+					${toolOutput} AS output, mp.version
 				FROM message_parts mp
 				JOIN messages ON messages.id = mp.message_id
 				WHERE (mp.call_id IN ${sql.in(toolIds)}
@@ -1616,15 +1616,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
-						parts = yield* sql<MessagePartRow>`
-							WITH target_messages AS (
-								SELECT id FROM messages
-								WHERE session_id = ${sessionId} AND version > ${floor}
-							)
-							${previewParts(
-								sql`FROM message_parts mp JOIN target_messages tm ON mp.message_id = tm.id
-									WHERE mp.version > ${floor} AND mp.version <= ${ceiling}`,
-							)}`;
+						// The parts that moved, by their own version. CROSS JOIN keeps
+						// SQLite on idx_message_parts_version: left to itself it walks
+						// every message in the session instead.
+						parts = yield* previewParts(
+							sql`FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
+								WHERE m.session_id = ${sessionId}
+									AND mp.version > ${floor} AND mp.version <= ${ceiling}`,
+						);
 					}
 					const removed =
 						range === undefined

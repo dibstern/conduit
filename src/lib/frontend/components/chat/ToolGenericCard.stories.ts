@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { MessageVersion, ToolCallId } from "../../../contracts/tool-wire.js";
+import { PartVersion, ToolCallId } from "../../../contracts/tool-wire.js";
 import {
 	mockToolBash,
 	mockToolCompleted,
@@ -85,7 +85,7 @@ export const ExpandedFullDetail: Story = {
 		message: mockToolPreview,
 		loadDetails: async (toolId: string) => ({
 			toolId: ToolCallId.make(toolId),
-			version: MessageVersion.make(1),
+			version: PartVersion.make(1),
 			output: { _tag: "whole", text: fullGrepOutput },
 		}),
 	},

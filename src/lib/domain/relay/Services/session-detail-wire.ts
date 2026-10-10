@@ -1,16 +1,11 @@
 import { Option, Schema, Stream } from "effect";
 import {
 	PartRemovalId,
+	SENT_PART_LIMIT,
 	type SessionDetailEnvelope,
 } from "../../../contracts/ws-rpc.js";
 import type { Envelope } from "./read-model-subscription.js";
 import type { SessionDetailItem } from "./session-detail-subscription.js";
-
-// Usually only the streaming part grows; eight slots keep it plus seven nearby
-// interleaved parts warm. A cache miss safely sends the whole authoritative
-// part, which the decoder accepts as a replacement, so eviction only costs
-// compression.
-const SENT_PART_LIMIT = 8;
 
 export const encodeSessionDetail = <E, R>(
 	input: Stream.Stream<Envelope<SessionDetailItem>, E, R>,

@@ -413,17 +413,15 @@ describe("session detail wire", () => {
 						{ provider: "claude", createdAt: 4 },
 					),
 				]);
-				// The header moves first and is whole; the part's suffix is the damaged one.
-				expect(yield* Queue.take(output)).toMatchObject({
-					item: { _tag: "message" },
-				});
+				// The part moves first and its suffix is the damaged one, so the
+				// header behind it never arrives: the repair brings it.
 				const repair = yield* Queue.take(output);
 				expect(repair._tag).toBe("snapshot");
 				if (repair._tag !== "snapshot")
 					throw new Error("expected whole-row repair");
 				expect(repair.rows).toMatchObject([
-					{ _tag: "message", message: { id: "m" } },
 					{ _tag: "part", part: { text: "Hello world" } },
+					{ _tag: "message", message: { id: "m" } },
 				]);
 				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
 				expect(issued).toEqual([undefined, undefined]);
@@ -437,11 +435,11 @@ describe("session detail wire", () => {
 				]);
 				expect(yield* Queue.take(output)).toMatchObject({
 					_tag: "upsert",
-					item: { _tag: "message", message: { id: "m" } },
+					item: { _tag: "part", part: { text: "Hello world!" } },
 				});
 				expect(yield* Queue.take(output)).toMatchObject({
 					_tag: "upsert",
-					item: { _tag: "part", part: { text: "Hello world!" } },
+					item: { _tag: "message", message: { id: "m" } },
 				});
 			}).pipe(Effect.provide(testLayer())),
 	);

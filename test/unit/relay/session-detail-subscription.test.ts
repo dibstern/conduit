@@ -339,7 +339,7 @@ describe("subscribeSessionDetail", () => {
 			// The base carries the read-model version it was read at — the same
 			// number a live delta or a resume will speak in.
 			expect(snapshot.sequence).toBe(yield* readModelVersion);
-			expect(namesOf(snapshot.rows)).toEqual(["m1", "m1/m1-0"]);
+			expect(namesOf(snapshot.rows)).toEqual(["m1/m1-0", "m1"]);
 			expect(snapshot.hasMore).toBe(false);
 			expect(snapshot.cursor).toBe("m1");
 			const message = expectMessage(snapshot.rows);
@@ -372,7 +372,7 @@ describe("subscribeSessionDetail", () => {
 				]);
 
 				const rows = yield* takeN(q, 3);
-				expect(namesOf(rows)).toEqual(["m1", "m1/m1-0", "m1/tool-1"]);
+				expect(namesOf(rows)).toEqual(["m1/m1-0", "m1/tool-1", "m1"]);
 				const message = expectMessage(rows);
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
@@ -386,7 +386,7 @@ describe("subscribeSessionDetail", () => {
 				// Text streaming on: the finished tool part stays where it is.
 				yield* commit([textDelta(SID, "m1", "m1-0", "!")]);
 				const streamed = yield* takeN(q, 2);
-				expect(namesOf(streamed)).toEqual(["m1", "m1/m1-0"]);
+				expect(namesOf(streamed)).toEqual(["m1/m1-0", "m1"]);
 				expect(textOf(expectMessage(streamed))).toBe("Hello world!");
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeDetailTestLayer())),
@@ -508,10 +508,10 @@ describe("subscribeSessionDetail", () => {
 				const [snapshot] = yield* takeN(q, 2);
 				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
 				expect(namesOf(snapshot.rows)).toEqual([
-					"m0",
 					"m0/m0-0",
-					"m1",
+					"m0",
 					"m1/m1-0",
+					"m1",
 				]);
 
 				yield* commit([textDelta(SID, "m1", "m1-0", " world")]);
@@ -519,7 +519,7 @@ describe("subscribeSessionDetail", () => {
 				// Rows for the one message that moved: m0 is untouched, so its
 				// version is below the floor and the query does not return it.
 				const rows = yield* takeN(q, 2);
-				expect(namesOf(rows)).toEqual(["m1", "m1/m1-0"]);
+				expect(namesOf(rows)).toEqual(["m1/m1-0", "m1"]);
 				const message = expectMessage(rows);
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
@@ -558,8 +558,8 @@ describe("subscribeSessionDetail", () => {
 			const replay = yield* takeN(q, 5);
 			const boundary = yield* Queue.take(q);
 			expect(boundary).toEqual({ _tag: "synchronized" });
-			expect(namesOf(replay)).toEqual(["m1", "m1/m1-0", "m0", "m2", "m2/m2-0"]);
-			const [first, , , second] = replay;
+			expect(namesOf(replay)).toEqual(["m1/m1-0", "m1", "m0", "m2/m2-0", "m2"]);
+			const [, first, , , second] = replay;
 			// Each replayed message carries the version of the commit that wrote
 			// it, not the counter the replay happened to read. That is what lets a
 			// client recognise a row it already holds as the SAME envelope rather
@@ -671,6 +671,7 @@ describe("subscribeSessionDetail", () => {
 						status: { _tag: "live" },
 						pending: [],
 						waiting: new Map(),
+						partOrder: new Map(),
 					},
 				);
 				expect(held.rows[0]?.parts?.map((part) => part.id)).toEqual(["m1-0"]);
@@ -1071,6 +1072,7 @@ describe("transcript states carried by the detail feed alone", () => {
 				status: { _tag: "live" },
 				pending: [],
 				waiting: new Map(),
+				partOrder: new Map(),
 			}),
 			[],
 		);
@@ -1184,8 +1186,8 @@ describe("transcript states carried by the detail feed alone", () => {
 			const errored = yield* takeN(q, 3);
 			expect(namesOf(errored)).toEqual([
 				"m1",
-				"turn-error-4",
 				"turn-error-4/turn-error-part-4",
+				"turn-error-4",
 			]);
 			const live = [...opening, ...errored];
 			const expected = [

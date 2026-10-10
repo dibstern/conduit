@@ -65,8 +65,10 @@ type DetailRow =
 	  };
 
 /**
- * Split each projected message into its rows: a message row when `moved` says
- * its own version is in the window, and a row for each part the read returned.
+ * Split each projected message into its rows: a row for each part the read
+ * returned, then a message row when `moved` says its own version is in the
+ * window. The header comes last so a client that declines it (a message below
+ * its held page) can drop the parts it has just queued along with it.
  * One group per message, so a page can keep or drop a message whole. The
  * adapter gets exactly these messages, so index `i` is still message `i`.
  */
@@ -84,14 +86,6 @@ const messageRowGroups = (
 		// A REST snapshot's parts come from its payload, stored under the same ids.
 		const projected = new Map(parts.map((part) => [part.id, part]));
 		return [
-			...(moved(stored.version)
-				? [
-						{
-							item: { _tag: "message" as const, message: header },
-							version: stored.version,
-						},
-					]
-				: []),
 			...stored.parts.flatMap((row): DetailRow[] => {
 				const part = projected.get(row.id);
 				return part === undefined
@@ -108,6 +102,14 @@ const messageRowGroups = (
 							},
 						];
 			}),
+			...(moved(stored.version)
+				? [
+						{
+							item: { _tag: "message" as const, message: header },
+							version: stored.version,
+						},
+					]
+				: []),
 		];
 	});
 

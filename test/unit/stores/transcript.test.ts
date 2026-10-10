@@ -26,7 +26,7 @@ const row = (
 	time: { created, ...(completed ? { completed: created + 1 } : {}) },
 	parts: [{ id: `${id}-part`, type: "text", text }],
 });
-// A message lands as its header and then each part, all at one sequence.
+// A message lands as each part and then its header, all at one sequence.
 const upsert = (
 	state: TranscriptEntry,
 	message: HistoryMessage,
@@ -41,6 +41,7 @@ const entry = (): TranscriptEntry => ({
 	status: { _tag: "live" },
 	pending: [],
 	waiting: new Map(),
+	partOrder: new Map(),
 });
 const snapshot = (
 	rows: HistoryMessage[],
@@ -79,6 +80,8 @@ describe("transcript detail reducer", () => {
 		);
 		const next = upsert(held, row("a", 1, "A"), 3);
 		expect(next.rows.map((message) => message.id)).toEqual(["b"]);
+		// Its parts came ahead of it and go with it.
+		expect(next.waiting.size).toBe(0);
 		expect(next.hwm).toBe(3);
 	});
 

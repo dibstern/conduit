@@ -234,6 +234,61 @@ describe("MessageProjector", () => {
 		).toEqual([]);
 	});
 
+	it("a recreated part supersedes its tombstone, through a delta or a snapshot", async () => {
+		const tombstones = () =>
+			harness.query("SELECT part_id FROM message_part_tombstones");
+		const snapshot = (parts: readonly string[], sequence: number) =>
+			project({
+				...makeStored(
+					"message.snapshot",
+					"s1",
+					{
+						messageId: "m1",
+						digest: `digest-${sequence}`,
+						message: {
+							id: "m1",
+							sessionID: "s1",
+							role: "assistant",
+							parts: parts.map((id) => ({ id, type: "text", text: id })),
+						},
+					},
+					sequence,
+				),
+				metadata: { rawSource: "opencode.rest" },
+			});
+		await project(
+			makeStored("text.delta", "s1", {
+				messageId: "m1",
+				partId: "p1",
+				text: "a",
+			}),
+		);
+		await project(
+			makeStored(
+				"message.part.removed",
+				"s1",
+				{ messageId: "m1", partId: "p1" },
+				2,
+			),
+		);
+		expect(await tombstones()).toEqual([{ part_id: "p1" }]);
+		await project(
+			makeStored(
+				"text.delta",
+				"s1",
+				{ messageId: "m1", partId: "p1", text: "b" },
+				3,
+			),
+		);
+		expect(await tombstones()).toEqual([]);
+
+		await snapshot(["p1", "p2"], 4);
+		await snapshot(["p1"], 5);
+		expect(await tombstones()).toEqual([{ part_id: "p2" }]);
+		await snapshot(["p1", "p2"], 6);
+		expect(await tombstones()).toEqual([]);
+	});
+
 	it.each([
 		false,
 		true,

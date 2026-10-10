@@ -1,44 +1,44 @@
 {
 	"schema": 1,
 	"project": "mobile",
-	"recordedAt": "2026-10-08T07:10:52.161Z",
+	"recordedAt": "2026-10-08T07:57:04.871Z",
 	"fixture": {
 		"families": 2500,
 		"sessions": 10001,
 		"events": 60841,
 		"heavySessionId": "load-heavy",
 		"heavyFinalText": "Heavy session complete: all steps verified.",
-		"seedMs": 17573,
-		"storeBytes": 56012800
+		"seedMs": 18147,
+		"storeBytes": 56004608
 	},
 	"devices": 4,
 	"streamingSessions": 3,
 	"restart": {
-		"stopMs": 862,
-		"startMs": 2229
+		"stopMs": 413,
+		"startMs": 1588
 	},
-	"reconnectMs": [2235, 2235, 2234, 2295],
+	"reconnectMs": [1613, 1614, 1613, 1643],
 	"open": {
 		"sessionId": "load-heavy",
-		"ms": 350,
-		"fromReadyMs": 428,
+		"ms": 262,
+		"fromReadyMs": 318,
 		"wire": {
 			"received": {
-				"frames": 7,
-				"bytes": 256433,
+				"frames": 8,
+				"bytes": 256659,
 				"maxFrameBytes": 255375,
 				"p95FrameBytes": 255375
 			},
 			"sent": {
-				"frames": 22,
-				"bytes": 4527,
+				"frames": 14,
+				"bytes": 3007,
 				"maxFrameBytes": 305,
-				"p95FrameBytes": 286
+				"p95FrameBytes": 305
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 7,
-					"bytes": 256433,
+					"frames": 8,
+					"bytes": 256659,
 					"maxFrameBytes": 255375,
 					"p95FrameBytes": 255375
 				}
@@ -48,7 +48,7 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"message\",\"message\":{\"id\":\"load-heavy-u176"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
 				},
 				{
 					"device": 3,
@@ -65,94 +65,94 @@
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 89,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"68\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"ok\":true,\"draft\":\"\"}}}"
+					"bytes": 98,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"59\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[]},{\"_tag\":\"synchronized\"}]}"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 78,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"67\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"ok\":true}}}"
+					"bytes": 89,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"68\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"ok\":true,\"draft\":\"\"}}}"
 				}
 			]
 		}
 	},
 	"wire": {
 		"warm": {
-			"ms": 2002,
+			"ms": 2003,
 			"received": {
-				"frames": 25,
-				"bytes": 10842,
+				"frames": 35,
+				"bytes": 15936,
 				"maxFrameBytes": 747,
 				"p95FrameBytes": 747
 			},
 			"sent": {
-				"frames": 19,
-				"bytes": 581,
+				"frames": 32,
+				"bytes": 982,
 				"maxFrameBytes": 31,
 				"p95FrameBytes": 31
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 25,
-					"bytes": 10842,
+					"frames": 35,
+					"bytes": 15936,
 					"maxFrameBytes": 747,
 					"p95FrameBytes": 747
 				}
 			},
 			"largestReceived": [
 				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
+				{
 					"device": 1,
 					"socket": "/rpc",
 					"bytes": 747,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"28\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				},
 				{
 					"device": 2,
 					"socket": "/rpc",
 					"bytes": 747,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"27\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
-				},
-				{
-					"device": 0,
-					"socket": "/rpc",
-					"bytes": 747,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"27\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 664,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"16\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"commands\":[{\"name\":\"init"
+					"bytes": 705,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"5\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"id\":\"ses_4d3dc12bab4840ca8622f19021441b50\",\"title\":\""
 				},
 				{
-					"device": 3,
+					"device": 2,
 					"socket": "/rpc",
-					"bytes": 637,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"15\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+					"bytes": 560,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"part\",\"messageId\":\"137a09e9-f725-43e4-9da8-d"
 				}
 			]
 		},
 		"restart": {
-			"ms": 5553,
+			"ms": 4353,
 			"received": {
-				"frames": 171,
-				"bytes": 350516,
+				"frames": 204,
+				"bytes": 379436,
 				"maxFrameBytes": 255375,
-				"p95FrameBytes": 920
+				"p95FrameBytes": 737
 			},
 			"sent": {
-				"frames": 228,
-				"bytes": 30949,
+				"frames": 248,
+				"bytes": 31644,
 				"maxFrameBytes": 305,
-				"p95FrameBytes": 286
+				"p95FrameBytes": 277
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 171,
-					"bytes": 350516,
+					"frames": 204,
+					"bytes": 379436,
 					"maxFrameBytes": 255375,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				}
 			},
 			"largestReceived": [
@@ -160,57 +160,57 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"message\",\"message\":{\"id\":\"load-heavy-u176"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
+				},
+				{
+					"device": 2,
+					"socket": "/rpc",
+					"bytes": 8568,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"105\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 1,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_a"
-				},
-				{
-					"device": 2,
-					"socket": "/rpc",
-					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_a"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"115\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 0,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"117\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_a"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"115\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
-					"device": 1,
+					"device": 3,
 					"socket": "/rpc",
-					"bytes": 987,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"105\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"message\",\"message\":{\"id\":\"5a4d5ee8-17e5-465"
+					"bytes": 8546,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"86\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_be"
 				}
 			],
 			"byDevice": [
 				{
-					"frames": 45,
-					"bytes": 27920,
+					"frames": 50,
+					"bytes": 33162,
 					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				},
 				{
-					"frames": 48,
-					"bytes": 28415,
+					"frames": 51,
+					"bytes": 33278,
 					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				},
 				{
-					"frames": 46,
-					"bytes": 28045,
-					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"frames": 63,
+					"bytes": 35441,
+					"maxFrameBytes": 8568,
+					"p95FrameBytes": 713
 				},
 				{
-					"frames": 32,
-					"bytes": 266136,
+					"frames": 40,
+					"bytes": 277555,
 					"maxFrameBytes": 255375,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 8546
 				}
 			]
 		}
@@ -227,15 +227,15 @@
 	},
 	"longTurn": {
 		"calls": 40,
-		"liveFrames": 25,
-		"partsSent": 60,
-		"firstQuartileMedianBytesPerPart": 1580,
+		"liveFrames": 26,
+		"partsSent": 58,
+		"firstQuartileMedianBytesPerPart": 1548,
 		"lastQuartileMedianBytesPerPart": 1918,
-		"maxFrameBytes": 6319,
+		"maxFrameBytes": 5513,
 		"wholeMessageBytes": 72350,
 		"resume": {
-			"frames": 17,
-			"bytes": 12007,
+			"frames": 15,
+			"bytes": 11061,
 			"resentEarlierTurn": false,
 			"carriedFollowUp": true
 		},
@@ -244,93 +244,93 @@
 	"server": {
 		"warm": {
 			"stalls": {
-				"count": 22,
-				"totalMs": 1731,
+				"count": 46,
+				"totalMs": 1557,
 				"longest": [
 					{
-						"atMs": 657,
-						"ms": 148
+						"atMs": 395,
+						"ms": 76
 					},
 					{
-						"atMs": 974,
-						"ms": 140
+						"atMs": 309,
+						"ms": 62
 					},
 					{
-						"atMs": 1394,
-						"ms": 115
+						"atMs": 2002,
+						"ms": 54
 					},
 					{
-						"atMs": 1733,
-						"ms": 112
+						"atMs": 830,
+						"ms": 43
 					},
 					{
-						"atMs": 1612,
-						"ms": 101
+						"atMs": 74,
+						"ms": 40
 					}
 				]
 			},
 			"reads": {
 				"base": 0,
-				"window": 365
+				"window": 467
 			},
-			"changesRead": 39,
-			"windowReadsPerChange": 9.4,
+			"changesRead": 50,
+			"windowReadsPerChange": 9.3,
 			"bySource": {
 				"approvals": {
 					"reads": {
 						"base": 0,
-						"window": 156
+						"window": 200
 					},
-					"changesRead": 39,
+					"changesRead": 50,
 					"windowReadsPerChange": 4,
-					"windowsRead": 39
+					"windowsRead": 50
 				},
 				"shell": {
 					"reads": {
 						"base": 0,
-						"window": 39
+						"window": 52
 					},
-					"changesRead": 39,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 39
+					"windowsRead": 52
 				},
-				"session-detail/ses_4996a58236074713ba07820d3d349812": {
+				"session-detail/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 6
+						"window": 9
 					},
-					"changesRead": 6,
+					"changesRead": 9,
 					"windowReadsPerChange": 1,
-					"windowsRead": 6
+					"windowsRead": 9
 				},
-				"session-family/ses_4996a58236074713ba07820d3d349812": {
+				"session-family/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 78
+						"window": 100
 					},
-					"changesRead": 39,
+					"changesRead": 50,
 					"windowReadsPerChange": 2,
-					"windowsRead": 39
+					"windowsRead": 50
 				},
-				"session-detail/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
+				"session-detail/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 5
+						"window": 7
 					},
-					"changesRead": 5,
+					"changesRead": 7,
 					"windowReadsPerChange": 1,
-					"windowsRead": 5
+					"windowsRead": 7
 				},
-				"session-family/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
+				"session-family/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 39
+						"window": 50
 					},
-					"changesRead": 39,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 39
+					"windowsRead": 50
 				},
-				"session-detail/ses_ab6375ad2c6943aba05cd1f61521fba8": {
+				"session-detail/ses_be18083ec8d9456c9743cad1b01c4704": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -339,7 +339,7 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"session-family/ses_ab6375ad2c6943aba05cd1f61521fba8": {
+				"session-family/ses_be18083ec8d9456c9743cad1b01c4704": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -348,130 +348,121 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"todos/ses_4996a58236074713ba07820d3d349812": {
+				"todos/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 30
+						"window": 32
 					},
-					"changesRead": 15,
+					"changesRead": 16,
 					"windowReadsPerChange": 2,
-					"windowsRead": 15
+					"windowsRead": 16
 				},
-				"todos/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
+				"todos/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 12
+						"window": 17
 					},
-					"changesRead": 12,
+					"changesRead": 17,
 					"windowReadsPerChange": 1,
-					"windowsRead": 12
+					"windowsRead": 17
 				}
 			},
 			"sidebarReads": {
-				"count": 33,
-				"totalMs": 4.36,
-				"medianMs": 0.1,
-				"maxMs": 0.89,
+				"count": 47,
+				"totalMs": 8.37,
+				"medianMs": 0.15,
+				"maxMs": 1.22,
 				"rows": 0
 			}
 		},
 		"restart": {
 			"stalls": {
-				"count": 32,
-				"totalMs": 3331,
+				"count": 41,
+				"totalMs": 2679,
 				"longest": [
 					{
-						"atMs": 1547,
-						"ms": 990
+						"atMs": 1026,
+						"ms": 710
 					},
 					{
-						"atMs": 2187,
-						"ms": 312
+						"atMs": 1561,
+						"ms": 301
 					},
 					{
-						"atMs": 1720,
-						"ms": 147
+						"atMs": 3706,
+						"ms": 103
 					},
 					{
-						"atMs": 4350,
-						"ms": 111
+						"atMs": 3381,
+						"ms": 97
 					},
 					{
-						"atMs": 3570,
-						"ms": 107
+						"atMs": 3813,
+						"ms": 97
 					}
 				]
 			},
 			"reads": {
 				"resume": 7,
 				"base": 13,
-				"window": 421
+				"window": 411
 			},
-			"changesRead": 50,
-			"windowReadsPerChange": 8.4,
+			"changesRead": 58,
+			"windowReadsPerChange": 7.1,
 			"bySource": {
-				"session-detail/ses_4996a58236074713ba07820d3d349812": {
-					"reads": {
-						"resume": 2,
-						"window": 14
-					},
-					"changesRead": 13,
-					"windowReadsPerChange": 1.1,
-					"windowsRead": 14
-				},
-				"session-detail/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
+				"session-detail/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"resume": 1,
-						"window": 8
+						"window": 17
 					},
-					"changesRead": 8,
+					"changesRead": 17,
 					"windowReadsPerChange": 1,
-					"windowsRead": 8
+					"windowsRead": 17
+				},
+				"session-detail/ses_724dad10922d410cb7996257fcd21167": {
+					"reads": {
+						"resume": 2,
+						"window": 16
+					},
+					"changesRead": 16,
+					"windowReadsPerChange": 1,
+					"windowsRead": 16
 				},
 				"shell": {
 					"reads": {
 						"resume": 4,
-						"window": 51
+						"window": 60
 					},
-					"changesRead": 47,
-					"windowReadsPerChange": 1.1,
-					"windowsRead": 51
+					"changesRead": 58,
+					"windowReadsPerChange": 1,
+					"windowsRead": 60
 				},
 				"approvals": {
 					"reads": {
 						"base": 4,
-						"window": 135
+						"window": 127
 					},
-					"changesRead": 44,
-					"windowReadsPerChange": 3.1,
-					"windowsRead": 44
+					"changesRead": 58,
+					"windowReadsPerChange": 2.2,
+					"windowsRead": 59
 				},
-				"todos/ses_4996a58236074713ba07820d3d349812": {
-					"reads": {
-						"base": 2,
-						"window": 40
-					},
-					"changesRead": 20,
-					"windowReadsPerChange": 2,
-					"windowsRead": 20
-				},
-				"todos/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
+				"todos/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 1,
-						"window": 13
+						"window": 22
 					},
-					"changesRead": 13,
+					"changesRead": 22,
 					"windowReadsPerChange": 1,
-					"windowsRead": 13
+					"windowsRead": 22
 				},
-				"session-family/ses_4996a58236074713ba07820d3d349812": {
+				"session-family/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
-						"base": 2,
-						"window": 84
+						"base": 1,
+						"window": 58
 					},
-					"changesRead": 47,
-					"windowReadsPerChange": 1.8,
-					"windowsRead": 48
+					"changesRead": 58,
+					"windowReadsPerChange": 1,
+					"windowsRead": 58
 				},
 				"session-detail/load-heavy": {
 					"reads": {
@@ -480,15 +471,6 @@
 					"changesRead": 0,
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
-				},
-				"session-family/ses_299cd70e3c5d42dfbb5eb9439c691da9": {
-					"reads": {
-						"base": 1,
-						"window": 43
-					},
-					"changesRead": 43,
-					"windowReadsPerChange": 1,
-					"windowsRead": 43
 				},
 				"todos/load-heavy": {
 					"reads": {
@@ -501,19 +483,37 @@
 				"session-family/load-heavy": {
 					"reads": {
 						"base": 1,
-						"window": 33
+						"window": 51
 					},
-					"changesRead": 33,
+					"changesRead": 51,
 					"windowReadsPerChange": 1,
-					"windowsRead": 33
+					"windowsRead": 51
+				},
+				"todos/ses_724dad10922d410cb7996257fcd21167": {
+					"reads": {
+						"base": 2,
+						"window": 14
+					},
+					"changesRead": 7,
+					"windowReadsPerChange": 2,
+					"windowsRead": 7
+				},
+				"session-family/ses_724dad10922d410cb7996257fcd21167": {
+					"reads": {
+						"base": 2,
+						"window": 46
+					},
+					"changesRead": 23,
+					"windowReadsPerChange": 2,
+					"windowsRead": 23
 				}
 			},
 			"sidebarReads": {
-				"count": 51,
-				"totalMs": 9.9,
-				"medianMs": 0.17,
-				"maxMs": 0.62,
-				"rows": 6
+				"count": 61,
+				"totalMs": 9.13,
+				"medianMs": 0.13,
+				"maxMs": 0.55,
+				"rows": 8
 			}
 		}
 	}

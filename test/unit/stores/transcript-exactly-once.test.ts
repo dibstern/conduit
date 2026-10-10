@@ -154,3 +154,59 @@ it("applies each detail update once", async () => {
 		),
 	).toHaveLength(1);
 });
+
+it("keeps a part in its place when a live update changes it", async () => {
+	const tool = (id: string, status: "running" | "completed") => ({
+		_tag: "part" as const,
+		messageId: "a1",
+		sortOrder: id === "tool-a" ? 1 : 2,
+		part: {
+			id,
+			type: "tool" as const,
+			callID: id,
+			tool: "Read",
+			state: {
+				status,
+				input: { _tag: "whole" as const, value: {} },
+				...(status === "completed"
+					? { output: { _tag: "whole" as const, text: "ok" } }
+					: {}),
+			},
+		},
+	});
+	viewTranscript("project", "A");
+	await vi.waitFor(() => expect(wire.ready).toBe(true));
+	await wire.emit({
+		_tag: "snapshot",
+		sequence: 4,
+		rows: [
+			{
+				_tag: "message",
+				message: { id: "a1", role: "assistant", time: { created: 2 } },
+			},
+			{
+				_tag: "part",
+				messageId: "a1",
+				sortOrder: 0,
+				part: { id: "think", type: "reasoning", text: "hmm" },
+			},
+			tool("tool-a", "running"),
+			tool("tool-b", "running"),
+		],
+	});
+	await wire.emit({ _tag: "synchronized" });
+	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
+	await wire.emit({
+		_tag: "upsert",
+		sequence: 5,
+		item: tool("tool-a", "completed"),
+	});
+	const parts = () =>
+		getOrCreateSessionSlot("A").messages.transcript?.rows[0]?.parts ?? [];
+	await vi.waitFor(() =>
+		expect(parts().find((part) => part.id === "tool-a")?.state?.status).toBe(
+			"completed",
+		),
+	);
+	expect(parts().map((part) => part.id)).toEqual(["think", "tool-a", "tool-b"]);
+});

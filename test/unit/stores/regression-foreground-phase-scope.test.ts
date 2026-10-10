@@ -35,6 +35,7 @@ it("keeps a background session's row in its own slot", () => {
 		status: { _tag: "live" as const },
 		pending: [],
 		waiting: new Map(),
+		partOrder: new Map(),
 	};
 	const running = detailUpserts(
 		{
@@ -81,6 +82,7 @@ it("the row going idle finalizes the visible turn once", () => {
 		status: { _tag: "live" as const },
 		pending: [],
 		waiting: new Map(),
+		partOrder: new Map(),
 	});
 	messages.messages = deriveTranscriptMessages(entry, []);
 	followSessionBusy("A", false);

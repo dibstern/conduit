@@ -220,21 +220,24 @@ const rowOrder = (a: HistoryMessage, b: HistoryMessage): number =>
 const pendingOrder = (a: PendingInput, b: PendingInput): number =>
 	a.admittedAt - b.admittedAt || a.inputId.localeCompare(b.inputId);
 
-// Where a held part sits among its message's parts. A part an older page
-// brought has no order and sorts first: that page brought its message whole.
-const partOrder = new WeakMap<HistoryMessagePart, number>();
-const orderOf = (part: HistoryMessagePart): number => partOrder.get(part) ?? -1;
-
-/** `parts` with `part` replacing its namesake, or placed by its order. */
+/**
+ * `parts` with `part` replacing its namesake in place, or placed by its order.
+ * Orders are kept by part id: held parts come back as reactive proxies, and a
+ * part an older page brought has none and sorts first, since that page brought
+ * its message whole.
+ */
 const placePart = (
 	parts: readonly HistoryMessagePart[],
 	part: HistoryMessagePart,
+	order: TranscriptEntry["partOrder"],
 ): HistoryMessagePart[] => {
-	const rest = parts.filter((old) => old.id !== part.id);
-	const at = rest.findIndex((old) => orderOf(old) > orderOf(part));
+	if (parts.some((old) => old.id === part.id))
+		return parts.map((old) => (old.id === part.id ? part : old));
+	const rank = (of: HistoryMessagePart) => order.get(of.id) ?? -1;
+	const at = parts.findIndex((old) => rank(old) > rank(part));
 	return at === -1
-		? [...rest, part]
-		: [...rest.slice(0, at), part, ...rest.slice(at)];
+		? [...parts, part]
+		: [...parts.slice(0, at), part, ...parts.slice(at)];
 };
 
 /** The entry with `messageId`'s parts rewritten, held or still waiting for it. */
@@ -276,7 +279,8 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 			const header = toHistoryMessage(item.message);
 			const held = entry.rows.find((old) => old.id === header.id);
 			const waiting = withoutWaiting(entry.waiting, header.id);
-			// Keep the held page contiguous below its floor.
+			// Keep the held page contiguous below its floor. The server sends a
+			// header after its parts, so the parts queued for it go with it.
 			if (
 				entry.hasMore &&
 				!held &&
@@ -300,11 +304,14 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 		case "part": {
 			const part = toHistoryPart(item.part);
 			if (part === undefined) return entry;
-			partOrder.set(part, item.sortOrder);
-			// A part can outrun its message: rows arrive in version order, and a
-			// part that moved before its message's last write sorts ahead of it.
-			return withParts(entry, item.messageId, (parts) =>
-				placePart(parts, part),
+			const partOrder =
+				entry.partOrder.get(part.id) === item.sortOrder
+					? entry.partOrder
+					: new Map(entry.partOrder).set(part.id, item.sortOrder);
+			// A part arrives before its message's header: rows arrive in version
+			// order, and a part write also advances the message that owns it.
+			return withParts({ ...entry, partOrder }, item.messageId, (parts) =>
+				placePart(parts, part, partOrder),
 			);
 		}
 		case "pendingInput": {
@@ -335,6 +342,7 @@ export function applyTranscriptEnvelope(
 					...entry,
 					rows: [],
 					waiting: new Map(),
+					partOrder: new Map(),
 					hasMore: false,
 					pending: [],
 					paused: false,
@@ -553,6 +561,7 @@ export function viewTranscript(
 				project,
 				pending: [],
 				waiting: new Map(),
+				partOrder: new Map(),
 			};
 			slot.messages.loadLifecycle = "loading";
 		} else {

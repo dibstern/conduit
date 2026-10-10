@@ -55,6 +55,8 @@ export type SessionMessages = {
 		steer?: InboxState["steer"] | undefined;
 		/** Parts that arrived before their message, by message id. */
 		waiting: ReadonlyMap<string, HistoryMessagePart[]>;
+		/** Each live part's place among its message's parts, by part id. */
+		partOrder: ReadonlyMap<string, number>;
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;

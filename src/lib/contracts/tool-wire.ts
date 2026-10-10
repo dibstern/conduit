@@ -69,7 +69,7 @@ export type ToolInput = typeof ToolInput.Type;
 /** A tool exactly as stored: what expanding a previewed tool shows. */
 export const ToolDetail = Schema.Struct({
 	toolId: ToolCallId,
-	version: MessageVersion,
+	version: PartVersion,
 	input: Schema.optionalWith(WholeInput, { exact: true }),
 	output: Schema.optionalWith(WholeText, { exact: true }),
 });

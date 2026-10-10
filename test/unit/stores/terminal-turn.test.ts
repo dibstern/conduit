@@ -36,6 +36,7 @@ function projectedTurn() {
 		status: { _tag: "live" },
 		pending: [],
 		waiting: new Map(),
+		partOrder: new Map(),
 	};
 	const entry = detailUpserts(
 		{

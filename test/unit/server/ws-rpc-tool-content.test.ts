@@ -3,7 +3,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
-	MessageVersion,
+	PartVersion,
 	ToolCallId,
 	type ToolDetail,
 } from "../../../src/lib/contracts/tool-wire.js";
@@ -17,7 +17,7 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 const detail: ToolDetail = {
 	toolId: ToolCallId.make("tool-1"),
-	version: MessageVersion.make(7),
+	version: PartVersion.make(7),
 	input: { _tag: "whole", value: { command: "ls" } },
 	output: { _tag: "whole", text: "full tool output" },
 };

@@ -42,6 +42,7 @@ function projectTool(name: "Task" | "Read") {
 		status: { _tag: "live" },
 		pending: [],
 		waiting: new Map(),
+		partOrder: new Map(),
 	};
 	const projected = detailUpserts(
 		{

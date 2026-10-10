@@ -151,10 +151,6 @@ describe("subscription RPC handlers", () => {
 							{ provider: "claude", createdAt: 4 },
 						),
 					);
-					// The message's header carries no text, so never a suffix.
-					const header = { item: { _tag: "message", message: { id: "m" } } };
-					expect(yield* Queue.take(decoded)).toMatchObject(header);
-					expect(yield* Queue.take(wire)).toMatchObject(header);
 					expect(yield* Queue.take(decoded)).toMatchObject({
 						item: { _tag: "part", part: { text: "Hello world" } },
 					});
@@ -168,6 +164,10 @@ describe("subscription RPC handlers", () => {
 							item: { part: { text: "Hello world" } },
 						});
 					}
+					// The message's header follows its part and carries no text, so never a suffix.
+					const header = { item: { _tag: "message", message: { id: "m" } } };
+					expect(yield* Queue.take(decoded)).toMatchObject(header);
+					expect(yield* Queue.take(wire)).toMatchObject(header);
 				}
 			}).pipe(Effect.provide(makeLayer())),
 		);
@@ -365,16 +365,16 @@ describe("subscription RPC handlers", () => {
 										]
 									: [
 											{
-												_tag: "message",
-												message: expect.objectContaining({ id: "message-1" }),
-											},
-											{
 												_tag: "part",
 												messageId: "message-1",
 												part: expect.objectContaining({
 													id: "part-1",
 													text: "Hello",
 												}),
+											},
+											{
+												_tag: "message",
+												message: expect.objectContaining({ id: "message-1" }),
 											},
 										],
 						});
@@ -406,16 +406,16 @@ describe("subscription RPC handlers", () => {
 							? [{ id: "session-1", title: "Renamed" }]
 							: [
 									{
-										_tag: "message",
-										message: expect.objectContaining({ id: "message-1" }),
-									},
-									{
 										_tag: "part",
 										messageId: "message-1",
 										part: expect.objectContaining({
 											id: "part-1",
 											text: "Hello world",
 										}),
+									},
+									{
+										_tag: "message",
+										message: expect.objectContaining({ id: "message-1" }),
 									},
 								]
 					).map((item) => ({
@@ -433,17 +433,17 @@ describe("subscription RPC handlers", () => {
 							sequence: cursor,
 						});
 						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
-						expect(yield* Queue.take(wire)).toMatchObject({
-							_tag: "upsert",
-							sequence: liveVersion,
-							item: { _tag: "message", message: { id: "message-1" } },
-						});
 						// Only the part's new text crosses the wire.
 						expect(yield* Queue.take(wire)).toMatchObject({
 							_tag: "upsert",
 							sequence: liveVersion,
 							item: { _tag: "part", part: { id: "part-1", text: " world" } },
 							textSuffix: { from: 5, total: 11 },
+						});
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "upsert",
+							sequence: liveVersion,
+							item: { _tag: "message", message: { id: "message-1" } },
 						});
 					}
 					const resumed = Array.from(

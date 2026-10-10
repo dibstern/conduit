@@ -10,18 +10,18 @@ import type {
 type DetailItem = typeof SessionDetailItemSchema.Type;
 type PartRow = Extract<DetailItem, { _tag: "part" }>;
 
-/** A whole message as the wire sends it: its header, then each part. */
+/** A whole message as the wire sends it: each part, then its header. */
 export const detailRowsOf = ({
 	parts = [],
 	...message
 }: typeof HistoryMessageSchema.Type): DetailItem[] => [
-	{ _tag: "message", message },
 	...parts.map((part, sortOrder) => ({
 		_tag: "part" as const,
 		messageId: message.id,
 		sortOrder,
 		part,
 	})),
+	{ _tag: "message", message },
 ];
 
 /** A whole message's upserts, all at one sequence. */
