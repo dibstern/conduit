@@ -44,6 +44,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				id: "claude",
 				name: "Claude",
 				driver: "claude",
+				port: 0,
 				managed: false,
 				status: "healthy",
 				restartCount: 0,
@@ -51,7 +52,9 @@ test("settings, commands and skill documents follow a workspace change and sessi
 			},
 		],
 	};
-	const projects = [{ slug: "e2e-replay", folders: [main] }];
+	const projects = [
+		{ slug: "e2e-replay", title: "Discovery project", folders: [main] },
+	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
@@ -132,7 +135,8 @@ test("settings, commands and skill documents follow a workspace change and sessi
 	rpc.setDaemonList("SubscribeInstances", instances);
 
 	async function openSettings(directory: string) {
-		await page.locator("#notif-settings-btn").click();
+		await page.getByTestId("session-bar-overflow").click();
+		await page.getByTestId("overflow-settings").click();
 		await page.getByTestId("settings-tab-claude").click();
 		const row = page.getByTestId("claude-setting-alwaysThinkingEnabled");
 		await expect(row.getByRole("switch")).toHaveAttribute(
@@ -211,7 +215,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 			`Skill instructions from ${worktree}`,
 		);
 		await page.keyboard.press("Escape");
-		const input = page.locator("#prompt-input");
+		const input = page.locator("#input");
 		await input.fill("/");
 		await expect(page.locator("#command-menu")).toContainText("/worktree-only");
 		await expect(page.locator("#command-menu")).not.toContainText("/main-only");
