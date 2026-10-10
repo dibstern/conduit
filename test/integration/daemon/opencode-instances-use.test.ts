@@ -120,6 +120,35 @@ describe("OpenCode Instances use", () => {
 		};
 		evidence["sessions"] = { sessionA, sessionB };
 
+		// Prompt before any permission prompt is open: the session inbox holds
+		// queued input while a prompt waits on the user.
+		// The fake accepts prompts without streaming a reply, so `done` never
+		// arrives; the recorded request is the observable.
+		void a.send(sessionA, "prompt for A").catch(() => undefined);
+		void b.send(sessionB, "prompt for B").catch(() => undefined);
+		const prompts = () =>
+			fixture
+				.opencodeRequestBodies()
+				.filter(({ path }) => /^\/session\/[^/]+\/prompt/.test(path))
+				.map((request) => ({
+					path: request.path,
+					pid: "pid" in request ? request.pid : undefined,
+				}))
+				.map(({ pid, path }) => ({
+					instance: pid === pids.a ? "a" : pid === pids.b ? "b" : String(pid),
+					session: path.split("/")[2],
+				}));
+		await vi.waitFor(() => expect(prompts()).toHaveLength(2), {
+			timeout: 15_000,
+		});
+		evidence["prompts"] = prompts();
+		expect(prompts()).toEqual(
+			expect.arrayContaining([
+				{ instance: "a", session: sessionA },
+				{ instance: "b", session: sessionB },
+			]),
+		);
+
 		// Cross-instance events first; the own-instance events after them are
 		// the processing barrier for the isolation assertions.
 		await fixture.emitOpenCodeEvent(
@@ -152,33 +181,6 @@ describe("OpenCode Instances use", () => {
 			a: { own: 1, cross: 0 },
 			b: { own: 1, cross: 0 },
 		});
-
-		// The fake accepts prompts without streaming a reply, so `done` never
-		// arrives; the recorded request is the observable.
-		void a.send(sessionA, "prompt for A").catch(() => undefined);
-		void b.send(sessionB, "prompt for B").catch(() => undefined);
-		const prompts = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(({ path }) => /^\/session\/[^/]+\/prompt/.test(path))
-				.map((request) => ({
-					path: request.path,
-					pid: "pid" in request ? request.pid : undefined,
-				}))
-				.map(({ pid, path }) => ({
-					instance: pid === pids.a ? "a" : pid === pids.b ? "b" : String(pid),
-					session: path.split("/")[2],
-				}));
-		await vi.waitFor(() => expect(prompts()).toHaveLength(2), {
-			timeout: 15_000,
-		});
-		evidence["prompts"] = prompts();
-		expect(prompts()).toEqual(
-			expect.arrayContaining([
-				{ instance: "a", session: sessionA },
-				{ instance: "b", session: sessionB },
-			]),
-		);
 	}, 90_000);
 
 	it("surfaces use on an unreachable instance as a browser error", async () => {
