@@ -62,10 +62,11 @@ export function translateDomainEventToRelay(
 		}
 
 		case "turn.completed": {
-			const { tokens, cost, duration } = event.data;
+			const { tokens, cost, duration, contextTokens } = event.data;
 			return emit(
 				{
 					type: "result",
+					...(contextTokens !== undefined ? { contextTokens } : {}),
 					usage: {
 						input: tokens?.input ?? 0,
 						output: tokens?.output ?? 0,

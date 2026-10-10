@@ -54,6 +54,28 @@ afterEach(() => {
 });
 
 describe("projected context usage", () => {
+	it.each([
+		0, 330_000,
+	])("uses explicit context %s instead of result totals", (contextTokens) => {
+		tm.contextPercent = 90;
+		tm.messages = [
+			{
+				type: "result",
+				uuid: "result-explicit-context",
+				inputTokens: 500,
+				outputTokens: 20_000,
+				cacheRead: 3_300_000,
+				cacheWrite: 80_000,
+				contextTokens,
+				context_window: 1_000_000,
+			},
+		];
+		restoreContextFromMessages(tm);
+		expect(tm.contextPercent).toBe(
+			Math.round((contextTokens / 1_000_000) * 100),
+		);
+	});
+
 	it("restores the context usage percentage from a persisted result window", () => {
 		tm.messages = [
 			{

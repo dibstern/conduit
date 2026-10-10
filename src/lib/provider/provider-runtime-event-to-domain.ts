@@ -322,6 +322,7 @@ export function translateProviderRuntimeEventToDomain(
 				data["providerCostTotalUsd"],
 			);
 			const providerSessionId = stringField(data["providerSessionId"]);
+			const contextTokens = numberFieldValue(data["contextTokens"]);
 			const tokens = tokensValue(data["tokens"]);
 			const duration =
 				numberFieldValue(data["duration"]) ??
@@ -331,6 +332,7 @@ export function translateProviderRuntimeEventToDomain(
 				...(cost != null ? { cost } : {}),
 				...(providerCostTotalUsd != null ? { providerCostTotalUsd } : {}),
 				...(providerSessionId != null ? { providerSessionId } : {}),
+				...(contextTokens != null ? { contextTokens } : {}),
 				...(tokens != null ? { tokens } : {}),
 				...(duration != null ? { duration } : {}),
 			} satisfies TurnCompletedPayload;

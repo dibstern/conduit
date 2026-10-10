@@ -1568,14 +1568,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["contextWindow"]).toBe(1_000_000);
 	});
 
-	// Regression: SDK result.usage is cumulative across every API request in
-	// the turn — cache_read re-counts the whole prompt per tool round, so a
-	// long turn reports millions of tokens and the context bar showed >5000%.
-	// The last assistant message's per-request usage is the actual context
-	// occupancy; turn.completed must prefer it. Subagent assistant messages
-	// (parent_tool_use_id set) must not overwrite the main-chain capture.
-
-	it("emits last main-chain per-request usage on turn.completed, ignoring cumulative result usage", async () => {
+	it("reports result usage separately from the last main request's context, ignoring subagent chatter", async () => {
 		const assistantMsg = (
 			uuid: string,
 			usage: Record<string, number>,
@@ -1646,7 +1639,6 @@ describe("ClaudeEventTranslator", () => {
 			result: "done",
 			stop_reason: "end_turn",
 			total_cost_usd: 1.5,
-			// Cumulative turn aggregate — must NOT be used for tokens
 			usage: {
 				input_tokens: 500,
 				output_tokens: 20_000,
@@ -1662,13 +1654,102 @@ describe("ClaudeEventTranslator", () => {
 		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
 		expect(turnCompleted).toBeDefined();
 		const tokens = dataOf(turnCompleted)["tokens"] as Record<string, unknown>;
-		expect(tokens["input"]).toBe(30);
-		expect(tokens["output"]).toBe(800);
-		expect(tokens["cacheRead"]).toBe(110_000);
-		expect(tokens["cacheWrite"]).toBe(1_500);
+		expect(tokens).toEqual({
+			input: 500,
+			output: 20_000,
+			cacheRead: 3_300_000,
+			cacheWrite: 80_000,
+		});
+		expect(dataOf(turnCompleted)["contextTokens"]).toBe(111_530);
 		// The raw session total is converted only when the result is persisted.
 		expect(dataOf(turnCompleted)["providerCostTotalUsd"]).toBe(1.5);
 		expect(dataOf(turnCompleted)["cost"]).toBeUndefined();
+	});
+
+	it.each([
+		undefined,
+		{},
+	])("keeps missing result usage unknown while retaining context: %j", async (usage) => {
+		await runTranslate(translator, ctx, makeAssistantMessage("claude-fable-5"));
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			...(usage === undefined ? {} : { usage }),
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000311",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const completed = sink.events.find(
+			(event) => event.type === "turn.completed",
+		);
+		expect(dataOf(completed)["tokens"]).toEqual({});
+		expect(dataOf(completed)["contextTokens"]).toBe(10);
+
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "next",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			usage: {
+				input_tokens: 100,
+				output_tokens: 300,
+				cache_read_input_tokens: 1_000,
+				cache_creation_input_tokens: 200,
+			},
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000312",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const next = sink.events
+			.filter((event) => event.type === "turn.completed")
+			.at(-1);
+		expect(dataOf(next)["tokens"]).toEqual({
+			input: 100,
+			output: 300,
+			cacheRead: 1_000,
+			cacheWrite: 200,
+		});
+		expect(dataOf(next)).not.toHaveProperty("contextTokens");
+	});
+
+	it("preserves a reported zero context independently of result usage", async () => {
+		const assistant = makeAssistantMessage("claude-fable-5");
+		if (assistant.type !== "assistant") throw new Error("expected assistant");
+		await runTranslate(translator, ctx, {
+			...assistant,
+			message: {
+				...assistant.message,
+				usage: { input_tokens: 0, output_tokens: 50 },
+			},
+		} as unknown as SDKMessage);
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			usage: {
+				input_tokens: 0,
+				output_tokens: 500,
+				cache_read_input_tokens: 0,
+				cache_creation_input_tokens: 0,
+			},
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000313",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const completed = sink.events.find(
+			(event) => event.type === "turn.completed",
+		);
+		expect(dataOf(completed)["tokens"]).toEqual({ input: 0, output: 500 });
+		expect(dataOf(completed)["contextTokens"]).toBe(0);
 	});
 
 	// 13b. result (success, no streaming, text in result field)

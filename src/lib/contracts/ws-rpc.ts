@@ -239,6 +239,7 @@ export const HistoryMessageSchema = Schema.Struct({
 	),
 	cost: Schema.optional(Schema.Number),
 	turnCost: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),

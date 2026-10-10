@@ -1142,6 +1142,49 @@ describe("economics", () => {
 		expect(e.tokensOut).toBe(1_311);
 	});
 
+	it("sums result usage across segments but takes only the final explicit context", () => {
+		const [turn] = segmentTurns(
+			[
+				user(),
+				read("/a.ts"),
+				result({
+					inputTokens: 500,
+					outputTokens: 20_000,
+					contextTokens: 111_530,
+					context_window: 200_000,
+				}),
+				read("/b.ts"),
+				result({
+					inputTokens: 10,
+					outputTokens: 50,
+					cacheRead: 900_000,
+					cacheWrite: 20_000,
+					contextTokens: 40_000,
+					context_window: 200_000,
+				}),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(economics(turn, 0)).toMatchObject({
+			tokensIn: 510,
+			tokensOut: 20_050,
+			context: { used: 40_000, window: 200_000, pct: 20 },
+		});
+	});
+
+	it.each([
+		0, 40_000,
+	])("uses explicit context %s even without usage counts", (contextTokens) => {
+		expect(
+			withResult({ contextTokens, context_window: 200_000 }).context,
+		).toEqual({
+			used: contextTokens,
+			window: 200_000,
+			pct: Math.round((contextTokens / 200_000) * 100),
+		});
+	});
+
 	it("omits the context reading entirely when no window is reported", () => {
 		const e = withResult({ inputTokens: 2_311, cacheRead: 41_900 });
 		expect(e.context).toBeUndefined();

@@ -483,6 +483,8 @@ export interface HistoryMessage {
 	cost?: number;
 	/** Canonical turn cost from the persisted turn projection, when available. */
 	turnCost?: number;
+	/** Context occupancy reported separately from cumulative result usage. */
+	contextTokens?: number;
 	/** Token usage — present on assistant messages from REST API. */
 	tokens?: {
 		input?: number;
@@ -620,6 +622,7 @@ export type Approval = typeof ApprovalSchema.Type;
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
 	usage: UsageInfoSchema,
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	cost: Schema.Number,
 	duration: Schema.Number,
 	sessionId: Schema.String,
