@@ -52,7 +52,7 @@ function accountReading(
 	};
 }
 
-function snapshot(page: Page): readonly UsageReading[] {
+export function snapshot(page: Page): readonly UsageReading[] {
 	return (
 		requireRpcControl(page).initialDaemonList("SubscribeUsage")[0] as {
 			readings: readonly UsageReading[];
@@ -217,16 +217,17 @@ export const usageSettingsHandlers: StepHandler[] = [
 					createdAt: 1,
 				})),
 			});
-			rpc.setDaemonList("SubscribeProjects", {
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						instanceId: "claude",
-					},
-				],
-			});
+			const projects = [
+				{
+					slug: "myapp",
+					title: "myapp",
+					folders: ["/src/myapp"],
+					instanceId: "claude",
+				},
+			];
+			rpc.setDaemonList("SubscribeProjects", { projects });
+			// A draft refetches the list; keep the binding there too.
+			rpc.setResponse("GetProjects", { projects, current: "myapp" });
 			seedUsageLimits(world.page, {
 				usageLimits: {
 					autoResume: false,

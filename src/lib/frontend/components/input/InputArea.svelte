@@ -21,6 +21,7 @@
 	import FileMenu from "./FileMenu.svelte";
 	import NewSessionContext from "./NewSessionContext.svelte";
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
+	import UsageWarningStrip from "./UsageWarningStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -1018,6 +1019,8 @@
 				<TextButton tone="inherit" class="shrink-0 font-semibold" disabled={!goalFacts?.endedGoal} onclick={undoGoalClear}>Undo</TextButton>
 			</div>
 		{/if}
+
+		<UsageWarningStrip session={currentSession} projectSlug={currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? ""} />
 
 		{#if contextWarning && !compacting}
 			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">

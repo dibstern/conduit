@@ -138,4 +138,58 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 		body: JSON.stringify(evidence),
 		contentType: "application/json",
 	});
+
+	await test.step("a fresh quota read warns above the project's composer", async () => {
+		const response = {
+			subscription_type: "max",
+			rate_limits_available: true,
+			rate_limits: {
+				five_hour: { utilization: 88, resets_at: null },
+				seven_day: { utilization: personal.week, resets_at: null },
+			},
+		} satisfies Pick<
+			SDKControlGetUsageResponse,
+			"subscription_type" | "rate_limits_available" | "rate_limits"
+		>;
+		writeFileSync(
+			join(personal.configDir, "conduit-test-usage-response.json"),
+			JSON.stringify(response),
+		);
+		// This existing RPC refreshes the shared Usage service and publishes its
+		// readings to SubscribeUsage. Poll past any overlapping initial probe.
+		await expect
+			.poll(async () => {
+				const readings = await Effect.runPromise(
+					browser.rpc.QuotaForAccounts({
+						projectSlug: savedSlug,
+						originId: browser.originId,
+					}),
+				);
+				return readings
+					.find((reading) => reading.accountId === personal.id)
+					?.windows.find((window) => window.kind === "five_hour")?.utilization;
+			})
+			.toBe(88);
+		await expect(
+			page.getByTestId(`usage-footer-value-${personal.id}-five_hour`),
+		).toHaveText("88%");
+		await new AppPage(page).goto(
+			`${harness.baseUrl}/new?p=${encodeURIComponent(savedSlug)}&project=${encodeURIComponent(savedSlug)}`,
+		);
+		await expect(page.locator("#input")).toBeVisible();
+		await expect(page.getByTestId("usage-warning-strip")).toBeVisible();
+		await expect(page.getByTestId("usage-warning-strip")).toHaveAttribute(
+			"data-window",
+			"five_hour",
+		);
+		await expect(page.getByTestId("usage-warning-title")).toHaveText(
+			"Personal: 5h limit 88% used.",
+		);
+		const warningScreenshot = join(artifacts, "usage-warning.png");
+		await page.locator("#input-area").screenshot({ path: warningScreenshot });
+		await testInfo.attach("usage-warning", {
+			path: warningScreenshot,
+			contentType: "image/png",
+		});
+	});
 });

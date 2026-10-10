@@ -237,6 +237,45 @@ export function usageDisplay(
 	};
 }
 
+/** Weekly warnings take priority; a reached plan limit takes over entirely. */
+export function usageWarning(
+	reading: UsageReading | undefined,
+	warnAt: number | "off",
+	accountName: string,
+	showAccount: boolean,
+	now: number,
+): { window: PlanUsageWindow; title: string; detail?: string } | undefined {
+	if (
+		!reading ||
+		reading.harness !== "claude" ||
+		reading.status !== "available" ||
+		warnAt === "off"
+	)
+		return undefined;
+	const windows = planUsageWindows(reading);
+	if (windows.some((window) => window.utilization >= 100)) return undefined;
+	const window =
+		windows.find(
+			(window) => window.kind === "seven_day" && window.utilization >= warnAt,
+		) ??
+		windows.find(
+			(window) => window.kind === "five_hour" && window.utilization >= warnAt,
+		);
+	if (!window) return undefined;
+	const reset =
+		window.kind === "seven_day"
+			? usageResetTime(window.resetsAt, true)
+			: window.resetsAt !== undefined &&
+					Number.isFinite(Date.parse(window.resetsAt))
+				? `in ${usageForecastDuration(Date.parse(window.resetsAt) - now)}`
+				: "";
+	return {
+		window,
+		title: `${showAccount ? `${accountName}: ` : ""}${window.kind === "seven_day" ? "Weekly" : "5h"} limit ${Math.round(window.utilization)}% used.`,
+		...(reset ? { detail: `Resets ${reset}.` } : {}),
+	};
+}
+
 /** Keep the existing meter's captions and highest-window headroom display. */
 export function quotaReading(reading: UsageReading | undefined): {
 	used: number | "checking" | "unknown";
