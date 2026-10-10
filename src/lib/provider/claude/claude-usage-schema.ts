@@ -1,12 +1,8 @@
 import { Either, Schema } from "effect";
-import type {
-	QuotaCheckResult,
-	QuotaWindowSchema,
-} from "../../contracts/limit-recovery.js";
+import type { UsageWindow } from "../../contracts/limit-recovery.js";
+import type { UsageRead } from "../usage-reader.js";
 
-export type { QuotaCheckResult } from "../../contracts/limit-recovery.js";
-
-const UsageWindowSchema = Schema.Struct({
+const ClaudeUsageWindowSchema = Schema.Struct({
 	utilization: Schema.NullOr(
 		Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
 	),
@@ -18,8 +14,8 @@ export const ClaudeUsageResponseSchema = Schema.Struct({
 	rate_limits_available: Schema.Boolean,
 	rate_limits: Schema.NullOr(
 		Schema.Struct({
-			five_hour: Schema.optional(Schema.NullOr(UsageWindowSchema)),
-			seven_day: Schema.optional(Schema.NullOr(UsageWindowSchema)),
+			five_hour: Schema.optional(Schema.NullOr(ClaudeUsageWindowSchema)),
+			seven_day: Schema.optional(Schema.NullOr(ClaudeUsageWindowSchema)),
 			extra_usage: Schema.optional(
 				Schema.NullOr(Schema.Struct({ is_enabled: Schema.Boolean })),
 			),
@@ -27,9 +23,7 @@ export const ClaudeUsageResponseSchema = Schema.Struct({
 	),
 });
 
-export type QuotaWindow = typeof QuotaWindowSchema.Type;
-
-export function decodeClaudeUsage(response: unknown): QuotaCheckResult {
+export function decodeClaudeUsage(response: unknown): UsageRead {
 	const decoded = Schema.decodeUnknownEither(ClaudeUsageResponseSchema)(
 		response,
 	);
@@ -38,43 +32,31 @@ export function decodeClaudeUsage(response: unknown): QuotaCheckResult {
 		!decoded.right.rate_limits_available ||
 		!decoded.right.rate_limits
 	)
-		return { _tag: "Unknown" };
+		return { status: "unknown", windows: [] };
 	const readWindow = (
-		window: typeof UsageWindowSchema.Type | null | undefined,
-	): QuotaWindow | undefined => {
+		kind: "five_hour" | "seven_day",
+		window: typeof ClaudeUsageWindowSchema.Type | null | undefined,
+	): UsageWindow | undefined => {
 		if (!window || window.utilization === null) return;
 		const millis = window.resets_at ? Date.parse(window.resets_at) : Number.NaN;
 		return {
-			utilization: window.utilization,
-			...(Number.isFinite(millis) ? { resetsAt: millis / 1000 } : {}),
+			kind,
+			utilization: Math.min(100, window.utilization),
+			...(window.resets_at && Number.isFinite(millis)
+				? { resetsAt: window.resets_at }
+				: {}),
 		};
 	};
-	const fiveHour = readWindow(decoded.right.rate_limits.five_hour);
-	const sevenDay = readWindow(decoded.right.rate_limits.seven_day);
-	for (const [rateLimitType, window] of [
-		["five_hour", fiveHour],
-		["seven_day", sevenDay],
-	] as const) {
-		if (window && window.utilization >= 100) {
-			// Extra usage may still fund a turn after the plan window is exhausted.
-			// Its budget/eligibility cannot be inferred from this control response.
-			if (decoded.right.rate_limits.extra_usage?.is_enabled)
-				return { _tag: "Unknown" };
-			return {
-				_tag: "Limited",
-				rateLimitType,
-				...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
-			};
-		}
+	const windows = [
+		readWindow("five_hour", decoded.right.rate_limits.five_hour),
+		readWindow("seven_day", decoded.right.rate_limits.seven_day),
+	].filter((window): window is UsageWindow => window !== undefined);
+	if (windows.some((window) => window.utilization >= 100)) {
+		// Extra usage may still fund a turn after the plan window is exhausted.
+		// Its budget/eligibility cannot be inferred from this control response.
+		if (decoded.right.rate_limits.extra_usage?.is_enabled)
+			return { status: "unknown", windows: [] };
+		return { status: "limited", windows };
 	}
-	if (!fiveHour && !sevenDay) return { _tag: "Unknown" };
-	return {
-		_tag: "Available",
-		utilization: Math.max(
-			fiveHour?.utilization ?? 0,
-			sevenDay?.utilization ?? 0,
-		),
-		...(fiveHour ? { fiveHour } : {}),
-		...(sevenDay ? { sevenDay } : {}),
-	};
+	return { status: windows.length === 0 ? "unknown" : "available", windows };
 }

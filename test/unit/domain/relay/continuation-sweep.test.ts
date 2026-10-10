@@ -17,9 +17,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Schedule } from "effect";
+import { Effect, Schedule, Stream } from "effect";
 import { expect, it } from "vitest";
-import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
+import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
@@ -48,6 +48,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
+import { usageReading } from "../../../helpers/usage.js";
 
 const seed = (at = 10) =>
 	Effect.gen(function* () {
@@ -204,8 +205,9 @@ for (const scenario of [
 				}
 				const before = yield* store.readAllBySession("s1");
 				yield* continuation.sweepDueContinuations(10).pipe(
-					Effect.provideService(QuotaCheckTag, {
-						check: () =>
+					Effect.provideService(Usage, {
+						readings: Stream.empty,
+						refresh: () =>
 							Effect.gen(function* () {
 								probes++;
 								switch (scenario) {
@@ -234,10 +236,15 @@ for (const scenario of [
 										break;
 								}
 								return scenario === "unavailable"
-									? { _tag: "Unavailable" as const, reason: "Not logged in" }
+									? [
+											usageReading("claude", {
+												status: "unavailable",
+												reason: "Not logged in",
+											}),
+										]
 									: scenario === "available"
-										? { _tag: "Available" as const }
-										: { _tag: "Unknown" as const };
+										? [usageReading("claude", { status: "available" })]
+										: [usageReading("claude")];
 							}).pipe(Effect.orDie),
 						pickFailover: () => Effect.succeed(undefined),
 					}),
@@ -276,8 +283,9 @@ for (const scenario of [
 				}
 			}).pipe(
 				Effect.provideService(ConfigTag, config),
-				Effect.provideService(QuotaCheckTag, {
-					check: () => Effect.succeed({ _tag: "Unknown" }),
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					refresh: () => Effect.succeed([usageReading("claude")]),
 					pickFailover: () => Effect.succeed(undefined),
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
@@ -447,7 +455,7 @@ for (const scenario of [
 					const before = (yield* store.readAllBySession("s1")).length;
 					yield* Effect.forkScoped(
 						continuation.runLimitPolicies.pipe(
-							Effect.provideService(QuotaCheckTag, {
+							Effect.provideService(Usage, {
 								pickFailover: (excluding) =>
 									Effect.gen(function* () {
 										picked.push(excluding);
@@ -460,8 +468,10 @@ for (const scenario of [
 											? "target"
 											: undefined;
 									}).pipe(Effect.orDie),
-								check: (instanceId) =>
+								readings: Stream.empty,
+								refresh: (accountIds) =>
 									Effect.gen(function* () {
+										const instanceId = accountIds?.[0] ?? "claude";
 										probed.push(instanceId);
 										if (scenario === "defect")
 											return yield* Effect.die("Probe defect");
@@ -494,11 +504,13 @@ for (const scenario of [
 												}),
 											]);
 										return scenario === "unavailable"
-											? {
-													_tag: "Unavailable" as const,
-													reason: "Not logged in",
-												}
-											: { _tag: "Unknown" as const };
+											? [
+													usageReading(instanceId, {
+														status: "unavailable",
+														reason: "Not logged in",
+													}),
+												]
+											: [usageReading(instanceId)];
 									}).pipe(Effect.orDie),
 							}),
 						),
@@ -642,8 +654,9 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			).toBe(true);
 		}).pipe(
 			Effect.provideService(ConfigTag, config),
-			Effect.provideService(QuotaCheckTag, {
-				check: () => Effect.succeed({ _tag: "Unknown" }),
+			Effect.provideService(Usage, {
+				readings: Stream.empty,
+				refresh: () => Effect.succeed([usageReading("claude")]),
 				pickFailover: () => Effect.succeed(undefined),
 			}),
 			Effect.provideService(ProviderTurnServiceTag, {
@@ -707,15 +720,27 @@ for (const freshReset of [42, undefined]) {
 				expect(probes).toBe(4);
 			}).pipe(
 				Effect.provideService(ConfigTag, config),
-				Effect.provideService(QuotaCheckTag, {
-					check: () =>
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					refresh: () =>
 						Effect.sync(() => {
 							probes++;
-							return {
-								_tag: "Limited" as const,
-								rateLimitType: "seven_day",
-								...(freshReset === undefined ? {} : { resetsAt: freshReset }),
-							};
+							return [
+								usageReading("claude", {
+									status: "limited",
+									windows: [
+										{
+											kind: "seven_day",
+											utilization: 100,
+											...(freshReset === undefined
+												? {}
+												: {
+														resetsAt: new Date(freshReset * 1000).toISOString(),
+													}),
+										},
+									],
+								}),
+							];
 						}),
 					pickFailover: () => Effect.succeed(undefined),
 				}),

@@ -5,7 +5,7 @@
      whole setting and shows before the server answers. -->
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
-	import type { QuotaCheckResult, UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
+	import type { UsageReading, UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -28,7 +28,7 @@
 	let confirmed: UsageLimitsSetting | null = null;
 	let saveTicket = 0;
 	/** undefined while the check runs. */
-	let quotas = $state<ReadonlyMap<string, QuotaCheckResult>>();
+	let quotas = $state<ReadonlyMap<string, UsageReading>>();
 
 	// Accounts the order leaves out go last, in list order, as auto-switch tries them.
 	const accounts = $derived.by(() => {
@@ -65,8 +65,8 @@
 		let current = true;
 		quotas = undefined;
 		void quotaForAccountsRpc({ projectSlug, originId: getBrowserClientId() })
-			.then(({ accounts: checked }) => {
-				if (current) quotas = new Map(checked.map((account) => [account.instanceId, account.quota]));
+			.then((checked) => {
+				if (current) quotas = new Map(checked.map((account) => [account.accountId, account]));
 			})
 			.catch(() => {
 				if (current) quotas = new Map();

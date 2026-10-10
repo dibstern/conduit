@@ -126,26 +126,34 @@ export const HandoffSummarySchema = Schema.Struct({
 });
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 
-export const QuotaWindowSchema = Schema.Struct({
-	utilization: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-	/** Unix seconds, matching session limitRecovery. */
-	resetsAt: Schema.optional(Schema.Number),
-});
+const usageWindowFields = {
+	utilization: Schema.Number.pipe(Schema.finite(), Schema.between(0, 100)),
+	/** ISO timestamp from the usage reader. */
+	resetsAt: Schema.optional(Schema.String),
+};
 
-export const QuotaCheckResultSchema = Schema.Union(
+export const UsageWindowSchema = Schema.Union(
 	Schema.Struct({
-		_tag: Schema.Literal("Available"),
-		/** Highest measured utilization percent across the plan windows. */
-		utilization: Schema.optional(Schema.Number),
-		fiveHour: Schema.optional(QuotaWindowSchema),
-		sevenDay: Schema.optional(QuotaWindowSchema),
+		kind: Schema.Literal("five_hour", "seven_day", "month"),
+		...usageWindowFields,
 	}),
 	Schema.Struct({
-		_tag: Schema.Literal("Limited"),
-		rateLimitType: Schema.String,
-		resetsAt: Schema.optional(Schema.Number),
+		kind: Schema.Literal("seven_day_model"),
+		model: Schema.optional(Schema.String),
+		...usageWindowFields,
 	}),
-	Schema.Struct({ _tag: Schema.Literal("Unavailable"), reason: Schema.String }),
-	Schema.Struct({ _tag: Schema.Literal("Unknown") }),
 );
-export type QuotaCheckResult = typeof QuotaCheckResultSchema.Type;
+export type UsageWindow = typeof UsageWindowSchema.Type;
+
+export const UsageReadingSchema = Schema.Struct({
+	accountId: Schema.String,
+	harness: Schema.Literal("claude"),
+	status: Schema.Literal("available", "limited", "unavailable", "unknown"),
+	planLabel: Schema.optional(Schema.String),
+	windows: Schema.Array(UsageWindowSchema),
+	/** Epoch milliseconds. */
+	readAt: Schema.Number,
+	stale: Schema.Boolean,
+	reason: Schema.optional(Schema.String),
+});
+export type UsageReading = typeof UsageReadingSchema.Type;

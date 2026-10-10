@@ -34,7 +34,7 @@ import {
 } from "../../../persistence/events.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
-import { QuotaCheckTag } from "../../daemon/Services/quota-check.js";
+import { Usage } from "../../daemon/Services/usage.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -122,7 +122,7 @@ export interface Continuation {
 		  >
 		| Effect.Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>,
 		| ConfigTag
-		| QuotaCheckTag
+		| Usage
 		| ProviderTurnServiceTag
 		| OverridesStateTag
 		| ReadQueryEffectTag
@@ -298,11 +298,22 @@ export const makeContinuation = Effect.gen(function* () {
 							const decision =
 								options.at === undefined
 									? yield* restore(
-											Effect.flatMap(QuotaCheckTag, (quota) =>
-												quota.check(options.instanceId),
+											Effect.flatMap(Usage, (usage) =>
+												usage
+													.refresh([options.instanceId])
+													.pipe(Effect.map((readings) => readings[0])),
 											),
 										)
 									: undefined;
+							// Claude reports the five-hour window before the weekly window;
+							// the first exhausted window preserves the existing resume decision.
+							const limit = decision?.windows.find(
+								(window) => window.utilization >= 100,
+							);
+							const resetsAt =
+								limit?.resetsAt === undefined
+									? undefined
+									: Date.parse(limit.resetsAt) / 1000;
 							const turns = yield* ProviderTurnServiceTag;
 							if (options.instanceId !== options.expectedInstanceId)
 								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
@@ -314,15 +325,15 @@ export const makeContinuation = Effect.gen(function* () {
 									if (
 										!due &&
 										decision &&
-										(decision._tag === "Limited" ||
-											decision._tag === "Unavailable")
+										(decision.status === "limited" ||
+											decision.status === "unavailable")
 									)
 										return yield* new AccountUnavailable({
 											instanceId: options.instanceId,
 											reason:
-												decision._tag === "Unavailable"
-													? decision.reason
-													: `Account is still limited (${decision.rateLimitType}).`,
+												decision.status === "unavailable"
+													? (decision.reason ?? "Claude account is unavailable")
+													: `Account is still limited (${limit?.kind ?? "usage"}).`,
 										});
 									const recovery =
 										session.limit_recovery === null
@@ -375,17 +386,17 @@ export const makeContinuation = Effect.gen(function* () {
 									if (
 										due &&
 										recovery &&
-										(decision?._tag === "Limited" ||
-											decision?._tag === "Unavailable")
+										(decision?.status === "limited" ||
+											decision?.status === "unavailable")
 									) {
 										const event =
-											decision._tag === "Limited" && recovery.rearms < 3
+											decision.status === "limited" && recovery.rearms < 3
 												? canonicalEvent(
 														"session.resume_scheduled",
 														sessionId,
 														{
 															instanceId: options.instanceId,
-															at: decision.resetsAt ?? due.now + 300,
+															at: resetsAt ?? due.now + 300,
 														},
 														{
 															provider: "claude",
@@ -549,8 +560,8 @@ export const makeContinuation = Effect.gen(function* () {
 				latest[0].reason === "auto-switch"
 			)
 				return false;
-			const quota = yield* QuotaCheckTag;
-			const instanceId = yield* quota.pickFailover(recovery.instanceId);
+			const usage = yield* Usage;
+			const instanceId = yield* usage.pickFailover(recovery.instanceId);
 			if (instanceId === undefined) return false;
 			yield* requestContinuation(
 				sessionId,

@@ -25,8 +25,8 @@ import {
 import {
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
-	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
+	UsageReadingSchema,
 } from "./limit-recovery.js";
 import {
 	ProviderDriverKindSchema,
@@ -1512,14 +1512,7 @@ export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuatio
 	},
 ) {}
 
-export const QuotaForAccountsResponseSchema = Schema.Struct({
-	accounts: Schema.Array(
-		Schema.Struct({
-			instanceId: NonEmptyString,
-			quota: QuotaCheckResultSchema,
-		}),
-	),
-});
+export const QuotaForAccountsResponseSchema = Schema.Array(UsageReadingSchema);
 export type QuotaForAccountsResponse =
 	typeof QuotaForAccountsResponseSchema.Type;
 

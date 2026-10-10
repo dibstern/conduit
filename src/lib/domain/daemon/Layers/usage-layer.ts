@@ -1,18 +1,18 @@
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import {
-	type ClaudeUsageProbeOptions,
-	makeClaudeUsageProbe,
+	type ClaudeUsageReaderOptions,
+	makeClaudeUsageReader,
 } from "../../../provider/claude/claude-usage-probe.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
 import { InstanceManagerStateTag } from "../Services/instance-manager-service.js";
-import { makeQuotaCheck, QuotaCheckTag } from "../Services/quota-check.js";
+import { makeUsage, Usage } from "../Services/usage.js";
 
 /** One instance for the daemon, shared by every project's continuation module. */
-export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
+export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 	Layer.scoped(
-		QuotaCheckTag,
+		Usage,
 		Effect.gen(function* () {
 			const state = yield* DaemonStateTag;
 			// Live accounts: DaemonState only holds the instances read at startup.
@@ -22,13 +22,13 @@ export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
 				? undefined
 				: yield* loadClaudeSdkTestModule;
 			const initial = yield* Ref.get(state);
-			return yield* makeQuotaCheck({
+			return yield* makeUsage({
 				order: Option.isSome(config)
 					? Ref.get(config.value).pipe(
 							Effect.map((current) => current.usageLimits?.order ?? []),
 						)
 					: Effect.succeed([]),
-				instances: Effect.gen(function* () {
+				accounts: Effect.gen(function* () {
 					const { instances } = yield* Ref.get(accounts);
 					const fallback = Option.isSome(config)
 						? (yield* Ref.get(config.value)).claudeConfigDir
@@ -39,16 +39,19 @@ export const QuotaCheckLive = (options: ClaudeUsageProbeOptions = {}) =>
 							const configDir = instance.configDir ?? fallback;
 							return {
 								id: instance.id,
+								harness: "claude" as const,
 								...(configDir === undefined ? {} : { configDir }),
 								...(instance.env ? { env: instance.env } : {}),
 							};
 						});
 				}),
-				probe: makeClaudeUsageProbe({
-					...options,
-					cwd: options.cwd ?? initial.configDir,
-					...(sdk ? { queryFactory: sdk.claudeSdk.query } : {}),
-				}),
+				readers: {
+					claude: makeClaudeUsageReader({
+						...options,
+						cwd: options.cwd ?? initial.configDir,
+						...(sdk ? { queryFactory: sdk.claudeSdk.query } : {}),
+					}),
+				},
 			});
 		}),
 	);

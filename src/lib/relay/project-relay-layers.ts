@@ -33,10 +33,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
-import {
-	makeQuotaCheck,
-	QuotaCheckTag,
-} from "../domain/daemon/Services/quota-check.js";
+import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -105,7 +102,7 @@ import {
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
-import { makeClaudeUsageProbe } from "../provider/claude/claude-usage-probe.js";
+import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
@@ -284,13 +281,13 @@ export function createProjectRelayLayers({
 					);
 				}),
 			);
-	const sharedQuotaCheck = config.quotaCheck;
-	const quotaCheckLayer = sharedQuotaCheck
-		? Layer.sync(QuotaCheckTag, () => sharedQuotaCheck)
+	const sharedUsage = config.usage;
+	const usageLayer = sharedUsage
+		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
-				QuotaCheckTag,
-				makeQuotaCheck({
-					instances: Effect.sync(() => {
+				Usage,
+				makeUsage({
+					accounts: Effect.sync(() => {
 						const saved = loadDaemonConfig(config.configDir);
 						return saved
 							? resolveConfiguredInstances(saved)
@@ -300,18 +297,21 @@ export function createProjectRelayLayers({
 											instance.configDir ?? saved.claudeConfigDir;
 										return {
 											id: instance.id,
+											harness: "claude" as const,
 											...(configDir === undefined ? {} : { configDir }),
 										};
 									})
-							: [{ id: "claude" }];
+							: [{ id: "claude", harness: "claude" as const }];
 					}),
-					probe: makeClaudeUsageProbe({
-						queryFactory: claudeSdk.query,
-						cwd: config.projectDir,
-						...(config.shellEnv
-							? { shellEnv: config.shellEnv(config.projectDir) }
-							: {}),
-					}),
+					readers: {
+						claude: makeClaudeUsageReader({
+							queryFactory: claudeSdk.query,
+							cwd: config.projectDir,
+							...(config.shellEnv
+								? { shellEnv: config.shellEnv(config.projectDir) }
+								: {}),
+						}),
+					},
 				}),
 			);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
@@ -481,7 +481,7 @@ export function createProjectRelayLayers({
 
 	const coreBridgeLayers = Layer.mergeAll(
 		daemonConfigLayer,
-		quotaCheckLayer,
+		usageLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
 		openCodeApiLayer,

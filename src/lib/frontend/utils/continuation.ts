@@ -1,68 +1,140 @@
 import type {
 	HandoffSummary,
 	LimitRecovery,
-	QuotaCheckResult,
+	UsageReading,
+	UsageWindow,
 } from "../../contracts/limit-recovery.js";
 import { formatSnoozeTime } from "./format.js";
 
-/** A quota check as a QuotaMeter shows it; `undefined` is a check still running. */
-export function quotaReading(quota: QuotaCheckResult | undefined): {
+export const DEFAULT_USAGE_WARN_AT = 80;
+
+/** One display rule for the plan windows; other kinds do not bind yet. */
+export function usageDisplay(
+	reading: UsageReading | undefined,
+	warnAt: number | "off" = DEFAULT_USAGE_WARN_AT,
+): {
+	level: "ok" | "warn" | "limited" | "unknown";
+	binding?: UsageWindow;
+	colour: string;
+	label: string;
+} {
+	if (
+		!reading ||
+		reading.status === "unknown" ||
+		reading.status === "unavailable"
+	)
+		return { level: "unknown", colour: "bg-border-chip", label: "—" };
+	const fiveHour = reading.windows.find(
+		(window) => window.kind === "five_hour",
+	);
+	const sevenDay = reading.windows.find(
+		(window) => window.kind === "seven_day",
+	);
+	const threshold = warnAt === "off" ? Number.POSITIVE_INFINITY : warnAt;
+	const binding =
+		fiveHour &&
+		sevenDay &&
+		fiveHour.utilization >= threshold &&
+		sevenDay.utilization >= threshold
+			? sevenDay
+			: fiveHour && (!sevenDay || fiveHour.utilization >= sevenDay.utilization)
+				? fiveHour
+				: sevenDay;
+	const used = binding?.utilization;
+	const limited =
+		reading.status === "limited" || (used !== undefined && used >= 100);
+	return {
+		level: limited
+			? "limited"
+			: used !== undefined && used >= threshold
+				? "warn"
+				: "ok",
+		...(binding ? { binding } : {}),
+		colour: limited
+			? "bg-fill-red"
+			: used !== undefined &&
+					used >= (warnAt === "off" ? DEFAULT_USAGE_WARN_AT : warnAt)
+				? "bg-fill-amber"
+				: "bg-text-secondary",
+		label: limited
+			? binding?.resetsAt === undefined
+				? "limited"
+				: formatSnoozeTime(Date.parse(binding.resetsAt))
+			: used === undefined
+				? "—"
+				: `${Math.round(used)}%`,
+	};
+}
+
+/** Keep the existing meter's captions and highest-window headroom display. */
+export function quotaReading(reading: UsageReading | undefined): {
 	used: number | "checking" | "unknown";
 	caption?: string;
 } {
-	if (quota === undefined) return { used: "checking" };
-	switch (quota._tag) {
-		case "Available":
-			return quota.utilization === undefined
-				? { used: "unknown", caption: "available" }
-				: { used: quota.utilization };
-		case "Limited":
-			return {
-				used: 100,
-				caption:
-					quota.resetsAt === undefined
-						? "limited"
-						: `limited · ${formatSnoozeTime(quota.resetsAt * 1000)}`,
-			};
-		case "Unavailable":
-			return { used: "unknown", caption: "unavailable" };
-		case "Unknown":
-			return { used: "unknown" };
-	}
+	const display = usageDisplay(reading, "off");
+	if (reading === undefined) return { used: "checking" };
+	if (display.level === "limited")
+		return {
+			used: 100,
+			caption:
+				display.binding?.resetsAt === undefined
+					? "limited"
+					: `limited · ${display.label}`,
+		};
+	if (reading.status === "available")
+		return display.binding === undefined
+			? { used: "unknown", caption: "available" }
+			: { used: display.binding.utilization };
+	return reading.status === "unavailable"
+		? { used: "unknown", caption: "unavailable" }
+		: { used: "unknown" };
 }
 
-/** An account's quota from a finished check, unknown when the check left it out; undefined while it runs. */
+/** Missing readings are unknown after refresh and undefined while it runs. */
 export function accountQuota(
-	quotas: ReadonlyMap<string, QuotaCheckResult> | undefined,
-	instanceId: string,
-): QuotaCheckResult | undefined {
-	return quotas === undefined
+	readings: ReadonlyMap<string, UsageReading> | undefined,
+	accountId: string,
+): UsageReading | undefined {
+	return readings === undefined
 		? undefined
-		: (quotas.get(instanceId) ?? { _tag: "Unknown" });
+		: (readings.get(accountId) ?? {
+				accountId,
+				harness: "claude",
+				status: "unknown",
+				windows: [],
+				readAt: 0,
+				stale: false,
+			});
 }
 
-/** The quota an open limit already proves, without waiting on a check. */
-export function limitedQuota(limit: LimitRecovery): QuotaCheckResult {
-	return { _tag: "Limited", rateLimitType: limit.rateLimitType };
+/** The session's open limit already proves this account is limited. */
+export function limitedQuota(limit: LimitRecovery): UsageReading {
+	return {
+		accountId: limit.instanceId,
+		harness: "claude",
+		status: "limited",
+		readAt: 0,
+		stale: false,
+		windows:
+			limit.rateLimitType === "five_hour" || limit.rateLimitType === "seven_day"
+				? [{ kind: limit.rateLimitType, utilization: 100 }]
+				: [],
+	};
 }
 
-/** A limited account can't take the session; one whose quota can't be read can. */
-export function quotaBlocksSwitch(
-	quota: QuotaCheckResult | undefined,
-): boolean {
-	return quota?._tag === "Limited";
+/** A limited account cannot take the session; an unreadable account can. */
+export function quotaBlocksSwitch(reading: UsageReading | undefined): boolean {
+	return reading?.status === "limited";
 }
 
-/**
- * How much an account has left, for choosing the one to pre-select: a measured
- * share outranks an unmeasured "available", which outranks a check that could
- * not tell, which outranks an account the daemon says it cannot use.
- */
-export function quotaHeadroom(quota: QuotaCheckResult | undefined): number {
-	if (quota === undefined || quota._tag === "Unknown") return -1;
-	if (quota._tag === "Available")
-		return quota.utilization === undefined ? 0 : 100 - quota.utilization;
-	return quota._tag === "Unavailable" ? -2 : -3;
+/** Measured headroom outranks unmeasured available, unknown, then unavailable. */
+export function quotaHeadroom(reading: UsageReading | undefined): number {
+	if (reading === undefined || reading.status === "unknown") return -1;
+	if (reading.status === "available") {
+		const { binding } = usageDisplay(reading, "off");
+		return binding === undefined ? 0 : 100 - binding.utilization;
+	}
+	return reading.status === "unavailable" ? -2 : -3;
 }
 
 /**

@@ -441,23 +441,39 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				const said = words.join(" ");
 				const used = /^(\d+)% used$/.exec(said)?.[1];
 				const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
-				const quota =
+				const usage =
 					used !== undefined
-						? { _tag: "Available", utilization: Number(used) }
+						? {
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: Number(used) }],
+							}
 						: limitedUntil !== undefined
 							? {
-									_tag: "Limited",
-									rateLimitType: "seven_day",
-									resetsAt: Date.parse(limitedUntil) / 1000,
+									status: "limited",
+									windows: [
+										{
+											kind: "seven_day",
+											utilization: 100,
+											resetsAt: limitedUntil,
+										},
+									],
 								}
 							: said === "unavailable"
-								? { _tag: "Unavailable", reason: "not logged in" }
-								: { _tag: "Unknown" };
-				return { instanceId, quota };
+								? {
+										status: "unavailable",
+										windows: [],
+										reason: "not logged in",
+									}
+								: { status: "unknown", windows: [] };
+				return {
+					accountId: instanceId,
+					harness: "claude",
+					readAt: 0,
+					stale: false,
+					...usage,
+				};
 			});
-			requireRpcControl(world.page).setResponse("QuotaForAccounts", {
-				accounts,
-			});
+			requireRpcControl(world.page).setResponse("QuotaForAccounts", accounts);
 		},
 	},
 	{

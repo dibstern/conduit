@@ -11,13 +11,12 @@ import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
-import { QuotaCheckTag } from "../../domain/daemon/Services/quota-check.js";
+import { Usage } from "../../domain/daemon/Services/usage.js";
 import {
 	ContinuationTag,
 	previewContinuation,
 } from "../../domain/relay/Services/continuation.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
-import { InstanceManagementServiceTag } from "../../domain/relay/Services/instance-management-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
@@ -266,26 +265,9 @@ export const sessionsHandlers = {
 			),
 		),
 	QuotaForAccounts: (_request) =>
-		Effect.gen(function* () {
-			const quota = yield* QuotaCheckTag;
-			const management = yield* Effect.serviceOption(
-				InstanceManagementServiceTag,
-			);
-			const config = yield* ConfigTag;
-			const instances =
-				management._tag === "Some"
-					? yield* management.value.list()
-					: (loadDaemonConfig(config.configDir)?.instances ?? []);
-			const accounts = yield* Effect.forEach(
-				instances.filter((instance) => instance.driver === "claude"),
-				(instance) =>
-					quota
-						.check(instance.id)
-						.pipe(Effect.map((quota) => ({ instanceId: instance.id, quota }))),
-				{ concurrency: 8 },
-			);
-			return { accounts };
-		}).pipe(Effect.catchAll(mapRpcFailure("QuotaForAccounts"))),
+		Effect.flatMap(Usage, (usage) => usage.refresh()).pipe(
+			Effect.catchAll(mapRpcFailure("QuotaForAccounts")),
+		),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;

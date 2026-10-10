@@ -2631,19 +2631,21 @@ for (const behavior of [
 				}),
 			);
 			evidence["quotas"] = quotas;
-			const quota = quotas.accounts.find(
-				(account) => account.instanceId === target.id,
-			)?.quota;
-			expect(quota?._tag).toBe(
+			const quota = quotas.find((account) => account.accountId === target.id);
+			expect(quota?.status).toBe(
 				["fail", "hang", "plan-unavailable"].includes(behavior)
-					? "Unknown"
+					? "unknown"
 					: behavior === "unavailable"
-						? "Unavailable"
+						? "unavailable"
 						: behavior === "limited"
-							? "Limited"
-							: "Available",
+							? "limited"
+							: "available",
 			);
-			if (quota?._tag === "Available") expect(quota.utilization).toBe(37);
+			if (quota?.status === "available")
+				expect(
+					quota.windows.find((window) => window.kind === "seven_day")
+						?.utilization,
+				).toBe(37);
 			if (behavior === "send-during-switch")
 				writeFileSync(join(source.configDir, "conduit-test-hold-stop"), "hold");
 			const continueSession = () =>

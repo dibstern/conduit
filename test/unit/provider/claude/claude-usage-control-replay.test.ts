@@ -6,14 +6,14 @@
 import { readFileSync } from "node:fs";
 import { Effect, Schema } from "effect";
 import { expect, it } from "vitest";
-import { makeQuotaCheck } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
-import { makeClaudeUsageProbe } from "../../../../src/lib/provider/claude/claude-usage-probe.js";
+import { makeUsage } from "../../../../src/lib/domain/daemon/Services/usage.js";
+import { makeClaudeUsageReader } from "../../../../src/lib/provider/claude/claude-usage-probe.js";
 import {
 	ClaudeUsageResponseSchema,
 	decodeClaudeUsage,
 } from "../../../../src/lib/provider/claude/claude-usage-schema.js";
 
-it("replays the captured usage control response through QuotaCheck", async () => {
+it("replays the captured usage control response through Usage", async () => {
 	const response: unknown = JSON.parse(
 		readFileSync(
 			new URL(
@@ -29,50 +29,54 @@ it("replays the captured usage control response through QuotaCheck", async () =>
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
-				const service = yield* makeQuotaCheck({
-					instances: Effect.succeed([
-						{ id: "captured-account", configDir: "/captured-account" },
-					]),
-					probe: makeClaudeUsageProbe({
-						queryFactory: ({ options }) => {
-							expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
-								"/captured-account",
-							);
-							return {
-								initializationResult: async () => ({
-									account: {
-										email: "captured@example.test",
-										tokenSource: "oauth",
-									},
-								}),
-								usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
-									async (options) => {
-										expect(options).toEqual({ skipBehaviors: true });
-										return response;
-									},
-								close: () => {
-									closed = true;
-								},
-							};
+				const service = yield* makeUsage({
+					accounts: Effect.succeed([
+						{
+							id: "captured-account",
+							harness: "claude",
+							configDir: "/captured-account",
 						},
-					}),
+					]),
+					readers: {
+						claude: makeClaudeUsageReader({
+							queryFactory: ({ options }) => {
+								expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
+									"/captured-account",
+								);
+								return {
+									initializationResult: async () => ({
+										account: {
+											email: "captured@example.test",
+											tokenSource: "oauth",
+										},
+									}),
+									usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
+										async (options) => {
+											expect(options).toEqual({ skipBehaviors: true });
+											return response;
+										},
+									close: () => {
+										closed = true;
+									},
+								};
+							},
+						}),
+					},
 				});
-				const result = yield* service.check("captured-account");
-				expect(["Available", "Limited"]).toContain(result._tag);
-				if (result._tag === "Available") {
-					expect(result.utilization).toBe(
-						Math.max(
-							decoded.rate_limits?.five_hour?.utilization ?? 0,
-							decoded.rate_limits?.seven_day?.utilization ?? 0,
-						),
-					);
-					expect(result.fiveHour?.utilization).toBe(
-						decoded.rate_limits?.five_hour?.utilization,
-					);
-					expect(result.sevenDay?.utilization).toBe(
-						decoded.rate_limits?.seven_day?.utilization,
-					);
-				}
+				const [result] = yield* service.refresh(["captured-account"]);
+				expect(["available", "limited"]).toContain(result?.status);
+				expect(result?.windows).toEqual([
+					{
+						kind: "five_hour",
+						utilization: decoded.rate_limits?.five_hour?.utilization,
+						resetsAt: decoded.rate_limits?.five_hour?.resets_at,
+					},
+					{
+						kind: "seven_day",
+						utilization: decoded.rate_limits?.seven_day?.utilization,
+						resetsAt: decoded.rate_limits?.seven_day?.resets_at,
+					},
+				]);
 			}),
 		),
 	);
@@ -88,8 +92,14 @@ it("uses the highest measured window and leaves non-plan accounts unknown", () =
 				seven_day: { utilization: 23 },
 			},
 		}),
-	).toMatchObject({ _tag: "Available", utilization: 71 });
+	).toEqual({
+		status: "available",
+		windows: [
+			{ kind: "five_hour", utilization: 71 },
+			{ kind: "seven_day", utilization: 23 },
+		],
+	});
 	expect(
 		decodeClaudeUsage({ rate_limits_available: false, rate_limits: null }),
-	).toEqual({ _tag: "Unknown" });
+	).toEqual({ status: "unknown", windows: [] });
 });

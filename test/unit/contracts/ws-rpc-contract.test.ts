@@ -32,6 +32,7 @@ import {
 	MarkSessionUnread,
 	ModelExecutionSchema,
 	PtyInput,
+	QuotaForAccountsResponseSchema,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -464,7 +465,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						firstMessageIncluded: false,
 						tokens: 0,
 					}),
-				QuotaForAccounts: () => Effect.succeed({ accounts: [] }),
+				QuotaForAccounts: () => Effect.succeed([]),
 				GetContinuationHandoff: () => Effect.succeed({ handoff: null }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
@@ -1723,4 +1724,43 @@ describe("browser WebSocket RPC contract", () => {
 		expect(sendWithoutCommandId._tag).toBe("Left");
 		expect(cancelWithoutCommandId._tag).toBe("Left");
 	});
+});
+
+// The on-demand usage RPC returns readings directly, with ISO window resets.
+it("decodes QuotaForAccounts as a harness-tagged reading array", () => {
+	const readings = [
+		{
+			accountId: "claude-2",
+			harness: "claude",
+			status: "available",
+			planLabel: "Max",
+			windows: [
+				{ kind: "five_hour", utilization: 12 },
+				{
+					kind: "seven_day",
+					utilization: 37,
+					resetsAt: "2026-10-12T09:00:00.000Z",
+				},
+			],
+			readAt: 1791637200000,
+			stale: false,
+		},
+		{
+			accountId: "claude-3",
+			harness: "claude",
+			status: "unknown",
+			windows: [],
+			readAt: 1791637200000,
+			stale: false,
+			reason: "Usage read failed",
+		},
+	];
+	expect(
+		Schema.decodeUnknownSync(QuotaForAccountsResponseSchema)(readings),
+	).toEqual(readings);
+	expect(() =>
+		Schema.decodeUnknownSync(QuotaForAccountsResponseSchema)({
+			accounts: readings,
+		}),
+	).toThrow();
 });
