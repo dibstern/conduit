@@ -505,7 +505,11 @@ test("opens the heavy session after a restart under load", async ({
 			'#messages .turn-activity-toggle[aria-expanded="false"]',
 		);
 		while ((await collapsed.count()) > 0) await collapsed.first().click();
-		return page.locator("#messages").innerText();
+		// The scroll button shows only while the view is detached: leave it out,
+		// so a scroll race can neither fake nor mask a difference in content.
+		return (
+			await page.locator("#messages > :not(#scroll-btn)").allInnerTexts()
+		).join("\n");
 	};
 	const [resumedTranscript, coldTranscript] = [
 		await transcriptOf(opener),

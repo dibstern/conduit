@@ -1616,13 +1616,20 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
-						// The parts that moved, by their own version. CROSS JOIN keeps
-						// SQLite on idx_message_parts_version: left to itself it walks
-						// every message in the session instead.
+						// The parts that moved, by their own version. A live window is a
+						// narrow range, so it starts from idx_message_parts_version
+						// (CROSS JOIN fixes the join order; unanalyzed, SQLite would
+						// start from the session's messages). A resume has no ceiling
+						// and may reach back past every session's writes, so it starts
+						// from this session's moved messages instead.
 						parts = yield* previewParts(
-							sql`FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
-								WHERE m.session_id = ${sessionId}
-									AND mp.version > ${floor} AND mp.version <= ${ceiling}`,
+							range?.through === undefined
+								? sql`FROM messages m CROSS JOIN message_parts mp ON mp.message_id = m.id
+									WHERE m.session_id = ${sessionId} AND m.version > ${floor}
+										AND mp.version > ${floor}`
+								: sql`FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
+									WHERE m.session_id = ${sessionId}
+										AND mp.version > ${floor} AND mp.version <= ${ceiling}`,
 						);
 					}
 					const removed =

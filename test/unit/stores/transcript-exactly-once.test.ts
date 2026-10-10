@@ -210,3 +210,36 @@ it("keeps a part in its place when a live update changes it", async () => {
 	);
 	expect(parts().map((part) => part.id)).toEqual(["think", "tool-a", "tool-b"]);
 });
+
+it("moves a held part when a reconcile changes its place", async () => {
+	const text = (id: string, sortOrder: number) => ({
+		_tag: "part" as const,
+		messageId: "a1",
+		sortOrder,
+		part: { id, type: "text" as const, text: id },
+	});
+	viewTranscript("project", "A");
+	await vi.waitFor(() => expect(wire.ready).toBe(true));
+	await wire.emit({
+		_tag: "snapshot",
+		sequence: 4,
+		rows: [
+			text("a", 0),
+			text("b", 1),
+			text("c", 2),
+			{
+				_tag: "message",
+				message: { id: "a1", role: "assistant", time: { created: 2 } },
+			},
+		],
+	});
+	await wire.emit({ _tag: "synchronized" });
+	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
+	// A message snapshot re-sends every part, with one new in the middle.
+	for (const item of [text("a", 0), text("new", 1), text("b", 2), text("c", 3)])
+		await wire.emit({ _tag: "upsert", sequence: 5, item });
+	const parts = () =>
+		getOrCreateSessionSlot("A").messages.transcript?.rows[0]?.parts ?? [];
+	await vi.waitFor(() => expect(parts()).toHaveLength(4));
+	expect(parts().map((part) => part.id)).toEqual(["a", "new", "b", "c"]);
+});

@@ -221,23 +221,36 @@ const pendingOrder = (a: PendingInput, b: PendingInput): number =>
 	a.admittedAt - b.admittedAt || a.inputId.localeCompare(b.inputId);
 
 /**
- * `parts` with `part` replacing its namesake in place, or placed by its order.
- * Orders are kept by part id: held parts come back as reactive proxies, and a
- * part an older page brought has none and sorts first, since that page brought
- * its message whole.
+ * `parts` with `part` replacing its namesake in place while its order holds, or
+ * placed by its order. Orders are kept by part id: held parts come back as
+ * reactive proxies, and a part an older page brought has none and sorts first,
+ * since that page brought its message whole.
  */
 const placePart = (
 	parts: readonly HistoryMessagePart[],
 	part: HistoryMessagePart,
 	order: TranscriptEntry["partOrder"],
+	moved: boolean,
 ): HistoryMessagePart[] => {
-	if (parts.some((old) => old.id === part.id))
+	if (!moved && parts.some((old) => old.id === part.id))
 		return parts.map((old) => (old.id === part.id ? part : old));
+	const rest = parts.filter((old) => old.id !== part.id);
 	const rank = (of: HistoryMessagePart) => order.get(of.id) ?? -1;
-	const at = parts.findIndex((old) => rank(old) > rank(part));
+	const at = rest.findIndex((old) => rank(old) > rank(part));
 	return at === -1
-		? [...parts, part]
-		: [...parts.slice(0, at), part, ...parts.slice(at)];
+		? [...rest, part]
+		: [...rest.slice(0, at), part, ...rest.slice(at)];
+};
+
+/** `order` without `partIds`. */
+const withoutOrders = (
+	order: TranscriptEntry["partOrder"],
+	partIds: readonly string[],
+): TranscriptEntry["partOrder"] => {
+	if (!partIds.some((id) => order.has(id))) return order;
+	const next = new Map(order);
+	for (const id of partIds) next.delete(id);
+	return next;
 };
 
 /** The entry with `messageId`'s parts rewritten, held or still waiting for it. */
@@ -304,14 +317,21 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 		case "part": {
 			const part = toHistoryPart(item.part);
 			if (part === undefined) return entry;
+			const held = entry.partOrder.get(part.id);
 			const partOrder =
-				entry.partOrder.get(part.id) === item.sortOrder
+				held === item.sortOrder
 					? entry.partOrder
 					: new Map(entry.partOrder).set(part.id, item.sortOrder);
 			// A part arrives before its message's header: rows arrive in version
 			// order, and a part write also advances the message that owns it.
+			// A part with no order came whole with an older page and stays put.
 			return withParts({ ...entry, partOrder }, item.messageId, (parts) =>
-				placePart(parts, part, partOrder),
+				placePart(
+					parts,
+					part,
+					partOrder,
+					held !== undefined && held !== item.sortOrder,
+				),
 			);
 		}
 		case "pendingInput": {
@@ -363,8 +383,14 @@ export function applyTranscriptEnvelope(
 				Schema.decodeUnknownOption(PartRemovalId)(envelope.id),
 				{
 					onSome: ([messageId, partId]) =>
-						withParts({ ...entry, hwm }, messageId, (parts) =>
-							parts.filter((part) => part.id !== partId),
+						withParts(
+							{
+								...entry,
+								hwm,
+								partOrder: withoutOrders(entry.partOrder, [partId]),
+							},
+							messageId,
+							(parts) => parts.filter((part) => part.id !== partId),
 						),
 					onNone: () => ({
 						...entry,
@@ -373,6 +399,14 @@ export function applyTranscriptEnvelope(
 						waiting: withoutWaiting(entry.waiting, envelope.id),
 						pending: entry.pending.filter(
 							(input) => `input:${input.inputId}` !== envelope.id,
+						),
+						partOrder: withoutOrders(
+							entry.partOrder,
+							[
+								...(entry.rows.find((row) => row.id === envelope.id)?.parts ??
+									[]),
+								...(entry.waiting.get(envelope.id) ?? []),
+							].map((part) => part.id),
 						),
 					}),
 				},

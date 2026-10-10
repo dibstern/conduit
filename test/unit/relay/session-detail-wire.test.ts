@@ -131,6 +131,8 @@ describe("session detail wire", () => {
 							sequence: input.length,
 						});
 					// Touch the oldest remaining entry, insert another, then check LRU promotion.
+					// The decoder evicts in lockstep: evicting early, or not promoting,
+					// loses a prefix the encoder still sends a suffix of.
 					for (const id of [7, 24, 7, 6])
 						input.push({
 							_tag: "upsert",

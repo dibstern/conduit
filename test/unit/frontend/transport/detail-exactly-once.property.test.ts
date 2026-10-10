@@ -10,12 +10,13 @@ import {
 import { resumeStream } from "../../../../src/lib/frontend/transport/resume.js";
 import { decodeSessionDetail } from "../../../../src/lib/frontend/transport/session-detail-wire.js";
 
-// Each message holds up to two text parts, in slot order: `clear` deletes one
-// part alone, and a later slot can be written before an earlier one.
+// Each message holds up to two text parts: `clear` deletes one part alone, a
+// later slot can be written before an earlier one, and `flip` swaps the slots'
+// places the way a reconcile re-sends a message's parts in a new order.
 type Slot = 0 | 1;
 type Change = {
 	readonly id: "a" | "b" | "c";
-	readonly kind: "grow" | "remove" | "clear";
+	readonly kind: "grow" | "remove" | "clear" | "flip";
 	readonly slot: Slot;
 	readonly text: string;
 };
@@ -29,10 +30,15 @@ const header = (id: string): Row => ({
 	_tag: "message",
 	message: { id, role: "assistant", time: { created: id.charCodeAt(0) } },
 });
-const part = (id: string, slot: Slot, text: string): Row => ({
+const part = (
+	id: string,
+	slot: Slot,
+	text: string,
+	sortOrder: number,
+): Row => ({
 	_tag: "part",
 	messageId: id,
-	sortOrder: slot,
+	sortOrder,
 	part: { id: `${id}-${slot}`, type: "text", text },
 });
 const partKey = (id: string, slot: Slot) =>
@@ -63,6 +69,10 @@ const lost = () =>
 function logOf(events: readonly Event[]) {
 	// Message id to its parts' text by slot; a deleted part has no slot.
 	const state = new Map<string, Map<Slot, string>>();
+	// Messages whose slots sit in reverse order.
+	const flipped = new Set<string>();
+	const orderOf = (id: string, slot: Slot) =>
+		flipped.has(id) ? 1 - slot : slot;
 	const log: SessionDetailEnvelope[] = [];
 	for (const [index, changes] of events.entries()) {
 		const sequence = index + 1;
@@ -79,8 +89,16 @@ function logOf(events: readonly Event[]) {
 					changed.set(id, { _tag: "remove", id, sequence });
 				}
 				state.delete(change.id);
+				flipped.delete(change.id);
 				changed.delete(change.id);
 				changed.set(change.id, { _tag: "remove", id: change.id, sequence });
+			} else if (change.kind === "flip") {
+				if (!held) continue;
+				if (!flipped.delete(change.id)) flipped.add(change.id);
+				for (const [slot, text] of held)
+					upsert(part(change.id, slot, text, orderOf(change.id, slot)));
+				changed.delete(change.id);
+				upsert(header(change.id));
 			} else if (change.kind === "clear") {
 				held?.delete(change.slot);
 				const id = partKey(change.id, change.slot);
@@ -89,7 +107,9 @@ function logOf(events: readonly Event[]) {
 				const parts = held ?? new Map<Slot, string>();
 				const text = (parts.get(change.slot) ?? "") + change.text;
 				state.set(change.id, parts.set(change.slot, text));
-				upsert(part(change.id, change.slot, text));
+				upsert(
+					part(change.id, change.slot, text, orderOf(change.id, change.slot)),
+				);
 				// As the server sends it: a new message's header after its parts.
 				if (!held) {
 					changed.delete(change.id);
@@ -101,8 +121,8 @@ function logOf(events: readonly Event[]) {
 	}
 	const rows = [...state].flatMap(([id, parts]) => [
 		...[...parts]
-			.sort(([left], [right]) => left - right)
-			.map(([slot, text]) => part(id, slot, text)),
+			.sort(([left], [right]) => orderOf(id, left) - orderOf(id, right))
+			.map(([slot, text]) => part(id, slot, text, orderOf(id, slot))),
 		header(id),
 	]);
 	return { log, rows, head: events.length };
@@ -186,7 +206,7 @@ describe("session detail exactly once", () => {
 	it("converges to the canonical transcript across drops, replay shapes and corrupt suffixes", async () => {
 		const change = fc.record({
 			id: fc.constantFrom("a", "b", "c"),
-			kind: fc.constantFrom("grow", "remove", "clear"),
+			kind: fc.constantFrom("grow", "remove", "clear", "flip"),
 			slot: fc.constantFrom<Slot>(0, 1),
 			text: fc.constantFrom("x", "y", "💡"),
 		});
@@ -280,7 +300,7 @@ describe("session detail exactly once", () => {
 						);
 					});
 					const actual = await fold(resumed);
-					// Laid down whole, each message's parts are in slot order.
+					// Laid down whole, each message's parts are in their order.
 					const whole = [
 						{ _tag: "snapshot", sequence: head, rows } as const,
 					].reduce(applyTranscriptEnvelope, empty());
