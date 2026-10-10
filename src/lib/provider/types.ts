@@ -4,6 +4,7 @@
 // Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
+import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type {
 	SessionGoalChangedPayload,
@@ -379,6 +380,7 @@ export interface ProviderInstance {
 
 export interface ProviderDriver<Input, R = never, E = never> {
 	readonly providerId: string;
+	readonly capabilities: ProviderSessionCapabilities;
 	readonly create: (
 		input: Input,
 	) => Effect.Effect<ProviderInstance, E, R | Scope.Scope>;

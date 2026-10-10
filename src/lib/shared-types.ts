@@ -5,7 +5,10 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
-import type { ProviderDriverKind } from "./contracts/provider-instance.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "./contracts/provider-instance.js";
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -759,6 +762,7 @@ export interface OpenCodeInstance {
 	port: number;
 	managed: boolean;
 	driver?: ProviderDriverKind;
+	capabilities?: ProviderSessionCapabilities;
 	configDir?: string;
 	url?: string;
 	status: InstanceStatus;

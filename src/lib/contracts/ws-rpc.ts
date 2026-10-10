@@ -27,7 +27,10 @@ import {
 	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
 } from "./limit-recovery.js";
-import { ProviderDriverKindSchema } from "./provider-instance.js";
+import {
+	ProviderDriverKindSchema,
+	ProviderSessionCapabilitiesSchema,
+} from "./provider-instance.js";
 import { StoredEventSchema } from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
@@ -174,6 +177,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	capabilities: Schema.optional(
+		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
+	),
 	configDir: Schema.optional(Schema.String),
 	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
@@ -541,9 +547,15 @@ export const SaveProjectResponseSchema = Schema.Struct({
 	warnings: Schema.Array(FolderIssueSchema),
 });
 
+const ProviderCapabilityMapSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
+});
+
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
+	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -2107,7 +2119,10 @@ export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
  */
 export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	payload: {},
-	success: Schema.Struct({ instances: Schema.Array(OpenCodeInstanceSchema) }),
+	success: Schema.Struct({
+		instances: Schema.Array(OpenCodeInstanceSchema),
+		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	}),
 	error: WsRpcError,
 	stream: true,
 });
