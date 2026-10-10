@@ -230,7 +230,7 @@ dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; }
 	<span class="tl">Best</span><a href="#a1">A1 Dock+</a><a href="#a2">A2 Tabs</a><a href="#a3">A3 Island</a><a href="#a4">A4 Meta line</a>
 	<span class="tl">Middle</span><a href="#b1">B1 Chip tray</a><a href="#b2">B2 Meter</a><a href="#b3">B3 Goal card</a><a href="#b4">B4 Accessory</a><a href="#b5">B5 Top bar</a>
 	<span class="tl">Wild</span><a href="#c1">C1 Prompt line</a><a href="#c2">C2 Fan</a><a href="#c3">C3 Deck</a><a href="#c4">C4 Goal-as-canvas</a><a href="#c5">C5 Thread</a>
-	<span class="tl">Shared</span><a href="#picker">Picker ×3</a><a href="#life">Goal lifecycle</a><a href="#opencode">OpenCode</a><a href="#pick">Recommendation</a>
+	<span class="tl">Shared</span><a href="#picker">Picker ×3</a><a href="#life">Goal lifecycle</a><a href="#opencode">OpenCode</a><a href="#pick">Recommendation</a><a href="#compose" style="color:var(--accent)">Compose →</a>
 </nav>
 
 <style>
@@ -1480,6 +1480,149 @@ dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; }
 		<dt>Runner-up</dt><dd><b>B2 goal border</b>, if you'd rather the goal be ambient (a violet frame) than a line of text. Its downside: a border can't show the reason text.</dd>
 	</dl>
 </section>
+
+<!-- ═════════════ COMPOSE ═════════════ -->
+<style>
+#compose .slot { border: 1px solid var(--border-subtle); border-radius: 14px; padding: 12px 14px; margin: 0 0 10px; background: var(--surface); }
+#compose .slot h4 { margin: 0 0 2px; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+#compose .slot h4 small { color: var(--dim); font-weight: 400; font-size: 11px; }
+#compose .slot p { margin: 0 0 8px; color: var(--muted); font-size: 11.5px; }
+#compose .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+#compose label { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
+#compose label:has(input:checked) { border-color: var(--accent); background: rgba(254,55,129,.1); color: var(--text); }
+#compose label input { display: none; }
+#compose label a { font-weight: 700; color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--dim); }
+#compose label.bad { border-color: rgba(244,96,122,.6); }
+#compose .cols { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+#compose .out { position: sticky; top: 96px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-alt); padding: 12px; }
+#compose .out h4 { margin: 0 0 8px; font-size: 13px; }
+#compose .flag { font-size: 11.5px; padding: 6px 9px; border-radius: 9px; margin-bottom: 6px; line-height: 1.4; }
+#compose .flag.clash { background: rgba(244,96,122,.1); color: #f6a3b2; border: 1px solid rgba(244,96,122,.35); }
+#compose .flag.note { background: rgba(244,183,64,.08); color: #f1cf8a; border: 1px solid rgba(244,183,64,.25); }
+#compose .flag.ok { background: rgba(63,214,154,.08); color: var(--success); border: 1px solid rgba(63,214,154,.3); }
+#compose textarea { width: 100%; height: 300px; box-sizing: border-box; background: var(--bg); color: var(--text-2); border: 1px solid var(--border); border-radius: 10px; padding: 9px; font-family: inherit; font-size: 11px; line-height: 1.5; resize: vertical; }
+#compose .btns { display: flex; gap: 6px; margin-top: 8px; }
+#compose button.b { flex: 1; padding: 8px 0; border-radius: 10px; border: 1px solid var(--border); background: var(--chip); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+#compose button.b.pri { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+@media (max-width: 900px) { #compose .cols { grid-template-columns: 1fr; } #compose .out { position: static; } }
+</style>
+<section class="design" id="compose">
+	<div class="dh"><h3>Compose your own</h3><span class="tag best">builder</span>
+		<p class="pitch">Every design breaks down into the same parts. Pick one option per part (some parts allow several), and the panel flags anything that clashes. When you're happy, copy the request and paste it to me, and I'll render the final version in every state you leave ticked. The bold codes link back to the design they came from. It starts on my recommended mix.</p></div>
+	<div class="cols">
+		<div id="slots"></div>
+		<div class="out">
+			<h4>Your request</h4>
+			<div id="flags"></div>
+			<textarea id="req" readonly></textarea>
+			<div class="btns"><button class="b pri" id="copy">Copy request</button><button class="b" id="reset">Reset to my pick</button></div>
+		</div>
+	</div>
+</section>
+<script>
+(() => {
+	const SLOTS = [
+		{ k: 'status', t: 'Live status', d: 'Where "Working 38m · step · ↓ live" sits.', opts: [
+			['A1', 'Header inside the composer (B3 style)'], ['A2', 'Tab on the composer’s top edge'], ['A3', 'Floating island above'],
+			['A4', 'Plain text line above'], ['B4', 'Small line above a capsule']] },
+		{ k: 'goal', t: 'Goal, at a glance', d: 'The main always-visible goal indicator.', opts: [
+			['A1', 'Line 2 of the composer header'], ['A2', 'Goal tab on the top edge'], ['A3', 'Check count in the island'],
+			['A4', 'Text line above + “goal” word below'], ['B1', 'First chip in the tray'], ['B3', 'Pinned card (pill while typing)'],
+			['B5', 'Subtitle under the session title'], ['C1', 'Last prompt segment'], ['C3', 'Deck tab'], ['C5', 'Check timeline above']] },
+		{ k: 'ambient', t: 'Goal, extra signals', d: 'Optional. These stack on top of the main indicator.', many: true, opts: [
+			['B2', 'Violet composer border'], ['B4', 'Orbit ring spinning around the logo'], ['C2', 'Violet dot on the logo'], ['C4', 'Goal fills the empty composer']] },
+		{ k: 'details', t: 'Goal details', d: 'What tapping the goal opens.', opts: [
+			['A1', 'Popover above the composer'], ['A3', 'Island grows into a card'], ['B5', 'Pulls down from the top bar'], ['C3', 'Deck page']] },
+		{ k: 'controls', t: 'Controls layout', d: 'The footer: how attach, model, effort, approvals, and send are arranged.', opts: [
+			['A1', 'Chip row'], ['A3', 'Icon-only capsule'], ['A4', 'Plain words under the field'], ['B1', 'Swipeable chip tray'],
+			['B4', 'Capsule at rest, toolbar on the keyboard'], ['C1', 'Powerline prompt'], ['C3', 'Swipeable control deck']] },
+		{ k: 'effort', t: 'Effort control', opts: [
+			['A1', 'Meter chip, tap to cycle'], ['A2', 'Right half of a split model button'], ['B2', 'Meter inside the model button'], ['C2', 'Long-press fan']] },
+		{ k: 'approvals', t: 'Approvals control', opts: [
+			['A1', 'Shield chip with label'], ['A3', 'Shield icon only, amber when elevated'], ['B2', 'Shield with tiny caption'], ['C2', 'Long-press fan']] },
+		{ k: 'hm', t: 'Harness & Model button', opts: [['A1', 'In the composer'], ['B5', 'Pill in the top bar']] },
+		{ k: 'picker', t: 'Picker', d: 'Desktop always uses the P3 popover.', opts: [['P1', 'Bottom sheet on phone'], ['P2', 'Drill-down list on phone']] },
+		{ k: 'addons', t: 'Add-ons', d: 'These work with any combination.', many: true, opts: [
+			['B1', 'Attach sheet with a “Set goal” tile'], ['C4', 'Typing /goal turns send violet + explainer'], ['A4', 'Approvals menu with one-line descriptions'],
+			['C5', 'Check history inside goal details'], ['A2', 'Outcome stays visible after the run (green / red)']] },
+		{ k: 'states', t: 'States to render', d: 'Untick any you don’t need in the final version.', many: true, opts: [
+			['·', 'Idle, empty'], ['·', 'Typing'], ['·', 'Working (stop)'], ['·', 'Working + typing (send + stop)'], ['·', 'Keyboard open'],
+			['·', 'Attach sheet open'], ['·', 'Files attached'], ['·', 'Picker open'], ['·', 'Effort cycling'], ['·', 'Elevated approvals'], ['·', 'Plan mode'],
+			['·', 'Setting a goal (/goal)'], ['·', 'Goal starting'], ['·', 'Goal pursuing'], ['·', 'Goal checking'], ['·', 'Goal not yet + reason'],
+			['·', 'Goal paused'], ['·', 'Goal met'], ['·', 'Goal impossible'], ['·', 'Goal cleared + undo'], ['·', 'Context nearly full'],
+			['·', 'Subagent back bar'], ['·', 'Model changed notice'], ['·', 'OpenCode session (no goal)'], ['·', 'Desktop']] },
+	];
+	const PICK = { status: 'A1', goal: 'A1', ambient: [], details: 'A1', controls: 'A1', effort: 'A1', approvals: 'A1', hm: 'A1', picker: 'P1',
+		addons: ['B1', 'C4', 'A4', 'C5'], states: null };
+	const anchor = c => c === 'P1' || c === 'P2' ? '#picker' : '#' + c.toLowerCase();
+	const root = document.getElementById('slots');
+	root.innerHTML = SLOTS.map(s => `<div class="slot"><h4>${s.t}<small>${s.many ? 'pick any' : 'pick one'}</small></h4>${s.d ? `<p>${s.d}</p>` : ''}<div class="opts">${
+		s.opts.map(([c, l], i) => `<label data-k="${s.k}"><input type="${s.many ? 'checkbox' : 'radio'}" name="${s.k}" value="${i}">${
+			c === '·' ? '' : `<a href="${anchor(c)}">${c}</a>`}${l}</label>`).join('')}</div></div>`).join('');
+
+	const inputs = k => [...root.querySelectorAll(`input[name="${k}"]`)];
+	const read = () => Object.fromEntries(SLOTS.map(s => {
+		const on = inputs(s.k).filter(i => i.checked).map(i => s.opts[+i.value]);
+		return [s.k, s.many ? on : on[0]];
+	}));
+	const apply = () => SLOTS.forEach(s => inputs(s.k).forEach((i, n) => {
+		const c = s.opts[n][0], want = PICK[s.k];
+		i.checked = want === null ? true : Array.isArray(want) ? want.includes(c) : want === c;
+	}));
+
+	// Each rule: [severity, slots it implicates, test over picked codes, message]
+	const RULES = [
+		['clash', ['goal', 'controls'], v => v.goal === 'B1' && v.controls !== 'B1', 'The B1 goal chip only exists in the B1 chip tray.'],
+		['clash', ['goal', 'controls'], v => v.goal === 'C1' && v.controls !== 'C1', 'The C1 goal segment only exists in the C1 prompt line.'],
+		['clash', ['goal', 'details', 'controls'], v => (v.goal === 'C3' || v.details === 'C3') && v.controls !== 'C3', 'The C3 goal tab and page only exist in the C3 deck.'],
+		['clash', ['goal', 'details', 'status'], v => (v.goal === 'A3' || v.details === 'A3') && v.status !== 'A3', 'The A3 goal lives in the A3 island, so status must be A3 too.'],
+		['clash', ['details', 'goal'], v => v.details === 'B5' && v.goal !== 'B5', 'The B5 pull-down hangs off the B5 top-bar goal.'],
+		['clash', ['status', 'goal'], v => v.status === 'A3' && ['B3', 'C5'].includes(v.goal), 'The A3 island floats over the same space as the B3 card or C5 timeline.'],
+		['clash', ['ambient'], v => v.ambient.includes('B4') && v.ambient.includes('C2'), 'The B4 orbit and C2 dot both decorate the logo. Pick one.'],
+		['clash', ['ambient', 'hm'], v => v.hm === 'B5' && (v.ambient.includes('B4') || v.ambient.includes('C2')), 'B4/C2 decorate the logo in the composer, but B5 moves it to the top bar.'],
+		['clash', ['effort', 'approvals', 'hm'], v => v.hm === 'B5' && (v.effort === 'C2' || v.approvals === 'C2'), 'The C2 fan opens from the composer logo, which B5 moves to the top bar.'],
+		['clash', ['effort', 'hm'], v => v.hm === 'B5' && ['A2', 'B2'].includes(v.effort), 'A2/B2 put effort inside the model button, which B5 moves to the top bar.'],
+		['note', ['effort', 'approvals'], v => (v.effort === 'C2') !== (v.approvals === 'C2'), 'The C2 fan carries effort and approvals together, so both will use it.'],
+		['note', ['controls', 'effort', 'approvals'], v => ['A4', 'C1', 'C3'].includes(v.controls), 'The {c} layout has its own effort and approvals style, so those two picks are ignored.'],
+		['note', ['controls'], v => v.controls === 'B4', 'With B4, approvals are hidden until you focus the field.'],
+		['note', ['controls', 'approvals'], v => ['A3', 'B4'].includes(v.controls) && v.approvals === 'A1', 'A labelled shield won’t fit a capsule. It’ll fall back to icon-only.'],
+		['note', ['ambient', 'goal'], v => v.ambient.includes('C4') && ['B3', 'C5'].includes(v.goal), 'C4 repeats the goal that the card or timeline above already shows.'],
+		['note', ['ambient', 'controls'], v => v.ambient.includes('B4') && !['A3', 'B4'].includes(v.controls), 'The B4 orbit is drawn for a round logo button. It will be adapted to a chip.'],
+		['note', ['goal', 'status'], v => v.goal === 'A1' && v.status !== 'A1', 'The A1 header will hold only the goal line, with status shown elsewhere.'],
+		['note', ['goal', 'status'], v => v.goal === 'A2' && v.status !== 'A2', 'The A2 goal tab will sit alone on the top edge.'],
+		['note', ['goal', 'hm'], v => v.goal === 'B5' || v.hm === 'B5', 'B5 crowds the top bar, which already has conduit’s view switcher.'],
+	];
+
+	const flags = document.getElementById('flags'), req = document.getElementById('req');
+	const render = () => {
+		const v = read();
+		const codes = Object.fromEntries(SLOTS.map(s => [s.k, s.many ? v[s.k].map(o => o[0]) : v[s.k] ? v[s.k][0] : '—']));
+		const hits = RULES.filter(r => r[2](codes)).map(([sev, ks, , msg]) => [sev, ks, msg.replace('{c}', codes.controls)]);
+		root.querySelectorAll('label.bad').forEach(l => l.classList.remove('bad'));
+		hits.filter(h => h[0] === 'clash').forEach(([, ks]) => ks.forEach(k =>
+			root.querySelectorAll(`label[data-k="${k}"]:has(input:checked)`).forEach(l => l.classList.add('bad'))));
+		flags.innerHTML = hits.length ? hits.map(([sev, , msg]) => `<div class="flag ${sev}">${sev === 'clash' ? '✕' : '!'} ${msg}</div>`).join('')
+			: '<div class="flag ok">✓ Everything fits together.</div>';
+		const st = SLOTS.find(s => s.k === 'states'), on = v.states.map(o => o[1]);
+		const off = st.opts.map(o => o[1]).filter(l => !on.includes(l));
+		const fmt = o => `${o[0]} (${o[1]})`;
+		req.value = ['Render the final composer from these picks:',
+			...SLOTS.filter(s => s.k !== 'states').map(s => `- ${s.t}: ${s.many ? (v[s.k].length ? v[s.k].map(fmt).join(', ') : 'none') : v[s.k] ? fmt(v[s.k]) : 'not picked'}`),
+			`- States: ${off.length ? `all except ${off.join(', ')}` : `all ${on.length}`}`,
+			...(hits.length ? ['', 'Flagged by the builder:', ...hits.map(([sev, , msg]) => `- ${sev}: ${msg}`)] : [])].join('\n');
+	};
+	root.addEventListener('change', render);
+	// A code link jumps to its design without also toggling the option it sits in.
+	root.addEventListener('click', e => { const a = e.target.closest('a'); if (a) { e.preventDefault(); location.hash = a.getAttribute('href'); } });
+	document.getElementById('reset').onclick = () => { apply(); render(); };
+	document.getElementById('copy').onclick = async e => {
+		req.select();
+		try { await navigator.clipboard.writeText(req.value); } catch { document.execCommand('copy'); }
+		e.target.textContent = 'Copied ✓'; setTimeout(() => e.target.textContent = 'Copy request', 1500);
+	};
+	apply(); render();
+})();
+</script>
 
 <!--BODY-->
 </div>
