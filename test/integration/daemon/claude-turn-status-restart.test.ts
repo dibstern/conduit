@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -28,11 +29,31 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 	try {
 		return {
 			session: db
-				.prepare("SELECT status FROM sessions WHERE id = ?")
-				.get(sessionId) as { status: string },
+				.prepare(
+					"SELECT status, last_turn_end_input_id FROM sessions WHERE id = ?",
+				)
+				.get(sessionId) as {
+				status: string;
+				last_turn_end_input_id: string | null;
+			},
 			turns: db
 				.prepare("SELECT state FROM turns WHERE session_id = ?")
 				.all(sessionId) as Array<{ state: string }>,
+			turnRows: db
+				.prepare(
+					"SELECT turns.id, turns.state, turns.completed_at, messages.input_id FROM turns LEFT JOIN messages ON messages.id = turns.id WHERE turns.session_id = ? ORDER BY turns.requested_at, turns.rowid",
+				)
+				.all(sessionId) as Array<{
+				id: string;
+				state: string;
+				completed_at: number | null;
+				input_id: string | null;
+			}>,
+			pendingInputs: db
+				.prepare(
+					"SELECT input_id, state FROM pending_inputs WHERE session_id = ?",
+				)
+				.all(sessionId) as Array<{ input_id: string; state: string }>,
 			terminalEvents: db
 				.prepare(
 					"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.interrupted', 'turn.error') ORDER BY sequence",
@@ -190,7 +211,10 @@ describe("running Claude turn status across restart", () => {
 // such as /compact runs "blind" (conduit-test-6t7n); a busy reported at the
 // start is never cleared, or lands after the turn's idle; the turn, which no
 // assistant message names, stays open and holds every later input in the
-// queue (conduit-test-jyr9.12).
+// queue, while its result re-completes the previous turn instead
+// (conduit-test-jyr9.12); a mid-turn permission-mode change reports idle,
+// which shows the session idle and lets queued input drain into the running
+// turn.
 describe("Claude turn status before the model streams", () => {
 	let harness: ProcessHarness | undefined;
 	afterEach(async () => {
@@ -214,6 +238,10 @@ describe("Claude turn status before the model streams", () => {
 				modelId: "claude-sonnet-4",
 			}),
 		);
+		// A prior answer makes the bare result below name that answer, as a
+		// /compact after real work does.
+		await browser.send(sessionId, "before-local-work");
+		const [previous] = persisted(harness, sessionId).turnRows;
 		// The fake SDK holds this prompt, then ends it with a bare result.
 		const sent = browser.send(sessionId, "local-work-turn");
 		await vi.waitFor(() => {
@@ -236,16 +264,138 @@ describe("Claude turn status before the model streams", () => {
 		mkdirSync("test-results", { recursive: true });
 		writeFileSync(
 			"test-results/conduit-test-6t7n-jyr9.12-local-work.json",
-			JSON.stringify({ sessionId, held, settled, next, drained }, null, 2),
+			JSON.stringify(
+				{ sessionId, previous, held, settled, next, drained },
+				null,
+				2,
+			),
 		);
 		expect(held.session.status).toBe("busy");
-		expect(settled.turns).toEqual([{ state: "completed" }]);
+		expect(settled.turns).toEqual([
+			{ state: "completed" },
+			{ state: "completed" },
+		]);
+		expect(settled.turnRows[0]).toEqual(previous);
+		// The end names the send it answered, so a browser waiting on this
+		// send sees its turn end (conduit-test-jyr9.10).
+		expect(settled.session.last_turn_end_input_id).toBe(
+			settled.turnRows[1]?.input_id,
+		);
 		expect("chunks" in next ? next.chunks.join("") : next).toBe(
 			responseChunks("after-local-work").join(""),
 		);
 		expect(drained.turns).toEqual([
 			{ state: "completed" },
 			{ state: "completed" },
+			{ state: "completed" },
 		]);
+	}, 60_000);
+
+	it("keeps a turn busy and its queue held across a mid-turn permission-mode change", async () => {
+		harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+		});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Mode change");
+		const payload = {
+			projectSlug: "process-test",
+			sessionId,
+			originId: browser.originId,
+		};
+		await Effect.runPromise(
+			browser.rpc.SwitchModel({
+				...payload,
+				providerId: "claude",
+				modelId: "claude-sonnet-4",
+			}),
+		);
+		// This fixture pauses after its first delta until release-upgrade-turn.
+		const prompt = "upgrade-long-turn";
+		const sent = browser
+			.send(sessionId, prompt, 30_000)
+			.catch((error: unknown) => ({ error: String(error) }));
+		await vi.waitFor(() => {
+			if (!harness) throw new Error("Missing harness");
+			expect(persisted(harness, sessionId).session.status).toBe("busy");
+			expect(
+				harness.marks.some(
+					(mark) => mark.kind === "emit" && mark.prompt === prompt,
+				),
+			).toBe(true);
+		}, 15_000);
+		await Effect.runPromise(
+			browser.rpc.SwitchPermissionMode({ ...payload, mode: "full" }),
+		);
+		// The SDK's own report of the change: its status message is the one
+		// that used to read as idle.
+		await vi.waitFor(() => {
+			if (!harness) throw new Error("Missing harness");
+			const db = new Database(harness.projectStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND metadata LIKE '%claude.sdk.translator%'",
+						)
+						.get(sessionId),
+				).toBeDefined();
+			} finally {
+				db.close();
+			}
+		}, 15_000);
+		const inputId = randomUUID();
+		await Effect.runPromise(
+			browser.rpc.input.submit({
+				...payload,
+				inputId,
+				delivery: "queue",
+				text: "after-mode-change",
+			}),
+		);
+		await vi.waitFor(() => {
+			if (!harness) throw new Error("Missing harness");
+			expect(
+				persisted(harness, sessionId).pendingInputs.some(
+					(row) => row.input_id === inputId,
+				),
+			).toBe(true);
+		}, 15_000);
+		const held = persisted(harness, sessionId);
+		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+		await sent;
+		await vi
+			.waitFor(() => {
+				if (!harness) throw new Error("Missing harness");
+				const now = persisted(harness, sessionId);
+				expect(now.turnRows.map((row) => row.state)).toEqual([
+					"completed",
+					"completed",
+				]);
+				expect(now.session.status).toBe("idle");
+			}, 30_000)
+			.catch(() => undefined);
+		const drained = persisted(harness, sessionId);
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			"test-results/conduit-test-jyr9.12-mode-change.json",
+			JSON.stringify({ sessionId, inputId, held, drained }, null, 2),
+		);
+		expect(held.session.status).toBe("busy");
+		expect(
+			held.statusEvents.map(
+				(row) => (JSON.parse(row.data) as { status: string }).status,
+			),
+		).not.toContain("idle");
+		expect(held.turns).toEqual([{ state: "running" }]);
+		expect(held.pendingInputs).toContainEqual({
+			input_id: inputId,
+			state: "queued",
+		});
+		expect(drained.turnRows.map((row) => [row.id, row.state])).toEqual([
+			[expect.any(String), "completed"],
+			[inputId, "completed"],
+		]);
+		expect(drained.session.status).toBe("idle");
 	}, 60_000);
 });

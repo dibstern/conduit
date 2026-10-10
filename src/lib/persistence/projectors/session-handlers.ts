@@ -579,7 +579,12 @@ export const sessionHandlers: {
 	},
 	"turn.completed": (event) => [
 		wakeSession(event.sessionId, event.createdAt, "turn"),
-		endTurn(event, null, null, event.data.messageId),
+		endTurn(
+			event,
+			null,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
 	],
 	"turn.error": (event) => [
 		wakeSession(event.sessionId, event.createdAt, "error"),

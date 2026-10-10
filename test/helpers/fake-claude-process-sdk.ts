@@ -410,6 +410,11 @@ function query(params: {
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
 	let livePermissionMode = params.options?.permissionMode;
+	// Messages the real SDK interleaves into a running turn, such as the bare
+	// status it reports on a permission-mode change. Only a held turn polls,
+	// so they are collected only while one is held.
+	const outOfBand: SDKMessage[] = [];
+	let turnHeld = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -888,8 +893,12 @@ function query(params: {
 			for (const [index, text] of responseChunks(prompt).entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
-					while (!existsSync(release) && !closed)
+					turnHeld = true;
+					while (!existsSync(release) && !closed) {
+						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
 					if (closed) return;
 				}
 				if (request.startsWith("restart-"))
@@ -1480,6 +1489,15 @@ function query(params: {
 		},
 		setPermissionMode: async (permissionMode: Options["permissionMode"]) => {
 			livePermissionMode = permissionMode;
+			if (turnHeld)
+				outOfBand.push({
+					type: "system",
+					subtype: "status",
+					status: null,
+					permissionMode,
+					uuid: randomUUID(),
+					session_id: sessionId,
+				} as unknown as SDKMessage);
 			mark({
 				kind: "query-update",
 				queryId,
