@@ -1,5 +1,11 @@
 import { subscribe } from "node:diagnostics_channel";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { Session } from "node:inspector/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -8,7 +14,8 @@ import { Effect, Fiber } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
-function recordServerMetrics(file: string): void {
+// With `profile`, also SQLite statement times and a CPU profile (below).
+function recordServerMetrics(file: string, profile: boolean): void {
 	const startedAt = Date.now();
 	const stalls: { at: number; ms: number }[] = [];
 	const reads: Record<string, number> = {};
@@ -41,8 +48,65 @@ function recordServerMetrics(file: string): void {
 			source.ranges.add(`${read.range.after}-${read.range.through}`);
 		}
 	});
-	// Every SQLite statement that held the loop for 1ms or more, timed around
-	// better-sqlite3's synchronous calls, the ones the store client makes.
+	const statements = profile ? timeStatements() : undefined;
+	const profiler = profile ? cpuProfiler(file) : undefined;
+	const tickMs = 10;
+	let last = performance.now();
+	setInterval(() => {
+		const now = performance.now();
+		const ms = Math.round(now - last - tickMs);
+		if (ms >= 20) stalls.push({ at: Date.now(), ms });
+		last = now;
+	}, tickMs).unref();
+	// Written beside the file and renamed over it: past one 8 KB write, a spec
+	// polling the file would otherwise read it half written.
+	setInterval(() => {
+		profiler?.();
+		// Appended before the flush the spec waits on, so a flush covers every
+		// statement before it, and only new ones are written each time.
+		if (statements?.length)
+			appendFileSync(
+				`${file}.statements.jsonl`,
+				statements
+					.splice(0)
+					.map((statement) => `${JSON.stringify(statement)}\n`)
+					.join(""),
+			);
+		writeFileSync(
+			`${file}.tmp`,
+			JSON.stringify({
+				pid: process.pid,
+				startedAt,
+				flushedAt: Date.now(),
+				stalls,
+				reads,
+				changesRead: windows.size,
+				sources: Object.fromEntries(
+					Object.entries(sources).map(([name, source]) => [
+						name,
+						{
+							reads: source.reads,
+							changesRead: source.windows.size,
+							windowsRead: source.ranges.size,
+						},
+					]),
+				),
+				sidebarReads,
+			}),
+		);
+		renameSync(`${file}.tmp`, file);
+	}, 250).unref();
+}
+
+// Every SQLite statement that holds the loop 1ms or more, timed around
+// better-sqlite3's synchronous calls, the ones the store client makes. The
+// caller drains the returned list.
+function timeStatements(): {
+	at: number;
+	ms: number;
+	method: string;
+	sql: string;
+}[] {
 	const statements: { at: number; ms: number; method: string; sql: string }[] =
 		[];
 	const sqlite = createRequire(
@@ -72,61 +136,40 @@ function recordServerMetrics(file: string): void {
 			}
 		};
 	}
-	// A CPU profile from start until the spec asks for it with `<file>.stop`;
-	// `stoppedAt` lets it place samples on the wall clock.
-	const profiler = new Session();
-	profiler.connect();
-	void profiler
-		.post("Profiler.enable")
-		.then(() => profiler.post("Profiler.start"));
-	let profiling = true;
-	const tickMs = 10;
-	let last = performance.now();
-	setInterval(() => {
-		const now = performance.now();
-		const ms = Math.round(now - last - tickMs);
-		if (ms >= 20) stalls.push({ at: Date.now(), ms });
-		last = now;
-	}, tickMs).unref();
-	// Written beside the file and renamed over it: past one 8 KB write, a spec
-	// polling the file would otherwise read it half written.
-	setInterval(() => {
-		if (profiling && existsSync(`${file}.stop`)) {
-			profiling = false;
+	return statements;
+}
+
+// A CPU profile from `<file>.start` to `<file>.stop`, both written by the spec
+// and checked on each call. `<file>.started` says sampling has begun, and
+// `stoppedAt` lets the spec place samples on the wall clock.
+function cpuProfiler(file: string): () => void {
+	const session = new Session();
+	session.connect();
+	let state: "waiting" | "profiling" | "stopped" = "waiting";
+	const fail = (error: unknown) => console.error("CPU profile failed", error);
+	return () => {
+		if (state === "waiting" && existsSync(`${file}.start`)) {
+			state = "profiling";
+			session
+				.post("Profiler.enable")
+				.then(() => session.post("Profiler.start"))
+				.then(() => writeFileSync(`${file}.started`, ""))
+				.catch(fail);
+		} else if (state === "profiling" && existsSync(`${file}.stop`)) {
+			state = "stopped";
 			const stoppedAt = Date.now();
-			void profiler.post("Profiler.stop").then(({ profile }) => {
-				writeFileSync(
-					`${file}.cpuprofile.tmp`,
-					JSON.stringify({ stoppedAt, profile }),
-				);
-				renameSync(`${file}.cpuprofile.tmp`, `${file}.cpuprofile`);
-			});
+			session
+				.post("Profiler.stop")
+				.then(({ profile }) => {
+					writeFileSync(
+						`${file}.cpuprofile.tmp`,
+						JSON.stringify({ stoppedAt, profile }),
+					);
+					renameSync(`${file}.cpuprofile.tmp`, `${file}.cpuprofile`);
+				})
+				.catch(fail);
 		}
-		writeFileSync(
-			`${file}.tmp`,
-			JSON.stringify({
-				pid: process.pid,
-				startedAt,
-				flushedAt: Date.now(),
-				stalls,
-				reads,
-				changesRead: windows.size,
-				sources: Object.fromEntries(
-					Object.entries(sources).map(([name, source]) => [
-						name,
-						{
-							reads: source.reads,
-							changesRead: source.windows.size,
-							windowsRead: source.ranges.size,
-						},
-					]),
-				),
-				sidebarReads,
-				statements,
-			}),
-		);
-		renameSync(`${file}.tmp`, file);
-	}, 250).unref();
+	};
 }
 
 async function main(): Promise<void> {
@@ -154,7 +197,11 @@ async function main(): Promise<void> {
 	});
 	if (!process.connected) process.exit(1);
 	const metricsFile = process.env["CONDUIT_TEST_SERVER_METRICS"];
-	if (metricsFile) recordServerMetrics(metricsFile);
+	if (metricsFile)
+		recordServerMetrics(
+			metricsFile,
+			process.env["CONDUIT_TEST_SERVER_PROFILE"] === "1",
+		);
 	const codeRoot = dist
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));

@@ -1,44 +1,44 @@
 {
 	"schema": 1,
 	"project": "mobile",
-	"recordedAt": "2026-10-10T00:58:01.105Z",
+	"recordedAt": "2026-10-08T07:57:04.871Z",
 	"fixture": {
 		"families": 2500,
 		"sessions": 10001,
 		"events": 60841,
 		"heavySessionId": "load-heavy",
 		"heavyFinalText": "Heavy session complete: all steps verified.",
-		"seedMs": 29416,
-		"storeBytes": 56012800
+		"seedMs": 18147,
+		"storeBytes": 56004608
 	},
 	"devices": 4,
 	"streamingSessions": 3,
 	"restart": {
-		"stopMs": 1000,
-		"startMs": 3312
+		"stopMs": 413,
+		"startMs": 1588
 	},
-	"reconnectMs": [3882, 3882, 3864, 3535],
+	"reconnectMs": [1613, 1614, 1613, 1643],
 	"open": {
 		"sessionId": "load-heavy",
-		"ms": 260,
-		"fromReadyMs": 311,
+		"ms": 262,
+		"fromReadyMs": 318,
 		"wire": {
 			"received": {
-				"frames": 4,
-				"bytes": 255935,
+				"frames": 8,
+				"bytes": 256659,
 				"maxFrameBytes": 255375,
 				"p95FrameBytes": 255375
 			},
 			"sent": {
-				"frames": 9,
-				"bytes": 1291,
-				"maxFrameBytes": 246,
-				"p95FrameBytes": 246
+				"frames": 14,
+				"bytes": 3007,
+				"maxFrameBytes": 305,
+				"p95FrameBytes": 305
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 4,
-					"bytes": 255935,
+					"frames": 8,
+					"bytes": 256659,
 					"maxFrameBytes": 255375,
 					"p95FrameBytes": 255375
 				}
@@ -48,612 +48,65 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"98\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 341,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"101\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"id\":\"load-heavy\",\"title\":\"Heavy session\",\"statu"
+					"bytes": 664,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"70\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"commands\":[{\"name\":\"init"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 150,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"99\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"sessionId\":\"load-heavy\",\"items\":[]}],\"sequence\":"
+					"bytes": 197,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"69\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"instanceId\":\"claude\",\"pr"
 				},
 				{
 					"device": 3,
 					"socket": "/rpc",
-					"bytes": 69,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"100\",\"values\":[{\"_tag\":\"synchronized\"}]}"
+					"bytes": 98,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"59\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[]},{\"_tag\":\"synchronized\"}]}"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 89,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"68\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"ok\":true,\"draft\":\"\"}}}"
 				}
 			]
-		},
-		"server": {
-			"stalls": {
-				"count": 0,
-				"totalMs": 0,
-				"longest": []
-			},
-			"database": {
-				"count": 8,
-				"totalMs": 19.14,
-				"longest": [
-					{
-						"atMs": 161,
-						"ms": 7.1,
-						"method": "all",
-						"sql": "SELECT id, message_id, type, text, tool_name, call_id, input, metadata, duration, status, sort_order, created_at, updated_at, version, CASE WHEN length(output) "
-					},
-					{
-						"atMs": 253,
-						"ms": 2.21,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 182,
-						"ms": 2.19,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 233,
-						"ms": 2.14,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 127,
-						"ms": 1.42,
-						"method": "run",
-						"sql": "COMMIT"
-					}
-				]
-			},
-			"cpu": {
-				"busyMs": 157.23,
-				"idleMs": 93,
-				"databaseMs": 24.34,
-				"topSelf": [
-					{
-						"frame": "all",
-						"ms": 21.74
-					},
-					{
-						"frame": "(garbage collector)",
-						"ms": 13.53
-					},
-					{
-						"frame": "Socket node:net:611",
-						"ms": 8.61
-					},
-					{
-						"frame": "parserOnHeadersComplete node:_http_common:77",
-						"ms": 8.31
-					},
-					{
-						"frame": "(anonymous) node:internal/validators:142",
-						"ms": 8.27
-					},
-					{
-						"frame": "(anonymous) esm/Hash.js:72",
-						"ms": 8.18
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:274",
-						"ms": 8.02
-					},
-					{
-						"frame": "writeOrBuffer streams/writable:550",
-						"ms": 7.59
-					},
-					{
-						"frame": "(anonymous) internal/fiberRuntime.js:122",
-						"ms": 6.65
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:831",
-						"ms": 6.1
-					}
-				],
-				"topConduitTotal": [
-					{
-						"frame": "context Services/local-trace-artifact.js:504",
-						"ms": 104.96
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:758",
-						"ms": 18.51
-					},
-					{
-						"frame": "drainOnce Services/local-trace-artifact.js:246",
-						"ms": 8.27
-					},
-					{
-						"frame": "sessionRowsToSessionInfoList effect/read-query-effect.js:48",
-						"ms": 8.15
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:274",
-						"ms": 8.02
-					},
-					{
-						"frame": "groupMessagesWithPartsAndTurnModels effect/read-query-effect.js:267",
-						"ms": 8.02
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:648",
-						"ms": 8.02
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:831",
-						"ms": 6.1
-					},
-					{
-						"frame": "stateFor effect/read-query-effect.js:54",
-						"ms": 5.01
-					},
-					{
-						"frame": "(anonymous) daemon/daemon-rpc-server.js:16",
-						"ms": 3.37
-					}
-				]
-			}
-		},
-		"settle": {
-			"ms": 2032,
-			"stalls": {
-				"count": 18,
-				"totalMs": 1330,
-				"longest": [
-					{
-						"atMs": 1638,
-						"ms": 106
-					},
-					{
-						"atMs": 1522,
-						"ms": 105
-					},
-					{
-						"atMs": 1864,
-						"ms": 105
-					},
-					{
-						"atMs": 1749,
-						"ms": 101
-					},
-					{
-						"atMs": 932,
-						"ms": 100
-					}
-				]
-			},
-			"database": {
-				"count": 249,
-				"totalMs": 488.55,
-				"longest": [
-					{
-						"atMs": 763,
-						"ms": 10.99,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 524,
-						"ms": 4.12,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 1682,
-						"ms": 3.81,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 449,
-						"ms": 3.67,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					},
-					{
-						"atMs": 1187,
-						"ms": 3.66,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					}
-				]
-			},
-			"cpu": {
-				"busyMs": 1927.08,
-				"idleMs": 105.31,
-				"databaseMs": 432.59,
-				"topSelf": [
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:758",
-						"ms": 492.26
-					},
-					{
-						"frame": "sessionRowsToSessionInfoList effect/read-query-effect.js:48",
-						"ms": 258.69
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:412",
-						"ms": 226.22
-					},
-					{
-						"frame": "prototype.<computed> helpers/process-harness-server.ts:1",
-						"ms": 203.94
-					},
-					{
-						"frame": "all",
-						"ms": 192.34
-					},
-					{
-						"frame": "(garbage collector)",
-						"ms": 137.94
-					},
-					{
-						"frame": "(anonymous) esm/Function.js:96",
-						"ms": 26.8
-					},
-					{
-						"frame": "Statement",
-						"ms": 17.26
-					},
-					{
-						"frame": "run",
-						"ms": 16.35
-					},
-					{
-						"frame": "(anonymous) internal/context.js:217",
-						"ms": 14.27
-					}
-				],
-				"topConduitTotal": [
-					{
-						"frame": "context Services/local-trace-artifact.js:504",
-						"ms": 1663.68
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:758",
-						"ms": 782.06
-					},
-					{
-						"frame": "sessionRowsToSessionInfoList effect/read-query-effect.js:48",
-						"ms": 281.25
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:412",
-						"ms": 226.22
-					},
-					{
-						"frame": "(anonymous) daemon/daemon-rpc-server.js:16",
-						"ms": 16.08
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:497",
-						"ms": 14.19
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:830",
-						"ms": 13.57
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:99",
-						"ms": 13.38
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:827",
-						"ms": 9.66
-					},
-					{
-						"frame": "stateFor effect/read-query-effect.js:54",
-						"ms": 9.18
-					}
-				]
-			}
-		}
-	},
-	"coldOpen": {
-		"sessionId": "load-heavy",
-		"ms": 11143,
-		"server": {
-			"stalls": {
-				"count": 103,
-				"totalMs": 10087,
-				"longest": [
-					{
-						"atMs": 10717,
-						"ms": 174
-					},
-					{
-						"atMs": 1561,
-						"ms": 150
-					},
-					{
-						"atMs": 9884,
-						"ms": 133
-					},
-					{
-						"atMs": 10533,
-						"ms": 130
-					},
-					{
-						"atMs": 10142,
-						"ms": 126
-					}
-				]
-			},
-			"database": {
-				"count": 1568,
-				"totalMs": 3075.54,
-				"longest": [
-					{
-						"atMs": 5994,
-						"ms": 21.09,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 10023,
-						"ms": 16.16,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 2209,
-						"ms": 12.32,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 8562,
-						"ms": 9.06,
-						"method": "all",
-						"sql": "UPDATE messages SET version = ? WHERE id = ? RETURNING session_id"
-					},
-					{
-						"atMs": 2711,
-						"ms": 8.9,
-						"method": "all",
-						"sql": "SELECT id, parent_id, unread, side_thread FROM sessions"
-					}
-				]
-			},
-			"reads": {
-				"base": 3,
-				"window": 2036,
-				"resume": 0
-			},
-			"changesRead": 202,
-			"windowReadsPerChange": 10.1,
-			"bySource": {
-				"session-detail/load-heavy": {
-					"reads": {
-						"base": 1,
-						"window": 0
-					},
-					"changesRead": 0,
-					"windowReadsPerChange": 0,
-					"windowsRead": 0
-				},
-				"todos/load-heavy": {
-					"reads": {
-						"base": 0,
-						"window": 0
-					},
-					"changesRead": 0,
-					"windowReadsPerChange": 0,
-					"windowsRead": 0
-				},
-				"session-family/load-heavy": {
-					"reads": {
-						"base": 0,
-						"window": 202
-					},
-					"changesRead": 202,
-					"windowReadsPerChange": 1,
-					"windowsRead": 202
-				},
-				"session-detail/ses_7896bba8756e439da37e1b47a3e50631": {
-					"reads": {
-						"resume": 0,
-						"window": 17
-					},
-					"changesRead": 17,
-					"windowReadsPerChange": 1,
-					"windowsRead": 17
-				},
-				"session-detail/ses_daf732a180254206b5ee7124fd2ca866": {
-					"reads": {
-						"resume": 0,
-						"window": 30
-					},
-					"changesRead": 26,
-					"windowReadsPerChange": 1.2,
-					"windowsRead": 30
-				},
-				"shell": {
-					"reads": {
-						"resume": 0,
-						"window": 202,
-						"base": 1
-					},
-					"changesRead": 202,
-					"windowReadsPerChange": 1,
-					"windowsRead": 202
-				},
-				"approvals": {
-					"reads": {
-						"base": 1,
-						"window": 811
-					},
-					"changesRead": 202,
-					"windowReadsPerChange": 4,
-					"windowsRead": 202
-				},
-				"todos/ses_7896bba8756e439da37e1b47a3e50631": {
-					"reads": {
-						"base": 0,
-						"window": 56
-					},
-					"changesRead": 56,
-					"windowReadsPerChange": 1,
-					"windowsRead": 56
-				},
-				"todos/ses_daf732a180254206b5ee7124fd2ca866": {
-					"reads": {
-						"base": 0,
-						"window": 112
-					},
-					"changesRead": 56,
-					"windowReadsPerChange": 2,
-					"windowsRead": 56
-				},
-				"session-family/ses_7896bba8756e439da37e1b47a3e50631": {
-					"reads": {
-						"base": 0,
-						"window": 202
-					},
-					"changesRead": 202,
-					"windowReadsPerChange": 1,
-					"windowsRead": 202
-				},
-				"session-family/ses_daf732a180254206b5ee7124fd2ca866": {
-					"reads": {
-						"base": 0,
-						"window": 404
-					},
-					"changesRead": 202,
-					"windowReadsPerChange": 2,
-					"windowsRead": 202
-				}
-			},
-			"sidebarReads": {
-				"count": 196,
-				"totalMs": 43.37,
-				"medianMs": 0.1,
-				"maxMs": 18.69,
-				"rows": 2504
-			},
-			"cpu": {
-				"busyMs": 11139.09,
-				"idleMs": 8.87,
-				"databaseMs": 2847.8,
-				"topSelf": [
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:758",
-						"ms": 2976.93
-					},
-					{
-						"frame": "all",
-						"ms": 1605.95
-					},
-					{
-						"frame": "sessionRowsToSessionInfoList effect/read-query-effect.js:48",
-						"ms": 1579.27
-					},
-					{
-						"frame": "prototype.<computed> helpers/process-harness-server.ts:1",
-						"ms": 1118.35
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:412",
-						"ms": 1114.61
-					},
-					{
-						"frame": "(garbage collector)",
-						"ms": 1018.9
-					},
-					{
-						"frame": "stateFor effect/read-query-effect.js:54",
-						"ms": 207.24
-					},
-					{
-						"frame": "(program)",
-						"ms": 104.57
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:831",
-						"ms": 97.2
-					},
-					{
-						"frame": "run",
-						"ms": 80.84
-					}
-				],
-				"topConduitTotal": [
-					{
-						"frame": "context Services/local-trace-artifact.js:504",
-						"ms": 9551.89
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:758",
-						"ms": 5001.13
-					},
-					{
-						"frame": "sessionRowsToSessionInfoList effect/read-query-effect.js:48",
-						"ms": 1799.68
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:412",
-						"ms": 1114.61
-					},
-					{
-						"frame": "stateFor effect/read-query-effect.js:54",
-						"ms": 207.24
-					},
-					{
-						"frame": "end Services/local-trace-artifact.js:478",
-						"ms": 137.88
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:831",
-						"ms": 97.2
-					},
-					{
-						"frame": "enqueue Services/local-trace-artifact.js:297",
-						"ms": 86.08
-					},
-					{
-						"frame": "(anonymous) effect/read-query-effect.js:827",
-						"ms": 75.91
-					},
-					{
-						"frame": "safeJsonLine Services/local-trace-artifact.js:168",
-						"ms": 72.5
-					}
-				]
-			}
 		}
 	},
 	"wire": {
 		"warm": {
-			"ms": 2001,
+			"ms": 2003,
 			"received": {
-				"frames": 26,
-				"bytes": 12464,
+				"frames": 35,
+				"bytes": 15936,
 				"maxFrameBytes": 747,
 				"p95FrameBytes": 747
 			},
 			"sent": {
-				"frames": 22,
-				"bytes": 678,
+				"frames": 32,
+				"bytes": 982,
 				"maxFrameBytes": 31,
 				"p95FrameBytes": 31
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 26,
-					"bytes": 12464,
+					"frames": 35,
+					"bytes": 15936,
 					"maxFrameBytes": 747,
 					"p95FrameBytes": 747
 				}
 			},
 			"largestReceived": [
+				{
+					"device": 0,
+					"socket": "/rpc",
+					"bytes": 747,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+				},
 				{
 					"device": 1,
 					"socket": "/rpc",
@@ -667,45 +120,39 @@
 					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
 				},
 				{
-					"device": 0,
+					"device": 3,
 					"socket": "/rpc",
-					"bytes": 747,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"17\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"providers\":[{\"id\":\"claud"
+					"bytes": 705,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"5\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"id\":\"ses_4d3dc12bab4840ca8622f19021441b50\",\"title\":\""
 				},
 				{
 					"device": 2,
 					"socket": "/rpc",
-					"bytes": 558,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"part\",\"messageId\":\"f459ea67-078a-480d-b7c4-8"
-				},
-				{
-					"device": 0,
-					"socket": "/rpc",
-					"bytes": 549,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"part\",\"messageId\":\"a1769539-d6c9-421a-8d03-e"
+					"bytes": 560,
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"20\",\"values\":[{\"_tag\":\"upsert\",\"item\":{\"_tag\":\"part\",\"messageId\":\"137a09e9-f725-43e4-9da8-d"
 				}
 			]
 		},
 		"restart": {
-			"ms": 6655,
+			"ms": 4353,
 			"received": {
-				"frames": 179,
-				"bytes": 365777,
+				"frames": 204,
+				"bytes": 379436,
 				"maxFrameBytes": 255375,
-				"p95FrameBytes": 920
+				"p95FrameBytes": 737
 			},
 			"sent": {
-				"frames": 226,
-				"bytes": 30318,
-				"maxFrameBytes": 375,
+				"frames": 248,
+				"bytes": 31644,
+				"maxFrameBytes": 305,
 				"p95FrameBytes": 277
 			},
 			"bySocket": {
 				"/rpc": {
-					"frames": 179,
-					"bytes": 365777,
+					"frames": 204,
+					"bytes": 379436,
 					"maxFrameBytes": 255375,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				}
 			},
 			"largestReceived": [
@@ -713,57 +160,57 @@
 					"device": 3,
 					"socket": "/rpc",
 					"bytes": 255375,
-					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"98\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
-				},
-				{
-					"device": 3,
-					"socket": "/rpc",
-					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"112\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+					"head": "{\"_tag\":\"Chunk\",\"requestId\":\"74\",\"values\":[{\"_tag\":\"snapshot\",\"rows\":[{\"_tag\":\"part\",\"messageId\":\"load-heavy-u1767375636"
 				},
 				{
 					"device": 2,
 					"socket": "/rpc",
-					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"141\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+					"bytes": 8568,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"105\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 1,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"141\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"115\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
 				},
 				{
 					"device": 0,
 					"socket": "/rpc",
 					"bytes": 8547,
-					"head": "{\"_tag\":\"Exit\",\"requestId\":\"141\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"115\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_b"
+				},
+				{
+					"device": 3,
+					"socket": "/rpc",
+					"bytes": 8546,
+					"head": "{\"_tag\":\"Exit\",\"requestId\":\"86\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"projectSlug\":\"process-test\",\"sessions\":[{\"id\":\"ses_be"
 				}
 			],
 			"byDevice": [
 				{
-					"frames": 45,
-					"bytes": 29138,
+					"frames": 50,
+					"bytes": 33162,
 					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				},
 				{
-					"frames": 46,
-					"bytes": 29644,
+					"frames": 51,
+					"bytes": 33278,
 					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"p95FrameBytes": 737
 				},
 				{
-					"frames": 48,
-					"bytes": 30153,
-					"maxFrameBytes": 8547,
-					"p95FrameBytes": 920
+					"frames": 63,
+					"bytes": 35441,
+					"maxFrameBytes": 8568,
+					"p95FrameBytes": 713
 				},
 				{
 					"frames": 40,
-					"bytes": 276842,
+					"bytes": 277555,
 					"maxFrameBytes": 255375,
-					"p95FrameBytes": 8547
+					"p95FrameBytes": 8546
 				}
 			]
 		}
@@ -771,7 +218,7 @@
 	"toolPreviews": {
 		"heavyFirstPageBytes": 255375,
 		"liveToolUpdateBytes": 5116,
-		"detailResponseBytes": 46623,
+		"detailResponseBytes": 46608,
 		"limits": {
 			"heavyFirstPageBytes": 262144,
 			"liveToolUpdateBytes": 8000,
@@ -781,14 +228,14 @@
 	"longTurn": {
 		"calls": 40,
 		"liveFrames": 26,
-		"partsSent": 61,
+		"partsSent": 58,
 		"firstQuartileMedianBytesPerPart": 1548,
-		"lastQuartileMedianBytesPerPart": 1551,
-		"maxFrameBytes": 4652,
+		"lastQuartileMedianBytesPerPart": 1918,
+		"maxFrameBytes": 5513,
 		"wholeMessageBytes": 72350,
 		"resume": {
-			"frames": 14,
-			"bytes": 11093,
+			"frames": 15,
+			"bytes": 11061,
 			"resentEarlierTurn": false,
 			"carriedFollowUp": true
 		},
@@ -797,129 +244,93 @@
 	"server": {
 		"warm": {
 			"stalls": {
-				"count": 36,
-				"totalMs": 1627,
+				"count": 46,
+				"totalMs": 1557,
 				"longest": [
 					{
-						"atMs": 818,
-						"ms": 139
+						"atMs": 395,
+						"ms": 76
 					},
 					{
-						"atMs": 668,
-						"ms": 109
+						"atMs": 309,
+						"ms": 62
 					},
 					{
-						"atMs": 549,
-						"ms": 84
+						"atMs": 2002,
+						"ms": 54
 					},
 					{
-						"atMs": 137,
-						"ms": 82
+						"atMs": 830,
+						"ms": 43
 					},
 					{
-						"atMs": 1832,
-						"ms": 81
-					}
-				]
-			},
-			"database": {
-				"count": 263,
-				"totalMs": 668.53,
-				"longest": [
-					{
-						"atMs": 505,
-						"ms": 48.67,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 717,
-						"ms": 43.24,
-						"method": "all",
-						"sql": "UPDATE messages SET version = ? WHERE id = ? RETURNING session_id"
-					},
-					{
-						"atMs": 738,
-						"ms": 20.52,
-						"method": "run",
-						"sql": "INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at) VALUES (?, ?, ?) ON CONFLICT (projector_name) DO UPDATE SET last_applied_seq = MAX("
-					},
-					{
-						"atMs": 1355,
-						"ms": 16.76,
-						"method": "run",
-						"sql": "INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at) VALUES (?, ?, ?) ON CONFLICT (projector_name) DO UPDATE SET last_applied_seq = MAX("
-					},
-					{
-						"atMs": 1448,
-						"ms": 9.25,
-						"method": "run",
-						"sql": "INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at) VALUES (?, ?, ?) ON CONFLICT (projector_name) DO UPDATE SET last_applied_seq = MAX("
+						"atMs": 74,
+						"ms": 40
 					}
 				]
 			},
 			"reads": {
 				"base": 0,
-				"window": 400
+				"window": 467
 			},
-			"changesRead": 43,
+			"changesRead": 50,
 			"windowReadsPerChange": 9.3,
 			"bySource": {
 				"approvals": {
 					"reads": {
 						"base": 0,
-						"window": 172
+						"window": 200
 					},
-					"changesRead": 43,
+					"changesRead": 50,
 					"windowReadsPerChange": 4,
-					"windowsRead": 43
+					"windowsRead": 50
 				},
 				"shell": {
 					"reads": {
 						"base": 0,
-						"window": 43
+						"window": 52
 					},
-					"changesRead": 43,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 43
+					"windowsRead": 52
 				},
-				"session-detail/ses_daf732a180254206b5ee7124fd2ca866": {
+				"session-detail/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 8
+						"window": 9
 					},
-					"changesRead": 8,
+					"changesRead": 9,
 					"windowReadsPerChange": 1,
-					"windowsRead": 8
+					"windowsRead": 9
 				},
-				"session-family/ses_daf732a180254206b5ee7124fd2ca866": {
+				"session-family/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 86
+						"window": 100
 					},
-					"changesRead": 43,
+					"changesRead": 50,
 					"windowReadsPerChange": 2,
-					"windowsRead": 43
+					"windowsRead": 50
 				},
-				"session-detail/ses_7896bba8756e439da37e1b47a3e50631": {
+				"session-detail/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 6
+						"window": 7
 					},
-					"changesRead": 6,
+					"changesRead": 7,
 					"windowReadsPerChange": 1,
-					"windowsRead": 6
+					"windowsRead": 7
 				},
-				"session-family/ses_7896bba8756e439da37e1b47a3e50631": {
+				"session-family/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 43
+						"window": 50
 					},
-					"changesRead": 43,
+					"changesRead": 50,
 					"windowReadsPerChange": 1,
-					"windowsRead": 43
+					"windowsRead": 50
 				},
-				"session-detail/ses_b3b1701b25c141eb9f88d5da60804b53": {
+				"session-detail/ses_be18083ec8d9456c9743cad1b01c4704": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -928,7 +339,7 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"session-family/ses_b3b1701b25c141eb9f88d5da60804b53": {
+				"session-family/ses_be18083ec8d9456c9743cad1b01c4704": {
 					"reads": {
 						"base": 0,
 						"window": 0
@@ -937,210 +348,172 @@
 					"windowReadsPerChange": 0,
 					"windowsRead": 0
 				},
-				"todos/ses_daf732a180254206b5ee7124fd2ca866": {
+				"todos/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"base": 0,
-						"window": 28
+						"window": 32
 					},
-					"changesRead": 14,
+					"changesRead": 16,
 					"windowReadsPerChange": 2,
-					"windowsRead": 14
+					"windowsRead": 16
 				},
-				"todos/ses_7896bba8756e439da37e1b47a3e50631": {
+				"todos/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 0,
-						"window": 14
+						"window": 17
 					},
-					"changesRead": 14,
+					"changesRead": 17,
 					"windowReadsPerChange": 1,
-					"windowsRead": 14
+					"windowsRead": 17
 				}
 			},
 			"sidebarReads": {
-				"count": 41,
-				"totalMs": 9.88,
-				"medianMs": 0.18,
-				"maxMs": 1.46,
+				"count": 47,
+				"totalMs": 8.37,
+				"medianMs": 0.15,
+				"maxMs": 1.22,
 				"rows": 0
 			}
 		},
 		"restart": {
 			"stalls": {
-				"count": 23,
-				"totalMs": 4074,
+				"count": 41,
+				"totalMs": 2679,
 				"longest": [
 					{
-						"atMs": 2337,
-						"ms": 1940
+						"atMs": 1026,
+						"ms": 710
 					},
 					{
-						"atMs": 2854,
-						"ms": 369
+						"atMs": 1561,
+						"ms": 301
 					},
 					{
-						"atMs": 3250,
-						"ms": 302
+						"atMs": 3706,
+						"ms": 103
 					},
 					{
-						"atMs": 2476,
-						"ms": 106
+						"atMs": 3381,
+						"ms": 97
 					},
 					{
-						"atMs": 5261,
-						"ms": 106
-					}
-				]
-			},
-			"database": {
-				"count": 272,
-				"totalMs": 597.2,
-				"longest": [
-					{
-						"atMs": 3227,
-						"ms": 17.54,
-						"method": "all",
-						"sql": "SELECT * FROM sessions WHERE 1=1 ORDER BY updated_at DESC, id DESC"
-					},
-					{
-						"atMs": 2971,
-						"ms": 17,
-						"method": "all",
-						"sql": "SELECT * FROM sessions WHERE 1=1 ORDER BY updated_at DESC, id DESC"
-					},
-					{
-						"atMs": 3208,
-						"ms": 14.14,
-						"method": "all",
-						"sql": "SELECT * FROM sessions WHERE 1=1 ORDER BY updated_at DESC, id DESC"
-					},
-					{
-						"atMs": 3271,
-						"ms": 13.39,
-						"method": "run",
-						"sql": "COMMIT"
-					},
-					{
-						"atMs": 4386,
-						"ms": 10.99,
-						"method": "run",
-						"sql": "COMMIT"
+						"atMs": 3813,
+						"ms": 97
 					}
 				]
 			},
 			"reads": {
+				"resume": 7,
 				"base": 13,
-				"window": 343,
-				"resume": 7
+				"window": 411
 			},
-			"changesRead": 47,
-			"windowReadsPerChange": 7.3,
+			"changesRead": 58,
+			"windowReadsPerChange": 7.1,
 			"bySource": {
-				"session-detail/load-heavy": {
-					"reads": {
-						"base": 1,
-						"window": 1
-					},
-					"changesRead": 1,
-					"windowReadsPerChange": 1,
-					"windowsRead": 1
-				},
-				"todos/load-heavy": {
-					"reads": {
-						"base": 1,
-						"window": 1
-					},
-					"changesRead": 1,
-					"windowReadsPerChange": 1,
-					"windowsRead": 1
-				},
-				"session-family/load-heavy": {
-					"reads": {
-						"base": 1,
-						"window": 44
-					},
-					"changesRead": 44,
-					"windowReadsPerChange": 1,
-					"windowsRead": 44
-				},
-				"session-detail/ses_7896bba8756e439da37e1b47a3e50631": {
+				"session-detail/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"resume": 1,
-						"window": 8
+						"window": 17
 					},
-					"changesRead": 8,
+					"changesRead": 17,
 					"windowReadsPerChange": 1,
-					"windowsRead": 8
+					"windowsRead": 17
 				},
-				"session-detail/ses_daf732a180254206b5ee7124fd2ca866": {
+				"session-detail/ses_724dad10922d410cb7996257fcd21167": {
 					"reads": {
 						"resume": 2,
-						"window": 10
+						"window": 16
 					},
-					"changesRead": 9,
-					"windowReadsPerChange": 1.1,
-					"windowsRead": 10
+					"changesRead": 16,
+					"windowReadsPerChange": 1,
+					"windowsRead": 16
 				},
 				"shell": {
 					"reads": {
 						"resume": 4,
-						"window": 41
+						"window": 60
 					},
-					"changesRead": 37,
-					"windowReadsPerChange": 1.1,
-					"windowsRead": 41
+					"changesRead": 58,
+					"windowReadsPerChange": 1,
+					"windowsRead": 60
 				},
 				"approvals": {
 					"reads": {
 						"base": 4,
-						"window": 124
+						"window": 127
 					},
-					"changesRead": 33,
-					"windowReadsPerChange": 3.8,
-					"windowsRead": 35
+					"changesRead": 58,
+					"windowReadsPerChange": 2.2,
+					"windowsRead": 59
 				},
-				"todos/ses_7896bba8756e439da37e1b47a3e50631": {
+				"todos/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 1,
-						"window": 8
+						"window": 22
 					},
-					"changesRead": 8,
+					"changesRead": 22,
 					"windowReadsPerChange": 1,
-					"windowsRead": 8
+					"windowsRead": 22
 				},
-				"todos/ses_daf732a180254206b5ee7124fd2ca866": {
-					"reads": {
-						"base": 2,
-						"window": 18
-					},
-					"changesRead": 9,
-					"windowReadsPerChange": 2,
-					"windowsRead": 9
-				},
-				"session-family/ses_7896bba8756e439da37e1b47a3e50631": {
+				"session-family/ses_4d3dc12bab4840ca8622f19021441b50": {
 					"reads": {
 						"base": 1,
-						"window": 30
-					},
-					"changesRead": 30,
-					"windowReadsPerChange": 1,
-					"windowsRead": 30
-				},
-				"session-family/ses_daf732a180254206b5ee7124fd2ca866": {
-					"reads": {
-						"base": 2,
 						"window": 58
 					},
-					"changesRead": 31,
-					"windowReadsPerChange": 1.9,
-					"windowsRead": 32
+					"changesRead": 58,
+					"windowReadsPerChange": 1,
+					"windowsRead": 58
+				},
+				"session-detail/load-heavy": {
+					"reads": {
+						"base": 1
+					},
+					"changesRead": 0,
+					"windowReadsPerChange": 0,
+					"windowsRead": 0
+				},
+				"todos/load-heavy": {
+					"reads": {
+						"base": 1
+					},
+					"changesRead": 0,
+					"windowReadsPerChange": 0,
+					"windowsRead": 0
+				},
+				"session-family/load-heavy": {
+					"reads": {
+						"base": 1,
+						"window": 51
+					},
+					"changesRead": 51,
+					"windowReadsPerChange": 1,
+					"windowsRead": 51
+				},
+				"todos/ses_724dad10922d410cb7996257fcd21167": {
+					"reads": {
+						"base": 2,
+						"window": 14
+					},
+					"changesRead": 7,
+					"windowReadsPerChange": 2,
+					"windowsRead": 7
+				},
+				"session-family/ses_724dad10922d410cb7996257fcd21167": {
+					"reads": {
+						"base": 2,
+						"window": 46
+					},
+					"changesRead": 23,
+					"windowReadsPerChange": 2,
+					"windowsRead": 23
 				}
 			},
 			"sidebarReads": {
-				"count": 42,
-				"totalMs": 8.93,
-				"medianMs": 0.12,
-				"maxMs": 1.3,
-				"rows": 7
+				"count": 61,
+				"totalMs": 9.13,
+				"medianMs": 0.13,
+				"maxMs": 0.55,
+				"rows": 8
 			}
 		}
 	}

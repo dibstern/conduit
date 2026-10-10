@@ -561,8 +561,18 @@ Object.assign(ClaudeDriver, { create: deps => {
 			opencodeIdleTimeoutMs?: number;
 			/** Listen on the previous port, so open tabs reconnect by themselves. */
 			keepPort?: boolean;
-			/** Record event-loop stalls and read-model reads to this JSON file. */
+			/**
+			 * Record event-loop stalls, read-model and sidebar reads to this JSON
+			 * file, flushed every 250ms.
+			 */
 			metricsFile?: string;
+			/**
+			 * With `metricsFile`, also append SQLite statements of 1ms or more to
+			 * `<metricsFile>.statements.jsonl`, and record a CPU profile between the
+			 * spec writing `<metricsFile>.start` and `.stop`; the server writes
+			 * `.started` once sampling and `.cpuprofile` once stopped.
+			 */
+			profile?: boolean;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -700,6 +710,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					...(options.metricsFile
 						? { CONDUIT_TEST_SERVER_METRICS: options.metricsFile }
 						: {}),
+					...(options.profile ? { CONDUIT_TEST_SERVER_PROFILE: "1" } : {}),
 					PATH:
 						this.managedOpenCode || this.foregroundCli
 							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
