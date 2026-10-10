@@ -269,7 +269,9 @@ function runtimeEventsToDomain(
 	return domainEvents;
 }
 
-function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
+function providerRuntimeEvent<
+	K extends Exclude<ProviderRuntimeEventType, "workspace.changed">,
+>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

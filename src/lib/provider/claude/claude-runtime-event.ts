@@ -8,11 +8,9 @@ import {
 } from "../../persistence/events.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 
-export function claudeRuntimeEvent<K extends ProviderRuntimeEventType>(
-	type: K,
-	sessionId: string,
-	data: EventPayloadMap[K],
-): ProviderRuntimeEvent {
+export function claudeRuntimeEvent<
+	K extends Exclude<ProviderRuntimeEventType, "workspace.changed">,
+>(type: K, sessionId: string, data: EventPayloadMap[K]): ProviderRuntimeEvent {
 	return {
 		eventId: createEventId(),
 		type,

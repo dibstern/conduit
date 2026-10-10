@@ -47,6 +47,10 @@ export function translateProviderRuntimeEventToDomain(
 	const data = dataRecord(event);
 
 	switch (event.type) {
+		case "workspace.changed":
+			// Session Workspace validates moves and remains their only canonical writer.
+			return { events: [], state };
+
 		case "message.removed": {
 			return {
 				events: [

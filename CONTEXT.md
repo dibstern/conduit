@@ -42,6 +42,18 @@ moves are refused before recording an event; Claude supports moves.
 **Effective Working Directory** is the primary project folder's mapped worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
 session's git pill and next provider launch use it. Other launch folders are the
-remaining project folders mapped through the workspace. A move updates the
+remaining project folders mapped through the workspace. A user move updates the
 session immediately and takes effect on the next turn, leaving a running turn
 undisturbed.
+
+Claude's successful `EnterWorktree` and `ExitWorktree` results emit the provider
+event `workspace.changed`. The Session Workspace service validates and records
+these agent moves during the turn, and the runner updates its saved launch
+folder so the next turn reuses it. Claude-created `.claude/worktrees` folders are
+validated as linked git worktrees of a configured project repository. Startup
+cwd reports reconcile unrecorded agent moves unless a user move is pending.
+
+`claudeWorktreeState` derives the active EnterWorktree state from recorded tool
+metadata. A user move remains pending until a later startup cwd or successful
+worktree declaration acknowledges its effective working directory. Both states
+survive daemon restarts without additional session columns.

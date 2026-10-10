@@ -36,6 +36,11 @@ export function buildClaudeQueryOptions(
 		}),
 		includePartialMessages: true,
 		forwardSubagentText: true,
+		systemPrompt: {
+			type: "preset",
+			preset: "claude_code",
+			append: "To work in another worktree, use EnterWorktree instead of cd.",
+		},
 		settings: buildClaudeFlagSettings(claudeSettingsOverrides),
 		settingSources: ["user", "project", "local"],
 		canUseTool,

@@ -1265,16 +1265,37 @@ export const makeProcessClaudeSessionRunner = (
 									existing &&
 									(command.type === "send-turn" || command.type === "pre-warm")
 								) {
-									const launch = existing.upgrade.state?.snapshot?.input;
+									const snapshot = existing.upgrade.state?.snapshot;
+									const launch = snapshot?.input;
 									const previousExtra = launch?.extraFolders ?? [];
 									const nextExtra = command.input.extraFolders ?? [];
+									const extraFoldersChanged =
+										previousExtra.length !== nextExtra.length ||
+										previousExtra.some(
+											(folder, index) => folder !== nextExtra[index],
+										);
+									const removedExtra = previousExtra.filter(
+										(folder) => !nextExtra.includes(folder),
+									);
+									const addedExtra = nextExtra.filter(
+										(folder) => !previousExtra.includes(folder),
+									);
+									// A reported move can swap the primary and extra folders.
+									// Enter adds the old cwd; Exit removes the restored cwd.
+									const canReconcileExtraFolders =
+										snapshot?.workspacePreviousRoot !== undefined &&
+										previousExtra.length === nextExtra.length &&
+										removedExtra.length === 1 &&
+										addedExtra.length === 1 &&
+										nextExtra.every((folder) =>
+											snapshot.workspaceDirectories?.includes(folder),
+										) &&
+										(addedExtra[0] === snapshot.workspacePreviousRoot ||
+											removedExtra[0] === launch?.workspaceRoot);
 									const foldersChanged =
 										launch !== undefined &&
 										(launch.workspaceRoot !== command.input.workspaceRoot ||
-											previousExtra.length !== nextExtra.length ||
-											previousExtra.some(
-												(folder, index) => folder !== nextExtra[index],
-											));
+											(extraFoldersChanged && !canReconcileExtraFolders));
 									if (foldersChanged && command.type === "pre-warm")
 										return { entry: undefined, draining: false };
 									if (

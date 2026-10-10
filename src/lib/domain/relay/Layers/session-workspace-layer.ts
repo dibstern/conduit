@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Schema } from "effect";
 import {
 	isKnownDriverKind,
@@ -14,6 +15,10 @@ import {
 } from "../../../daemon/config-persistence.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { readWorktrees, realWorkspacePath } from "../../../git/worktrees.js";
+import {
+	type CommitAndSignalProject,
+	makeCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { ConfigTag } from "../Services/services.js";
@@ -35,9 +40,10 @@ export const SessionWorkspaceLive = Layer.effect(
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const read = yield* ReadQueryEffectTag;
+		const sql = yield* SqlClient.SqlClient;
+		const commitAndSignal = yield* makeCommitAndSignal;
 		// Retain the relay's ambient bus and notifier along with command dependencies.
 		const services = yield* Effect.context<Dependencies>();
-		const moves = yield* Effect.makeSemaphore(1);
 		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -77,8 +83,56 @@ export const SessionWorkspaceLive = Layer.effect(
 						effectiveWorkingDirectory(config.projectDir, workspace),
 					),
 				),
-			move: (sessionId, path, cause) =>
-				moves.withPermits(1)(
+			claudeWorktreeState: (sessionId) =>
+				Effect.gen(function* () {
+					const { workspace } = yield* readWorkspace(sessionId);
+					const declarations = yield* sql<{ entered: number }>`
+					SELECT json_extract(metadata, '$.claudeWorktree.entered') AS entered
+					FROM events WHERE session_id = ${sessionId} AND type = 'tool.completed'
+					AND json_type(metadata, '$.claudeWorktree.entered') IN ('true', 'false')
+					ORDER BY sequence DESC LIMIT 1`;
+					const latest = yield* sql<{ sequence: number; cause: string }>`
+					SELECT sequence, json_extract(data, '$.cause') AS cause FROM events
+					WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+					ORDER BY sequence DESC LIMIT 1`;
+					const enteredWorktree = declarations[0]?.entered === 1;
+					const lastMove = latest[0];
+					if (lastMove?.cause !== "user")
+						return { enteredWorktree, pendingUserMove: false };
+					const requested = effectiveWorkingDirectory(
+						config.projectDir,
+						workspace,
+					);
+					const target = yield* realWorkspacePath(requested).pipe(
+						Effect.orElseSucceed(() => requested),
+					);
+					const acknowledgments = yield* sql<{ path: string }>`
+					SELECT CASE type WHEN 'session.status' THEN json_extract(metadata, '$.workspaceCwd')
+						ELSE json_extract(metadata, '$.claudeWorktree.path') END AS path
+					FROM events WHERE session_id = ${sessionId} AND sequence > ${lastMove.sequence}
+					AND ((type = 'session.status' AND json_type(metadata, '$.workspaceCwd') = 'text')
+						OR (type = 'tool.completed' AND json_type(metadata, '$.claudeWorktree.path') = 'text'))`;
+					for (const { path } of acknowledgments) {
+						const actual = yield* realWorkspacePath(path).pipe(
+							Effect.orElseSucceed(() => path),
+						);
+						if (actual === target)
+							return { enteredWorktree, pendingUserMove: false };
+					}
+					return { enteredWorktree, pendingUserMove: true };
+				}).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionCommandError({
+								operation: "workspace.claudeWorktreeState",
+								cause,
+							}),
+					),
+				),
+			move: (sessionId, path, cause, options) => {
+				// The canonical commit serializes both RPC and provider moves. A provider
+				// move joins its runner-output receipt transaction through the same seam.
+				const move = (project: CommitAndSignalProject) =>
 					Effect.gen(function* () {
 						const { row, workspace: previous } =
 							yield* readWorkspace(sessionId);
@@ -163,16 +217,32 @@ export const SessionWorkspaceLive = Layer.effect(
 									}),
 							),
 						);
-						yield* applySessionCommand({
-							type: "session.workspace_changed",
-							data: {
-								sessionId,
-								...workspace,
+						yield* applySessionCommand(
+							{
+								type: "session.workspace_changed",
+								data: {
+									sessionId,
+									...workspace,
+								},
 							},
-						}).pipe(Effect.provide(services));
+							{ project },
+						).pipe(Effect.provide(services));
 						return target;
-					}),
-				),
+					});
+				return options?.project
+					? move(options.project)
+					: commitAndSignal.write(move).pipe(
+							Effect.mapError((error) =>
+								error instanceof WorkspaceMoveError ||
+								error instanceof SessionCommandError
+									? error
+									: new SessionCommandError({
+											operation: "workspace.move",
+											cause: error,
+										}),
+							),
+						);
+			},
 		} satisfies SessionWorkspace;
 	}),
 );

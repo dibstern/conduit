@@ -584,6 +584,11 @@ export interface EventMetadata {
 	 *  field (or < 2) use raw provider-specific input shapes and need
 	 *  normalizeToolInput() upcast at replay time. */
 	readonly schemaVersion?: number;
+	readonly workspaceCwd?: string;
+	readonly claudeWorktree?: {
+		readonly entered: boolean;
+		readonly path: string;
+	};
 }
 
 export type CanonicalEvent = {
@@ -631,6 +636,11 @@ export const EventMetadataSchema = Schema.Struct({
 	sseBatchId: Schema.optionalWith(Schema.String, { exact: true }),
 	sseBatchSize: Schema.optionalWith(Schema.Number, { exact: true }),
 	schemaVersion: Schema.optionalWith(Schema.Number, { exact: true }),
+	workspaceCwd: Schema.optionalWith(Schema.String, { exact: true }),
+	claudeWorktree: Schema.optionalWith(
+		Schema.Struct({ entered: Schema.Boolean, path: Schema.String }),
+		{ exact: true },
+	),
 });
 
 const MessageRoleSchema = Schema.Literal("user", "assistant");

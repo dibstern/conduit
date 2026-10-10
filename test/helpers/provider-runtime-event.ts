@@ -8,7 +8,9 @@ import type {
 	EventPayloadMap,
 } from "../../src/lib/persistence/events.js";
 
-export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
+export function providerRuntimeEvent<
+	K extends ProviderRuntimeEventType & keyof EventPayloadMap,
+>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

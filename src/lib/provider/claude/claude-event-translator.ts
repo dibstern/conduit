@@ -25,6 +25,7 @@ import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
+	ProviderWorkspaceChangedData,
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
@@ -67,7 +68,9 @@ const defaultLog = createLogger("claude-event-translator");
 function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: (EventPayloadMap & {
+		"workspace.changed": ProviderWorkspaceChangedData;
+	})[K],
 	metadata?: Readonly<Record<string, unknown>>,
 ): ProviderRuntimeEvent {
 	return {
@@ -745,20 +748,32 @@ export class ClaudeEventTranslator {
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
 						);
 					}
-					// init lands ~1s after the prompt starts, so reporting idle
-					// unconditionally blanks the bounce bar and the sidebar dot at
-					// the top of every first turn. It is still the only thing that
-					// clears a busy status stranded by a crash mid-turn, so keep it
-					// for the case where no turn is actually running.
-					if (!ctx.turnInFlight) {
+					const cwd = message.cwd;
+					const validCwd = cwd.length > 0 && cwd === cwd.trim();
+					if (!ctx.workspaceStartReported && validCwd) {
+						ctx.workspaceStartReported = true;
 						yield* this.push(
 							ctx,
-							makeProviderRuntimeEvent("session.status", ctx.sessionId, {
-								sessionId: ctx.sessionId,
-								status: "idle",
+							makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+								path: cwd,
+								source: "start",
 							}),
 						);
 					}
+					// Record the start report before its cwd acknowledgment so a pending
+					// user move is compared with the preceding runner's actual folder.
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent(
+							"session.status",
+							ctx.sessionId,
+							{
+								sessionId: ctx.sessionId,
+								status: ctx.turnInFlight ? "busy" : "idle",
+							},
+							validCwd ? { workspaceCwd: cwd } : undefined,
+						),
+					);
 					return;
 				}
 
@@ -1466,6 +1481,50 @@ export class ClaudeEventTranslator {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
 
+			// Partial messages are optional. Preserve the same call-ID correlation
+			// for workspace tools when only their completed assistant snapshot arrives.
+			if (message.parent_tool_use_id == null) {
+				for (const block of content) {
+					if (
+						!isRecord(block) ||
+						block["type"] !== "tool_use" ||
+						(block["name"] !== "EnterWorktree" &&
+							block["name"] !== "ExitWorktree") ||
+						typeof block["id"] !== "string" ||
+						[...ctx.inFlightTools.values()].some(
+							(tool) => tool.itemId === block["id"],
+						)
+					)
+						continue;
+					const toolName = block["name"];
+					const itemId = block["id"];
+					const input = normalizeToolInput(toolName, block["input"]);
+					ctx.inFlightTools.set(this.nextSyntheticToolIndex--, {
+						itemId,
+						toolName,
+						title: "Tool call",
+						input,
+						partialInputJson: "",
+					});
+					yield* this.pushMessageCreated(ctx, messageId);
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent(
+							"tool.started",
+							ctx.sessionId,
+							{
+								messageId,
+								partId: itemId,
+								callId: itemId,
+								toolName,
+								input,
+							},
+							{ schemaVersion: 2 },
+						),
+					);
+				}
+			}
+
 			const readableBlocks = content.filter(
 				(block) =>
 					isRecord(block) &&
@@ -1507,6 +1566,10 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
+			const singleToolResult =
+				content.filter(
+					(block) => typeof block !== "string" && block.type === "tool_result",
+				).length === 1;
 
 			for (const block of content) {
 				if (typeof block === "string") continue;
@@ -1527,6 +1590,24 @@ export class ClaudeEventTranslator {
 				if (!matchedTool || matchedIndex === undefined) continue;
 
 				const resultContent = serializeToolResultContent(block.content);
+				const entered = matchedTool.toolName === "EnterWorktree";
+				const workspaceTool =
+					entered || matchedTool.toolName === "ExitWorktree";
+				const result = message.tool_use_result;
+				const reportedPath =
+					workspaceTool &&
+					singleToolResult &&
+					message.parent_tool_use_id == null &&
+					!block.is_error &&
+					isRecord(result)
+						? result[entered ? "worktreePath" : "originalCwd"]
+						: undefined;
+				const path =
+					typeof reportedPath === "string" &&
+					reportedPath.length > 0 &&
+					reportedPath === reportedPath.trim()
+						? reportedPath
+						: undefined;
 
 				if (resultContent.length > 0) {
 					yield* this.push(
@@ -1540,14 +1621,28 @@ export class ClaudeEventTranslator {
 
 				yield* this.push(
 					ctx,
-					makeProviderRuntimeEvent("tool.completed", ctx.sessionId, {
-						messageId: this.currentAssistantMessageId,
-						partId: matchedTool.itemId,
-						result: resultContent || null,
-						duration: 0,
-					}),
+					makeProviderRuntimeEvent(
+						"tool.completed",
+						ctx.sessionId,
+						{
+							messageId: this.currentAssistantMessageId,
+							partId: matchedTool.itemId,
+							result: resultContent || null,
+							duration: 0,
+						},
+						path ? { claudeWorktree: { entered, path } } : undefined,
+					),
 				);
 				ctx.inFlightTools.delete(matchedIndex);
+				if (path !== undefined) {
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+							path,
+							source: "tool",
+						}),
+					);
+				}
 			}
 		});
 	}

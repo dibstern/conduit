@@ -13,7 +13,7 @@ import type {
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 
-function makeEvent<T extends ProviderRuntimeEventType>(
+function makeEvent<T extends ProviderRuntimeEventType & keyof EventPayloadMap>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},

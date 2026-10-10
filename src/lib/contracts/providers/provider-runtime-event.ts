@@ -45,6 +45,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"session.permission_mode_changed",
 	"session.goal_changed",
 	"session.usage_limited",
+	"workspace.changed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -188,9 +189,22 @@ const ProviderRuntimeEventEnvelopeSchema = Schema.Struct({
 	),
 });
 
+export const ProviderWorkspaceChangedDataSchema = Schema.Struct({
+	path: NonBlankString,
+	source: Schema.Literal("tool", "start"),
+});
+export type ProviderWorkspaceChangedData = Schema.Schema.Type<
+	typeof ProviderWorkspaceChangedDataSchema
+>;
+
 export const ProviderRuntimeEventSchema = Schema.Unknown.pipe(
 	Schema.filter(hasOnlyProviderRuntimeEventEnvelopeKeys),
 	Schema.compose(ProviderRuntimeEventEnvelopeSchema),
+	Schema.filter(
+		(event) =>
+			event.type !== "workspace.changed" ||
+			Schema.is(ProviderWorkspaceChangedDataSchema)(event.data),
+	),
 );
 export type ProviderRuntimeEvent = Schema.Schema.Type<
 	typeof ProviderRuntimeEventSchema

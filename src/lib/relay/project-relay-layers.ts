@@ -7,9 +7,11 @@ import {
 	ManagedRuntime,
 	Option,
 	Ref,
+	Schema,
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { ProviderWorkspaceChangedDataSchema } from "../contracts/providers/provider-runtime-event.js";
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
@@ -93,12 +95,14 @@ import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceLive,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -343,13 +347,55 @@ export function createProjectRelayLayers({
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
 	);
+	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				persistenceEffectLayer,
+				configLayer,
+				loggerLayer,
+				openCodeApiLayer,
+				SessionEventBusLive,
+			),
+		),
+	);
 	const providerRuntimeIngestionLayer = Layer.unwrapEffect(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
 			const alerts = yield* AlertsTag;
 			const sql = yield* SqlClient.SqlClient;
 			const log = yield* LoggerTag;
+			const workspace = yield* SessionWorkspaceTag;
 			return makeProviderRuntimeIngestionLive({
+				workspaceChanged: (event, project) =>
+					Effect.gen(function* () {
+						const { path, source } = yield* Schema.decodeUnknown(
+							ProviderWorkspaceChangedDataSchema,
+						)(event.data);
+						if (
+							source === "start" &&
+							(yield* workspace.claudeWorktreeState(event.sessionId))
+								.pendingUserMove
+						)
+							return;
+						yield* workspace
+							.move(event.sessionId, path, "agent", { project })
+							.pipe(
+								Effect.catchTag("WorkspaceMoveError", (error) =>
+									Effect.sync(() => {
+										log.warn("Invalid agent workspace move", {
+											sessionId: event.sessionId,
+											path,
+											reason: error.reason,
+										});
+									}),
+								),
+							);
+					}).pipe(
+						Effect.mapError(
+							(cause) =>
+								new EventStoreError({ operation: "workspace.changed", cause }),
+						),
+					),
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
@@ -373,6 +419,7 @@ export function createProjectRelayLayers({
 		Layer.provide(
 			Layer.mergeAll(
 				persistenceEffectLayer,
+				sessionWorkspaceLayer,
 				SessionEventBusLive,
 				alertLedgerLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
@@ -553,10 +600,7 @@ export function createProjectRelayLayers({
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			Layer.provideMerge(
-				SessionWorkspaceLive,
-				baseLayersWithProjectionNotifier,
-			),
+			Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
 			makeWsTransportLive({ noServer: true }),
 		),
 	);

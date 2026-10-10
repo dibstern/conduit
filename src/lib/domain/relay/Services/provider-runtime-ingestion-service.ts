@@ -2,7 +2,10 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Deferred, Effect, FiberRef, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignalProject,
+	makeCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	type EventStoreError,
@@ -63,6 +66,11 @@ export interface ProviderRuntimeRelayPublisher {
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
+	/** Session Workspace validates and records declared moves through the command seam. */
+	readonly workspaceChanged?: (
+		event: ProviderRuntimeEvent,
+		project: CommitAndSignalProject,
+	) => Effect.Effect<void, EventStoreError>;
 	readonly relayPublisher?: ProviderRuntimeRelayPublisher;
 	readonly compactions?: Pick<
 		ReturnType<typeof makeSessionCompactions>,
@@ -247,6 +255,13 @@ export const makeProviderRuntimeIngestionLive = (
 											: yield* ownsClaudeRunnerAttachment(sql, context);
 									if (!appended) return;
 									yield* ensureSessions;
+									for (const event of events) {
+										if (
+											event.type === "workspace.changed" &&
+											options.workspaceChanged
+										)
+											yield* options.workspaceChanged(event, project);
+									}
 									let pending: CanonicalEvent[] = [];
 									for (const event of persistentEvents) {
 										if (event.type === "session.usage_limited") {
