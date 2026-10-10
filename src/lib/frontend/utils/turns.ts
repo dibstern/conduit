@@ -542,7 +542,14 @@ export function latestStamp(segment: Segment): number | undefined {
 	return end;
 }
 
-/** Explicit waits keep time waiting for the user out of the prompt's clock. */
+function firstStamp(segment: Segment): number | undefined {
+	for (const part of [...segment.activity, ...segment.reply]) {
+		if (part.createdAt !== undefined) return part.createdAt;
+	}
+	return segment.handBack?.createdAt ?? segment.end?.createdAt;
+}
+
+/** Approval waits and gaps between segments stay out of the prompt's clock. */
 export function workingTime(
 	turn: Turn,
 	now: number,
@@ -561,9 +568,18 @@ export function workingTime(
 	if (end === undefined) return undefined;
 	if (until !== undefined) end = Math.min(end, until);
 	let duration = Math.max(0, end - start);
+	const waits: { from: number; to?: number }[] = [...(timing?.waits ?? [])];
+	for (const [index, segment] of turn.segments.entries()) {
+		const previous = turn.segments[index - 1];
+		if (previous === undefined) continue;
+		const from = latestStamp(previous);
+		const to = firstStamp(segment);
+		if (from !== undefined && to !== undefined && to > from)
+			waits.push({ from, to });
+	}
 	// Parallel prompts can overlap; time already subtracted is skipped.
 	let waitedUntil = start;
-	const waits = [...(timing?.waits ?? [])].sort((a, b) => a.from - b.from);
+	waits.sort((a, b) => a.from - b.from);
 	for (const wait of waits) {
 		const to = Math.min(wait.to ?? end, end);
 		duration -= Math.max(0, to - Math.max(wait.from, waitedUntil));
@@ -752,7 +768,8 @@ export interface TurnEconomics {
 /**
  * What the turn cost, and how full the context was when it finished. Context
  * used is the final call's fresh input plus everything read from and written to
- * cache; a provider that reports no window gets no context reading at all.
+ * cache; tokens sum the reported usage across segments. A provider that reports
+ * no window gets no context reading at all.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
 	const result = lastResult(turn);
@@ -765,15 +782,21 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 				(result.cacheRead ?? 0) +
 				(result.cacheWrite ?? 0)
 			: undefined;
+	let tokensIn: number | undefined;
+	let tokensOut: number | undefined;
+	for (const segment of turn.segments) {
+		const end = segment.end;
+		if (end?.type !== "result") continue;
+		if (end.inputTokens !== undefined)
+			tokensIn = (tokensIn ?? 0) + end.inputTokens;
+		if (end.outputTokens !== undefined)
+			tokensOut = (tokensOut ?? 0) + end.outputTokens;
+	}
 	return {
 		...(duration !== undefined ? { duration } : {}),
 		...(result?.cost !== undefined ? { cost: result.cost } : {}),
-		...(result?.inputTokens !== undefined
-			? { tokensIn: result.inputTokens }
-			: {}),
-		...(result?.outputTokens !== undefined
-			? { tokensOut: result.outputTokens }
-			: {}),
+		...(tokensIn !== undefined ? { tokensIn } : {}),
+		...(tokensOut !== undefined ? { tokensOut } : {}),
 		...(used !== undefined && window !== undefined && window > 0
 			? {
 					context: {
