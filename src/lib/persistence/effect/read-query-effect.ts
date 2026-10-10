@@ -255,6 +255,9 @@ export const sessionRowsToSessionInfoList = (
 			...(row.last_turn_end_version != null
 				? { lastTurnEndVersion: row.last_turn_end_version }
 				: {}),
+			...(row.last_turn_end_input_id != null
+				? { lastTurnEndInputId: row.last_turn_end_input_id }
+				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
 			limitRecovery:
 				row.limit_recovery == null
