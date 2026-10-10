@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
 
 const meta = {
@@ -130,6 +131,90 @@ export const WorktreeMenu: Story = {
 		await expect(
 			within(document.body).getByRole("menuitem", { name: /feature\/two/ }),
 		).toBeVisible();
+	},
+};
+
+async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
+	const canvas = within(canvasElement);
+	const body = within(canvasElement.ownerDocument.body);
+	const identity = canvas.getByTestId("session-bar-identity");
+	await expect(identity).toHaveAttribute("title", "conduit / main");
+	await userEvent.click(canvas.getByRole("button", { name: "EnterWorktree" }));
+	await waitFor(() =>
+		expect(identity).toHaveAttribute(
+			"title",
+			"header-agent / worktree-header-agent",
+		),
+	);
+	await expect(
+		identity.querySelector('[data-icon="worktree"]'),
+	).toBeInTheDocument();
+	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
+		"Session header · Running turn",
+	);
+	await userEvent.click(identity);
+	let menu = await body.findByRole("menu", { name: "Checkout" });
+	await expect(
+		within(menu).getByText("/src/conduit/.claude/worktrees/header-agent", {
+			exact: true,
+		}),
+	).toBeVisible();
+	await expect(
+		within(menu).getByText("Worktree", { exact: true }),
+	).toBeVisible();
+	if (!exit) return;
+	await userEvent.keyboard("{Escape}");
+	await waitFor(() => expect(menu).not.toBeVisible());
+	await userEvent.click(canvas.getByRole("button", { name: "ExitWorktree" }));
+	await waitFor(() =>
+		expect(identity).toHaveAttribute("title", "conduit / main"),
+	);
+	await expect(
+		identity.querySelector('[data-icon="branch"]'),
+	).toBeInTheDocument();
+	await expect(
+		identity.querySelector('[data-part="worktree"]'),
+	).not.toBeInTheDocument();
+	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
+		"Session header · Running turn",
+	);
+	await userEvent.click(identity);
+	menu = await body.findByRole("menu", { name: "Checkout" });
+	await expect(
+		within(menu).getByText("/src/conduit", { exact: true }),
+	).toBeVisible();
+	await expect(
+		within(menu).queryByText("Worktree", { exact: true }),
+	).not.toBeInTheDocument();
+}
+
+export const AgentEntersWorktree: Story = {
+	tags: ["viewport-capture"],
+	args: { git: { branch: "main", dirty: false, ahead: 0, behind: 0 } },
+	render: (args) => ({ Component: AgentWorktreeLifecycle, props: args }),
+	play: async ({ canvasElement }) => playAgentMove(canvasElement, false),
+};
+
+export const AgentExitsWorktree: Story = {
+	...AgentEntersWorktree,
+	// Storybook indexes tags statically, so a spread one is not seen.
+	tags: ["viewport-capture"],
+	play: async ({ canvasElement }) => playAgentMove(canvasElement, true),
+};
+
+export const PhoneAgentEntersWorktree: Story = {
+	...AgentEntersWorktree,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const PhoneAgentExitsWorktree: Story = {
+	...AgentExitsWorktree,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
 	},
 };
 

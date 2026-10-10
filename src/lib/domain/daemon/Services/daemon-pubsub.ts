@@ -17,6 +17,7 @@ export type DaemonEvent = Data.TaggedEnum<{
 	VersionUpdate: { readonly current: string; readonly latest: string };
 	InstanceAdded: { readonly instanceId: string };
 	InstanceRemoved: { readonly instanceId: string };
+	ProviderInstanceRemoved: { readonly instanceId: string };
 	InstanceStatusChanged: { readonly instanceId: string };
 	DiskSpaceLow: { readonly usage: number };
 	DiskSpaceOk: { readonly usage: number };
@@ -67,6 +68,9 @@ export const publishInstanceAdded = (instanceId: string) =>
 
 export const publishInstanceRemoved = (instanceId: string) =>
 	publish(DaemonEvent.InstanceRemoved({ instanceId }));
+
+export const publishProviderInstanceRemoved = (instanceId: string) =>
+	publish(DaemonEvent.ProviderInstanceRemoved({ instanceId }));
 
 export const publishInstanceStatusChanged = (instanceId: string) =>
 	publish(DaemonEvent.InstanceStatusChanged({ instanceId }));

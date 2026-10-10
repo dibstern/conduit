@@ -264,6 +264,10 @@ describe("InstanceManager restart scheduling", () => {
 			}
 			const errorEvents = events.filter((e) => e._tag === "InstanceError");
 			expect(errorEvents.length).toBe(1);
+			expect(events).toContainEqual({
+				_tag: "InstanceStatusChanged",
+				instanceId: "inst-1",
+			});
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 

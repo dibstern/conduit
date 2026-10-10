@@ -62,7 +62,10 @@
 		if (!getIsConnected()) return;
 		let current = true;
 		void getUsageLimitsSettingRpc()
-			.then((loaded) => { if (current && saveTicket === 0) setting = confirmed = loaded; })
+			.then((loaded) => {
+				applyUsageLimitsSetting(loaded);
+				if (current && saveTicket === 0) setting = confirmed = loaded;
+			})
 			.catch(() => {
 				if (current) showToast("Couldn't load usage limit settings", { variant: "error" });
 			});

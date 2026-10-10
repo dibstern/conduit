@@ -3,16 +3,24 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { Cause, Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeFileServiceTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { getFileTreeEntries } from "../../../src/lib/handlers/files.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
-import { makeMockLogger } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 
 describe("file tree time limits", () => {
 	it.effect("preserves breadth-first order and gitignore filtering", () =>
@@ -164,6 +172,11 @@ describe("file tree time limits", () => {
 					list,
 					read: () => Effect.succeed({ content: "" }),
 				}),
+				Effect.provideService(ConfigTag, makeMockConfig()),
+				Effect.provide(AlertsLive),
+				Effect.provide(
+					makePersistenceEffectLayer(":memory:", "private-project"),
+				),
 			);
 		},
 	);
@@ -237,7 +250,15 @@ describe("file tree time limits", () => {
 				Effect.provideService(LoggerTag, log),
 				Effect.provide(
 					OpenCodeFileServiceLive.pipe(
-						Layer.provide(Layer.succeed(OpenCodeAPITag, api)),
+						Layer.provide(
+							Layer.mergeAll(
+								Layer.succeed(OpenCodeAPITag, api),
+								Layer.succeed(
+									OpenCodeInstancesTag,
+									makeOpenCodeInstancesStub({ opencode: api }),
+								),
+							),
+						),
 					),
 				),
 			);
@@ -277,7 +298,15 @@ describe("file tree time limits", () => {
 			}).pipe(
 				Effect.provide(
 					OpenCodeFileServiceLive.pipe(
-						Layer.provide(Layer.succeed(OpenCodeAPITag, api)),
+						Layer.provide(
+							Layer.mergeAll(
+								Layer.succeed(OpenCodeAPITag, api),
+								Layer.succeed(
+									OpenCodeInstancesTag,
+									makeOpenCodeInstancesStub({ opencode: api }),
+								),
+							),
+						),
 					),
 				),
 			);

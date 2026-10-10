@@ -80,6 +80,8 @@ test.describe("Claude", () => {
 		harness,
 	}, testInfo) => {
 		const directory = await sendFromAddedProject(page, harness, "claude");
+		const sessionId = new URL(page.url()).pathname.match(/\/s\/([^/]+)/)?.[1];
+		expect(sessionId).toBeTruthy();
 		const options = harness.claudeOptions();
 		expect(options).not.toHaveLength(0);
 		const runnerOptions = options.filter(({ pid }) =>
@@ -90,6 +92,10 @@ test.describe("Claude", () => {
 			expect(harness.runnerPids()).toContain(record.pid);
 			expect(record.pid).not.toBe(harness.generations.at(-1)?.pid);
 			expect(record.options["cwd"]).toBe(directory);
+			// The agent's tools inherit this env, so a session can name itself.
+			expect(record.options["env"]).toMatchObject({
+				CONDUIT_SESSION_ID: sessionId,
+			});
 		}
 		await page.screenshot({ path: testInfo.outputPath("claude-tracer.png") });
 	});

@@ -272,12 +272,15 @@ export class WsMockControl {
 			const status = OPENCODE_CONNECTION_STATES.find(
 				(state) => state === msg["status"],
 			);
-			if (status)
-				sendMockProjectSetting(this.page, {
-					_tag: "opencodeConnection",
-					instanceId: "opencode",
-					status,
-				});
+			if (!status)
+				throw new Error(
+					`Unsupported connection_status: ${JSON.stringify(msg["status"])}`,
+				);
+			sendMockProjectSetting(this.page, {
+				_tag: "opencodeConnection",
+				instanceId: "opencode",
+				status,
+			});
 			return;
 		}
 		const modelState = legacyModelState(msg);

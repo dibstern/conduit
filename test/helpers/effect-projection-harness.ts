@@ -57,7 +57,11 @@ export function makeEffectProjectionHarness(
 	const dir = mkdtempSync(join(tmpdir(), "conduit-effect-projection-"));
 	const dbPath = join(dir, "events.db");
 
-	const persistenceLayer = makePersistenceEffectLayer(dbPath, projectors);
+	const persistenceLayer = makePersistenceEffectLayer(
+		dbPath,
+		"test-project",
+		projectors,
+	);
 	const runtime = ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,

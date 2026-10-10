@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { GetAgents } from "../../../src/lib/contracts/ws-rpc.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
@@ -27,7 +28,10 @@ import {
 	makeHandlerLogger,
 	makeHandlerOpenCodeAPI,
 } from "../../helpers/handler-fakes.js";
-import { makeMockConfig } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 function mockWsHandler(
@@ -61,6 +65,10 @@ function agentHandlerLayer({
 	const logLayer = Layer.succeed(LoggerTag, log);
 	const deps = Layer.mergeAll(
 		apiLayer,
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
 		wsLayer,
 		overridesLayer,
 		logLayer,

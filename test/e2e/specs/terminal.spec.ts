@@ -213,3 +213,60 @@ test.describe("Terminal Panel", () => {
 		await expect(activeRows).not.toContainText("tab2data");
 	});
 });
+
+// The relay runs in this worker, so the PTY host it spawns inherits this
+// process's environment (conduit-test-ni8.59).
+test.describe("Terminal host startup", () => {
+	test("a slow host start shows the starting tab, then attaches", async ({
+		page,
+		relayUrl,
+	}) => {
+		// Longer than the fixed 5 s start deadline this replaced.
+		process.env["CONDUIT_PTY_HOST_START_DELAY_MS"] = "6000";
+		try {
+			const app = new AppPage(page);
+			await app.goto(relayUrl);
+			await app.terminalToggleBtn.click();
+
+			await expect(page.locator(".term-starting")).toHaveText(
+				"Starting terminal…",
+			);
+			await expect(page.locator(".term-tab-pending")).toHaveText("Terminal 1");
+			await expect(page.locator(".term-tab")).toHaveCount(0);
+
+			// The server waits for a live host up to its 15 s backstop.
+			const tab = page.locator(".term-tab");
+			await expect(tab).toHaveText(/Terminal 1/, { timeout: 15_000 });
+			await expect(tab).toHaveClass(/term-tab-active/);
+			await expect(page.locator(".term-tab-pending")).toHaveCount(0);
+			await expect(page.locator(".term-starting")).toBeHidden();
+			await expect(page.locator("#terminal-panel .xterm-screen")).toBeVisible();
+		} finally {
+			delete process.env["CONDUIT_PTY_HOST_START_DELAY_MS"];
+		}
+	});
+
+	test("a host that exits at once fails fast with the error shown", async ({
+		page,
+		relayUrl,
+	}) => {
+		const app = new AppPage(page);
+		await app.goto(relayUrl);
+		const nodeOptions = process.env["NODE_OPTIONS"];
+		// Node rejects this before running any code, so the host exits at once.
+		process.env["NODE_OPTIONS"] = "--conduit-invalid-option";
+		try {
+			const started = Date.now();
+			await app.terminalToggleBtn.click();
+			await expect(page.locator(".term-status")).toHaveText(
+				"Failed to create terminal",
+			);
+			// Well under the 15 s backstop for a host that is still alive.
+			expect(Date.now() - started).toBeLessThan(5_000);
+			await expect(page.locator(".term-tab, .term-tab-pending")).toHaveCount(0);
+		} finally {
+			if (nodeOptions === undefined) delete process.env["NODE_OPTIONS"];
+			else process.env["NODE_OPTIONS"] = nodeOptions;
+		}
+	});
+});

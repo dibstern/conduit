@@ -11,7 +11,6 @@ import type {
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
-import { applyUsageLimitsSetting } from "../stores/usage.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
@@ -151,6 +150,7 @@ export interface PtyInputRpcInput {
 export interface CreatePtyRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly sessionId?: string;
 }
 
 export interface ResizePtyRpcInput {
@@ -173,6 +173,7 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	readonly worktreePath?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -246,15 +247,18 @@ export interface RejectQuestionRpcInput {
 
 export interface GetFileTreeRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 }
 
 export interface GetFileListRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 	readonly path?: string;
 }
 
 export interface GetFileContentRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 	readonly path: string;
 }
 
@@ -266,6 +270,7 @@ export interface GetToolContentRpcInput {
 export interface GetSkillContentRpcInput {
 	readonly projectSlug: string;
 	readonly name: string;
+	readonly sessionId?: string;
 }
 
 export interface GetSessionSkillsRpcInput {
@@ -333,6 +338,7 @@ export interface SetClaudeSettingsRpcInput {
 export interface ResolveClaudeSettingsRpcInput {
 	readonly projectSlug: string;
 	readonly instanceId: string;
+	readonly sessionId?: string;
 }
 
 export interface ReloadProviderSessionRpcInput {
@@ -505,10 +511,16 @@ const callControl = <A, E>(
 		return yield* call(control);
 	});
 
-export async function listWorktreesRpc(projectSlug: string, sessionId: string) {
+export async function listWorktreesRpc(
+	projectSlug: string,
+	sessionId?: string,
+) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) =>
-			client.ListWorktrees({ projectSlug, sessionId }),
+			client.ListWorktrees({
+				projectSlug,
+				...(sessionId ? { sessionId } : {}),
+			}),
 		),
 	);
 }
@@ -617,6 +629,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),
+			...(input.worktreePath != null
+				? { worktreePath: input.worktreePath }
+				: {}),
 		}),
 	);
 
@@ -1051,7 +1066,11 @@ export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
 export async function createSessionRpc(
 	input: CreateSessionRpcInput,
 ): Promise<CreateSessionResponse> {
-	return await runTransportEffect(callCreateSession(input));
+	const result = await runTransportEffect(
+		Effect.either(callCreateSession(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function viewSessionRpc(
@@ -1299,7 +1318,6 @@ export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
 	const result = await runTransportEffect(
 		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
 	);
-	applyUsageLimitsSetting(result.usageLimits);
 	return result.usageLimits;
 }
 
@@ -1318,7 +1336,6 @@ export async function setUsageLimitsSettingRpc(
 		() => undefined,
 	);
 	const result = await request;
-	applyUsageLimitsSetting(result.usageLimits);
 	return result.usageLimits;
 }
 

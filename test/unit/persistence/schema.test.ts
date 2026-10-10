@@ -234,6 +234,7 @@ describe("Schema Migration", () => {
 				"metadata",
 				"provider",
 				"created_at",
+				"project_id",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
 	);

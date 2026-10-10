@@ -536,7 +536,7 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			busy !== isBusy(previousRow) ||
 			(!busy && turnEnded(previousRow, change.item))
 		)
-			followSessionBusy(change.item.id, busy);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
 	}
 }
 
@@ -984,6 +984,7 @@ export function switchToSession(
 			.catch(() => undefined);
 	}
 	if (slug) {
+		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 		void getAgentsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
@@ -999,7 +1000,9 @@ export function switchToSession(
 				if (
 					generation === selectionGeneration &&
 					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
+					getCurrentSlug() === slug &&
+					JSON.stringify(findSession(sessionId)?.workspace ?? null) ===
+						workspace
 				)
 					applyGetCommandsResponse(response);
 			})
@@ -1032,13 +1035,15 @@ export async function reloadProviderSession(
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
+	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 	const [commands, models] = await Promise.all([
 		getCommandsRpc({ projectSlug, sessionId }),
 		getModelsRpc({ projectSlug, sessionId }),
 	]);
 	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
 		return;
-	applyGetCommandsResponse(commands);
+	if (JSON.stringify(findSession(sessionId)?.workspace ?? null) === workspace)
+		applyGetCommandsResponse(commands);
 	applyGetModelsResponse(models);
 }
 

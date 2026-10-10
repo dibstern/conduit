@@ -1,3 +1,4 @@
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
 // and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
@@ -15,6 +16,7 @@ import {
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
@@ -370,7 +372,11 @@ function makeEventStoreLayerForFile(filename: string) {
 	const sqliteLayer = makeFileSqliteLayer(filename);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(sqliteLayer));
 	return Layer.merge(sqliteLayer, eventStoreLayer);
 }
@@ -387,12 +393,20 @@ const makeTestLayer = (
 
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 
 	const cursorLayer = Layer.effect(
 		ProjectorCursorEffectTag,
-		makeProjectorCursorEffect,
+		makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 
 	const projectionRunnerLayer = Layer.effect(
@@ -553,8 +567,9 @@ function insertRawEventRow(opts: {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO events (
-				event_id, session_id, stream_version, type, data, metadata, provider, created_at
+				project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 			) VALUES (
+				${"test-project"},
 				${opts.eventId ?? createEventId()},
 				${opts.sessionId},
 				${opts.streamVersion ?? 0},
@@ -831,6 +846,195 @@ describe("EventStoreEffect", () => {
 				expect(results[1]?.sequence).toBe(2);
 			}),
 		));
+
+	// Recovery can repeat within one batch, after a live ask, or after opening
+	// a new store. Request identity must include its session, kind and provider;
+	// duplicates must not consume a stream version or reach projection again.
+	it("appendBatch stores and projects each recovered OpenCode ask once", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.recover();
+				yield* seedSession("s1");
+				const asks = [
+					makePermissionAsked("s1", "permission-1", "bash"),
+					canonicalEvent("question.asked", "s1", {
+						id: "question-1",
+						sessionId: "s1",
+						questions: [],
+					}),
+				];
+				const stored = yield* store.appendBatch([
+					...asks,
+					...asks.map((event) => ({ ...event, eventId: createEventId() })),
+				]);
+				expect(stored).toHaveLength(2);
+				yield* runner.projectBatch(stored);
+				for (let reconnect = 0; reconnect < 2; reconnect++) {
+					const recovered = yield* store.appendBatch(
+						asks.map((event) => ({ ...event, eventId: createEventId() })),
+					);
+					expect(recovered).toEqual([]);
+					expect((yield* runner.projectBatch(recovered)).version).toBe(0);
+				}
+				expect(yield* store.readBySession("s1")).toHaveLength(2);
+				expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+				expect(
+					yield* sql`SELECT kind, json_extract(payload, '$.id') AS id
+					FROM activities ORDER BY sequence`,
+				).toEqual([
+					{ kind: "permission.asked", id: "permission-1" },
+					{ kind: "question.asked", id: "question-1" },
+				]);
+			}),
+		));
+
+	it("appendBatch keeps OpenCode ask identities separate by session, kind, provider and request", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				yield* seedSession("s2");
+				const asks = [
+					makePermissionAsked("s1", "shared", "bash"),
+					makePermissionAsked("s2", "shared", "bash"),
+					makePermissionAsked("s1", "different", "bash"),
+					canonicalEvent("question.asked", "s1", {
+						id: "shared",
+						sessionId: "s1",
+						questions: [],
+					}),
+					{
+						...makePermissionAsked("s1", "shared", "bash"),
+						provider: "claude",
+					},
+				];
+				expect(yield* store.appendBatch(asks)).toHaveLength(5);
+				expect(
+					yield* store.appendBatch(
+						asks
+							.slice(0, 4)
+							.map((event) => ({ ...event, eventId: createEventId() })),
+					),
+				).toEqual([]);
+				expect(yield* store.readBySession("s1")).toHaveLength(4);
+				expect(yield* store.readBySession("s2")).toHaveLength(1);
+			}),
+		));
+
+	it("appendBatch deduplicates recovered OpenCode asks after reopening the event store", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-recovered-asks-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator();
+					yield* seedSession("s1");
+				}),
+			);
+			const asks = [
+				makePermissionAsked("s1", "permission-1", "bash"),
+				canonicalEvent("question.asked", "s1", {
+					id: "question-1",
+					sessionId: "s1",
+					questions: [],
+				}),
+			];
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const store = yield* EventStoreEffectTag;
+						yield* store.appendBatch(asks);
+					}),
+					makeEventStoreLayerForFile(filename),
+				),
+			);
+			for (let restart = 0; restart < 2; restart++) {
+				await Effect.runPromise(
+					Effect.provide(
+						Effect.gen(function* () {
+							const store = yield* EventStoreEffectTag;
+							const recovered = yield* store.appendBatch(
+								asks.map((event) => ({ ...event, eventId: createEventId() })),
+							);
+							expect(recovered).toEqual([]);
+							expect(
+								(yield* store.readBySession("s1")).map(
+									({ eventId }) => eventId,
+								),
+							).toEqual(asks.map(({ eventId }) => eventId));
+							expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+						}),
+						makeEventStoreLayerForFile(filename),
+					),
+				);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("concurrent recovered OpenCode asks from independent store instances are stored once", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-concurrent-asks-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator();
+					yield* seedSession("s1");
+				}),
+			);
+			const batches = Array.from({ length: 6 }, () => [
+				makePermissionAsked("s1", "permission-1", "bash"),
+				canonicalEvent("question.asked", "s1", {
+					id: "question-1",
+					sessionId: "s1",
+					questions: [],
+				}),
+			]);
+			const results = await Effect.runPromise(
+				Effect.forEach(
+					batches,
+					(batch) =>
+						Effect.provide(
+							Effect.gen(function* () {
+								const store = yield* EventStoreEffectTag;
+								return yield* store.appendBatch(batch);
+							}),
+							makeEventStoreLayerForFile(filename),
+						),
+					{ concurrency: 6 },
+				),
+			);
+			const inserted = results.flat();
+			expect(inserted).toHaveLength(2);
+			expect(inserted.map(({ type }) => type).sort()).toEqual([
+				"permission.asked",
+				"question.asked",
+			]);
+			expect(inserted.map(({ streamVersion }) => streamVersion).sort()).toEqual(
+				[0, 1],
+			);
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT type, COUNT(*) AS count FROM events GROUP BY type ORDER BY type`,
+					).toEqual([
+						{ type: "permission.asked", count: 1 },
+						{ type: "question.asked", count: 1 },
+					]);
+				}),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 
 	it("append observes stream versions advanced outside the service instance", () =>
 		runTest(
@@ -1211,6 +1415,154 @@ describe("ProjectorCursorEffect", () => {
 });
 
 describe("Effect Session Projector (via ProjectionRunner)", () => {
+	it.each([
+		["message.created", "after"],
+		["message.created", "before"],
+		["message.snapshot", "after"],
+		["message.snapshot", "before"],
+	] as const)("uses the fork copy's stored clock for %s %s lineage", (type, order) =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const reads = yield* makeReadQueryEffect;
+				yield* runner.markRecovered();
+				const providerTime = 1000;
+				const boundaryTime =
+					type === "message.created" ? FIXED_TS : providerTime;
+				const lineage = canonicalEvent("session.created", "child", {
+					sessionId: "child",
+					title: "Fork",
+					provider: "opencode",
+					parentId: "parent",
+					forkPointEvent: "copy-reply",
+					forkPointTimestamp: providerTime,
+				});
+				const copies = (
+					[
+						["copy-user", "user", -1],
+						["copy-reply", "assistant", 0],
+					] as const
+				).map(([messageId, role, offset]) =>
+					type === "message.created"
+						? makeMessageCreated("child", messageId, {
+								role,
+								createdAt: FIXED_TS + offset,
+							})
+						: canonicalEvent(
+								"message.snapshot",
+								"child",
+								{
+									messageId,
+									digest: messageId,
+									message: {
+										id: messageId,
+										sessionID: "child",
+										role,
+										time: { created: providerTime + offset },
+										parts: [],
+									},
+								},
+								{ createdAt: FIXED_TS + offset },
+							),
+				);
+				for (const event of [
+					makeSessionCreated("parent"),
+					...(order === "after"
+						? [lineage, ...copies]
+						: [makeSessionCreated("child"), ...copies, lineage]),
+					makeMessageCreated("child", "later-user", {
+						role: "user",
+						createdAt: FIXED_TS + 1,
+					}),
+					// A provider refresh must not replace the stored copy's clock.
+					canonicalEvent("session.created", "child", lineage.data),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+
+				const child = yield* reads.getSession("child");
+				const history = yield* reads.getSessionMessagesWithParts("child");
+				const copy = history.find(({ id }) => id === "copy-reply");
+				expect(copy?.created_at).toBe(boundaryTime);
+				expect(child?.fork_point_timestamp).toBe(copy?.created_at);
+				const messages: ChatMessage[] = history.map((row) => ({
+					...(row.role === "user"
+						? { type: "user" as const, text: row.text ?? "" }
+						: {
+								type: "assistant" as const,
+								rawText: row.text ?? "",
+								html: "",
+								finalized: true,
+							}),
+					uuid: row.id,
+					messageId: row.id,
+					createdAt: row.created_at,
+				}));
+				const info = (yield* reads.listSessionInfos()).find(
+					({ id }) => id === "child",
+				);
+				expect(info?.forkPointTimestamp).toBe(copy?.created_at);
+				expect(
+					splitAtForkPoint(
+						messages,
+						info?.forkMessageId,
+						info?.forkPointTimestamp,
+					),
+				).toEqual({
+					inherited: messages.slice(0, 2),
+					current: messages.slice(2),
+				});
+			}),
+		));
+
+	it("updates the fork boundary and session version when a snapshot replaces a streamed copy", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const reads = yield* makeReadQueryEffect;
+				yield* runner.markRecovered();
+				for (const event of [
+					makeSessionCreated("parent"),
+					canonicalEvent("session.created", "child", {
+						sessionId: "child",
+						title: "Fork",
+						provider: "opencode",
+						parentId: "parent",
+						forkPointEvent: "copy-reply",
+					}),
+					makeMessageCreated("child", "copy-reply"),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				const streamed = yield* reads.getSession("child");
+				expect(streamed?.fork_point_timestamp).toBe(FIXED_TS);
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("message.snapshot", "child", {
+							messageId: "copy-reply",
+							digest: "snapshot",
+							message: {
+								id: "copy-reply",
+								sessionID: "child",
+								role: "assistant",
+								time: { created: 1000 },
+								parts: [],
+							},
+						}),
+					),
+				);
+				const snapshot = yield* reads.getSession("child");
+				expect(snapshot?.fork_point_timestamp).toBe(1000);
+				expect(snapshot?.version).toBeGreaterThan(streamed?.version ?? 0);
+				yield* runner.projectEvent(
+					yield* store.append(makeMessageCreated("child", "copy-reply")),
+				);
+				expect((yield* reads.getSession("child"))?.fork_point_timestamp).toBe(
+					1000,
+				);
+			}),
+		));
+
 	it("captures the boundary on creation and preserves it across provider refreshes and parent message deletion", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -2008,6 +2360,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 						...recorded,
 						eventId: `recorded-${recorded.sequence}`,
 						sessionId,
+						projectId: "test-project",
 						streamVersion: index,
 						metadata: {},
 					} as StoredEvent;
@@ -2623,6 +2976,7 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(result.recovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 4,
@@ -2639,6 +2993,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(durableFailure?.failed_at).toBeGreaterThan(0);
 		expect(result.recentFailures).toEqual([
 			{
+				projectId: "test-project",
 				projectorName: "message",
 				eventSequence: result.event.sequence,
 				eventType: "message.created",
@@ -2750,6 +3105,7 @@ describe("ProjectionRunnerEffect", () => {
 		}
 		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
 		expect(result.secondRecovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: result.poisonEvent.sequence,
 			totalReplayed: 0,
@@ -2840,6 +3196,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
 		expect(result.recoveredAfterFailure).toBe(false);
 		expect(result.retryRecovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 3,
@@ -2907,6 +3264,7 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(cold.recovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 3,
 			totalReplayed: 7,
@@ -3066,6 +3424,7 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(recovery).toMatchObject({
+					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 4,
 					totalReplayed: 3,
@@ -3181,6 +3540,7 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(first).toMatchObject({
+					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 501,
 					totalReplayed: 1002,
@@ -3201,6 +3561,7 @@ describe("ProjectionRunnerEffect", () => {
 					status: string;
 				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
+					projectId: "test-project",
 					startCursor: 501,
 					endCursor: 502,
 					totalReplayed: 2,
@@ -3433,6 +3794,7 @@ describe("ProjectionRunnerEffect", () => {
 				yield* runner.projectEvent({
 					...makeSessionCreated("s-replaying-reset"),
 					sequence: 2,
+					projectId: "test-project",
 					streamVersion: 1,
 				});
 

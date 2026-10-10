@@ -124,7 +124,9 @@ describe("ProviderSideEffectReactor", () => {
 					["cmd-1"],
 				))[0],
 			).toEqual({ status: "side_effect_completed" });
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect(
@@ -166,7 +168,9 @@ describe("ProviderSideEffectReactor", () => {
 				yield* reactor.drain();
 
 				expect(sendTurn).toHaveBeenCalledTimes(1);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -237,7 +241,7 @@ describe("ProviderSideEffectReactor", () => {
 				Effect.provide(
 					Layer.provideMerge(
 						makeProviderRuntimeIngestionLive(),
-						makePersistenceEffectLayer(":memory:"),
+						makePersistenceEffectLayer(":memory:", "test-project"),
 					),
 				),
 			),
@@ -288,7 +292,9 @@ describe("ProviderSideEffectReactor", () => {
 			yield* reactor.drain();
 
 			expect(ingest).toHaveBeenCalledWith(runtimeEvent);
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	// Regression: streamed provider output must mark the session as alive on the
@@ -352,7 +358,9 @@ describe("ProviderSideEffectReactor", () => {
 			// Output still streams only through the durable ingestion seam.
 			expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 			expect(interactions.push).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect("backs off retryable provider failures without hot looping", () =>
@@ -443,7 +451,9 @@ describe("ProviderSideEffectReactor", () => {
 				attempt_count: 1,
 				next_attempt_at: 1200,
 			});
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect(
@@ -497,7 +507,9 @@ describe("ProviderSideEffectReactor", () => {
 
 				expect(sendTurn).not.toHaveBeenCalled();
 				expect(result.status).toBe("completed");
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -539,7 +551,9 @@ describe("ProviderSideEffectReactor", () => {
 					durationMs: 0,
 					providerStateUpdates: [],
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -591,7 +605,9 @@ describe("ProviderSideEffectReactor", () => {
 						errorCode,
 					});
 				}
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -632,7 +648,9 @@ describe("ProviderSideEffectReactor", () => {
 					commandId: "cmd-1",
 					errorCode: null,
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -664,7 +682,9 @@ describe("ProviderSideEffectReactor", () => {
 					commandId: "cmd-1",
 					errorCode: null,
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -711,7 +731,9 @@ describe("ProviderSideEffectReactor", () => {
 				yield* TestClock.adjust("100 millis");
 				expect((yield* Fiber.join(loser)).status).toBe("completed");
 				expect(sendTurn).toHaveBeenCalledTimes(1);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -743,7 +765,9 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 1,
 					error_code: "provider_not_registered",
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect("marks malformed outbox payloads as typed failures", () =>
@@ -772,7 +796,9 @@ describe("ProviderSideEffectReactor", () => {
 				status: "failed",
 				error_code: "provider_command_payload_parse_failed",
 			});
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 
 	it.effect(
@@ -805,7 +831,9 @@ describe("ProviderSideEffectReactor", () => {
 					status: "failed",
 					error_code: "provider_command_payload_parse_failed",
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
@@ -854,7 +882,9 @@ describe("ProviderSideEffectReactor", () => {
 					status: "failed",
 					error_code: "provider_side_effect_interaction_unsupported",
 				});
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 });
 

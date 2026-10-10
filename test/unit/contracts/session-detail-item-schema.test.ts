@@ -26,6 +26,7 @@ describe("session detail item contract", () => {
 					provider: "claude",
 					createdAt: 100,
 					sequence: 7,
+					projectId: "test-project",
 					streamVersion: 1,
 				},
 			},

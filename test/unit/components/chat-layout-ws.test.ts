@@ -207,6 +207,7 @@ vi.mock("../../../src/lib/frontend/stores/file-tree.svelte.js", () => ({
 	applyGetFileTreeResponse: vi.fn(),
 	requestFileTree: vi.fn(),
 	clearFileTreeState: vi.fn(),
+	fileTreeState: { scope: null, loading: false },
 }));
 
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({

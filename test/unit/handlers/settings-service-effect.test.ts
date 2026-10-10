@@ -9,6 +9,7 @@ import {
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { getCommandsForSession } from "../../../src/lib/handlers/settings.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import {
@@ -32,6 +33,15 @@ describe("settings reads with Effect-native settings service", () => {
 				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(ConfigTag, makeMockConfig()),
+				Layer.succeed(SessionWorkspaceTag, {
+					get: () => Effect.succeed("/workspace"),
+					move: () => Effect.succeed("/workspace"),
+					resolve: () => Effect.die("unused"),
+					record: () => Effect.die("unused"),
+					claudeWorktreeState: () => Effect.die("unused"),
+					withLaunch: (effect) => effect,
+				}),
 			);
 
 			return getCommandsForSession(undefined).pipe(

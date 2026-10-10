@@ -46,6 +46,7 @@ describe("domain-event relay translation exhaustiveness", () => {
 		"session.permission_mode_changed",
 		"session.model_changed",
 		"session.workspace_changed",
+		"session.workspace_started",
 		"session.variant_changed",
 		"session.context_window_changed",
 		"session.goal_changed",

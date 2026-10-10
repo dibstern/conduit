@@ -4,7 +4,6 @@ import { DURABLE_COMMAND_FINGERPRINT_VERSION } from "./orchestration-command-con
 
 export interface DurableSendTurnCommandDecisionInput {
 	readonly commandId: string;
-	readonly projectKey: string;
 	readonly sessionId: string;
 	readonly providerId: string;
 	readonly fingerprintHash: string;
@@ -22,7 +21,6 @@ export function decideDurableSendTurnCommand(
 		receipt: {
 			commandId: input.commandId,
 			commandType: "send_turn",
-			projectKey: input.projectKey,
 			sessionId: input.sessionId,
 			status: "side_effect_requested",
 			fingerprintHash: input.fingerprintHash,
@@ -36,7 +34,6 @@ export function decideDurableSendTurnCommand(
 			{
 				requestSequence: input.requestSequence,
 				commandId: input.commandId,
-				projectKey: input.projectKey,
 				sessionId: input.sessionId,
 				providerId: input.providerId,
 				effectType: "send_turn",

@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option, Queue, Stream } from "effect";
 import { expect, vi } from "vitest";
-import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	type ProjectSettingsEnvelope,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	setDefaultContextWindow,
@@ -38,6 +41,25 @@ import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
+});
+
+const readClaudeCatalog = Effect.gen(function* () {
+	const client = yield* rpcClient;
+	return yield* client
+		.SubscribeProjectSettings({ projectSlug: "project-a" })
+		.pipe(
+			Stream.mapConcat((envelope) =>
+				envelope._tag === "snapshot"
+					? envelope.rows
+					: envelope._tag === "upsert"
+						? [envelope.item]
+						: [],
+			),
+			Stream.filter((setting) => setting._tag === "providerModels"),
+			Stream.map((setting) => setting.providers),
+			Stream.runHead,
+			Effect.map(Option.getOrThrow),
+		);
 });
 
 const makeReadQuery = (
@@ -163,9 +185,8 @@ describe("WsRpcServerLayer GetModels", () => {
 					requestedModel: "agent-model",
 					actualModel: "claude-sonnet-5",
 				});
-				expect(drift.providers[0]?.models[0]).not.toHaveProperty(
-					"resolvedModel",
-				);
+				const catalog = yield* readClaudeCatalog;
+				expect(catalog[0]?.models[0]).not.toHaveProperty("resolvedModel");
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
@@ -257,6 +278,7 @@ describe("WsRpcServerLayer GetModels", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-model-execution-"));
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
+				"test-project",
 			);
 			const orchestrationEngine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
@@ -397,9 +419,8 @@ describe("WsRpcServerLayer GetModels", () => {
 					actualModel: "claude-fable-4-0",
 					drifted: true,
 				});
-				expect(match.providers[0]?.models[0]).not.toHaveProperty(
-					"resolvedModel",
-				);
+				const catalog = yield* readClaudeCatalog;
+				expect(catalog[0]?.models[0]).not.toHaveProperty("resolvedModel");
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
@@ -481,7 +502,7 @@ describe("WsRpcServerLayer GetModels", () => {
 				expect(result.providers).toEqual([
 					{
 						id: "anthropic",
-						name: "Anthropic - opencode",
+						name: "Anthropic",
 						configured: true,
 						models: [
 							{
@@ -492,6 +513,8 @@ describe("WsRpcServerLayer GetModels", () => {
 							},
 						],
 					},
+				]);
+				expect(yield* readClaudeCatalog).toEqual([
 					{
 						id: "claude",
 						name: "Anthropic - claude",
@@ -516,12 +539,12 @@ describe("WsRpcServerLayer GetModels", () => {
 				expect(api.session.get).not.toHaveBeenCalled();
 				expect(result.variant).toEqual({
 					variant: "careful",
-					variants: ["fast", "careful"],
+					variants: [],
 				});
 				expect(result.permissionMode).toBe("ask");
 				expect(result.contextWindow).toEqual({
 					contextWindow: "200k",
-					options: [{ value: "200k", label: "200K", isDefault: true }],
+					options: [],
 				});
 				expect(result.modelExecution).toBeUndefined();
 			}).pipe(
@@ -544,7 +567,7 @@ describe("WsRpcServerLayer GetModels", () => {
 	);
 
 	it.effect(
-		"returns only the requested configured instance driver snapshot",
+		"shares one live Claude catalog between default and named instances",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-rpc-models-instance-"),
@@ -583,16 +606,44 @@ describe("WsRpcServerLayer GetModels", () => {
 					),
 				);
 				const client = yield* rpcClient;
-				const result = yield* client.GetModels({
-					projectSlug: "project-a",
-					instanceId: "claude-work",
-				});
-
-				expect(result.instanceId).toBe("claude-work");
-				expect(result.providers).toEqual([
+				const updates = yield* Queue.unbounded<ProjectSettingsEnvelope>();
+				yield* client
+					.SubscribeProjectSettings({ projectSlug: "project-a" })
+					.pipe(
+						Stream.runForEach((envelope) => Queue.offer(updates, envelope)),
+						Effect.forkScoped,
+					);
+				expect((yield* Queue.take(updates))._tag).toBe("snapshot");
+				expect((yield* Queue.take(updates))._tag).toBe("synchronized");
+				const responses = [];
+				for (const instanceId of ["claude", "claude-work"]) {
+					const result = yield* client.GetModels({
+						projectSlug: "project-a",
+						instanceId,
+					});
+					expect(result.instanceId).toBe(instanceId);
+					responses.push(result);
+					expect(yield* Queue.take(updates)).toMatchObject({
+						_tag: "upsert",
+						item: { _tag: "providerModels" },
+					});
+				}
+				const snapshot = yield* client
+					.SubscribeProjectSettings({ projectSlug: "project-a" })
+					.pipe(Stream.runHead);
+				expect(Option.isSome(snapshot) && snapshot.value._tag).toBe("snapshot");
+				if (Option.isNone(snapshot) || snapshot.value._tag !== "snapshot")
+					throw new Error("missing snapshot");
+				const catalogs = snapshot.value.rows.filter(
+					(row) => row._tag === "providerModels",
+				);
+				// Settings key their provider groups by id, including on reconnect.
+				expect(
+					catalogs.flatMap((row) => row.providers.map(({ id }) => id)),
+				).toEqual(["claude"]);
+				expect(catalogs[0]?.providers).toEqual([
 					{
 						id: "claude",
-						instanceId: "claude-work",
 						name: "Anthropic - claude",
 						configured: true,
 						models: [
@@ -604,6 +655,8 @@ describe("WsRpcServerLayer GetModels", () => {
 						],
 					},
 				]);
+				for (const response of responses)
+					expect(response.providers).toEqual([]);
 				expect(api.provider.list).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,

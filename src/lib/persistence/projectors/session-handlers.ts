@@ -166,6 +166,36 @@ function settleOpenSubagents(
 	};
 }
 
+// A turn's end advances the turn-end version and names the send the turn
+// answered, so a browser can tell a late end of an earlier turn from the end of
+// the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
+// ended turn has no known send.
+function endTurn(
+	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
+	errorAt: number | null,
+	userMessageId: string | null,
+	messageId: string,
+): SessionStatement {
+	return {
+		sql: `UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
+			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
+				THEN (SELECT input_id FROM messages WHERE id = COALESCE(?,
+					(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+				ELSE last_turn_end_input_id END,
+			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
+			WHERE id = ?`,
+		params: [
+			event.createdAt,
+			errorAt,
+			event.streamVersion,
+			userMessageId,
+			messageId,
+			event.streamVersion,
+			event.sessionId,
+		],
+	};
+}
+
 function isAutoTitleRename(event: StoredEvent): boolean {
 	return event.metadata.source === "auto-title";
 }
@@ -556,30 +586,25 @@ export const sessionHandlers: {
 			},
 		];
 	},
-	"turn.completed": (event) => {
-		return [
-			wakeSession(event.sessionId, event.createdAt, "turn"),
-			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
-				params: [event.createdAt, event.streamVersion, event.sessionId],
-			},
-		];
-	},
-	"turn.error": (event) => {
-		return [
-			wakeSession(event.sessionId, event.createdAt, "error"),
-			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ?, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
-				params: [
-					event.createdAt,
-					event.createdAt,
-					event.streamVersion,
-					event.sessionId,
-				],
-			},
-			settleOpenSubagents(event.sessionId, event.createdAt),
-		];
-	},
+	"turn.completed": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "turn"),
+		endTurn(
+			event,
+			null,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
+	],
+	"turn.error": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "error"),
+		endTurn(
+			event,
+			event.createdAt,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
+		settleOpenSubagents(event.sessionId, event.createdAt),
+	],
 	"turn.interrupted": (event) => [
 		settleOpenSubagents(event.sessionId, event.createdAt),
 	],
@@ -625,12 +650,14 @@ export function getSessionStatements<K extends CanonicalEventType>(
 	if (event.type !== "session.created" && event.type !== "session.forked") {
 		return statements;
 	}
-	// Both projector implementations execute this writer before publishing the
-	// session. Reads never need the parent message again.
+	// A fork's own boundary copy is authoritative when already projected.
+	// Claude forks reference the parent row; retain that captured fallback.
 	return [
 		...statements,
 		{
 			sql: `UPDATE sessions SET fork_point_timestamp = COALESCE(
+			(SELECT created_at FROM messages
+			 WHERE session_id = sessions.id AND id = sessions.fork_point_event),
 			fork_point_timestamp, ?,
 			(SELECT created_at FROM messages
 			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)

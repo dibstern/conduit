@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 
 export class ProviderStateEffectError extends Data.TaggedError(
 	"ProviderStateEffectError",
@@ -15,6 +16,7 @@ export interface ProviderStateEffectUpdate {
 }
 
 export interface NativeThread {
+	readonly projectId: string;
 	readonly configDir?: string | undefined;
 	readonly resumeSessionId: string;
 	readonly firstSequence: number;
@@ -36,6 +38,7 @@ export const nativeThreadKey = (instanceId: string): string =>
 	`${NATIVE_THREAD_PREFIX}${instanceId}`;
 
 export interface ProviderStateEffect {
+	readonly projectId: string;
 	readonly nativeThread: (
 		sessionId: string,
 		instanceId: string,
@@ -68,13 +71,15 @@ export class ProviderStateEffectTag extends Context.Tag("ProviderStateEffect")<
 
 export const makeProviderStateEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
 
 	const nativeThread = (sessionId: string, instanceId: string) =>
 		Effect.gen(function* () {
 			const state = yield* getState(sessionId);
 			const stored = state[nativeThreadKey(instanceId)];
 			if (stored !== undefined) {
-				return yield* Schema.decodeUnknown(NativeThreadSchema)(stored);
+				const thread = yield* Schema.decodeUnknown(NativeThreadSchema)(stored);
+				return { ...thread, projectId };
 			}
 			// Once per-account receipts exist, legacy keys cannot prove delivery to
 			// an account with no receipt, especially after a provider change.
@@ -104,6 +109,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 				COALESCE(MAX(sequence), 0) AS deliveredThrough
 				FROM events WHERE session_id = ${sessionId}`;
 			return {
+				projectId,
 				...(state["claudeConfigDir"] !== undefined
 					? { configDir: state["claudeConfigDir"] }
 					: {}),
@@ -221,6 +227,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 		);
 
 	return {
+		projectId,
 		nativeThread,
 		getState,
 		saveUpdates,

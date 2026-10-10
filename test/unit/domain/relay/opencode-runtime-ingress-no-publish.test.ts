@@ -36,7 +36,7 @@ function makeTestRuntime(
 	relayPublisher: ProviderRuntimeRelayPublisher,
 	sessionEventBus: SessionEventBus,
 ) {
-	const persistenceLayer = makePersistenceEffectLayer(dbPath);
+	const persistenceLayer = makePersistenceEffectLayer(dbPath, "test-project");
 	const sessionEventBusLayer = Layer.succeed(
 		SessionEventBusTag,
 		sessionEventBus,

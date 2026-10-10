@@ -19,6 +19,7 @@ function stored(sessionId: string, sequence: number): StoredEvent {
 			sessionId,
 		}),
 		sequence,
+		projectId: "test-project",
 		streamVersion: sequence - 1,
 	};
 }

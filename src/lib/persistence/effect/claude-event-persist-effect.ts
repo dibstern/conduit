@@ -377,9 +377,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							stream_version: number;
 						}>`
 					INSERT OR IGNORE INTO events (
-						event_id, session_id, stream_version, type, data, metadata, provider, created_at
+						project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 					)
 					SELECT
+						${eventStore.projectId},
 						${event.eventId},
 						${event.sessionId},
 						COALESCE(MAX(stream_version) + 1, 0),
@@ -397,6 +398,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 						const stored: StoredEvent = {
 							...event,
+							projectId: eventStore.projectId,
 							sequence: row.sequence,
 							streamVersion: row.stream_version,
 						};

@@ -166,7 +166,9 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 				}),
 			]);
 			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toBeNull();
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 });
 
@@ -316,7 +318,7 @@ for (const scenario of [
 					interruptTurn: () => Effect.void,
 				}),
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:")),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
 		);
 	});

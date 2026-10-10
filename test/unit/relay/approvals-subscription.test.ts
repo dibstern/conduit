@@ -27,6 +27,7 @@ const makeLayer = () => {
 	return Layer.mergeAll(
 		makePersistenceEffectLayer(
 			join(dir, "events.db"),
+			"test-project",
 			undefined,
 			SessionEventBusLive,
 		),

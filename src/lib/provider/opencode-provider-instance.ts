@@ -5,7 +5,10 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { Deferred, Effect, type Scope } from "effect";
-import { PROVIDER_SESSION_CAPABILITIES } from "../contracts/provider-instance.js";
+import {
+	defaultInstanceIdForDriver,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../contracts/provider-instance.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -78,6 +81,10 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly clientForSession?: (
 		sessionId: string,
 	) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>;
+	/** Authoritative binding for diagnostics; endpoint snapshots can be stale. */
+	readonly instanceIdForSession?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined>;
 }
 
 export class OpenCodeProviderInstance implements ProviderInstance {
@@ -91,6 +98,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				sessionId: string,
 		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
+	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
 	private readonly pendingTurns = new Map<
 		string,
 		{
@@ -108,6 +116,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
+		this.instanceIdForSession = options.instanceIdForSession;
 	}
 
 	/** The send a new user message echo belongs to: the oldest unechoed one. */
@@ -364,6 +373,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					const cause = promptResult.left;
 					const baseMessage =
 						cause instanceof Error ? cause.message : String(cause);
+					const boundInstanceId =
+						cause instanceof OpenCodeApiError &&
+						cause.responseStatus === 404 &&
+						this.instanceIdForSession
+							? yield* this.instanceIdForSession(sessionId)
+							: undefined;
 					// Migration guard: a session bound to a named
 					// OpenCode instance BEFORE per-instance routing physically
 					// lives on the project-default server, so the named server
@@ -372,7 +387,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					const message =
 						cause instanceof OpenCodeApiError &&
 						cause.responseStatus === 404 &&
-						client.getBaseUrl() !== this.client.getBaseUrl()
+						boundInstanceId !== undefined &&
+						boundInstanceId !== defaultInstanceIdForDriver("opencode")
 							? `${baseMessage} — this session does not exist on its bound OpenCode instance (it may predate named-instance routing); create a new session on that instance`
 							: baseMessage;
 					log.error(`sendTurn failed for session ${sessionId}: ${message}`);

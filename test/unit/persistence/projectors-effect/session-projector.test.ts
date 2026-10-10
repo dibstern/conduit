@@ -31,6 +31,7 @@ function makeStored<T extends StoredEvent["type"]>(
 ): StoredEvent {
 	return {
 		sequence,
+		projectId: "test-project",
 		streamVersion: sequence - 1,
 		eventId: createEventId(),
 		sessionId,

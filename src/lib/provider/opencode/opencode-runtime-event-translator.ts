@@ -201,6 +201,13 @@ export class OpenCodeRuntimeEventTranslator {
 		if (event.type === "session.updated") {
 			return this.translateSessionUpdated(event, sessionId);
 		}
+		if (event.type === "session.deleted") {
+			return [
+				opencodeRuntimeEvent("session.deleted", sessionId, event, {
+					sessionId,
+				}),
+			];
+		}
 
 		return null;
 	}
@@ -787,12 +794,12 @@ export function opencodeSessionCreatedRuntimeEvent(
 	};
 }
 
-function opencodeRuntimeEvent(
-	type: ProviderRuntimeEvent["type"],
+function opencodeRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+	type: K,
 	sessionId: string,
 	source: SSEEvent,
 	data: Record<string, unknown>,
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: createEventId(),
 		type,

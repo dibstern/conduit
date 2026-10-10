@@ -13,6 +13,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
@@ -64,6 +65,9 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
+							seedEvents: [
+								makeSessionCreatedEvent("session-1", { provider: "claude" }),
+							],
 							claudeEventPersistEffect: {
 								persistHandoffDelivered: () => Effect.void,
 								persistEvent: () => Effect.void,
@@ -121,6 +125,7 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
+							seedEvents: [makeSessionCreatedEvent("session-1")],
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
 							}),
@@ -172,6 +177,7 @@ describe("WsRpcServerLayer input.submit", () => {
 							makeTestHandlerLayer({
 								config: makeMockConfig({ projectDir: tmpdir() }),
 								orchestrationEngine: engine,
+								seedEvents: [makeSessionCreatedEvent("session-1")],
 							}),
 							RateLimiterLive({ maxRequests: 1, windowMs: 60_000 }),
 						),

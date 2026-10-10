@@ -13,6 +13,7 @@ import {
 	ManagedRuntime,
 	Ref,
 } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -41,7 +42,7 @@ import {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
-import { hasRunningClaudeTurn } from "../Services/daemon-session-reader.js";
+import { hasProviderRecoveryCandidate } from "../Services/daemon-session-reader.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import {
 	type InstanceManagerState,
@@ -463,6 +464,13 @@ export async function startForegroundDaemon(
 				// Persist startup refreshes even when no project is saved this run.
 				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
+				const openCodeInstanceIds = (yield* currentHandle.getInstances())
+					.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+					.map((instance) => instance.id);
+				// Persisted default bindings route to the project's selected instance,
+				// even when only named instances are registered.
+				if (openCodeInstanceIds.length > 0)
+					openCodeInstanceIds.push(defaultInstanceIdForDriver("opencode"));
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
@@ -470,9 +478,14 @@ export async function startForegroundDaemon(
 						);
 						if (
 							runners.length > 0 ||
-							(yield* hasRunningClaudeTurn(project, configDir))
+							(yield* hasProviderRecoveryCandidate(
+								project,
+								configDir,
+								openCodeInstanceIds,
+							))
 						) {
-							// Cold projects stay lazy unless runner recovery or turn settlement needs them.
+							// Recovery subscribes OpenCode directories passively, including
+							// projects no browser has opened since the restart.
 							yield* relayCache.get(project.slug);
 						}
 					}).pipe(

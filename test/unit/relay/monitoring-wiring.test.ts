@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
+import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import {
 	Chunk,
 	Effect,
@@ -13,6 +14,7 @@ import {
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
+import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -26,6 +28,7 @@ import {
 	makePollerStateLive,
 	type SessionStatusPollerService,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -278,7 +281,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("handles later ticks while an earlier lineage refresh is pending", async () => {
+	it("holds later ticks until an earlier lineage refresh finishes", async () => {
 		let releaseRefresh: (() => void) | undefined;
 		const lineageRefresh = new Promise<void>((resolve) => {
 			releaseRefresh = resolve;
@@ -295,11 +298,12 @@ describe("wireMonitoring shutdown", () => {
 		await flushPromises();
 		harness.emitStatus({ s1: { type: "idle" } });
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		expect(harness.pollerEvents).toEqual([]);
+		expect(harness.alerts()).toEqual([]);
 		releaseRefresh?.();
 		await flushPromises();
-		expect(harness.alerts()).toEqual([]);
+		expect(harness.pollerEvents).toEqual(["stop:s1"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
 		harness.result.stopMonitoring();
 	});
@@ -544,7 +548,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("drops an older busy snapshot that reaches reduction after a newer idle one", async () => {
+	it("reports done for a busy tick whose lineage refresh outlasts the next idle tick", async () => {
 		let releaseFirst: (() => void) | undefined;
 		const first = new Promise<void>((resolve) => {
 			releaseFirst = resolve;
@@ -553,20 +557,15 @@ describe("wireMonitoring shutdown", () => {
 			.fn(() => Effect.void)
 			.mockImplementationOnce(() => Effect.promise(() => first));
 		const harness = await createEffectHarness(refreshSessionLineage);
-		harness.result.setMonitoringState({
-			sessions: new Map([
-				["s1", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
-			]),
-		});
 		harness.emitStatus({ s1: { type: "busy" } }, true);
 		await flushPromises();
 		harness.emitStatus({ s1: { type: "idle" } }, true);
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		// The idle tick waits for the busy one rather than overtaking it.
+		expect(harness.alerts()).toEqual([]);
 		releaseFirst?.();
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
 		harness.result.stopMonitoring();
 	});
@@ -647,6 +646,58 @@ describe("wireMonitoring shutdown", () => {
 		expect(harness.pollerEvents).toEqual(["start:s1"]);
 		expect(harness.messages).toHaveBeenCalledOnce();
 		harness.result.stopMonitoring();
+	});
+
+	it("does not warn when poller seeding reaches a stopped OpenCode SDK client", async () => {
+		const harness = await createEffectHarness();
+		const unavailable = new OpenCodeUnavailable({
+			instanceId: "stopped",
+			reason: "not-running",
+			message: "OpenCode is not running",
+		});
+		const fetch = vi.fn(() => Effect.runPromise(Effect.fail(unavailable)));
+		const api = new OpenCodeAPI({
+			sdk: createOpencodeClient({ baseUrl: "http://opencode.invalid", fetch }),
+			baseUrl: "http://opencode.invalid",
+			authHeaders: {},
+		});
+		harness.messages.mockImplementationOnce(() => api.session.messages("s1"));
+		harness.result.setMonitoringState({
+			sessions: new Map([
+				["s1", { phase: "busy-sse-covered", busySince: 0, lastSSEAt: 0 }],
+			]),
+		});
+		try {
+			harness.emitStatus({ s1: { type: "busy" } });
+			await flushPromises();
+			expect(harness.messages).toHaveBeenCalledWith("s1");
+			expect(fetch).toHaveBeenCalledOnce();
+			expect(harness.statusWarn).not.toHaveBeenCalled();
+			expect(harness.startPolling).not.toHaveBeenCalled();
+		} finally {
+			harness.result.stopMonitoring();
+		}
+	});
+
+	it("warns with the original error when poller seeding genuinely fails", async () => {
+		const harness = await createEffectHarness();
+		harness.messages.mockRejectedValueOnce(new Error("seed request failed"));
+		harness.result.setMonitoringState({
+			sessions: new Map([
+				["s1", { phase: "busy-sse-covered", busySince: 0, lastSSEAt: 0 }],
+			]),
+		});
+		try {
+			harness.emitStatus({ s1: { type: "busy" } });
+			await flushPromises();
+			expect(harness.messages).toHaveBeenCalledWith("s1");
+			expect(harness.statusWarn).toHaveBeenCalledExactlyOnceWith(
+				"Failed to seed poller for s1, will retry: seed request failed",
+			);
+			expect(harness.startPolling).not.toHaveBeenCalled();
+		} finally {
+			harness.result.stopMonitoring();
+		}
 	});
 
 	it("rejects an old seed after deletion and a new polling cycle", async () => {
@@ -748,7 +799,9 @@ async function createEffectHarness(
 		makePollerStateLive(),
 		makeOverridesStateLive(),
 	);
-	const persistence = makePersistenceEffectLayer(dbPath);
+	const persistence = makePersistenceEffectLayer(dbPath, "test-project");
+	const statusLog = createSilentLogger();
+	const statusWarn = vi.spyOn(statusLog, "warn");
 	const monitoring = wireMonitoringEffect({
 		client: { session: { messages } },
 		wsHandler: {
@@ -766,7 +819,7 @@ async function createEffectHarness(
 			pollerGatingConfig: { sseGracePeriodMs: 0, sseActiveThresholdMs: 0 },
 			...(pushManager && { pushManager }),
 		},
-		statusLog: createSilentLogger(),
+		statusLog,
 		sseLog: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
 	});
@@ -804,6 +857,7 @@ async function createEffectHarness(
 		runtime,
 		dispose: () => runtime?.dispose() ?? Promise.resolve(),
 		messages,
+		statusWarn,
 		startPolling,
 		getClientsForSession,
 		pollerEvents,

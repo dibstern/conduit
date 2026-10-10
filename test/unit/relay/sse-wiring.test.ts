@@ -490,6 +490,34 @@ describe("handleSSEEventEffect", () => {
 });
 
 describe("wireSSEConsumerEffect", () => {
+	it("invalidates delayed stop settlement when the instance starts again", async () => {
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		let stopIsCurrent: (() => boolean) | undefined;
+		const deps = createMockSSEWiringDeps({
+			opencodeRuntimeIngress: {
+				onReconnect: () => Effect.void,
+				onSSEEventEffect: () =>
+					Effect.succeed({ ok: false, reason: "not-translatable" }),
+				onInstanceStopped: (_instanceId: string, isCurrent?: () => boolean) => {
+					stopIsCurrent = isCurrent;
+					return Effect.void;
+				},
+			},
+		});
+		await wireSSEConsumerForTest(deps, consumer);
+		const status = listeners.get("status");
+		assert.exists(status);
+		status("stopped", true);
+		expect(stopIsCurrent?.()).toBe(true);
+		status("starting");
+		expect(stopIsCurrent?.()).toBe(false);
+	});
+
 	it("registers event listeners on consumer", async () => {
 		const deps = createMockSSEWiringDeps();
 		const consumer = {

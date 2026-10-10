@@ -1,9 +1,10 @@
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 // Session Lifecycle Wiring (G4)
 // Subscribes to DaemonEventBus session lifecycle events.
 
-import { Data, Effect, FiberMap, Layer, Ref, Stream } from "effect";
+import { Data, Effect, FiberMap, Layer, Option, Ref, Stream } from "effect";
+import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	LoggerTag,
 	PollerManagerTag,
@@ -88,7 +89,7 @@ export const makeSessionLifecycleWiringLive = (
 ): Layer.Layer<
 	never,
 	never,
-	| OpenCodeAPITag
+	| OpenCodeInstancesTag
 	| PollerManagerTag
 	| StatusPollerTag
 	| LoggerTag
@@ -96,7 +97,7 @@ export const makeSessionLifecycleWiringLive = (
 > =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
-			const client = yield* OpenCodeAPITag;
+			const instances = yield* OpenCodeInstancesTag;
 			const pollerManager = yield* PollerManagerTag;
 			const statusPoller = yield* StatusPollerTag;
 			const log = yield* LoggerTag;
@@ -123,17 +124,26 @@ export const makeSessionLifecycleWiringLive = (
 								yield* FiberMap.run(
 									createFibers,
 									event.sessionId,
-									handleSessionCreated(event.sessionId, {
-										translator,
-										client,
-										pollerManager,
-										sessionLog,
-										isSessionCurrent: isSessionGenerationCurrent(
-											createGenerationsRef,
-											event.sessionId,
-											generation,
-										),
+									Effect.gen(function* () {
+										// Lifecycle history reads are background work, including
+										// the events published when a Claude session is created.
+										const client = yield* instances.ifRunning(
+											defaultInstanceIdForDriver("opencode"),
+										);
+										if (Option.isNone(client)) return;
+										yield* handleSessionCreated(event.sessionId, {
+											translator,
+											client: client.value,
+											pollerManager,
+											sessionLog,
+											isSessionCurrent: isSessionGenerationCurrent(
+												createGenerationsRef,
+												event.sessionId,
+												generation,
+											),
+										});
 									}).pipe(
+										Effect.scoped,
 										Effect.catchTag(
 											"SessionLifecycleHistoryRebuildError",
 											(error) =>

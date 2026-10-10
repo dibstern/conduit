@@ -155,6 +155,7 @@ export function translateDomainEventToRelay(
 		case "session.resumed":
 		case "session.resume_scheduled":
 		case "session.resume_cancelled":
+		case "session.workspace_started":
 		// Read state reaches the UI as the `unread` field on a broadcast session
 		// list, never as a relay event, so there is nothing to translate here.
 		case "session.read":

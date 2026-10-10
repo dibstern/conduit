@@ -61,6 +61,8 @@ export const createOpenCodeReconciler = (options: {
 	const busy = new Map<string, Map<string, SessionStatus>>();
 	// Pending prompt keys ("permission:<id>", "question:<id>") per directory.
 	const pending = new Map<string, Set<string>>();
+	// A removed and re-added directory must not accept its previous reads.
+	const generations = new Map<string, symbol>();
 	let client: OpenCodeReconcileClient | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let wasActive = false;
@@ -126,18 +128,23 @@ export const createOpenCodeReconciler = (options: {
 			const current = client;
 			if (!current) return;
 			void Promise.all(
-				[...busy.keys()].map((directory) =>
-					current.session.statuses(directory).then(
+				[...busy.keys()].map((directory) => {
+					const generation = generations.get(directory);
+					return current.session.statuses(directory).then(
 						(statuses) => {
-							if (client === current) correct(directory, statuses);
+							if (
+								client === current &&
+								generations.get(directory) === generation
+							)
+								correct(directory, statuses);
 						},
 						(error: unknown) =>
 							options.log.debug("OpenCode status poll failed", {
 								directory,
 								error,
 							}),
-					),
-				),
+					);
+				}),
 			).finally(schedule);
 		}, options.pollIntervalMs ?? STATUS_POLL_INTERVAL_MS);
 		timer.unref?.();
@@ -149,6 +156,7 @@ export const createOpenCodeReconciler = (options: {
 
 		/** Feed every routed stream payload so polling follows streamed status. */
 		observe(directory: string, event: OpenCodePayload) {
+			generations.set(directory, generations.get(directory) ?? Symbol());
 			const [kind, action] = event.type.split(".");
 			const id =
 				action === "asked"
@@ -198,6 +206,8 @@ export const createOpenCodeReconciler = (options: {
 			client = next;
 			const read = await Promise.all(
 				[...new Set(directories)].map(async (directory) => {
+					const generation = generations.get(directory) ?? Symbol();
+					generations.set(directory, generation);
 					const lists = await Promise.all([
 						next.session.statuses(directory),
 						next.permission.list(directory),
@@ -206,6 +216,8 @@ export const createOpenCodeReconciler = (options: {
 						options.log.warn("OpenCode reconcile failed", { directory, error });
 						return undefined;
 					});
+					if (client !== next || generations.get(directory) !== generation)
+						return true;
 					if (!lists) return false;
 					const [statuses, permissions, questions] = lists;
 					correct(directory, statuses, emit);
@@ -225,12 +237,25 @@ export const createOpenCodeReconciler = (options: {
 			return read.every(Boolean);
 		},
 
+		/** Release all demand when a directory loses its last subscriber. */
+		forget(directory: string) {
+			generations.delete(directory);
+			busy.delete(directory);
+			pending.delete(directory);
+			if (busy.size === 0 && timer) {
+				clearTimeout(timer);
+				timer = undefined;
+			}
+			settle();
+		},
+
 		reset() {
 			if (timer) clearTimeout(timer);
 			timer = undefined;
 			client = undefined;
 			busy.clear();
 			pending.clear();
+			generations.clear();
 			wasActive = false;
 		},
 	};

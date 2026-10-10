@@ -9,6 +9,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import {
@@ -47,12 +48,35 @@ const makeTitleService = (): SessionTitleService => ({
 	startForFirstClaudeMessage: vi.fn(() => Effect.void),
 });
 
+const makeSessionRow = (provider: "claude" | "opencode"): SessionRow => ({
+	id: "session-1",
+	version: 1,
+	provider,
+	provider_sid: null,
+	title: "Test Session",
+	status: "idle",
+	parent_id: null,
+	fork_point_event: null,
+	last_message_at: null,
+	last_turn_error_at: null,
+	permission_mode: null,
+	settled_at: null,
+	pinned_at: null,
+	snoozed_at: null,
+	snoozed_until: null,
+	woken_at: null,
+	woken_reason: null,
+	created_at: 0,
+	updated_at: 0,
+});
+
 const makeReadQuery = (
 	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"],
+	provider: "claude" | "opencode" = "claude",
 ): ReadQueryEffect => ({
 	getToolContent: vi.fn(() => Effect.succeed(undefined)),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-	getSession: vi.fn(() => Effect.succeed(undefined)),
+	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider))),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
@@ -82,6 +106,7 @@ const providePromptLayer = (input: {
 	readonly titleService: SessionTitleService;
 	readonly persistService?: ClaudeEventPersistEffect;
 	readonly priorMessageCount?: number;
+	readonly provider?: "claude" | "opencode";
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientSession: vi.fn(() => "session-1"),
@@ -93,11 +118,13 @@ const providePromptLayer = (input: {
 		sessionManagerService,
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,
-		readQueryEffect: makeReadQuery(() =>
-			Effect.succeed({
-				messageCount: input.priorMessageCount ?? 0,
-				cumulativeTokens: 0,
-			}),
+		readQueryEffect: makeReadQuery(
+			() =>
+				Effect.succeed({
+					messageCount: input.priorMessageCount ?? 0,
+					cumulativeTokens: 0,
+				}),
+			input.provider,
 		),
 		...(input.persistService
 			? { claudeEventPersistEffect: input.persistService }
@@ -196,6 +223,7 @@ describe("Claude prompt title generation", () => {
 			engine,
 			titleService,
 			persistService,
+			provider: "opencode",
 		});
 
 		return Effect.gen(function* () {

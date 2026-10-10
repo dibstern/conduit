@@ -120,6 +120,7 @@ function makeHarness(options?: {
 	});
 
 	const eventStore = {
+		projectId: "test-project",
 		append,
 		appendBatch,
 		readFromSequence: vi.fn(() => Effect.succeed([])),
@@ -132,6 +133,7 @@ function makeHarness(options?: {
 		projectBatch,
 		recover: vi.fn(() =>
 			Effect.succeed({
+				projectId: "test-project",
 				startCursor: 0,
 				endCursor: 0,
 				totalReplayed: 0,
@@ -488,7 +490,15 @@ describe("ProviderRuntimeIngestion", () => {
 		expect(harness.appended).toEqual([
 			expect.objectContaining({ type: "session.created" }),
 		]);
-		expect(harness.executeSql).not.toHaveBeenCalled();
+		const queries = harness.executeSql.mock.calls as unknown as [
+			TemplateStringsArray,
+			...unknown[],
+		][];
+		expect(
+			queries.filter(([fragment]) =>
+				fragment.join("?").includes("INSERT OR IGNORE INTO sessions"),
+			),
+		).toEqual([]);
 	});
 
 	it("seeds a session row for a session it never saw created", async () => {
@@ -515,16 +525,24 @@ describe("ProviderRuntimeIngestion", () => {
 
 		// Claude subagents stream under an id Conduit never created. Without the
 		// row the message projector trips sessions(id) and the message is lost.
-		expect(harness.executeSql).toHaveBeenCalledTimes(1);
-		const [fragment, ...values] = harness.executeSql.mock
-			.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+		const queries = harness.executeSql.mock.calls as unknown as [
+			TemplateStringsArray,
+			...unknown[],
+		][];
+		const seedCalls = queries.filter(([fragment]) =>
+			fragment.join("?").includes("INSERT OR IGNORE INTO sessions"),
+		);
+		expect(seedCalls).toHaveLength(1);
+		const seed = seedCalls[0];
+		if (!seed) throw new Error("No session seed");
+		const [fragment, ...values] = seed;
 		expect(fragment.join("?")).toContain("INSERT OR IGNORE INTO sessions");
 		expect(values).toEqual(
 			expect.arrayContaining(["subagent-session", "claude"]),
 		);
-		expect(harness.executeSql.mock.invocationCallOrder[0]).toBeLessThan(
-			harness.projectBatch.mock.invocationCallOrder[0] as number,
-		);
+		expect(
+			harness.executeSql.mock.invocationCallOrder[queries.indexOf(seed)],
+		).toBeLessThan(harness.projectBatch.mock.invocationCallOrder[0] as number);
 	});
 
 	it("appends mapped domain events and projects the stored events eagerly", async () => {

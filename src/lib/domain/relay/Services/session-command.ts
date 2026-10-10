@@ -249,13 +249,11 @@ export const applySessionCommand = (
 			);
 		}
 
-		const defaultAdapter =
-			row !== undefined && isClaudeSessionRow(row, config.configDir)
-				? claudeUpstreamAdapter
-				: openCodeUpstreamAdapter(api);
 		const adapter =
 			options.upstreamAdapter === undefined
-				? defaultAdapter
+				? row !== undefined && isClaudeSessionRow(row, config.configDir)
+					? claudeUpstreamAdapter
+					: openCodeUpstreamAdapter(api)
 				: options.upstreamAdapter;
 
 		if (adapter !== null)
@@ -341,8 +339,8 @@ export const createOpenCodeSession = (
  * it surfaced as a root session in the sidebar.
  *
  * The fork keeps the parent's messages up to and including `messageId`, or all
- * of them when it is omitted. Resolve the fork point before publishing creation
- * so the first subscription row already carries it.
+ * of them when it is omitted. Resolve the boundary id before publishing creation;
+ * its timestamp follows the fork's stored copy when that row is projected.
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
@@ -442,25 +440,14 @@ export const forkOpenCodeSession = (
 				).pipe(Effect.as(undefined)),
 			),
 		);
-		let forkPointTimestamp =
-			forkTip?.time?.created ?? requestedBoundary?.time?.created;
-
 		let forkPointEvent = forkTip?.id ?? messageId;
-		if (
-			(forkPointEvent === undefined || forkPointTimestamp === undefined) &&
-			readQueryOption._tag === "Some"
-		) {
+		if (forkPointEvent === undefined && readQueryOption._tag === "Some") {
 			const parentMessages =
 				yield* readQueryOption.value.getSessionMessagesWithParts(
 					parentSessionId,
 				);
 			// A lagging projection cannot replace a known provider boundary.
-			const localBoundary =
-				forkPointEvent === undefined
-					? parentMessages.at(-1)
-					: parentMessages.find((message) => message.id === forkPointEvent);
-			forkPointEvent ??= localBoundary?.id;
-			forkPointTimestamp ??= localBoundary?.created_at;
+			forkPointEvent = parentMessages.at(-1)?.id;
 		}
 
 		yield* applySessionCommand({
@@ -472,16 +459,20 @@ export const forkOpenCodeSession = (
 				parentId: parentSessionId,
 				...(side ? { sideThread: true, permissionMode: "plan" as const } : {}),
 				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
-				...(forkPointTimestamp === undefined ? {} : { forkPointTimestamp }),
 				providerSessionId: session.id,
 			},
 		});
+		const forkPointTimestamp =
+			readQueryOption._tag === "Some"
+				? (yield* readQueryOption.value.getSession(session.id))
+						?.fork_point_timestamp
+				: undefined;
 
 		return {
 			...session,
 			...(side ? { title } : {}),
 			forkMessageId: forkPointEvent,
-			forkPointTimestamp,
+			...(forkPointTimestamp == null ? {} : { forkPointTimestamp }),
 		};
 	}).pipe(
 		Effect.annotateLogs("operation", "forkOpenCodeSession"),

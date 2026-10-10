@@ -86,6 +86,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 				Layer.merge(
 					makePersistenceEffectLayer(
 						join(directory, "events.db"),
+						"test-project",
 						undefined,
 						bus,
 					),
@@ -95,6 +96,9 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 		),
 	);
 	const sql = await runtime.runPromise(SqlClient.SqlClient);
+	await runtime.runPromise(sql`INSERT INTO sessions
+		(id, provider, title, status, created_at, updated_at)
+		VALUES ('session', 'claude', 'Runner session', 'idle', 0, 0)`);
 	const ingestion = await runtime.runPromise(ProviderRuntimeIngestionTag);
 	const receipts = await runtime.runPromise(makeClaudeRunnerReceiptStore(sql));
 	const peers: ClaudeRunnerSocket[] = [];

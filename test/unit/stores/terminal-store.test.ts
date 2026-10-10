@@ -5,6 +5,7 @@ import {
 	closePanel,
 	destroyAll,
 	failCreateTab,
+	getPendingTabTitle,
 	getScrollback,
 	getScrollbackSize,
 	handlePtyOutput,
@@ -309,7 +310,9 @@ describe("beginCreateTab", () => {
 	it("sets pending create state", () => {
 		expect(beginCreateTab()).toBe(true);
 		expect(terminalState.pendingCreate).toBe(true);
-		expect(terminalState.statusMessage).toBe("Creating terminal...");
+		// The pending tab shows progress, not the status bar.
+		expect(terminalState.statusMessage).toBeNull();
+		expect(getPendingTabTitle()).toBe("Terminal 1");
 	});
 
 	it("returns false if already pending", () => {
@@ -325,8 +328,9 @@ describe("beginCreateTab", () => {
 		expect(beginCreateTab()).toBe(false);
 	});
 
-	it("times out after 15 seconds", () => {
+	it("times out after 30 seconds, past the server's host start backstop", () => {
 		beginCreateTab();
+		vi.advanceTimersByTime(15_000);
 		expect(terminalState.pendingCreate).toBe(true);
 		vi.advanceTimersByTime(15_000);
 		expect(terminalState.pendingCreate).toBe(false);

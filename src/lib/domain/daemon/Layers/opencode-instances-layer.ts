@@ -7,6 +7,7 @@ import {
 	Exit,
 	Fiber,
 	FiberId,
+	FiberMap,
 	Layer,
 	Option,
 	Queue,
@@ -32,6 +33,7 @@ import type {
 } from "../../../types.js";
 import { subscribeToDaemonEvents } from "../Services/daemon-pubsub.js";
 import {
+	checkInstanceHealth,
 	getInstance,
 	getInstances,
 	getInstanceUrl,
@@ -80,10 +82,17 @@ export type OpenCodeEndpoint = {
 type OpenCodeProcessControl<Start, Stop> = {
 	/** Spawns a managed instance; begins health checks of an external one. */
 	readonly start: (instanceId: string) => Effect.Effect<void, unknown, Start>;
-	readonly stop: (instanceId: string) => Effect.Effect<void, never, Stop>;
+	/** True only when termination completed; cached manager status is not proof. */
+	readonly stop: (instanceId: string) => Effect.Effect<boolean, never, Stop>;
 	/** Instances running before any use: survivors re-adopted at startup. */
 	readonly adopted: Effect.Effect<ReadonlyArray<string>, never, Start>;
+	/** Exact registered ids removed from the manager, independent of alias resolution. */
+	readonly removed?: Stream.Stream<string, never, Start>;
 	readonly crashes?: {
+		/** Verify process health promptly after a managed transport loss. */
+		readonly checkHealth?: (
+			instanceId: string,
+		) => Effect.Effect<void, never, Start>;
 		/** Ids of instances whose process status changed. */
 		readonly statusChanges: Stream.Stream<string, never, Start>;
 		/** Restarts a crashed managed instance with backoff; fails on giving up. */
@@ -173,9 +182,17 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			// Completes when an instance's stop finishes; `use` waits on it.
 			const stopping = new Map<string, Deferred.Deferred<void>>();
 			// Last lifecycle state per instance; only transitions are broadcast.
-			const states = new Map<string, OpenCodeConnectionStatus>();
+			const states = new Map<
+				string,
+				{ state: OpenCodeConnectionStatus; managedStopped: boolean }
+			>();
 			// Reconcilers report demand changes from callbacks; settled in order.
 			const demandChanged = yield* Queue.unbounded<string>();
+			const healthChecks = yield* Queue.unbounded<{
+				instanceId: string;
+				stream: InstanceStream;
+			}>();
+			const healthProbes = yield* FiberMap.make<string, void>();
 			const paths = new Map<string, string>();
 			const normalize = (directory: string) => {
 				const cached = paths.get(directory);
@@ -203,14 +220,21 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const setState = (
 				instanceId: string,
 				state: OpenCodeConnectionStatus,
+				managedStopped = false,
 			) => {
-				if (states.get(instanceId) === state) return;
-				states.set(instanceId, state);
+				const previous = states.get(instanceId);
+				if (
+					previous?.state === state &&
+					previous.managedStopped === managedStopped
+				)
+					return;
+				states.set(instanceId, { state, managedStopped });
 				log.info("OpenCode instance state", { instanceId, state });
 				broadcast({
 					_tag: "connection",
 					instanceId,
 					state,
+					...(managedStopped ? { managedStopped } : {}),
 					health:
 						streams.get(instanceId)?.source.getHealth() ?? NO_STREAM_HEALTH,
 				});
@@ -298,6 +322,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					// managed one still running just reconnects unnoticed.
 					const lost = () => {
 						if (!current()) return;
+						broadcast({
+							_tag: "disconnected",
+							instanceId,
+							health: source.getHealth(),
+						});
 						if (hasDemand(instanceId)) setState(instanceId, "reconnecting");
 						else if (!stream.managed) setState(instanceId, "stopped");
 					};
@@ -305,13 +334,22 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Deferred.unsafeDone(stream.connected, Exit.void);
 						if (!current()) return;
 						setState(instanceId, "connected");
+						broadcast({
+							_tag: "connected",
+							instanceId,
+							health: source.getHealth(),
+						});
 						if (stream.reconcileClient)
 							void stream.reconciler.reconcile(
 								stream.reconcileClient,
 								subscribedDirectories(),
 							);
 					});
-					source.on("disconnected", lost);
+					source.on("disconnected", () => {
+						lost();
+						if (current() && stream.managed && control?.crashes?.checkHealth)
+							Queue.unsafeOffer(healthChecks, { instanceId, stream });
+					});
 					source.on("reconnecting", lost);
 					source.on("event", (raw) => {
 						const decoded = decodeEnvelope(raw);
@@ -362,6 +400,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					const stream = streams.get(instanceId);
 					if (!stream) return;
 					streams.delete(instanceId);
+					yield* FiberMap.remove(healthProbes, instanceId);
 					stream.reconciler.reset();
 					yield* stream.source.drainEffect();
 				});
@@ -446,18 +485,26 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			) =>
 				(control && stopProcess
 					? control.stop(instanceId).pipe(Effect.provide(context))
-					: Effect.void
+					: Effect.succeed(false)
 				).pipe(
-					Effect.ensuring(
+					Effect.onExit((terminated) =>
 						gate
 							.withPermits(1)(
-								Effect.sync(() => {
+								Effect.gen(function* () {
+									const endpoint = yield* resolveIn(instanceId);
 									stopping.delete(instanceId);
-									setState(instanceId, "stopped");
+									setState(
+										instanceId,
+										"stopped",
+										Exit.isSuccess(terminated) &&
+											terminated.value &&
+											endpoint?.managed === true,
+									);
 								}),
 							)
 							.pipe(Effect.zipRight(Deferred.done(done, Exit.void))),
 					),
+					Effect.asVoid,
 				);
 
 			/**
@@ -577,20 +624,34 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						),
 						Effect.exit,
 						Effect.flatMap((exit) =>
-							gate
-								.withPermits(1)(
-									Effect.suspend(() => {
-										starts.delete(instanceId);
-										if (Exit.isSuccess(exit)) return Effect.void;
-										// A stop that won the race already settled the state.
-										if (states.get(instanceId) !== "stopped")
-											setState(instanceId, "failed");
-										return closeStream(instanceId);
-									}),
-								)
-								.pipe(
-									Effect.zipRight(Deferred.done(started, Exit.asVoid(exit))),
-								),
+							Effect.gen(function* () {
+								const endpoint = Exit.isFailure(exit)
+									? yield* resolveIn(instanceId)
+									: undefined;
+								// Exhaustion can leave a live recovery record behind. Confirm
+								// its termination before publishing a terminal settlement signal.
+								const terminated =
+									endpoint?.managed && endpoint.status === "stopped" && control
+										? yield* control
+												.stop(instanceId)
+												.pipe(Effect.provide(context))
+										: false;
+								return yield* gate
+									.withPermits(1)(
+										Effect.gen(function* () {
+											starts.delete(instanceId);
+											if (Exit.isSuccess(exit)) return;
+											// A stop that won the race already settled the state.
+											if (states.get(instanceId)?.state !== "stopped") {
+												setState(instanceId, "failed", terminated);
+											}
+											yield* closeStream(instanceId);
+										}),
+									)
+									.pipe(
+										Effect.zipRight(Deferred.done(started, Exit.asVoid(exit))),
+									);
+							}),
 						),
 						Effect.forkIn(scope),
 						Effect.zipRight(Deferred.await(started)),
@@ -720,6 +781,40 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			// restarts with backoff if it has demand; otherwise it stays stopped.
 			// Starts and stops in progress own their failures.
 			const crashes = control?.crashes;
+			const checkHealth = crashes?.checkHealth;
+			if (checkHealth)
+				yield* Stream.fromQueue(healthChecks).pipe(
+					Stream.runForEach(({ instanceId, stream }) =>
+						gate.withPermits(1)(
+							Effect.suspend(() =>
+								streams.get(instanceId) === stream && !stopping.has(instanceId)
+									? FiberMap.run(
+											healthProbes,
+											instanceId,
+											Effect.suspend(() => checkHealth(instanceId)),
+											{ onlyIfMissing: true },
+										).pipe(Effect.asVoid)
+									: Effect.void,
+							),
+						),
+					),
+					Effect.provide(context),
+					Effect.forkIn(scope),
+				);
+			if (control?.removed)
+				yield* control.removed.pipe(
+					Stream.runForEach((instanceId) =>
+						gate.withPermits(1)(
+							Effect.suspend(() =>
+								cancelGrace(instanceId).pipe(
+									Effect.zipRight(closeStream(instanceId)),
+								),
+							),
+						),
+					),
+					Effect.provide(context),
+					Effect.forkIn(scope),
+				);
 			if (crashes)
 				yield* crashes.statusChanges.pipe(
 					Stream.runForEach((instanceId) =>
@@ -821,30 +916,51 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												gate.withPermits(1)(
 													Effect.sync(() => {
 														subscribers.delete(member);
+														const remaining = new Set(subscribedDirectories());
+														for (const directory of member.directories) {
+															if (remaining.has(directory)) continue;
+															for (const stream of streams.values())
+																stream.reconciler.forget(directory);
+														}
 													}),
 												),
 										);
 										const stream = streams.get(instanceId);
-										const state = states.get(instanceId);
-										if (state)
+										for (const [id, { state, managedStopped }] of states) {
+											if (id !== instanceId && !managedStopped) continue;
 											subscriber.send({
 												_tag: "connection",
-												instanceId,
+												instanceId: id,
 												state,
-												health: stream?.source.getHealth() ?? NO_STREAM_HEALTH,
+												...(managedStopped ? { managedStopped } : {}),
+												health:
+													streams.get(id)?.source.getHealth() ??
+													NO_STREAM_HEALTH,
 											});
-										if (stream) {
+										}
+										if (stream?.source.isConnected())
+											subscriber.send({
+												_tag: "connected",
+												instanceId,
+												health: stream.source.getHealth(),
+											});
+										// Recover every already-open instance, including sessions
+										// bound to a non-selected instance. This stays passive.
+										for (const [runningId, running] of streams) {
 											// A late subscriber gets its own replay; others never see it.
-											if (stream.source.isConnected() && stream.reconcileClient)
-												void stream.reconciler.reconcile(
-													stream.reconcileClient,
+											if (
+												running.source.isConnected() &&
+												running.reconcileClient
+											)
+												void running.reconciler.reconcile(
+													running.reconcileClient,
 													subscriber.directories,
 													(_directory, payload) =>
 														subscriber.send({
 															_tag: "event",
-															instanceId,
+															instanceId: runningId,
 															payload,
-															health: stream.source.getHealth(),
+															health: running.source.getHealth(),
 														}),
 												);
 										}
@@ -899,6 +1015,17 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 	{
 		control: {
 			start: startInstance,
+			removed: Stream.unwrapScoped(
+				Effect.map(subscribeToDaemonEvents, (events) =>
+					Stream.fromQueue(events).pipe(
+						Stream.filterMap((event) =>
+							event._tag === "ProviderInstanceRemoved"
+								? Option.some(event.instanceId)
+								: Option.none(),
+						),
+					),
+				),
+			),
 			adopted: Effect.map(getInstances, (instances) =>
 				Array.from(instances).flatMap(({ id, driver, managed, status }) =>
 					(driver ?? "opencode") === "opencode" &&
@@ -911,10 +1038,13 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			stop: (instanceId) =>
 				stopInstance(instanceId).pipe(
 					Effect.catchAllCause((cause) =>
-						Effect.logWarning("OpenCode instance stop failed", cause),
+						Effect.logWarning("OpenCode instance stop failed", cause).pipe(
+							Effect.as(false),
+						),
 					),
 				),
 			crashes: {
+				checkHealth: checkInstanceHealth,
 				statusChanges: Stream.unwrapScoped(
 					Effect.map(subscribeToDaemonEvents, (events) =>
 						Stream.fromQueue(events).pipe(
