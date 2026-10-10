@@ -52,7 +52,7 @@
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
-	import { drawSavedTranscript, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
+	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
 	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
@@ -489,7 +489,7 @@
 		return () => { cancelled = true; };
 	});
 	// A drawn session is viewed once the server has placed it.
-	const placedId = $derived(sessionState.currentId === savedDraw.sessionId ? null : sessionState.currentId);
+	const placedId = $derived(placedSessionId());
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? placedId : null;
@@ -539,6 +539,7 @@
 		// commands match it before the first send.
 		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : getCurrentSearchParams().get("p");
 		const attachedSlug = attachedProjectState.slug;
+		untrack(() => leaveSavedDraw(route.page === "chat" ? route.sessionId : undefined));
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {

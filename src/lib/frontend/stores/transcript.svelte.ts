@@ -553,6 +553,22 @@ export const savedDraw = $state({ sessionId: null as string | null });
 /** The record each drawn slot came from; its view resumes from it. */
 const drawn = new WeakMap<SessionMessages, SavedTranscript>();
 
+/** The open session, once the server has placed it: null while it is only
+ *  drawn from its saved page, so nothing asks the server about it yet. */
+export const placedSessionId = (): string | null =>
+	sessionState.currentId === savedDraw.sessionId
+		? null
+		: sessionState.currentId;
+
+/** The route left the drawn session before the server placed it. Its record
+ *  stays: nothing has disowned it. */
+export function leaveSavedDraw(sessionId: string | undefined): void {
+	const left = savedDraw.sessionId;
+	if (left === null || left === sessionId) return;
+	savedDraw.sessionId = null;
+	if (sessionState.currentId === left) sessionState.currentId = null;
+}
+
 const emptyTranscript = (project: ProjectRef): TranscriptEntry => ({
 	rows: [],
 	hwm: null,
@@ -698,12 +714,12 @@ export function viewTranscript(
 					Stream.runForEach(
 						supervise(
 							Stream.suspend(() => {
-								const drawn = unopened;
+								const first = unopened;
 								unopened = undefined;
 								return subscriptions.sessionDetail({
 									sessionId,
 									ledger,
-									saved: drawn,
+									saved: first,
 									...(slot.messages.transcript?.hwm == null
 										? {}
 										: { resumeFromSequence: slot.messages.transcript.hwm }),

@@ -5,8 +5,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import { currentChat } from "../../stores/chat.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
-	import { loadOlderTranscript } from "../../stores/transcript.svelte.js";
+	import { loadOlderTranscript, placedSessionId } from "../../stores/transcript.svelte.js";
 
 	let {
 		sentinelEl,
@@ -42,14 +41,10 @@
 
 	function loadMore() {
 		const chat = currentChat();
-		if (
-			!sessionState.currentId ||
-			chat.historyLoading ||
-			!chat.historyHasMore
-		)
-			return;
+		const sessionId = placedSessionId();
+		if (!sessionId || chat.historyLoading || !chat.historyHasMore) return;
 
-		void loadOlderTranscript(sessionState.currentId).catch(() => undefined);
+		void loadOlderTranscript(sessionId).catch(() => undefined);
 	}
 </script>
 

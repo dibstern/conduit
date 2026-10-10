@@ -123,14 +123,15 @@ const partRowId = (messageId: string, partId: string) =>
 	Schema.encodeSync(PartRemovalId)([messageId, partId]);
 
 /**
- * What a {@link ResumePoint} says, readable only here: the store that sent
- * the snapshot, and the base a resume from it is checked against.
+ * What a {@link ResumePoint} says, readable only here: the store and session
+ * that sent the snapshot, and the base a resume from it is checked against.
  */
 const ResumePointBody = Schema.compose(
 	Schema.StringFromBase64Url,
 	Schema.parseJson(
 		Schema.Struct({
 			store: Schema.String,
+			session: Schema.String,
 			sequence: Schema.Number,
 			cursor: Schema.optional(Schema.NonEmptyString),
 		}),
@@ -197,11 +198,11 @@ export const subscribeSessionDetail = (options: {
 					Option.fromNullable(options.resumePoint).pipe(
 						Option.flatMap(Schema.decodeOption(ResumePointBody)),
 					),
-					(body) => body.store === store,
+					(body) => body.store === store && body.session === options.sessionId,
 				),
 			);
 			// A saved snapshot resumes from the base its point names; a point
-			// this store did not send gets a fresh snapshot.
+			// this store did not send for this session gets a fresh snapshot.
 			const resume =
 				options.resumePoint === undefined
 					? options
@@ -387,6 +388,7 @@ export const subscribeSessionDetail = (options: {
 									resumePoint: ResumePoint.make(
 										Schema.encodeSync(ResumePointBody)({
 											store,
+											session: options.sessionId,
 											sequence: envelope.sequence,
 											...(envelope.cursor === undefined
 												? {}

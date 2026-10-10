@@ -54,6 +54,7 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
@@ -383,7 +384,9 @@
 		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
 		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
 	);
-	const canSend = $derived(!unsupportedDraftFolders && (inputText.trim().length > 0 || pendingImages.length > 0));
+	// A session drawn from its saved page takes sends once the server places it.
+	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
+	const canSend = $derived(!unsupportedDraftFolders && !unplaced && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
 			? "Reply"
@@ -535,7 +538,7 @@
 	let startingSideThread = false;
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (unsupportedDraftFolders) return false;
+		if (unsupportedDraftFolders || unplaced) return false;
 		let text = textOverride ?? inputText.trim();
 		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
 		const builtins = providerBuiltinNameSet;

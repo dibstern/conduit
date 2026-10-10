@@ -15,12 +15,14 @@
 //   saved record;
 // - a record from another build, or one that no longer decodes, is drawn, or
 //   its resume point is sent;
-// - a resume point minted by another store (reset, fresh install) is honoured,
-//   so the server sends deltas against rows it never had;
+// - a resume point minted by another store (reset, fresh install) or for
+//   another session is honoured, so the server sends deltas against rows it
+//   never had;
 // - a store restored from a backup answers with an older snapshot, and the
 //   newer record is kept, or its rows stay on screen;
 // - unavailable storage (private browsing) or a full quota breaks the open or
 //   throws, instead of opening cold; an aborted write takes back a read;
+// - IndexedDB never answering holds up the first subscribe forever;
 // - more than 20 sessions are kept, or the wrong ones are dropped.
 //
 //   CONDUIT_TEST_DIST=dist pnpm exec playwright test \
@@ -172,10 +174,11 @@ const detailRequests = (sent: readonly unknown[]) =>
 		),
 	);
 
-/** The detail envelopes the page was given since `from`. */
-const detailEnvelopes = (tab: Tab, from: number) => {
+/** The detail envelopes the page was given since `from`. Request ids
+ *  restart on every page, so only this page's requests name its replies. */
+const detailEnvelopes = (tab: Tab, sentFrom: number, from: number) => {
 	const ids = new Set(
-		detailRequests(tab.sent).map((request) =>
+		detailRequests(tab.sent.slice(sentFrom)).map((request) =>
 			"id" in request ? String(request.id) : "",
 		),
 	);
@@ -385,7 +388,10 @@ test("a session opened from its saved page ends where a cold open does", async (
 			});
 			await expect
 				.poll(
-					() => detailEnvelopes(tab, receivedFrom).some(tagged("synchronized")),
+					() =>
+						detailEnvelopes(tab, sentFrom, receivedFrom).some(
+							tagged("synchronized"),
+						),
 					{ timeout: 30_000 },
 				)
 				.toBe(true);
@@ -412,7 +418,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 								() => true,
 								() => false,
 							);
-			const envelopes = detailEnvelopes(tab, receivedFrom);
+			const envelopes = detailEnvelopes(tab, sentFrom, receivedFrom);
 			const requests = detailRequests(tab.sent.slice(sentFrom));
 			return {
 				sessionId,
@@ -704,6 +710,52 @@ test("a session opened from its saved page ends where a cold open does", async (
 		}),
 		{ ...clean, resumePointSent: true, detailSnapshots: 1, settled: true },
 	);
+
+	// A point minted for another session is refused: a fresh snapshot, never
+	// a resume checked against the wrong rows, and the record is replaced.
+	const other = "cache-lru-0";
+	await visit(tab, other, replyEnd("lru", 0), {
+		cold: false,
+		settled: (saved) => saved[other] !== undefined,
+	});
+	const foreignPoint = restored.verdicts.record?.resumePoint;
+	await atOrigin(tab, (page) =>
+		page.evaluate(
+			([id, point]) =>
+				new Promise<void>((resolve, reject) => {
+					const request = indexedDB.open("conduit-saved-transcripts");
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => {
+						const db = request.result;
+						const transaction = db.transaction("transcripts", "readwrite");
+						const store = transaction.objectStore("transcripts");
+						const get = store.get(id);
+						get.onsuccess = () =>
+							store.put({
+								...get.result,
+								snapshot: { ...get.result.snapshot, resumePoint: point },
+							});
+						transaction.oncomplete = () => {
+							db.close();
+							resolve();
+						};
+						transaction.onabort = () => {
+							db.close();
+							reject(transaction.error);
+						};
+					};
+				}),
+			[other, foreignPoint] as const,
+		),
+	);
+	await run(
+		"other-session-point",
+		visit(tab, other, replyEnd("lru", 0), {
+			settled: (saved) =>
+				saved[other] !== undefined && saved[other].resumePoint !== foreignPoint,
+		}),
+		{ ...clean, resumePointSent: true, detailSnapshots: 1, settled: true },
+	);
 	await tab.context.close();
 
 	// Private browsing: storage refuses to open, and every open is cold.
@@ -718,6 +770,26 @@ test("a session opened from its saved page ends where a cold open does", async (
 	for (const name of ["storage-unavailable", "storage-unavailable-reload"])
 		await run(name, visit(blocked, SESSION, shown), { ...clean, ...cold });
 	await blocked.context.close();
+
+	// IndexedDB never answers the app's open (it names version 1; this test's
+	// own reads name none and still answer): the read gives up, and the
+	// session opens cold.
+	const hung = await openTab(() => {
+		const open = IDBFactory.prototype.open;
+		IDBFactory.prototype.open = function (
+			this: IDBFactory,
+			...args: Parameters<IDBFactory["open"]>
+		) {
+			return args[1] === 1
+				? Object.create(IDBOpenDBRequest.prototype)
+				: open.apply(this, args);
+		};
+	});
+	await run("storage-never-answers", visit(hung, SESSION, shown), {
+		...clean,
+		...cold,
+	});
+	await hung.context.close();
 
 	// Over quota: every write aborts. A read still draws and resumes, and a
 	// failed save leaves no record and no error.

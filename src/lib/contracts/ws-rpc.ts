@@ -53,11 +53,11 @@ export const ResumeBase = Schema.Struct({
 export type ResumeBase = typeof ResumeBase.Type;
 
 /**
- * Where a saved snapshot can resume from, named by the store that sent it
- * (conduit-test-y7eo.14). Opaque: only the server makes one and only the
- * server reads one, so a client can keep it and hand it back but cannot
- * forge or alter what it says. A point from another store is refused with a
- * fresh snapshot.
+ * Where a saved snapshot can resume from, named by the store and session that
+ * sent it (conduit-test-y7eo.14). Opaque to the browser, which only keeps it
+ * and hands it back; it is not tamper-proof. The server validates it, refusing
+ * one from another store or session with a fresh snapshot, and the resume
+ * checksum backs whatever it accepts.
  */
 export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
 export type ResumePoint = typeof ResumePoint.Type;

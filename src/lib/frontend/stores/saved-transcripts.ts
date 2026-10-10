@@ -8,6 +8,9 @@
 // never an error the user sees):
 // - IndexedDB is missing, refuses to open (private browsing), or is blocked:
 //   every call resolves to "no record" and every write is dropped.
+// - IndexedDB never answers (a WebKit bug can leave an open or a transaction
+//   pending forever): a read gives up after READ_WAIT_MS as "no record", so
+//   it never holds up the first subscribe.
 // - A write exceeds the quota or the transaction aborts: the old record, if
 //   any, stays as it was; a transaction is all or nothing.
 // - A record from another build, protocol or schema version, or one that no
@@ -33,6 +36,7 @@ import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 const DATABASE = "conduit-saved-transcripts";
 const STORE = "transcripts";
 const KEEP = 20;
+const READ_WAIT_MS = 150;
 
 const SavedSnapshot = SessionDetailEnvelopeSchema.members[0];
 export type SavedSnapshot = typeof SavedSnapshot.Type;
@@ -69,7 +73,15 @@ const open = (): Promise<IDBDatabase> =>
 			request.result
 				.createObjectStore(STORE, { keyPath: "sessionId" })
 				.createIndex("openedAt", "openedAt");
-		request.onsuccess = () => resolve(request.result);
+		request.onsuccess = () => {
+			const db = request.result;
+			// Another tab upgrading the database: let it, and reopen next time.
+			db.onversionchange = () => {
+				db.close();
+				database = undefined;
+			};
+			resolve(db);
+		};
 		request.onerror = () => reject(request.error);
 		request.onblocked = () => reject(request.error);
 	}));
@@ -94,8 +106,17 @@ const transact = <T>(
 		)
 		.catch(() => undefined);
 
-/** The session's saved page, if it is still usable; marks it opened. */
+/** The session's saved page, if it is still usable and read in time; marks
+ *  it opened. */
 export const openSavedTranscript = (
+	sessionId: string,
+): Promise<SavedTranscript | undefined> =>
+	Promise.race([
+		readSavedTranscript(sessionId),
+		new Promise<undefined>((resolve) => setTimeout(resolve, READ_WAIT_MS)),
+	]);
+
+const readSavedTranscript = (
 	sessionId: string,
 ): Promise<SavedTranscript | undefined> =>
 	transact<SavedTranscript>((store, done) => {
