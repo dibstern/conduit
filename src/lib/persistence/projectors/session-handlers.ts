@@ -109,8 +109,11 @@ type SessionHandledType =
 	| "session.resumed"
 	| "session.resume_scheduled"
 	| "session.resume_cancelled"
+	| "tool.running"
+	| "tool.completed"
 	| "turn.completed"
 	| "turn.error"
+	| "turn.interrupted"
 	| "permission.asked"
 	| "question.asked"
 	| "message.created";
@@ -135,6 +138,61 @@ function wakeSession(
 			WHERE ${target} AND snoozed_at IS NOT NULL AND woken_at IS NULL
 			AND snoozed_at <= ? AND (snoozed_until IS NULL OR snoozed_until > ?)`,
 		params: [createdAt, reason, sessionId, createdAt, createdAt],
+	};
+}
+
+// A Claude subagent has no status stream of its own: its lifecycle is the
+// parent's Task tool part, which names the child in metadata.childSessionId
+// (conduit-test-zbct). OpenCode children emit their own session.status and
+// name the child under `sessionId`, so none of this touches them. Parts are
+// read before the message projector applies the same event, and corrupt
+// metadata reads as no child rather than failing the projection.
+const PART_CHILD =
+	"CASE WHEN json_valid(p.metadata) THEN json_extract(p.metadata, '$.childSessionId') END";
+
+// A parent turn that is interrupted or fails leaves its Task parts open, so the
+// children they name settle with it rather than staying busy forever.
+function settleOpenSubagents(
+	parentSessionId: string,
+	createdAt: number,
+): SessionStatement {
+	return {
+		sql: `UPDATE sessions SET status = 'idle', updated_at = ?
+			WHERE status IN ('busy', 'retry') AND id IN (
+				SELECT ${PART_CHILD} FROM message_parts p
+				JOIN messages m ON m.id = p.message_id
+				WHERE m.session_id = ? AND p.type = 'tool' AND p.status IN ('started', 'running'))`,
+		params: [createdAt, parentSessionId],
+	};
+}
+
+// A turn's end advances the turn-end version and names the send the turn
+// answered, so a browser can tell a late end of an earlier turn from the end of
+// the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
+// ended turn has no known send.
+function endTurn(
+	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
+	errorAt: number | null,
+	userMessageId: string | null,
+	messageId: string,
+): SessionStatement {
+	return {
+		sql: `UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
+			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
+				THEN (SELECT input_id FROM messages WHERE id = COALESCE(?,
+					(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+				ELSE last_turn_end_input_id END,
+			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
+			WHERE id = ?`,
+		params: [
+			event.createdAt,
+			errorAt,
+			event.streamVersion,
+			userMessageId,
+			messageId,
+			event.streamVersion,
+			event.sessionId,
+		],
 	};
 }
 
@@ -486,29 +544,56 @@ export const sessionHandlers: {
 		},
 	],
 
-	"turn.completed": (event) => {
+	// Only the first attach of a child to a still-open part starts it: progress
+	// and post-result materialization re-send the same child id on parts that
+	// already name it, or that have completed or been interrupted.
+	"tool.running": (event) => {
+		const child = event.data.metadata?.["childSessionId"];
+		if (typeof child !== "string") return [];
 		return [
-			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
-				params: [event.createdAt, event.streamVersion, event.sessionId],
+				sql: `UPDATE sessions SET status = 'busy', updated_at = ?
+					WHERE id = ? AND status <> 'busy' AND NOT EXISTS (
+						SELECT 1 FROM message_parts p WHERE p.id = ?
+						AND (p.status IN ('completed', 'error') OR ${PART_CHILD} IS NOT NULL))`,
+				params: [event.createdAt, child, event.data.partId],
 			},
 		];
 	},
-	"turn.error": (event) => {
+	// Completion rarely repeats the child id, so fall back to the one the part
+	// already holds.
+	"tool.completed": (event) => {
+		const child = event.data.metadata?.["childSessionId"];
 		return [
-			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ?, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				sql: `UPDATE sessions SET status = 'idle', updated_at = ?
+					WHERE status IN ('busy', 'retry') AND id = COALESCE(?,
+						(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))`,
 				params: [
 					event.createdAt,
-					event.createdAt,
-					event.streamVersion,
-					event.sessionId,
+					typeof child === "string" ? child : null,
+					event.data.partId,
 				],
 			},
 		];
 	},
+	"turn.completed": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "turn"),
+		endTurn(event, null, null, event.data.messageId),
+	],
+	"turn.error": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "error"),
+		endTurn(
+			event,
+			event.createdAt,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
+		settleOpenSubagents(event.sessionId, event.createdAt),
+	],
+	"turn.interrupted": (event) => [
+		settleOpenSubagents(event.sessionId, event.createdAt),
+	],
 	"permission.asked": (event) => [
 		wakeSession(event.data.sessionId, event.createdAt, "approval"),
 	],

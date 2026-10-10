@@ -290,6 +290,8 @@ export interface InputAdmittedPayload {
 export interface InputSentPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
+	/** Handed into the running turn rather than starting one. */
+	readonly steer?: true;
 }
 
 export interface InputCancelledPayload {
@@ -937,6 +939,7 @@ const InputAdmittedPayloadSchema = Schema.Struct({
 const InputSentPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
+	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
 const InputCancelledPayloadSchema = Schema.Struct({
