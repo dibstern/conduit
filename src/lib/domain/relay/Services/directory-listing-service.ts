@@ -3,7 +3,11 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Context, Data, Effect, Layer, Option } from "effect";
-import type { FindFoldersResponse } from "../../../contracts/ws-rpc.js";
+import {
+	type FindFoldersResponse,
+	ProjectSaveRejected,
+} from "../../../contracts/ws-rpc.js";
+import { isPermissionDenied } from "../../../project-folders.js";
 
 /** Path autocomplete lists every child folder; this only bounds huge folders like node_modules. The list scrolls. */
 const MAX_PATH_MATCHES = 500;
@@ -27,7 +31,10 @@ export class DirectoryListingServiceError extends Data.TaggedError(
 export interface DirectoryListingService {
 	find(
 		query: string,
-	): Effect.Effect<FindFoldersResponse, DirectoryListingServiceError>;
+	): Effect.Effect<
+		FindFoldersResponse,
+		DirectoryListingServiceError | ProjectSaveRejected
+	>;
 }
 
 export class DirectoryListingServiceTag extends Context.Tag(
@@ -192,7 +199,10 @@ const suggestFolders = (
 export const findFolders = (
 	query: string,
 	sources: FolderSuggestionSources = { recent: [], projectFolders: [] },
-): Effect.Effect<FindFoldersResponse, DirectoryListingServiceError> =>
+): Effect.Effect<
+	FindFoldersResponse,
+	DirectoryListingServiceError | ProjectSaveRejected
+> =>
 	Effect.gen(function* () {
 		if (!query.startsWith("/") && !query.startsWith("~"))
 			return yield* suggestFolders(query.trim(), sources);
@@ -260,7 +270,18 @@ export const findFolders = (
 			exists: true,
 		} as const;
 		return { entries: [typed, ...children.flat()] };
-	}).pipe(Effect.map((result) => ({ home: homedir(), ...result })));
+	}).pipe(
+		Effect.map((result) => ({ home: homedir(), ...result })),
+		Effect.mapError((error) =>
+			isPermissionDenied(error.cause)
+				? new ProjectSaveRejected({
+						issues: [
+							{ kind: "permission-denied", path: resolve(expandHome(query)) },
+						],
+					})
+				: error,
+		),
+	);
 
 export const DirectoryListingServiceLive: Layer.Layer<DirectoryListingServiceTag> =
 	Layer.succeed(DirectoryListingServiceTag, {

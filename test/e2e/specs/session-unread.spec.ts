@@ -503,6 +503,10 @@ async function dwellAndViewport(
 	});
 
 	await test.step("scrolled up keeps it until the turn end is in view", async () => {
+		// Let the off-screen step's ArrowUp age past the scroll-follow window:
+		// shrinking the window re-pins the following transcript, and that scroll
+		// would count as one the key set off.
+		await A.clock.fastForward(1_500);
 		const viewport = A.viewportSize();
 		if (!viewport) throw new Error("window A has no viewport");
 		await A.setViewportSize({ width: viewport.width, height: 300 });

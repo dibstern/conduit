@@ -148,14 +148,14 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 		"title",
 		"Mark read (u)",
 	);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 	await row.hover();
 	await expect(markUnread).toBeVisible();
 	await row.getByTestId("session-act-settle").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	await expect(row).toBeVisible();
 
 	// Keyboard: ● then the settle twin are the first stops after the row link.
@@ -167,7 +167,7 @@ test("desktop: hover and Tab reach the row's verbs, and the menu returns focus",
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");
 	await expect(row).toHaveCount(0);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	await expect(row).toBeVisible();
 
 	// The menu is keyboard operable and Escape hands focus back to its trigger.
@@ -316,7 +316,7 @@ test.describe("phone", () => {
 		await drag(row, [0.4]);
 		await settleButton.tap();
 		await expect(row).toHaveCount(0);
-		await page.getByTestId("toast-action").last().click();
+		await page.getByTestId("toast-action").first().click();
 		await expect(row).toBeVisible();
 
 		// Left: a full swipe snoozes to tomorrow morning, a short one offers presets.
@@ -325,7 +325,7 @@ test.describe("phone", () => {
 		await expect(
 			page.getByRole("status").filter({ hasText: `Snoozed “${title}” until` }),
 		).toContainText("9:00");
-		await page.getByTestId("toast-action").last().click();
+		await page.getByTestId("toast-action").first().click();
 		await expect(row).toBeVisible();
 		await drag(row, [-0.4]);
 		await tapExposed(

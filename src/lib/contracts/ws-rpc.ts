@@ -489,6 +489,10 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		slug: Schema.String,
 	}),
 	Schema.Struct({ kind: Schema.Literal("missing"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("permission-denied"),
+		path: Schema.String,
+	}),
 	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
 	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
 	Schema.Struct({
@@ -543,6 +547,7 @@ export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>
 
 export const SaveProjectResponseSchema = Schema.Struct({
 	...ProjectMutationResponseSchema.fields,
+	kind: Schema.optional(Schema.Literal("existing")),
 	savedSlug: Schema.String,
 	warnings: Schema.Array(FolderIssueSchema),
 });
@@ -1111,7 +1116,7 @@ export class PtyInput extends Schema.TaggedRequest<PtyInput>()("PtyInput", {
 export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 	"FindFolders",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
 		success: FindFoldersResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),

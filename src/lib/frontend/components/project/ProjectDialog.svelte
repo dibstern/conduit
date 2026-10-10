@@ -74,6 +74,7 @@
 	let attemptedSave = $state(false);
 	let saveIssues = $state<readonly FolderIssue[]>([]);
 	let addIssues = $state<readonly FolderIssue[]>([]);
+	let lookupIssues = $state<readonly FolderIssue[]>([]);
 	let lookupError = $state("");
 	let saveError = $state("");
 	let input = $state<HTMLInputElement>();
@@ -94,11 +95,12 @@
 	const unsupportedProviders = $derived((instances ?? getAvailableInstances().map(({ id, label, capabilities }) => ({
 		id, name: getInstanceById(id)?.name ?? label, capabilities,
 	}))).filter((instance) => instance.capabilities?.supportsMultiFolder === false));
-	const issues = $derived(check(draft, projects.filter(({ slug }) => slug !== project?.slug)));
+	const issues = $derived(check(draft, project ? projects.filter(({ slug }) => slug !== project.slug) : []));
+	const permissionIssues = $derived([...lookupIssues, ...saveIssues].filter((issue) => issue.kind === "permission-denied"));
 	const errors = $derived([
 		...(draft.folders.length || attemptedSave ? issues.errors : []),
 		...addIssues,
-		...saveIssues,
+		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
 		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original)),
@@ -151,6 +153,7 @@
 		const version = ++lookupVersion;
 		entries = [];
 		lookupError = "";
+		lookupIssues = [];
 		searching = false;
 		activeIndex = 0;
 		if (!open) return;
@@ -167,7 +170,10 @@
 				(error: unknown) => {
 					if (version !== lookupVersion) return;
 					// Suggestions are a convenience; only a failed path lookup is worth an error.
-					if (pathQuery) lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
+					if (pathQuery) {
+						if (error instanceof ProjectSaveRejected) lookupIssues = error.issues;
+						else lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
+					}
 					searching = false;
 				},
 			);
@@ -253,6 +259,7 @@
 			case "main-taken": return `${issue.path} is already the main folder of`;
 			case "nested": return `${issue.path} is inside ${issue.parent}. Sessions can already edit it.`;
 			case "missing": return `${issue.path} no longer exists.`;
+			case "permission-denied": return `Permission denied: ${issue.path}. Check the folder permissions and try again.`;
 			case "not-a-folder": return `${issue.path} isn't a folder.`;
 			case "create-exists": return `${issue.path} already exists. Add it as an existing folder.`;
 			case "mkdir-failed": return `Couldn't create ${issue.path}: ${issue.message}`;
@@ -299,6 +306,8 @@
 						placeholder="Search folders, or type / or ~"
 						role="combobox"
 						aria-label="Add folder"
+						invalid={permissionIssues.length > 0}
+						aria-describedby={permissionIssues.length ? `${uid}-folder-error` : undefined}
 						aria-autocomplete="list"
 						aria-haspopup="listbox"
 						aria-expanded={expanded}
@@ -313,6 +322,7 @@
 					/>
 					{#if expanded}<kbd aria-hidden="true" class="pointer-events-none absolute right-[8px] top-1/2 -translate-y-1/2 font-mono text-[9px] text-text-muted max-md:hidden pointer-coarse:hidden">↵ add</kbd>{/if}
 				</div>
+				{#if permissionIssues.length}<div id={`${uid}-folder-error`} role="alert" class="break-words text-[11px] text-error">{#each permissionIssues as issue}<p>{issueText(issue)}</p>{/each}</div>{/if}
 				{#if expanded}
 					<div class="relative">
 						<DetachedListbox id={listboxId} ariaLabel="Folder matches" class="overflow-y-auto" style={isPhone ? undefined : `max-height: 200px; scroll-padding-bottom: ${newFolder ? 34 : 0}px;`}>
