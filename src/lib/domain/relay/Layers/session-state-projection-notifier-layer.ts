@@ -4,6 +4,7 @@ import {
 	type SessionStateProjectionNotifier,
 	SessionStateProjectionNotifierTag,
 } from "../../../persistence/effect/session-state-projection-notifier.js";
+import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
@@ -27,6 +28,7 @@ export const makeSessionStateProjectionNotifierLive = (
 		Effect.gen(function* () {
 			const scope = yield* Scope.Scope;
 			const sessionManagerService = yield* SessionManagerServiceTag;
+			const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 			const broadcastPending = yield* Ref.make(false);
 
 			// One lineage refresh per burst. A streaming turn projects thousands of
@@ -74,13 +76,19 @@ export const makeSessionStateProjectionNotifierLive = (
 							eventType === "turn.error" ||
 							eventType === "turn.interrupted"
 						) {
-							yield* Effect.forkDaemon(
-								Effect.tryPromise(() => refreshSessionGit()).pipe(
-									Effect.catchAllCause((cause) =>
-										logFailure("Failed to refresh session git state", cause),
+							yield* Effect.forkIn(
+								Effect.interruptible(
+									(Option.isSome(sessionGit)
+										? sessionGit.value.refresh({ sessionId })
+										: Effect.tryPromise(() => refreshSessionGit())
+									).pipe(
+										Effect.catchAllCause((cause) =>
+											logFailure("Failed to refresh session git state", cause),
+										),
+										Effect.zipRight(armBroadcast),
 									),
-									Effect.zipRight(armBroadcast),
 								),
+								scope,
 							);
 						} else {
 							yield* armBroadcast;

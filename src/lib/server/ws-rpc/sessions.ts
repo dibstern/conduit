@@ -4,6 +4,7 @@ import {
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
+import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
@@ -20,6 +21,11 @@ import { InstanceManagementServiceTag } from "../../domain/relay/Services/instan
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
+import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import {
+	listProjectWorktrees,
+	realWorkspacePath,
+} from "../../git/worktrees.js";
 import { rewindSessionToMessage } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
 import {
@@ -43,6 +49,48 @@ import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.j
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	ListWorktrees: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			const directory =
+				request.sessionId === undefined
+					? undefined
+					: yield* workspace
+							.get(request.sessionId)
+							.pipe(
+								Effect.flatMap((path) =>
+									realWorkspacePath(path).pipe(
+										Effect.orElseSucceed(() => path),
+									),
+								),
+							);
+			return {
+				...(directory === undefined ? {} : { directory }),
+				worktrees: yield* listProjectWorktrees([
+					config.projectDir,
+					...(config.extraFolders ?? []),
+				]),
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("ListWorktrees"))),
+	MoveSessionWorkspace: (request) =>
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			return {
+				directory: yield* workspace.move(
+					request.sessionId,
+					request.path,
+					"user",
+				),
+			};
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
+					error instanceof WorkspaceMoveError
+						? Effect.fail(error)
+						: mapRpcFailure("MoveSessionWorkspace")(error),
+			),
+		),
 	GetGoalDetails: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -475,6 +523,8 @@ export const sessionsHandlers = {
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
+	| "ListWorktrees"
+	| "MoveSessionWorkspace"
 	| "SetSessionSettled"
 	| "SetSessionPinned"
 	| "SetSessionAutoSettle"

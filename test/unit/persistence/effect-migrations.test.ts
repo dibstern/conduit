@@ -73,6 +73,7 @@ const expectedNames = [
 	"sessions_resumes",
 	"session_sidebar",
 	"session_sidebar_tombstones",
+	"sessions_workspace",
 	"messages_input_id",
 	"pending_inputs",
 	"messages_steered",
@@ -462,7 +463,7 @@ describe("Effect migration lineage", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE effect_sql_migrations SET name = 'create_projection_failures'
 				WHERE migration_id = 12`;
-				expect(yield* makeEffectSqlMigrator()).toHaveLength(31);
+				expect(yield* makeEffectSqlMigrator()).toHaveLength(32);
 				const history = yield* sql<{ name: string }>`
 				SELECT name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history.map((row) => row.name)).toEqual(expectedNames);
@@ -619,9 +620,10 @@ describe("Effect migration lineage", () => {
 				[37, "sessions_resumes"],
 				[38, "session_sidebar"],
 				[39, "session_sidebar_tombstones"],
-				[40, "messages_input_id"],
-				[41, "pending_inputs"],
-				[42, "messages_steered"],
+				[40, "sessions_workspace"],
+				[41, "messages_input_id"],
+				[42, "pending_inputs"],
+				[43, "messages_steered"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -698,9 +700,10 @@ describe("Effect migration lineage", () => {
 					[37, "sessions_resumes"],
 					[38, "session_sidebar"],
 					[39, "session_sidebar_tombstones"],
-					[40, "messages_input_id"],
-					[41, "pending_inputs"],
-					[42, "messages_steered"],
+					[40, "sessions_workspace"],
+					[41, "messages_input_id"],
+					[42, "pending_inputs"],
+					[43, "messages_steered"],
 				]);
 				const rows = yield* sql<{
 					id: string;

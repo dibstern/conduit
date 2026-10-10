@@ -33,6 +33,7 @@ import {
 } from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import { SessionWorkspaceLive } from "../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	type AgentList,
 	type AgentService,
@@ -1002,6 +1003,16 @@ export function makeTestHandlerLayer(
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
+		SessionWorkspaceLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					openCodeApiLayer,
+					configLayer,
+					loggerLayer,
+					providerTurnPersistenceLayer,
+				),
+			),
+		),
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,

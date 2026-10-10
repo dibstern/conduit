@@ -87,6 +87,7 @@ SELECT id FROM subtree`;
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
+	| "session.workspace_changed"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -249,6 +250,22 @@ export const sessionHandlers: {
 			params: [
 				event.createdAt,
 				event.data.automatic === true ? 1 : 0,
+				event.data.sessionId,
+			],
+		},
+	],
+
+	"session.workspace_changed": (event) => [
+		{
+			sql: "UPDATE sessions SET workspace = ? WHERE id = ?",
+			params: [
+				Object.keys(event.data.worktrees).length === 0
+					? null
+					: JSON.stringify({
+							cause: event.data.cause,
+							worktrees: event.data.worktrees,
+							origin: event.data.origin,
+						}),
 				event.data.sessionId,
 			],
 		},

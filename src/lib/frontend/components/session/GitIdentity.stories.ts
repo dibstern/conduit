@@ -100,6 +100,39 @@ export const DetailsOpen: Story = {
 	},
 };
 
+export const WorktreeMenu: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-one",
+		git: { branch: "feature/one", worktree: "conduit-one", dirty: true },
+		loadWorktrees: async () => ({
+			directory: "/src/conduit-one",
+			worktrees: [
+				{ path: "/src/conduit", branch: "main", main: true },
+				{ path: "/src/conduit-one", branch: "feature/one", main: false },
+				{ path: "/src/conduit-two", branch: "feature/two", main: false },
+			],
+		}),
+		onmove: async () => {},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await userEvent.click(
+			within(document.body).getByRole("menuitem", {
+				name: "Move to worktree…",
+			}),
+		);
+		await expect(
+			within(document.body).getByTestId("current-worktree"),
+		).toBeVisible();
+		await expect(
+			within(document.body).getByRole("menuitem", { name: /feature\/two/ }),
+		).toBeVisible();
+	},
+};
+
 export const Phone: Story = {
 	beforeEach: () => {
 		sessionViewState.compact = true;

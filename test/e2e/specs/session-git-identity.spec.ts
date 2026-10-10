@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
@@ -64,7 +67,12 @@ async function supplyProject(
 	});
 }
 
-test.use({ recording: "chat-simple", screenshot: "off" });
+// The relay reads real git for its folder; a non-git folder keeps the mocked project git in charge.
+test.use({
+	recording: "chat-simple",
+	screenshot: "off",
+	projectDir: mkdtempSync(join(tmpdir(), "git-identity-")),
+});
 
 for (const viewport of [
 	{ width: 390, height: 844 },

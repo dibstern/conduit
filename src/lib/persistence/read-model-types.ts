@@ -26,6 +26,8 @@ export interface SessionRow {
 	limit_recovery?: string | null;
 	/** JSON array of SessionResume, oldest first. */
 	resumes?: string | null;
+	/** JSON SessionWorkspace. NULL uses the project's main folders. */
+	workspace?: string | null;
 	last_turn_end_version?: number | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */

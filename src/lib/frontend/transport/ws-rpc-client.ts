@@ -504,6 +504,29 @@ const callControl = <A, E>(
 		return yield* call(control);
 	});
 
+export async function listWorktreesRpc(projectSlug: string, sessionId: string) {
+	return runTransportEffect(
+		callControl(projectSlug, (client) =>
+			client.ListWorktrees({ projectSlug, sessionId }),
+		),
+	);
+}
+
+export async function moveSessionWorkspaceRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly path: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.MoveSessionWorkspace(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
 const callCancelSession = (input: CancelSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.CancelSession(input).pipe(Effect.asVoid),

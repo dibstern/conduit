@@ -1,5 +1,7 @@
 <script lang="ts">
-	import type { SessionGit } from "../../../shared-types.js";
+	import { Schema } from "effect";
+	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Button from "../ui/Button.svelte";
@@ -9,7 +11,48 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git }: { directory: string; git: SessionGit | undefined } = $props();
+	let { directory, git, loadWorktrees, onmove }: {
+		directory: string;
+		git: SessionGit | undefined;
+		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
+		onmove?: ((path: string) => Promise<void>) | undefined;
+	} = $props();
+	let showWorktrees = $state(false);
+	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
+	let currentDirectory = $state<string | undefined>();
+	let moving = $state(false);
+
+	async function openWorktrees() {
+		showWorktrees = true;
+		worktrees = undefined;
+		currentDirectory = undefined;
+		try {
+			const result = await loadWorktrees?.();
+			worktrees = result?.worktrees ?? [];
+			currentDirectory = result?.directory;
+		} catch {
+			worktrees = [];
+			showToast("Could not list worktrees", { variant: "error" });
+		}
+	}
+
+	const moveFailures: Record<WorkspaceMoveError["reason"], string> = {
+		missing: "Could not move session: that folder no longer exists",
+		"not-a-worktree": "Could not move session: that folder is not a git worktree",
+		"other-repository": "Could not move session: that worktree belongs to another repository",
+		"unsupported-provider": "Could not move session: its provider cannot switch worktrees",
+	};
+
+	async function move(path: string) {
+		moving = true;
+		try {
+			await onmove?.(path);
+		} catch (error) {
+			showToast(Schema.is(WorkspaceMoveError)(error) ? moveFailures[error.reason] : "Could not move session", { variant: "error" });
+		} finally {
+			moving = false;
+		}
+	}
 	const project = $derived(directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory);
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
@@ -44,7 +87,7 @@
 	}
 </script>
 
-<Menu presentation={sessionViewState.compact ? "sheet" : "popover"} align="end" ariaLabel="Checkout" class={sessionViewState.compact ? undefined : "w-[280px]"} data-testid="session-bar-checkout">
+<Menu presentation={sessionViewState.compact ? "sheet" : "popover"} align="end" ariaLabel="Checkout" class={sessionViewState.compact ? undefined : "w-[280px]"} data-testid="session-bar-checkout" onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 	{#snippet trigger({ props })}
 		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
@@ -94,6 +137,29 @@
 	<MenuSeparator />
 	{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "")}>Copy branch name</MenuItem>{/if}
 	<MenuItem onselect={() => void copy(directory)}>Copy folder path</MenuItem>
+	{#if loadWorktrees && onmove}
+		<MenuSeparator />
+		<MenuItem closeOnSelect={false} onselect={() => void openWorktrees()}>Move to worktree…</MenuItem>
+		{#if showWorktrees}
+			<MenuGroup label="Worktrees">
+				{#if worktrees === undefined}
+					<MenuItem disabled>Loading worktrees…</MenuItem>
+				{:else if worktrees.length === 0}
+					<MenuItem disabled>No worktrees available</MenuItem>
+				{:else}
+					{#each worktrees as worktree (worktree.path)}
+						<MenuItem disabled={moving} onselect={() => void move(worktree.path)}>
+							<span class="flex min-w-0 flex-1 flex-col">
+								<span>{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
+								<span class="break-all text-text-muted">{worktree.path}</span>
+							</span>
+							{#if worktree.path === (currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
+						</MenuItem>
+					{/each}
+				{/if}
+			</MenuGroup>
+		{/if}
+	{/if}
 </Menu>
 
 <style>

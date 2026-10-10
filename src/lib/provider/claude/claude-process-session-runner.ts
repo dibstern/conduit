@@ -1312,13 +1312,23 @@ export const makeProcessClaudeSessionRunner = (
 									if (
 										foldersChanged &&
 										!existing.failure &&
-										!existing.recovering &&
 										!existing.stopping &&
 										!existing.idleExiting &&
-										existing.ending === 0 &&
-										existing.commandsInFlight === 0 &&
-										existing.upgrade.state?.quiescent === true
+										existing.ending === 0
 									) {
+										// A turn's completion can reach the browser before the
+										// runner reports quiescence. Do not admit the next turn
+										// on its old folders while that final output drains.
+										if (
+											existing.recovering ||
+											existing.commandsInFlight > 0 ||
+											existing.upgrade.state?.quiescent !== true
+										)
+											return {
+												entry: existing,
+												draining: true,
+												foldersPending: true,
+											};
 										existing.endingReleased = yield* Deferred.make<void>();
 										existing.ending++;
 										return {
@@ -1400,6 +1410,10 @@ export const makeProcessClaudeSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if ("foldersPending" in selection) {
+							yield* Effect.sleep("10 millis");
+							continue;
+						}
 						if (selection.retire) {
 							const retiring = selection.retire;
 							yield* runner

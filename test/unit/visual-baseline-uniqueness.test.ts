@@ -32,6 +32,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":
 		"tapping the collapsed banners row opens the full header with its banners",
+	"input-newsessioncontext--multi-folder-supported | input-newsessioncontext--multi-folder-unknown":
+		"unknown worktree support is offered like supported support, so the open start menu is identical",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.

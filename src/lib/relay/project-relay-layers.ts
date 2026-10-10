@@ -47,7 +47,9 @@ import {
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
+import { SessionGitLive } from "../domain/relay/Layers/session-git-layer.js";
 import { makeSessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
+import { SessionWorkspaceLive } from "../domain/relay/Layers/session-workspace-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -531,7 +533,7 @@ export function createProjectRelayLayers({
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		StatusPollerLive,
-		relayStateAndBridges,
+		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
 	);
 	const relayStateServicesAndBridges = Layer.provideMerge(
 		AgentServiceLive,
@@ -543,16 +545,16 @@ export function createProjectRelayLayers({
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(
-		makeSessionStateProjectionNotifierLive(async () => {
-			await config.refreshSessionGit?.();
-			await config.broadcastSessionListChanged?.();
-		}),
+		makeSessionStateProjectionNotifierLive(),
 		baseLayers,
 	);
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			baseLayersWithProjectionNotifier,
+			Layer.provideMerge(
+				SessionWorkspaceLive,
+				baseLayersWithProjectionNotifier,
+			),
 			makeWsTransportLive({ noServer: true }),
 		),
 	);

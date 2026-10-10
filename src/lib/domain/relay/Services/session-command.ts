@@ -73,6 +73,7 @@ export class SessionCommandError extends Data.TaggedError(
 type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
+	| "session.workspace_changed"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -148,6 +149,7 @@ export const openCodeUpstreamAdapter = (
 			case "session.auto_settle_set":
 			case "session.unsnoozed":
 			case "session.provider_changed":
+			case "session.workspace_changed":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":

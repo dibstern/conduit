@@ -1,5 +1,10 @@
 import type { Page, TestInfo } from "@playwright/test";
-import type { SessionGit } from "../../../src/lib/shared-types.js";
+import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import type {
+	SessionGit,
+	SessionWorkspace,
+	WorktreeInfo,
+} from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -19,14 +24,33 @@ async function openHeader(
 	page: Page,
 	relayBaseUrl: string,
 	options: {
+		provider?: string;
+		supportsWorktree?: boolean | undefined;
 		directory?: string;
 		git?: SessionGit;
 		sessionGit?: SessionGit;
+		workspace?: SessionWorkspace;
+		worktrees?: readonly WorktreeInfo[];
+		canonicalDirectory?: string;
+		moveError?: WorkspaceMoveError;
+		onmove?: (path: string) => void;
 		skills?: boolean;
 		viewActivity?: boolean;
 	},
 ) {
 	const directory = options.directory ?? "/workspace/conduit";
+	const instances = {
+		instances: [],
+		providerCapabilities:
+			options.supportsWorktree === undefined
+				? {}
+				: {
+						[options.provider ?? "claude"]: {
+							supportsMultiFolder: true,
+							supportsWorktree: options.supportsWorktree,
+						},
+					},
+	};
 	const projects = [
 		{
 			slug: "e2e-replay",
@@ -42,11 +66,33 @@ async function openHeader(
 			status: "idle",
 			projectSlug: "e2e-replay",
 			...(options.sessionGit ? { git: options.sessionGit } : {}),
+			...(options.workspace ? { workspace: options.workspace } : {}),
 		},
 	];
-	await mockWsRpc(page, {
+	const rpc = await mockWsRpc(page, {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetAgents: () => ({
+				projectSlug: "e2e-replay",
+				agents: [],
+				providerScope: {
+					id: options.provider ?? "opencode",
+					name: "Session provider",
+				},
+				instanceId: options.provider ?? "opencode",
+			}),
+			GetInstances: () => instances,
+			ListWorktrees: ({ sessionId }) => ({
+				worktrees: options.worktrees ?? [],
+				...(options.canonicalDirectory && sessionId === "header-session"
+					? { directory: options.canonicalDirectory }
+					: {}),
+			}),
+			MoveSessionWorkspace: ({ path }) => {
+				options.onmove?.(String(path));
+				if (options.moveError) throw options.moveError;
+				return { directory: String(path) };
+			},
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
@@ -102,6 +148,7 @@ async function openHeader(
 		],
 		responses: new Map(),
 	});
+	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${relayBaseUrl}/s/header-session`);
 	const pill = page.getByTestId("session-bar-identity");
 	await expect(pill).toBeVisible();
@@ -210,6 +257,120 @@ for (const mode of [
 				page.getByRole("menuitem", { name: "Copy branch name" }),
 			).toHaveCount(0);
 			await capture(page, testInfo, `${mode.name}-no-git-details`);
+		});
+
+		test("a moved session shows its folder and lists worktrees with the current one ticked", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const main = "/workspace/conduit";
+			const moved = "/workspace/conduit-one";
+			const other = "/workspace/conduit-two";
+			const moves: string[] = [];
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				git: { branch: "main" },
+				sessionGit: {
+					branch: "feature/one",
+					worktree: "conduit-one",
+					dirty: true,
+				},
+				workspace: {
+					cause: "user",
+					worktrees: { [main]: moved },
+					origin: "existing",
+				},
+				worktrees: [
+					{ path: main, branch: "main", main: true },
+					{ path: moved, branch: "feature/one", main: false },
+					{ path: other, branch: "feature/two", main: false },
+				],
+				onmove: (path) => moves.push(path),
+			});
+			await expect(pill).toHaveAttribute("title", "conduit-one / feature/one");
+			await expect(pill.locator('[data-icon="worktree"] svg')).toBeVisible();
+			await pill.click();
+			const details = page.getByRole("menu", { name: "Checkout" });
+			await expect(details.getByText(moved, { exact: true })).toBeVisible();
+			await details
+				.getByRole("menuitem", { name: "Move to worktree…" })
+				.click();
+			const current = details.getByRole("menuitem", { name: /feature\/one/ });
+			await expect(
+				current.locator('[data-testid="current-worktree"]'),
+			).toBeVisible();
+			await expect(
+				details.getByRole("menuitem", { name: /main/ }),
+			).toBeVisible();
+			await capture(page, testInfo, `${mode.name}-worktree-list`);
+			await details.getByRole("menuitem", { name: /feature\/two/ }).click();
+			await expect.poll(() => moves).toEqual([other]);
+		});
+
+		for (const supportsWorktree of [false, true, undefined]) {
+			test(`workspace move visibility follows the session capability: ${supportsWorktree}`, async ({
+				page,
+				harness,
+			}) => {
+				const pill = await openHeader(page, harness.relayBaseUrl, {
+					provider: supportsWorktree === true ? "claude" : "opencode",
+					supportsWorktree,
+					git: { branch: "main" },
+				});
+				await pill.click();
+				await expect(
+					page.getByRole("menuitem", { name: "Move to worktree…" }),
+				).toHaveCount(supportsWorktree === false ? 0 : 1);
+			});
+		}
+
+		test("a symlinked primary folder ticks its canonical reset destination", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const directory = "/workspace/conduit-alias/packages/app";
+			const canonicalDirectory = "/real/conduit/packages/app";
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				directory,
+				canonicalDirectory,
+				git: { branch: "main" },
+				worktrees: [
+					{ path: canonicalDirectory, branch: "main", main: true },
+					{ path: "/real/conduit", branch: "main", main: true },
+					{ path: "/real/conduit-one", branch: "feature/one", main: false },
+				],
+			});
+			await pill.click();
+			const details = page.getByRole("menu", { name: "Checkout" });
+			await details
+				.getByRole("menuitem", { name: "Move to worktree…" })
+				.click();
+			const destination = details
+				.getByRole("menuitem")
+				.filter({ hasText: canonicalDirectory });
+			await expect(destination.getByTestId("current-worktree")).toBeVisible();
+			await expect(details.getByTestId("current-worktree")).toHaveCount(1);
+			await capture(page, testInfo, `${mode.name}-symlinked-primary`);
+		});
+
+		test("an invalid workspace move shows the typed reason in a toast", async ({
+			page,
+			harness,
+		}) => {
+			const path = "/workspace/removed";
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				git: { branch: "main" },
+				worktrees: [{ path, branch: "feature/removed", main: false }],
+				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
+			});
+			await pill.click();
+			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
+			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
+			await expect(
+				page.getByText("Could not move session: that folder no longer exists", {
+					exact: true,
+				}),
+			).toBeVisible();
+			await expect(pill).toHaveAttribute("title", "conduit / main");
 		});
 
 		test("long project names keep four letters plus the ellipsis and a visible branch", async ({

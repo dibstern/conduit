@@ -12,7 +12,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
 import { join } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import {
 	Cause,
 	Context,
@@ -25,7 +24,6 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
 import {
 	projectEventsDbPath,
 	projectStorageDir,
@@ -35,14 +33,16 @@ import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type {
 	InstanceConfig,
 	OpenCodeInstance,
-	SessionGit,
 } from "../../../shared-types.js";
 import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import {
+	listDaemonSessions as listEffectDaemonSessions,
+	resolveDaemonSession,
+} from "../Services/daemon-session-reader.js";
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -381,7 +381,6 @@ export const RelayFactoryLive = (
 						// Create the relay using the imperative createProjectRelay while
 						// threading Effect-owned daemon read models and instance callbacks.
 						const ac = new AbortController();
-						let lastPublishedGit: SessionGit | undefined;
 						let creation: Promise<ProjectRelay> | undefined;
 						const relay = yield* Effect.tryPromise({
 							try: () => {
@@ -410,6 +409,15 @@ export const RelayFactoryLive = (
 									persistenceDbPath: dbPath,
 									getProjects,
 									listDaemonSessions,
+									resolveSessionProject: (sessionId) =>
+										runCallback(
+											resolveDaemonSession(configDir, sessionId).pipe(
+												Effect.provideService(
+													ProjectRegistryTag,
+													projectRegistry,
+												),
+											),
+										),
 									broadcastSessionListChanged,
 									publishGlobalSetting: (tag) =>
 										PubSub.publish(
@@ -420,13 +428,7 @@ export const RelayFactoryLive = (
 											}),
 										).pipe(Effect.asVoid),
 									refreshSessionGit: async () => {
-										const git = await daemonSessionGitCache.refresh(
-											project.folders[0],
-										);
-										if (isDeepStrictEqual(git, lastPublishedGit)) return;
 										await publishProjectList();
-										await broadcastSessionListChanged();
-										lastPublishedGit = git;
 									},
 									getInstances,
 									addInstance,
