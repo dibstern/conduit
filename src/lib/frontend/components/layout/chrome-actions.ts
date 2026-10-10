@@ -9,7 +9,10 @@
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
-import { getCurrentSlug } from "../../stores/router.svelte.js";
+import {
+	getCurrentSessionId,
+	getCurrentSlug,
+} from "../../stores/router.svelte.js";
 import {
 	beginCreateTab,
 	failCreateTab,
@@ -76,10 +79,12 @@ export function toggleTerminal(): void {
 
 	if (terminalState.tabs.size === 0) {
 		const slug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
 		if (slug && beginCreateTab()) {
 			void createPtyRpc({
 				projectSlug: slug,
 				originId: getBrowserClientId(),
+				...(sessionId ? { sessionId } : {}),
 			}).catch(() => {
 				failCreateTab("Failed to create terminal");
 			});

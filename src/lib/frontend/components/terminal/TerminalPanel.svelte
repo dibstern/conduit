@@ -18,7 +18,7 @@
 		closePanel,
 	} from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
 	import Surface from "../ui/Surface.svelte";
@@ -90,10 +90,12 @@
 
 	function handleNewTab() {
 		const projectSlug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
 		if (!projectSlug || !beginCreateTab()) return;
 		void createPtyRpc({
 			projectSlug,
 			originId: getBrowserClientId(),
+			...(sessionId ? { sessionId } : {}),
 		}).catch(() => {
 			failCreateTab("Failed to create terminal");
 		});

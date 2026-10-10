@@ -58,8 +58,9 @@
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { viewInputDraft } from "../../stores/input-draft.js";
-	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyProjectList, followDaemonLists, getDraftProject } from "../../stores/project.svelte.js";
+	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { applyProjectList, followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
@@ -406,14 +407,6 @@
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
 				});
-			requestFileTree();
-			void getFileTreeRpc({ projectSlug: slug })
-				.then((response) => {
-					if (generation === attachGeneration) applyGetFileTreeResponse(response);
-				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
-				});
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
@@ -431,6 +424,40 @@
 	// Project navigation requests attachment through RPC on the existing socket.
 	// This also covers browser history and project-only links from every caller.
 	const connected = $derived(getIsConnected());
+	const fileScope = $derived.by(() => {
+		const slug = attachedProjectState.slug;
+		const sessionId = getCurrentSessionId();
+		const session = sessionId ? findSession(sessionId) : undefined;
+		const primary = projectState.projects.find((project) => project.slug === slug)?.folders[0] ?? "";
+		const directory = effectiveWorkingDirectory(primary, session?.workspace);
+		return JSON.stringify([slug, sessionId, directory]);
+	});
+	$effect(() => {
+		const scope = fileScope;
+		const slug = untrack(() => attachedProjectState.slug);
+		const sessionId = untrack(getCurrentSessionId);
+		if (!connected || !slug) return;
+		let cancelled = false;
+		untrack(() => {
+			if (fileTreeState.scope !== scope) {
+				clearFileTreeState();
+				fileTreeState.scope = scope;
+				closeFileViewer();
+			}
+			requestFileTree();
+		});
+		void getFileTreeRpc({ projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
+			.then((response) => {
+				if (!cancelled) applyGetFileTreeResponse(response);
+			})
+			.catch(() => {
+				if (!cancelled) {
+					fileTreeState.loading = false;
+					showToast("Failed to load file tree", { variant: "error" });
+				}
+			});
+		return () => { cancelled = true; };
+	});
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? sessionState.currentId : null;

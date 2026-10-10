@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../../errors.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
@@ -17,13 +18,16 @@ export const terminalsHandlers = {
 	CreatePty: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
-			yield* terminal.create(request.originId);
+			const { workspaceRoot } = yield* resolveSessionRequestFolders(
+				request.sessionId,
+			);
+			yield* terminal.create(request.originId, workspaceRoot);
 			return { ok: true as const };
 		}).pipe(
 			Effect.mapError(
 				(error) =>
 					new WsRpcError({
-						message: `Failed to create terminal: ${formatErrorDetail(error.cause)}`,
+						message: `Failed to create terminal: ${formatErrorDetail(error)}`,
 					}),
 			),
 		),
