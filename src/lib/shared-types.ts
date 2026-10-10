@@ -481,6 +481,8 @@ export interface HistoryMessage {
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
 	cost?: number;
+	/** Canonical turn cost from the persisted turn projection, when available. */
+	turnCost?: number;
 	/** Token usage — present on assistant messages from REST API. */
 	tokens?: {
 		input?: number;

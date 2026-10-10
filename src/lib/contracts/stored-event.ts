@@ -223,6 +223,9 @@ export type CanonicalToolInput =
 export interface TurnCompletedPayload {
 	readonly messageId: string;
 	readonly cost?: number;
+	/** Claude's session running total; cost is its delta at persistence time. */
+	readonly providerCostTotalUsd?: number;
+	readonly providerSessionId?: string;
 	readonly tokens?: {
 		readonly input?: number;
 		readonly output?: number;
@@ -830,6 +833,8 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
+	providerCostTotalUsd: Schema.optionalWith(Schema.Number, { exact: true }),
+	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
 });

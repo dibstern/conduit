@@ -50,6 +50,7 @@ function snapshotRowToHistory(
 		role: parsed.role,
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+		...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 		...(row.role === "user" && row.turnTiming
 			? { turnTiming: row.turnTiming }
 			: {}),
@@ -238,6 +239,7 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
+			...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 			...(row.role === "user" && row.turnTiming
 				? { turnTiming: row.turnTiming }
 				: {}),
