@@ -29,8 +29,8 @@ const isClaudeModel = (model: unknown): boolean =>
 test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 
 /** A project whose relay default is a Claude-harness model, as the reporter's
- *  was, opened on a new-session draft. `prepare` runs before the page loads.
- *  Returns the composer's model picker. */
+ *  was, opened on a new-session draft with OpenCode running. `prepare` runs
+ *  before the page loads. Returns the composer's model picker. */
 async function openDraft(
 	page: Page,
 	harness: ProcessHarness,
@@ -50,6 +50,9 @@ async function openDraft(
 			provider: "claude",
 		}),
 	);
+	// The reporter's OpenCode was running. Model discovery never starts a
+	// stopped one, so a draft would list none of its models.
+	await browser.startInstance("opencode");
 	await prepare?.(browser, slug);
 	await new AppPage(page).goto(
 		`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`,
@@ -133,6 +136,101 @@ async function pickOpenCodeModel(page: Page, picker: Locator) {
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+}
+
+/** An RPC frame on the page's socket. Requests carry `tag` and `payload`;
+ *  replies name their request with `requestId`. */
+type RpcFrame = {
+	readonly _tag?: string;
+	readonly id?: string;
+	readonly tag?: string;
+	readonly requestId?: string;
+	readonly payload?: Readonly<Record<string, unknown>>;
+};
+
+/** Pass the page's RPC frames through `edit`, which sees each with the request
+ *  it answers and resolves to the frame to deliver, or null to drop it. A frame
+ *  held by a pending edit holds back no other frame. */
+async function editRpc(
+	page: Page,
+	edit: (frame: RpcFrame, request: RpcFrame | undefined) => unknown,
+): Promise<void> {
+	await page.routeWebSocket(/\/rpc$/, (ws) => {
+		const server = ws.connectToServer();
+		const requests = new Map<string, RpcFrame>();
+		const relay =
+			(send: (message: string | Buffer) => void) =>
+			async (message: string | Buffer) => {
+				if (typeof message !== "string") return send(message);
+				const frame = JSON.parse(message) as RpcFrame;
+				if (frame._tag === "Request" && frame.id) requests.set(frame.id, frame);
+				const edited = await edit(
+					frame,
+					frame.requestId ? requests.get(frame.requestId) : undefined,
+				);
+				if (edited !== null) send(JSON.stringify(edited));
+			};
+		ws.onMessage(relay((message) => server.send(message)));
+		server.onMessage(relay((message) => ws.send(message)));
+	});
+}
+
+/** `value` with every model catalogue in it emptied. */
+const withoutCatalogues = (value: unknown): unknown =>
+	Array.isArray(value)
+		? value.map(withoutCatalogues)
+		: typeof value === "object" && value !== null
+			? Object.fromEntries(
+					Object.entries(value).map(([key, entry]) => [
+						key,
+						key === "providers" ? [] : withoutCatalogues(entry),
+					]),
+				)
+			: value;
+
+/** Open an OpenCode session that picked `picked`. Returns its model picker. */
+async function openPickedSession(
+	page: Page,
+	harness: ProcessHarness,
+): Promise<Locator> {
+	let url = "";
+	const picker = await openDraft(
+		page,
+		harness,
+		async (browser, projectSlug) => {
+			const { sessionId } = await Effect.runPromise(
+				browser.rpc.CreateSession({
+					projectSlug,
+					originId: "session-setup",
+					instanceId: ProviderInstanceIdSchema.make("opencode"),
+					model: { modelId: picked.modelID, providerId: picked.providerID },
+				}),
+			);
+			url = `${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`;
+		},
+	);
+	await new AppPage(page).goto(url);
+	await expect(picker).toHaveAccessibleName(/nemotron/i);
+	return picker;
+}
+
+/** Settings lives in the list overflow or session title sheet on a phone,
+ *  and in the session bar overflow on desktop. */
+async function openSettingsPanel(page: Page): Promise<void> {
+	const listOverflow = page.getByTestId("list-bar-overflow");
+	if (await listOverflow.isVisible()) {
+		await listOverflow.click();
+		await page.getByTestId("list-overflow-settings").click();
+		return;
+	}
+	const titleMenu = page.getByTestId("session-bar-title-menu");
+	if (await titleMenu.isVisible()) {
+		await titleMenu.click();
+		await page.getByTestId("session-title-settings").click();
+		return;
+	}
+	await page.getByTestId("session-bar-overflow").click();
+	await page.getByTestId("overflow-settings").click();
 }
 
 test("a model picked in the draft composer is the model OpenCode runs", async ({
@@ -291,6 +389,67 @@ test("a model picked on another harness never reaches an OpenCode that lists no 
 			"prompt_async never carries the other harness's pick",
 		)
 		.toEqual([]);
+});
+
+test("an OpenCode session shows OpenCode before conduit reports its harness", async ({
+	page,
+	harness,
+}, testInfo) => {
+	// The composer aims at Claude, and the session's harness never arrives.
+	await page.addInitScript(() =>
+		localStorage.setItem("conduit-selected-instance", "claude"),
+	);
+	await editRpc(page, (frame) =>
+		frame._tag === "Request" &&
+		frame.tag === "GetAgents" &&
+		frame.payload?.["sessionId"] !== undefined
+			? null
+			: frame,
+	);
+	const picker = await openPickedSession(page, harness);
+
+	await expect(
+		picker,
+		"the picker shows the session's harness, not the composer's",
+	).toHaveAttribute("data-instance-id", "opencode");
+	await page.screenshot({ path: testInfo.outputPath("session-harness.png") });
+});
+
+test("opening model settings in a session keeps the session's model", async ({
+	page,
+	harness,
+}, testInfo) => {
+	// Every catalogue arrives empty, as one still loading would, so the
+	// settings tab fetches models. Its reply is held while `holding`.
+	let holding = false;
+	let release = () => {};
+	const released = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await editRpc(page, async (frame, request) => {
+		if (holding && frame._tag === "Exit" && request?.tag === "GetModels")
+			await released;
+		return withoutCatalogues(frame);
+	});
+	const picker = await openPickedSession(page, harness);
+
+	holding = true;
+	await openSettingsPanel(page);
+	await page.getByTestId("settings-tab-visibility").click();
+	const panel = page.locator("#settings-panel");
+	await expect(panel).toContainText("Loading models…");
+	release();
+	await expect(panel, "the tab applied its models reply").toContainText(
+		"No models available",
+	);
+	await page.getByTestId("settings-close-btn").click();
+	await expect(
+		picker,
+		"the picker still shows the session's model",
+	).toHaveAccessibleName(/nemotron/i);
+	await page.screenshot({
+		path: testInfo.outputPath("session-model-after-settings.png"),
+	});
 });
 
 test.describe("a model id both harnesses list", () => {
@@ -467,6 +626,57 @@ test.describe("effort", () => {
 			await sendAndReadFirstTurn(page, harness, testInfo),
 			"the first turn runs the default model at the picked effort",
 		).toEqual([{ model: "opus", effort: "high" }]);
+	});
+
+	test("an effort picked while the picked model's efforts load is the effort the first turn runs", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		// Hold the reply to the draft's model pick, which carries its efforts.
+		let held = 0;
+		let release = () => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await editRpc(page, async (frame, request) => {
+			if (frame._tag === "Exit" && request?.tag === "SwitchModel") {
+				held += 1;
+				await released;
+			}
+			return frame;
+		});
+		const picker = await openDraft(page, harness, saveEfforts);
+		await picker.click();
+		await page.getByTestId("picker-row-model").click();
+		await page
+			.getByTestId("model-picker-list")
+			.locator('[data-model-id="sonnet"][data-provider-id="claude"]')
+			.click();
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("model-picker")).toBeHidden();
+		await expect.poll(() => held).toBe(1);
+
+		// Opus's efforts still show, and high is one of Sonnet's too.
+		await picker.click();
+		await page.getByTestId("picker-effort-option-high").click();
+		release();
+		await expect(
+			page.locator('[data-testid^="picker-effort-option-"]:visible'),
+			"the effort control offers Sonnet's efforts",
+		).toHaveText(["low", "high"]);
+		await expect
+			.soft(
+				page.locator('[data-testid="picker-effort-option-high"]:visible'),
+				"the picked effort stays selected",
+			)
+			.toHaveAttribute("aria-checked", "true");
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("model-picker")).toBeHidden();
+
+		expect(
+			await sendAndReadFirstTurn(page, harness, testInfo),
+			"the first turn runs Sonnet at the picked effort",
+		).toEqual([{ model: "sonnet", effort: "high" }]);
 	});
 
 	test("a model picked in the draft shows its own efforts, at its saved effort", async ({

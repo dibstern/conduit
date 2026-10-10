@@ -21,12 +21,12 @@ import {
 	choosePermissionMode,
 	chooseVariant,
 	discoveryState,
+	followDraftModelPick,
 	getActiveContextWindowOptions,
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
 	getSessionInstanceId,
-	handleVariantInfo,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
@@ -281,7 +281,9 @@ export const model: ComposerSetting<ComposerModel> = {
 						)
 					: // A draft has no session to switch. This reads the efforts and
 						// saved effort of the model its first turn will run.
-						switchModelRpc({ projectSlug, ...value }).then(handleVariantInfo),
+						switchModelRpc({ projectSlug, ...value }).then(
+							followDraftModelPick(),
+						),
 			`Couldn't switch model to "${value.modelId}"`,
 		);
 	},
