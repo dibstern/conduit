@@ -108,11 +108,8 @@ describe("Claude message ownership", () => {
 					open.issuer.kind === "parent" ? "parent" : open.issuer.childSessionId,
 			})),
 		).toEqual([
-			{
-				taskId: "b66c4l9s4",
-				childSessionId: "child:b66c4l9s4",
-				issuer: "parent",
-			},
+			// Background shells (local_bash) get no Child Session: their output is
+			// not a transcript (conduit-test-i7fy.9).
 			{
 				taskId: field(46, "task_id"),
 				childSessionId: CHILD_A,
@@ -123,39 +120,27 @@ describe("Claude message ownership", () => {
 				childSessionId: CHILD_B,
 				issuer: "parent",
 			},
-			{
-				taskId: "b1oikywh4",
-				childSessionId: "child:b1oikywh4",
-				issuer: CHILD_A,
-			},
-			{
-				taskId: "b1iy1zcfh",
-				childSessionId: "child:b1iy1zcfh",
-				issuer: CHILD_B,
-			},
-			{
-				taskId: "bpdadyngc",
-				childSessionId: "child:bpdadyngc",
-				issuer: CHILD_A,
-			},
 		]);
 	});
 
 	it("names the tool call a task message is about and the message that issued it", () => {
 		const decisions = feed(core(), lines(1, 78));
 		const nestedStart = routedTo(decisions).length - 1;
-		const open = ofKind(decisions, "open-child").at(-1);
 		const route = ofKind(decisions, "route")[nestedStart];
 
 		expect(route?.tool).toEqual({
 			toolUseId: field(78, "tool_use_id"),
 			issuingMessageId: field(75, "uuid"),
 		});
-		expect(open).toMatchObject({
-			toolUseId: field(78, "tool_use_id"),
-			issuingMessageId: field(75, "uuid"),
-			description: field(78, "description"),
-			taskType: "local_bash",
+		expect(
+			ofKind(decisions, "open-child").find(
+				(open) => open.taskId === field(46, "task_id"),
+			),
+		).toMatchObject({
+			toolUseId: AGENT_A_TOOL,
+			issuingMessageId: field(43, "uuid"),
+			description: field(46, "description"),
+			taskType: field(46, "task_type"),
 		});
 	});
 
@@ -171,11 +156,7 @@ describe("Claude message ownership", () => {
 		expect(early).toEqual([
 			{ kind: "hold", message: line(27), awaiting: field(27, "tool_use_id") },
 		]);
-		expect(after.map((decision) => decision.kind)).toEqual([
-			"route",
-			"open-child",
-			"route",
-		]);
+		expect(after.map((decision) => decision.kind)).toEqual(["route", "route"]);
 		expect(routedTo(after)).toEqual([
 			{ uuid: field(22, "uuid"), to: "parent" },
 			{ uuid: field(27, "uuid"), to: "parent" },
@@ -244,10 +225,7 @@ describe("Claude message ownership", () => {
 		]);
 		expect(
 			ofKind(decisions, "open-child").map((open) => [open.taskId, open.issuer]),
-		).toEqual([
-			["agentY", { kind: "child", childSessionId: CHILD_A }],
-			["shellZ", { kind: "child", childSessionId: "child:agentY" }],
-		]);
+		).toEqual([["agentY", { kind: "child", childSessionId: CHILD_A }]]);
 	});
 
 	// Failure 3.
@@ -286,18 +264,18 @@ describe("Claude message ownership", () => {
 
 	// Failure 5.
 	it("opens a Child Session once for a duplicate task_started and still routes both", () => {
-		const decisions = feed(core(), [...lines(1, 27), line(27)]);
+		const decisions = feed(core(), [...lines(1, 46), line(46)]);
 
 		expect(
 			ofKind(decisions, "open-child").filter(
-				(open) => open.taskId === "b66c4l9s4",
+				(open) => open.taskId === field(46, "task_id"),
 			),
 		).toHaveLength(1);
 		expect(
-			routedTo(decisions).filter((route) => route.uuid === field(27, "uuid")),
+			routedTo(decisions).filter((route) => route.uuid === field(46, "uuid")),
 		).toEqual([
-			{ uuid: field(27, "uuid"), to: "parent" },
-			{ uuid: field(27, "uuid"), to: "parent" },
+			{ uuid: field(46, "uuid"), to: "parent" },
+			{ uuid: field(46, "uuid"), to: "parent" },
 		]);
 	});
 

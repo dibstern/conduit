@@ -36,6 +36,9 @@ const NESTED_SHELL_IDS = [
 
 type TraceLine = {
 	type: string;
+	subtype?: string;
+	task_id?: string;
+	task_type?: string;
 	parent_tool_use_id?: string | null;
 	message?: { content?: { type: string; id?: string }[] };
 };
@@ -58,6 +61,13 @@ const toolIds = (lines: TraceLine[], issued: (line: TraceLine) => boolean) =>
 // trace was issued by an agent.
 const PARENT_TOOL_IDS = toolIds(traceLines, (line) => !line.parent_tool_use_id);
 const AGENT_TOOL_IDS = toolIds(traceLines, (line) => !!line.parent_tool_use_id);
+// Only agents get a Child Session; background shells do not (.9).
+const AGENT_TASK_IDS = traceLines
+	.filter(
+		(line) =>
+			line.subtype === "task_started" && line.task_type !== "local_bash",
+	)
+	.map((line) => String(line.task_id));
 // Agent A's tool calls streamed after the parent's result ("launched.").
 const AGENT_A_LATE_TOOL_IDS = toolIds(
 	traceLines.slice(traceLines.findIndex((line) => line.type === "result") + 1),
@@ -164,6 +174,12 @@ test.describe("Claude background agents", () => {
 			expect
 				.soft(found.agentToolsInParent, `${step}: agent tool ids in the parent`)
 				.toEqual([]);
+			expect
+				.soft(
+					found.children.map((child) => child.sid).sort(),
+					`${step}: Child Sessions are exactly the agents'`,
+				)
+				.toEqual([...AGENT_TASK_IDS].sort());
 		};
 
 		const app = new AppPage(page);

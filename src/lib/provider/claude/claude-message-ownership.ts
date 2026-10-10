@@ -71,7 +71,6 @@ export function createClaudeMessageOwnership(deps: {
 	>();
 	const agents = new Map<string, string>();
 	const tasks = new Map<string, string>();
-	const opened = new Set<string>();
 	const held: { message: SDKMessage; awaiting: string }[] = [];
 
 	return {
@@ -158,19 +157,23 @@ export function createClaudeMessageOwnership(deps: {
 							? {}
 							: { issuingMessageId: issuer.issuingMessageId }),
 					};
-					if (
+					const firstStart =
 						message.type === "system" &&
 						message.subtype === "task_started" &&
-						!opened.has(message.task_id)
-					) {
+						!tasks.has(message.task_id);
+					if (firstStart) {
+						tasks.set(message.task_id, toolUseId);
+						newlyKnown.add(message.task_id);
+					}
+					// Background shells get no Child Session: their output is not a
+					// transcript (conduit-test-i7fy.9). Unknown task types may be
+					// agents, so they keep one.
+					if (firstStart && message.task_type !== "local_bash") {
 						const childSessionId = deps.childSessionIdFor(
 							message.task_id,
 							message,
 						);
-						opened.add(message.task_id);
-						tasks.set(message.task_id, toolUseId);
 						agents.set(toolUseId, childSessionId);
-						newlyKnown.add(message.task_id);
 						newlyKnown.add(toolUseId);
 						decisions.push({
 							kind: "open-child",
