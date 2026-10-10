@@ -31,6 +31,7 @@ import {
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
@@ -473,6 +474,7 @@ const appendedSessionColumns = [
 	"root_id",
 	"workspace",
 	"last_turn_end_input_id",
+	"claude_worktree_state",
 ] as const;
 
 function sameStrings(
@@ -1111,6 +1113,11 @@ export const effectMigrationEntries = {
 		"events",
 		"project_id",
 		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),
+	),
+	"0046_sessions_claude_worktree_state": runAddColumnMigrationIfMissing(
+		"sessions",
+		"claude_worktree_state",
+		readMigrationSql(SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION),
 	),
 } satisfies Record<
 	string,

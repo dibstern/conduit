@@ -1,4 +1,9 @@
-import { appendFileSync, existsSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { decodeClaudeSDKMessage } from "../../src/lib/contracts/providers/claude-agent-sdk.js";
 import {
@@ -6,6 +11,7 @@ import {
 	type ClaudeTraceReplayer,
 	createClaudeTraceReplayer,
 } from "../e2e/helpers/claude-trace-replayer.js";
+import { provisionalLimitReply } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
 import { claudeSdk as fakeSdk } from "./fake-claude-process-sdk.js";
 
 export {
@@ -16,6 +22,7 @@ export {
 // The server imports this module too. Only per-session runners play turns.
 const isRunner = /claude-session-runner\.(js|ts)$/.test(process.argv[1] ?? "");
 let replayer: ClaudeTraceReplayer | undefined;
+let activeWorkspace: string | undefined;
 
 export const claudeSdk: typeof fakeSdk = {
 	titleQuery: fakeSdk.titleQuery,
@@ -36,14 +43,29 @@ export const claudeSdk: typeof fakeSdk = {
 			},
 		);
 		appendFileSync(file, `${record}\n`);
+		const recordedOptions: { options: Record<string, unknown> } =
+			JSON.parse(record);
 		if (!isRunner || params.options?.maxTurns === 0)
 			return fakeSdk.query(params);
+		const workspaceMoves =
+			process.env["CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES"] === "1";
+		const checkpoint = `${file}.${process.argv[3]}.workspace-replay`;
+		const saved: { nextTurn: number; activeWorkspace?: string } =
+			workspaceMoves && existsSync(checkpoint)
+				? JSON.parse(readFileSync(checkpoint, "utf8"))
+				: { nextTurn: 0 };
+		let nextTurn = saved.nextTurn;
+		if (!replayer) activeWorkspace = saved.activeWorkspace;
+		const save = () =>
+			writeFileSync(checkpoint, JSON.stringify({ nextTurn, activeWorkspace }));
 
 		if (!replayer) {
 			const turns = process.env["CONDUIT_TEST_CLAUDE_REPLAY_TURNS"];
 			if (!turns) throw new Error("Claude replay requires a turn plan");
 			replayer = createClaudeTraceReplayer({
-				turns: JSON.parse(turns) as readonly ClaudeTraceName[],
+				turns: (JSON.parse(turns) as readonly ClaudeTraceName[]).slice(
+					nextTurn,
+				),
 				delayMs: Number(
 					process.env["CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS"] ?? 0,
 				),
@@ -57,7 +79,38 @@ export const claudeSdk: typeof fakeSdk = {
 				yield* [];
 			})(),
 		});
-		const query = replayer.sdk.query(params);
+		let directiveTarget: string | undefined;
+		const query = replayer.sdk.query({
+			...params,
+			prompt: (async function* () {
+				for await (const message of params.prompt) {
+					const prompt =
+						typeof message.message.content === "string"
+							? message.message.content
+							: message.message.content
+									.flatMap((block) =>
+										block.type === "text" ? [block.text] : [],
+									)
+									.join("\n");
+					appendFileSync(
+						file,
+						`${JSON.stringify({ pid: process.pid, options: recordedOptions.options, prompt })}\n`,
+					);
+					const line = prompt.split("\n")[0] ?? "";
+					const prefix =
+						"[Conduit workspace move] Call EnterWorktree with path ";
+					directiveTarget =
+						workspaceMoves && line.startsWith(prefix)
+							? (JSON.parse(
+									line.slice(prefix.length, -" before continuing.".length),
+								) as string)
+							: undefined;
+					nextTurn += 1;
+					if (workspaceMoves) save();
+					yield message;
+				}
+			})(),
+		});
 		const nextReplay = query.next.bind(query);
 		const closeReplay = query.close.bind(query);
 		let closed = false;
@@ -76,8 +129,16 @@ export const claudeSdk: typeof fakeSdk = {
 				)
 					await sleep(10);
 				const project = process.env["CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR"];
-				const enterPath = process.env["CONDUIT_TEST_CLAUDE_REPLAY_ENTER_PATH"];
+				const enterPath =
+					directiveTarget ??
+					process.env["CONDUIT_TEST_CLAUDE_REPLAY_ENTER_PATH"];
 				let wire = JSON.stringify(message);
+				// Workspace confirmations reuse a captured turn; each tool call is distinct.
+				if (workspaceMoves)
+					wire = wire.replaceAll(
+						/toolu_[A-Za-z0-9]+/g,
+						`$&-workspace-${nextTurn}`,
+					);
 				if (enterPath)
 					wire = wire.replaceAll(
 						"/tmp/conduit-worktree-capture/repo/.claude/worktrees/contract",
@@ -86,6 +147,35 @@ export const claudeSdk: typeof fakeSdk = {
 				if (project)
 					wire = wire.replaceAll("/tmp/conduit-worktree-capture/repo", project);
 				const mapped = decodeClaudeSDKMessage(JSON.parse(wire));
+				if (
+					mapped.type === "result" &&
+					nextTurn ===
+						Number(process.env["CONDUIT_TEST_CLAUDE_REPLAY_USAGE_LIMIT_TURN"])
+				)
+					return {
+						done: false as const,
+						value: decodeClaudeSDKMessage({
+							...mapped,
+							is_error: true,
+							result: provisionalLimitReply,
+							terminal_reason: "blocking_limit",
+						}),
+					};
+				if (
+					workspaceMoves &&
+					mapped.type === "user" &&
+					mapped.tool_use_result &&
+					typeof mapped.tool_use_result === "object"
+				) {
+					if ("originalCwd" in mapped.tool_use_result)
+						activeWorkspace = undefined;
+					else if (
+						"worktreePath" in mapped.tool_use_result &&
+						typeof mapped.tool_use_result.worktreePath === "string"
+					)
+						activeWorkspace = mapped.tool_use_result.worktreePath;
+					save();
+				}
 				return {
 					done: false as const,
 					value:
@@ -94,6 +184,7 @@ export const claudeSdk: typeof fakeSdk = {
 									...mapped,
 									cwd:
 										process.env["CONDUIT_TEST_CLAUDE_REPLAY_CWD"] ??
+										(workspaceMoves ? activeWorkspace : undefined) ??
 										params.options?.cwd ??
 										mapped.cwd,
 								}

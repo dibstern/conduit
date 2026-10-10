@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
@@ -131,6 +131,33 @@ export const WorktreeMenu: Story = {
 		await expect(
 			within(document.body).getByRole("menuitem", { name: /feature\/two/ }),
 		).toBeVisible();
+	},
+};
+
+export const WorkspaceMismatch: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-two",
+		git: { branch: "feature/two", worktree: "conduit-two" },
+		workspaceMismatch: {
+			actualPath: "/src/conduit/.claude/worktrees/contract",
+		},
+		onmove: fn(async (_path: string) => {}),
+	},
+	play: async ({ canvasElement, args }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
+			args["workspaceMismatch"]?.actualPath ?? "",
+		);
+		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-two");
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
 	},
 };
 

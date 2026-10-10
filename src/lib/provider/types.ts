@@ -199,6 +199,8 @@ export interface SendTurnInput {
 	readonly commandAttempt?: number;
 	readonly sessionId: string;
 	readonly prompt: string;
+	/** Kept ahead of Claude's context handoff without changing the displayed user text. */
+	readonly workspaceMoveDirective?: string;
 	/** What the user sent, when the prompt wraps it in a hidden handoff. */
 	readonly text?: string;
 	readonly handoff?: SessionHandoffDeliveredPayload;

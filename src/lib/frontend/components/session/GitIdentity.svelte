@@ -11,9 +11,10 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, loadWorktrees, onmove }: {
+	let { directory, git, workspaceMismatch, loadWorktrees, onmove }: {
 		directory: string;
 		git: SessionGit | undefined;
+		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
 		onmove?: ((path: string) => Promise<void>) | undefined;
 	} = $props();
@@ -134,6 +135,11 @@
 			{/if}
 		</dl>
 	</MenuGroup>
+	{#if workspaceMismatch}
+		<MenuSeparator />
+		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
+		{#if onmove}<MenuItem disabled={moving} onselect={() => void move(directory)}>Retry move</MenuItem>{/if}
+	{/if}
 	<MenuSeparator />
 	{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "")}>Copy branch name</MenuItem>{/if}
 	<MenuItem onselect={() => void copy(directory)}>Copy folder path</MenuItem>

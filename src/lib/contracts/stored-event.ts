@@ -296,6 +296,8 @@ export interface InputSentPayload {
 	readonly inputId: string;
 	/** Handed into the running turn rather than starting one. */
 	readonly steer?: true;
+	/** The user workspace move whose directive was included in this handoff. */
+	readonly workspaceMoveSequence?: number;
 }
 
 export interface InputCancelledPayload {
@@ -368,6 +370,8 @@ export interface SessionRenamedPayload {
 
 export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
+	/** Effective cwd after applying the mapping, including a reset to main. */
+	readonly path?: string;
 }
 
 /** The runner's reported startup folder, independent of recorded workspace moves. */
@@ -954,6 +958,7 @@ const InputSentPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
 	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+	workspaceMoveSequence: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const InputCancelledPayloadSchema = Schema.Struct({
@@ -986,6 +991,7 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 
 export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
+	path: Schema.optional(Schema.String),
 	...SessionWorkspaceSchema.fields,
 });
 

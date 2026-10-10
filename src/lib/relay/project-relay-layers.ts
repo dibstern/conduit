@@ -404,11 +404,13 @@ export function createProjectRelayLayers({
 						return (project: CommitAndSignalProject) =>
 							Effect.gen(function* () {
 								// A user can move while resolution is in flight. Recheck intent under
-								// the commit permit; this state check does only database reads.
+								// the commit permit before recording the declaration.
+								const state = yield* workspace.claudeWorktreeState(
+									event.sessionId,
+								);
 								if (
-									source === "start" &&
-									(yield* workspace.claudeWorktreeState(event.sessionId))
-										.pendingUserMove
+									state.pendingUserMove &&
+									target.path !== state.requestedPath
 								)
 									return;
 								yield* workspace.record(event.sessionId, target, "agent", {

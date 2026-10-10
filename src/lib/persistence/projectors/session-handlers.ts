@@ -37,6 +37,10 @@
 //
 // Bead conduit-test-ni8.5.12.
 
+import {
+	decodeClaudeWorktreeState,
+	projectClaudeWorktreeState,
+} from "../../session/claude-worktree-state.js";
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
@@ -88,6 +92,8 @@ type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
 	| "session.workspace_changed"
+	| "session.workspace_started"
+	| "input.sent"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -328,6 +334,8 @@ export const sessionHandlers: {
 			],
 		},
 	],
+	"session.workspace_started": () => [],
+	"input.sent": () => [],
 
 	"session.unsettled": (event) => [
 		{
@@ -638,6 +646,7 @@ export const SESSION_HANDLED_TYPES = Object.keys(
 
 export function getSessionStatements<K extends CanonicalEventType>(
 	event: StoredEvent & { type: K; data: EventPayloadMap[K] },
+	claudeWorktreeState?: string | null,
 ): readonly SessionStatement[] {
 	// The partial view permits ignored event types while preserving the correlation
 	// between each handler key and its payload through the generic K.
@@ -646,7 +655,30 @@ export function getSessionStatements<K extends CanonicalEventType>(
 			event: StoredEvent & { type: T; data: EventPayloadMap[T] },
 		) => readonly SessionStatement[];
 	} = sessionHandlers;
-	const statements = handlers[event.type]?.(event) ?? [];
+	let statements = handlers[event.type]?.(event) ?? [];
+	if (claudeWorktreeState !== undefined) {
+		const fact: StoredEvent = event;
+		const previous = claudeWorktreeState
+			? decodeClaudeWorktreeState(claudeWorktreeState)
+			: undefined;
+		const next = projectClaudeWorktreeState(previous, event);
+		const serialized = next === undefined ? null : JSON.stringify(next);
+		if (
+			fact.type === "session.workspace_changed" &&
+			fact.data.cause === "agent" &&
+			previous?.pending &&
+			next?.observed !== previous.pending.path
+		)
+			statements = [];
+		if (serialized !== claudeWorktreeState)
+			statements = [
+				...statements,
+				{
+					sql: "UPDATE sessions SET claude_worktree_state = ? WHERE id = ? AND claude_worktree_state IS NOT ?",
+					params: [serialized, event.sessionId, serialized],
+				},
+			];
+	}
 	if (event.type !== "session.created" && event.type !== "session.forked") {
 		return statements;
 	}

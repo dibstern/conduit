@@ -28,6 +28,8 @@ export interface SessionRow {
 	resumes?: string | null;
 	/** JSON SessionWorkspace. NULL uses the project's main folders. */
 	workspace?: string | null;
+	/** Projected Claude native workspace and pending user intent. */
+	claude_worktree_state?: string | null;
 	last_turn_end_version?: number | null;
 	last_turn_end_input_id?: string | null;
 	seen_version?: number | null;

@@ -19,6 +19,10 @@ import type {
 } from "../../contracts/ws-rpc.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
 import {
+	claudeWorkspaceMismatch,
+	decodeClaudeWorktreeState,
+} from "../../session/claude-worktree-state.js";
+import {
 	type SessionAttention,
 	type SessionInfo,
 	SessionPermissionModeSchema,
@@ -224,6 +228,11 @@ export const sessionRowsToSessionInfoList = (
 							Schema.parseJson(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
+			workspaceMismatch: row.claude_worktree_state
+				? claudeWorkspaceMismatch(
+						decodeClaudeWorktreeState(row.claude_worktree_state),
+					)
+				: undefined,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }

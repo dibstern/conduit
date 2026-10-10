@@ -79,6 +79,7 @@ const expectedNames = [
 	"messages_steered",
 	"sessions_last_turn_end_input_id",
 	"project_provenance",
+	"sessions_claude_worktree_state",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -97,6 +98,25 @@ const legacyNames = [
 ];
 
 describe("Effect migration lineage", () => {
+	it.effect(
+		"adds nullable Claude worktree state without inventing historical facts",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(45));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+				VALUES ('kept-workspace', 'claude', 'Preserved', 'idle', 1, 1)`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[46, "sessions_claude_worktree_state"],
+				]);
+				expect(
+					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
+				).toEqual([
+					{ title: "Preserved", workspace: null, claude_worktree_state: null },
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
 	it.effect("a failed migration run applies and records nothing", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -630,6 +650,7 @@ describe("Effect migration lineage", () => {
 				[43, "messages_steered"],
 				[44, "sessions_last_turn_end_input_id"],
 				[45, "project_provenance"],
+				[46, "sessions_claude_worktree_state"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -712,6 +733,7 @@ describe("Effect migration lineage", () => {
 					[43, "messages_steered"],
 					[44, "sessions_last_turn_end_input_id"],
 					[45, "project_provenance"],
+					[46, "sessions_claude_worktree_state"],
 				]);
 				const rows = yield* sql<{
 					id: string;

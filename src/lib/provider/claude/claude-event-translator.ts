@@ -1577,6 +1577,13 @@ export class ClaudeEventTranslator {
 						partId: matchedTool.itemId,
 						result: resultContent || null,
 						duration: 0,
+						...(path !== undefined
+							? {
+									metadata: {
+										workspace: { path, entered },
+									},
+								}
+							: {}),
 					}),
 				);
 				ctx.inFlightTools.delete(matchedIndex);

@@ -21,6 +21,7 @@ import {
 	makeCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { ConfigTag } from "../Services/services.js";
 import {
@@ -48,9 +49,6 @@ export const SessionWorkspaceLive = Layer.effect(
 		const services = yield* Effect.context<Dependencies>();
 		const launches = yield* Effect.makeSemaphore(1);
 		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
-		const primary = yield* realWorkspacePath(config.projectDir).pipe(
-			Effect.orElseSucceed(() => config.projectDir),
-		);
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
 				const row = yield* read
@@ -205,15 +203,33 @@ export const SessionWorkspaceLive = Layer.effect(
 						// A successful declaration can acknowledge a user move to the same path,
 						// including a reset whose read-model workspace is NULL.
 						if (
-							cause !== "agent" ||
-							(yield* latestMove(sessionId))[0]?.cause !== "user"
+							!(
+								cause === "agent" &&
+								(yield* latestMove(sessionId))[0]?.cause === "user"
+							) &&
+							!(
+								cause === "user" &&
+								(yield* readClaudeWorktreeState(
+									sql,
+									sessionId,
+									config.projectDir,
+								)).workspaceMismatch
+							)
 						)
 							return target.path;
 					}
+					const directory = effectiveWorkingDirectory(config.projectDir, {
+						cause,
+						worktrees,
+						origin: "existing",
+					});
+					const path = yield* realWorkspacePath(directory).pipe(
+						Effect.orElseSucceed(() => directory),
+					);
 					yield* applySessionCommand(
 						{
 							type: "session.workspace_changed",
-							data: { sessionId, cause, worktrees, origin: "existing" },
+							data: { sessionId, cause, path, worktrees, origin: "existing" },
 						},
 						{ project, upstreamAdapter: null },
 					).pipe(Effect.provide(services));
@@ -250,21 +266,7 @@ export const SessionWorkspaceLive = Layer.effect(
 					Effect.flatMap((target) => record(sessionId, target, cause)),
 				),
 			claudeWorktreeState: (sessionId) =>
-				Effect.gen(function* () {
-					const lastMove = (yield* latestMove(sessionId))[0];
-					if (lastMove?.cause !== "user") return { pendingUserMove: false };
-					const { workspace } = yield* readWorkspace(sessionId);
-					const requested = effectiveWorkingDirectory(
-						config.projectDir,
-						workspace,
-					);
-					const target = requested === config.projectDir ? primary : requested;
-					const acknowledgments = yield* sql`
-					SELECT 1 FROM events WHERE session_id = ${sessionId}
-					AND sequence > ${lastMove.sequence} AND type = 'session.workspace_started'
-					AND json_extract(data, '$.path') = ${target} LIMIT 1`;
-					return { pendingUserMove: acknowledgments.length === 0 };
-				}).pipe(
+				readClaudeWorktreeState(sql, sessionId, config.projectDir).pipe(
 					Effect.mapError(
 						(cause) =>
 							new SessionCommandError({
