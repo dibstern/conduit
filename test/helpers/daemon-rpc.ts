@@ -29,6 +29,10 @@ import {
 	makeRelayCacheLive,
 	type RelayFactory,
 } from "../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	makeUsage,
+	Usage,
+} from "../../src/lib/domain/daemon/Services/usage.js";
 import type { StoredProject } from "../../src/lib/types.js";
 
 export const makeDaemonRpcTestLayer = (
@@ -73,6 +77,10 @@ export const makeDaemonRpcTestLayer = (
 			}),
 		),
 		makeInstanceManagerStateLive(),
+		Layer.scoped(
+			Usage,
+			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
+		),
 		Layer.succeed(PortScannerTag, {
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),

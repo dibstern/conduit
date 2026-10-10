@@ -33,10 +33,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
-import {
-	makeQuotaCheck,
-	QuotaCheckTag,
-} from "../domain/daemon/Services/quota-check.js";
+import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -93,23 +90,28 @@ import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceLive,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { realWorkspacePath } from "../git/worktrees.js";
+import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
+import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
-import { makeClaudeUsageProbe } from "../provider/claude/claude-usage-probe.js";
+import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
+import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
@@ -130,14 +132,15 @@ import { PermissionTimeoutLive } from "./timer-wiring.js";
 const relayOpenCodeInstances = (
 	instances: OpenCodeInstances,
 	config: ProjectRelayConfig,
+	persistedInstanceIds: readonly string[],
 ): OpenCodeInstances => {
 	const defaultId = defaultInstanceIdForDriver("opencode");
 	const selectedId = config.openCodeInstanceId ?? defaultId;
 	const target = (instanceId: string) =>
 		instanceId === defaultId ? selectedId : instanceId;
 	const scope = config.noServer ? config.projectDir : undefined;
-	// Other instances' events reach this relay only once it has used them.
-	const used = new Set<string>();
+	// Restored sessions receive events before the relay first uses their instance.
+	const used = new Set(persistedInstanceIds.map(target));
 	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
 		instances.use(target(instanceId), directory).pipe(
 			Effect.tap(() => {
@@ -233,7 +236,6 @@ export function createProjectRelayLayers({
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		extraFolders: config.extraFolders ?? [],
-		...(config.slug != null ? { projectKey: config.slug } : {}),
 		...(config.configDir != null ? { configDir: config.configDir } : {}),
 	});
 
@@ -284,13 +286,13 @@ export function createProjectRelayLayers({
 					);
 				}),
 			);
-	const sharedQuotaCheck = config.quotaCheck;
-	const quotaCheckLayer = sharedQuotaCheck
-		? Layer.sync(QuotaCheckTag, () => sharedQuotaCheck)
+	const sharedUsage = config.usage;
+	const usageLayer = sharedUsage
+		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
-				QuotaCheckTag,
-				makeQuotaCheck({
-					instances: Effect.sync(() => {
+				Usage,
+				makeUsage({
+					accounts: Effect.sync(() => {
 						const saved = loadDaemonConfig(config.configDir);
 						return saved
 							? resolveConfiguredInstances(saved)
@@ -300,48 +302,74 @@ export function createProjectRelayLayers({
 											instance.configDir ?? saved.claudeConfigDir;
 										return {
 											id: instance.id,
+											harness: "claude" as const,
 											...(configDir === undefined ? {} : { configDir }),
 										};
 									})
-							: [{ id: "claude" }];
+							: [{ id: "claude", harness: "claude" as const }];
 					}),
-					probe: makeClaudeUsageProbe({
-						queryFactory: claudeSdk.query,
-						cwd: config.projectDir,
-						...(config.shellEnv
-							? { shellEnv: config.shellEnv(config.projectDir) }
-							: {}),
-					}),
+					readers: {
+						claude: makeClaudeUsageReader({
+							queryFactory: claudeSdk.query,
+							cwd: config.projectDir,
+							...(config.shellEnv
+								? { shellEnv: config.shellEnv(config.projectDir) }
+								: {}),
+						}),
+					},
 				}),
 			);
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
 	const sharedInstances = config.openCodeInstances;
-	const openCodeInstancesLayer = Layer.map(
-		sharedInstances
-			? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-			: makeStandaloneOpenCodeInstancesLive(config),
-		(context) =>
-			Context.make(
-				OpenCodeInstancesTag,
-				relayOpenCodeInstances(
-					Context.get(context, OpenCodeInstancesTag),
-					config,
-				),
+	const persistenceEffectLayer = makePersistenceEffectLayer(
+		config.persistenceDbPath,
+		config.slug,
+		undefined,
+		SessionEventBusLive,
+	);
+	const openCodeInstancesLayer = Layer.effect(
+		OpenCodeInstancesTag,
+		Effect.gen(function* () {
+			const instances = yield* OpenCodeInstancesTag;
+			const sql = yield* SqlClient.SqlClient;
+			const bindings = yield* new SqliteProviderSessionBindingReadModel(
+				sql,
+			).listBoundSessions();
+			return relayOpenCodeInstances(
+				instances,
+				config,
+				bindings.map(({ providerId }) => providerId),
+			);
+		}),
+	).pipe(
+		Layer.provide(
+			Layer.merge(
+				sharedInstances
+					? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+					: makeStandaloneOpenCodeInstancesLive(config),
+				persistenceEffectLayer,
 			),
+		),
 	);
 	// The relay's default client resolves its endpoint through that view.
 	const openCodeApiLayer = OpenCodeAPILive.pipe(
 		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
-	const persistenceEffectLayer = makePersistenceEffectLayer(
-		config.persistenceDbPath,
-		undefined,
-		SessionEventBusLive,
-	);
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
+	);
+	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				persistenceEffectLayer,
+				configLayer,
+				loggerLayer,
+				openCodeApiLayer,
+				SessionEventBusLive,
+			),
+		),
 	);
 	const providerRuntimeIngestionLayer = Layer.unwrapEffect(
 		Effect.gen(function* () {
@@ -349,7 +377,77 @@ export function createProjectRelayLayers({
 			const alerts = yield* AlertsTag;
 			const sql = yield* SqlClient.SqlClient;
 			const log = yield* LoggerTag;
+			const workspace = yield* SessionWorkspaceTag;
 			return makeProviderRuntimeIngestionLive({
+				usage: yield* Usage,
+				workspaceChanged: (event) =>
+					Effect.gen(function* () {
+						const { path, source } = event.data;
+						if (source === "start") {
+							const recorded = yield* workspace.get(event.sessionId);
+							const current = yield* realWorkspacePath(recorded).pipe(
+								Effect.orElseSucceed(() => recorded),
+							);
+							// The common case needs no history query, git discovery or cache refresh.
+							if (current === path) return;
+							if (
+								(yield* workspace.claudeWorktreeState(event.sessionId))
+									.pendingUserMove
+							)
+								return;
+						}
+						const target = yield* workspace.resolve(
+							event.sessionId,
+							path,
+							"agent",
+						);
+						return (project: CommitAndSignalProject) =>
+							Effect.gen(function* () {
+								// A user can move while resolution is in flight. Recheck intent under
+								// the commit permit; this state check does only database reads.
+								if (
+									source === "start" &&
+									(yield* workspace.claudeWorktreeState(event.sessionId))
+										.pendingUserMove
+								)
+									return;
+								yield* workspace.record(event.sessionId, target, "agent", {
+									project,
+								});
+							}).pipe(
+								Effect.catchTag("WorkspaceMoveError", (error) =>
+									Effect.sync(() => {
+										log.warn("Invalid agent workspace move", {
+											sessionId: event.sessionId,
+											path,
+											reason: error.reason,
+										});
+									}),
+								),
+								Effect.mapError(
+									(cause) =>
+										new EventStoreError({
+											operation: "workspace.changed",
+											cause,
+										}),
+								),
+							);
+					}).pipe(
+						Effect.catchTag("WorkspaceMoveError", (error) =>
+							Effect.sync(() => {
+								log.warn("Invalid agent workspace move", {
+									sessionId: event.sessionId,
+									path: event.data.path,
+									reason: error.reason,
+								});
+								return undefined;
+							}),
+						),
+						Effect.mapError(
+							(cause) =>
+								new EventStoreError({ operation: "workspace.changed", cause }),
+						),
+					),
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
@@ -373,12 +471,14 @@ export function createProjectRelayLayers({
 		Layer.provide(
 			Layer.mergeAll(
 				persistenceEffectLayer,
+				sessionWorkspaceLayer,
 				SessionEventBusLive,
 				alertLedgerLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
 				AlertsLive,
 				loggerLayer,
+				usageLayer,
 			),
 		),
 	);
@@ -401,7 +501,7 @@ export function createProjectRelayLayers({
 		Layer.provide(providerOrchestrationDeps),
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(
@@ -414,7 +514,7 @@ export function createProjectRelayLayers({
 		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const sseStreamLayer = SSEStreamLive.pipe(
 		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),
@@ -481,7 +581,7 @@ export function createProjectRelayLayers({
 
 	const coreBridgeLayers = Layer.mergeAll(
 		daemonConfigLayer,
-		quotaCheckLayer,
+		usageLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
 		openCodeApiLayer,
@@ -551,10 +651,7 @@ export function createProjectRelayLayers({
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			Layer.provideMerge(
-				SessionWorkspaceLive,
-				baseLayersWithProjectionNotifier,
-			),
+			Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
 			makeWsTransportLive({ noServer: true }),
 		),
 	);

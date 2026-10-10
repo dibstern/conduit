@@ -27,6 +27,7 @@ export class ProjectionRunnerError extends Data.TaggedError(
 }> {}
 
 export interface ProjectionFailure {
+	readonly projectId: string;
 	readonly projectorName: string;
 	readonly eventSequence: number;
 	readonly eventType: string;
@@ -36,6 +37,7 @@ export interface ProjectionFailure {
 }
 
 export interface RecoveryResult {
+	readonly projectId: string;
 	readonly startCursor: number;
 	readonly endCursor: number;
 	readonly totalReplayed: number;
@@ -167,6 +169,7 @@ export const makeProjectionRunnerEffect = (
 			err: unknown,
 		): ProjectionFailure => {
 			const failure: ProjectionFailure = {
+				projectId: event.projectId,
 				projectorName: projector.name,
 				eventSequence: event.sequence,
 				eventType: event.type,
@@ -341,6 +344,7 @@ export const makeProjectionRunnerEffect = (
 				if (allCaughtUp) {
 					recovered = true;
 					return {
+						projectId: cursorRepo.projectId,
 						startCursor: latestSeq,
 						endCursor: latestSeq,
 						totalReplayed: 0,
@@ -371,7 +375,7 @@ export const makeProjectionRunnerEffect = (
 
 					while (true) {
 						const eventRows = yield* sql<StoredEventRow>`
-							SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at
+							SELECT project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 							FROM events
 							WHERE sequence > ${scanCursor} AND sequence <= ${latestSeq}
 							ORDER BY sequence ASC
@@ -467,6 +471,7 @@ export const makeProjectionRunnerEffect = (
 				);
 
 				return {
+					projectId: cursorRepo.projectId,
 					startCursor,
 					endCursor: latestSeq,
 					totalReplayed,

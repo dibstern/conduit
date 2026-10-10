@@ -5,11 +5,12 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect, Runtime } from "effect";
+import { Cause, Deferred, Effect, FiberId, Runtime } from "effect";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
+import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	type AlertsTag,
 	publishAlert,
@@ -335,11 +336,13 @@ const executeMonitoringEffectsEffect = (
 					// the effects that follow it (other sessions' stops and dones).
 					yield* Effect.forkDaemon(
 						Effect.gen(function* () {
-							const messages = yield* Effect.tryPromise(() =>
-								deps.client.session.messages(sessionId),
-							).pipe(
+							const messages = yield* Effect.tryPromise({
+								try: () => deps.client.session.messages(sessionId),
+								catch: (error) => error,
+							}).pipe(
 								Effect.catchAll((err) =>
 									Effect.sync(() => {
+										if (isOpenCodeNotRunningError(err)) return;
 										deps.statusLog.warn(
 											`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
 										);
@@ -440,11 +443,12 @@ export function wireMonitoring(
 					if (!monitoringActive) return;
 					pollerManager.startPolling(sessionId, msgs);
 				})
-				.catch((err) =>
+				.catch((err) => {
+					if (isOpenCodeNotRunningError(err)) return;
 					statusLog.warn(
 						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-					),
-				);
+					);
+				});
 		},
 		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
 		processAndApplyDone: (sessionId, isSubagent, busySince) => {
@@ -613,13 +617,14 @@ export const wireMonitoringEffect = (
 		};
 
 		const runFork = Runtime.runFork(runtime);
-		const tickSemaphore = yield* Effect.makeSemaphore(1);
-		// Ticks can reach reduction out of order (the lineage refresh before it is
-		// async), so a snapshot older than the last reduced one is dropped.
-		let capturedTicks = 0;
-		let lastReducedTick = 0;
+		// Ticks reduce in capture order. The lineage refresh before reduction is
+		// async, so a busy tick could otherwise reach reduction after the next idle
+		// one; dropping it as stale lost the busy period and its done alert.
+		let previousReduction: Effect.Effect<void> = Effect.void;
 		yield* statusPoller.on("changed", (statuses, statusesChanged) => {
-			const tick = ++capturedTicks;
+			const reduction = Deferred.unsafeMake<void>(FiberId.none);
+			const afterPrevious = previousReduction;
+			previousReduction = Deferred.await(reduction);
 			runFork(
 				Effect.gen(function* () {
 					if (!monitoringActive) return;
@@ -641,54 +646,51 @@ export const wireMonitoringEffect = (
 							);
 					}
 
+					yield* afterPrevious;
 					if (!monitoringActive) return;
 
 					const parentMap = yield* sessionService.getSessionParentMap({
 						activityOnly: true,
 					});
-					const reduced = yield* tickSemaphore.withPermits(1)(
-						Effect.sync(() => {
-							if (tick < lastReducedTick) return undefined;
-							lastReducedTick = tick;
-							const now = Date.now();
-							const prevState = getMonitoringState();
-							const contexts = new Map<string, SessionEvalContext>();
-							for (const sessionId of selectMonitoringCandidates(
-								prevState,
-								statuses,
-								parentMap,
-							)) {
-								const status = statuses[sessionId];
-								if (status == null) continue;
-								contexts.set(
+					const reduced = yield* Effect.sync(() => {
+						const now = Date.now();
+						const prevState = getMonitoringState();
+						const contexts = new Map<string, SessionEvalContext>();
+						for (const sessionId of selectMonitoringCandidates(
+							prevState,
+							statuses,
+							parentMap,
+						)) {
+							const status = statuses[sessionId];
+							if (status == null) continue;
+							contexts.set(
+								sessionId,
+								assembleContext(
 									sessionId,
-									assembleContext(
-										sessionId,
-										status,
-										{ connected: sseStream.isConnected() },
-										sseTracker,
-										parentMap,
-										(sid) => wsHandler.getClientsForSession(sid).length > 0,
-										now,
-										providerStreamsLifecycle(
-											daemonConfig,
-											providers.get(sessionId),
-										),
+									status,
+									{ connected: sseStream.isConnected() },
+									sseTracker,
+									parentMap,
+									(sid) => wsHandler.getClientsForSession(sid).length > 0,
+									now,
+									providerStreamsLifecycle(
+										daemonConfig,
+										providers.get(sessionId),
 									),
-								);
-							}
-
-							const result = evaluateAll(
-								prevState,
-								contexts,
-								pollerGatingCfg,
-								parentMap,
+								),
 							);
-							setMonitoringState(result.state);
-							return { prevState, result, contexts };
-						}),
-					);
-					if (reduced === undefined) return;
+						}
+
+						const result = evaluateAll(
+							prevState,
+							contexts,
+							pollerGatingCfg,
+							parentMap,
+						);
+						setMonitoringState(result.state);
+						return { prevState, result, contexts };
+					});
+					yield* Deferred.succeed(reduction, undefined);
 					const { prevState, result, contexts } = reduced;
 
 					if (result.effects.length > 0) {
@@ -717,6 +719,8 @@ export const wireMonitoringEffect = (
 						}
 					}
 				}).pipe(
+					// Early returns and failures must not stall later ticks.
+					Effect.ensuring(Deferred.succeed(reduction, undefined)),
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() =>
 							statusLog.warn(

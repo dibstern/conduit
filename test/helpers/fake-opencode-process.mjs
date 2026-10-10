@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	writeFileSync,
@@ -39,14 +40,22 @@ appendFileSync(
 );
 const streams = new Map();
 let streamId = 0;
-const sessionsFile = join(configDir, "fake-opencode-sessions.json");
+let silenceReconnect = false;
+// While set, /session/status samples at arrival but answers only on release.
+let statusHold;
+// Multiple instances in one harness can opt into separate provider stores.
+const statePrefix = process.env.CONDUIT_TEST_OPENCODE_STATE_PREFIX;
+const stateStem = statePrefix
+	? `fake-opencode-${statePrefix}`
+	: "fake-opencode";
+const sessionsFile = join(configDir, `${stateStem}-sessions.json`);
 const sessions = () =>
 	existsSync(sessionsFile)
 		? JSON.parse(readFileSync(sessionsFile, "utf8"))
 		: [];
 // Per-directory status and pending prompts, kept in a file so they survive a
 // managed restart like sessions do. Idle sessions are absent, as in OpenCode.
-const stateFile = join(configDir, "fake-opencode-state.json");
+const stateFile = join(configDir, `${stateStem}-state.json`);
 const readState = () =>
 	existsSync(stateFile)
 		? JSON.parse(readFileSync(stateFile, "utf8"))
@@ -182,6 +191,21 @@ const server = createServer(async (request, response) => {
 		response.end("{}");
 		return;
 	}
+	if (path === "/test/hold-status" && request.method === "POST") {
+		let release;
+		const released = new Promise((done) => {
+			release = done;
+		});
+		statusHold = { released, release };
+		response.end("{}");
+		return;
+	}
+	if (path === "/test/release-status" && request.method === "POST") {
+		statusHold?.release();
+		statusHold = undefined;
+		response.end("{}");
+		return;
+	}
 	if (path === "/test/drop-events" && request.method === "POST") {
 		const input = JSON.parse(body);
 		updateState((state) => {
@@ -190,7 +214,16 @@ const server = createServer(async (request, response) => {
 		response.end("{}");
 		return;
 	}
+	if (path === "/test/fail-delete" && request.method === "POST") {
+		const input = JSON.parse(body);
+		updateState((state) => {
+			state.failedDeletes = [...(state.failedDeletes ?? []), input.sessionID];
+		});
+		response.end("{}");
+		return;
+	}
 	if (path === "/test/close-streams" && request.method === "POST") {
+		silenceReconnect = JSON.parse(body).silenceReconnect === true;
 		for (const client of streams.keys()) client.end();
 		response.end("{}");
 		return;
@@ -221,10 +254,12 @@ const server = createServer(async (request, response) => {
 				projectID: "global",
 				directory,
 				title: input.title ?? "Fake session",
+				...(input.parentID ? { parentID: input.parentID } : {}),
 				time: { created: Date.now(), updated: Date.now() },
 			};
 			writeFileSync(sessionsFile, JSON.stringify([...sessions(), session]));
 			response.end(JSON.stringify(session));
+			emitTyped(directory, "session.created", { info: session });
 		} else {
 			response.end(
 				JSON.stringify(
@@ -257,7 +292,9 @@ const server = createServer(async (request, response) => {
 		streams.set(response, stream);
 		streamLog("open", stream);
 		response.setHeader("Content-Type", "text/event-stream");
+		response.flushHeaders();
 		const write = (type) => {
+			if (silenceReconnect) return;
 			const payload = { id: `evt_${randomUUID()}`, type, properties: {} };
 			response.write(
 				`data: ${JSON.stringify(path === "/global/event" ? { payload } : payload)}\n\n`,
@@ -271,9 +308,17 @@ const server = createServer(async (request, response) => {
 			streamLog("close", stream);
 		});
 	} else if (path === "/session/status") {
-		response.end(
-			JSON.stringify((directory && readState().statuses[directory]) || {}),
+		const statuses = JSON.stringify(
+			(directory && readState().statuses[directory]) || {},
 		);
+		if (statusHold) {
+			appendFileSync(
+				join(configDir, "fake-opencode-held-status.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), directory, statuses })}\n`,
+			);
+			await statusHold.released;
+		}
+		response.end(statuses);
 	} else if (
 		(path === "/permission" || path === "/question") &&
 		request.method === "GET"
@@ -322,12 +367,98 @@ const server = createServer(async (request, response) => {
 				{ sessionID: pending?.sessionID, requestID },
 			);
 		response.end("true");
-	} else if (/^\/session\/[^/]+$/.test(path)) {
+	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
+		const sessionID = path.split("/")[2];
+		const failureFile = join(configDir, "fake-opencode-history-failures.json");
+		const failures = existsSync(failureFile)
+			? JSON.parse(readFileSync(failureFile, "utf8"))
+			: {};
+		// true keeps failures active until the test removes the entry.
+		if (failures[sessionID] === true || failures[sessionID] > 0) {
+			if (failures[sessionID] !== true) {
+				failures[sessionID]--;
+				writeFileSync(failureFile, JSON.stringify(failures));
+			}
+			appendFileSync(
+				join(configDir, "fake-opencode-history-failures.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), sessionID })}\n`,
+			);
+			response.writeHead(503).end('{"message":"Injected history failure"}');
+		} else {
+			response.end("[]");
+		}
+	} else if (["/agent", "/command", "/file", "/file/content"].includes(path)) {
+		const discoveryFile = join(configDir, "fake-opencode-discovery.json");
+		const discovery = existsSync(discoveryFile)
+			? JSON.parse(readFileSync(discoveryFile, "utf8"))
+			: {};
 		response.end(
 			JSON.stringify(
-				sessions().find(({ id }) => path === `/session/${id}`) ?? {},
+				path === "/agent"
+					? (discovery.agents ?? [])
+					: path === "/command"
+						? (discovery.commands ?? [])
+						: path === "/file/content"
+							? { type: "text", content: "" }
+							: (discovery.files ?? []),
 			),
 		);
+	} else if (/^\/session\/[^/]+$/.test(path)) {
+		const session = sessions().find(({ id }) => path === `/session/${id}`);
+		if (request.method === "DELETE") {
+			if ((readState().failedDeletes ?? []).includes(session?.id)) {
+				response
+					.writeHead(503)
+					.end(JSON.stringify({ message: "Delete failed" }));
+				return;
+			}
+			if (!session) {
+				response.writeHead(404).end("{}");
+				return;
+			}
+			writeFileSync(
+				sessionsFile,
+				JSON.stringify(sessions().filter(({ id }) => id !== session.id)),
+			);
+			updateState((state) => {
+				delete state.statuses[session.directory]?.[session.id];
+				for (const kind of ["permissions", "questions"])
+					state[kind][session.directory] = (
+						state[kind][session.directory] ?? []
+					).filter(({ sessionID }) => sessionID !== session.id);
+			});
+			response.end("true");
+			emitTyped(session.directory, "session.deleted", { info: session });
+			return;
+		}
+		response.end(JSON.stringify(session ?? {}));
+	} else if (path === "/file" || path === "/file/content") {
+		try {
+			const target = join(
+				directory ?? configDir,
+				url.searchParams.get("path") ?? ".",
+			);
+			response.end(
+				JSON.stringify(
+					path === "/file"
+						? readdirSync(target, { withFileTypes: true }).map((entry) => ({
+								name: entry.name,
+								path: entry.name,
+								absolute: join(target, entry.name),
+								type: entry.isDirectory() ? "directory" : "file",
+								ignored: false,
+							}))
+						: { type: "text", content: readFileSync(target, "utf8") },
+				),
+			);
+		} catch {
+			response.writeHead(404).end(
+				JSON.stringify({
+					name: "NotFoundError",
+					data: { message: "File not found" },
+				}),
+			);
+		}
 	} else if (path === "/path") {
 		response.end(
 			JSON.stringify({
@@ -338,26 +469,32 @@ const server = createServer(async (request, response) => {
 			}),
 		);
 	} else if (path === "/config") {
-		response.end("{}");
-	} else if (path === "/provider" && request.method === "GET") {
+		const projectConfig = join(directory ?? process.cwd(), "opencode.json");
 		response.end(
-			JSON.stringify({
-				all: [
-					{
-						id: "fake",
-						name: "Fake Provider",
-						models: {
-							"fake-model": {
-								id: "fake-model",
-								name: "Fake Model",
-								limit: { context: 128000, output: 4096 },
+			existsSync(projectConfig) ? readFileSync(projectConfig, "utf8") : "{}",
+		);
+	} else if (path === "/provider" && request.method === "GET") {
+		const catalogFile = join(configDir, "fake-opencode-model-catalog.json");
+		response.end(
+			existsSync(catalogFile)
+				? readFileSync(catalogFile, "utf8")
+				: JSON.stringify({
+						all: [
+							{
+								id: "fake",
+								name: "Fake Provider",
+								models: {
+									"fake-model": {
+										id: "fake-model",
+										name: "Fake Model",
+										limit: { context: 128000, output: 4096 },
+									},
+								},
 							},
-						},
-					},
-				],
-				default: { fake: "fake-model" },
-				connected: ["fake"],
-			}),
+						],
+						default: { fake: "fake-model" },
+						connected: ["fake"],
+					}),
 		);
 	} else {
 		response.end("[]");

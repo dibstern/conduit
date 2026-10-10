@@ -76,6 +76,7 @@ describe("SessionManagerService settle signal", () => {
 					SessionEventBusLive,
 					makePersistenceEffectLayer(
 						join(dir, "events.db"),
+						"test-project",
 						undefined,
 						SessionEventBusLive,
 					),

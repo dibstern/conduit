@@ -30,7 +30,8 @@ export const visualHandlers: StepHandler[] = [
 			/^the ([a-z0-9-]+) region visually matches ([a-z0-9-]+) at ([0-9]+(?:\.[0-9]+)?) percent$/,
 		run: async ({ world, match, example }) => {
 			const regionId = match[1] ?? "";
-			const baseline = exampleValue(example, "baseline");
+			// The step text, so one scenario can compare several named states.
+			const baseline = match[2] ?? "";
 			const threshold = thresholdExampleValue(example, "threshold");
 			const result = await world.driver.matchRegion(
 				world.page,

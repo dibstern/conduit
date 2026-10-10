@@ -170,7 +170,7 @@ describe("project shell environment", () => {
 		await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
-				nativeThread,
+				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 				providerState: Object.fromEntries(
 					result.providerStateUpdates.map(({ key, value }) => [key, value]),
@@ -191,7 +191,7 @@ describe("project shell environment", () => {
 			namedInstance.sendTurnEffect({
 				...input,
 				configDir: namedConfigDir,
-				nativeThread,
+				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 			}),
 		);

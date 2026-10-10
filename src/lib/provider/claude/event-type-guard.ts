@@ -31,6 +31,7 @@ const CLAUDE_PRODUCED_TYPES = [
 	"session.compaction",
 	"session.permission_mode_changed",
 	"session.goal_changed", // Goal tracker translates SDK facts and transcript settlement through the event sink
+	"session.workspace_started", // The workspace.changed startup report maps to a durable observation.
 ] as const satisfies readonly CanonicalEventType[];
 
 /**

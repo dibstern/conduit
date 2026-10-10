@@ -18,13 +18,34 @@
 // golden holds a normalised copy, because stream versions depend on how many
 // text deltas the relay coalesced and so vary from run to run.
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Browser, Page, TestInfo, WebSocketRoute } from "@playwright/test";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import {
+	expect,
+	gotoRelay,
+	test as replayTest,
+} from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
+
+// The row screenshots include the project's git label. A folder outside git
+// keeps it empty; the default (this checkout) shows its branch off main.
+const test = replayTest.extend({
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructuring even for a fixture with no dependencies.
+	projectDir: async ({}, use) => {
+		const projectDir = mkdtempSync(join(tmpdir(), "e2e-session-unread-"));
+		try {
+			await use(projectDir);
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	},
+});
 
 type Provider = "opencode" | "claude";
 type Windows = { readonly A: Page; readonly B: Page };
@@ -175,6 +196,47 @@ async function screenshotRow(page: Page, sessionId: string, name: string) {
 	await page.mouse.move(0, 0);
 	await expect(row(page, sessionId)).toHaveScreenshot(name, {
 		mask: [row(page, sessionId).locator(".session-item-meta")],
+	});
+}
+
+// A send that never ends leaves its trace in the store: no pending_inputs row
+// means the server never received it, a queued one that the inbox held it,
+// and a sent one with a running turn and no reply that the provider runtime
+// lost it (conduit-test-6ksg).
+async function attachSendState(
+	harness: ReplayHarness,
+	sessionId: string,
+	testInfo: TestInfo,
+) {
+	const rows = (sql: string) =>
+		query<Record<string, unknown>>(harness, sql, sessionId);
+	// A file, not a body: the list reporter prints only an attachment's path.
+	const path = testInfo.outputPath("send-state.json");
+	writeFileSync(
+		path,
+		JSON.stringify(
+			{
+				session: rows("SELECT id, status, provider FROM sessions WHERE id = ?"),
+				pendingInputs: rows(
+					"SELECT input_id, text, state, admitted_at FROM pending_inputs WHERE session_id = ? ORDER BY admitted_at",
+				),
+				outbox: rows(
+					"SELECT command_id, effect_type, status, requested_at FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+				),
+				turns: rows(
+					"SELECT id, state, user_message_id, requested_at, completed_at FROM turns WHERE session_id = ? ORDER BY requested_at",
+				),
+				events: rows(
+					"SELECT sequence, type, stream_version FROM events WHERE session_id = ? ORDER BY sequence DESC LIMIT 40",
+				),
+			},
+			null,
+			2,
+		),
+	);
+	await testInfo.attach("send-state.json", {
+		contentType: "application/json",
+		path,
 	});
 }
 
@@ -950,6 +1012,7 @@ test.describe("Session unread dot", () => {
 			browser,
 			relayUrl,
 			harness,
+			projectDir,
 		}, testInfo) => {
 			const rootId = "ses_e2e_root";
 			const forkId = "ses_e2e_fork";
@@ -957,7 +1020,7 @@ test.describe("Session unread dot", () => {
 			harness.mock.setExactResponse("POST", `/session/${rootId}/fork`, 200, {
 				id: forkId,
 				projectID: "e2e",
-				directory: process.cwd(),
+				directory: projectDir,
 				title: "Fork",
 				version: "1",
 				time: { created: now, updated: now },
@@ -1027,6 +1090,16 @@ test.describe("Session unread dot", () => {
 	});
 
 	test.describe("Claude", () => {
+		// Hooks run after a test timeout, while the harness is still up.
+		test.afterEach(async ({ harness }, testInfo) => {
+			if (testInfo.status !== testInfo.expectedStatus)
+				await attachSendState(
+					harness,
+					decodeURIComponent(harness.projectUrl.slice("/s/".length)),
+					testInfo,
+				);
+		});
+
 		test.describe("dot lifecycle", () => {
 			test.use({
 				claudeReplay: {

@@ -25,8 +25,8 @@ import {
 import {
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
-	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
+	UsageReadingSchema,
 } from "./limit-recovery.js";
 import {
 	ProviderDriverKindSchema,
@@ -335,6 +335,7 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
+	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
@@ -1130,6 +1131,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 	payload: {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
+		sessionId: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -1293,6 +1295,7 @@ export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSet
 		payload: {
 			projectSlug: NonEmptyString,
 			instanceId: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1513,14 +1516,7 @@ export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuatio
 	},
 ) {}
 
-export const QuotaForAccountsResponseSchema = Schema.Struct({
-	accounts: Schema.Array(
-		Schema.Struct({
-			instanceId: NonEmptyString,
-			quota: QuotaCheckResultSchema,
-		}),
-	),
-});
+export const QuotaForAccountsResponseSchema = Schema.Array(UsageReadingSchema);
 export type QuotaForAccountsResponse =
 	typeof QuotaForAccountsResponseSchema.Type;
 
@@ -1613,6 +1609,7 @@ export class GetFileTree extends Schema.TaggedRequest<GetFileTree>()(
 		success: GetFileTreeResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1624,6 +1621,7 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		success: GetFileListResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
 	},
@@ -1636,6 +1634,7 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		success: GetFileContentResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
 	},
@@ -1661,6 +1660,7 @@ export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			name: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1707,7 +1707,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 	"CreateSession",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
 		success: CreateSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -1717,6 +1717,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
 			),
 			providerId: Schema.optional(Schema.String),
+			worktreePath: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -2252,6 +2253,13 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	stream: true,
 });
 
+export const SubscribeUsage = Rpc.make("SubscribeUsage", {
+	payload: {},
+	success: Schema.Struct({ readings: Schema.Array(UsageReadingSchema) }),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	payload: {},
 	success: Schema.Struct({
@@ -2325,6 +2333,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("opencodeConnection", {
 		instanceId: Schema.String,
 		status: OpenCodeConnectionStatusSchema,
+	}),
+	/** The shared Claude catalog, including an empty discovery result. */
+	Schema.TaggedStruct("providerModels", {
+		providers: Schema.Array(ProviderInfoSchema),
 	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
@@ -2409,6 +2421,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,
+	SubscribeUsage,
 	SubscribeServerStatus,
 	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),

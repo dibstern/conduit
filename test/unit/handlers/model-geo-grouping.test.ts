@@ -7,6 +7,7 @@
 import { layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -20,6 +21,7 @@ import {
 	groupGeoRoutingModels,
 } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -34,9 +36,11 @@ const bedrockModel = (id: string, name: string) => ({
 });
 
 layer(
-	Layer.merge(
-		makePersistenceEffectLayer(":memory:"),
+	Layer.mergeAll(
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(ConfigTag, makeMockConfig()),
+		ProjectSettingsLive,
+		RpcSubscriptionScopeLive,
 	),
 )("groupGeoRoutingModels", (it) => {
 	it("groups geo-prefix variants into one entry defaulting to global", () => {

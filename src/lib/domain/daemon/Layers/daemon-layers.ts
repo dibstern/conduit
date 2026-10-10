@@ -113,7 +113,6 @@ import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
-import { QuotaCheckLive } from "./quota-check-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -130,6 +129,7 @@ import {
 } from "./tailscale-serve-layer.js";
 import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
 import { makeDaemonTracingLive } from "./tracing.js";
+import { UsageLive } from "./usage-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
@@ -770,7 +770,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			QuotaCheckLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
+			UsageLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
 		),
 	);
 

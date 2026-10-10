@@ -150,6 +150,7 @@ export interface PtyInputRpcInput {
 export interface CreatePtyRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly sessionId?: string;
 }
 
 export interface ResizePtyRpcInput {
@@ -172,6 +173,7 @@ export interface CreateSessionRpcInput {
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
 	readonly providerId?: string;
+	readonly worktreePath?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -245,15 +247,18 @@ export interface RejectQuestionRpcInput {
 
 export interface GetFileTreeRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 }
 
 export interface GetFileListRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 	readonly path?: string;
 }
 
 export interface GetFileContentRpcInput {
 	readonly projectSlug: string;
+	readonly sessionId?: string;
 	readonly path: string;
 }
 
@@ -265,6 +270,7 @@ export interface GetToolContentRpcInput {
 export interface GetSkillContentRpcInput {
 	readonly projectSlug: string;
 	readonly name: string;
+	readonly sessionId?: string;
 }
 
 export interface GetSessionSkillsRpcInput {
@@ -332,6 +338,7 @@ export interface SetClaudeSettingsRpcInput {
 export interface ResolveClaudeSettingsRpcInput {
 	readonly projectSlug: string;
 	readonly instanceId: string;
+	readonly sessionId?: string;
 }
 
 export interface ReloadProviderSessionRpcInput {
@@ -504,10 +511,16 @@ const callControl = <A, E>(
 		return yield* call(control);
 	});
 
-export async function listWorktreesRpc(projectSlug: string, sessionId: string) {
+export async function listWorktreesRpc(
+	projectSlug: string,
+	sessionId?: string,
+) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) =>
-			client.ListWorktrees({ projectSlug, sessionId }),
+			client.ListWorktrees({
+				projectSlug,
+				...(sessionId ? { sessionId } : {}),
+			}),
 		),
 	);
 }
@@ -616,6 +629,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),
+			...(input.worktreePath != null
+				? { worktreePath: input.worktreePath }
+				: {}),
 		}),
 	);
 
@@ -1050,7 +1066,11 @@ export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
 export async function createSessionRpc(
 	input: CreateSessionRpcInput,
 ): Promise<CreateSessionResponse> {
-	return await runTransportEffect(callCreateSession(input));
+	const result = await runTransportEffect(
+		Effect.either(callCreateSession(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function viewSessionRpc(
@@ -1290,7 +1310,11 @@ export async function setAutoSettleSettingRpc(
 	return result.autoSettleAfterDays;
 }
 
+// Saves stay ordered across Settings tab mounts, and loads wait for their flush.
+let usageLimitsSaves: Promise<void> = Promise.resolve();
+
 export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+	await usageLimitsSaves;
 	const result = await runTransportEffect(
 		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
 	);
@@ -1300,11 +1324,18 @@ export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
 export async function setUsageLimitsSettingRpc(
 	usageLimits: UsageLimitsSetting,
 ): Promise<UsageLimitsSetting> {
-	const result = await runTransportEffect(
-		callControl(undefined, (client) =>
-			client.SetUsageLimitsSetting({ usageLimits }),
+	const request = usageLimitsSaves.then(() =>
+		runTransportEffect(
+			callControl(undefined, (client) =>
+				client.SetUsageLimitsSetting({ usageLimits }),
+			),
 		),
 	);
+	usageLimitsSaves = request.then(
+		() => undefined,
+		() => undefined,
+	);
+	const result = await request;
 	return result.usageLimits;
 }
 

@@ -15,7 +15,7 @@ import { ConfigTag } from "./services.js";
 export interface RelayOpenCodeStream extends SSEStreamPort {
 	/**
 	 * Wires a port for every other OpenCode instance that delivers events for
-	 * this project. Each port is wired on that instance's first event.
+	 * this project. Ports also receive managed stops before their first event.
 	 */
 	wireInstanceStreams<R>(
 		wirer: (
@@ -77,11 +77,16 @@ const makeChannel = (log: Logger | undefined) => {
 				case "heartbeat":
 					for (const callback of callbacks.heartbeat) notify(callback);
 					break;
+				case "connected":
+					for (const callback of callbacks.connected) notify(callback);
+					break;
+				case "disconnected":
+					for (const callback of callbacks.disconnected)
+						notify(() => callback(undefined));
+					break;
 				case "connection":
-					if (message.state === "connected")
-						for (const callback of callbacks.connected) notify(callback);
 					for (const callback of callbacks.status)
-						notify(() => callback(message.state));
+						notify(() => callback(message.state, message.managedStopped));
 			}
 		},
 	};
@@ -111,7 +116,12 @@ export const SSEStreamLive: Layer.Layer<
 				if (message.instanceId === selectedId) return main.dispatch(message);
 				let channel = others.get(message.instanceId);
 				if (!channel) {
-					if (message._tag !== "event" || !wirer) return;
+					if (
+						!wirer ||
+						(message._tag !== "event" &&
+							!(message._tag === "connection" && message.managedStopped))
+					)
+						return;
 					const created = makeChannel(log);
 					others.set(message.instanceId, created);
 					yield* wirer(
@@ -127,6 +137,12 @@ export const SSEStreamLive: Layer.Layer<
 						message.instanceId,
 					);
 					channel = created;
+					if (message.health.connected)
+						channel.dispatch({
+							_tag: "connected",
+							instanceId: message.instanceId,
+							health: message.health,
+						});
 				}
 				channel.dispatch(message);
 			});

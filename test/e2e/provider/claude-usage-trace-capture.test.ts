@@ -2,7 +2,8 @@
  * Capture the experimental usage control response without a model turn.
  * RUN_EXPENSIVE_E2E=1 pnpm exec vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-usage-trace-capture.test.ts
- * Requires an existing Claude login. Review usage-control-response.json before committing.
+ * Requires an existing Claude login. USAGE_CAPTURE_FIXTURE names another fixture file,
+ * for capturing a second account. Review the fixture before committing.
  */
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +57,9 @@ describe.skipIf(process.env["RUN_EXPENSIVE_E2E"] !== "1")(
 				writeFileSync(
 					join(
 						import.meta.dirname,
-						"../../fixtures/claude-sdk-traces/usage-control-response.json",
+						"../../fixtures/claude-sdk-traces",
+						process.env["USAGE_CAPTURE_FIXTURE"] ??
+							"usage-control-response.json",
 					),
 					`${JSON.stringify(response, null, "\t")}\n`,
 				);

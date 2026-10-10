@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { makePersistenceServiceLive } from "../../src/lib/domain/persistence/Services/persistence-service.js";
+import {
+	makePersistenceServiceLive,
+	PersistenceProjectTag,
+} from "../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../src/lib/persistence/effect/migrations.js";
 import { ReadQueryEffectTag } from "../../src/lib/persistence/effect/read-query-effect.js";
@@ -158,7 +161,12 @@ export function makeStored<T extends StoredEvent["type"]>(
 
 	validateEventPayload(event);
 
-	return { ...event, sequence, streamVersion } as StoredEvent;
+	return {
+		...event,
+		projectId: "test-project",
+		sequence,
+		streamVersion,
+	} as StoredEvent;
 }
 
 export interface SessionSeedOpts {
@@ -205,7 +213,9 @@ export interface TestHarness {
 
 /** A migrated in-memory event store for seeding read-model rows directly. */
 export function createTestHarness(): TestHarness {
-	const runtime = ManagedRuntime.make(makePersistenceEffectLayer(":memory:"));
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(":memory:", "test-project"),
+	);
 
 	const execute: TestHarness["execute"] = (statement, params = []) =>
 		runtime.runPromise(
@@ -336,4 +346,10 @@ export function makeTestSqlLayer() {
  *   );
  */
 export const makeTestPersistenceLayer = () =>
-	Layer.provideMerge(makePersistenceServiceLive, makeTestSqlLayer());
+	Layer.provideMerge(
+		makePersistenceServiceLive,
+		Layer.merge(
+			makeTestSqlLayer(),
+			Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+		),
+	);

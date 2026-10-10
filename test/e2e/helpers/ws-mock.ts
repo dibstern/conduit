@@ -29,10 +29,14 @@ const OPENCODE_CONNECTION_STATES = [
 /** Mock-only inputs served over the daemon-global subscriptions. */
 const DAEMON_LIST_TAGS = new Map<
 	string,
-	"SubscribeProjects" | "SubscribeInstances" | "SubscribeServerStatus"
+	| "SubscribeProjects"
+	| "SubscribeInstances"
+	| "SubscribeUsage"
+	| "SubscribeServerStatus"
 >([
 	["project_list", "SubscribeProjects"],
 	["instance_list", "SubscribeInstances"],
+	["usage_readings", "SubscribeUsage"],
 	["server_status", "SubscribeServerStatus"],
 ]);
 
@@ -268,12 +272,15 @@ export class WsMockControl {
 			const status = OPENCODE_CONNECTION_STATES.find(
 				(state) => state === msg["status"],
 			);
-			if (status)
-				sendMockProjectSetting(this.page, {
-					_tag: "opencodeConnection",
-					instanceId: "opencode",
-					status,
-				});
+			if (!status)
+				throw new Error(
+					`Unsupported connection_status: ${JSON.stringify(msg["status"])}`,
+				);
+			sendMockProjectSetting(this.page, {
+				_tag: "opencodeConnection",
+				instanceId: "opencode",
+				status,
+			});
 			return;
 		}
 		const modelState = legacyModelState(msg);

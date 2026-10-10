@@ -82,7 +82,12 @@ const makeDetailTestLayer = (options?: {
 		),
 	);
 	return Layer.mergeAll(
-		makePersistenceEffectLayer(filename, options?.projectors, busLayer),
+		makePersistenceEffectLayer(
+			filename,
+			"test-project",
+			options?.projectors,
+			busLayer,
+		),
 		busLayer,
 		cleanup,
 	);
@@ -681,6 +686,7 @@ describe("subscribeSessionDetail", () => {
 						Layer.merge(
 							makePersistenceEffectLayer(
 								":memory:",
+								"test-project",
 								undefined,
 								SessionEventBusLive,
 							),

@@ -13,6 +13,7 @@ import {
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
@@ -58,7 +59,6 @@ export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
@@ -74,7 +74,6 @@ export interface OrchestrationRuntimeLayerOptions {
 	) => void;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
@@ -131,6 +130,7 @@ const createOrchestrationComponentsEffect = (
 	never,
 	| Scope.Scope
 	| SqlClient.SqlClient
+	| PersistenceProjectTag
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
@@ -144,6 +144,7 @@ const createOrchestrationComponentsEffect = (
 		// the session binding read model and durable command receipts, so
 		// orchestration shares the relay's single database connection.
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
 		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
 			sql,
 		);
@@ -170,6 +171,8 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
+			instanceIdForSession: (sessionId) =>
+				sessionBindingReadModel.getProviderForSession(sessionId),
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 
@@ -229,10 +232,10 @@ const createOrchestrationComponentsEffect = (
 		// relay/UI snapshot or message history.
 		const durableCommands = {
 			sql,
-			snapshot: yield* new CommandReadModelRepository(sql)
+			snapshot: yield* new CommandReadModelRepository(sql, projectId)
 				.bootstrap()
 				.pipe(Effect.orDie),
-			projectKey: options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+			projectKey: projectId,
 			now: () => Date.now(),
 			generateId: () => `disp_${randomUUID()}`,
 			ingestion,
@@ -299,6 +302,7 @@ export const makeOrchestrationRuntimeLayer = (
 	never,
 	| OpenCodeAPITag
 	| SqlClient.SqlClient
+	| PersistenceProjectTag
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
@@ -322,9 +326,6 @@ export const makeOrchestrationRuntimeLayer = (
 					? { workspaceRoot: options.workspaceRoot }
 					: {}),
 				extraFolders: options.extraFolders ?? [],
-				...(options.projectKey != null
-					? { projectKey: options.projectKey }
-					: {}),
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }

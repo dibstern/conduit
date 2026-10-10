@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceLive,
@@ -21,6 +22,7 @@ import type { OrchestrationEngine } from "../../../src/lib/provider/orchestratio
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 function makeDiscoverCapabilities(
@@ -68,6 +70,10 @@ function makeLayer({
 	const engineLayer = Layer.succeed(OrchestrationEngineTag, engine);
 	const deps = Layer.mergeAll(
 		apiLayer,
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: api }),
+		),
 		overridesLayer,
 		loggerLayer,
 		engineLayer,

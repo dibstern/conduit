@@ -149,6 +149,7 @@ it("releases a timed-out delivery claim so a later observation reaches the devic
 					Layer.merge(
 						makePersistenceEffectLayer(
 							join(dir, "events.db"),
+							"test-project",
 							createAllEffectProjectors(),
 							bus,
 						),

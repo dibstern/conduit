@@ -251,7 +251,7 @@ async function createTestHarness(): Promise<TestHarness> {
 					),
 				);
 			}
-		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath))),
+		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "test-project"))),
 	);
 
 	const relay = await createProjectRelay({

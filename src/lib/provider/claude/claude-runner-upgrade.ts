@@ -11,6 +11,9 @@ export interface ClaudeRunnerSettingsSnapshot {
 	readonly claudeSettingsOverrides?: Settings;
 	readonly options: Omit<Options, "abortController" | "canUseTool" | "resume">;
 	readonly fileSettings?: ClaudeRunnerFileSettings;
+	/** Retain original launch directories across primary/extra folder swaps. */
+	readonly workspaceDirectories?: readonly string[];
+	readonly workspacePreviousRoot?: string;
 }
 
 /** Mutable SDK controls travel separately from the session's launch snapshot. */

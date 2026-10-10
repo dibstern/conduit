@@ -3,12 +3,80 @@ import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect } from "vitest";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { EffectSessionSeeder } from "../../../src/lib/persistence/effect/session-seeder-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
 describe("EffectSessionSeeder", () => {
+	it.effect(
+		"a fresh seeder honours durable deletions, including cascaded children and absent ids",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.created", "parent", {
+						sessionId: "parent",
+						title: "Parent",
+						provider: "opencode",
+					}),
+					canonicalEvent("session.created", "child", {
+						sessionId: "child",
+						parentId: "parent",
+						title: "Child",
+						provider: "opencode",
+					}),
+				]);
+				yield* commit([
+					canonicalEvent("session.deleted", "parent", { sessionId: "parent" }),
+					canonicalEvent("session.deleted", "never-seeded", {
+						sessionId: "never-seeded",
+					}),
+				]);
+				const seeder = new EffectSessionSeeder();
+				for (const id of ["parent", "child", "never-seeded"])
+					expect(yield* seeder.ensureSession(id, "opencode")).toBe(false);
+				const sql = yield* SqlClient.SqlClient;
+				expect(yield* sql`SELECT id FROM sessions`).toEqual([]);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
+	it.effect("keeps a live child whose former sidebar row is a tombstone", () =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			yield* commit([
+				canonicalEvent("session.created", "parent", {
+					sessionId: "parent",
+					title: "Parent",
+					provider: "opencode",
+				}),
+				canonicalEvent("session.created", "child", {
+					sessionId: "child",
+					title: "Child",
+					provider: "opencode",
+				}),
+				canonicalEvent("session.forked", "child", {
+					sessionId: "child",
+					parentId: "parent",
+				}),
+			]);
+			expect(
+				yield* new EffectSessionSeeder().ensureSession("child", "opencode"),
+			).toBe(true);
+			const sql = yield* SqlClient.SqlClient;
+			expect(
+				yield* sql`SELECT parent_id FROM sessions WHERE id = 'child'`,
+			).toEqual([{ parent_id: "parent" }]);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	it.effect("creates an idle session row with the current time", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

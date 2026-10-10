@@ -85,7 +85,9 @@ describe("message_parts file-type migration", () => {
 		const filename = join(dir, "events.db");
 		seedLegacyDatabase(filename);
 
-		const runtime = ManagedRuntime.make(makePersistenceEffectLayer(filename));
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "test-project"),
+		);
 		try {
 			await runtime.runPromise(
 				Effect.gen(function* () {

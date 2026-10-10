@@ -1,3 +1,4 @@
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 // The translator-level regression test (regression-subagent-activity.test.ts)
 // proves the right ProviderRuntimeEvents come out. This one carries a real
 // captured subagent turn all the way to the surface the user complained about:
@@ -116,11 +117,19 @@ function makeTestLayer() {
 	);
 	const eventStore = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(base));
 	const cursor = Layer.effect(
 		ProjectorCursorEffectTag,
-		makeProjectorCursorEffect,
+		makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(base));
 	const runner = Layer.effect(
 		ProjectionRunnerEffectTag,

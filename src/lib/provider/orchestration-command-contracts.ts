@@ -82,7 +82,11 @@ export interface DurableCommandOutboxRequest {
 }
 
 export interface DurableCommandCommitPlan {
-	readonly receipt: DurableCommandReceiptWrite;
-	readonly outboxRequests: readonly DurableCommandOutboxRequest[];
+	// The bound repository supplies provenance when turning a plan into writes.
+	readonly receipt: Omit<DurableCommandReceiptWrite, "projectKey">;
+	readonly outboxRequests: readonly Omit<
+		DurableCommandOutboxRequest,
+		"projectKey"
+	>[];
 	readonly readModelRows: readonly DurableCommandTransactionRow[];
 }

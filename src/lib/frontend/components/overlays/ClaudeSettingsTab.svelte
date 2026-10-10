@@ -29,8 +29,8 @@
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
 		getClaudeSettingsRpc,
@@ -48,6 +48,8 @@
 
 	const log = createFrontendLogger("claude-settings");
 	let reloadInFlight = $state(false);
+	const sessionId = $derived(getCurrentSessionId());
+	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
 
 	const autoCompactEnabled = $derived(
 		getClaudeSettingValue("autoCompactEnabled"),
@@ -169,6 +171,7 @@
 	$effect(() => {
 		const projectSlug = getCurrentSlug();
 		const instanceId = claudeInstanceId;
+		const requestedWorkspace = workspace;
 		if (!projectSlug) return;
 		if (!instanceId) {
 			markClaudeSettingsResolutionUnavailable(projectSlug);
@@ -177,9 +180,9 @@
 
 		let cancelled = false;
 		beginClaudeSettingsResolution(projectSlug);
-		void resolveClaudeSettingsRpc({ projectSlug, instanceId })
+		void resolveClaudeSettingsRpc({ projectSlug, instanceId, ...(sessionId ? { sessionId } : {}) })
 			.then((response) => {
-				if (!cancelled) applyResolvedClaudeSettingsResponse(response);
+				if (!cancelled && workspace === requestedWorkspace) applyResolvedClaudeSettingsResponse(response);
 			})
 			.catch((error) => {
 				if (!cancelled) failClaudeSettingsResolution(projectSlug);

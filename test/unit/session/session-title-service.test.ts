@@ -86,7 +86,7 @@ function makeTestLayer(input: {
 			ConfigTag,
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({
@@ -113,7 +113,7 @@ function makePersistenceTestLayer(input: {
 			ConfigTag,
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
-		makePersistenceEffectLayer(input.persistenceDbPath),
+		makePersistenceEffectLayer(input.persistenceDbPath, "test-project"),
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({
@@ -613,7 +613,9 @@ describe("SessionTitleService", () => {
 						yield* projectionRunner.projectEvent(manualRename);
 						expect(yield* getSessionTitle()).toBe("Manual OAuth Title");
 					}).pipe(Effect.provide(race.layer));
-				}).pipe(Effect.provide(makePersistenceEffectLayer(filename)));
+				}).pipe(
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				);
 			}).pipe(Effect.ensuring(removeTempDir(dir)));
 		},
 	);
@@ -669,7 +671,9 @@ describe("SessionTitleService", () => {
 						yield* projectionRunner.projectEvent(manualRename);
 						expect(yield* getSessionTitle()).toBe("Manual OAuth Title");
 					}).pipe(Effect.provide(race.layer));
-				}).pipe(Effect.provide(makePersistenceEffectLayer(filename)));
+				}).pipe(
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				);
 			}).pipe(Effect.ensuring(removeTempDir(dir)));
 		},
 	);
@@ -679,7 +683,7 @@ describe("SessionTitleService", () => {
 		() => {
 			const { dir, filename } = makeTempDbPath("conduit-title-projector-race-");
 			return Effect.gen(function* () {
-				const layer = makePersistenceEffectLayer(filename);
+				const layer = makePersistenceEffectLayer(filename, "test-project");
 				yield* Effect.gen(function* () {
 					yield* seedSessionRow();
 					const eventStore = yield* EventStoreEffectTag;

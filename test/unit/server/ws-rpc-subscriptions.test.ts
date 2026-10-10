@@ -43,6 +43,7 @@ const makeLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-sub-"));
 	const persistenceLayer = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		undefined,
 		SessionEventBusLive,
 	);

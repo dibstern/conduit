@@ -8,7 +8,7 @@
 	import { onFileBrowser, applyGetFileListResponse } from "../../stores/ws-listeners.js";
 	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 	import { setFilesOpen } from "../../stores/session-view.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -39,6 +39,7 @@
 	});
 
 	function loadDirectory(path: string) {
+		const scope = fileTreeState.scope;
 		const cachedEntries = fileTreeState.browserCache.get(path);
 		if (cachedEntries !== undefined) {
 			fileTreeState.browserEntries = cachedEntries;
@@ -46,13 +47,16 @@
 			return;
 		}
 		const slug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
 		if (!slug) return;
 		loading = true;
 		fileTreeState.browserPath = path;
-		void getFileListRpc({ projectSlug: slug, path })
-			.then(applyGetFileListResponse)
+		void getFileListRpc({ projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
+			.then((response) => {
+				if (fileTreeState.scope === scope) applyGetFileListResponse(response);
+			})
 			.catch(() => {
-				if (fileTreeState.browserPath === path) loading = false;
+				if (fileTreeState.scope === scope && fileTreeState.browserPath === path) loading = false;
 			});
 	}
 
@@ -102,10 +106,12 @@
 
 	function handleDirClick(fullPath: string) {
 		const slug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
+		const scope = fileTreeState.scope;
 		if (slug && !fileTreeState.browserChildren.has(fullPath)) {
-			void getFileListRpc({ projectSlug: slug, path: fullPath }).then(
-				applyGetFileListResponse,
-			);
+			void getFileListRpc({ projectSlug: slug, path: fullPath, ...(sessionId ? { sessionId } : {}) }).then(
+				(response) => { if (fileTreeState.scope === scope) applyGetFileListResponse(response); },
+			).catch(() => undefined);
 		}
 	}
 

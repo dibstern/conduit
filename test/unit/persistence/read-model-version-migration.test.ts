@@ -97,7 +97,7 @@ describe("read-model version migration", () => {
 					yield* sql`SELECT * FROM projector_cursors ORDER BY projector_name`,
 				).toEqual(beforeCursors);
 				expect(yield* sql`SELECT * FROM events ORDER BY sequence`).toEqual(
-					beforeEvents,
+					beforeEvents.map((event) => ({ ...event, project_id: null })),
 				);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(

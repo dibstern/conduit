@@ -113,6 +113,10 @@ export interface SSEWiringDeps {
 			providerInstanceId: string,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+		onInstanceStopped?(
+			providerInstanceId: string,
+			isCurrent: () => boolean,
+		): Effect.Effect<void>;
 	};
 }
 
@@ -733,7 +737,10 @@ interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent): void;
 	onReconnect?(): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
-	onConnectionStatus(status: OpenCodeConnectionStatus): void;
+	onConnectionStatus(
+		status: OpenCodeConnectionStatus,
+		managedStopped?: boolean,
+	): void;
 }
 
 function wireSSEConsumerWithCallbacks(
@@ -742,17 +749,19 @@ function wireSSEConsumerWithCallbacks(
 	callbacks: SSEConsumerCallbacks,
 ): void {
 	const { log } = deps;
+	let hasConnected = false;
 
 	// Pending prompts and missed status are recovered upstream by OpenCode
 	// Instances and arrive as ordinary stream events.
 	consumer.on("connected", () => {
 		log.info("Connected to OpenCode event stream");
 
-		callbacks.onReconnect?.();
+		if (hasConnected) callbacks.onReconnect?.();
+		hasConnected = true;
 	});
-	consumer.on("status", (status) => {
+	consumer.on("status", (status, managedStopped) => {
 		log.info(`OpenCode ${status}`);
-		callbacks.onConnectionStatus(status);
+		callbacks.onConnectionStatus(status, managedStopped);
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
@@ -792,14 +801,25 @@ export const wireSSEConsumerEffect = (
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Runtime.runFork(runtime);
+			let connectionRevision = 0;
 			wireSSEConsumerWithCallbacks(deps, consumer, {
-				onConnectionStatus: (status) => {
+				onConnectionStatus: (status, managedStopped) => {
+					const revision = ++connectionRevision;
 					runFork(
 						publishProjectSetting({
 							_tag: "opencodeConnection",
 							instanceId: deps.providerInstanceId,
 							status,
-						}),
+						}).pipe(
+							Effect.zipRight(
+								managedStopped
+									? (deps.opencodeRuntimeIngress?.onInstanceStopped?.(
+											deps.providerInstanceId,
+											() => revision === connectionRevision,
+										) ?? Effect.void)
+									: Effect.void,
+							),
+						),
 					);
 				},
 				handleEvent: (event) => {

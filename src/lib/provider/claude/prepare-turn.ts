@@ -112,6 +112,7 @@ export const historicalMessageText = (message: MessageWithParts): string =>
 
 /** All decisions stay here; undefined messages asks the caller to page history. */
 function planTurn(input: {
+	readonly projectId: string;
 	readonly sessionId: string;
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
@@ -197,6 +198,7 @@ function planTurn(input: {
 						nativeThread?.resumeSessionId === resumeSessionId
 							? nativeThread
 							: {
+									projectId: input.projectId,
 									configDir: base.configDir,
 									resumeSessionId,
 									firstSequence: 0,
@@ -363,6 +365,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 						LIMIT 1`;
 				const session = yield* read.getSession(sessionId);
 				const input = {
+					projectId: state.projectId,
 					sessionId,
 					instanceId,
 					nativeThread,

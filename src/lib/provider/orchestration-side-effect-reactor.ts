@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -410,7 +411,11 @@ export class ProviderSideEffectReactor {
 				const result =
 					driver === "claude"
 						? yield* Effect.gen(function* () {
-								const state = yield* makeProviderStateEffect;
+								const state = yield* makeProviderStateEffect.pipe(
+									Effect.provideService(PersistenceProjectTag, {
+										projectId: row.project_key,
+									}),
+								);
 								const read = yield* makeReadQueryEffect;
 								return yield* sendPreparedClaudeTurn({
 									sessionId: payload.sessionId,
@@ -466,6 +471,9 @@ export class ProviderSideEffectReactor {
 					result.providerStateUpdates?.length
 				) {
 					yield* makeProviderStateEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, {
+							projectId: row.project_key,
+						}),
 						Effect.flatMap((state) =>
 							state.saveUpdates(
 								payload.sessionId,

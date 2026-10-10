@@ -4,10 +4,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Schema } from "effect";
 
+// The process harness realpaths its mkdtemp root, and /tmp is a symlink to
+// /private/tmp on macOS, so the guard compares real paths on both sides.
+const HARNESS_ROOT_PREFIX = join(realpathSync("/tmp"), "conduit-process-");
+
 /** Drop only the server's host transport; the real host and browser stay alive. */
 export async function createPtySocketProxy(root: string, target: string) {
 	if (
-		!root.startsWith("/tmp/conduit-process-") ||
+		!realpathSync(root).startsWith(HARNESS_ROOT_PREFIX) ||
 		!realpathSync(target).startsWith(`${realpathSync(root)}/`)
 	) {
 		throw new Error("PTY proxy requires isolated process harness paths");
@@ -116,7 +120,7 @@ if (
 	if (
 		!root ||
 		!dist ||
-		!root.startsWith("/tmp/conduit-process-") ||
+		!realpathSync(root).startsWith(HARNESS_ROOT_PREFIX) ||
 		process.env["HOME"] !== join(root, "home") ||
 		process.env["CONDUIT_CONFIG_DIR"] !== join(root, "config")
 	) {

@@ -21,6 +21,7 @@ import {
 } from "./router.svelte.js";
 import { applyServerStatus, serverStatusFeed } from "./server-status.js";
 import { confirm } from "./ui.svelte.js";
+import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
 // This store has no client half: the project list and the current slug both
 // come from the server, and `applyProjectList` below is the only writer.
@@ -149,22 +150,45 @@ export function followDaemonLists(connection: string | null): void {
 			if (currentGeneration !== generation) return;
 			const next = runtime.runFork(
 				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(clients.forProject(connection), ({ subscriptions }) =>
-						Effect.all(
-							[
-								follow(subscriptions.projects, (list) => {
-									applyProjectList(list);
-									projectState.newSessionProject =
-										list.newSessionProject ?? null;
-								}),
-								follow(subscriptions.instances, applyInstanceListResponse),
-								follow(
-									() => serverStatusFeed(subscriptions),
-									applyServerStatus,
-								),
-							],
-							{ concurrency: "unbounded", discard: true },
-						),
+					Effect.flatMap(
+						clients.forProject(connection),
+						({ subscriptions, control }) =>
+							Effect.all(
+								[
+									follow(subscriptions.projects, (list) => {
+										applyProjectList(list);
+										projectState.newSessionProject =
+											list.newSessionProject ?? null;
+									}),
+									follow(subscriptions.instances, applyInstanceListResponse),
+									Stream.runForEach(
+										supervise(
+											Stream.suspend(subscriptions.usage),
+											() => undefined,
+										),
+										({ readings }) =>
+											Effect.gen(function* () {
+												if (currentGeneration !== generation) return;
+												applyUsageReadings(readings);
+												// Reload the shared order after reconnect and each snapshot.
+												yield* control.GetUsageLimitsSetting({}).pipe(
+													Effect.tap(({ usageLimits }) =>
+														Effect.sync(() => {
+															if (currentGeneration === generation)
+																applyUsageLimitsSetting(usageLimits);
+														}),
+													),
+													Effect.catchAll(() => Effect.void),
+												);
+											}),
+									),
+									follow(
+										() => serverStatusFeed(subscriptions),
+										applyServerStatus,
+									),
+								],
+								{ concurrency: "unbounded", discard: true },
+							),
 					),
 				),
 			);

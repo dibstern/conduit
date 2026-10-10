@@ -4,9 +4,9 @@
 // All refusals must leave the event stream untouched and never dispatch a turn.
 import { createServer } from "node:http";
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { expect, it } from "vitest";
-import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
+import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
@@ -32,6 +32,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
+import { usageReading } from "../../../helpers/usage.js";
 
 // Failure modes and agreed seams are recorded in the account-switch report.
 it("records one limit per user turn, closes only the cut-off on Dismiss, and clears recovery on a reply", async () => {
@@ -165,7 +166,9 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 				}),
 			]);
 			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toBeNull();
-		}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
 	);
 });
 
@@ -244,8 +247,11 @@ for (const scenario of [
 							"expected" in scenario ? scenario.expected : "claude",
 					})
 					.pipe(
-						Effect.provideService(QuotaCheckTag, {
-							check: () =>
+						Effect.provideService(Usage, {
+							readings: Stream.empty,
+							latest: () => Effect.succeed(undefined),
+							turnEnded: () => Effect.void,
+							refresh: () =>
 								Effect.gen(function* () {
 									probes++;
 									if ("duringProbe" in scenario) {
@@ -255,10 +261,20 @@ for (const scenario of [
 											yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
 									}
 									return "quota" in scenario && scenario.quota === "Unavailable"
-										? { _tag: "Unavailable" as const, reason: "Not logged in" }
+										? [
+												usageReading("claude", {
+													status: "unavailable",
+													reason: "Not logged in",
+												}),
+											]
 										: "quota" in scenario && scenario.quota === "Limited"
-											? { _tag: "Limited" as const, rateLimitType: "seven_day" }
-											: { _tag: "Unknown" as const };
+											? [
+													usageReading("claude", {
+														status: "limited",
+														windows: [{ kind: "seven_day", utilization: 100 }],
+													}),
+												]
+											: [usageReading("claude")];
 								}).pipe(Effect.orDie),
 							pickFailover: () => Effect.succeed(undefined),
 						}),
@@ -302,7 +318,7 @@ for (const scenario of [
 					interruptTurn: () => Effect.void,
 				}),
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:")),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
 		);
 	});

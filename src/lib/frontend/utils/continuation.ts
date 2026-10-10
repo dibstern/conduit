@@ -1,68 +1,350 @@
 import type {
 	HandoffSummary,
 	LimitRecovery,
-	QuotaCheckResult,
+	UsageReading,
+	UsageWindow,
 } from "../../contracts/limit-recovery.js";
 import { formatSnoozeTime } from "./format.js";
 
-/** A quota check as a QuotaMeter shows it; `undefined` is a check still running. */
-export function quotaReading(quota: QuotaCheckResult | undefined): {
+export const DEFAULT_USAGE_WARN_AT = 80;
+
+export type PlanUsageWindow = UsageWindow & {
+	kind: "five_hour" | "seven_day";
+};
+
+export function planUsageWindows(reading: UsageReading): PlanUsageWindow[] {
+	if (reading.status === "unknown" || reading.status === "unavailable")
+		return [];
+	return reading.windows.filter(
+		(window): window is PlanUsageWindow =>
+			window.kind === "five_hour" || window.kind === "seven_day",
+	);
+}
+
+/** Preserve the Usage rows' clock and weekly reset labels. */
+export function usageResetTime(
+	at: string | number | undefined,
+	weekday = false,
+): string {
+	if (at === undefined) return "";
+	const date = new Date(at);
+	if (!Number.isFinite(date.getTime())) return "";
+	const time = date.toLocaleTimeString("en-GB", {
+		hour: "numeric",
+		minute: "2-digit",
+		hour12: true,
+	});
+	return weekday
+		? `${date.toLocaleDateString("en-GB", { weekday: "short" })} ${time.replace(":00", "")}`
+		: time;
+}
+
+export function usageForecastTime(
+	at: string | number | undefined,
+	now: number,
+): string {
+	return usageResetTime(
+		at,
+		at !== undefined &&
+			new Date(at).toDateString() !== new Date(now).toDateString(),
+	);
+}
+
+export function usageForecastDuration(milliseconds: number): string {
+	const minutes = Math.max(0, Math.round(milliseconds / 60_000));
+	if (minutes >= 1440) {
+		const days = Math.floor(minutes / 1440);
+		return `${days} ${days === 1 ? "day" : "days"}`;
+	}
+	return minutes >= 60
+		? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`
+		: `${minutes}m`;
+}
+
+export function usageForecastLevel(
+	reading: UsageReading,
+): "neutral" | "amber" | "red" {
+	if (usageDisplay(reading, "off").level === "limited") return "red";
+	return planUsageWindows(reading).some(
+		(window) => window.forecast?.kind === "runs_out",
+	)
+		? "amber"
+		: "neutral";
+}
+
+export function usageWindowLimited(
+	reading: UsageReading,
+	window: PlanUsageWindow,
+): boolean {
+	return (
+		window.utilization >= 100 ||
+		(reading.status === "limited" &&
+			!planUsageWindows(reading).some((item) => item.utilization >= 100) &&
+			usageDisplay(reading, "off").binding?.kind === window.kind)
+	);
+}
+
+/** Legacy readings without forecast metadata keep their bars-only layout. */
+export function usageForecastWindow(
+	reading: UsageReading,
+): PlanUsageWindow | undefined {
+	const windows = planUsageWindows(reading);
+	if (
+		!windows.some(
+			(window) =>
+				window.forecast !== undefined ||
+				(window.history !== undefined && usageWindowLimited(reading, window)),
+		)
+	)
+		return undefined;
+	const runsOut = windows
+		.filter((window) => window.forecast?.kind === "runs_out")
+		.sort((a, b) =>
+			a.forecast?.kind === "runs_out" && b.forecast?.kind === "runs_out"
+				? a.forecast.at - b.forecast.at
+				: 0,
+		)[0];
+	return (
+		runsOut ??
+		windows.find((window) => usageWindowLimited(reading, window)) ??
+		windows.find((window) => window.kind === "five_hour" && window.forecast) ??
+		windows.find((window) => window.forecast)
+	);
+}
+
+/** Text fragments keep the emphasized value escaped by the Svelte template. */
+export function usageForecastCopy(
+	reading: UsageReading,
+	window: PlanUsageWindow,
+	now: number,
+): { before: string; highlight: string; after: string } | undefined {
+	const weekly = window.kind === "seven_day";
+	const reset = usageForecastTime(window.resetsAt, now);
+	if (usageWindowLimited(reading, window))
+		return {
+			before: `Limit reached.${reset ? ` The ${weekly ? "weekly" : "5h"} window resets at ` : ""}`,
+			highlight: reset,
+			after: reset ? "." : "",
+		};
+	if (window.forecast?.kind === "under")
+		return {
+			before: `On pace to finish this ${weekly ? "week" : "5h window"} at `,
+			highlight: `~${Math.round(window.forecast.atReset)}%`,
+			after: `${reset ? ` (resets ${reset})` : ""}.`,
+		};
+	if (window.forecast?.kind === "runs_out")
+		return {
+			before: `At this pace the ${weekly ? "weekly" : "5h"} limit runs out ≈ `,
+			highlight: usageForecastTime(window.forecast.at, now),
+			after: `${reset ? `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets` : ""}.`,
+		};
+	return undefined;
+}
+
+export function usageOtherForecast(
+	window: PlanUsageWindow | undefined,
+	now: number,
+): string | undefined {
+	if (!window?.forecast) return undefined;
+	const label = window.kind === "seven_day" ? "Week" : "5h window";
+	const reset = usageForecastTime(window.resetsAt, now);
+	return window.forecast.kind === "under"
+		? `${label}: on pace for ~${Math.round(window.forecast.atReset)}%${reset ? ` by ${reset}` : ""}.`
+		: `${label}: runs out ≈ ${usageForecastTime(window.forecast.at, now)}${reset ? `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets` : ""}.`;
+}
+
+export function usagePaceLine(
+	reading: UsageReading,
+	now: number,
+): string | undefined {
+	const windows = planUsageWindows(reading);
+	const fiveHour = windows.find((window) => window.kind === "five_hour");
+	const week = windows.find((window) => window.kind === "seven_day");
+	const parts = [fiveHour, week].flatMap((window) => {
+		if (!window?.forecast) return [];
+		const label = window.kind === "five_hour" ? "5h" : "week";
+		if (window.forecast.kind === "runs_out")
+			return [
+				`${label} runs out ≈ ${usageForecastTime(window.forecast.at, now)}`,
+			];
+		const day = usageResetTime(window.resetsAt, true).split(" ")[0];
+		return [
+			`${label}${window.kind === "five_hour" ? " on pace for" : ""} ~${Math.round(window.forecast.atReset)}%${window.kind === "seven_day" && day ? ` by ${day}` : ""}`,
+		];
+	});
+	if (parts.length === 0) return undefined;
+	if (!fiveHour || (fiveHour.utilization === 0 && !fiveHour.resetsAt))
+		parts.unshift("No 5h window open");
+	return parts.join(" · ");
+}
+
+/** One display rule for the plan windows; other kinds do not bind yet. */
+export function usageDisplay(
+	reading: UsageReading | undefined,
+	warnAt: number | "off" = DEFAULT_USAGE_WARN_AT,
+): {
+	level: "ok" | "warn" | "limited" | "unknown";
+	binding?: UsageWindow;
+	colour: string;
+	label: string;
+} {
+	if (
+		!reading ||
+		reading.status === "unknown" ||
+		reading.status === "unavailable"
+	)
+		return { level: "unknown", colour: "bg-border-chip", label: "—" };
+	const fiveHour = reading.windows.find(
+		(window) => window.kind === "five_hour",
+	);
+	const sevenDay = reading.windows.find(
+		(window) => window.kind === "seven_day",
+	);
+	const month = reading.windows.find((window) => window.kind === "month");
+	const threshold = warnAt === "off" ? Number.POSITIVE_INFINITY : warnAt;
+	const binding =
+		fiveHour &&
+		sevenDay &&
+		fiveHour.utilization >= threshold &&
+		sevenDay.utilization >= threshold
+			? sevenDay
+			: fiveHour && (!sevenDay || fiveHour.utilization >= sevenDay.utilization)
+				? fiveHour
+				: (sevenDay ?? month);
+	const used = binding?.utilization;
+	const limited =
+		reading.status === "limited" || (used !== undefined && used >= 100);
+	return {
+		level: limited
+			? "limited"
+			: used !== undefined && used >= threshold
+				? "warn"
+				: "ok",
+		...(binding ? { binding } : {}),
+		colour: limited
+			? "bg-fill-red"
+			: used !== undefined &&
+					used >= (warnAt === "off" ? DEFAULT_USAGE_WARN_AT : warnAt)
+				? "bg-fill-amber"
+				: "bg-text-secondary",
+		label: limited
+			? binding?.resetsAt === undefined
+				? "limited"
+				: formatSnoozeTime(Date.parse(binding.resetsAt))
+			: used === undefined
+				? "—"
+				: `${Math.round(used)}%`,
+	};
+}
+
+/** Weekly warnings take priority; a reached plan limit takes over entirely. */
+export function usageWarning(
+	reading: UsageReading | undefined,
+	warnAt: number | "off",
+	accountName: string,
+	showAccount: boolean,
+	now: number,
+): { window: PlanUsageWindow; title: string; detail?: string } | undefined {
+	if (
+		!reading ||
+		reading.harness !== "claude" ||
+		reading.status !== "available" ||
+		warnAt === "off"
+	)
+		return undefined;
+	const windows = planUsageWindows(reading);
+	if (windows.some((window) => window.utilization >= 100)) return undefined;
+	const window =
+		windows.find(
+			(window) => window.kind === "seven_day" && window.utilization >= warnAt,
+		) ??
+		windows.find(
+			(window) => window.kind === "five_hour" && window.utilization >= warnAt,
+		);
+	if (!window) return undefined;
+	const reset =
+		window.kind === "seven_day"
+			? usageResetTime(window.resetsAt, true)
+			: window.resetsAt !== undefined &&
+					Number.isFinite(Date.parse(window.resetsAt))
+				? `in ${usageForecastDuration(Date.parse(window.resetsAt) - now)}`
+				: "";
+	return {
+		window,
+		title: `${showAccount ? `${accountName}: ` : ""}${window.kind === "seven_day" ? "Weekly" : "5h"} limit ${Math.round(window.utilization)}% used.`,
+		...(reset ? { detail: `Resets ${reset}.` } : {}),
+	};
+}
+
+/** Keep the existing meter's captions and highest-window headroom display. */
+export function quotaReading(reading: UsageReading | undefined): {
 	used: number | "checking" | "unknown";
 	caption?: string;
 } {
-	if (quota === undefined) return { used: "checking" };
-	switch (quota._tag) {
-		case "Available":
-			return quota.utilization === undefined
-				? { used: "unknown", caption: "available" }
-				: { used: quota.utilization };
-		case "Limited":
-			return {
-				used: 100,
-				caption:
-					quota.resetsAt === undefined
-						? "limited"
-						: `limited · ${formatSnoozeTime(quota.resetsAt * 1000)}`,
-			};
-		case "Unavailable":
-			return { used: "unknown", caption: "unavailable" };
-		case "Unknown":
-			return { used: "unknown" };
-	}
+	const display = usageDisplay(reading, "off");
+	if (reading === undefined) return { used: "checking" };
+	if (display.level === "limited")
+		return {
+			used: 100,
+			caption:
+				display.binding?.resetsAt === undefined
+					? "limited"
+					: `limited · ${display.label}`,
+		};
+	if (reading.status === "available")
+		return display.binding === undefined
+			? { used: "unknown", caption: "available" }
+			: { used: display.binding.utilization };
+	return reading.status === "unavailable"
+		? { used: "unknown", caption: "unavailable" }
+		: { used: "unknown" };
 }
 
-/** An account's quota from a finished check, unknown when the check left it out; undefined while it runs. */
+/** Missing readings are unknown after refresh and undefined while it runs. */
 export function accountQuota(
-	quotas: ReadonlyMap<string, QuotaCheckResult> | undefined,
-	instanceId: string,
-): QuotaCheckResult | undefined {
-	return quotas === undefined
+	readings: ReadonlyMap<string, UsageReading> | undefined,
+	accountId: string,
+): UsageReading | undefined {
+	return readings === undefined
 		? undefined
-		: (quotas.get(instanceId) ?? { _tag: "Unknown" });
+		: (readings.get(accountId) ?? {
+				accountId,
+				harness: "claude",
+				status: "unknown",
+				windows: [],
+				readAt: 0,
+				stale: false,
+			});
 }
 
-/** The quota an open limit already proves, without waiting on a check. */
-export function limitedQuota(limit: LimitRecovery): QuotaCheckResult {
-	return { _tag: "Limited", rateLimitType: limit.rateLimitType };
+/** The session's open limit already proves this account is limited. */
+export function limitedQuota(limit: LimitRecovery): UsageReading {
+	return {
+		accountId: limit.instanceId,
+		harness: "claude",
+		status: "limited",
+		readAt: 0,
+		stale: false,
+		windows:
+			limit.rateLimitType === "five_hour" || limit.rateLimitType === "seven_day"
+				? [{ kind: limit.rateLimitType, utilization: 100 }]
+				: [],
+	};
 }
 
-/** A limited account can't take the session; one whose quota can't be read can. */
-export function quotaBlocksSwitch(
-	quota: QuotaCheckResult | undefined,
-): boolean {
-	return quota?._tag === "Limited";
+/** A limited account cannot take the session; an unreadable account can. */
+export function quotaBlocksSwitch(reading: UsageReading | undefined): boolean {
+	return reading?.status === "limited";
 }
 
-/**
- * How much an account has left, for choosing the one to pre-select: a measured
- * share outranks an unmeasured "available", which outranks a check that could
- * not tell, which outranks an account the daemon says it cannot use.
- */
-export function quotaHeadroom(quota: QuotaCheckResult | undefined): number {
-	if (quota === undefined || quota._tag === "Unknown") return -1;
-	if (quota._tag === "Available")
-		return quota.utilization === undefined ? 0 : 100 - quota.utilization;
-	return quota._tag === "Unavailable" ? -2 : -3;
+/** Measured headroom outranks unmeasured available, unknown, then unavailable. */
+export function quotaHeadroom(reading: UsageReading | undefined): number {
+	if (reading === undefined || reading.status === "unknown") return -1;
+	if (reading.status === "available") {
+		const { binding } = usageDisplay(reading, "off");
+		return binding === undefined ? 0 : 100 - binding.utilization;
+	}
+	return reading.status === "unavailable" ? -2 : -3;
 }
 
 /**

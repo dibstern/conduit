@@ -137,10 +137,11 @@ const readProjectSessions = (
 		);
 	});
 
-/** Check outstanding Claude admissions without acquiring the project's relay. */
-export const hasRunningClaudeTurn = (
+/** Check recovery work without acquiring the project's relay or starting providers. */
+export const hasProviderRecoveryCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	configDir: string,
+	openCodeInstanceIds: readonly string[],
 ) =>
 	Effect.gen(function* () {
 		const databasePath = projectEventsDbPath({ configDir, ...project });
@@ -161,11 +162,20 @@ export const hasRunningClaudeTurn = (
 		}).pipe(Layer.provide(Reactivity.layer));
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const rows = yield* sql<{ has_running_turn: number }>`SELECT EXISTS (
+			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
 				WHERE provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
-			) AS has_running_turn`;
-			return rows[0]?.has_running_turn === 1;
+			) OR EXISTS (
+				SELECT 1 FROM sessions AS session
+				JOIN session_providers AS binding ON binding.session_id = session.id
+				WHERE binding.status = 'active'
+				AND binding.provider IN ${sql.in(openCodeInstanceIds)}
+				AND (session.status IN ('busy', 'retry') OR EXISTS (
+					SELECT 1 FROM pending_approvals AS approval
+					WHERE approval.session_id = session.id AND approval.status = 'pending'
+				))
+			) AS needs_recovery`;
+			return rows[0]?.needs_recovery === 1;
 		}).pipe(Effect.provide(sqliteLayer));
 	});
 

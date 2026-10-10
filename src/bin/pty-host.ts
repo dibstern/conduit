@@ -18,6 +18,10 @@ async function main(): Promise<void> {
 		console.log(`PTY host restarted (pid=${client.hello.pid}).`);
 		client.disconnect();
 	} else if (action === undefined) {
+		// Test hook: a host that is alive but slow to start, as on a loaded machine.
+		const startDelayMs = Number(process.env["CONDUIT_PTY_HOST_START_DELAY_MS"]);
+		if (startDelayMs > 0)
+			await new Promise((done) => setTimeout(done, startDelayMs));
 		await runPtyHost({ configDir: DEFAULT_CONFIG_DIR });
 	} else {
 		throw new Error("Usage: node dist/src/bin/pty-host.js [stop|restart]");

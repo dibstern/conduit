@@ -64,7 +64,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		const client = makeHandlerOpenCodeAPI({
 			session: { prompt: vi.fn(async () => undefined) },
 		});
-		const persistence = makePersistenceEffectLayer(":memory:");
+		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -118,7 +118,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			const client = makeHandlerOpenCodeAPI({
 				session: { abort: vi.fn(async () => undefined) },
 			});
-			const persistence = makePersistenceEffectLayer(":memory:");
+			const persistence = makePersistenceEffectLayer(
+				":memory:",
+				"test-project",
+			);
 			const baseLayer = Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),

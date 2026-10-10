@@ -137,6 +137,44 @@ describe("InstanceModelPicker", () => {
 		});
 	});
 
+	it.each([
+		null,
+		"session-1",
+	])("uses Claude context metadata when OpenCode has the same model id (%s)", async (sessionId) => {
+		sessionState.currentId = sessionId;
+		handleModelList({
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Sonnet",
+							provider: "anthropic",
+							contextWindowOptions: [{ value: "200k", label: "200K" }],
+						},
+					],
+				},
+				{
+					...CLAUDE_PROVIDER,
+					models: [
+						{
+							id: "claude-sonnet-4-7",
+							name: "Sonnet",
+							provider: "claude",
+							contextWindowOptions: [{ value: "1m", label: "1M" }],
+						},
+					],
+				},
+			],
+		});
+		const { getByTitle, getByTestId } = render(InstanceModelPicker);
+		await fireEvent.click(getByTitle("Switch model"));
+		expect(getByTestId("picker-row-context").textContent).toContain("1M");
+	});
+
 	// Turns persist the API form of the model ("opus[1m]"), and reopening a
 	// session restores that string, while the SDK catalog may advertise only
 	// the bare alias ("opus"). The trigger fell back to the raw id and the

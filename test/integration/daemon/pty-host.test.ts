@@ -729,13 +729,12 @@ describe("PTY host process survival", () => {
 		const historical = `${prefix}:000`;
 		const finalMarker = `${prefix}:040`;
 		const start = join(harness.root, "start-stream-after-reconnect");
-		const finished = join(harness.root, "numbered-stream-finished");
 		const armed = `85kb-stream-armed-${randomUUID()}`;
 		await original.inputPty(pty.id, `stty -echo; ${printMarker(historical)}\n`);
 		await waitForOutput(original, pty.id, historical);
 		await original.inputPty(
 			pty.id,
-			`(while [ ! -f ${shellQuote(start)} ]; do sleep 0.01; done; n=1; while [ "$n" -le 40 ]; do printf '%s%s:%03d\\n' ${shellQuote(prefix.slice(0, 4))} ${shellQuote(prefix.slice(4))} "$n"; n=$((n+1)); sleep 0.03; done; printf done > ${shellQuote(finished)}) &\n${printMarker(armed)}\n`,
+			`(while [ ! -f ${shellQuote(start)} ]; do sleep 0.01; done; n=1; while [ "$n" -le 40 ]; do printf '%s%s:%03d\\n' ${shellQuote(prefix.slice(0, 4))} ${shellQuote(prefix.slice(4))} "$n"; n=$((n+1)); sleep 0.03; done) &\n${printMarker(armed)}\n`,
 		);
 		await waitForOutput(original, pty.id, armed);
 		await harness.kill();
@@ -747,9 +746,8 @@ describe("PTY host process survival", () => {
 		const pendingLists = Promise.all([first.listPtys(), second.listPtys()]);
 		writeFileSync(start, "go");
 		await pendingLists;
-		await vi.waitFor(() => expect(existsSync(finished)).toBe(true), {
-			timeout: 5000,
-		});
+		// The final marker proves the stream completed; a fixed 5 s gate failed
+		// on macOS, where forking `sleep` 40 times under load takes longer.
 		await Promise.all([
 			waitForOutput(first, pty.id, finalMarker),
 			waitForOutput(second, pty.id, finalMarker),
@@ -841,6 +839,9 @@ describe("PTY host process survival", () => {
 		}
 		await vi.waitFor(() => expect(alive(pty.pid)).toBe(false));
 		const listed = await browser.listPtys();
+		// The exit upsert is a coalesced stream push, so it can land after the
+		// ListPtys reply; wait for the event rather than sampling at reply time.
+		await browser.waitFor((message) => isExitOf(message, pty.id), cursor);
 		const exits = browser.frames
 			.slice(cursor)
 			.filter(({ message }) => isExitOf(message, pty.id));

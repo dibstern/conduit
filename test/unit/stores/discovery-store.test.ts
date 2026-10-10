@@ -13,7 +13,11 @@ import {
 	formatModelName,
 	getActiveContextWindowOptions,
 	getActiveModel,
+	getActiveModelVariants,
+	getChosenModel,
 	getModelDisplayName,
+	getProviderGroups,
+	getProviderGroupsForInstance,
 	handleAgentList,
 	handleCommandList,
 	handleContextWindowInfo,
@@ -22,6 +26,11 @@ import {
 	handleModelList,
 	handlePermissionModeInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import {
+	applyInstanceListResponse,
+	clearInstanceState,
+} from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type {
 	AgentInfo,
@@ -33,6 +42,7 @@ import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 
 beforeEach(() => {
 	clearDiscoveryState();
+	clearInstanceState();
 });
 
 describe("formatAgentLabel", () => {
@@ -222,6 +232,174 @@ describe("handleModelList", () => {
 });
 
 describe("applyGetModelsResponse", () => {
+	it.each([
+		"update-first",
+		"response-first",
+	])("keeps live Claude models when an older GetModels response arrives %s", (order) => {
+		handleModelInfo({ model: "sonnet", provider: "claude" });
+		const applyResponse = () =>
+			applyGetModelsResponse({
+				projectSlug: "project-a",
+				active: { model: "sonnet", provider: "claude" },
+				providers: [
+					{
+						id: "anthropic",
+						name: "Anthropic",
+						configured: true,
+						models: [
+							{
+								id: "sonnet",
+								name: "Sonnet",
+								provider: "anthropic",
+								variants: ["low"],
+								contextWindowOptions: [{ value: "200k", label: "200K" }],
+							},
+						],
+					},
+				],
+				variant: { variant: "high", variants: [] },
+				contextWindow: { contextWindow: "1m", options: [] },
+			});
+		const applyUpdate = () =>
+			applyProjectSetting({
+				_tag: "providerModels",
+				providers: [
+					{
+						id: "claude",
+						name: "Anthropic - claude",
+						configured: true,
+						models: [
+							{
+								id: "sonnet",
+								name: "Sonnet",
+								provider: "claude",
+								variants: ["high", "max"],
+								contextWindowOptions: [{ value: "1m", label: "1M" }],
+							},
+						],
+					},
+				],
+			});
+		if (order === "update-first") {
+			applyUpdate();
+			applyResponse();
+		} else {
+			applyResponse();
+			applyUpdate();
+		}
+		expect(discoveryState.providers.map(({ id }) => id)).toEqual([
+			"anthropic",
+			"claude",
+		]);
+		expect(discoveryState.currentModelId).toBe("sonnet");
+		expect(discoveryState.currentProviderId).toBe("claude");
+		expect(discoveryState.currentVariant).toBe("high");
+		expect(getActiveModelVariants()).toEqual(["high", "max"]);
+		expect(getActiveContextWindowOptions()).toEqual([
+			{ value: "1m", label: "1M" },
+		]);
+	});
+
+	it("uses one live Claude catalog for default and named instance choices", () => {
+		applyInstanceListResponse({
+			instances: [
+				{
+					id: "claude-work",
+					name: "Work",
+					driver: "claude",
+					port: 0,
+					managed: false,
+					status: "stopped",
+					restartCount: 0,
+					createdAt: 0,
+				},
+			],
+		});
+		applyProjectSetting({
+			_tag: "providerModels",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+				},
+			],
+		});
+		chooseModel({ modelId: "sonnet", providerId: "claude" });
+		for (const instanceId of ["claude", "claude-work"]) {
+			expect(
+				getProviderGroupsForInstance(instanceId).map(
+					({ provider }) => provider.id,
+				),
+			).toEqual(["claude"]);
+			expect(getChosenModel(instanceId)).toEqual({
+				modelId: "sonnet",
+				providerId: "claude",
+			});
+		}
+		expect(getProviderGroups().map(({ provider }) => provider.id)).toEqual([
+			"claude",
+		]);
+	});
+
+	it("keeps the global catalog when a scoped model response arrives", () => {
+		const providers = [
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [{ id: "gpt", name: "GPT", provider: "openai" }],
+			},
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+			},
+		];
+		handleModelList({ providers });
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "claude",
+			providers: [],
+		});
+		const openCodeProvider = providers[0];
+		assert.exists(openCodeProvider);
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode-work",
+			providers: [{ ...openCodeProvider, instanceId: "opencode-work" }],
+		});
+		expect(discoveryState.providers).toEqual(providers);
+	});
+
+	it("does not revive removed Claude options from an older RPC response", () => {
+		applyProjectSetting({
+			_tag: "providerModels",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+				},
+			],
+		});
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			providers: [],
+			active: { model: "sonnet", provider: "claude" },
+			variant: { variant: "high", variants: ["high"] },
+			contextWindow: {
+				contextWindow: "1m",
+				options: [{ value: "1m", label: "1M" }],
+			},
+		});
+		expect(getActiveModelVariants()).toEqual([]);
+		expect(getActiveContextWindowOptions()).toEqual([]);
+	});
+
 	it("updates model discovery state from one RPC response", () => {
 		const response: GetModelsResponse = {
 			projectSlug: "project-a",
@@ -579,7 +757,7 @@ describe("getActiveContextWindowOptions", () => {
 		expect(getActiveContextWindowOptions()).toEqual(modelOptions);
 	});
 
-	it("falls back to the server list when the active model has no options", () => {
+	it("keeps an empty Claude option list authoritative over the server list", () => {
 		handleModelList({
 			providers: [
 				{
@@ -601,9 +779,7 @@ describe("getActiveContextWindowOptions", () => {
 			options: [{ value: "200k", label: "200K", isDefault: true }],
 		});
 
-		expect(getActiveContextWindowOptions()).toEqual([
-			{ value: "200k", label: "200K", isDefault: true },
-		]);
+		expect(getActiveContextWindowOptions()).toEqual([]);
 	});
 });
 

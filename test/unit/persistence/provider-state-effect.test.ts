@@ -3,6 +3,7 @@ import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { makeProviderStateEffect } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 
@@ -14,7 +15,9 @@ const setup = Effect.gen(function* () {
 	yield* sql`
 		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 		VALUES ('s1', 'claude', 'Test', 'idle', 1, 1), ('s2', 'claude', 'Test', 'idle', 1, 1)`;
-	return yield* makeProviderStateEffect;
+	return yield* makeProviderStateEffect.pipe(
+		Effect.provideService(PersistenceProjectTag, { projectId: "test-project" }),
+	);
 });
 
 describe("ProviderStateEffect", () => {

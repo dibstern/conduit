@@ -1,10 +1,54 @@
 import { expect } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import {
+	openModelPicker,
+	requireRelayControl,
+	requireRpcControl,
+} from "./shared.js";
 
 export const opencodeConnectionBannerHandlers: StepHandler[] = [
+	{
+		name: "seed persisted session instance during an outage",
+		match:
+			/^the (Claude|OpenCode) session is persisted on instance (\S+)( as the project default)? with another instance healthy$/,
+		run: ({ world, match }) => {
+			const name = match[1] ?? "";
+			const instanceId = match[2] ?? "";
+			const rpc = requireRpcControl(world.page);
+			rpc.upsertShellRow({
+				id: `sess-banner-${name.toLowerCase()}`,
+				title: `${name} session`,
+				status: "idle",
+				projectSlug: "myapp",
+				updatedAt: PINNED_CLOCK_MS,
+				resumes: [{ at: PINNED_CLOCK_MS, instanceId, reason: "user" }],
+			});
+			rpc.setDaemonList("SubscribeInstances", {
+				instances: ["healthy-oc", instanceId].map((id) => ({
+					id,
+					name: id,
+					driver:
+						id === instanceId && name === "Claude" ? "claude" : "opencode",
+					port: 0,
+					managed: false,
+					status: id === instanceId ? "unhealthy" : "healthy",
+					restartCount: 0,
+					createdAt: PINNED_CLOCK_MS,
+				})),
+			});
+			if (match[3]) {
+				rpc.setDaemonList("SubscribeProjects", {
+					projects: [
+						{ slug: "myapp", title: "myapp", folders: ["/myapp"], instanceId },
+					],
+					current: "myapp",
+				});
+			}
+		},
+	},
 	{
 		name: "seed sessions for both providers",
 		match: /^the mock relay has Claude and OpenCode sessions$/,
@@ -28,7 +72,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "view a provider session",
 		match:
-			/^I view the (Claude|OpenCode) session( using the OpenCode project default| on instance (\S+))?$/,
+			/^I view the (Claude|OpenCode) session( using the OpenCode project default| on instance (\S+))?( with rejected agent discovery)?$/,
 		run: async ({ world, match }) => {
 			const name = match[1] ?? "";
 			const sessionId = `sess-banner-${name.toLowerCase()}`;
@@ -37,18 +81,34 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setResponse("GetModels", {
 				projectSlug: "myapp",
-				providers: dualDriverProviders,
+				providers: dualDriverProviders.filter(
+					(provider) => provider.id !== "claude",
+				),
 				active: {
 					model: claudeModel ? "claude-opus-4-1" : "claude-sonnet-4",
 					provider: claudeModel ? "claude" : "anthropic",
 				},
 			});
-			rpc.setResponse("GetAgents", {
+			const agents = {
 				projectSlug: "myapp",
 				...(match[3] ? { instanceId: match[3] } : {}),
 				providerScope: { id: claude ? "claude" : "opencode", name },
 				agents: [],
-			});
+			};
+			let rejected = false;
+			if (match[4]) {
+				rpc.setHandler("GetAgents", (payload) => {
+					if (payload["sessionId"] === sessionId) {
+						rejected = true;
+						throw new WsRpcError({
+							message: "OpenCode agent discovery is unavailable",
+						});
+					}
+					return agents;
+				});
+			} else {
+				rpc.setResponse("GetAgents", agents);
+			}
 			await world.page
 				.locator(`[data-session-id="${sessionId}"]`)
 				.press("Enter");
@@ -58,6 +118,67 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("session-bar-title")).toHaveText(
 				`${name} session`,
 			);
+			if (match[4]) await expect.poll(() => rejected).toBe(true);
+		},
+	},
+	{
+		name: "reject session creation on the selected instance",
+		match: /^creating a session on instance (\S+) fails with (.+)$/,
+		run: async ({ world, match }) => {
+			const instanceId = match[1] ?? "";
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeInstances", {
+				instances: [
+					{
+						id: instanceId,
+						name: instanceId,
+						driver: "opencode",
+						port: 0,
+						managed: false,
+						status: "unhealthy",
+						restartCount: 0,
+						createdAt: PINNED_CLOCK_MS,
+					},
+				],
+			});
+			rpc.setHandler("CreateSession", (payload) => {
+				expect(payload["instanceId"]).toBe(instanceId);
+				throw new WsRpcError({ message: match[2] ?? "" });
+			});
+			await openModelPicker(world.page);
+			await world.page.getByTestId("picker-row-harness").click();
+			await world.page.getByTestId(`picker-instance-${instanceId}`).click();
+			await world.page
+				.getByTestId("picker-row-model")
+				.waitFor({ state: "visible" });
+			await world.page.keyboard.press("Escape");
+		},
+	},
+	{
+		name: "assert session creation cause in composer toast",
+		match: /^an error toast contains (.+)$/,
+		run: async ({ world, match }) => {
+			const toast = world.page
+				.getByRole("alert")
+				.filter({ hasText: match[1] ?? "" });
+			await expect(toast).toBeVisible();
+			await expect(toast).toHaveAttribute("aria-live", "assertive");
+		},
+	},
+	{
+		name: "assert creation failure preserves the composer draft",
+		match: /^the composer still contains (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator("#input")).toHaveValue(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert unrelated instance health warning absent",
+		match: /^the generic instance health warning is not visible$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.locator('[data-banner-id="no-healthy-instances"]'),
+			).toBeHidden();
 		},
 	},
 	{

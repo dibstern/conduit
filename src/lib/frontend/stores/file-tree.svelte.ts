@@ -15,6 +15,8 @@ export interface AtQuery {
 // is typing lives in the component, not here.
 
 export const fileTreeState = $state({
+	/** Project, session and effective folder that own these caches. */
+	scope: null as string | null,
 	entries: [] as string[],
 	loading: false,
 	loaded: false,
@@ -111,8 +113,9 @@ export function requestFileTree(): void {
 	fileTreeState.loading = true;
 }
 
-/** Clear file tree state (for project switch). */
+/** Clear paths and previews when the project or session workspace changes. */
 export function clearFileTreeState(): void {
+	fileTreeState.scope = null;
 	fileTreeState.entries = [];
 	fileTreeState.loading = false;
 	fileTreeState.loaded = false;

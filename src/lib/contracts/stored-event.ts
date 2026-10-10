@@ -3,6 +3,7 @@ import {
 	type ContinuationReason,
 	ContinuationReasonSchema,
 } from "./limit-recovery.js";
+import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
@@ -62,6 +63,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.created",
 	"session.renamed",
 	"session.workspace_changed",
+	"session.workspace_started",
 	"session.read",
 	"session.unread",
 	"session.settled",
@@ -232,6 +234,8 @@ export type CanonicalToolInput =
 
 export interface TurnCompletedPayload {
 	readonly messageId: string;
+	/** Names the turn when no assistant message of its own answered it. */
+	readonly userMessageId?: string;
 	readonly cost?: number;
 	readonly tokens?: {
 		readonly input?: number;
@@ -290,6 +294,8 @@ export interface InputAdmittedPayload {
 export interface InputSentPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
+	/** Handed into the running turn rather than starting one. */
+	readonly steer?: true;
 }
 
 export interface InputCancelledPayload {
@@ -362,6 +368,12 @@ export interface SessionRenamedPayload {
 
 export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
+}
+
+/** The runner's reported startup folder, independent of recorded workspace moves. */
+export interface SessionWorkspaceStartedPayload {
+	readonly sessionId: string;
+	readonly path: string;
 }
 
 export interface SessionDeletedPayload {
@@ -549,6 +561,7 @@ export interface QuestionResolvedPayload {
  * Map from event type to its payload shape.
  */
 export interface EventPayloadMap {
+	"workspace.changed": ProviderWorkspaceChangedData;
 	"message.created": MessageCreatedPayload;
 	"message.removed": MessageRemovedPayload;
 	"message.part.removed": MessagePartRemovedPayload;
@@ -576,6 +589,7 @@ export interface EventPayloadMap {
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
+	"session.workspace_started": SessionWorkspaceStartedPayload;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
 	"session.settled": SessionSettledPayload;
@@ -649,6 +663,7 @@ export type CanonicalEvent = {
 }[CanonicalEventType];
 
 export type StoredEvent = CanonicalEvent & {
+	readonly projectId: string;
 	readonly sequence: number;
 	readonly streamVersion: number;
 };
@@ -890,6 +905,7 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
+	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
@@ -937,6 +953,7 @@ const InputAdmittedPayloadSchema = Schema.Struct({
 const InputSentPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
+	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
 const InputCancelledPayloadSchema = Schema.Struct({
@@ -970,6 +987,11 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	...SessionWorkspaceSchema.fields,
+});
+
+const SessionWorkspaceStartedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	path: Schema.String,
 });
 
 const SessionReadPayloadSchema = Schema.Struct({
@@ -1261,6 +1283,10 @@ const SessionWorkspaceChangedEventSchema = eventEnvelope(
 	"session.workspace_changed",
 	SessionWorkspaceChangedPayloadSchema,
 );
+const SessionWorkspaceStartedEventSchema = eventEnvelope(
+	"session.workspace_started",
+	SessionWorkspaceStartedPayloadSchema,
+);
 const SessionReadEventSchema = eventEnvelope(
 	"session.read",
 	SessionReadPayloadSchema,
@@ -1408,6 +1434,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionWorkspaceChangedEventSchema,
+	SessionWorkspaceStartedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
 	SessionSettledEventSchema,
@@ -1443,6 +1470,7 @@ export const CanonicalEventSchema = Schema.Union(
 export const StoredEventSchema = Schema.extend(
 	CanonicalEventSchema,
 	Schema.Struct({
+		projectId: Schema.NonEmptyString,
 		sequence: Schema.Number,
 		streamVersion: Schema.Number,
 	}),

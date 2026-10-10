@@ -26,7 +26,7 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 	StatusPollerLive.pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
-				makePersistenceEffectLayer(":memory:"),
+				makePersistenceEffectLayer(":memory:", "test-project"),
 				PendingInteractionServiceLive,
 				Layer.succeed(ConfigTag, makeMockConfig()),
 				Layer.succeed(LoggerTag, makeMockLogger()),

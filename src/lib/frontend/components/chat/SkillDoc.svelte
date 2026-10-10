@@ -1,23 +1,27 @@
 <script lang="ts">
 	import hljs from "highlight.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { findSession } from "../../stores/session.svelte.js";
 	import { getSkillContentRpc } from "../../transport/ws-rpc-client.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
 
 	let { name }: { name: string } = $props();
 	let skillDoc = $state<string | null>(null);
 	let skillState = $state<"loading" | "idle" | "missing">("loading");
+	const sessionId = $derived(getCurrentSessionId());
+	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
 
 	$effect(() => {
 		const projectSlug = getCurrentSlug();
 		const requestedName = name;
+		const requestedWorkspace = workspace;
 		let active = true;
 		skillDoc = null;
 		skillState = projectSlug && requestedName ? "loading" : "missing";
 		if (projectSlug && requestedName) {
-			void getSkillContentRpc({ projectSlug, name: requestedName })
+			void getSkillContentRpc({ projectSlug, name: requestedName, ...(sessionId ? { sessionId } : {}) })
 				.then((response) => {
-					if (!active) return;
+					if (!active || workspace !== requestedWorkspace) return;
 					// Markdown would read YAML frontmatter as a rule and a heading.
 					skillDoc = response.content.replace(
 						/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/,

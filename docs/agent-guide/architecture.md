@@ -64,7 +64,13 @@ Local terminals belong to a detached per-user PTY host, not the server. The host
 entrypoint is `src/bin/pty-host.ts`, emitted by the server build as
 `dist/src/bin/pty-host.js`. It imports the same stamped build ID as the server.
 `LocalPtyServiceLive` connects lazily and starts the host when creating the first
-terminal. Each project discovers its terminals by cwd and attaches to a snapshot
+terminal. Each project discovers its terminals by their owning project folder,
+recorded separately from their start cwd so session worktree terminals remain
+discoverable after a move or restart. Legacy creates use cwd as the owning folder.
+Hosts advertise support for a separate owning folder. A retained older host can
+continue serving its terminals and creating terminals in the project folder;
+worktree creates fail before spawning until that host is restarted.
+The relay attaches to a snapshot
 of up to 50 KiB of UTF-8 scrollback followed by live output. Replay uses
 `pty_output` with `replace: true`, including empty history, so the browser resets
 its buffer and renderer before accepting live output. Replacing a disconnected

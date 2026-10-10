@@ -67,6 +67,7 @@ import {
 	updateProject,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 
@@ -98,6 +99,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
+		const usage = yield* Usage;
 		// Every open SubscribeInstances / SubscribeProjects stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
@@ -223,6 +225,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 					})),
 				),
+			SubscribeUsage: () =>
+				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
 			SubscribeProjects: () =>
 				followList(
 					"projects",

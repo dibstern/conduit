@@ -121,6 +121,7 @@ it("releases a claim after the endpoint closes without response or error", async
 					Layer.merge(
 						makePersistenceEffectLayer(
 							join(dir, "events.db"),
+							"test-project",
 							createAllEffectProjectors(),
 							bus,
 						),

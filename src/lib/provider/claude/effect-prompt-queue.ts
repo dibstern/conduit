@@ -29,6 +29,15 @@ export class EffectPromptQueueAlreadyIterating extends Data.TaggedError(
 	}
 }
 
+/** Nothing will read the prompt: dropping it silently would strand its turn. */
+export class EffectPromptQueueClosed extends Data.TaggedError(
+	"EffectPromptQueueClosed",
+)<NoPromptQueueErrorFields> {
+	override get message(): string {
+		return "EffectPromptQueue is closed. The prompt was not enqueued.";
+	}
+}
+
 export class EffectPromptQueue implements PromptQueueController {
 	private _iterating = false;
 	private _closed = false;
@@ -55,9 +64,11 @@ export class EffectPromptQueue implements PromptQueueController {
 		});
 	}
 
-	enqueue(message: SDKUserMessage): Effect.Effect<void> {
+	enqueue(
+		message: SDKUserMessage,
+	): Effect.Effect<void, EffectPromptQueueClosed> {
 		return Effect.suspend(() => {
-			if (this._closed) return Effect.void;
+			if (this._closed) return Effect.fail(new EffectPromptQueueClosed());
 			return Queue.offer(this.queue, {
 				_tag: "Message",
 				message,

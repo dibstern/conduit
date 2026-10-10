@@ -17,9 +17,9 @@
 
 	type QuotaUsed = number | "checking" | "unknown";
 
-	function tone(used: QuotaUsed): "normal" | "high" | "full" | "checking" | "unknown" {
+	function tone(used: QuotaUsed, warnAt: number | "off"): "normal" | "high" | "full" | "checking" | "unknown" {
 		if (typeof used !== "number") return used;
-		return used >= 100 ? "full" : used >= 80 ? "high" : "normal";
+		return used >= 100 ? "full" : used >= (warnAt === "off" ? 80 : warnAt) ? "high" : "normal";
 	}
 
 	const FILL_CLASSES = {
@@ -47,32 +47,58 @@
 	let {
 		used,
 		caption,
+		warnAt = 80,
 		size = "md",
 		track = true,
+		variant = "headroom",
+		trackWidth,
+		gap = 8,
+		trackTestId,
+		captionTestId = "quota-meter-caption",
 		class: className = "",
 	}: {
 		/** Percent of the quota used, 0 to 100, or a state with no number yet. */
 		used: QuotaUsed;
 		/** Replaces the default caption, e.g. "limited · Mon 9:00". */
 		caption?: string | undefined;
+		warnAt?: number | "off";
 		size?: keyof typeof TRACK_WIDTH_CLASSES | undefined;
 		/** false keeps only the caption, for rows too narrow for the track. */
 		track?: boolean | undefined;
+		/** Usage values colour the caption at the same thresholds as the fill. */
+		variant?: "headroom" | "usage";
+		/** Compact footer tracks have literal widths from the approved design. */
+		trackWidth?: number;
+		gap?: 4 | 5 | 8;
+		trackTestId?: string;
+		captionTestId?: string;
 		/** Layout only (margin, alignment). */
 		class?: string | undefined;
 	} = $props();
 
-	const level = $derived(tone(used));
+	const level = $derived(tone(used, warnAt));
 	const share = $derived(typeof used === "number" ? Math.max(0, Math.min(100, used)) : 0);
 </script>
 
-<span data-testid="quota-meter" data-state={level} class="inline-flex shrink-0 items-center gap-[8px] {className}">
+<span data-testid="quota-meter" data-state={level} class="inline-flex shrink-0 items-center {variant === 'usage' ? 'max-w-full' : ''} {gap === 8 ? 'gap-[8px]' : ''} {className}" style:gap={gap === 8 ? undefined : `${gap}px`}>
 	{#if track}
-		<span aria-hidden="true" class="block h-[4px] overflow-hidden rounded-full bg-border-chip {TRACK_WIDTH_CLASSES[size]} {level === 'checking' ? 'opacity-50' : ''}">
+		<span data-testid={trackTestId} aria-hidden="true" class="block h-[4px] overflow-hidden rounded-full bg-border-chip {TRACK_WIDTH_CLASSES[size]} {trackWidth === undefined ? '' : 'custom-track'} {variant === 'usage' ? 'usage-track' : ''} {level === 'checking' ? 'opacity-50' : ''}" style:--quota-track-width={trackWidth === undefined ? undefined : `${trackWidth}px`}>
 			{#if level === "normal" || level === "high" || level === "full"}
 				<span class="block h-full {FILL_CLASSES[level]}" style:width="{share}%"></span>
 			{/if}
 		</span>
 	{/if}
-	<span data-testid="quota-meter-caption" class="whitespace-nowrap font-mono text-[10.5px] {CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
+	<span data-testid={captionTestId} class="whitespace-nowrap font-mono text-[10.5px] {variant === 'usage' && level === 'high' && warnAt !== 'off' ? 'text-fill-amber' : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
 </span>
+
+<style>
+	.custom-track {
+		width: var(--quota-track-width);
+	}
+
+	@container sidebar (width < 210px) {
+		.usage-track {
+			width: min(var(--quota-track-width, 40px), 26px);
+		}
+	}
+</style>

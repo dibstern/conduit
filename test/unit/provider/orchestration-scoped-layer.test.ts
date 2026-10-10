@@ -41,7 +41,7 @@ describe("orchestration scoped layer", () => {
 		const claudeShutdown = vi
 			.spyOn(ClaudeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
-		const persistence = makePersistenceEffectLayer(":memory:");
+		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const openCodeApi = makeStubClient();
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(

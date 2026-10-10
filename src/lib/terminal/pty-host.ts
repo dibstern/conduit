@@ -117,6 +117,7 @@ export async function runPtyHost(options: {
 
 	interface Terminal {
 		pty: PtyInfo;
+		projectDir: string;
 		process: nodePty.IPty;
 		scrollback: PtyScrollback;
 		exitCode: number | null;
@@ -235,6 +236,7 @@ export async function runPtyHost(options: {
 						buildId,
 						pid: process.pid,
 						openTerminals: terminals.size,
+						supportsProjectDir: true,
 					});
 					negotiated = message.protocolVersion === PTY_HOST_PROTOCOL_VERSION;
 					if (!negotiated) {
@@ -276,6 +278,7 @@ export async function runPtyHost(options: {
 							};
 							const terminal: Terminal = {
 								pty,
+								projectDir: resolve(message.projectDir ?? message.cwd),
 								process: ptyProcess,
 								scrollback: new PtyScrollback(),
 								exitCode: null,
@@ -309,14 +312,14 @@ export async function runPtyHost(options: {
 								requestId: message.requestId,
 								terminals: [...terminals.values()]
 									.filter(
-										(terminal) => terminal.pty.cwd === resolve(message.cwd),
+										(terminal) => terminal.projectDir === resolve(message.cwd),
 									)
 									.map(({ pty, exitCode }) => ({ pty, exitCode })),
 							});
 							break;
 						case "attach": {
 							const terminal = terminals.get(message.id);
-							if (!terminal || terminal.pty.cwd !== resolve(message.cwd))
+							if (!terminal || terminal.projectDir !== resolve(message.cwd))
 								throw new PtyHostError({
 									message: `Unknown terminal: ${message.id}`,
 								});

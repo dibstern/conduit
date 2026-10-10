@@ -1,12 +1,15 @@
 import {
+	Cause,
 	Context,
 	Data,
 	type Effect,
-	type Option,
+	Option,
+	Runtime,
 	type Scope,
 	type Stream,
 } from "effect";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
+import { OpenCodeConnectionError } from "../../../errors.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type { ConnectionHealth } from "../../../types.js";
 
@@ -16,10 +19,16 @@ export type OpenCodeInstanceEvent = {
 } & (
 	| { readonly _tag: "event"; readonly payload: unknown }
 	| { readonly _tag: "heartbeat" }
+	/** Successful transport connection, including reconnects with unchanged state. */
+	| { readonly _tag: "connected" }
+	/** Transport loss, including quiet managed instances with no lifecycle change. */
+	| { readonly _tag: "disconnected" }
 	| {
 			/** Lifecycle transition; repeats are never emitted. */
 			readonly _tag: "connection";
 			readonly state: OpenCodeConnectionStatus;
+			/** The managed process has stopped, rather than only its transport. */
+			readonly managedStopped?: boolean;
 	  }
 );
 
@@ -30,9 +39,26 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 	"OpenCodeUnavailable",
 )<{
 	readonly instanceId: string;
-	readonly reason: "not-configured" | "spawn-failed" | "unreachable";
+	readonly reason:
+		| "not-configured"
+		| "not-running"
+		| "spawn-failed"
+		| "unreachable";
 	readonly message: string;
 }> {}
+
+/** The background SDK boundary wraps this expected rejection in a fiber failure. */
+export const isOpenCodeNotRunningError = (error: unknown): boolean => {
+	const cause = error instanceof OpenCodeConnectionError ? error.cause : error;
+	const failure = Runtime.isFiberFailure(cause)
+		? Option.getOrUndefined(
+				Cause.failureOption(cause[Runtime.FiberFailureCauseId]),
+			)
+		: cause;
+	return (
+		failure instanceof OpenCodeUnavailable && failure.reason === "not-running"
+	);
+};
 
 export interface OpenCodeInstances {
 	/**

@@ -451,7 +451,7 @@ Scenario Outline: the auto-switch toast's Settings opens the usage limit setting
   And the session resumes on self from claude by auto-switch and replies All provider tests pass now.
   Then a toast titled Switched to personal says work2claude reached its 5-hour limit.
   When I press Settings on the toast
-  Then settings are open on the Instances tab at the usage limit settings
+  Then settings are open on the Usage tab at the usage limit settings
 
 Examples:
   | viewport |

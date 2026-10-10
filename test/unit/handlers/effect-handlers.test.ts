@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, layer } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import { expect, vi } from "vitest";
 import { GetAgents, GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -29,7 +29,10 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
-import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
+import {
+	ProjectSettingsLive,
+	subscribeProjectSettings,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -128,6 +131,7 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
+import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -232,7 +236,13 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 }
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.merge(
 		apiLayer,
 		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
@@ -255,7 +265,13 @@ function projectManagementLayer(
 }
 
 function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.mergeAll(
 		apiLayer,
 		OpenCodeModelServiceLive.pipe(
@@ -289,7 +305,7 @@ function mockConfig(
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = Layer.merge(
-	makePersistenceEffectLayer(":memory:"),
+	makePersistenceEffectLayer(":memory:", "test-project"),
 	Layer.succeed(ClaudeEventPersistEffectTag, {
 		persistHandoffDelivered: () => Effect.void,
 		persistEvent: () => Effect.void,
@@ -300,7 +316,7 @@ const persistentHandlerPersistence = Layer.merge(
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -441,6 +457,13 @@ describe("reloadProviderSessionForClient", () => {
 });
 
 describe("sendModelsStateToClient", () => {
+	const readClaudeCatalog = subscribeProjectSettings().pipe(
+		Stream.mapConcat((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []),
+		Stream.filter((setting) => setting._tag === "providerModels"),
+		Stream.map((setting) => setting.providers),
+		Stream.runHead,
+		Effect.map(Option.getOrThrow),
+	);
 	it.effect("fetches providers into the model catalog", () => {
 		const ws = mockWsHandler();
 		const engine = withDispatchEffect({
@@ -483,7 +506,7 @@ describe("sendModelsStateToClient", () => {
 	});
 
 	it.effect(
-		"includes variants and contextWindowOptions in claude provider entries",
+		"publishes variants and contextWindowOptions in live claude provider entries",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -521,10 +544,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return getModelsResponse({ clientId: "client-1" }).pipe(
-				Effect.provide(layer),
-				Effect.tap((response) => {
-					expect(response.providers).toEqual([
+			return Effect.gen(function* () {
+				const response = yield* getModelsResponse({ clientId: "client-1" });
+				expect(response.providers).toEqual([]);
+				expect(yield* readClaudeCatalog).toEqual([
 								{
 									id: "claude",
 									name: "Anthropic - claude",
@@ -543,12 +566,11 @@ describe("sendModelsStateToClient", () => {
 									],
 								},
 							]);
-				}),
-			);
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
 		},
 	);
 	it.effect(
-		"returns Claude models when OpenCode provider discovery fails",
+		"publishes Claude models when OpenCode provider discovery fails",
 		() => {
 			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
@@ -580,10 +602,10 @@ describe("sendModelsStateToClient", () => {
 				makeOverridesStateLive(),
 			);
 
-			return getModelsResponse({ clientId: "client-1" }).pipe(
-				Effect.provide(layer),
-				Effect.tap((response) => {
-					expect(response.providers).toEqual([
+			return Effect.gen(function* () {
+				const response = yield* getModelsResponse({ clientId: "client-1" });
+				expect(response.providers).toEqual([]);
+				expect(yield* readClaudeCatalog).toEqual([
 							{
 								id: "claude",
 								name: "Anthropic - claude",
@@ -597,8 +619,7 @@ describe("sendModelsStateToClient", () => {
 								],
 							},
 						]);
-				}),
-			);
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
 		},
 	);
 	it.effect(
@@ -672,6 +693,8 @@ describe("sendModelsStateToClient", () => {
 								},
 							],
 						},
+					]);
+				expect(yield* readClaudeCatalog).toEqual([
 						{
 							id: "claude",
 							name: "Anthropic - claude",
@@ -689,7 +712,7 @@ describe("sendModelsStateToClient", () => {
 					model: "claude-opus-4-7",
 					provider: "claude",
 				});
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
 		},
 	);
 });
@@ -1228,7 +1251,7 @@ function makeForkSessionLayer(options?: {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:")));
+	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")));
 
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
@@ -2817,7 +2840,7 @@ describe("sendMessageToSession", () => {
 ),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
-						makePersistenceEffectLayer(dbFile),
+						makePersistenceEffectLayer(dbFile, "test-project"),
 						Layer.succeed(
 							OrchestrationEngineTag,
 							new OrchestrationEngine({ registry: new ProviderRegistry() }),
@@ -3602,6 +3625,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, status, created_at, updated_at)
+					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0)`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",
@@ -3614,7 +3641,6 @@ describe("handleMessage", () => {
 				);
 				// The failure is recorded as the turn's error; the relay's failed
 				// `done` idles the composer from there.
-				const sql = yield* SqlClient.SqlClient;
 				const failures = yield* sql<{ code: string; error: string }>`
 					SELECT json_extract(data, '$.code') AS code,
 						json_extract(data, '$.error') AS error

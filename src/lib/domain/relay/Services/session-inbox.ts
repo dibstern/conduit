@@ -6,7 +6,15 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Deferred, Effect, Layer, Schema, Stream } from "effect";
+import {
+	Clock,
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Schema,
+	Stream,
+} from "effect";
 import {
 	type InputAdmittedPayload,
 	type InputCancelledPayload,
@@ -22,6 +30,8 @@ import {
 } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { Usage } from "../../daemon/Services/usage.js";
+import { type Continuation, ContinuationTag } from "./continuation.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -34,16 +44,22 @@ import { OverridesStateTag } from "./session-overrides-state.js";
 
 /** What the inbox knows about one session, read fresh for every decision. */
 export interface InboxView {
+	/** The account whose usage was read for this decision. */
+	readonly provider: string | undefined;
 	/** Queued inputs, oldest first. */
 	readonly queued: readonly InboxInput[];
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
 	/** A turn is open, a handoff is in flight, or a prompt waits on the user. */
 	readonly busy: boolean;
-	/** A turn was stopped or failed since the latest handoff. */
+	/** A turn was stopped or failed since the latest handoff or reset release. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
 	readonly limited: boolean;
+	/** Usage reports this account limited until a known future Unix second. */
+	readonly usageResetsAt: number | undefined;
+	/** A scheduled reset must fire before queued inputs can drain. */
+	readonly scheduled: boolean;
 	/** The command's input id is already admitted or started. */
 	readonly known: boolean;
 	/** The session's provider can take an input mid-turn. */
@@ -137,7 +153,13 @@ const steer = (
 	if (reason) return { _tag: "Rejected", reason };
 	return {
 		_tag: "Accepted",
-		events: [...events, sent(sessionId, input.inputId)],
+		events: [
+			...events,
+			{
+				type: "input.sent",
+				data: { sessionId, inputId: input.inputId, steer: true },
+			},
+		],
 		handoff: input,
 		steer: true,
 	};
@@ -153,7 +175,11 @@ export function decideInbox(
 	// answered after Stop leaves it paused. The cut-off lifts when a reply lands
 	// (a resume, a switch's continuation, or a new turn) or when it is dismissed.
 	const paused =
-		view.queued.length > 0 && (view.stoppedSinceHandoff || view.limited);
+		view.queued.length > 0 &&
+		(view.stoppedSinceHandoff ||
+			view.limited ||
+			view.usageResetsAt !== undefined ||
+			view.scheduled);
 	const idle = !view.busy && !view.steering;
 	switch (command._tag) {
 		case "Submit": {
@@ -163,6 +189,8 @@ export function decideInbox(
 				type: "input.admitted",
 				data: { sessionId, inputId, delivery: command.delivery, request },
 			};
+			if (view.usageResetsAt !== undefined || view.scheduled)
+				return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
@@ -227,7 +255,8 @@ type SendTurnError = Effect.Effect.Error<
 export type SessionInboxError =
 	| SqlError
 	| ClaudeEventPersistFailure
-	| SendTurnError;
+	| SendTurnError
+	| Effect.Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
 
 export interface SessionInboxTarget {
 	readonly clientId: string;
@@ -280,6 +309,12 @@ export const SessionInboxLive = Layer.scoped(
 		const overrides = yield* OverridesStateTag;
 		const bus = yield* SessionEventBusTag;
 		const log = yield* LoggerTag;
+		const usage = yield* Usage;
+		const continuation = yield* ContinuationTag;
+		const continuationContext =
+			yield* Effect.context<
+				Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
+			>();
 		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 		const permits = new Map<string, Effect.Semaphore>();
 		const serialised = (sessionId: string) => {
@@ -308,10 +343,13 @@ export const SessionInboxLive = Layer.scoped(
 							Effect.map((request) => ({ inputId: row.input_id, request })),
 						),
 				);
+				// A reset-only release restarts an input admitted after an earlier
+				// Stop, as an idle Submit would. A Stop after admission still wins.
 				const [facts] = yield* sql<{
 					status: string | null;
 					provider: string | null;
 					limited: number;
+					scheduled: number;
 					open_prompts: number;
 					last_turn: string | null;
 					stopped: number;
@@ -322,6 +360,9 @@ export const SessionInboxLive = Layer.scoped(
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 						FROM sessions WHERE id = ${sessionId}) AS limited,
+					(SELECT json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
+						AND NOT json_extract(limit_recovery, '$.continued')
+						FROM sessions WHERE id = ${sessionId}) AS scheduled,
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
 					(SELECT state FROM turns WHERE session_id = ${sessionId}
@@ -332,7 +373,16 @@ export const SessionInboxLive = Layer.scoped(
 							(SELECT MAX(requested_at) FROM provider_command_outbox
 								WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
 							(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-							0)) AS stopped,
+							0)) AND NOT EXISTS (
+						SELECT 1 FROM events admitted JOIN events released
+							ON released.session_id = admitted.session_id
+						WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'
+							AND released.type = 'session.resume_cancelled'
+							AND json_extract(released.metadata, '$.source') = 'inbox-reset'
+							AND released.sequence > admitted.sequence
+							AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId}
+								AND type IN ('turn.interrupted', 'turn.error')), 0)) AS stopped,
 					(SELECT pending.request FROM provider_command_outbox outbox
 						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 						WHERE outbox.session_id = ${sessionId}
@@ -358,7 +408,24 @@ export const SessionInboxLive = Layer.scoped(
 					facts?.running == null
 						? undefined
 						: yield* decodeRequest(facts.running).pipe(Effect.orDie);
+				const reading = facts?.provider
+					? yield* usage.latest(facts.provider)
+					: undefined;
+				const now = (yield* Clock.currentTimeMillis) / 1000;
+				const resets =
+					reading?.status === "limited"
+						? reading.windows
+								.filter(
+									(window) =>
+										(window.kind === "five_hour" ||
+											window.kind === "seven_day") &&
+										window.utilization >= 100,
+								)
+								.map((window) => Date.parse(window.resetsAt ?? "") / 1000)
+								.filter((at) => Number.isFinite(at) && at > now)
+						: [];
 				return {
+					provider: facts?.provider ?? undefined,
 					queued,
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
@@ -370,6 +437,8 @@ export const SessionInboxLive = Layer.scoped(
 						facts?.in_flight === 1,
 					stoppedSinceHandoff: facts?.stopped === 1,
 					limited: facts?.limited === 1,
+					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
+					scheduled: facts?.scheduled === 1,
 					known,
 					providerSteers:
 						facts?.provider != null &&
@@ -473,11 +542,41 @@ export const SessionInboxLive = Layer.scoped(
 					}),
 				);
 
+		const scheduleReset = (sessionId: string, view: InboxView) =>
+			Effect.gen(function* () {
+				if (
+					view.usageResetsAt === undefined ||
+					view.scheduled ||
+					view.provider === undefined
+				)
+					return;
+				// A cancellation after the last Submit stays cancelled. A new input
+				// can schedule again; the sweep's reset release is not a user cancel.
+				const [cancelled] = yield* sql<{ n: number }>`SELECT EXISTS (
+					SELECT 1 FROM events WHERE session_id = ${sessionId}
+						AND type = 'session.resume_cancelled'
+						AND COALESCE(json_extract(metadata, '$.source'), '') <> 'inbox-reset'
+						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId}
+							AND type IN ('input.admitted', 'session.resume_scheduled')), 0)) AS n`;
+				if (cancelled?.n === 1) return;
+				yield* continuation
+					.requestContinuation(sessionId, {
+						instanceId: view.provider,
+						expectedInstanceId: view.provider,
+						reason: "reset",
+						at: view.usageResetsAt,
+						onlyIfUnscheduled: true,
+					})
+					.pipe(Effect.provide(continuationContext));
+			});
+
 		const drain = (sessionId: string) =>
 			serialised(sessionId)(
 				Effect.gen(function* () {
 					const view = yield* readView(sessionId);
 					if (view.queued.length === 0) return;
+					yield* scheduleReset(sessionId, view);
 					yield* commit(
 						sessionId,
 						decideInbox(sessionId, view, { _tag: "Drain" }),
@@ -551,6 +650,8 @@ export const SessionInboxLive = Layer.scoped(
 						// A queued input handed off ahead of this one has no requesting client.
 						const own = decision.handoff?.inputId === input.inputId;
 						yield* commit(input.sessionId, decision, own ? input : DRAINED);
+						if (!decision.handoff && decision.events.length > 0)
+							yield* scheduleReset(input.sessionId, view);
 						return { handedOff: own };
 					}),
 				),

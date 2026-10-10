@@ -8,11 +8,13 @@
 <script lang="ts">
 	import type { SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { PendingInput } from "../../stores/chat.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { cancelInputRpc, sendInputNowRpc } from "../../transport/ws-rpc-client.js";
 	import { extractDisplayText } from "../../utils/format.js";
+	import { usageForecastTime } from "../../utils/continuation.js";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -21,6 +23,7 @@
 	let {
 		inputs,
 		paused = false,
+		sendsAt,
 		steer,
 		onEdit,
 		onSteerRefused,
@@ -28,6 +31,8 @@
 		inputs: readonly PendingInput[];
 		/** The last turn was stopped or failed, so nothing drains until Resume. */
 		paused?: boolean;
+		/** The scheduled reset's release time, in Unix milliseconds. */
+		sendsAt?: number | undefined;
 		/** Steer on queued rows: hidden when undefined, disabled while a prompt is open. */
 		steer?: "ready" | "prompt_open" | undefined;
 		/** Takes back a queued input that Edit removed. */
@@ -82,7 +87,12 @@
 			{#each inputs as input (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
 				<li data-testid="pending-input-row" data-input-id={input.inputId} class="flex items-center gap-2">
-					<span data-testid="pending-input-text" class="flex-1 min-w-0 truncate">{extractDisplayText(input.request.text)}</span>
+					<span class="flex-1 min-w-0">
+						<span data-testid="pending-input-text" class="block truncate">{extractDisplayText(input.request.text)}</span>
+						{#if input.state === "queued" && sendsAt !== undefined}
+							<span data-testid="pending-input-sends-at" class="block text-text-muted">Sends at {usageForecastTime(sendsAt, clock.now)}</span>
+						{/if}
+					</span>
 					{#if images > 0}
 						<span
 							data-testid="pending-input-images"

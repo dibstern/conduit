@@ -9,7 +9,15 @@
 // reading means a write that lands in between arrives twice, never zero
 // times; each fact is a whole slot, so twice is harmless.
 
-import { Context, Effect, Layer, PubSub, Ref, Stream } from "effect";
+import {
+	Context,
+	Effect,
+	FiberHandle,
+	Layer,
+	PubSub,
+	Ref,
+	Stream,
+} from "effect";
 import type {
 	GlobalProjectSetting,
 	ProjectSetting,
@@ -34,7 +42,7 @@ type ProjectSettingChange = Extract<
 /** Facts the relay observes rather than reads from config. */
 type LiveProjectFact = Extract<
 	ProjectSetting,
-	{ readonly _tag: "clientCount" | "opencodeConnection" }
+	{ readonly _tag: "clientCount" | "opencodeConnection" | "providerModels" }
 >;
 /** OpenCode connections are kept per instance. */
 type LiveProjectFacts = {
@@ -43,14 +51,22 @@ type LiveProjectFacts = {
 		LiveProjectFact,
 		{ _tag: "opencodeConnection" }
 	>;
+	readonly providerModels?: Extract<
+		LiveProjectFact,
+		{ _tag: "providerModels" }
+	>;
 };
 const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
-	setting._tag === "clientCount" || setting._tag === "opencodeConnection";
+	setting._tag === "clientCount" ||
+	setting._tag === "opencodeConnection" ||
+	setting._tag === "providerModels";
 
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
 	/** Keep an older read from publishing after a newer one on this relay. */
 	readonly globalSync: Effect.Semaphore;
+	/** Share the pending Claude catalog refresh and its publication per relay. */
+	readonly modelDiscovery: FiberHandle.FiberHandle<void, never>;
 	/**
 	 * Open subscriptions: each tab holds one for its attached project.
 	 * Read synchronously by the relay status snapshot, like its own counts.
@@ -71,11 +87,12 @@ export class ProjectSettingsTag extends Context.Tag("ProjectSettings")<
 >() {}
 
 export const ProjectSettingsLive: Layer.Layer<ProjectSettingsTag> =
-	Layer.effect(
+	Layer.scoped(
 		ProjectSettingsTag,
 		Effect.all({
 			changes: PubSub.unbounded<ProjectSettingChange>(),
 			globalSync: Effect.makeSemaphore(1),
+			modelDiscovery: FiberHandle.make<void, never>(),
 			browsers: Effect.sync(() => {
 				let count = 0;
 				return {
@@ -94,9 +111,9 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 		const { changes, revision, live } = yield* ProjectSettingsTag;
 		if (isLiveFact(setting))
 			yield* Ref.update(live, (facts) =>
-				setting._tag === "clientCount"
-					? { ...facts, clientCount: setting }
-					: { ...facts, [`opencodeConnection:${setting.instanceId}`]: setting },
+				setting._tag === "opencodeConnection"
+					? { ...facts, [`${setting._tag}:${setting.instanceId}`]: setting }
+					: { ...facts, [setting._tag]: setting },
 			);
 		const sequence = yield* Ref.updateAndGet(revision, (n) => n + 1);
 		yield* PubSub.publish(changes, {
@@ -106,14 +123,18 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 		});
 	});
 
-const globalSettingRows = (settings: RelaySettings, defaults: OverridesState) =>
-	({
+const globalSettingRows = (
+	settings: RelaySettings,
+	defaults: OverridesState,
+) => {
+	const defaultModel = defaults.defaultModel ?? defaults.nativeDefaultModel;
+	return {
 		defaultModel: {
 			_tag: "defaultModel",
-			...(defaults.defaultModel
+			...(defaultModel
 				? {
-						model: defaults.defaultModel.modelID,
-						provider: defaults.defaultModel.providerID,
+						model: defaultModel.modelID,
+						provider: defaultModel.providerID,
 					}
 				: {}),
 			variant: defaults.defaultVariant,
@@ -131,7 +152,8 @@ const globalSettingRows = (settings: RelaySettings, defaults: OverridesState) =>
 			_tag: "claudeSettings",
 			overrides: settings.claudeSettings ?? {},
 		},
-	}) satisfies Record<GlobalProjectSetting["_tag"], GlobalProjectSetting>;
+	} satisfies Record<GlobalProjectSetting["_tag"], GlobalProjectSetting>;
+};
 
 /** Reload and commit together so a delayed startup cannot restore old defaults. */
 export const refreshGlobalDefaults = Effect.gen(function* () {

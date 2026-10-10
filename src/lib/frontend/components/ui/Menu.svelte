@@ -95,7 +95,7 @@
 	let contentNode = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
 	let scrimFade = $state({ progress: 0, settling: false });
-	let touchClickDeadline = 0;
+	let openingClickDeadline = 0;
 
 	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
 	// onclick toggles again when the synthetic click arrives with detail=0.
@@ -107,21 +107,23 @@
 		const onClick = props["onclick"] as ((event: MouseEvent) => void) | undefined;
 		return {
 			...props,
+			// A mouse press opens the sheet at once; its release must not pick the
+			// row that has just slid under the pointer.
 			onpointerdown: (event: PointerEvent) => {
-				if (event.pointerType !== "touch") touchClickDeadline = 0;
+				openingClickDeadline = event.pointerType === "touch" ? 0 : event.timeStamp + 500;
 				onPointerDown?.(event);
 			},
 			onpointerup: (event: PointerEvent) => {
-				if (event.pointerType === "touch") touchClickDeadline = event.timeStamp + 500;
+				if (event.pointerType === "touch") openingClickDeadline = event.timeStamp + 500;
 				onPointerUp?.(event);
 			},
 			onkeydown: (event: KeyboardEvent) => {
-				touchClickDeadline = 0;
+				openingClickDeadline = 0;
 				onKeyDown?.(event);
 			},
 			onclick: (event: MouseEvent) => {
-				const followsTouch = event.timeStamp <= touchClickDeadline;
-				touchClickDeadline = 0;
+				const followsTouch = event.timeStamp <= openingClickDeadline;
+				openingClickDeadline = 0;
 				if (followsTouch && event.detail === 0) {
 					event.preventDefault();
 					return;
@@ -133,9 +135,10 @@
 
 	// The tap that opens a sheet ends in a click at the same spot. When the
 	// trigger sits low, a sheet row is there by then and would be chosen.
+	// A press inside the sheet starts a new gesture, so it clears the deadline.
 	function swallowOpeningClick(event: MouseEvent) {
-		if (event.timeStamp > touchClickDeadline) return;
-		touchClickDeadline = 0;
+		if (event.timeStamp > openingClickDeadline) return;
+		openingClickDeadline = 0;
 		event.preventDefault();
 		event.stopPropagation();
 	}
@@ -243,7 +246,7 @@
 					     scrollable-region-focusable fails. Bits intercepts Tab inside the menu, so
 					     this adds no stray tab stop. Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<div class="mx-auto mt-[8px] mb-[6px] h-[4px] w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
 						{@render children()}
 					</div>
