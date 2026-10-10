@@ -488,6 +488,9 @@ export function createProjectRelayLayers({
 	// ingestion pipeline — no duplicate event append. Likewise the shared
 	// persistenceEffectLayer reference gives orchestration (session bindings,
 	// durable command receipts) the relay's one SqlClient connection.
+	const instanceManagementLayer = hasInstanceManagement
+		? InstanceManagementServiceFromConfigLive.pipe(Layer.provide(configLayer))
+		: Layer.empty;
 	const providerOrchestrationDeps = Layer.mergeAll(
 		openCodeApiLayer,
 		persistenceEffectLayer,
@@ -496,6 +499,7 @@ export function createProjectRelayLayers({
 		SessionEventBusLive,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
+		instanceManagementLayer,
 	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
@@ -612,14 +616,7 @@ export function createProjectRelayLayers({
 	);
 
 	// Optional bridge layers (only included when deps are present)
-	const bridgeLayers = hasInstanceManagement
-		? Layer.merge(
-				coreBridgeLayers,
-				InstanceManagementServiceFromConfigLive.pipe(
-					Layer.provide(configLayer),
-				),
-			)
-		: coreBridgeLayers;
+	const bridgeLayers = Layer.merge(coreBridgeLayers, instanceManagementLayer);
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionLifecycleWiringLive) are added after monitoring state exists

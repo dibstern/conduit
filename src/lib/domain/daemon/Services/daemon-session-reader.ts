@@ -353,3 +353,76 @@ export const resolveDaemonSession = (configDir: string, sessionId: string) =>
 		}
 		return null;
 	}).pipe(Effect.withSpan("daemonSessions.resolve"));
+
+/** Active bindings take precedence after provider switches; legacy rows use the session id. */
+export const findOpenCodeSession = (
+	instanceId: string,
+	providerSessionId: string,
+) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{
+			id: string;
+		}>`SELECT session.id FROM sessions AS session
+			LEFT JOIN session_providers AS binding ON binding.id = (
+				SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
+				ORDER BY activated_at DESC, id DESC LIMIT 1
+			)
+			WHERE COALESCE(binding.provider, session.provider) = ${instanceId}
+			AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${providerSessionId}
+			LIMIT 2`;
+		if (rows.length > 1)
+			return yield* Effect.fail(
+				new Error("OpenCode session has ambiguous Conduit bindings"),
+			);
+		return rows[0]?.id;
+	});
+
+/** Resolve a provider id within its owning instance, including cold project stores. */
+export const resolveDaemonOpenCodeSession = (
+	configDir: string,
+	instanceId: string,
+	providerSessionId: string,
+) =>
+	Effect.gen(function* () {
+		let match: { projectSlug: string; sessionId: string } | undefined;
+		for (const project of yield* allProjects) {
+			const filename = projectEventsDbPath({ configDir, ...project });
+			const exists = yield* Effect.try({
+				try: () => statSync(filename),
+				catch: (cause) => cause,
+			}).pipe(
+				Effect.catchAll((cause) =>
+					isMissingPathError(cause)
+						? Effect.succeed(null)
+						: Effect.fail(
+								new DaemonSessionReadError({
+									projectSlug: project.slug,
+									cause,
+								}),
+							),
+				),
+			);
+			if (exists === null) continue;
+			const sessionId = yield* findOpenCodeSession(
+				instanceId,
+				providerSessionId,
+			).pipe(
+				Effect.provide(
+					SqliteNode.layer({ filename, readonly: true, disableWAL: true }).pipe(
+						Layer.provide(Reactivity.layer),
+					),
+				),
+			);
+			if (sessionId !== undefined) {
+				if (match !== undefined)
+					return yield* Effect.fail(
+						new Error(
+							"OpenCode session belongs to more than one Conduit project",
+						),
+					);
+				match = { projectSlug: project.slug, sessionId };
+			}
+		}
+		return match;
+	}).pipe(Effect.withSpan("daemonSessions.resolveOpenCode"));

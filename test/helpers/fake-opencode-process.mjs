@@ -21,6 +21,14 @@ const portArg = args.find((arg) => arg.startsWith("--port="));
 const port = Number(portArg?.split("=")[1] ?? args[args.indexOf("--port") + 1]);
 const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
 const password = process.env.OPENCODE_SERVER_PASSWORD;
+writeFileSync(
+	join(configDir, "fake-opencode-worktree-env.json"),
+	JSON.stringify({
+		OPENCODE_CONFIG_CONTENT: process.env.OPENCODE_CONFIG_CONTENT,
+		CONDUIT_DAEMON_SOCKET: process.env.CONDUIT_DAEMON_SOCKET,
+		CONDUIT_OPENCODE_INSTANCE_ID: process.env.CONDUIT_OPENCODE_INSTANCE_ID,
+	}),
+);
 const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 const groupPid = Number(process.env.CONDUIT_OPENCODE_GROUP_PID ?? process.pid);
 let healthy = true;

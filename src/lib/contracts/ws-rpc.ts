@@ -1341,6 +1341,20 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 	},
 ) {}
 
+/** The managed OpenCode plugin attributes the declaration using ToolContext.sessionID. */
+export class OpenCodeUseWorktree extends Schema.TaggedRequest<OpenCodeUseWorktree>()(
+	"OpenCodeUseWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: {
+			instanceId: NonEmptyString,
+			providerSessionId: NonEmptyString,
+			path: NonEmptyString,
+		},
+	},
+) {}
+
 export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
 	"RenameSession",
 	{
@@ -2048,6 +2062,7 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	ListWorktrees,
 	MoveSessionWorkspace,
+	OpenCodeUseWorktree,
 	MarkSessionUnread,
 	MarkSessionRead,
 	MarkSessionSeen,
@@ -2452,6 +2467,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(MarkSessionRead),
 	Rpc.fromTaggedRequest(MarkSessionSeen),

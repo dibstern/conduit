@@ -111,7 +111,9 @@ export const SessionWorkspaceLive = Layer.effect(
 				if (
 					!driver ||
 					!isKnownDriverKind(driver) ||
-					!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree
+					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
+						// Recording an OpenCode declaration does not promise execution cwd switching.
+						!(driver === "opencode" && cause === "agent"))
 				)
 					return yield* new WorkspaceMoveError({
 						path,
