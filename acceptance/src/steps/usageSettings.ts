@@ -269,6 +269,41 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "publish reported model windows without changing account status",
+		match:
+			/^the Usage account (\S+) has model windows Fable (\d+)% and Sonnet (\d+)%$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const readings = snapshot(world.page).map(
+				(reading): UsageReading =>
+					reading.accountId === match[1]
+						? {
+								...reading,
+								windows: [
+									...reading.windows.filter(
+										(window) => window.kind !== "seven_day_model",
+									),
+									{
+										kind: "seven_day_model",
+										model: "Fable",
+										utilization: Number(match[2]),
+										resetsAt: "2026-01-08T09:00:00Z",
+									},
+									{
+										kind: "seven_day_model",
+										model: "Sonnet",
+										utilization: Number(match[3]),
+										resetsAt: "2026-01-08T09:00:00Z",
+									},
+								],
+							}
+						: reading,
+			);
+			rpc.setUsageReadings(readings);
+			rpc.setResponse("QuotaForAccounts", readings);
+		},
+	},
+	{
 		name: "remove a five-hour window from the live subscription",
 		match: /^the Usage account (\S+) has no five-hour window$/,
 		run: ({ world, match }) => {
@@ -433,6 +468,105 @@ export const usageSettingsHandlers: StepHandler[] = [
 				match[3] ?? "",
 				false,
 			),
+	},
+	{
+		name: "assert reported single-account model rows, bars and absent reset lines",
+		match:
+			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% without reset lines$/,
+		run: async ({ world, match }) => {
+			const rows = world.page.getByTestId("usage-settings-single-model-row");
+			await expect(rows).toHaveCount(2);
+			const weekReset = await world.page
+				.getByTestId("usage-settings-single-seven_day-reset")
+				.boundingBox();
+			if (!weekReset) throw new Error("Missing all-model weekly row");
+			let previousBottom = weekReset.y + weekReset.height;
+			for (const [index, model] of ["Fable", "Sonnet"].entries()) {
+				const row = rows.nth(index);
+				const used = Number(match[index + 1]);
+				const level = used >= 100 ? "limited" : used >= 80 ? "warn" : "ok";
+				await expect(row.getByTestId("usage-settings-model-label")).toHaveText(
+					`This week · ${model}`,
+				);
+				await expect(row.getByTestId("usage-settings-model-value")).toHaveText(
+					`${used}%`,
+				);
+				await expect(row.locator('[data-testid$="-reset"]')).toHaveCount(0);
+				await expect(row.locator(":scope > div")).toHaveCount(2);
+				const bar = row.getByTestId("usage-settings-model-bar");
+				await expect(bar).toHaveAttribute("data-level", level);
+				await expect(bar).toHaveAttribute("aria-label", `This week · ${model}`);
+				await expect(bar).toHaveAttribute("aria-valuenow", String(used));
+				await expect(bar).toHaveCSS("height", "6px");
+				await expect(bar.locator(":scope > div")).toHaveCSS(
+					"background-color",
+					await themeColour(
+						world.page,
+						used >= 100
+							? "--color-fill-red"
+							: used >= 80
+								? "--color-fill-amber"
+								: "--color-text-secondary",
+					),
+				);
+				const geometry = await bar.evaluate((track) => ({
+					track: track.getBoundingClientRect().width,
+					parent: track.parentElement?.getBoundingClientRect().width,
+					fill: track.firstElementChild?.getBoundingClientRect().width,
+				}));
+				expect(geometry.track).toBeCloseTo(geometry.parent ?? 0, 0);
+				expect(((geometry.fill ?? 0) / geometry.track) * 100).toBeCloseTo(
+					used,
+					0,
+				);
+				const box = await row.boundingBox();
+				if (!box) throw new Error("Missing model weekly row");
+				expect(box.y).toBeGreaterThan(previousBottom);
+				previousBottom = box.y + box.height;
+			}
+		},
+	},
+	{
+		name: "assert unreported model rows are absent",
+		match: /^the Usage single-account has no model rows$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("usage-settings-single-model-row"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert a dim model summary below card bars or no summary",
+		match: /^the Usage account (\S+) model line reads (.+)$/,
+		run: async ({ world, match }) => {
+			const line = world.page.getByTestId(`usage-settings-models-${match[1]}`);
+			if (match[2] === "absent") {
+				await expect(line).toHaveCount(0);
+				return;
+			}
+			await expect(line).toHaveText(match[2] ?? "");
+			await expect(line).toHaveCSS(
+				"color",
+				await themeColour(world.page, "--color-text-dimmer"),
+			);
+			const lineBox = await line.boundingBox();
+			const resetBox = await world.page
+				.getByTestId(`usage-settings-card-${match[1]}-seven_day-reset`)
+				.boundingBox();
+			if (!lineBox || !resetBox)
+				throw new Error("Missing model summary or weekly reset");
+			expect(lineBox.y).toBeGreaterThan(resetBox.y + resetBox.height);
+		},
+	},
+	{
+		name: "assert model utilization preserves the available account reading",
+		match: /^the Usage account (\S+) remains available$/,
+		run: ({ world, match }) => {
+			expect(
+				snapshot(world.page).find((reading) => reading.accountId === match[1])
+					?.status,
+			).toBe("available");
+		},
 	},
 	{
 		name: "assert single account reset text",

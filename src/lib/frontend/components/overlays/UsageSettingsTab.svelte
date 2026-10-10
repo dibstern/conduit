@@ -152,18 +152,23 @@
 	});
 </script>
 
+{#snippet meter(account: UsageReading, window: UsageWindow | undefined, label: string, prefix: string, full: boolean)}
+	<!-- usageDisplay only rates account-wide windows, so a lone window is rated as one. -->
+	{@const display = usageDisplay(window ? { ...account, status: window.utilization >= 100 ? "limited" : "available", windows: [{ ...window, kind: "seven_day" }] } : undefined, usageState.limits.warnAt)}
+	<div class="mb-[3px] flex items-baseline gap-[6px] text-[11px]">
+		<span data-testid="{prefix}-label" class="flex-1">{label}</span>
+		<span data-testid="{prefix}-value" class="font-mono text-[10.5px] {display.level === 'limited' ? 'text-error' : display.level === 'warn' ? 'text-fill-amber' : 'text-text-secondary'}">{window ? `${Math.round(window.utilization)}%` : "—"}</span>
+	</div>
+	<div data-testid="{prefix}-bar" data-level={display.level} class="w-full overflow-hidden rounded-full bg-border-chip {full ? 'h-[6px]' : 'h-[5px]'}" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={window?.utilization} aria-valuetext={window ? `${Math.round(window.utilization)}% used` : "no window open"}>
+		<div class="h-full {display.colour}" style:width="{window?.utilization ?? 0}%"></div>
+	</div>
+{/snippet}
+
 {#snippet windowRow(account: UsageReading, kind: "five_hour" | "seven_day", label: string, full: boolean)}
 	{@const window = account.windows.find((item) => item.kind === kind)}
-	{@const display = usageDisplay(window ? { ...account, status: window.utilization >= 100 ? "limited" : "available", windows: [window] } : undefined, usageState.limits.warnAt)}
 	{@const prefix = full ? `usage-settings-single-${kind}` : `usage-settings-card-${account.accountId}-${kind}`}
 	<div class="min-w-0">
-		<div class="mb-[3px] flex items-baseline gap-[6px] text-[11px]">
-			<span class="flex-1">{label}</span>
-			<span data-testid="{prefix}-value" class="font-mono text-[10.5px] {display.level === 'limited' ? 'text-error' : display.level === 'warn' ? 'text-fill-amber' : 'text-text-secondary'}">{window ? `${Math.round(window.utilization)}%` : "—"}</span>
-		</div>
-		<div data-testid="{prefix}-bar" data-level={display.level} class="w-full overflow-hidden rounded-full bg-border-chip {full ? 'h-[6px]' : 'h-[5px]'}" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={window?.utilization} aria-valuetext={window ? `${Math.round(window.utilization)}% used` : "no window open"}>
-			<div class="h-full {display.colour}" style:width="{window?.utilization ?? 0}%"></div>
-		</div>
+		{@render meter(account, window, label, prefix, full)}
 		<div data-testid="{prefix}-reset" class="mt-[3px] font-mono text-[10.5px] text-text-dimmer">{resetLine(window, full)}</div>
 	</div>
 {/snippet}
@@ -189,6 +194,8 @@
 				<span data-testid="usage-settings-status-{account.accountId}" class="ml-auto shrink-0 whitespace-nowrap font-mono text-[10.5px] {usageDisplay(account, usageState.limits.warnAt).level === 'limited' ? 'text-error' : usageDisplay(account, usageState.limits.warnAt).level === 'warn' ? 'text-fill-amber' : 'text-text-dimmer'}">{statusOf(account)}</span>
 			{/snippet}
 			{#snippet details(account)}
+				{@const models = account.windows.flatMap((window) => window.kind === "seven_day_model" && window.model
+					? [`${window.model} week ${Math.round(window.utilization)}%`] : [])}
 				<div data-testid="usage-settings-card-{account.accountId}">
 					{#if hasPlanData(account)}
 						<div class="mt-[8px] grid gap-[10px] md:grid-cols-2 md:gap-[14px]">
@@ -196,14 +203,20 @@
 							{@render windowRow(account, "seven_day", "Week", false)}
 						</div>
 					{:else}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
+					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
 				</div>
 			{/snippet}
 		</SortableList>
 		<p data-testid="usage-settings-order-hint" class="mt-[6px] mb-[4px] font-mono text-[10.5px] text-text-dimmer">Drag ⠿ to set the auto-switch order.</p>
-	{:else if single && hasPlanData(single)}
+	{:else if single && (hasPlanData(single) || single.windows.some((window) => window.kind === "seven_day_model" && window.model))}
 		<div class="flex flex-col gap-[11px]">
 			{@render windowRow(single, "five_hour", "Current 5-hour window", true)}
 			{@render windowRow(single, "seven_day", "This week · all models", true)}
+			{#each single.windows as window, index (index)}
+				{#if window.kind === "seven_day_model" && window.model}
+					<div data-testid="usage-settings-single-model-row" class="min-w-0">{@render meter(single, window, `This week · ${window.model}`, "usage-settings-model", true)}</div>
+				{/if}
+			{/each}
 		</div>
 	{:else}
 		<p class="text-[12px] leading-[1.5] text-text-dimmer">No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them.</p>

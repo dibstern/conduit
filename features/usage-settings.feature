@@ -128,6 +128,84 @@ Examples:
   | limit  | Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left.                       | red    | limited · 3:13   | red          | 100%     | 71%    | resets 3:13 pm        | resets Thu 9 am | absent                                                                                                                 | usage-settings-multiple-limit-phone | 98        |
   | none   | Personal has no plan data. Work and Spare are on pace to stay under their limits.                                     | muted  | no plan data     | muted        | absent   | absent | absent                | absent          | No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.                           | usage-settings-multiple-none-phone  | 98        |
 
+Scenario Outline: one account shows only its reported model weeks without reset lines
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
+  When I open settings to the Usage tab
+  Then the Usage single-account windows show 5h 41% and Week 22%
+  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines
+  And the Usage account claude remains available
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | fable | baseline                                   | threshold |
+  | desktop  | 12    | usage-settings-single-models-desktop       | 98        |
+  | phone    | 12    | usage-settings-single-models-phone         | 98        |
+  | desktop  | 100   | usage-settings-single-model-limit-desktop  | 98        |
+  | phone    | 100   | usage-settings-single-model-limit-phone    | 98        |
+
+Scenario Outline: an account without model windows shows no extra rows
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  When I open settings to the Usage tab
+  Then the Usage single-account windows show 5h 41% and Week 22%
+  And the Usage single-account has no model rows
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                                  | threshold |
+  | desktop  | usage-settings-single-no-models-desktop    | 98        |
+  | phone    | usage-settings-single-no-models-phone      | 98        |
+
+Scenario Outline: desktop cards show model weeks without changing account limits
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
+  When I open settings to the Usage tab
+  Then the Usage account claude model line reads Fable week <fable>% · Sonnet week 6%
+  And the Usage account work model line reads absent
+  And the Usage account spare model line reads absent
+  And the Usage account claude remains available
+  And the Usage account claude status reads ok in muted
+  And the Usage settings headline reads All 3 accounts are on pace to stay under their limits. in muted
+  And the account order reads Personal, Work, Spare
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+  When I close settings
+  Then the usage footer claude shows five_hour 41% and seven_day 22%
+  And the usage footer claude five_hour meter is normal at 41 percent
+  And the usage footer claude seven_day meter is normal at 22 percent
+
+Examples:
+  | fable | baseline                                      | threshold |
+  | 12    | usage-settings-multiple-models-desktop         | 98        |
+  | 100   | usage-settings-multiple-model-limit-desktop    | 98        |
+
+Scenario Outline: phone cards and chips keep account limits separate from model weeks
+  Given the viewport is a phone
+  And the session list has 24 rows for usage footer clearance
+  And I open "Usage footer session 1" from the phone session list
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
+  When I open settings to the Usage tab
+  Then the Usage account claude model line reads Fable week <fable>% · Sonnet week 6%
+  And the Usage account work model line reads absent
+  And the Usage account spare model line reads absent
+  And the Usage account claude remains available
+  And the Usage account claude status reads ok in muted
+  And the Usage settings headline reads All 3 accounts are on pace to stay under their limits. in muted
+  And the account order reads Personal, Work, Spare
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+  When I close settings
+  And I tap back to the session list
+  Then the phone usage chip claude shows 5h 41% at level ok
+  And the phone usage chips are claude in that order
+
+Examples:
+  | fable | baseline                                    | threshold |
+  | 12    | usage-settings-multiple-models-phone         | 98        |
+  | 100   | usage-settings-multiple-model-limit-phone    | 98        |
+
 Scenario: a single account with no five-hour window still has its weekly usage
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state

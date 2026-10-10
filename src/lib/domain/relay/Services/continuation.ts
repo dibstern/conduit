@@ -308,7 +308,10 @@ export const makeContinuation = Effect.gen(function* () {
 							// Claude reports the five-hour window before the weekly window;
 							// the first exhausted window preserves the existing resume decision.
 							const limit = decision?.windows.find(
-								(window) => window.utilization >= 100,
+								(window) =>
+									(window.kind === "five_hour" ||
+										window.kind === "seven_day") &&
+									window.utilization >= 100,
 							);
 							const resetsAt =
 								limit?.resetsAt === undefined
