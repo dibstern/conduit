@@ -728,7 +728,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						);
 						return {
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
-							clearOfButton: bounds.right <= button.left,
+							clearOfButton: chips.every((box) => box.right <= button.left),
 							lastTextVisible:
 								textBounds.length > 0 &&
 								textBounds.every(

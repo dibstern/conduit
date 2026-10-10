@@ -374,5 +374,6 @@
 		"requires": "<BackgroundTaskList",
 		"reason": "conduit-test-i7fy.10: the task list moved verbatim into BackgroundTaskList, which the pull-down and the desktop task drawer both render."
 	},
-	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: grid-cols-[16px_minmax(0,1fr)_auto]": "conduit-test-i7fy.10: the row grid moved to BackgroundTaskList with a fourth 12px column for the drill-in arrow, reserved on shell rows too so ages stay aligned: grid-cols-[16px_minmax(0,1fr)_auto_12px]."
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: grid-cols-[16px_minmax(0,1fr)_auto]": "conduit-test-i7fy.10: the row grid moved to BackgroundTaskList with a fourth 12px column for the drill-in arrow, reserved on shell rows too so ages stay aligned: grid-cols-[16px_minmax(0,1fr)_auto_12px].",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: left-0,px-[14px],py-[16px],right-[66px]": "The phone usage strip became a solid bottom bar: inset-x-0 replaces left-0 and right-[66px] (the bar spans the width and pr-[66px] keeps chips clear of the new-session button); pt/pr/pl plus a safe-area padding-bottom replace px/py so the bar reaches the screen edge."
 }
