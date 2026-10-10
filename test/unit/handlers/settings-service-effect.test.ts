@@ -37,6 +37,9 @@ describe("settings reads with Effect-native settings service", () => {
 				Layer.succeed(SessionWorkspaceTag, {
 					get: () => Effect.succeed("/workspace"),
 					move: () => Effect.succeed("/workspace"),
+					resolve: () => Effect.die("unused"),
+					record: () => Effect.die("unused"),
+					claudeWorktreeState: () => Effect.die("unused"),
 				}),
 			);
 

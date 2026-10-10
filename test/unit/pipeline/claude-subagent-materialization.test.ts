@@ -7,6 +7,7 @@ import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Fiber, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -67,11 +68,19 @@ function makePersistenceLayer(filename: string) {
 	const baseLayer = Layer.merge(sqliteLayer, schemaLayer);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 	const cursorLayer = Layer.effect(
 		ProjectorCursorEffectTag,
-		makeProjectorCursorEffect,
+		makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 	const projectionRunnerLayer = Layer.effect(
 		ProjectionRunnerEffectTag,
@@ -308,6 +317,7 @@ describe("Claude subagent materialization pipeline", () => {
 							model: { providerId: "claude", modelId: "sonnet" },
 							nativeThread: {
 								resumeSessionId: parentClaudeSessionId,
+								projectId: "test-project",
 								firstSequence: 0,
 								deliveredThrough: 0,
 							},
@@ -663,6 +673,7 @@ describe("Claude subagent materialization pipeline", () => {
 								model: { providerId: "claude", modelId: "sonnet" },
 								nativeThread: {
 									resumeSessionId: parentClaudeSessionId,
+									projectId: "test-project",
 									firstSequence: 0,
 									deliveredThrough: 0,
 								},

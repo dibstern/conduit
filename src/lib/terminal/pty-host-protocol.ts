@@ -71,6 +71,7 @@ export const PtyHostRequestSchema = Schema.Union(
 		type: Schema.Literal("create"),
 		requestId,
 		cwd: Schema.String,
+		projectDir: Schema.optional(Schema.String),
 		cols: dimension,
 		rows: dimension,
 		shell: Schema.String,
@@ -114,6 +115,7 @@ export const PtyHostMessageSchema = Schema.Union(
 		buildId: Schema.String,
 		pid: Schema.Int,
 		openTerminals: Schema.Int,
+		supportsProjectDir: Schema.optional(Schema.Boolean),
 	}),
 	Schema.Struct({ type: Schema.Literal("created"), requestId, pty: ptyInfo }),
 	Schema.Struct({

@@ -630,7 +630,7 @@ class FileNamespace {
 
 	async list(
 		path: string,
-		options?: { signal?: AbortSignal },
+		options?: { signal?: AbortSignal; directory?: string | undefined },
 	): Promise<Array<{ name: string; type: string; size?: number }>> {
 		const entries = await this.api.sdk(
 			"file.list",
@@ -639,6 +639,9 @@ class FileNamespace {
 				this.api._sdk.file.list(
 					{
 						path,
+						...(options?.directory !== undefined
+							? { directory: options.directory }
+							: {}),
 					},
 					options?.signal ? { signal: options.signal } : undefined,
 				),
@@ -651,7 +654,7 @@ class FileNamespace {
 
 	async read(
 		path: string,
-		options?: { signal?: AbortSignal },
+		options?: { signal?: AbortSignal; directory?: string | undefined },
 	): Promise<{ content: string; binary?: boolean }> {
 		const file = await this.api.sdk(
 			"file.read",
@@ -660,6 +663,9 @@ class FileNamespace {
 				this.api._sdk.file.read(
 					{
 						path,
+						...(options?.directory !== undefined
+							? { directory: options.directory }
+							: {}),
 					},
 					options?.signal ? { signal: options.signal } : undefined,
 				),

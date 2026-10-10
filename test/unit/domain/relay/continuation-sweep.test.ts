@@ -291,7 +291,7 @@ for (const scenario of [
 				}),
 				withSwitchServices,
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:")),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
 		);
 	});
@@ -597,7 +597,9 @@ for (const scenario of [
 					}),
 					withSwitchServices,
 					Effect.provide(makeOverridesStateLive()),
-					Effect.provide(makePersistenceEffectLayer(":memory:")),
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
 				),
 			);
 		} finally {
@@ -657,7 +659,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			}),
 			withSwitchServices,
 			Effect.provide(makeOverridesStateLive()),
-			Effect.provide(makePersistenceEffectLayer(":memory:")),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),
 	);
 });
@@ -727,7 +729,7 @@ for (const freshReset of [42, undefined]) {
 				}),
 				withSwitchServices,
 				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:")),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
 		);
 	});

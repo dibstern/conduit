@@ -102,7 +102,10 @@ describe("events session foreign-key migration", () => {
 		const filename = join(dir, "events.db");
 		seedLegacyDatabase(filename);
 
-		const persistenceLayer = makePersistenceEffectLayer(filename);
+		const persistenceLayer = makePersistenceEffectLayer(
+			filename,
+			"test-project",
+		);
 		const appLayer = Layer.mergeAll(
 			persistenceLayer,
 			ProviderRuntimeIngestionLive.pipe(Layer.provide(persistenceLayer)),

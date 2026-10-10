@@ -1303,16 +1303,35 @@ export const makeProcessClaudeSessionRunner = (
 									existing &&
 									(command.type === "send-turn" || command.type === "pre-warm")
 								) {
-									const launch = existing.upgrade.state?.snapshot?.input;
-									const previousExtra = launch?.extraFolders ?? [];
-									const nextExtra = command.input.extraFolders ?? [];
+									const snapshot = existing.upgrade.state?.snapshot;
+									const launch = snapshot?.input;
+									const previousExtra = new Set(launch?.extraFolders ?? []);
+									const nextExtra = new Set(command.input.extraFolders ?? []);
+									const extraFoldersChanged =
+										previousExtra.size !== nextExtra.size ||
+										[...previousExtra].some((folder) => !nextExtra.has(folder));
+									const removedExtra = [...previousExtra].filter(
+										(folder) => !nextExtra.has(folder),
+									);
+									const addedExtra = [...nextExtra].filter(
+										(folder) => !previousExtra.has(folder),
+									);
+									// Secondary Enter/Exit swaps a configured folder's role. The
+									// captured secondary-folder integration requires this reconciliation.
+									const canReconcileExtraFolders =
+										snapshot?.workspacePreviousRoot !== undefined &&
+										previousExtra.size === nextExtra.size &&
+										removedExtra.length === 1 &&
+										addedExtra.length === 1 &&
+										[...nextExtra].every((folder) =>
+											snapshot.workspaceDirectories?.includes(folder),
+										) &&
+										(addedExtra[0] === snapshot.workspacePreviousRoot ||
+											removedExtra[0] === launch?.workspaceRoot);
 									const foldersChanged =
 										launch !== undefined &&
 										(launch.workspaceRoot !== command.input.workspaceRoot ||
-											previousExtra.length !== nextExtra.length ||
-											previousExtra.some(
-												(folder, index) => folder !== nextExtra[index],
-											));
+											(extraFoldersChanged && !canReconcileExtraFolders));
 									if (foldersChanged && command.type === "pre-warm")
 										return { entry: undefined, draining: false };
 									if (

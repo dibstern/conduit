@@ -13,7 +13,12 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 it("publishes task additions and removals from onChange without another event", async () => {
 	const bus = makeSessionEventBusLive();
-	const persistence = makePersistenceEffectLayer(":memory:", undefined, bus);
+	const persistence = makePersistenceEffectLayer(
+		":memory:",
+		"test-project",
+		undefined,
+		bus,
+	);
 	let now = 100;
 	const onChange = vi.fn((sessionId: string) => {
 		runtime.runFork(announceBackgroundWork(sessionId));
@@ -100,7 +105,12 @@ it("publishes task additions and removals from onChange without another event", 
 
 it("publishes committed permission counts through the root subscription", async () => {
 	const bus = makeSessionEventBusLive();
-	const persistence = makePersistenceEffectLayer(":memory:", undefined, bus);
+	const persistence = makePersistenceEffectLayer(
+		":memory:",
+		"test-project",
+		undefined,
+		bus,
+	);
 	const runtime = ManagedRuntime.make(Layer.merge(bus, persistence));
 	try {
 		await runtime.runPromise(

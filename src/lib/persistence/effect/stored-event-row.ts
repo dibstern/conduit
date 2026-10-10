@@ -3,6 +3,7 @@ import type { StoredEvent } from "../events.js";
 import { StoredEventSchema } from "../events.js";
 
 export interface StoredEventRow {
+	readonly project_id: string;
 	readonly sequence: number;
 	readonly event_id: string;
 	readonly session_id: string;
@@ -29,6 +30,7 @@ export const decodeStoredEventRow = <E>(
 		});
 
 		const event = {
+			projectId: row.project_id,
 			sequence: row.sequence,
 			eventId: row.event_id,
 			sessionId: row.session_id,

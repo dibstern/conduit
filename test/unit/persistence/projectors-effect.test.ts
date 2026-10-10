@@ -1,3 +1,4 @@
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
 // and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
@@ -370,7 +371,11 @@ function makeEventStoreLayerForFile(filename: string) {
 	const sqliteLayer = makeFileSqliteLayer(filename);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(sqliteLayer));
 	return Layer.merge(sqliteLayer, eventStoreLayer);
 }
@@ -387,12 +392,20 @@ const makeTestLayer = (
 
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 
 	const cursorLayer = Layer.effect(
 		ProjectorCursorEffectTag,
-		makeProjectorCursorEffect,
+		makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 
 	const projectionRunnerLayer = Layer.effect(
@@ -553,8 +566,9 @@ function insertRawEventRow(opts: {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO events (
-				event_id, session_id, stream_version, type, data, metadata, provider, created_at
+				project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 			) VALUES (
+				${"test-project"},
 				${opts.eventId ?? createEventId()},
 				${opts.sessionId},
 				${opts.streamVersion ?? 0},
@@ -2008,6 +2022,7 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 						...recorded,
 						eventId: `recorded-${recorded.sequence}`,
 						sessionId,
+						projectId: "test-project",
 						streamVersion: index,
 						metadata: {},
 					} as StoredEvent;
@@ -2623,6 +2638,7 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(result.recovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 4,
@@ -2639,6 +2655,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(durableFailure?.failed_at).toBeGreaterThan(0);
 		expect(result.recentFailures).toEqual([
 			{
+				projectId: "test-project",
 				projectorName: "message",
 				eventSequence: result.event.sequence,
 				eventType: "message.created",
@@ -2750,6 +2767,7 @@ describe("ProjectionRunnerEffect", () => {
 		}
 		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
 		expect(result.secondRecovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: result.poisonEvent.sequence,
 			totalReplayed: 0,
@@ -2840,6 +2858,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
 		expect(result.recoveredAfterFailure).toBe(false);
 		expect(result.retryRecovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 3,
@@ -2907,6 +2926,7 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(cold.recovery).toMatchObject({
+			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 3,
 			totalReplayed: 7,
@@ -3066,6 +3086,7 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(recovery).toMatchObject({
+					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 4,
 					totalReplayed: 3,
@@ -3181,6 +3202,7 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(first).toMatchObject({
+					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 501,
 					totalReplayed: 1002,
@@ -3201,6 +3223,7 @@ describe("ProjectionRunnerEffect", () => {
 					status: string;
 				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
+					projectId: "test-project",
 					startCursor: 501,
 					endCursor: 502,
 					totalReplayed: 2,
@@ -3433,6 +3456,7 @@ describe("ProjectionRunnerEffect", () => {
 				yield* runner.projectEvent({
 					...makeSessionCreated("s-replaying-reset"),
 					sequence: 2,
+					projectId: "test-project",
 					streamVersion: 1,
 				});
 

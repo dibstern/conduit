@@ -6,6 +6,7 @@ import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
@@ -85,11 +86,19 @@ function makePersistenceLayer(filename: string) {
 	const baseLayer = Layer.merge(sqliteLayer, schemaLayer);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
+		makeEventStoreEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 	const cursorLayer = Layer.effect(
 		ProjectorCursorEffectTag,
-		makeProjectorCursorEffect,
+		makeProjectorCursorEffect.pipe(
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: "test-project",
+			}),
+		),
 	).pipe(Layer.provide(baseLayer));
 	const projectionRunnerLayer = Layer.effect(
 		ProjectionRunnerEffectTag,

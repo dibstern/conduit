@@ -42,7 +42,7 @@ const relayStateTestLayer = RelayStateLive.pipe(
 				OrchestrationEngineTag,
 				new OrchestrationEngine({ registry: new ProviderRegistry() }),
 			),
-			makePersistenceEffectLayer(":memory:"),
+			makePersistenceEffectLayer(":memory:", "test-project"),
 		),
 	),
 );

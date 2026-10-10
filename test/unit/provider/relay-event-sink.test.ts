@@ -1,10 +1,7 @@
 import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type {
-	ProviderRuntimeEvent,
-	ProviderRuntimeEventType,
-} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type { ProviderRuntimeEventType } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
 	CanonicalEvent,
@@ -17,7 +14,7 @@ function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
 	data: EventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: `evt_${Math.random()}`,
 		sessionId: "ses-1",

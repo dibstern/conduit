@@ -21,7 +21,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-interleaving-"));
 			const filename = join(dir, "events.db");
-			const layer = makePersistenceEffectLayer(filename);
+			const layer = makePersistenceEffectLayer(filename, "test-project");
 			const sessionId = "interleaved-opencode-session";
 
 			return Effect.gen(function* () {
@@ -95,7 +95,12 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 				subscribe: () => Effect.dieMessage("unused test subscription"),
 				subscribeAdvances: () => Effect.dieMessage("unused test subscription"),
 			} satisfies SessionEventBus);
-			const layer = makePersistenceEffectLayer(filename, undefined, busLayer);
+			const layer = makePersistenceEffectLayer(
+				filename,
+				"test-project",
+				undefined,
+				busLayer,
+			);
 
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
@@ -135,7 +140,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-raw-only-"));
 			const filename = join(dir, "events.db");
-			const layer = makePersistenceEffectLayer(filename);
+			const layer = makePersistenceEffectLayer(filename, "test-project");
 			const sessionId = "legacy-raw-only-session";
 
 			return Effect.gen(function* () {
@@ -179,7 +184,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-raw-content-"));
 			const filename = join(dir, "events.db");
-			const layer = makePersistenceEffectLayer(filename);
+			const layer = makePersistenceEffectLayer(filename, "test-project");
 			const sessionId = "legacy-raw-content-session";
 
 			return Effect.gen(function* () {
@@ -236,7 +241,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 				join(tmpdir(), "conduit-claude-event-lifecycle-"),
 			);
 			const filename = join(dir, "events.db");
-			const layer = makePersistenceEffectLayer(filename);
+			const layer = makePersistenceEffectLayer(filename, "test-project");
 
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;

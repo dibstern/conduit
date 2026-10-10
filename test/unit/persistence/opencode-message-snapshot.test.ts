@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	decodeProviderRuntimeEvent,
+	type ProviderRuntimeEvent,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -76,16 +79,16 @@ function runtime(
 	data: Record<string, unknown>,
 	createdAt: number,
 ): ProviderRuntimeEvent {
-	return {
+	return decodeProviderRuntimeEvent({
 		eventId,
-		type: type as ProviderRuntimeEvent["type"],
+		type,
 		providerId: "opencode",
 		sessionId,
 		providerRefs: {},
 		rawSource: { kind: "opencode.sse" },
 		createdAt,
 		data,
-	};
+	});
 }
 
 describe("OpenCode message snapshots", () => {

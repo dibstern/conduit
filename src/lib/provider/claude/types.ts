@@ -216,6 +216,8 @@ export interface ClaudeSessionContext {
 	resumeFallbackAllowed?: boolean;
 	/** Remains true for this query after its first system/init message. */
 	queryInitialized?: boolean;
+	/** One SDK cwd backstop report per query, independent of turn resets. */
+	workspaceStartReported?: boolean;
 	usageLimit?:
 		| { readonly rateLimitType: string; readonly resetsAt?: number }
 		| undefined;

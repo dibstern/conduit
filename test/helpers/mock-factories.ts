@@ -869,7 +869,8 @@ export function makeTestHandlerLayer(
 		opts?.providerRegistry ?? new ProviderRegistry(),
 	);
 	const persistenceLayer =
-		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
+		opts?.persistenceLayer ??
+		makePersistenceEffectLayer(":memory:", "test-project");
 	const providerTurnPersistenceLayer = Layer.mergeAll(
 		persistenceLayer,
 		...(opts?.readQueryEffect

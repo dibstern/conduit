@@ -144,6 +144,9 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				Effect.provideService(SessionWorkspaceTag, {
 					get: () => Effect.succeed("/workspace/project"),
 					move: () => Effect.succeed("/workspace/project"),
+					resolve: () => Effect.die("unused"),
+					record: () => Effect.die("unused"),
+					claudeWorktreeState: () => Effect.die("unused"),
 				}),
 				Effect.provideService(
 					ConfigTag,

@@ -51,6 +51,7 @@ describe("subscription RPC contracts", () => {
 				metadata: {},
 				provider: "claude",
 				createdAt: 100,
+				projectId: "project-1",
 				sequence: 43,
 				streamVersion: 1,
 			},

@@ -204,6 +204,13 @@ export class ProcessHarness {
 		private readonly claudeReplay?: {
 			readonly turns: readonly ClaudeTraceName[];
 			readonly delayMs?: number;
+			/** Relative paths resolve against the isolated project. */
+			readonly reportedCwd?: string;
+			readonly enterPath?: string;
+			/** Pause result delivery until the test writes claude-replay-release. */
+			readonly holdBeforeResult?: boolean;
+			/** Enable relay diagnostics when a replay checks warning logs. */
+			readonly logLevel?: "warn";
 		},
 		private readonly claudeCaptureDir?: string,
 		realOpenCode?: string,
@@ -718,6 +725,31 @@ Object.assign(ClaudeDriver, { create: deps => {
 								CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS: String(
 									this.claudeReplay.delayMs ?? 0,
 								),
+								CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR: this.projectDir,
+								...(this.claudeReplay.reportedCwd
+									? {
+											CONDUIT_TEST_CLAUDE_REPLAY_CWD: resolve(
+												this.projectDir,
+												this.claudeReplay.reportedCwd,
+											),
+										}
+									: {}),
+								...(this.claudeReplay.enterPath
+									? {
+											CONDUIT_TEST_CLAUDE_REPLAY_ENTER_PATH: resolve(
+												this.projectDir,
+												this.claudeReplay.enterPath,
+											),
+										}
+									: {}),
+								...(this.claudeReplay.holdBeforeResult
+									? {
+											CONDUIT_TEST_CLAUDE_REPLAY_RESULT_RELEASE: join(
+												this.root,
+												"claude-replay-release",
+											),
+										}
+									: {}),
 							}
 						: {}),
 					CONDUIT_TEST_ENQUEUE_MARK_DELAY_MS: String(this.enqueueMarkDelayMs),
@@ -819,7 +851,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
 						: {}),
 					NODE_ENV: "test",
-					LOG_LEVEL: "error",
+					LOG_LEVEL: this.claudeReplay?.logLevel ?? "error",
 				}),
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},

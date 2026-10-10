@@ -54,7 +54,11 @@ function makeRuntime(
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
 ) {
-	const persistenceLayer = makePersistenceEffectLayer(filename, projectors);
+	const persistenceLayer = makePersistenceEffectLayer(
+		filename,
+		"test-project",
+		projectors,
+	);
 	const ingestionDeps = sessionEventBusLayer
 		? Layer.merge(persistenceLayer, sessionEventBusLayer)
 		: persistenceLayer;

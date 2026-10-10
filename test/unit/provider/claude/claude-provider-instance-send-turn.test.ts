@@ -2239,6 +2239,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			nativeThread: {
 				configDir: "/claude/resume",
 				resumeSessionId: "legacy-native-thread-session",
+				projectId: "test-project",
 				firstSequence: 12,
 				deliveredThrough: 40,
 			},
@@ -3865,6 +3866,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			resumeSessionId: "stale-sdk-session-xyz",
 			nativeThread: {
 				resumeSessionId: "stale-sdk-session-xyz",
+				projectId: "test-project",
 				firstSequence: 3,
 				deliveredThrough: 8,
 			},
@@ -3933,6 +3935,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			resumeSessionId: "dead-sdk-session-abc",
 			nativeThread: {
 				resumeSessionId: "dead-sdk-session-abc",
+				projectId: "test-project",
 				firstSequence: 3,
 				deliveredThrough: 8,
 			},
@@ -4154,6 +4157,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			resumeSessionId: "valid-sdk-session-123",
 			nativeThread: {
 				resumeSessionId: "valid-sdk-session-123",
+				projectId: "test-project",
 				firstSequence: 3,
 				deliveredThrough: 8,
 			},

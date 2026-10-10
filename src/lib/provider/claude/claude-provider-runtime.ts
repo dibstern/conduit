@@ -600,6 +600,19 @@ export class ClaudeProviderRuntime {
 										}),
 								),
 							);
+						// The SDK reports busy only once the model streams, so SDK-local
+						// work (a manual /compact, a slash command) ran with the session
+						// idle until its result. A send to an idle session starts its
+						// turn now; the turn's end reports idle as before.
+						if (inFlight === 0)
+							yield* eventSink
+								.push(
+									claudeRuntimeEvent("session.status", sessionId, {
+										sessionId,
+										status: "busy",
+									}),
+								)
+								.pipe(Effect.ignore);
 						const sinkId = claudeRunnerSinkId(
 							input.inputId,
 							input.commandAttempt,

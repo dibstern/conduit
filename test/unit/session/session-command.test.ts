@@ -85,7 +85,10 @@ describe("applySessionCommand", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-session-command-"));
 		const api = makeMockApi();
 		const log = makeMockLogger();
-		const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
+		const persistenceLayer = makePersistenceEffectLayer(
+			join(dir, "events.db"),
+			"test-project",
+		);
 
 		return use({ api, log }).pipe(
 			Effect.provide(

@@ -150,6 +150,7 @@ export interface SessionBinding {
 export interface DurableCommandStoreOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly snapshot: CommandReadModelSnapshot;
+	/** The stable slug bound when the project's store is constructed. */
 	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
@@ -182,7 +183,6 @@ interface DurableCommandRuntime {
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
 	readonly sql: SqlClient.SqlClient;
-	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
 	readonly snapshot: CommandReadModelSnapshot;
@@ -243,8 +243,14 @@ export class OrchestrationEngine {
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
-				commit: new DurableCommandCommitRepository(durable.sql),
-				receipts: new CommandReadModelRepository(durable.sql),
+				commit: new DurableCommandCommitRepository(
+					durable.sql,
+					durable.projectKey,
+				),
+				receipts: new CommandReadModelRepository(
+					durable.sql,
+					durable.projectKey,
+				),
 				// Single provider executor. Shares the durable DB, registry, and
 				// wall-clock with the engine; provider output streams to the shared
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).
@@ -261,7 +267,6 @@ export class OrchestrationEngine {
 						: {}),
 				}),
 				sql: durable.sql,
-				projectKey: durable.projectKey,
 				now: durable.now,
 				generateId: durable.generateId,
 				snapshot: durable.snapshot,
@@ -543,7 +548,6 @@ export class OrchestrationEngine {
 			return yield* durable.commit.commit(
 				decideDurableSendTurnCommand({
 					commandId: command.commandId,
-					projectKey: durable.projectKey,
 					sessionId: command.input.sessionId,
 					providerId: command.providerId,
 					fingerprintHash: fingerprintHashValue,

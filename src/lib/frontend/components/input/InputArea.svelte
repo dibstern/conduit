@@ -8,6 +8,7 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
+	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Textarea from "../ui/Textarea.svelte";
@@ -651,8 +652,8 @@
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
-			} catch {
-				showToast("Failed to create session", { variant: "error" });
+			} catch (error) {
+				showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
 				return false;
 			} finally {
 				creatingSession = false;
@@ -667,7 +668,10 @@
 		const { activity, messages } = getOrCreateSessionSlot(sid);
 		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
 			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
-		if (startsTurn) phaseToProcessing(activity);
+		if (startsTurn) {
+			phaseToProcessing(activity);
+			activity.awaitingInputId = commandId;
+		}
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
 			sendMessageRpc({

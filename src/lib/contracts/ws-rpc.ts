@@ -1130,6 +1130,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 	payload: {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
+		sessionId: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -1613,6 +1614,7 @@ export class GetFileTree extends Schema.TaggedRequest<GetFileTree>()(
 		success: GetFileTreeResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1624,6 +1626,7 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		success: GetFileListResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
 	},
@@ -1636,6 +1639,7 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		success: GetFileContentResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
 	},
