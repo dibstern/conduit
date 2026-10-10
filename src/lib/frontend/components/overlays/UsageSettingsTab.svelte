@@ -2,18 +2,22 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
+	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { getUsageLimitsSettingRpc, quotaForAccountsRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
-	import { usageDisplay } from "../../utils/continuation.js";
+	import { planUsageWindows, usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
+	import Button from "../ui/Button.svelte";
 	import SortableList from "../ui/SortableList.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import UsageForecast from "./UsageForecast.svelte";
 	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 
 	const phone = new MediaQuery("(max-width: 767px)");
@@ -32,6 +36,12 @@
 	const several = $derived(accounts.length > 1);
 	const single = $derived(accounts[0]);
 	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
+	const sessionId = $derived(getCurrentSessionId());
+	const session = $derived(sessionId ? sessionState.sessions.get(sessionId) : undefined);
+	const sessionAccountId = $derived(session?.resumes?.at(-1)?.instanceId ?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined));
+	const forecastAccount = $derived(accounts.find((account) => account.accountId === sessionAccountId) ?? accounts.find((account) => account.accountId === project?.instanceId) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
+		!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
+	let expandedAccounts = $state<string[]>([]);
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
 	let setting = $state<UsageLimitsSetting | null>(null);
 	let confirmed: UsageLimitsSetting | null = null;
@@ -92,17 +102,9 @@
 			account.windows.some((window) => window.kind === "five_hour" || window.kind === "seven_day");
 	}
 
-	function resetTime(window: UsageWindow | undefined, weekly = false): string {
-		if (!window?.resetsAt) return "";
-		const date = new Date(window.resetsAt);
-		if (!Number.isFinite(date.getTime())) return "";
-		const time = date.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true });
-		return weekly ? `${date.toLocaleDateString("en-GB", { weekday: "short" })} ${time.replace(":00", "")}` : time;
-	}
-
 	function resetLine(window: UsageWindow | undefined, full: boolean): string {
 		if (!window || (window.kind === "five_hour" && window.utilization === 0 && !window.resetsAt)) return "no window open";
-		const time = resetTime(window, window.kind === "seven_day");
+		const time = usageResetTime(window.resetsAt, window.kind === "seven_day");
 		if (!time) return window.utilization >= 100 ? "limit reached" : "reset time unavailable";
 		if (window.kind === "seven_day") return `resets ${time}`;
 		if (window.utilization >= 100) return full ? `limit reached · resets ${time}` : `resets ${time}`;
@@ -123,7 +125,7 @@
 		if (!hasPlanData(account)) return "no plan data";
 		const display = usageDisplay(account, usageState.limits.warnAt);
 		if (display.level === "limited") {
-			const time = resetTime(limitWindow(account)).replace(/ (am|pm)$/, "");
+			const time = usageResetTime(limitWindow(account)?.resetsAt).replace(/ (am|pm)$/, "");
 			return time ? `limited · ${time}` : "limited";
 		}
 		return display.level === "warn" && display.binding
@@ -131,17 +133,43 @@
 			: "ok";
 	}
 
-	const headline = $derived.by(() => {
+	function nextAccount(account: UsageReading): UsageReading | undefined {
+		return accounts.slice(accounts.indexOf(account) + 1).find((candidate) =>
+			candidate.status !== "unavailable" && usageDisplay(candidate, usageState.limits.warnAt).level !== "limited");
+	}
+
+	const headline = $derived.by((): { text: string; limited: boolean; warning?: boolean; bold?: string } => {
 		const defaultAccount = accounts.find((account) => account.accountId === project?.instanceId) ?? single;
 		const limited = accounts.find((account) => usageDisplay(account, usageState.limits.warnAt).level === "limited");
 		if (limited) {
-			const time = resetTime(limitWindow(limited));
+			const time = usageResetTime(limitWindow(limited)?.resetsAt);
 			let text = `${nameOf(limited)} is limited${time ? ` until ${time}` : ""}.`;
-			const next = accounts.slice(accounts.indexOf(limited) + 1).find((account) =>
-				account.status !== "unavailable" && usageDisplay(account, usageState.limits.warnAt).level !== "limited");
+			const next = nextAccount(limited);
 			const fiveHour = next?.windows.find((window) => window.kind === "five_hour");
 			if (next && fiveHour) text += ` ${nameOf(next)}, next in the switch order, has ${Math.round(100 - fiveHour.utilization)}% of its 5h window left.`;
 			return { text, limited: true };
+		}
+		for (const kind of ["seven_day", "five_hour"] as const) {
+			const account = accounts.find((candidate) => planUsageWindows(candidate).some((window) => window.kind === kind && window.forecast?.kind === "runs_out"));
+			const window = account && planUsageWindows(account).find((window) => window.kind === kind);
+			if (!account || window?.forecast?.kind !== "runs_out") continue;
+			const time = usageForecastTime(window.forecast.at, now);
+			let bold = `${nameOf(account)} runs out of its ${kind === "seven_day" ? "week" : "5h window"} ≈ ${time}`;
+			let rest = "";
+			if (kind === "seven_day") {
+				if (usageResetTime(window.resetsAt)) bold += `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets`;
+				const others = accounts.filter((other) => other !== account && hasPlanData(other)).flatMap((other) => {
+					const week = other.windows.find((window) => window.kind === "seven_day");
+					return week ? [{ name: nameOf(other), left: Math.round(100 - week.utilization) }] : [];
+				});
+				if (others.length) rest = ` ${others.map((other, index) => `${other.name}${index === 0 ? " has" : ""} ${other.left}%${index === 0 ? " of its week left" : ""}`).join(", ")}.`;
+			} else {
+				const next = nextAccount(account);
+				const fiveHour = next?.windows.find((window) => window.kind === "five_hour");
+				if (next && fiveHour) rest = ` ${nameOf(next)}, next in the switch order, has ${Math.round(100 - fiveHour.utilization)}% of its 5h window left.`;
+			}
+			bold += ".";
+			return { text: bold + rest, limited: false, warning: true, bold };
 		}
 		if (defaultAccount && !hasPlanData(defaultAccount)) {
 			const names = accounts.filter((account) => account !== defaultAccount && hasPlanData(account)).map(nameOf);
@@ -182,7 +210,7 @@
 		{/if}
 	</div>
 	{#if several}
-		<div data-testid="usage-settings-headline" class="mb-[12px] rounded-[12px] border px-[12px] py-[8px] text-[12px] leading-[1.45] {headline.limited ? 'border-fill-red/40 bg-fill-red/[0.06] text-error' : 'border-border bg-bg text-text-secondary'}">{headline.text}</div>
+		<div id="usage-settings-headline" data-testid="usage-settings-headline" class="mb-[12px] rounded-[12px] border px-[12px] py-[8px] text-[12px] leading-[1.45] {headline.limited ? 'border-fill-red/40 bg-fill-red/[0.06] text-error' : headline.warning ? 'border-fill-amber/35 bg-fill-amber/[0.05] text-fill-amber' : 'border-border bg-bg text-text-secondary'}">{#if headline.bold}<b>{headline.bold}</b>{headline.text.slice(headline.bold.length)}{:else}{headline.text}{/if}</div>
 		<SortableList items={accounts} key={(account) => account.accountId} label={nameOf} ariaLabel="Auto-switch account order" variant="cards" disabled={setting === null} onreorder={(next) => {
 			if (setting) void save({ ...setting, order: next.map((account) => account.accountId) });
 		}}>
@@ -196,7 +224,7 @@
 			{#snippet details(account)}
 				{@const models = account.windows.flatMap((window) => window.kind === "seven_day_model" && window.model
 					? [`${window.model} week ${Math.round(window.utilization)}%`] : [])}
-				<div data-testid="usage-settings-card-{account.accountId}">
+				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}">
 					{#if hasPlanData(account)}
 						<div class="mt-[8px] grid gap-[10px] md:grid-cols-2 md:gap-[14px]">
 							{@render windowRow(account, "five_hour", "5h", false)}
@@ -204,11 +232,23 @@
 						</div>
 					{:else}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
 					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
+					{#if usageForecastWindow(account)}
+						{@const pace = usagePaceLine(account, now)}
+						{#if account === forecastAccount || !pace}
+							<UsageForecast {account} {now} />
+						{:else}
+								<Button variant="ghost" size="content" layout="flow" tone="muted" hoverFill="none" data-testid="usage-settings-pace-{account.accountId}" aria-expanded={expandedAccounts.includes(account.accountId)} aria-controls="usage-settings-forecast-{account.accountId}" class="mt-[6px] flex w-full items-start gap-[8px] text-left font-mono text-[10.5px]" onclick={() => {
+									expandedAccounts = expandedAccounts.includes(account.accountId) ? expandedAccounts.filter((id) => id !== account.accountId) : [...expandedAccounts, account.accountId];
+								}}><span class="min-w-0 flex-1">{pace}</span><span aria-hidden="true" class="text-text-dimmer">›</span></Button>
+							{#if expandedAccounts.includes(account.accountId)}<UsageForecast {account} {now} />{/if}
+						{/if}
+					{/if}
 				</div>
 			{/snippet}
 		</SortableList>
 		<p data-testid="usage-settings-order-hint" class="mt-[6px] mb-[4px] font-mono text-[10.5px] text-text-dimmer">Drag ⠿ to set the auto-switch order.</p>
 	{:else if single && (hasPlanData(single) || single.windows.some((window) => window.kind === "seven_day_model" && window.model))}
+		<UsageForecast account={single} {now} framed />
 		<div class="flex flex-col gap-[11px]">
 			{@render windowRow(single, "five_hour", "Current 5-hour window", true)}
 			{@render windowRow(single, "seven_day", "This week · all models", true)}

@@ -8,6 +8,176 @@ import { formatSnoozeTime } from "./format.js";
 
 export const DEFAULT_USAGE_WARN_AT = 80;
 
+export type PlanUsageWindow = UsageWindow & {
+	kind: "five_hour" | "seven_day";
+};
+
+export function planUsageWindows(reading: UsageReading): PlanUsageWindow[] {
+	if (reading.status === "unknown" || reading.status === "unavailable")
+		return [];
+	return reading.windows.filter(
+		(window): window is PlanUsageWindow =>
+			window.kind === "five_hour" || window.kind === "seven_day",
+	);
+}
+
+/** Preserve the Usage rows' clock and weekly reset labels. */
+export function usageResetTime(
+	at: string | number | undefined,
+	weekday = false,
+): string {
+	if (at === undefined) return "";
+	const date = new Date(at);
+	if (!Number.isFinite(date.getTime())) return "";
+	const time = date.toLocaleTimeString("en-GB", {
+		hour: "numeric",
+		minute: "2-digit",
+		hour12: true,
+	});
+	return weekday
+		? `${date.toLocaleDateString("en-GB", { weekday: "short" })} ${time.replace(":00", "")}`
+		: time;
+}
+
+export function usageForecastTime(
+	at: string | number | undefined,
+	now: number,
+): string {
+	return usageResetTime(
+		at,
+		at !== undefined &&
+			new Date(at).toDateString() !== new Date(now).toDateString(),
+	);
+}
+
+export function usageForecastDuration(milliseconds: number): string {
+	const minutes = Math.max(0, Math.round(milliseconds / 60_000));
+	if (minutes >= 1440) {
+		const days = Math.floor(minutes / 1440);
+		return `${days} ${days === 1 ? "day" : "days"}`;
+	}
+	return minutes >= 60
+		? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`
+		: `${minutes}m`;
+}
+
+export function usageForecastLevel(
+	reading: UsageReading,
+): "neutral" | "amber" | "red" {
+	if (usageDisplay(reading, "off").level === "limited") return "red";
+	return planUsageWindows(reading).some(
+		(window) => window.forecast?.kind === "runs_out",
+	)
+		? "amber"
+		: "neutral";
+}
+
+export function usageWindowLimited(
+	reading: UsageReading,
+	window: PlanUsageWindow,
+): boolean {
+	return (
+		window.utilization >= 100 ||
+		(reading.status === "limited" &&
+			!planUsageWindows(reading).some((item) => item.utilization >= 100) &&
+			usageDisplay(reading, "off").binding?.kind === window.kind)
+	);
+}
+
+/** Legacy readings without forecast metadata keep their bars-only layout. */
+export function usageForecastWindow(
+	reading: UsageReading,
+): PlanUsageWindow | undefined {
+	const windows = planUsageWindows(reading);
+	if (
+		!windows.some(
+			(window) =>
+				window.forecast !== undefined ||
+				(window.history !== undefined && usageWindowLimited(reading, window)),
+		)
+	)
+		return undefined;
+	const runsOut = windows
+		.filter((window) => window.forecast?.kind === "runs_out")
+		.sort((a, b) =>
+			a.forecast?.kind === "runs_out" && b.forecast?.kind === "runs_out"
+				? a.forecast.at - b.forecast.at
+				: 0,
+		)[0];
+	return (
+		runsOut ??
+		windows.find((window) => usageWindowLimited(reading, window)) ??
+		windows.find((window) => window.kind === "five_hour" && window.forecast) ??
+		windows.find((window) => window.forecast)
+	);
+}
+
+/** Text fragments keep the emphasized value escaped by the Svelte template. */
+export function usageForecastCopy(
+	reading: UsageReading,
+	window: PlanUsageWindow,
+	now: number,
+): { before: string; highlight: string; after: string } | undefined {
+	const weekly = window.kind === "seven_day";
+	const reset = usageForecastTime(window.resetsAt, now);
+	if (usageWindowLimited(reading, window))
+		return {
+			before: `Limit reached.${reset ? ` The ${weekly ? "weekly" : "5h"} window resets at ` : ""}`,
+			highlight: reset,
+			after: reset ? "." : "",
+		};
+	if (window.forecast?.kind === "under")
+		return {
+			before: `On pace to finish this ${weekly ? "week" : "5h window"} at `,
+			highlight: `~${Math.round(window.forecast.atReset)}%`,
+			after: `${reset ? ` (resets ${reset})` : ""}.`,
+		};
+	if (window.forecast?.kind === "runs_out")
+		return {
+			before: `At this pace the ${weekly ? "weekly" : "5h"} limit runs out ≈ `,
+			highlight: usageForecastTime(window.forecast.at, now),
+			after: `${reset ? `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets` : ""}.`,
+		};
+	return undefined;
+}
+
+export function usageOtherForecast(
+	window: PlanUsageWindow | undefined,
+	now: number,
+): string | undefined {
+	if (!window?.forecast) return undefined;
+	const label = window.kind === "seven_day" ? "Week" : "5h window";
+	const reset = usageForecastTime(window.resetsAt, now);
+	return window.forecast.kind === "under"
+		? `${label}: on pace for ~${Math.round(window.forecast.atReset)}%${reset ? ` by ${reset}` : ""}.`
+		: `${label}: runs out ≈ ${usageForecastTime(window.forecast.at, now)}${reset ? `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets` : ""}.`;
+}
+
+export function usagePaceLine(
+	reading: UsageReading,
+	now: number,
+): string | undefined {
+	const windows = planUsageWindows(reading);
+	const fiveHour = windows.find((window) => window.kind === "five_hour");
+	const week = windows.find((window) => window.kind === "seven_day");
+	const parts = [fiveHour, week].flatMap((window) => {
+		if (!window?.forecast) return [];
+		const label = window.kind === "five_hour" ? "5h" : "week";
+		if (window.forecast.kind === "runs_out")
+			return [
+				`${label} runs out ≈ ${usageForecastTime(window.forecast.at, now)}`,
+			];
+		const day = usageResetTime(window.resetsAt, true).split(" ")[0];
+		return [
+			`${label}${window.kind === "five_hour" ? " on pace for" : ""} ~${Math.round(window.forecast.atReset)}%${window.kind === "seven_day" && day ? ` by ${day}` : ""}`,
+		];
+	});
+	if (parts.length === 0) return undefined;
+	if (!fiveHour || (fiveHour.utilization === 0 && !fiveHour.resetsAt))
+		parts.unshift("No 5h window open");
+	return parts.join(" · ");
+}
+
 /** One display rule for the plan windows; other kinds do not bind yet. */
 export function usageDisplay(
 	reading: UsageReading | undefined,

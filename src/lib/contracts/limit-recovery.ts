@@ -136,10 +136,32 @@ const usageWindowFields = {
 	resetsAt: Schema.optional(Schema.String),
 };
 
+export const UsageHistoryPointSchema = Schema.Struct({
+	/** Epoch milliseconds. */
+	at: Schema.Number.pipe(Schema.finite()),
+	utilization: usageWindowFields.utilization,
+});
+export type UsageHistoryPoint = typeof UsageHistoryPointSchema.Type;
+
+export const UsageForecastSchema = Schema.Union(
+	Schema.Struct({
+		kind: Schema.Literal("under"),
+		atReset: usageWindowFields.utilization,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("runs_out"),
+		/** Epoch milliseconds. */
+		at: Schema.Number.pipe(Schema.finite()),
+	}),
+);
+export type UsageForecast = typeof UsageForecastSchema.Type;
+
 export const UsageWindowSchema = Schema.Union(
 	Schema.Struct({
 		kind: Schema.Literal("five_hour", "seven_day", "month"),
 		...usageWindowFields,
+		history: Schema.optional(Schema.Array(UsageHistoryPointSchema)),
+		forecast: Schema.optional(UsageForecastSchema),
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("seven_day_model"),

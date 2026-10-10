@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type {
+	UsageForecast,
 	UsageLimitsSetting,
 	UsageReading,
 } from "../../../src/lib/contracts/limit-recovery.js";
@@ -269,6 +270,308 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set or clear the project account fallback",
+		match: /^the Usage project account is (\S+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
+				projects: [
+					{
+						slug: "myapp",
+						title: "myapp",
+						folders: ["/src/myapp"],
+						...(match[1] === "none" ? {} : { instanceId: match[1] }),
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "publish history and a forecast for an account window",
+		match:
+			/^the Usage account (\S+) (five_hour|seven_day) forecast is (under at (\d+)%|runs_out at (\S+)) resetting at (\S+)$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const now = clockTimes.get(world.page) ?? Date.now();
+			const resetsAt = match[6] ?? "";
+			const reset = Date.parse(resetsAt);
+			const forecast: UsageForecast =
+				match[4] !== undefined
+					? { kind: "under", atReset: Number(match[4]) }
+					: { kind: "runs_out", at: Date.parse(match[5] ?? "") };
+			if (
+				!Number.isFinite(reset) ||
+				(forecast.kind === "runs_out" && !Number.isFinite(forecast.at))
+			)
+				throw new Error("Invalid forecast fixture time");
+			const duration =
+				match[2] === "five_hour" ? 5 * 3_600_000 : 7 * 86_400_000;
+			const readings = snapshot(world.page).map(
+				(reading): UsageReading =>
+					reading.accountId === match[1]
+						? {
+								...reading,
+								windows: reading.windows.map((window) =>
+									window.kind === match[2]
+										? {
+												...window,
+												resetsAt,
+												forecast,
+												history: [0, 0.3, 0.55, 0.8, 1].map(
+													(fraction, index) => ({
+														at:
+															reset -
+															duration +
+															fraction * (now - 120_000 - (reset - duration)),
+														utilization:
+															window.utilization *
+															([0, 0.18, 0.5, 0.62, 1][index] ?? 1),
+													}),
+												),
+											}
+										: window,
+								),
+							}
+						: reading,
+			);
+			rpc.setUsageReadings(readings);
+			rpc.setResponse("QuotaForAccounts", readings);
+		},
+	},
+	{
+		name: "publish early history without a forecast",
+		match:
+			/^the Usage account (\S+) (five_hour|seven_day) has (\d+) history readings without a forecast$/,
+		run: ({ world, match }) => {
+			const now = clockTimes.get(world.page) ?? Date.now();
+			const count = Number(match[3]);
+			requireRpcControl(world.page).setUsageReadings(
+				snapshot(world.page).map(
+					(reading): UsageReading =>
+						reading.accountId === match[1]
+							? {
+									...reading,
+									windows: reading.windows.map((window) => {
+										if (
+											window.kind !== match[2] ||
+											window.kind === "seven_day_model"
+										)
+											return window;
+										const { forecast: _forecast, ...rest } = window;
+										return {
+											...rest,
+											history: Array.from({ length: count }, (_, index) => ({
+												at: now - (count - 1 - index) * 300_000,
+												utilization: window.utilization,
+											})),
+										};
+									}),
+								}
+							: reading,
+				),
+			);
+		},
+	},
+	{
+		name: "assert the framed or inline forecast layout",
+		match: /^the Usage forecast (\S+) is (framed|unframed)$/,
+		run: async ({ world, match }) => {
+			const prefix = `usage-settings-forecast-${match[1]}`;
+			const forecast = world.page.getByTestId(prefix);
+			const framed = match[2] === "framed";
+			await expect(forecast).toBeVisible();
+			await expect(forecast).toHaveAttribute("data-framed", String(framed));
+			await expect(world.page.getByTestId(`${prefix}-label`)).toHaveCount(
+				framed ? 1 : 0,
+			);
+			if (framed) {
+				await expect(forecast).toHaveCSS("border-radius", "12px");
+				await expect(forecast).toHaveCSS("padding", "10px 12px");
+			} else await expect(forecast).toHaveCSS("margin-top", "9px");
+			const forecastBox = await forecast.boundingBox();
+			const bars = world.page.getByTestId(
+				framed
+					? "usage-settings-single-five_hour-bar"
+					: `usage-settings-card-${match[1]}-seven_day-bar`,
+			);
+			const barsBox = await bars.boundingBox();
+			if (!forecastBox || !barsBox)
+				throw new Error("Missing forecast or usage bars");
+			if (framed)
+				expect(forecastBox.y + forecastBox.height).toBeLessThan(barsBox.y);
+			else expect(forecastBox.y).toBeGreaterThan(barsBox.y + barsBox.height);
+		},
+	},
+	{
+		name: "assert forecast absence before enough readings",
+		match: /^the Usage forecast (\S+) is absent$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`usage-settings-forecast-${match[1]}`),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the selected forecast window and radio",
+		match: /^the Usage forecast (\S+) selects (five_hour|seven_day)$/,
+		run: async ({ world, match }) => {
+			const prefix = `usage-settings-forecast-${match[1]}`;
+			await expect(world.page.getByTestId(prefix)).toHaveAttribute(
+				"data-window",
+				match[2] ?? "",
+			);
+			await expect(
+				world.page.getByTestId(`${prefix}-${match[2]}`),
+			).toHaveAttribute("aria-checked", "true");
+		},
+	},
+	{
+		name: "switch the forecast window",
+		match: /^I select the Usage forecast (\S+) (five_hour|seven_day) window$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(`usage-settings-forecast-${match[1]}-${match[2]}`)
+				.click();
+		},
+	},
+	{
+		name: "assert forecast copy and level from the live reading",
+		match:
+			/^the Usage forecast (\S+) sentence reads (.+) in (neutral|amber|red)$/,
+		run: async ({ world, match }) => {
+			const prefix = `usage-settings-forecast-${match[1]}`;
+			await expect(world.page.getByTestId(prefix)).toHaveAttribute(
+				"data-level",
+				match[3] ?? "",
+			);
+			const sentence = world.page.getByTestId(`${prefix}-sentence`);
+			await expect(sentence).toHaveText(match[2] ?? "");
+			await expect(sentence).toHaveCSS(
+				"color",
+				await themeColour(
+					world.page,
+					match[3] === "red"
+						? "--color-error"
+						: match[3] === "amber"
+							? "--color-fill-amber"
+							: "--color-text-secondary",
+				),
+			);
+		},
+	},
+	{
+		name: "assert the emphasized forecast value",
+		match: /^the Usage forecast (\S+) emphasizes (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId(`usage-settings-forecast-${match[1]}-sentence`)
+					.locator("b"),
+			).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert the secondary window forecast or its absence",
+		match: /^the Usage forecast (\S+) other line reads (.+)$/,
+		run: async ({ world, match }) => {
+			const line = world.page.getByTestId(
+				`usage-settings-forecast-${match[1]}-other`,
+			);
+			if (match[2] === "absent") await expect(line).toHaveCount(0);
+			else await expect(line).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert forecast SVG marks, projection and available width",
+		match:
+			/^the Usage forecast (\S+) chart has a (present|absent) crossing dot and a (rising|flat) projection$/,
+		run: async ({ world, match }) => {
+			const prefix = `usage-settings-forecast-${match[1]}`;
+			const chart = world.page.getByTestId(`${prefix}-chart`);
+			await expect(chart).toBeVisible();
+			await expect(chart).toHaveAttribute(
+				"data-window",
+				(await world.page.getByTestId(prefix).getAttribute("data-window")) ??
+					"",
+			);
+			await expect(chart).toHaveCSS("height", "76px");
+			const geometry = await chart.evaluate((element) => ({
+				width: element.getBoundingClientRect().width,
+				parent: element.parentElement?.getBoundingClientRect().width,
+			}));
+			expect(geometry.width).toBeCloseTo(geometry.parent ?? 0, 0);
+			const past = world.page.getByTestId(`${prefix}-past-path`);
+			await expect(past).toHaveAttribute("stroke-width", "2");
+			await expect(past).toHaveAttribute("d", /^M.+ L/);
+			const projection = world.page.getByTestId(`${prefix}-projection-path`);
+			await expect(projection).toHaveAttribute("stroke-width", "1.5");
+			await expect(projection).toHaveAttribute("stroke-dasharray", "4 3");
+			const coordinates = (await projection.getAttribute("d"))
+				?.match(/-?\d+(?:\.\d+)?/g)
+				?.map(Number);
+			if (!coordinates || coordinates.length !== 4)
+				throw new Error("Missing forecast projection coordinates");
+			if (match[3] === "flat") expect(coordinates[3]).toBe(coordinates[1]);
+			else expect(coordinates[3]).toBeLessThan(coordinates[1] ?? 0);
+			await expect(
+				world.page.getByTestId(`${prefix}-now-marker`),
+			).toHaveAttribute("stroke", "var(--color-border)");
+			await expect(
+				world.page.getByTestId(`${prefix}-limit-line`),
+			).toHaveAttribute("stroke-dasharray", "2 3");
+			await expect(
+				world.page.getByTestId(`${prefix}-limit-line`),
+			).toHaveAttribute("opacity", "0.6");
+			for (const label of ["limit", "now", "reset"])
+				await expect(chart.getByText(label, { exact: true })).toBeVisible();
+			const crossing = world.page.getByTestId(`${prefix}-crossing-dot`);
+			await expect(crossing).toHaveCount(match[2] === "present" ? 1 : 0);
+			if (match[2] === "present")
+				await expect(crossing).toHaveAttribute("r", "3.5");
+		},
+	},
+	{
+		name: "assert the collapsed account pace line",
+		match: /^the Usage account (\S+) pace line reads (.+)$/,
+		run: async ({ world, match }) => {
+			const line = world.page.getByTestId(`usage-settings-pace-${match[1]}`);
+			if (match[2] === "absent") {
+				await expect(line).toHaveCount(0);
+				return;
+			}
+			await expect(line.locator(":scope > span").first()).toHaveText(
+				match[2] ?? "",
+			);
+			await expect(line.locator(":scope > span").last()).toHaveText("›");
+			await expect(line).toHaveCSS(
+				"color",
+				await themeColour(world.page, "--color-text-muted"),
+			);
+		},
+	},
+	{
+		name: "expand or collapse an account forecast with pointer or keyboard",
+		match:
+			/^I toggle the Usage account (\S+) pace line using (click|chevron|keyboard)$/,
+		run: async ({ world, match }) => {
+			const line = world.page.getByTestId(`usage-settings-pace-${match[1]}`);
+			if (match[2] === "keyboard") {
+				await line.focus();
+				await line.press("Space");
+			} else if (match[2] === "chevron")
+				await line.locator(":scope > span").last().click();
+			else await line.click();
+		},
+	},
+	{
+		name: "assert the fleet forecast emphasizes its first sentence",
+		match: /^the Usage headline emphasizes (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("usage-settings-headline").locator("b"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
 		name: "publish reported model windows without changing account status",
 		match:
 			/^the Usage account (\S+) has model windows Fable (\d+)% and Sonnet (\d+)%$/,
@@ -432,7 +735,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert a fleet headline and its theme colour",
-		match: /^the Usage settings headline reads (.+) in (muted|red)$/,
+		match: /^the Usage settings headline reads (.+) in (muted|amber|red)$/,
 		run: async ({ world, match }) => {
 			const headline = world.page.getByTestId("usage-settings-headline");
 			await expect(headline).toHaveText(match[1] ?? "");
@@ -440,7 +743,11 @@ export const usageSettingsHandlers: StepHandler[] = [
 				"color",
 				await themeColour(
 					world.page,
-					match[2] === "red" ? "--color-error" : "--color-text-secondary",
+					match[2] === "red"
+						? "--color-error"
+						: match[2] === "amber"
+							? "--color-fill-amber"
+							: "--color-text-secondary",
 				),
 			);
 		},

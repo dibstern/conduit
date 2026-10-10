@@ -6,10 +6,16 @@ import {
 	Fiber,
 	FiberMap,
 	Schedule,
+	Schema,
 	Stream,
 	SubscriptionRef,
 } from "effect";
-import type { UsageReading } from "../../../contracts/limit-recovery.js";
+import {
+	type UsageForecast,
+	type UsageHistoryPoint,
+	UsageHistoryPointSchema,
+	type UsageReading,
+} from "../../../contracts/limit-recovery.js";
 import type {
 	UsageAccount,
 	UsageRead,
@@ -29,15 +35,87 @@ export interface UsageService {
 
 export class Usage extends Context.Tag("Usage")<Usage, UsageService>() {}
 
+const usageHistorySeriesSchema = Schema.Struct({
+	resetsAt: Schema.optional(Schema.Number.pipe(Schema.finite())),
+	points: Schema.Array(UsageHistoryPointSchema),
+});
+
+export const UsageHistorySnapshotSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.Struct({
+		five_hour: Schema.optional(usageHistorySeriesSchema),
+		seven_day: Schema.optional(usageHistorySeriesSchema),
+	}),
+});
+export type UsageHistorySnapshot = typeof UsageHistorySnapshotSchema.Type;
+
+export function forecastUsage(
+	points: readonly UsageHistoryPoint[],
+	latest: number,
+	resetsAt: number | undefined,
+	now: number,
+): UsageForecast | undefined {
+	const first = points[0];
+	const last = points.at(-1);
+	if (
+		resetsAt === undefined ||
+		!Number.isFinite(resetsAt) ||
+		resetsAt <= now ||
+		points.length < 3 ||
+		!first ||
+		!last ||
+		last.at - first.at < 15 * 60_000 ||
+		latest >= 100
+	)
+		return undefined;
+	// Center time offsets to avoid cancellation with epoch-sized timestamps.
+	const meanAt =
+		points.reduce((sum, point) => sum + (point.at - first.at), 0) /
+		points.length;
+	const meanUtilization =
+		points.reduce((sum, point) => sum + point.utilization, 0) / points.length;
+	let covariance = 0;
+	let variance = 0;
+	for (const point of points) {
+		const offset = point.at - first.at - meanAt;
+		covariance += offset * (point.utilization - meanUtilization);
+		variance += offset * offset;
+	}
+	const slope = covariance / variance;
+	if (slope <= 0) return { kind: "under", atReset: Math.round(latest) };
+	const projected = latest + slope * (resetsAt - last.at);
+	return projected >= 100
+		? { kind: "runs_out", at: last.at + (100 - latest) / slope }
+		: { kind: "under", atReset: Math.round(projected) };
+}
+
 export const makeUsage = (options: {
 	readonly accounts: Effect.Effect<readonly UsageAccount[]>;
 	readonly order?: Effect.Effect<readonly string[]>;
 	readonly readers: Readonly<
 		Partial<Record<UsageAccount["harness"], UsageReader>>
 	>;
+	readonly history?: {
+		readonly load: Effect.Effect<UsageHistorySnapshot, unknown>;
+		readonly save: (
+			snapshot: UsageHistorySnapshot,
+		) => Effect.Effect<void, unknown>;
+	};
 }) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
+		const historyStore = options.history;
+		let history = yield* (
+			historyStore?.load ?? Effect.succeed<UsageHistorySnapshot>({})
+		).pipe(
+			Effect.catchAllCause((cause) =>
+				Effect.logWarning("Usage history load failed", { cause }).pipe(
+					Effect.as<UsageHistorySnapshot>({}),
+				),
+			),
+		);
+		let savedHistory = history;
+		const historySaveLock = yield* Effect.makeSemaphore(1);
 		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([]);
 		const lock = yield* Effect.makeSemaphore(1);
 		const subscriberLock = yield* Effect.makeSemaphore(1);
@@ -86,11 +164,85 @@ export const makeUsage = (options: {
 								),
 								Effect.flatMap((reading) =>
 									Effect.gen(function* () {
+										const readAt = yield* Clock.currentTimeMillis;
+										const windows =
+											reading.status === "available" ||
+											reading.status === "limited"
+												? reading.windows.map((window) => {
+														if (
+															window.kind !== "five_hour" &&
+															window.kind !== "seven_day"
+														)
+															return window;
+														const parsedReset =
+															window.resetsAt === undefined
+																? undefined
+																: Date.parse(window.resetsAt);
+														const resetsAt =
+															parsedReset !== undefined &&
+															Number.isFinite(parsedReset)
+																? parsedReset
+																: undefined;
+														const previous = history[accountId]?.[window.kind];
+														const last = previous?.points.at(-1);
+														const reset =
+															// Claude recomputes resets_at per request, so only a
+															// move of more than a few minutes is a new window.
+															(resetsAt !== undefined &&
+																previous?.resetsAt !== undefined &&
+																resetsAt - previous.resetsAt > 10 * 60_000) ||
+															(last !== undefined &&
+																window.utilization < last.utilization);
+														const points = [
+															...(reset ? [] : (previous?.points ?? [])),
+															{ at: readAt, utilization: window.utilization },
+														].slice(-2016);
+														const seriesReset = resetsAt ?? previous?.resetsAt;
+														history = {
+															...history,
+															[accountId]: {
+																...history[accountId],
+																[window.kind]: {
+																	points,
+																	...(seriesReset === undefined
+																		? {}
+																		: { resetsAt: seriesReset }),
+																},
+															},
+														};
+														const forecast = forecastUsage(
+															points,
+															window.utilization,
+															resetsAt,
+															readAt,
+														);
+														return {
+															...window,
+															// Evenly spaced transport samples, including both ends.
+															history:
+																points.length <= 48
+																	? points
+																	: Array.from(
+																			{ length: 48 },
+																			(_, i) => i,
+																		).flatMap(
+																			(i) =>
+																				points[
+																					Math.round(
+																						(i * (points.length - 1)) / 47,
+																					)
+																				] ?? [],
+																		),
+															...(forecast === undefined ? {} : { forecast }),
+														};
+													})
+												: reading.windows;
 										const value: UsageReading = {
 											...reading,
+											windows,
 											accountId,
 											harness: account?.harness ?? "claude",
-											readAt: yield* Clock.currentTimeMillis,
+											readAt,
 											stale: false,
 										};
 										// Decisions get the fresh result; only the published
@@ -133,6 +285,26 @@ export const makeUsage = (options: {
 				// Publish the latest completed reads, including a newer overlapping
 				// refresh, so a slow batch cannot replace a fresh account reading.
 				yield* SubscriptionRef.set(current, [...latest.values()]);
+				if (historyStore)
+					yield* historySaveLock.withPermits(1)(
+						Effect.gen(function* () {
+							if (history === savedHistory) return;
+							const snapshot = history;
+							yield* Effect.suspend(() => historyStore.save(snapshot)).pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										savedHistory = snapshot;
+									}),
+								),
+								Effect.catchAllCause((cause) =>
+									Effect.logWarning("Usage history save failed", { cause }),
+								),
+								// Async filesystem writes outlive interruption; retain the
+								// permit until the snapshot has finished saving.
+								Effect.uninterruptible,
+							);
+						}),
+					);
 				return readings;
 			});
 		const readings = Stream.unwrapScoped(

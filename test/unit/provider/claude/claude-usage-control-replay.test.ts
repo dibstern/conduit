@@ -78,11 +78,23 @@ it.each([
 									kind: "five_hour",
 									utilization: decoded.rate_limits?.five_hour?.utilization,
 									resetsAt: decoded.rate_limits?.five_hour?.resets_at,
+									history: [
+										{
+											at: result?.readAt,
+											utilization: decoded.rate_limits?.five_hour?.utilization,
+										},
+									],
 								},
 								{
 									kind: "seven_day",
 									utilization: decoded.rate_limits?.seven_day?.utilization,
 									resetsAt: decoded.rate_limits?.seven_day?.resets_at,
+									history: [
+										{
+											at: result?.readAt,
+											utilization: decoded.rate_limits?.seven_day?.utilization,
+										},
+									],
 								},
 								{
 									kind: "seven_day_model",

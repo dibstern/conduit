@@ -9,6 +9,7 @@ Scenario Outline: one account has full window rows on desktop
   Given the viewport is a desktop
   And Usage settings have one Claude account in the <state> state
   When I open settings to the Usage tab
+  Then the Usage forecast claude is absent
   Then the Usage settings title reads Claude plan usage
   And the settings tabs place Usage between Claude and Instances
   And the Usage settings subheader reads <subheader>
@@ -37,6 +38,7 @@ Scenario Outline: one account has a full-screen Usage screen on phones
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have one Claude account in the <state> state
   When I open settings to the Usage tab
+  Then the Usage forecast claude is absent
   Then the Usage settings title reads Usage
   And the phone Usage screen fills the viewport and has a scrolling body and a back button
   And the Usage settings subheader reads <subheader>
@@ -411,3 +413,298 @@ Scenario: the phone single-account row opens Usage directly
   And I tap the phone single-account usage row
   Then the Usage settings title reads Usage
   And the Usage settings subheader reads Claude Max · updated 2m ago · Refresh
+
+Scenario Outline: a single-account forecast describes the selected window
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the usage footer claude <kind> reading is <used>% resetting at <reset>
+  And the Usage account claude <kind> forecast is <forecast> resetting at <reset>
+  And the Usage account claude <otherKind> forecast is under at <otherValue>% resetting at <otherReset>
+  When I open settings to the Usage tab
+  Then the Usage forecast claude is framed
+  And the Usage forecast claude selects <kind>
+  And the Usage forecast claude sentence reads <sentence> in <level>
+  And the Usage forecast claude emphasizes <emphasis>
+  And the Usage forecast claude other line reads <otherLine>
+  And the Usage forecast claude chart has a <crossing> crossing dot and a <projection> projection
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | kind | used | reset | forecast | otherKind | otherValue | otherReset | sentence | level | emphasis | otherLine | crossing | projection | baseline | threshold |
+  | desktop | five_hour | 41 | 2026-01-01T17:30:00Z | under at 74% | seven_day | 48 | 2026-01-08T09:00:00Z | On pace to finish this 5h window at ~74% (resets 5:30 pm). | neutral | ~74% | Week: on pace for ~48% by Thu 9 am. | absent | rising | usage-settings-forecast-fine-desktop | 98 |
+  | phone | five_hour | 41 | 2026-01-01T17:30:00Z | under at 74% | seven_day | 48 | 2026-01-08T09:00:00Z | On pace to finish this 5h window at ~74% (resets 5:30 pm). | neutral | ~74% | Week: on pace for ~48% by Thu 9 am. | absent | rising | usage-settings-forecast-fine-phone | 98 |
+  | desktop | five_hour | 86 | 2026-01-01T15:37:00Z | runs_out at 2026-01-01T15:04:00Z | seven_day | 48 | 2026-01-08T09:00:00Z | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | amber | 3:04 pm | Week: on pace for ~48% by Thu 9 am. | present | rising | usage-settings-forecast-five-hour-out-desktop | 98 |
+  | phone | five_hour | 86 | 2026-01-01T15:37:00Z | runs_out at 2026-01-01T15:04:00Z | seven_day | 48 | 2026-01-08T09:00:00Z | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | amber | 3:04 pm | Week: on pace for ~48% by Thu 9 am. | present | rising | usage-settings-forecast-five-hour-out-phone | 98 |
+  | desktop | seven_day | 91 | 2026-01-08T09:00:00Z | runs_out at 2026-01-06T05:00:00Z | five_hour | 55 | 2026-01-01T18:45:00Z | At this pace the weekly limit runs out ≈ Tue 5 am, 2 days before it resets. | amber | Tue 5 am | 5h window: on pace for ~55% by 6:45 pm. | present | rising | usage-settings-forecast-week-out-desktop | 98 |
+  | phone | seven_day | 91 | 2026-01-08T09:00:00Z | runs_out at 2026-01-06T05:00:00Z | five_hour | 55 | 2026-01-01T18:45:00Z | At this pace the weekly limit runs out ≈ Tue 5 am, 2 days before it resets. | amber | Tue 5 am | 5h window: on pace for ~55% by 6:45 pm. | present | rising | usage-settings-forecast-week-out-phone | 98 |
+  | desktop | five_hour | 100 | 2026-01-01T15:13:00Z | under at 100% | seven_day | 48 | 2026-01-08T09:00:00Z | Limit reached. The 5h window resets at 3:13 pm. | red | 3:13 pm | Week: on pace for ~48% by Thu 9 am. | absent | flat | usage-settings-forecast-limit-desktop | 98 |
+  | phone | five_hour | 100 | 2026-01-01T15:13:00Z | under at 100% | seven_day | 48 | 2026-01-08T09:00:00Z | Limit reached. The 5h window resets at 3:13 pm. | red | 3:13 pm | Week: on pace for ~48% by Thu 9 am. | absent | flat | usage-settings-forecast-limit-phone | 98 |
+  | desktop | seven_day | 100 | 2026-01-08T09:00:00Z | under at 100% | five_hour | 55 | 2026-01-01T18:45:00Z | Limit reached. The weekly window resets at Thu 9 am. | red | Thu 9 am | 5h window: on pace for ~55% by 6:45 pm. | absent | flat | usage-settings-forecast-week-limit-desktop | 98 |
+  | phone | seven_day | 100 | 2026-01-08T09:00:00Z | under at 100% | five_hour | 55 | 2026-01-01T18:45:00Z | Limit reached. The weekly window resets at Thu 9 am. | red | Thu 9 am | 5h window: on pace for ~55% by 6:45 pm. | absent | flat | usage-settings-forecast-week-limit-phone | 98 |
+
+Scenario Outline: a weekly-only forecast opens on Week
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the Usage account claude has no five-hour window
+  And the Usage account claude seven_day forecast is under at 48% resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast claude selects seven_day
+  And the Usage forecast claude sentence reads On pace to finish this week at ~48% (resets Thu 9 am). in neutral
+  And the Usage forecast claude emphasizes ~48%
+  And the Usage forecast claude other line reads absent
+  And the Usage forecast claude chart has a absent crossing dot and a rising projection
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-week-fine-desktop | 98 |
+  | phone | usage-settings-forecast-week-fine-phone | 98 |
+
+Scenario Outline: the first crossing opens and switching updates the whole forecast
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
+  And the Usage account claude seven_day forecast is runs_out at <weekCrossing> resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast claude selects <first>
+  And the Usage forecast claude sentence reads <firstSentence> in amber
+  And the Usage forecast claude other line reads <firstOther>
+  And the Usage forecast claude chart has a present crossing dot and a rising projection
+  And the usage-settings region visually matches <baseline>-initial at <threshold> percent
+  When I select the Usage forecast claude <second> window
+  Then the Usage forecast claude selects <second>
+  And the Usage forecast claude sentence reads <secondSentence> in amber
+  And the Usage forecast claude other line reads <secondOther>
+  And the Usage forecast claude chart has a present crossing dot and a rising projection
+  And the usage-settings region visually matches <baseline>-switched at <threshold> percent
+
+Examples:
+  | viewport | weekCrossing | first | second | firstSentence | firstOther | secondSentence | secondOther | baseline | threshold |
+  | desktop | 2026-01-06T05:00:00Z | five_hour | seven_day | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | Week: runs out ≈ Tue 5 am, 2 days before it resets. | At this pace the weekly limit runs out ≈ Tue 5 am, 2 days before it resets. | 5h window: runs out ≈ 3:04 pm, 33m before it resets. | usage-settings-forecast-five-first-desktop | 98 |
+  | phone | 2026-01-06T05:00:00Z | five_hour | seven_day | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | Week: runs out ≈ Tue 5 am, 2 days before it resets. | At this pace the weekly limit runs out ≈ Tue 5 am, 2 days before it resets. | 5h window: runs out ≈ 3:04 pm, 33m before it resets. | usage-settings-forecast-five-first-phone | 98 |
+  | desktop | 2026-01-01T14:55:00Z | seven_day | five_hour | At this pace the weekly limit runs out ≈ 2:55 pm, 6 days before it resets. | 5h window: runs out ≈ 3:04 pm, 33m before it resets. | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | Week: runs out ≈ 2:55 pm, 6 days before it resets. | usage-settings-forecast-week-first-desktop | 98 |
+  | phone | 2026-01-01T14:55:00Z | seven_day | five_hour | At this pace the weekly limit runs out ≈ 2:55 pm, 6 days before it resets. | 5h window: runs out ≈ 3:04 pm, 33m before it resets. | At this pace the 5h limit runs out ≈ 3:04 pm, 33m before it resets. | Week: runs out ≈ 2:55 pm, 6 days before it resets. | usage-settings-forecast-week-first-phone | 98 |
+
+Scenario Outline: switching to an under-limit window removes the crossing dot
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the Usage account claude five_hour forecast is under at 55% resetting at 2026-01-01T18:45:00Z
+  And the Usage account claude seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast claude selects seven_day
+  And the Usage forecast claude chart has a present crossing dot and a rising projection
+  When I select the Usage forecast claude five_hour window
+  Then the Usage forecast claude selects five_hour
+  And the Usage forecast claude sentence reads On pace to finish this 5h window at ~55% (resets 6:45 pm). in amber
+  And the Usage forecast claude other line reads Week: runs out ≈ Tue 5 am, 2 days before it resets.
+  And the Usage forecast claude chart has a absent crossing dot and a rising projection
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-switch-under-desktop | 98 |
+  | phone | usage-settings-forecast-switch-under-phone | 98 |
+
+Scenario Outline: a forecast formats the hours and minutes before reset
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the warn5 state
+  And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T16:24:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast claude sentence reads At this pace the 5h limit runs out ≈ 3:04 pm, 1h 20m before it resets. in amber
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-duration-desktop | 98 |
+  | phone | usage-settings-forecast-duration-phone | 98 |
+
+Scenario Outline: early history keeps the bars without a forecast card
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the normal state
+  And the Usage account claude five_hour has <count> history readings without a forecast
+  And the Usage account claude seven_day has <count> history readings without a forecast
+  When I open settings to the Usage tab
+  Then the Usage forecast claude is absent
+  And the Usage single-account windows show 5h 41% and Week 22%
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | count | baseline | threshold |
+  | desktop | 1 | usage-settings-forecast-one-reading-desktop | 98 |
+  | phone | 1 | usage-settings-forecast-one-reading-phone | 98 |
+  | desktop | 3 | usage-settings-forecast-short-history-desktop | 98 |
+  | phone | 3 | usage-settings-forecast-short-history-phone | 98 |
+
+Scenario Outline: a reached limit with early history still has a reset forecast
+  Given the viewport is a <viewport>
+  And Usage settings have one Claude account in the limit state
+  And the Usage account claude five_hour has 1 history readings without a forecast
+  When I open settings to the Usage tab
+  Then the Usage forecast claude selects five_hour
+  And the Usage forecast claude sentence reads Limit reached. The 5h window resets at 3:13 pm. in red
+  And the Usage forecast claude other line reads absent
+  And the Usage forecast claude chart has a absent crossing dot and a flat projection
+  And the usage-settings region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-limit-early-desktop | 98 |
+  | phone | usage-settings-forecast-limit-early-phone | 98 |
+
+Scenario Outline: other account pace lines expand into unframed forecasts
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude five_hour forecast is under at 74% resetting at 2026-01-01T17:30:00Z
+  And the Usage account claude seven_day forecast is under at 48% resetting at 2026-01-08T09:00:00Z
+  And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
+  And the Usage account work seven_day forecast is under at 70% resetting at 2026-01-03T09:00:00Z
+  And the Usage account spare seven_day forecast is under at 20% resetting at 2026-01-05T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast claude is unframed
+  And the Usage account claude pace line reads absent
+  And the Usage forecast work is absent
+  And the Usage account work pace line reads 5h on pace for ~35% · week ~70% by Sat
+  And the Usage account spare pace line reads No 5h window open · week ~20% by Mon
+  And the usage-settings-card-work region visually matches <baseline>-collapsed at <threshold> percent
+  When I toggle the Usage account work pace line using click
+  Then the Usage forecast work is unframed
+  And the Usage forecast work sentence reads On pace to finish this 5h window at ~35% (resets 5:30 pm). in neutral
+  And the Usage forecast work chart has a absent crossing dot and a rising projection
+  And the usage-settings-card-work region visually matches <baseline>-expanded at <threshold> percent
+  When I toggle the Usage account work pace line using keyboard
+  Then the Usage forecast work is absent
+  When I toggle the Usage account work pace line using chevron
+  Then the Usage forecast work is unframed
+  When I toggle the Usage account work pace line using chevron
+  Then the Usage forecast work is absent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-accounts-desktop | 98 |
+  | phone | usage-settings-forecast-accounts-phone | 98 |
+
+Scenario Outline: fleet headlines describe five-hour and weekly crossings
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude <kind> forecast is runs_out at <crossing> resetting at <reset>
+  When I open settings to the Usage tab
+  Then the Usage settings headline reads <headline> in amber
+  And the Usage headline emphasizes <firstSentence>
+  And the Usage forecast claude is unframed
+  And the Usage account work pace line reads absent
+  And the usage-settings-headline region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | kind | crossing | reset | headline | firstSentence | baseline | threshold |
+  | desktop | five_hour | 2026-01-01T15:04:00Z | 2026-01-01T15:37:00Z | Personal runs out of its 5h window ≈ 3:04 pm. Work, next in the switch order, has 88% of its 5h window left. | Personal runs out of its 5h window ≈ 3:04 pm. | usage-settings-forecast-headline-five-desktop | 98 |
+  | phone | five_hour | 2026-01-01T15:04:00Z | 2026-01-01T15:37:00Z | Personal runs out of its 5h window ≈ 3:04 pm. Work, next in the switch order, has 88% of its 5h window left. | Personal runs out of its 5h window ≈ 3:04 pm. | usage-settings-forecast-headline-five-phone | 98 |
+  | desktop | seven_day | 2026-01-06T05:00:00Z | 2026-01-08T09:00:00Z | Personal runs out of its week ≈ Tue 5 am, 2 days before it resets. Work has 52% of its week left, Spare 91%. | Personal runs out of its week ≈ Tue 5 am, 2 days before it resets. | usage-settings-forecast-headline-week-desktop | 98 |
+  | phone | seven_day | 2026-01-06T05:00:00Z | 2026-01-08T09:00:00Z | Personal runs out of its week ≈ Tue 5 am, 2 days before it resets. Work has 52% of its week left, Spare 91%. | Personal runs out of its week ≈ Tue 5 am, 2 days before it resets. | usage-settings-forecast-headline-week-phone | 98 |
+
+Scenario Outline: weekly crossings outrank five-hour crossings and follow switch order
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
+  And the Usage account work five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
+  And the Usage account work seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
+  And the Usage account spare seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage settings headline reads Work runs out of its week ≈ Tue 5 am, 2 days before it resets. Personal has 78% of its week left, Spare 91%. in amber
+  And the Usage account work pace line reads 5h runs out ≈ 3:04 pm · week runs out ≈ Tue 5 am
+  And the Usage account spare pace line reads No 5h window open · week runs out ≈ Tue 5 am
+  And the usage-settings-headline region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-headline-priority-desktop | 98 |
+  | phone | usage-settings-forecast-headline-priority-phone | 98 |
+
+Scenario Outline: a limited headline outranks forecast crossings
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  And the Usage account claude five_hour has 1 history readings without a forecast
+  And the Usage account work seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage settings headline reads Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left. in red
+  And the Usage forecast claude sentence reads Limit reached. The 5h window resets at 3:13 pm. in red
+  And the usage-settings-headline region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-headline-limited-desktop | 98 |
+  | phone | usage-settings-forecast-headline-limited-phone | 98 |
+
+Scenario Outline: the open session account shows its forecast after a switch
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude five_hour forecast is under at 74% resetting at 2026-01-01T17:30:00Z
+  And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
+  And the session resumes on work from claude by user and replies Continued on Work.
+  When I open settings to the Usage tab
+  Then the Usage forecast work is unframed
+  And the Usage forecast claude is absent
+  And the Usage account claude pace line reads 5h on pace for ~74%
+  And the Usage account work pace line reads absent
+  And the usage-settings-card-work region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-session-account-desktop | 98 |
+  | phone | usage-settings-forecast-session-account-phone | 98 |
+
+Scenario Outline: a forecast with no eligible successor omits the recommendation
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account work is unavailable
+  And the Usage account spare is unavailable
+  And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
+  When I open settings to the Usage tab
+  Then the Usage settings headline reads Personal runs out of its 5h window ≈ 3:04 pm. in amber
+  And the Usage headline emphasizes Personal runs out of its 5h window ≈ 3:04 pm.
+  And the usage-settings-headline region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-no-successor-desktop | 98 |
+  | phone | usage-settings-forecast-no-successor-phone | 98 |
+
+Scenario Outline: a secondary limited account keeps its reset forecast without a pace line
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account claude five_hour forecast is under at 74% resetting at 2026-01-01T17:30:00Z
+  And the usage footer work five_hour reading is 100% resetting at 2026-01-01T15:13:00Z
+  And the Usage account work five_hour has 1 history readings without a forecast
+  When I open settings to the Usage tab
+  Then the Usage forecast claude is unframed
+  And the Usage forecast work is unframed
+  And the Usage account work pace line reads absent
+  And the Usage forecast work sentence reads Limit reached. The 5h window resets at 3:13 pm. in red
+  And the Usage forecast work chart has a absent crossing dot and a flat projection
+  And the usage-settings-card-work region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-secondary-limited-desktop | 98 |
+  | phone | usage-settings-forecast-secondary-limited-phone | 98 |
+
+Scenario Outline: an unconfigured session account falls back to the project then the fullest account
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Claude accounts are work as Work, spare as Spare
+  And the usage footer spare seven_day reading is 97% resetting at 2026-01-08T09:00:00Z
+  And the Usage project account is <projectAccount>
+  And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
+  And the Usage account spare seven_day forecast is under at 98% resetting at 2026-01-08T09:00:00Z
+  When I open settings to the Usage tab
+  Then the Usage forecast <primary> is unframed
+  And the Usage account <primary> pace line reads absent
+  And the Usage forecast <secondary> is absent
+  And the Usage account <secondary> pace line reads <pace>
+  And the usage-settings-card-<primary> region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | projectAccount | primary | secondary | pace | baseline | threshold |
+  | desktop | work | work | spare | No 5h window open · week ~98% by Thu | usage-settings-forecast-project-fallback-desktop | 98 |
+  | phone | work | work | spare | No 5h window open · week ~98% by Thu | usage-settings-forecast-project-fallback-phone | 98 |
+  | desktop | none | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-desktop | 98 |
+  | phone | none | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-phone | 98 |
