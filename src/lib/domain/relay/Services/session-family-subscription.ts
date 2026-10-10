@@ -9,7 +9,8 @@
 // from the advance, kept to ids this family has served so another family's
 // deletion stays silent.
 //
-// The feed anchors on the family root, resolved once at subscribe, so deleting
+// The feed anchors on the family root (the topmost ancestor still present, so
+// an orphan family has one too), resolved once at subscribe, so deleting
 // the member it was opened on (a finished subagent) does not orphan it, and
 // every device viewing any member of one family asks the same question: the
 // source is named by that root and shares its window reads (y7eo.15). The read
@@ -44,7 +45,7 @@ export const subscribeSessionFamily = (options: {
 				yield* Effect.serviceOption(ConfigTag),
 			);
 			const anchor =
-				(yield* readQuery.getSession(options.sessionId))?.root_id ??
+				(yield* readQuery.getSessionFamilyRoot(options.sessionId)) ??
 				options.sessionId;
 			const held = new Set<string>();
 			return stream<SessionInfo, ShellSubscriptionError>({

@@ -37,6 +37,7 @@ import type {
 } from "../read-model-types.js";
 import {
 	sessionFamilyMembersQuery,
+	sessionFamilyRootQuery,
 	sessionFamilyWindowQuery,
 } from "../session-family-query.js";
 import { messageRowsToHistory } from "../session-history-adapter.js";
@@ -396,6 +397,11 @@ export interface ReadQueryEffect {
 	readonly getSession: (
 		sessionId: string,
 	) => Effect.Effect<SessionRow | undefined, ReadQueryEffectError | SqlError>;
+
+	/** The topmost ancestor still present; none for a missing session or a cycle. */
+	readonly getSessionFamilyRoot: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined, ReadQueryEffectError>;
 
 	readonly getGoalDetails: (
 		sessionId: string,
@@ -920,6 +926,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getSession",
 							cause: e,
 						}),
+			),
+		);
+
+	const getSessionFamilyRoot = (sessionId: string) =>
+		sql.unsafe<{ id: string }>(sessionFamilyRootQuery, [sessionId]).pipe(
+			Effect.map((rows) => rows[0]?.id),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getSessionFamilyRoot",
+						cause,
+					}),
 			),
 		);
 
@@ -1955,6 +1973,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readToolDetails,
 		getSessionStatus,
 		getSession,
+		getSessionFamilyRoot,
 		getGoalDetails,
 		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,

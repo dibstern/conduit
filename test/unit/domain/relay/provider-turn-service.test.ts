@@ -202,6 +202,7 @@ const makeReadQuery = (
 ): ReadQueryEffect => ({
 	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),

@@ -142,6 +142,7 @@ function makeReadQueryEffect(
 	return {
 		readToolDetails: vi.fn(() => Effect.succeed([])),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+		getSessionFamilyRoot: () => Effect.succeed(undefined),
 		getSession: vi.fn((sessionId: string) =>
 			Effect.succeed(rows.find((row) => row.id === sessionId)),
 		),

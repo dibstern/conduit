@@ -97,6 +97,7 @@ const makeLayer = (options: {
 				Layer.succeed(ReadQueryEffectTag, {
 					readToolDetails: () => Effect.succeed([]),
 					getSessionStatus: () => Effect.succeed(undefined),
+					getSessionFamilyRoot: () => Effect.succeed(undefined),
 					getSession: () => Effect.succeed(undefined),
 					getGoalDetails: () =>
 						Effect.succeed({ checks: [], tokensSinceStart: null }),

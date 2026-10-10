@@ -790,6 +790,7 @@ describe("switchModelForSession", () => {
 			const readQuery = {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -2280,6 +2281,7 @@ describe("handleNewSession", () => {
 			const readQuery = {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -2378,6 +2380,7 @@ describe("handleNewSession", () => {
 			const readQuery = {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "session-in-flight",
@@ -2668,6 +2671,7 @@ describe("loadMoreHistoryForSession", () => {
 		const readQuery = {
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSessionFamilyRoot: () => Effect.succeed(undefined),
 			getSession: vi.fn(() =>
 				Effect.succeed({
 					id: "session-1",
@@ -3214,6 +3218,7 @@ describe("handleMessage", () => {
 			const readQuery = {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
@@ -3448,6 +3453,7 @@ describe("handleMessage", () => {
 			const readQuery = {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",

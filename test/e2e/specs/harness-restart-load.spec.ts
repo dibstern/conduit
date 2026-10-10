@@ -83,6 +83,16 @@ interface ServerMetrics extends Reads {
 		readonly method: string;
 		readonly sql: string;
 	}[];
+	/**
+	 * Every session-family read, however long its statements took, from a
+	 * server started with `profile`: whether its window held a changed member,
+	 * and how many of its statements read every session row.
+	 */
+	readonly familyReads?: readonly {
+		readonly at: number;
+		readonly changed: boolean;
+		readonly fullSessionScans: number;
+	}[];
 	readonly flushedAt: number;
 }
 
@@ -218,6 +228,7 @@ const blocking = (end: ServerMetrics, from: number, to: number) => {
 		items.filter(({ at }) => at >= from && at <= to);
 	const stalls = inside(end.stalls);
 	const statements = end.statements && inside(end.statements);
+	const familyReads = end.familyReads && inside(end.familyReads);
 	return {
 		stalls: {
 			count: stalls.length,
@@ -244,11 +255,20 @@ const blocking = (end: ServerMetrics, from: number, to: number) => {
 						atMs: at - from,
 						...statement,
 					}))[0],
-				// Reads of every session row, which a family read no longer makes
-				// (conduit-test-y7eo.15).
-				fullSessionScans: statements.filter(({ sql }) =>
-					/^SELECT [^;]* FROM sessions$/i.test(sql),
-				).length,
+			},
+		}),
+		// Session-family reads by whether their window held a changed member,
+		// and the reads of every session row they made. Counted per read, not
+		// from the statement log, which holds only statements of 1ms or more and
+		// every other caller's too (conduit-test-y7eo.15).
+		...(familyReads && {
+			familyReads: {
+				unchanged: familyReads.filter(({ changed }) => !changed).length,
+				changed: familyReads.filter(({ changed }) => changed).length,
+				fullSessionScans: familyReads.reduce(
+					(total, read) => total + read.fullSessionScans,
+					0,
+				),
 			},
 		}),
 	};
@@ -866,13 +886,19 @@ test("opens the heavy session after a restart under load", async ({
 		expect(shared[name]?.reads["window"], name).toBe(shared[name]?.windowsRead);
 	}
 	// The heavy session's family moves in none of the cold open's windows, yet
-	// is asked each of them: those reads scan no session table, and nothing
-	// else does either (conduit-test-y7eo.15).
+	// is asked each of them: such a read is its window query alone. No family
+	// read, changed or not, reads every session row, on the profiled (restarted)
+	// server (conduit-test-y7eo.15).
 	expect(
 		report.coldOpen.server.bySource[`session-family/${HEAVY_SESSION_ID}`]
 			?.reads["window"],
 	).toBeGreaterThan(0);
-	expect(report.coldOpen.server.database?.fullSessionScans).toBe(0);
+	expect(report.coldOpen.server.familyReads?.unchanged).toBeGreaterThan(0);
+	for (const [phase, server] of Object.entries({
+		restart: report.server.restart,
+		coldOpen: report.coldOpen.server,
+	}))
+		expect(server.familyReads?.fullSessionScans, phase).toBe(0);
 	// Every device reconnects with its cursor and is sent the sidebar changes
 	// past it, not the list again: no base read, and fewer rows across all four
 	// than one list holds (conduit-test-y7eo.3).

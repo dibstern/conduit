@@ -14,8 +14,13 @@ import { Effect, Fiber } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
-// With `profile`, also SQLite statement times and a CPU profile (below).
-function recordServerMetrics(file: string, profile: boolean): void {
+// With `profile`, also SQLite statement times, what each session-family read
+// ran, and a CPU profile (below).
+function recordServerMetrics(
+	file: string,
+	profile: boolean,
+	familyWindowSql: string,
+): void {
 	const startedAt = Date.now();
 	const stalls: { at: number; ms: number }[] = [];
 	const reads: Record<string, number> = {};
@@ -48,7 +53,8 @@ function recordServerMetrics(file: string, profile: boolean): void {
 			source.ranges.add(`${read.range.after}-${read.range.through}`);
 		}
 	});
-	const statements = profile ? timeStatements() : undefined;
+	const timed = profile ? timeStatements(familyWindowSql) : undefined;
+	const statements = timed?.statements;
 	const profiler = profile ? cpuProfiler(file) : undefined;
 	const tickMs = 10;
 	let last = performance.now();
@@ -92,6 +98,7 @@ function recordServerMetrics(file: string, profile: boolean): void {
 					]),
 				),
 				sidebarReads,
+				...(timed && { familyReads: timed.familyReads }),
 			}),
 		);
 		renameSync(`${file}.tmp`, file);
@@ -100,43 +107,80 @@ function recordServerMetrics(file: string, profile: boolean): void {
 
 // Every SQLite statement that holds the loop 1ms or more, timed around
 // better-sqlite3's synchronous calls, the ones the store client makes. The
-// caller drains the returned list.
-function timeStatements(): {
-	at: number;
-	ms: number;
-	method: string;
-	sql: string;
-}[] {
+// caller drains `statements`.
+//
+// `familyReads` is every session-family read, whatever its statements took:
+// whether its window held a changed member, and how many of its statements
+// read every session row. A read is its transaction, BEGIN to COMMIT, on one
+// connection; the client runs one statement at a time per connection, so no
+// other caller's statement lands inside it (conduit-test-y7eo.15).
+function timeStatements(familyWindowSql: string): {
+	statements: { at: number; ms: number; method: string; sql: string }[];
+	familyReads: { at: number; changed: boolean; fullSessionScans: number }[];
+} {
 	const statements: { at: number; ms: number; method: string; sql: string }[] =
 		[];
+	const familyReads: {
+		at: number;
+		changed: boolean;
+		fullSessionScans: number;
+	}[] = [];
+	const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim();
+	const familyWindow = normalize(familyWindowSql);
+	const transactions = new WeakMap<
+		object,
+		{ changed?: boolean; fullSessionScans: number }
+	>();
 	const sqlite = createRequire(
 		createRequire(import.meta.url).resolve("@effect/sql-sqlite-node"),
 	)("better-sqlite3") as typeof import("better-sqlite3");
 	const probe = new sqlite(":memory:");
 	const prototype = Object.getPrototypeOf(probe.prepare("select 1")) as Record<
 		"all" | "get" | "run",
-		(this: { source: string }, ...params: unknown[]) => unknown
+		(
+			this: { source: string; database: object },
+			...params: unknown[]
+		) => unknown
 	>;
 	probe.close();
 	for (const method of ["all", "get", "run"] as const) {
 		const original = prototype[method];
 		prototype[method] = function (...params) {
 			const started = performance.now();
+			let result: unknown;
 			try {
-				return original.apply(this, params);
+				result = original.apply(this, params);
+				return result;
 			} finally {
 				const ms = performance.now() - started;
+				const sql = normalize(this.source);
 				if (ms >= 1)
 					statements.push({
 						at: Date.now(),
 						ms: Math.round(ms * 100) / 100,
 						method,
-						sql: this.source.replace(/\s+/g, " ").trim().slice(0, 160),
+						sql: sql.slice(0, 160),
 					});
+				if (sql === "BEGIN")
+					transactions.set(this.database, { fullSessionScans: 0 });
+				const open = transactions.get(this.database);
+				if (open && sql === familyWindow)
+					open.changed = Array.isArray(result) && result.length > 0;
+				else if (open && /^SELECT [^;]* FROM sessions$/i.test(sql))
+					open.fullSessionScans += 1;
+				else if (open && (sql === "COMMIT" || sql === "ROLLBACK")) {
+					transactions.delete(this.database);
+					if (open.changed !== undefined)
+						familyReads.push({
+							at: Date.now(),
+							changed: open.changed,
+							fullSessionScans: open.fullSessionScans,
+						});
+				}
 			}
 		};
 	}
-	return statements;
+	return { statements, familyReads };
 }
 
 // A CPU profile from `<file>.start` to `<file>.stop`, both written by the spec
@@ -196,16 +240,27 @@ async function main(): Promise<void> {
 		});
 	});
 	if (!process.connected) process.exit(1);
+	const codeRoot = dist
+		? join(dist, "src")
+		: fileURLToPath(new URL("../../src", import.meta.url));
+	const extension = dist ? "js" : "ts";
 	const metricsFile = process.env["CONDUIT_TEST_SERVER_METRICS"];
 	if (metricsFile)
 		recordServerMetrics(
 			metricsFile,
 			process.env["CONDUIT_TEST_SERVER_PROFILE"] === "1",
+			(
+				(await import(
+					pathToFileURL(
+						join(
+							codeRoot,
+							"lib/persistence",
+							`session-family-query.${extension}`,
+						),
+					).href
+				)) as typeof import("../../src/lib/persistence/session-family-query.js")
+			).sessionFamilyWindowQuery,
 		);
-	const codeRoot = dist
-		? join(dist, "src")
-		: fileURLToPath(new URL("../../src", import.meta.url));
-	const extension = dist ? "js" : "ts";
 	if (existsSync(join(root, "capabilities-probe-gated"))) {
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(

@@ -1,14 +1,22 @@
-// The family of the session bound to `?`: its root (the topmost ancestor still
-// present) and every descendant of that root, as the `family(id)` CTE.
-const sessionFamilyCte = `WITH RECURSIVE ancestors(id, parent_id) AS (
+// The root of the session bound to `?`, the topmost ancestor still present, as
+// the `root(id)` CTE. Unlike `sessions.root_id`, an orphan family has one.
+const sessionFamilyRootCte = `WITH RECURSIVE ancestors(id, parent_id) AS (
 	SELECT id, parent_id FROM sessions WHERE id = ?
 	UNION
 	SELECT s.id, s.parent_id FROM sessions s
 	JOIN ancestors a ON s.id = a.parent_id
-), family(id) AS (
+), root(id) AS (
 	SELECT a.id FROM ancestors a
 	WHERE a.parent_id IS NULL
 		OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.id = a.parent_id)
+)`;
+
+export const sessionFamilyRootQuery = `${sessionFamilyRootCte} SELECT id FROM root`;
+
+// The family of the session bound to `?`: its root and every descendant of
+// that root, as the `family(id)` CTE.
+const sessionFamilyCte = `${sessionFamilyRootCte}, family(id) AS (
+	SELECT id FROM root
 	UNION
 	SELECT s.id FROM sessions s JOIN family f ON s.parent_id = f.id
 )`;

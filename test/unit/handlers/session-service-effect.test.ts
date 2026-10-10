@@ -157,6 +157,7 @@ describe("session handler metadata", () => {
 		return {
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSessionFamilyRoot: vi.fn(() => Effect.succeed(undefined)),
 			getSession: vi.fn(() =>
 				Effect.succeed({
 					id: "session-1",

@@ -12,8 +12,6 @@ export interface SessionRow {
 	status: string;
 	history_complete?: number;
 	parent_id: string | null;
-	/** The family's top session; null for an orphan or a cycle (0037). */
-	root_id?: string | null;
 	side_thread?: number;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;
