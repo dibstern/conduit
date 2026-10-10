@@ -31,6 +31,7 @@
 
 	let addProjectOpen = $state(false);
 	let listMenuOpen = $state(false);
+	let phoneUsageHeight = $state(0);
 
 	function handleCloseSidebar() {
 		collapseSidebar();
@@ -229,7 +230,7 @@
 	{#if listScreen}<Banners />{/if}
 
 	<!-- Sidebar nav -->
-	<nav id="sidebar-nav" class="relative flex-1 flex flex-col overflow-hidden">
+	<nav id="sidebar-nav" class:phone-list={listScreen} style:--phone-usage-height="{phoneUsageHeight}px" class="relative flex-1 flex flex-col overflow-hidden">
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -242,6 +243,7 @@
 		</div>
 
 		{#if sessionViewState.compact}
+			{#if listScreen}<UsageFooterMeter phone bind:height={phoneUsageHeight} />{/if}
 			<Button
 				id="new-session-btn"
 				variant="ghost"
@@ -271,3 +273,9 @@
 		returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
 	/>
 {/if}
+
+<style>
+	.phone-list :global(#session-list-scroller) {
+		padding-bottom: calc(max(55px, var(--phone-usage-height, 0px) + 9px) + 12px + env(safe-area-inset-bottom, 0px));
+	}
+</style>

@@ -532,4 +532,227 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			expect(overflow.outside).toEqual([]);
 		},
 	},
+	{
+		name: "seed a scrollable phone list for footer clearance",
+		match: /^the session list has (\d+) rows for usage footer clearance$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setShellRows([
+				...(rpc.shellRows ?? []),
+				...Array.from({ length: Number(match[1]) }, (_, index) => ({
+					id: `sess-usage-footer-${index + 1}`,
+					title: `Usage footer session ${index + 1}`,
+					projectSlug: "myapp",
+					instanceId: "claude",
+					status: "idle",
+					updatedAt: PINNED_CLOCK_MS - (index + 1) * 60_000,
+				})),
+			]);
+		},
+	},
+	{
+		// Opening a session from the list attaches its project, which is
+		// what gives the phone list a project default after going back.
+		name: "open a project session from the phone session list",
+		match: /^I open "([^"]+)" from the phone session list$/,
+		run: async ({ world, match }) => {
+			await world.page.locator("[data-testid='session-bar-back']").click();
+			await world.page
+				.locator("#sidebar-panel-sessions")
+				.getByText(match[1] ?? "", { exact: true })
+				.click();
+			await world.page
+				.locator("[data-testid='session-bar-back']")
+				.waitFor({ state: "visible" });
+		},
+	},
+	{
+		name: "assert the phone chips follow shared account order",
+		match: /^the phone usage chips are (.+) in that order$/,
+		run: async ({ world, match }) => {
+			const expected = (match[1] ?? "").split(", ");
+			const chips = world.page
+				.getByTestId("usage-footer-phone")
+				.locator('[data-testid^="usage-phone-chip-"]');
+			await expect(chips).toHaveCount(expected.length);
+			for (const [index, accountId] of expected.entries()) {
+				await expect(chips.nth(index)).toBeVisible();
+				await expect(chips.nth(index)).toHaveAttribute(
+					"data-account",
+					accountId,
+				);
+			}
+		},
+	},
+	{
+		name: "assert the phone default chip highlight and design dimensions",
+		match: /^the phone usage chip (\S+) is the highlighted project default$/,
+		run: async ({ world, match }) => {
+			const chip = world.page.getByTestId(`usage-phone-chip-${match[1]}`);
+			await expect(
+				world.page
+					.getByTestId("usage-footer-phone")
+					.locator('[data-default="true"]'),
+			).toHaveCount(1);
+			await expect(chip).toHaveAttribute("data-default", "true");
+			await expect(chip).toHaveAttribute("title", "Default for this project");
+			await expect(chip).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-bg-alt"),
+			);
+			await expect(chip).toHaveCSS("height", "22px");
+			await expect(chip).toHaveCSS("padding-left", "7px");
+			await expect(chip).toHaveCSS("padding-right", "7px");
+			await expect(
+				world.page.getByTestId(`usage-phone-dot-${match[1]}`),
+			).toHaveAttribute("data-account", match[1] ?? "");
+		},
+	},
+	{
+		name: "assert a phone chip's window, display value and colour",
+		match:
+			/^the phone usage chip (\S+) shows (5h|wk|mo|none) (\S+) at level (ok|warn|limited|unknown)$/,
+		run: async ({ world, match }) => {
+			const [accountId, kind, value, level] = match.slice(1);
+			const chip = world.page.getByTestId(`usage-phone-chip-${accountId}`);
+			await expect(chip).toBeVisible();
+			await expect(chip).toHaveAttribute("data-level", level ?? "");
+			const window = world.page.getByTestId(`usage-phone-window-${accountId}`);
+			if (kind === "none") await expect(window).toHaveCount(0);
+			else {
+				await expect(window).toHaveText(kind ?? "");
+				await expect(window).toHaveCSS(
+					"color",
+					await themeColour(world.page, "--color-text-dimmer"),
+				);
+			}
+			const caption = world.page.getByTestId(`usage-phone-value-${accountId}`);
+			await expect(caption).toHaveText(value ?? "");
+			const token =
+				level === "limited"
+					? "--color-error"
+					: level === "warn"
+						? "--color-fill-amber"
+						: level === "unknown"
+							? "--color-text-dimmer"
+							: "--color-text-secondary";
+			await expect(caption).toHaveCSS(
+				"color",
+				await themeColour(world.page, token),
+			);
+		},
+	},
+	{
+		name: "assert the count includes every remaining account",
+		match: /^the phone usage footer counts (\d+) remaining accounts$/,
+		run: async ({ world, match }) => {
+			const more = world.page.getByTestId("usage-phone-more");
+			if (Number(match[1]) === 0) await expect(more).toHaveCount(0);
+			else await expect(more).toHaveText(`+${match[1]}`);
+		},
+	},
+	{
+		name: "assert the single phone account uses the inline design",
+		match: /^the single phone usage footer shows 5h (\S+) and Wk (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("usage-phone-single")).toBeVisible();
+			await expect(
+				world.page.locator('[data-testid^="usage-phone-chip-"]'),
+			).toHaveCount(0);
+			await expect(world.page.getByTestId("usage-phone-more")).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("usage-phone-column-five_hour"),
+			).toHaveText("5h");
+			await expect(
+				world.page.getByTestId("usage-phone-column-seven_day"),
+			).toHaveText("Wk");
+			await expect(
+				world.page.getByTestId("usage-footer-value-claude-five_hour"),
+			).toHaveText(match[1] ?? "");
+			await expect(
+				world.page.getByTestId("usage-footer-value-claude-seven_day"),
+			).toHaveText(match[2] ?? "");
+			await expect(
+				world.page.getByTestId("usage-footer-bar-claude-five_hour"),
+			).toHaveCSS("width", "40px");
+			await expect(
+				world.page.getByTestId("usage-footer-bar-claude-seven_day"),
+			).toHaveCSS("width", "32px");
+		},
+	},
+	{
+		name: "assert missing plan data hides the phone footer",
+		match: /^the phone usage footer is not visible$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("usage-footer-phone"),
+			).not.toBeVisible();
+			await expect(world.page.getByTestId("usage-phone-single")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert phone footer and last-row geometry after scrolling",
+		match:
+			/^the phone usage footer clears the new-session button and the last row text$/,
+		run: async ({ world }) => {
+			const footer = world.page.getByTestId("usage-footer-phone");
+			await expect(footer).toBeVisible();
+			await expect
+				.poll(async () => {
+					await world.page
+						.locator("#session-list-scroller")
+						.evaluate((element) => {
+							element.scrollTop = element.scrollHeight;
+						});
+					return footer.evaluate((element) => {
+						const bounds = element.getBoundingClientRect();
+						const button = document
+							.querySelector("#new-session-btn")
+							?.getBoundingClientRect();
+						const scroller = document.querySelector("#session-list-scroller");
+						const lastRow = scroller?.querySelectorAll(".session-item");
+						const text = lastRow?.[lastRow.length - 1]?.querySelectorAll(
+							".session-item-title, .session-item-context, .session-item-meta",
+						);
+						if (!button || !scroller || !text?.length)
+							throw new Error("Missing phone list geometry");
+						const listBounds = scroller.getBoundingClientRect();
+						const textBounds = Array.from(text, (item) =>
+							item.getBoundingClientRect(),
+						).filter((box) => box.width > 0 && box.height > 0);
+						const chips = Array.from(
+							element.querySelectorAll(
+								'[data-testid^="usage-phone-chip-"], [data-testid="usage-phone-more"], [data-testid="usage-phone-single"]',
+							),
+							(item) => item.getBoundingClientRect(),
+						);
+						return {
+							scrollable: scroller.scrollHeight > scroller.clientHeight,
+							clearOfButton: bounds.right <= button.left,
+							lastTextVisible:
+								textBounds.length > 0 &&
+								textBounds.every(
+									(box) =>
+										box.top >= listBounds.top && box.bottom <= bounds.top,
+								),
+							contentContained:
+								chips.length > 0 &&
+								chips.every(
+									(box) =>
+										box.left >= bounds.left &&
+										box.right <= bounds.right &&
+										box.top >= bounds.top &&
+										box.bottom <= bounds.bottom,
+								),
+						};
+					});
+				})
+				.toEqual({
+					scrollable: true,
+					clearOfButton: true,
+					lastTextVisible: true,
+					contentContained: true,
+				});
+		},
+	},
 ];
