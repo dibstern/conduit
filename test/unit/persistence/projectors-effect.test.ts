@@ -846,6 +846,195 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	// Recovery can repeat within one batch, after a live ask, or after opening
+	// a new store. Request identity must include its session, kind and provider;
+	// duplicates must not consume a stream version or reach projection again.
+	it("appendBatch stores and projects each recovered OpenCode ask once", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.recover();
+				yield* seedSession("s1");
+				const asks = [
+					makePermissionAsked("s1", "permission-1", "bash"),
+					canonicalEvent("question.asked", "s1", {
+						id: "question-1",
+						sessionId: "s1",
+						questions: [],
+					}),
+				];
+				const stored = yield* store.appendBatch([
+					...asks,
+					...asks.map((event) => ({ ...event, eventId: createEventId() })),
+				]);
+				expect(stored).toHaveLength(2);
+				yield* runner.projectBatch(stored);
+				for (let reconnect = 0; reconnect < 2; reconnect++) {
+					const recovered = yield* store.appendBatch(
+						asks.map((event) => ({ ...event, eventId: createEventId() })),
+					);
+					expect(recovered).toEqual([]);
+					expect((yield* runner.projectBatch(recovered)).version).toBe(0);
+				}
+				expect(yield* store.readBySession("s1")).toHaveLength(2);
+				expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+				expect(
+					yield* sql`SELECT kind, json_extract(payload, '$.id') AS id
+					FROM activities ORDER BY sequence`,
+				).toEqual([
+					{ kind: "permission.asked", id: "permission-1" },
+					{ kind: "question.asked", id: "question-1" },
+				]);
+			}),
+		));
+
+	it("appendBatch keeps OpenCode ask identities separate by session, kind, provider and request", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				yield* seedSession("s2");
+				const asks = [
+					makePermissionAsked("s1", "shared", "bash"),
+					makePermissionAsked("s2", "shared", "bash"),
+					makePermissionAsked("s1", "different", "bash"),
+					canonicalEvent("question.asked", "s1", {
+						id: "shared",
+						sessionId: "s1",
+						questions: [],
+					}),
+					{
+						...makePermissionAsked("s1", "shared", "bash"),
+						provider: "claude",
+					},
+				];
+				expect(yield* store.appendBatch(asks)).toHaveLength(5);
+				expect(
+					yield* store.appendBatch(
+						asks
+							.slice(0, 4)
+							.map((event) => ({ ...event, eventId: createEventId() })),
+					),
+				).toEqual([]);
+				expect(yield* store.readBySession("s1")).toHaveLength(4);
+				expect(yield* store.readBySession("s2")).toHaveLength(1);
+			}),
+		));
+
+	it("appendBatch deduplicates recovered OpenCode asks after reopening the event store", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-recovered-asks-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator();
+					yield* seedSession("s1");
+				}),
+			);
+			const asks = [
+				makePermissionAsked("s1", "permission-1", "bash"),
+				canonicalEvent("question.asked", "s1", {
+					id: "question-1",
+					sessionId: "s1",
+					questions: [],
+				}),
+			];
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const store = yield* EventStoreEffectTag;
+						yield* store.appendBatch(asks);
+					}),
+					makeEventStoreLayerForFile(filename),
+				),
+			);
+			for (let restart = 0; restart < 2; restart++) {
+				await Effect.runPromise(
+					Effect.provide(
+						Effect.gen(function* () {
+							const store = yield* EventStoreEffectTag;
+							const recovered = yield* store.appendBatch(
+								asks.map((event) => ({ ...event, eventId: createEventId() })),
+							);
+							expect(recovered).toEqual([]);
+							expect(
+								(yield* store.readBySession("s1")).map(
+									({ eventId }) => eventId,
+								),
+							).toEqual(asks.map(({ eventId }) => eventId));
+							expect(yield* store.getNextStreamVersion("s1")).toBe(2);
+						}),
+						makeEventStoreLayerForFile(filename),
+					),
+				);
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("concurrent recovered OpenCode asks from independent store instances are stored once", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-concurrent-asks-"));
+		try {
+			const filename = join(dir, "events.db");
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					yield* makeEffectSqlMigrator();
+					yield* seedSession("s1");
+				}),
+			);
+			const batches = Array.from({ length: 6 }, () => [
+				makePermissionAsked("s1", "permission-1", "bash"),
+				canonicalEvent("question.asked", "s1", {
+					id: "question-1",
+					sessionId: "s1",
+					questions: [],
+				}),
+			]);
+			const results = await Effect.runPromise(
+				Effect.forEach(
+					batches,
+					(batch) =>
+						Effect.provide(
+							Effect.gen(function* () {
+								const store = yield* EventStoreEffectTag;
+								return yield* store.appendBatch(batch);
+							}),
+							makeEventStoreLayerForFile(filename),
+						),
+					{ concurrency: 6 },
+				),
+			);
+			const inserted = results.flat();
+			expect(inserted).toHaveLength(2);
+			expect(inserted.map(({ type }) => type).sort()).toEqual([
+				"permission.asked",
+				"question.asked",
+			]);
+			expect(inserted.map(({ streamVersion }) => streamVersion).sort()).toEqual(
+				[0, 1],
+			);
+			await runWithSqliteFile(
+				filename,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT type, COUNT(*) AS count FROM events GROUP BY type ORDER BY type`,
+					).toEqual([
+						{ type: "permission.asked", count: 1 },
+						{ type: "question.asked", count: 1 },
+					]);
+				}),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("append observes stream versions advanced outside the service instance", () =>
 		runTest(
 			Effect.gen(function* () {
