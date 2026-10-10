@@ -16,7 +16,9 @@ const SCROLLBACK_MAX_BYTES = 50 * 1024; // 50 KB per tab
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 const DEFAULT_MAX_TABS = 10;
-const PENDING_CREATE_TIMEOUT_MS = 15_000;
+// Outlasts the server's 15 s PTY host start backstop, so a slow start that
+// succeeds is not reported as a failure first (conduit-test-ni8.59).
+const PENDING_CREATE_TIMEOUT_MS = 30_000;
 
 // The PTYs the server has told us about, keyed by id. The `handlePty*`
 // functions below are the only writers.
@@ -118,6 +120,11 @@ export function getTabCount(): number {
 /** Get whether we can create more tabs. */
 export function getCanCreateTab(): boolean {
 	return !clientTerminal.pendingCreate && serverPtys.size < DEFAULT_MAX_TABS;
+}
+
+/** The label a terminal being created will get, or null when none is. */
+export function getPendingTabTitle(): string | null {
+	return clientTerminal.pendingCreate ? nextTabTitle() : null;
 }
 
 /** Get the ordered list of tabs for rendering: a server row plus its label. */
@@ -353,7 +360,8 @@ export function beginCreateTab(): boolean {
 	if (!getCanCreateTab()) return false;
 
 	clientTerminal.pendingCreate = true;
-	clientTerminal.statusMessage = "Creating terminal...";
+	// The pending tab shows progress; clear any earlier failure.
+	clientTerminal.statusMessage = null;
 
 	pendingCreateTimer = setTimeout(() => {
 		if (clientTerminal.pendingCreate) {

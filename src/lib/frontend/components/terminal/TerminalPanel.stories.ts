@@ -106,7 +106,8 @@ export const TabExited: Story = {
 	},
 };
 
-export const WithStatusMessage: Story = {
+/** The first terminal, while the server is still starting it. */
+export const Starting: Story = {
 	beforeEach: () => {
 		openPanel();
 		beginCreateTab();

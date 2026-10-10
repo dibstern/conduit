@@ -44,9 +44,10 @@ export default defineConfig({
 	forbidOnly: !!process.env["CI"],
 	retries: 1,
 	// Each worker runs Chromium, an in-process relay and real child processes
-	// (PTY hosts, shells). One worker per core saturated the machine, so a PTY
-	// host missed its 5 s start deadline and every terminal.spec test failed
-	// in full runs while passing alone (conduit-test-ni8.59).
+	// (PTY hosts, shells). One worker per core saturates the machine and pushes
+	// every test toward its timeouts. Terminals no longer fail on a slow PTY
+	// host start alone: the server waits while the host is alive, up to a 15 s
+	// backstop (conduit-test-ni8.59).
 	workers: "50%",
 	// require-tests-reporter fails a run where every test skipped (conduit-test-g49a).
 	reporter: process.env["CI"]
