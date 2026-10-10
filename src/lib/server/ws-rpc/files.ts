@@ -1,7 +1,9 @@
 import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
+import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
@@ -27,7 +29,8 @@ export const filesHandlers = {
 			),
 		),
 	GetFileTree: (request) =>
-		getFileTreeEntries().pipe(
+		resolveSessionRequestFolders(request.sessionId).pipe(
+			Effect.flatMap(({ workspaceRoot }) => getFileTreeEntries(workspaceRoot)),
 			Effect.map((entries) => ({
 				projectSlug: request.projectSlug,
 				entries,
@@ -41,7 +44,10 @@ export const filesHandlers = {
 			),
 		),
 	GetFileList: (request) =>
-		getFileListResponse(request.path ?? ".").pipe(
+		resolveSessionRequestFolders(request.sessionId).pipe(
+			Effect.flatMap(({ workspaceRoot }) =>
+				getFileListResponse(request.path ?? ".", workspaceRoot),
+			),
 			Effect.map((result) => ({
 				projectSlug: request.projectSlug,
 				path: result.path,
@@ -56,7 +62,10 @@ export const filesHandlers = {
 			),
 		),
 	GetFileContent: (request) =>
-		getFileContentResponse(request.path).pipe(
+		resolveSessionRequestFolders(request.sessionId).pipe(
+			Effect.flatMap(({ workspaceRoot }) =>
+				getFileContentResponse(request.path, workspaceRoot),
+			),
 			Effect.map((result) => ({
 				projectSlug: request.projectSlug,
 				path: result.path,
@@ -99,9 +108,13 @@ export const filesHandlers = {
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
+			const primaryFolder = config.projectDir;
+			const directory = request.sessionId
+				? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
+				: primaryFolder;
 			const result = yield* getSkillContentValue(
 				request.name,
-				config.slug === request.projectSlug ? config.projectDir : undefined,
+				config.slug === request.projectSlug ? directory : undefined,
 			);
 			if (result === undefined) {
 				return yield* Effect.fail(

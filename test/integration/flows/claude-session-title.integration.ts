@@ -95,7 +95,7 @@ const makeTitleServiceLayer = (input: {
 			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			makePersistenceEffectLayer(input.filename),
+			makePersistenceEffectLayer(input.filename, "test-project"),
 		),
 	);
 

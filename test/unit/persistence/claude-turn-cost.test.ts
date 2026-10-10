@@ -23,7 +23,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 function makeCostRuntime(filename: string) {
-	const persistence = makePersistenceEffectLayer(filename);
+	const persistence = makePersistenceEffectLayer(filename, "test-project");
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistence,

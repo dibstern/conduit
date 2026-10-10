@@ -249,6 +249,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events.map((event) => event.type)).toEqual([
 			"turn.model_resolved",
 			"session.permission_mode_changed",
+			"workspace.changed",
 			"session.status",
 		]);
 		expect(dataOf(sink.events[0])).toEqual({

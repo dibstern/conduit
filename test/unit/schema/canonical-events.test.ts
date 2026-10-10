@@ -537,6 +537,7 @@ describe("Canonical event schemas", () => {
 				metadata: {},
 				provider: "opencode",
 				createdAt: Date.now(),
+				projectId: "project-1",
 				sequence: 1,
 				streamVersion: 0,
 			};

@@ -31,6 +31,7 @@ function makeStored<T extends StoredEvent["type"]>(
 ): StoredEvent {
 	return {
 		sequence,
+		projectId: "test-project",
 		streamVersion: sequence - 1,
 		eventId: createEventId(),
 		sessionId,
@@ -137,6 +138,7 @@ describe("TurnProjector", () => {
 				...recorded,
 				eventId: `recorded-${recorded.sequence}`,
 				sessionId,
+				projectId: "test-project",
 				streamVersion: index,
 				metadata: {},
 			} as StoredEvent;
@@ -327,7 +329,7 @@ describe("TurnProjector", () => {
 			expect(row?.started_at).toBe(now + 200);
 		});
 
-		it("ignores non-busy status changes", async () => {
+		it("settles a prompt still waiting for its reply on idle", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -358,8 +360,9 @@ describe("TurnProjector", () => {
 			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row?.state).toBe("pending");
+			expect(row?.state).toBe("completed");
 			expect(row?.started_at).toBeNull();
+			expect(row?.completed_at).toBe(now + 200);
 		});
 	});
 
@@ -526,6 +529,11 @@ describe("TurnProjector", () => {
 				 VALUES ('older', 's1', 'pending', ?, NULL, NULL, NULL),
 				        ('latest', 's1', ?, ?, ?, ?, 'a1')`,
 				[now, state, now, now + 1, now + 2],
+			);
+			// The tool belongs to the turn's reply; one no turn owns cannot reopen it.
+			await harness.query(
+				"INSERT INTO messages (id, session_id, role, turn_id, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 'latest', ?, ?)",
+				[now + 1, now + 1],
 			);
 			const activity =
 				resume === "busy"

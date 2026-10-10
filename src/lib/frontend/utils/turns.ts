@@ -500,6 +500,8 @@ function turnStart(turn: Turn): number | undefined {
 
 /** Observed stamps keep settled turns independent of the render clock. */
 export function latestStamp(segment: Segment): number | undefined {
+	if (segment.end?.type === "result" && segment.end.createdAt !== undefined)
+		return segment.end.createdAt;
 	let end = segment.end?.createdAt;
 	for (const part of segment.activity) {
 		for (const stamp of [

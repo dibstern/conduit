@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	writeFileSync,
@@ -190,6 +191,14 @@ const server = createServer(async (request, response) => {
 		response.end("{}");
 		return;
 	}
+	if (path === "/test/fail-delete" && request.method === "POST") {
+		const input = JSON.parse(body);
+		updateState((state) => {
+			state.failedDeletes = [...(state.failedDeletes ?? []), input.sessionID];
+		});
+		response.end("{}");
+		return;
+	}
 	if (path === "/test/close-streams" && request.method === "POST") {
 		for (const client of streams.keys()) client.end();
 		response.end("{}");
@@ -221,10 +230,12 @@ const server = createServer(async (request, response) => {
 				projectID: "global",
 				directory,
 				title: input.title ?? "Fake session",
+				...(input.parentID ? { parentID: input.parentID } : {}),
 				time: { created: Date.now(), updated: Date.now() },
 			};
 			writeFileSync(sessionsFile, JSON.stringify([...sessions(), session]));
 			response.end(JSON.stringify(session));
+			emitTyped(directory, "session.created", { info: session });
 		} else {
 			response.end(
 				JSON.stringify(
@@ -322,12 +333,98 @@ const server = createServer(async (request, response) => {
 				{ sessionID: pending?.sessionID, requestID },
 			);
 		response.end("true");
-	} else if (/^\/session\/[^/]+$/.test(path)) {
+	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
+		const sessionID = path.split("/")[2];
+		const failureFile = join(configDir, "fake-opencode-history-failures.json");
+		const failures = existsSync(failureFile)
+			? JSON.parse(readFileSync(failureFile, "utf8"))
+			: {};
+		// true keeps failures active until the test removes the entry.
+		if (failures[sessionID] === true || failures[sessionID] > 0) {
+			if (failures[sessionID] !== true) {
+				failures[sessionID]--;
+				writeFileSync(failureFile, JSON.stringify(failures));
+			}
+			appendFileSync(
+				join(configDir, "fake-opencode-history-failures.jsonl"),
+				`${JSON.stringify({ pid: process.pid, at: Date.now(), sessionID })}\n`,
+			);
+			response.writeHead(503).end('{"message":"Injected history failure"}');
+		} else {
+			response.end("[]");
+		}
+	} else if (["/agent", "/command", "/file", "/file/content"].includes(path)) {
+		const discoveryFile = join(configDir, "fake-opencode-discovery.json");
+		const discovery = existsSync(discoveryFile)
+			? JSON.parse(readFileSync(discoveryFile, "utf8"))
+			: {};
 		response.end(
 			JSON.stringify(
-				sessions().find(({ id }) => path === `/session/${id}`) ?? {},
+				path === "/agent"
+					? (discovery.agents ?? [])
+					: path === "/command"
+						? (discovery.commands ?? [])
+						: path === "/file/content"
+							? { type: "text", content: "" }
+							: (discovery.files ?? []),
 			),
 		);
+	} else if (/^\/session\/[^/]+$/.test(path)) {
+		const session = sessions().find(({ id }) => path === `/session/${id}`);
+		if (request.method === "DELETE") {
+			if ((readState().failedDeletes ?? []).includes(session?.id)) {
+				response
+					.writeHead(503)
+					.end(JSON.stringify({ message: "Delete failed" }));
+				return;
+			}
+			if (!session) {
+				response.writeHead(404).end("{}");
+				return;
+			}
+			writeFileSync(
+				sessionsFile,
+				JSON.stringify(sessions().filter(({ id }) => id !== session.id)),
+			);
+			updateState((state) => {
+				delete state.statuses[session.directory]?.[session.id];
+				for (const kind of ["permissions", "questions"])
+					state[kind][session.directory] = (
+						state[kind][session.directory] ?? []
+					).filter(({ sessionID }) => sessionID !== session.id);
+			});
+			response.end("true");
+			emitTyped(session.directory, "session.deleted", { info: session });
+			return;
+		}
+		response.end(JSON.stringify(session ?? {}));
+	} else if (path === "/file" || path === "/file/content") {
+		try {
+			const target = join(
+				directory ?? configDir,
+				url.searchParams.get("path") ?? ".",
+			);
+			response.end(
+				JSON.stringify(
+					path === "/file"
+						? readdirSync(target, { withFileTypes: true }).map((entry) => ({
+								name: entry.name,
+								path: entry.name,
+								absolute: join(target, entry.name),
+								type: entry.isDirectory() ? "directory" : "file",
+								ignored: false,
+							}))
+						: { type: "text", content: readFileSync(target, "utf8") },
+				),
+			);
+		} catch {
+			response.writeHead(404).end(
+				JSON.stringify({
+					name: "NotFoundError",
+					data: { message: "File not found" },
+				}),
+			);
+		}
 	} else if (path === "/path") {
 		response.end(
 			JSON.stringify({

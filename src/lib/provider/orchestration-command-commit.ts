@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type EventStoreError,
 	makeEventStoreEffect,
@@ -17,7 +18,10 @@ export interface DurableCommandCommitInput extends DurableCommandCommitPlan {
 }
 
 export class DurableCommandCommitRepository {
-	constructor(private readonly sql: SqlClient.SqlClient) {}
+	constructor(
+		private readonly sql: SqlClient.SqlClient,
+		private readonly projectId: string,
+	) {}
 
 	/** Events, receipt, outbox requests and meta commit atomically or not at all. */
 	commit(
@@ -27,14 +31,22 @@ export class DurableCommandCommitRepository {
 			Effect.gen(this, function* () {
 				const eventStore = yield* makeEventStoreEffect.pipe(
 					Effect.provideService(SqlClient.SqlClient, this.sql),
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: this.projectId,
+					}),
 				);
 				const storedEvents = yield* eventStore.appendBatch(input.events);
-				yield* this.recordReceipt(input.receipt);
+				yield* this.recordReceipt({
+					...input.receipt,
+					projectKey: this.projectId,
+				});
 				for (const request of input.outboxRequests) {
-					yield* this.recordOutboxRequest(request, input.receipt.updatedAt);
+					yield* this.recordOutboxRequest(
+						{ ...request, projectKey: this.projectId },
+						input.receipt.updatedAt,
+					);
 				}
 				yield* this.recordMeta(
-					input.receipt.projectKey,
 					storedEvents.at(-1)?.sequence ?? 0,
 					input.receipt.updatedAt,
 				);
@@ -112,14 +124,13 @@ export class DurableCommandCommitRepository {
 	}
 
 	private recordMeta(
-		projectKey: string,
 		lastAppliedSequence: number,
 		updatedAt: number,
 	): Effect.Effect<void, SqlError> {
 		return this.sql`
 			INSERT INTO provider_command_meta (
 				project_key, last_applied_sequence, schema_version, rebuilt_at
-			) VALUES (${projectKey}, ${lastAppliedSequence}, 1, ${updatedAt})
+			) VALUES (${this.projectId}, ${lastAppliedSequence}, 1, ${updatedAt})
 			ON CONFLICT (project_key) DO UPDATE SET
 				last_applied_sequence = excluded.last_applied_sequence,
 				schema_version = excluded.schema_version,

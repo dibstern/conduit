@@ -255,6 +255,9 @@ export const sessionRowsToSessionInfoList = (
 			...(row.last_turn_end_version != null
 				? { lastTurnEndVersion: row.last_turn_end_version }
 				: {}),
+			...(row.last_turn_end_input_id != null
+				? { lastTurnEndInputId: row.last_turn_end_input_id }
+				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
 			limitRecovery:
 				row.limit_recovery == null
@@ -618,6 +621,7 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 >() {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	completedAt?: number;
 	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
@@ -745,6 +749,34 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	// Background task metadata keeps a message fresh after its execution ends.
+	// Read completion boundaries in one batch instead of using that mutable stamp.
+	const withMessageCompletionTimes = (
+		messages: readonly MessageWithTurnModelRow[],
+	) =>
+		Effect.gen(function* () {
+			const completed = messages.filter(
+				(message) => message.role === "assistant" && !message.is_streaming,
+			);
+			if (!completed.length) return messages;
+			const rows = yield* sql<{ message_id: string; completed_at: number }>`
+				SELECT json_extract(data, '$.messageId') AS message_id,
+					created_at AS completed_at FROM events
+				WHERE session_id IN ${sql.in([...new Set(completed.map((message) => message.session_id))])}
+					AND type = 'turn.completed' AND json_extract(data, '$.userMessageId') IS NULL
+					AND json_extract(data, '$.messageId') IN (
+						SELECT value FROM json_each(${JSON.stringify(completed.map((message) => message.id))}))
+				ORDER BY sequence`;
+			const times = new Map(
+				rows.map((row) => [row.message_id, row.completed_at]),
+			);
+			return messages.map((message) => {
+				const completedAt = times.get(message.id);
+				return completedAt === undefined
+					? message
+					: { ...message, completedAt };
+			});
+		});
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
 	const turnMetadataColumns = sql`
@@ -1092,7 +1124,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
-			return groupMessagesWithPartsAndTurnModels(messages, parts);
+			return groupMessagesWithPartsAndTurnModels(
+				yield* withMessageCompletionTimes(messages),
+				parts,
+			);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -1311,7 +1346,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								ORDER BY message_id, sort_order`
 						: [];
 					return {
-						messages: groupMessagesWithPartsAndTurnModels(page, parts),
+						messages: groupMessagesWithPartsAndTurnModels(
+							yield* withMessageCompletionTimes(page),
+							parts,
+						),
 						hasMore: rows.length > pageLimit,
 						version,
 					};
@@ -1561,7 +1599,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						ORDER BY version, message_id`;
 
 					return {
-						messages: groupMessagesWithPartsAndTurnModels(messages, parts),
+						messages: groupMessagesWithPartsAndTurnModels(
+							yield* withMessageCompletionTimes(messages),
+							parts,
+						),
 						version,
 						...(removed === undefined ? {} : { removed }),
 					};

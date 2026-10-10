@@ -341,6 +341,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 					session_id = excluded.session_id, version = excluded.version`;
 				return [];
 			}
+			// A result keyed by its prompt has no answer of its own. Its
+			// messageId can name the previous answer, whose usage and time stay put.
+			if (isEventType(event, "turn.completed") && event.data.userMessageId)
+				return [];
 			if (
 				"messageId" in event.data &&
 				event.type !== "message.part.removed" &&
@@ -469,18 +473,23 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const isBackfilled = event.data.backfilled ? 1 : 0;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
-				// A live user message placed while another turn is open was read
-				// mid-turn: a steer. The turn projector closes that turn.
+				// A live user message whose input was sent as a steer, landing while
+				// another turn is open, was read mid-turn; the turn projector closes
+				// that turn. A steer landing after the turn ended ran as its own.
 				const steers = event.data.role === "user" && !isBackfilled;
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
 						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
 						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
-							${steers ? 1 : 0} AND EXISTS (SELECT 1 FROM turns
-								WHERE session_id = ${event.data.sessionId}
-								AND state IN ('pending', 'running')
-								AND id != ${event.data.messageId}))
+							${steers ? 1 : 0}
+								AND EXISTS (SELECT 1 FROM pending_inputs
+									WHERE input_id = ${event.data.inputId ?? null}
+									AND state = 'steering')
+								AND EXISTS (SELECT 1 FROM turns
+									WHERE session_id = ${event.data.sessionId}
+									AND state IN ('pending', 'running')
+									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
@@ -850,7 +859,8 @@ export const makeTurnProjector = (): EffectProjector => ({
 			const sql = yield* SqlClient.SqlClient;
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
-				"messageId" in event.data
+				"messageId" in event.data &&
+				!(isEventType(event, "turn.completed") && event.data.userMessageId)
 			) {
 				const rows = yield* sql<{
 					rest_digest: string | null;
@@ -985,6 +995,23 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 			}
 
+			// Idle means the provider has nothing in flight, so an open turn
+			// still waiting for its reply never got one (sent from another
+			// client, or ended before replying), and no result will close it.
+			// It settles; a later reply reopens it.
+			if (
+				isEventType(event, "session.status") &&
+				event.data.status === "idle"
+			) {
+				const written = yield* sql<OwnedRow & { id: string }>`
+						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
+						WHERE session_id = ${event.sessionId}
+						AND state IN ('pending', 'running') AND assistant_message_id IS NULL
+						AND requested_at <= ${event.createdAt}
+						RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
 			// A result may arrive before the provider continues the same turn.
 			if (
 				(isEventType(event, "session.status") &&
@@ -1033,6 +1060,16 @@ export const makeTurnProjector = (): EffectProjector => ({
 							AND state NOT IN ('pending', 'running'))) DESC,
 						requested_at DESC, rowid DESC LIMIT 1`;
 				if (!turn) return { sessions: [], messages: [] };
+				const reopening = turn.state !== "pending" && turn.state !== "running";
+				// A tool no message of ours owns (a background task restarting
+				// between turns) joins an open turn only. Reopened, a settled turn
+				// would run with no reply whose result could close it.
+				if (
+					reopening &&
+					isEventType(event, "tool.started") &&
+					!parentTurn.length
+				)
+					return { sessions: [], messages: [] };
 				// Turns run one at a time, so a reply starting ends every earlier
 				// turn still running.
 				const superseded = isEventType(event, "message.created")
@@ -1047,7 +1084,6 @@ export const makeTurnProjector = (): EffectProjector => ({
 						parent_id = COALESCE(parent_id, ${turn.id})
 						WHERE id = ${event.data.messageId}`;
 				}
-				const reopening = turn.state !== "pending" && turn.state !== "running";
 				const assistantMessageId = reopening ? null : turn.assistant_message_id;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
@@ -1069,6 +1105,8 @@ export const makeTurnProjector = (): EffectProjector => ({
 			if (isEventType(event, "turn.completed")) {
 				// New Claude completions add their cost deltas, like per-execution tokens.
 				// Other providers and historical Claude events retain latest-wins cost.
+				// A result-only turn (Claude /compact) has no reply of its own,
+				// so it is keyed by its prompt instead of the previous turn's reply.
 				const tokens = event.data.tokens;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
@@ -1079,7 +1117,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
 							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE ${
+							event.data.userMessageId
+								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
+								: sql`assistant_message_id = ${event.data.messageId}`
+						}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}
@@ -1440,17 +1482,13 @@ export const makeInputProjector = (): EffectProjector => ({
 				);
 			}
 
-			// Sent while another turn is open, the input steers that turn and stays
-			// in the tray until its message lands. Otherwise it leaves now.
+			// Sent as a steer, the input stays in the tray until its message lands.
+			// Otherwise it starts its own turn and leaves now.
 			if (isEventType(event, "input.sent")) {
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE pending_inputs
-						SET state = CASE WHEN EXISTS (
-								SELECT 1 FROM turns
-								WHERE session_id = ${event.data.sessionId}
-									AND state IN ('pending', 'running')
-							) THEN 'steering' ELSE 'removed' END,
+						SET state = ${event.data.steer ? "steering" : "removed"},
 							version = ${ctx.version}
 						WHERE input_id = ${event.data.inputId} AND state = 'queued'
 						RETURNING session_id`,
@@ -1509,6 +1547,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
 	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
+	"session.workspace_started", // Startup observation is read from history by Session Workspace.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",

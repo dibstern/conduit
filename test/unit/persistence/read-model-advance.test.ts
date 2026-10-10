@@ -56,6 +56,7 @@ const withPersistence = async <A>(
 	const bus = recordingBus(advances);
 	const persistence = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors(),
 		bus,
 	);
@@ -227,6 +228,7 @@ it("a replayed write advances the version of the row it changed", async () => {
 					{ provider: "claude" },
 				),
 				sequence: 1,
+				projectId: "test-project",
 				streamVersion: 0,
 			});
 

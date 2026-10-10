@@ -104,6 +104,7 @@ const makeShellTestLayer = (
 	const filename = join(dir, "events.db");
 	const persistenceLayer = makePersistenceEffectLayer(
 		filename,
+		"test-project",
 		undefined,
 		SessionEventBusLive,
 	);

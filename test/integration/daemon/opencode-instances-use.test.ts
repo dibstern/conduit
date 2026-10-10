@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AddInstance,
@@ -70,7 +71,7 @@ describe("OpenCode Instances use", () => {
 			} finally {
 				mkdirSync("test-results", { recursive: true });
 				writeFileSync(
-					`test-results/pa3r-5-${scenario}.json`,
+					`test-results/${scenario.startsWith("rqbc-2-") ? scenario : `pa3r-5-${scenario}`}.json`,
 					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
 				);
 				harness = undefined;
@@ -120,6 +121,35 @@ describe("OpenCode Instances use", () => {
 		};
 		evidence["sessions"] = { sessionA, sessionB };
 
+		// Prompt before any permission prompt is open: the session inbox holds
+		// queued input while a prompt waits on the user.
+		// The fake accepts prompts without streaming a reply, so `done` never
+		// arrives; the recorded request is the observable.
+		void a.send(sessionA, "prompt for A").catch(() => undefined);
+		void b.send(sessionB, "prompt for B").catch(() => undefined);
+		const prompts = () =>
+			fixture
+				.opencodeRequestBodies()
+				.filter(({ path }) => /^\/session\/[^/]+\/prompt/.test(path))
+				.map((request) => ({
+					path: request.path,
+					pid: "pid" in request ? request.pid : undefined,
+				}))
+				.map(({ pid, path }) => ({
+					instance: pid === pids.a ? "a" : pid === pids.b ? "b" : String(pid),
+					session: path.split("/")[2],
+				}));
+		await vi.waitFor(() => expect(prompts()).toHaveLength(2), {
+			timeout: 15_000,
+		});
+		evidence["prompts"] = prompts();
+		expect(prompts()).toEqual(
+			expect.arrayContaining([
+				{ instance: "a", session: sessionA },
+				{ instance: "b", session: sessionB },
+			]),
+		);
+
 		// Cross-instance events first; the own-instance events after them are
 		// the processing barrier for the isolation assertions.
 		await fixture.emitOpenCodeEvent(
@@ -152,32 +182,199 @@ describe("OpenCode Instances use", () => {
 			a: { own: 1, cross: 0 },
 			b: { own: 1, cross: 0 },
 		});
+	}, 90_000);
 
-		// The fake accepts prompts without streaming a reply, so `done` never
-		// arrives; the recorded request is the observable.
-		void a.send(sessionA, "prompt for A").catch(() => undefined);
-		void b.send(sessionB, "prompt for B").catch(() => undefined);
-		const prompts = () =>
-			fixture
-				.opencodeRequestBodies()
-				.filter(({ path }) => /^\/session\/[^/]+\/prompt/.test(path))
-				.map((request) => ({
-					path: request.path,
-					pid: "pid" in request ? request.pid : undefined,
-				}))
-				.map(({ pid, path }) => ({
-					instance: pid === pids.a ? "a" : pid === pids.b ? "b" : String(pid),
-					session: path.split("/")[2],
-				}));
-		await vi.waitFor(() => expect(prompts()).toHaveLength(2), {
-			timeout: 15_000,
+	it("delivers a persisted session's live permission from non-selected instance B after restart without using B", async () => {
+		const fixture = await start("rqbc-2-non-selected-instance");
+		evidence["ticket"] = "conduit-test-rqbc.2";
+		const socket = join(fixture.configDir, "relay.sock");
+		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const instanceA = instances.find(
+			({ id, driver }) => driver === "opencode" && id === "opencode",
+		);
+		const instanceB = instances.find(
+			({ id, driver }) => driver === "opencode" && id === "managed-test",
+		);
+		if (!instanceA || !instanceB)
+			throw new Error("Expected two OpenCode instances");
+		await sendRpcRequest(
+			socket,
+			new SetProjectInstance({
+				slug: "process-test",
+				instanceId: instanceA.id,
+			}),
+		);
+		const first = await fixture.connect();
+		const sessionB = await first.createSession(
+			"Persisted on B",
+			instanceB.id,
+			"opencode",
+		);
+		const pidB = loadDaemonConfig(fixture.configDir)?.instances?.find(
+			({ id }) => id === instanceB.id,
+		)?.pid;
+		expect(pidB).toBeTypeOf("number");
+		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT provider FROM session_providers WHERE session_id = ? AND status = 'active'",
+					)
+					.get(sessionB),
+			).toEqual({ provider: instanceB.id });
+		} finally {
+			db.close();
+		}
+		await first.close();
+		await fixture.terminate();
+		const streamCursor = fixture.opencodeStreamConnections().length;
+		await fixture.restart({ skipBrowserProbe: true });
+		await vi.waitFor(() =>
+			expect(
+				fixture
+					.opencodeStreamConnections()
+					.slice(streamCursor)
+					.some(({ action, pid }) => action === "open" && pid === pidB),
+			).toBe(true),
+		);
+		const browser = await fixture.connect();
+		// A live-only ask cannot be recovered by /permission polling. Browsing
+		// recreates the relay, but no create/send/answer/start may use B.
+		await fixture.emitOpenCodeEvent(
+			{
+				directory: fixture.projectDir,
+				payload: permission("rqbc-2-live-on-b", sessionB),
+			},
+			instanceB.id,
+		);
+		const delivered = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				message["requestId"] === "rqbc-2-live-on-b",
+		);
+		const recovered = new Database(fixture.projectStorePath(), {
+			readonly: true,
 		});
-		evidence["prompts"] = prompts();
-		expect(prompts()).toEqual(
-			expect.arrayContaining([
-				{ instance: "a", session: sessionA },
-				{ instance: "b", session: sessionB },
-			]),
+		try {
+			const approval = recovered
+				.prepare(
+					"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+				)
+				.get("rqbc-2-live-on-b");
+			evidence["recovered"] = {
+				selectedInstance: instanceA.id,
+				boundInstance: instanceB.id,
+				pidB,
+				sessionB,
+				delivered,
+				approval,
+			};
+			expect(approval).toEqual({
+				id: "rqbc-2-live-on-b",
+				session_id: sessionB,
+				status: "pending",
+			});
+		} finally {
+			recovered.close();
+		}
+		expect(
+			loadDaemonConfig(fixture.configDir)?.projects.find(
+				({ slug }) => slug === "process-test",
+			)?.instanceId,
+		).toBe(instanceA.id);
+	}, 90_000);
+
+	it("recovers a downtime permission on non-selected B before grace expiry without a browser", async () => {
+		const fixture = await start("rqbc-2-non-selected-recovery");
+		evidence["ticket"] = "conduit-test-rqbc.2";
+		const socket = join(fixture.configDir, "relay.sock");
+		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
+		const instanceA = instances.find(
+			({ id, driver }) => driver === "opencode" && id === "opencode",
+		);
+		const instanceB = instances.find(
+			({ id, driver }) => driver === "opencode" && id === "managed-test",
+		);
+		if (!instanceA || !instanceB)
+			throw new Error("Expected two OpenCode instances");
+		await sendRpcRequest(
+			socket,
+			new SetProjectInstance({
+				slug: "process-test",
+				instanceId: instanceA.id,
+			}),
+		);
+		const first = await fixture.connect();
+		await first.createSession("Selected A", instanceA.id, "opencode");
+		const sessionB = await first.createSession(
+			"Busy on B",
+			instanceB.id,
+			"opencode",
+		);
+		await fixture.setOpenCodeStatus(
+			fixture.projectDir,
+			sessionB,
+			{ type: "busy" },
+			instanceB.id,
+		);
+		await vi.waitFor(() => {
+			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			try {
+				expect(
+					db.prepare("SELECT status FROM sessions WHERE id = ?").get(sessionB),
+				).toEqual({ status: "busy" });
+			} finally {
+				db.close();
+			}
+		});
+		await first.close();
+		await fixture.terminate();
+		const id = "rqbc-2-downtime-on-b";
+		await fixture.addOpenCodePrompt(
+			"permission",
+			fixture.projectDir,
+			permission(id, sessionB).properties,
+			instanceB.id,
+		);
+		const graceMs = 60_000;
+		const restartedAt = Date.now();
+		await fixture.restart({
+			skipBrowserProbe: true,
+			opencodeIdleTimeoutMs: graceMs,
+		});
+		await vi.waitFor(
+			() => {
+				const db = new Database(fixture.projectStorePath(), { readonly: true });
+				try {
+					const approval = db
+						.prepare(
+							"SELECT id, session_id, status FROM pending_approvals WHERE id = ?",
+						)
+						.get(id);
+					expect(approval).toEqual({
+						id,
+						session_id: sessionB,
+						status: "pending",
+					});
+					evidence["recoveredBeforeAttach"] = {
+						selectedInstance: instanceA.id,
+						boundInstance: instanceB.id,
+						elapsedMs: Date.now() - restartedAt,
+						graceMs,
+						approval,
+					};
+				} finally {
+					db.close();
+				}
+			},
+			{ timeout: 5_000 },
+		);
+		expect(Date.now() - restartedAt).toBeLessThan(graceMs);
+		const browser = await fixture.connect();
+		evidence["delivered"] = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" && message["requestId"] === id,
 		);
 	}, 90_000);
 
@@ -227,9 +424,12 @@ describe("OpenCode Instances use", () => {
 			message,
 		};
 		expect(error).toBeDefined();
-		// The relay wraps the tagged OpenCodeUnavailable in SessionManagerError;
-		// the browser sees the operation failure, not a timeout.
+		// The browser retains the actionable cause through SessionManagerError.
 		expect(message).toContain("CreateSession failed");
+		expect(message).toContain(unreachable.id);
+		expect(message).toContain(`http://127.0.0.1:${closedPort}`);
+		expect(message).toContain("unreachable");
+		expect(message).toMatch(/refused|fetch failed|connect|ECONNREFUSED/i);
 		expect(message).not.toContain("Timeout");
 		expect(elapsedMs).toBeLessThan(15_000);
 		// The browser socket is still usable after the failure.

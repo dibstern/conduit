@@ -17,6 +17,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "conduit",
+	getCurrentSessionId: () => null,
 }));
 
 import ActivityRow from "../../../src/lib/frontend/components/chat/ActivityRow.svelte";

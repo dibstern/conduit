@@ -235,6 +235,7 @@ const makePersistService = (
 const makeProviderState = (
 	overrides?: Partial<ProviderStateEffect>,
 ): ProviderStateEffect => ({
+	projectId: "test-project",
 	nativeThread: vi.fn(() => Effect.succeed(undefined)),
 	getState: vi.fn(() => Effect.succeed({})),
 	saveUpdates: vi.fn(() => Effect.void),
@@ -308,7 +309,7 @@ const serviceLayer = (input: {
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(
 			ClaudeEventPersistEffectTag,
 			input.persist ?? makePersistService(() => Effect.void),
@@ -792,6 +793,7 @@ describe("ProviderTurnService", () => {
 				nativeThread: vi.fn(() =>
 					Effect.succeed({
 						resumeSessionId: "prev",
+						projectId: "test-project",
 						firstSequence: 3,
 						deliveredThrough: 8,
 					}),

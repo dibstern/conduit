@@ -305,6 +305,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Deferred.unsafeDone(stream.connected, Exit.void);
 						if (!current()) return;
 						setState(instanceId, "connected");
+						broadcast({
+							_tag: "connected",
+							instanceId,
+							health: source.getHealth(),
+						});
 						if (stream.reconcileClient)
 							void stream.reconciler.reconcile(
 								stream.reconcileClient,
@@ -821,6 +826,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												gate.withPermits(1)(
 													Effect.sync(() => {
 														subscribers.delete(member);
+														const remaining = new Set(subscribedDirectories());
+														for (const directory of member.directories) {
+															if (remaining.has(directory)) continue;
+															for (const stream of streams.values())
+																stream.reconciler.forget(directory);
+														}
 													}),
 												),
 										);
@@ -833,18 +844,29 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												state,
 												health: stream?.source.getHealth() ?? NO_STREAM_HEALTH,
 											});
-										if (stream) {
+										if (stream?.source.isConnected())
+											subscriber.send({
+												_tag: "connected",
+												instanceId,
+												health: stream.source.getHealth(),
+											});
+										// Recover every already-open instance, including sessions
+										// bound to a non-selected instance. This stays passive.
+										for (const [runningId, running] of streams) {
 											// A late subscriber gets its own replay; others never see it.
-											if (stream.source.isConnected() && stream.reconcileClient)
-												void stream.reconciler.reconcile(
-													stream.reconcileClient,
+											if (
+												running.source.isConnected() &&
+												running.reconcileClient
+											)
+												void running.reconciler.reconcile(
+													running.reconcileClient,
 													subscriber.directories,
 													(_directory, payload) =>
 														subscriber.send({
 															_tag: "event",
-															instanceId,
+															instanceId: runningId,
 															payload,
-															health: stream.source.getHealth(),
+															health: running.source.getHealth(),
 														}),
 												);
 										}

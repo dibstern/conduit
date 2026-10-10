@@ -318,10 +318,9 @@ export interface ProviderInstance {
 	readonly steering: boolean;
 
 	/** Query the provider for available models, commands, and capabilities */
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	>;
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(

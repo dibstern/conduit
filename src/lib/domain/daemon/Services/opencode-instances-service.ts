@@ -16,6 +16,8 @@ export type OpenCodeInstanceEvent = {
 } & (
 	| { readonly _tag: "event"; readonly payload: unknown }
 	| { readonly _tag: "heartbeat" }
+	/** Successful transport connection, including reconnects with unchanged state. */
+	| { readonly _tag: "connected" }
 	| {
 			/** Lifecycle transition; repeats are never emitted. */
 			readonly _tag: "connection";

@@ -115,6 +115,7 @@ import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
 } from "../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
@@ -123,6 +124,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../src/lib/persistence/effect/read-query-effect.js";
+import type { CanonicalEvent } from "../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import {
@@ -791,6 +793,8 @@ export interface TestHandlerLayerOptions {
 	orchestrationEngine?: OrchestrationEngine;
 	providerRegistry?: ProviderRegistry;
 	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
+	/** Committed to the store when the layer builds, e.g. the session a test sends to. */
+	seedEvents?: readonly CanonicalEvent[];
 	readQueryEffect?: ReadQueryEffect;
 	claudeEventPersistEffect?: ClaudeEventPersistEffect;
 }
@@ -868,8 +872,19 @@ export function makeTestHandlerLayer(
 		ProviderRegistryTag,
 		opts?.providerRegistry ?? new ProviderRegistry(),
 	);
-	const persistenceLayer =
-		opts?.persistenceLayer ?? makePersistenceEffectLayer(":memory:");
+	const basePersistenceLayer =
+		opts?.persistenceLayer ??
+		makePersistenceEffectLayer(":memory:", "test-project");
+	const seedEvents = opts?.seedEvents;
+	const persistenceLayer = seedEvents
+		? basePersistenceLayer.pipe(
+				Layer.tap((context) =>
+					Effect.flatMap(makeCommitAndSignal, (commit) =>
+						commit(seedEvents),
+					).pipe(Effect.provide(context), Effect.orDie),
+				),
+			)
+		: basePersistenceLayer;
 	const providerTurnPersistenceLayer = Layer.mergeAll(
 		persistenceLayer,
 		...(opts?.readQueryEffect
@@ -908,7 +923,7 @@ export function makeTestHandlerLayer(
 		sessionTitleService,
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(
@@ -921,7 +936,7 @@ export function makeTestHandlerLayer(
 		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(openCodeApiLayer),
+		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
@@ -934,6 +949,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeInstancesLayer,
 				loggerLayer,
 				overridesStateLayer,
 				orchestrationLayer,

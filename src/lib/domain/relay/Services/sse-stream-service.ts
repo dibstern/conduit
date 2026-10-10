@@ -77,9 +77,10 @@ const makeChannel = (log: Logger | undefined) => {
 				case "heartbeat":
 					for (const callback of callbacks.heartbeat) notify(callback);
 					break;
+				case "connected":
+					for (const callback of callbacks.connected) notify(callback);
+					break;
 				case "connection":
-					if (message.state === "connected")
-						for (const callback of callbacks.connected) notify(callback);
 					for (const callback of callbacks.status)
 						notify(() => callback(message.state));
 			}
@@ -127,6 +128,12 @@ export const SSEStreamLive: Layer.Layer<
 						message.instanceId,
 					);
 					channel = created;
+					if (message.health.connected)
+						channel.dispatch({
+							_tag: "connected",
+							instanceId: message.instanceId,
+							health: message.health,
+						});
 				}
 				channel.dispatch(message);
 			});

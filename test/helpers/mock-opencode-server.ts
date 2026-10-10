@@ -743,15 +743,23 @@ export class MockOpenCodeServer {
 				this.getActiveQueue(this.normalizedQueues, normalized);
 			if (!queue) {
 				// Return a minimal project directory listing so integration
-				// tests that check for common project files can pass.
+				// tests that check for common project files can pass. Only the
+				// root has it: listing every folder the same made the tree
+				// infinite (src/src/test/...), so each GetFileTree walked ~1250
+				// folders and, under load, ran to its 15 s deadline.
+				const dir = new URL(path, "http://mock").searchParams.get("path");
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(
-					JSON.stringify([
-						{ name: "package.json", type: "file" },
-						{ name: "tsconfig.json", type: "file" },
-						{ name: "src", type: "directory" },
-						{ name: "test", type: "directory" },
-					]),
+					JSON.stringify(
+						dir && dir !== "."
+							? []
+							: [
+									{ name: "package.json", type: "file" },
+									{ name: "tsconfig.json", type: "file" },
+									{ name: "src", type: "directory" },
+									{ name: "test", type: "directory" },
+								],
+					),
 				);
 				return;
 			}

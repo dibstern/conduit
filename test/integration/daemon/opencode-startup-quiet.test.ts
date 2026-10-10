@@ -12,6 +12,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: daemon or relay startup or browser attach spawning or probing
 // OpenCode, the first OpenCode session spawning twice or not at all, a
+// automatic discovery or a delayed history retry restarting a stopped instance,
 // reachable external server being replaced by a spawned one, a restart
 // spawning a second process next to the survivor, and a survivor's pending
 // prompts and busy sessions staying invisible until someone uses OpenCode.
@@ -23,7 +24,10 @@ describe("Managed OpenCode starts on first use", () => {
 
 	function start(name: string, autoStartOpenCode = true) {
 		scenario = name;
-		evidence = { ticket: "conduit-test-pa3r.7", at: new Date().toISOString() };
+		evidence = {
+			tickets: ["conduit-test-pa3r.7", "conduit-test-rqbc.1"],
+			at: new Date().toISOString(),
+		};
 		harness = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
@@ -46,6 +50,41 @@ describe("Managed OpenCode starts on first use", () => {
 	/** Every fake OpenCode process the daemon ever started. */
 	const spawned = (fixture: ProcessHarness) =>
 		fakeLog<{ pid: number }>(fixture.configDir, "pids");
+
+	// ChatLayout's onShellSynchronized requests, including sessionless attach.
+	const discovery = (
+		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
+		sessionId?: string,
+	) => {
+		const scope = {
+			projectSlug: "process-test",
+			...(sessionId === undefined ? {} : { sessionId }),
+		};
+		return Effect.runPromise(
+			Effect.all(
+				{
+					models: browser.rpc.GetModels(scope),
+					agents: browser.rpc.GetAgents(scope),
+					commands: browser.rpc.GetCommands(scope),
+					files: browser.rpc.GetFileTree({ projectSlug: scope.projectSlug }),
+				},
+				{ concurrency: 4 },
+			),
+		);
+	};
+
+	function historyComplete(fixture: ProcessHarness, sessionId: string) {
+		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		try {
+			return (
+				db
+					.prepare("SELECT history_complete FROM sessions WHERE id = ?")
+					.get(sessionId) as { history_complete: number } | undefined
+			)?.history_complete;
+		} finally {
+			db.close();
+		}
+	}
 
 	function persistedStatus(fixture: ProcessHarness, sessionId: string) {
 		const db = new Database(fixture.projectStorePath(), { readonly: true });
@@ -78,19 +117,36 @@ describe("Managed OpenCode starts on first use", () => {
 					`test-results/pa3r-7-${scenario}.json`,
 					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
 				);
+				writeFileSync(
+					`test-results/rqbc-1-${scenario}.json`,
+					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
+				);
 				harness = undefined;
 			}
 		}
 	});
 
-	it("spawns nothing at startup or attach, then exactly once for the first OpenCode session", async () => {
+	it("spawns nothing for automatic discovery on attach or reconnect, then exactly once for the first OpenCode session", async () => {
 		const fixture = start("first-use");
+		writeFileSync(
+			join(fixture.configDir, "fake-opencode-discovery.json"),
+			JSON.stringify({
+				agents: [{ name: "fake-agent", mode: "primary" }],
+				commands: [{ name: "fake-command", template: "hello" }],
+				files: [
+					{
+						name: "live.ts",
+						path: "live.ts",
+						absolute: "/live.ts",
+						type: "file",
+						ignored: false,
+					},
+				],
+			}),
+		);
 		await fixture.restart();
-		// connect() returns after the PTY snapshot. A
-		// sessionless attach sends nothing after that (the model, effort and
-		// context window ride shell rows and GetModels since ni8.55), so the
-		// quiet window below is what covers the rest of the attach.
-		const browser = await fixture.connect();
+		let browser = await fixture.connect();
+		evidence["coldDiscovery"] = await discovery(browser);
 		await new Promise<void>((done) => setTimeout(done, 1500));
 		const idle = {
 			spawned: spawned(fixture).length,
@@ -105,6 +161,16 @@ describe("Managed OpenCode starts on first use", () => {
 			requests: [],
 			status: "stopped",
 		});
+		await browser.close();
+		browser = await fixture.connect();
+		evidence["reconnectDiscovery"] = await discovery(browser);
+		expect(spawned(fixture)).toHaveLength(0);
+		expect(fixture.opencodeRequests()).toEqual([]);
+
+		const claudeSessionId = await browser.createSession("Claude");
+		evidence["claudeDiscovery"] = await discovery(browser, claudeSessionId);
+		expect(spawned(fixture)).toHaveLength(0);
+		expect(fixture.opencodeRequests()).toEqual([]);
 
 		const sessionId = await browser.createSession(
 			"OpenCode",
@@ -128,9 +194,21 @@ describe("Managed OpenCode starts on first use", () => {
 			id: "fake",
 			models: ["fake-model"],
 		});
+		const live = await discovery(browser, sessionId);
+		evidence["liveDiscovery"] = live;
+		expect(live.agents.agents.map(({ id }) => id)).toContain("fake-agent");
+		expect(live.commands.commands).toContainEqual({ name: "fake-command" });
+		expect(live.files.entries).toEqual(["live.ts"]);
 
 		await browser.stopInstance(instanceId);
 		const stopped = (await browser.instanceStatus(instanceId)).instance?.status;
+		const cached = await discovery(browser, sessionId);
+		evidence["stoppedDiscovery"] = cached;
+		expect(cached.models.providers.map(({ id }) => id)).toContain("fake");
+		expect(cached.agents.agents).toEqual([]);
+		expect(cached.commands.commands).toEqual([]);
+		expect(cached.files.entries).toEqual([]);
+		expect(spawned(fixture)).toHaveLength(1);
 		await browser.startInstance(instanceId);
 		await vi.waitFor(
 			async () =>
@@ -148,6 +226,101 @@ describe("Managed OpenCode starts on first use", () => {
 		expect(stopped).toBe("stopped");
 		expect(spawned(fixture)).toHaveLength(2);
 		expect(afterRestart.providers.map(({ id }) => id)).toContain("fake");
+
+		await browser.stopInstance(instanceId);
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				projectSlug: "process-test",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		const refreshed = await discovery(browser, sessionId);
+		evidence["explicitRefresh"] = refreshed;
+		expect(spawned(fixture)).toHaveLength(3);
+		expect(refreshed.models.providers.map(({ id }) => id)).toContain("fake");
+		expect(refreshed.commands.commands).toContainEqual({
+			name: "fake-command",
+		});
+		expect(refreshed.files.entries).toEqual(["live.ts"]);
+	}, 90_000);
+
+	it("keeps OpenCode stopped when a failed history backfill retries after explicit stop, then backfills on explicit start", async () => {
+		const fixture = start("history-retry-after-stop");
+		await fixture.restart({
+			opencodeIdleTimeoutMs: 120_000,
+			// The harness defaults to error; this scenario observes retry warnings.
+			cliArgs: ["serve", "--log-level", "warn"],
+		});
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"History",
+			instanceId,
+			"opencode",
+		);
+		await vi.waitFor(() => expect(historyComplete(fixture, sessionId)).toBe(1));
+		const failureFile = join(
+			fixture.configDir,
+			"fake-opencode-history-failures.json",
+		);
+		// Keep failures active until ingress retries: message pollers also read
+		// this endpoint and must not consume a fixed failure count first.
+		writeFileSync(failureFile, JSON.stringify({ [sessionId]: true }));
+		// Reconnect invalidates the completed history and launches a new backfill.
+		await fixture.closeOpenCodeStreams();
+		await vi.waitFor(
+			() => {
+				expect(
+					fakeLog(fixture.configDir, "history-failures").length,
+				).toBeGreaterThanOrEqual(2);
+				expect(fixture.proof()).toMatchObject({
+					logTail: expect.stringMatching(
+						/history backfill failed, retry scheduled[\s\S]*history backfill failed, retry scheduled/,
+					),
+				});
+			},
+			{ timeout: 10_000 },
+		);
+		// The second failure schedules a retry 1.6 to 2 seconds later.
+		const beforeStop = spawned(fixture);
+		await browser.stopInstance(instanceId);
+		expect((await browser.instanceStatus(instanceId)).instance?.status).toBe(
+			"stopped",
+		);
+		const requestsAtStop = fixture.opencodeRequests();
+		evidence["beforeStop"] = { spawned: beforeStop, requests: requestsAtStop };
+		await new Promise<void>((done) => setTimeout(done, 2200));
+		const afterRetry = {
+			spawned: spawned(fixture),
+			status: (await browser.instanceStatus(instanceId)).instance?.status,
+			historyComplete: historyComplete(fixture, sessionId),
+			requests: fixture.opencodeRequests().slice(requestsAtStop.length),
+		};
+		evidence["afterRetry"] = afterRetry;
+		expect(afterRetry).toEqual({
+			spawned: beforeStop,
+			status: "stopped",
+			historyComplete: 0,
+			requests: [],
+		});
+		// This proves the scheduled retry ran, rather than only sampling before it.
+		expect(fixture.proof()).toMatchObject({
+			logTail: expect.stringMatching(
+				/history backfill failed, retry scheduled[\s\S]*history backfill failed, retry scheduled[\s\S]*history backfill failed, retry scheduled/,
+			),
+		});
+
+		writeFileSync(failureFile, JSON.stringify({}));
+		await browser.startInstance(instanceId);
+		await vi.waitFor(
+			() => expect(historyComplete(fixture, sessionId)).toBe(1),
+			{ timeout: 10_000 },
+		);
+		evidence["resumed"] = {
+			spawned: spawned(fixture),
+			historyComplete: historyComplete(fixture, sessionId),
+		};
+		expect(spawned(fixture)).toHaveLength(2);
 	}, 90_000);
 
 	it("uses a reachable external server at the default URL and spawns nothing", async () => {

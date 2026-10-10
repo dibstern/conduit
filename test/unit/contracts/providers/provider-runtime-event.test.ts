@@ -103,7 +103,6 @@ describe("ProviderRuntimeEvent contracts", () => {
 		// Conduit-originated events. No provider can produce them, so they are
 		// deliberately absent from the provider runtime event union.
 		const explicitlyReclassified: readonly string[] = [
-			"session.deleted",
 			"session.provider_cleanup_failed",
 			"session.handoff_delivered",
 			"session.cut_off_dismissed",
@@ -115,6 +114,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.permission_mode_changed",
 			"session.model_changed",
 			"session.workspace_changed",
+			"session.workspace_started", // Mapped from the provider's workspace.changed startup report.
 			"session.variant_changed",
 			"session.context_window_changed",
 			"session.read",

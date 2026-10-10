@@ -26,6 +26,8 @@ export type SessionActivity = {
 	terminalTurnIds: ReadonlySet<string>;
 	currentMessageId: string | null;
 	currentPartId: string | null;
+	/** The send whose optimistic turn waits for the server's busy. */
+	awaitingInputId: string | null;
 	replayGeneration: number;
 	doneMessageIds: SvelteSet<string>;
 	seenMessageIds: SvelteSet<string>;
@@ -83,6 +85,7 @@ export function createEmptySessionActivity(): SessionActivity {
 		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
+		awaitingInputId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),
@@ -802,14 +805,29 @@ export function applyTerminalTurn(
 /** Follow the session's shell row, the server's only word on whether a turn
  *  is running (ni8.35). Busy starts the turn; idle ends it through the
  *  idempotent terminal reducer. Callers pass row transitions, so an idle
- *  write while the sender's optimistic turn waits for busy never lands here. */
-export function followSessionBusy(id: string, busy: boolean): void {
+ *  write while the sender's optimistic turn waits for busy never lands here.
+ *  `endedInputId` names the send whose turn the row last ended: an earlier
+ *  turn's late end leaves the optimistic turn running (jyr9.10). */
+export function followSessionBusy(
+	id: string,
+	busy: boolean,
+	endedInputId?: string,
+): void {
 	const activity = sessionActivity.get(id);
 	if (!activity) return;
 	if (busy) {
+		activity.awaitingInputId = null;
 		if (activity.phase === "idle") phaseToProcessing(activity);
 		return;
 	}
+	if (
+		activity.phase !== "idle" &&
+		activity.awaitingInputId !== null &&
+		endedInputId !== undefined &&
+		endedInputId !== activity.awaitingInputId
+	)
+		return;
+	activity.awaitingInputId = null;
 	const messages = sessionMessages.get(id);
 	if (activity.phase !== "idle") {
 		if (messages) applyTerminalTurn(activity, messages);
@@ -982,6 +1000,7 @@ export function clearMessages(): void {
 			activity.terminalTurnIds = new Set();
 			activity.currentMessageId = null;
 			activity.currentPartId = null;
+			activity.awaitingInputId = null;
 			activity.doneMessageIds.clear();
 			activity.seenMessageIds.clear();
 			activity.replayGeneration++;

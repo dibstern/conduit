@@ -6,7 +6,7 @@ import type {
 	WorktreeInfo,
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, sendMockShellRowPatch } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({
@@ -26,6 +26,7 @@ async function openHeader(
 	options: {
 		provider?: string;
 		supportsWorktree?: boolean | undefined;
+		status?: "idle" | "busy";
 		directory?: string;
 		git?: SessionGit;
 		sessionGit?: SessionGit;
@@ -63,7 +64,7 @@ async function openHeader(
 		{
 			id: "header-session",
 			title: "Session header",
-			status: "idle",
+			status: options.status ?? "idle",
 			projectSlug: "e2e-replay",
 			...(options.sessionGit ? { git: options.sessionGit } : {}),
 			...(options.workspace ? { workspace: options.workspace } : {}),
@@ -240,6 +241,149 @@ for (const mode of [
 					.getByRole("menu", { name: "Checkout" })
 					.getByText("conduit-wt-draft", { exact: true }),
 			).toBeVisible();
+		});
+
+		test("agent EnterWorktree and ExitWorktree update the selected session during its running turn", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			await page.clock.setFixedTime(new Date("2026-10-06T10:00:00Z"));
+			const main = "/workspace/conduit";
+			const worktree = `${main}/.claude/worktrees/header-agent`;
+			const mainGit: SessionGit = {
+				branch: "main",
+				dirty: false,
+				ahead: 0,
+				behind: 0,
+			};
+			const pill = await openHeader(page, harness.relayBaseUrl, {
+				provider: "claude",
+				supportsWorktree: true,
+				status: "busy",
+				directory: main,
+				git: mainGit,
+				sessionGit: mainGit,
+			});
+			const stages: ReadonlyArray<{
+				name: string;
+				tool: "EnterWorktree" | "ExitWorktree" | null;
+				directory: string;
+				workspace: SessionWorkspace | null;
+				git: SessionGit;
+			}> = [
+				{
+					name: "main",
+					tool: null,
+					directory: main,
+					workspace: null,
+					git: mainGit,
+				},
+				{
+					name: "entered",
+					tool: "EnterWorktree",
+					directory: worktree,
+					workspace: {
+						cause: "agent",
+						worktrees: { [main]: worktree },
+						origin: "existing",
+					},
+					git: {
+						branch: "worktree-header-agent",
+						worktree: "header-agent",
+						dirty: true,
+						ahead: 1,
+						behind: 0,
+					},
+				},
+				{
+					name: "exited",
+					tool: "ExitWorktree",
+					directory: main,
+					workspace: null,
+					git: mainGit,
+				},
+			];
+			const observations = [];
+			for (const stage of stages) {
+				// Workspace changes now arrive as live SubscribeShell row upserts.
+				if (stage.tool)
+					sendMockShellRowPatch(page, "header-session", () => ({
+						workspace: stage.workspace,
+						git: stage.git,
+					}));
+				await expect(page).toHaveURL(/\/s\/header-session$/);
+				await expect(page.getByTestId("session-bar-title")).toHaveText(
+					"Session header",
+				);
+				await expect(
+					page.getByRole("button", { name: "Stop generating" }),
+				).toBeVisible();
+				const running = await page
+					.getByRole("button", { name: "Stop generating" })
+					.isVisible();
+				const folder = stage.directory.split("/").at(-1);
+				await expect(pill).toHaveAttribute(
+					"title",
+					`${folder} / ${stage.git.branch}`,
+				);
+				await expect(pill.locator('[data-part="project"]')).toHaveText(
+					folder ?? "",
+				);
+				await expect(pill.locator('[data-part="branch"]')).toHaveText(
+					stage.git.branch ?? "",
+				);
+				await expect(pill.locator("[data-icon]")).toHaveAttribute(
+					"data-icon",
+					stage.git.worktree ? "worktree" : "branch",
+				);
+				await expect(pill.locator('[data-part="dirty"]')).toHaveCount(
+					stage.git.dirty ? 1 : 0,
+				);
+				await capture(
+					page,
+					testInfo,
+					`${mode.name}-agent-${stage.name}-header`,
+				);
+				await pill.click();
+				const details = page.getByRole("menu", { name: "Checkout" });
+				await expect(details).toBeVisible();
+				const checkout = await details
+					.locator("dl")
+					.evaluate(
+						(list): Record<string, string> =>
+							Object.fromEntries(
+								Array.from(list.querySelectorAll("dt"), (label) => [
+									label.textContent?.trim() ?? "",
+									label.nextElementSibling?.textContent?.trim() ?? "",
+								]).sort(([left = ""], [right = ""]) =>
+									left.localeCompare(right),
+								),
+							),
+					);
+				expect(checkout["Folder"]).toBe(stage.directory);
+				expect(checkout["Branch"]).toBe(stage.git.branch);
+				expect(checkout["Worktree"]).toBe(stage.git.worktree);
+				observations.push({
+					stage: stage.name,
+					tool: stage.tool,
+					selectedSession: new URL(page.url()).pathname,
+					running,
+					label: await pill.getAttribute("title"),
+					icon: await pill.locator("[data-icon]").getAttribute("data-icon"),
+					checkout,
+				});
+				await capture(
+					page,
+					testInfo,
+					`${mode.name}-agent-${stage.name}-details`,
+				);
+				await page.keyboard.press("Escape");
+				await expect(details).not.toBeVisible();
+			}
+			await testInfo.attach(`${mode.name}-agent-worktree-lifecycle.json`, {
+				body: Buffer.from(JSON.stringify(observations, null, 2)),
+				contentType: "application/json",
+			});
 		});
 
 		test("a folder without git shows only its basename", async ({

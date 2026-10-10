@@ -17,6 +17,7 @@
 // a screenshot per step.
 
 import { writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -268,6 +269,20 @@ test.describe("Claude launching rows", () => {
 			const replayer = harness.claudeReplayer;
 			if (!replayer) throw new Error("no Claude replayer");
 			const steps = recorder(page, testInfo);
+			const statusReport: { step: string; statuses: string[] }[] = [];
+			const childStatuses = () => {
+				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+				try {
+					return db
+						.prepare(
+							"SELECT status FROM sessions WHERE parent_id = ? ORDER BY id",
+						)
+						.all(decodeURIComponent(harness.projectUrl.slice("/s/".length)))
+						.map((row) => String(row["status"]));
+				} finally {
+					db.close();
+				}
+			};
 			try {
 				await app.goto(relayUrl);
 				await app.sendMessage("Launch the background work");
@@ -280,6 +295,11 @@ test.describe("Claude launching rows", () => {
 					[SHELL]: { state: "running" },
 					[AGENT_A]: { state: "running", nested: "" },
 					[AGENT_B]: { state: "running" },
+				});
+				await expect.poll(childStatuses).toEqual(["busy", "busy"]);
+				statusReport.push({
+					step: "before-restart",
+					statuses: childStatuses(),
 				});
 
 				// (c) the restart cuts the held trace off: no task reports an outcome.
@@ -295,6 +315,8 @@ test.describe("Claude launching rows", () => {
 					[AGENT_A]: gone,
 					[AGENT_B]: gone,
 				});
+				await expect.poll(childStatuses).toEqual(["idle", "idle"]);
+				statusReport.push({ step: "after-restart", statuses: childStatuses() });
 				// Whatever usage an agent reported while running stays; no outcome is
 				// made up for it.
 				for (const id of [SHELL, AGENT_A, AGENT_B])
@@ -319,6 +341,12 @@ test.describe("Claude launching rows", () => {
 						.toEqual(restarted[id]);
 			} finally {
 				await steps.write("launching-rows-restart-report.json");
+				const statusPath = testInfo.outputPath("child-status-restart.json");
+				writeFileSync(statusPath, JSON.stringify(statusReport, null, 2));
+				await testInfo.attach("child-status-restart.json", {
+					path: statusPath,
+					contentType: "application/json",
+				});
 			}
 		});
 	});

@@ -1,4 +1,6 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
+import { decodeClaudeSDKMessage } from "../../src/lib/contracts/providers/claude-agent-sdk.js";
 import {
 	type ClaudeTraceName,
 	type ClaudeTraceReplayer,
@@ -56,10 +58,51 @@ export const claudeSdk: typeof fakeSdk = {
 			})(),
 		});
 		const query = replayer.sdk.query(params);
+		const nextReplay = query.next.bind(query);
 		const closeReplay = query.close.bind(query);
+		let closed = false;
 		return Object.assign(query, {
+			next: async (...args: Parameters<typeof query.next>) => {
+				const next = await nextReplay(...args);
+				if (next.done) return next;
+				const message = next.value;
+				const release =
+					process.env["CONDUIT_TEST_CLAUDE_REPLAY_RESULT_RELEASE"];
+				while (
+					message.type === "result" &&
+					release &&
+					!closed &&
+					!existsSync(release)
+				)
+					await sleep(10);
+				const project = process.env["CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR"];
+				const enterPath = process.env["CONDUIT_TEST_CLAUDE_REPLAY_ENTER_PATH"];
+				let wire = JSON.stringify(message);
+				if (enterPath)
+					wire = wire.replaceAll(
+						"/tmp/conduit-worktree-capture/repo/.claude/worktrees/contract",
+						enterPath,
+					);
+				if (project)
+					wire = wire.replaceAll("/tmp/conduit-worktree-capture/repo", project);
+				const mapped = decodeClaudeSDKMessage(JSON.parse(wire));
+				return {
+					done: false as const,
+					value:
+						mapped.type === "system" && mapped.subtype === "init"
+							? {
+									...mapped,
+									cwd:
+										process.env["CONDUIT_TEST_CLAUDE_REPLAY_CWD"] ??
+										params.options?.cwd ??
+										mapped.cwd,
+								}
+							: mapped,
+				};
+			},
 			initializationResult: () => initialization.initializationResult(),
 			close: () => {
+				closed = true;
 				initialization.close();
 				closeReplay();
 			},

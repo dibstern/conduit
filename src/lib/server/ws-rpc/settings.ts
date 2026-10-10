@@ -130,7 +130,7 @@ export const settingsHandlers = {
 			),
 		),
 	ResolveClaudeSettings: (request) =>
-		resolveClaudeSettingsForInstance({ instanceId: request.instanceId }).pipe(
+		resolveClaudeSettingsForInstance(request).pipe(
 			Effect.map((resolved) => ({
 				projectSlug: request.projectSlug,
 				instanceId: request.instanceId,

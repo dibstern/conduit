@@ -242,7 +242,7 @@ async function projectedHistory(
  * pattern). Without this the default session runs on the Claude provider and
  * never touches the mock — the "differential" would silently compare the
  * projection with itself. Returns the local session id; the first sendMessage
- * to it materializes an OpenCode session returned by SendMessage.
+ * to it materializes an OpenCode session returned by input.submit.
  */
 async function bindOpenCodeSession(
 	client: TestWsClient,
@@ -454,8 +454,13 @@ describe("Integration: Session Visibility Repros", () => {
 	it("materialized session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
-		const detourId = client1.getActiveSessionId();
-		if (!detourId) throw new Error("No initial session");
+		// A relay-owned detour, not the initial session: resetQueues() re-armed
+		// the POST /session entry relay startup consumed, so the materialized
+		// OpenCode session below receives the initial session's id.
+		const detour = await client1.createSession("Detour", {
+			instanceId: "claude",
+		});
+		const detourId = detour["id"] as string;
 
 		const { providers } = await client1.getModels();
 		const provider = providers.find(

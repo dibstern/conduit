@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -225,9 +226,18 @@ it("pins global directory routing, session demand and pending-list scope from th
 	}[] = [];
 	const sessions: (TestSession & {
 		directory: string;
+		requestedDirectory: string;
+		returnedDirectory: string | null;
 		ask: "permission" | "question";
 	})[] = [];
 	const directories: string[] = [];
+	let aliasRoot: string | undefined;
+	let directoryAlias: string | undefined;
+	const aliasStatusReads: {
+		phase: "pending" | "resolved";
+		path: string;
+		result: Record<string, { type: string }>;
+	}[] = [];
 	let passed = false;
 	let version: string | undefined;
 	const { controller, ready } = connectSSE("/global/event", ({ data }) => {
@@ -247,15 +257,33 @@ it("pins global directory routing, session demand and pending-list scope from th
 				realpathSync(mkdtempSync(join(tmpdir(), `opencode-global-${name}-`))),
 			);
 		}
+		aliasRoot = realpathSync(
+			mkdtempSync(join(tmpdir(), "opencode-global-alias-")),
+		);
+		directoryAlias = join(aliasRoot, "project");
+		const canonicalDirectory = directories[0];
+		assert.exists(canonicalDirectory);
+		symlinkSync(canonicalDirectory, directoryAlias, "dir");
+		expect(realpathSync(directoryAlias)).toBe(directories[0]);
 
 		for (const directory of directories) {
 			for (const ask of ["permission", "question"] as const) {
-				const query = `?directory=${encodeURIComponent(directory)}`;
+				// Both asks in directory A originate through the alias. Their session
+				// metadata, global envelopes and canonical API reads must agree.
+				const requestDirectory =
+					directory === directories[0] ? directoryAlias : directory;
+				const query = `?directory=${encodeURIComponent(requestDirectory)}`;
 				const session = await apiPost<TestSession>(`/session${query}`, {
 					title: `global-stream-${ask}`,
 					permission: [{ permission: "bash", pattern: "*", action: "ask" }],
 				});
-				sessions.push({ ...session, directory, ask });
+				sessions.push({
+					...session,
+					directory,
+					ask,
+					requestedDirectory: requestDirectory,
+					returnedDirectory: session.directory ?? null,
+				});
 				expect(session.directory).toBe(directory);
 				await apiPost(`/session/${session.id}/prompt_async${query}`, {
 					// Same unauthenticated model as helpers/session-helpers.ts.
@@ -286,16 +314,18 @@ it("pins global directory routing, session demand and pending-list scope from th
 		}
 
 		for (const endpoint of ["permission", "question"] as const) {
-			for (const directory of [undefined, ...directories]) {
+			for (const directory of [undefined, ...directories, directoryAlias]) {
 				const path = `/${endpoint}${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`;
 				const result = await apiGet<PendingAsk[]>(path);
 				pendingLists.push({ phase: "pending", path, result });
 				// 1.18.34's unscoped lists are NOT global. Even with asks in both
 				// directories they return []; scoped lists return only that ask.
+				const canonicalDirectory =
+					directory === directoryAlias ? directories[0] : directory;
 				const expected = envelopes
 					.filter(
 						(envelope) =>
-							envelope.directory === directory &&
+							envelope.directory === canonicalDirectory &&
 							envelope.payload.type === `${endpoint}.asked`,
 					)
 					.map(({ payload }) => payload.properties);
@@ -303,6 +333,24 @@ it("pins global directory routing, session demand and pending-list scope from th
 				expect(result).toEqual(expected);
 			}
 		}
+		for (const directory of [canonicalDirectory, directoryAlias]) {
+			const path = `/session/status?directory=${encodeURIComponent(directory)}`;
+			const result = await apiGet<Record<string, { type: string }>>(path);
+			aliasStatusReads.push({ phase: "pending", path, result });
+			// Non-empty demand prevents two empty responses from proving parity.
+			for (const session of sessions.filter(
+				(session) => session.directory === directories[0],
+			)) {
+				expect(result[session.id]).toEqual({ type: "busy" });
+			}
+			expect(Object.keys(result).sort()).toEqual(
+				sessions
+					.filter((session) => session.directory === directories[0])
+					.map((session) => session.id)
+					.sort(),
+			);
+		}
+		expect(aliasStatusReads[1]?.result).toEqual(aliasStatusReads[0]?.result);
 
 		// Reply using the directory from the SSE envelope, not a guessed scope.
 		for (const { directory, payload } of [...envelopes]) {
@@ -357,6 +405,18 @@ it("pins global directory routing, session demand and pending-list scope from th
 			pendingLists.push({ phase: "resolved", path, result });
 			expect(result).toEqual([]);
 		}
+		for (const endpoint of ["permission", "question"] as const) {
+			const path = `/${endpoint}?directory=${encodeURIComponent(directoryAlias)}`;
+			const result = await apiGet<PendingAsk[]>(path);
+			pendingLists.push({ phase: "resolved", path, result });
+			expect(result).toEqual([]);
+		}
+		for (const directory of [canonicalDirectory, directoryAlias]) {
+			const path = `/session/status?directory=${encodeURIComponent(directory)}`;
+			const result = await apiGet<Record<string, { type: string }>>(path);
+			aliasStatusReads.push({ phase: "resolved", path, result });
+			expect(result).toEqual({});
+		}
 		controller.abort();
 		assertRouting(
 			envelopes,
@@ -375,6 +435,8 @@ it("pins global directory routing, session demand and pending-list scope from th
 					version,
 					passed,
 					directories,
+					directoryAlias,
+					aliasStatusReads,
 					sessions,
 					pendingLists,
 					retryObserved: envelopes.some(
@@ -390,12 +452,13 @@ it("pins global directory routing, session demand and pending-list scope from th
 			),
 		);
 		for (const session of sessions) {
-			const query = `?directory=${encodeURIComponent(session.directory)}`;
+			const query = `?directory=${encodeURIComponent(session.requestedDirectory)}`;
 			await apiPost(`/session/${session.id}/abort${query}`, {}).catch(() => {});
 			await apiDelete(`/session/${session.id}${query}`).catch(() => {});
 		}
 		for (const directory of directories) {
 			rmSync(directory, { recursive: true, force: true });
 		}
+		if (aliasRoot) rmSync(aliasRoot, { recursive: true, force: true });
 	}
 }, 420_000);

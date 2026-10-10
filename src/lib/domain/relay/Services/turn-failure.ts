@@ -28,11 +28,11 @@ export const makeFailTurn = Effect.gen(function* () {
 		userMessageId?: string,
 	): Effect.Effect<void> => {
 		const errorId = createEventId();
-		const event = (
+		const event = <K extends ProviderRuntimeEvent["type"]>(
 			eventId: string,
-			type: ProviderRuntimeEvent["type"],
+			type: K,
 			data: Record<string, unknown>,
-		): ProviderRuntimeEvent => ({
+		) => ({
 			eventId,
 			type,
 			providerId: "conduit",

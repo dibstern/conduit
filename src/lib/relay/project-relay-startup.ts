@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Cause, Effect, Exit, Runtime } from "effect";
+import { Cause, Effect, Exit, Option, Runtime } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -234,9 +234,15 @@ function acquireStartupServices(inputs: StartupInputs) {
 			log.child("opencode-runtime-ingress"),
 			(sessionId, instanceId, signal) =>
 				Effect.gen(function* () {
-					const client = yield* instances.use(instanceId);
+					const client = yield* instances.ifRunning(instanceId);
+					if (Option.isNone(client)) {
+						// Empty history would incorrectly mark the backfill complete.
+						return yield* Effect.fail(
+							new Error(`OpenCode instance "${instanceId}" is not running`),
+						);
+					}
 					return yield* Effect.tryPromise(() =>
-						client.session.messages(sessionId, { signal }),
+						client.value.session.messages(sessionId, { signal }),
 					);
 				}).pipe(Effect.scoped),
 			(sessionId, messageId) =>

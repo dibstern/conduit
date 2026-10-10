@@ -57,7 +57,10 @@ describe("permission/question processing timeouts through Effect state", () => {
 			const client = makeHandlerOpenCodeAPI({
 				question: { reply: vi.fn(async () => undefined) },
 			});
-			const persistence = makePersistenceEffectLayer(":memory:");
+			const persistence = makePersistenceEffectLayer(
+				":memory:",
+				"test-project",
+			);
 			const layer = Layer.provideMerge(
 				ProviderTurnServiceLive,
 				Layer.mergeAll(

@@ -132,3 +132,62 @@ export const MultiFolderUnknown: Story = {
 		);
 	},
 };
+
+const existingWorktrees = [
+	{ path: "/src/app", branch: "main", main: true },
+	{ path: "/src/app-draft", branch: "feature/draft", main: false },
+	{ path: "/src/docs-draft", branch: "feature/docs", main: false },
+];
+
+export const ExistingWorktreeList: Story = {
+	beforeEach: () => seed(true),
+	args: { loadWorktrees: async () => ({ worktrees: existingWorktrees }) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await userEvent.click(
+			canvas.getByRole("menuitem", { name: "Existing worktree" }),
+		);
+		await expect(
+			await canvas.findByRole("menuitemradio", { name: /feature\/draft/ }),
+		).toHaveTextContent("/src/app-draft");
+		await expect(
+			canvas.getByRole("menuitemradio", { name: /feature\/docs/ }),
+		).toHaveTextContent("/src/docs-draft");
+	},
+};
+
+export const ExistingWorktreeSelected: Story = {
+	beforeEach: () => seed(true),
+	args: { loadWorktrees: async () => ({ worktrees: existingWorktrees }) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await userEvent.click(
+			canvas.getByRole("menuitem", { name: "Existing worktree" }),
+		);
+		await userEvent.click(
+			await canvas.findByRole("menuitemradio", { name: /feature\/draft/ }),
+		);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^feature\/draft$/,
+		);
+		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
+			"existing worktree",
+		);
+	},
+};
+
+export const ExistingWorktreeUnsupported: Story = {
+	beforeEach: () => seed(false, 1, false),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await expect(
+			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
+		).toHaveAttribute("aria-disabled", "true");
+		await expect(
+			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
+		).toHaveTextContent("Not supported by Folder provider");
+	},
+};

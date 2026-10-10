@@ -96,6 +96,7 @@ const run = async (
 	const pushed: string[] = [];
 	const persistence = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors(),
 		silentBus,
 	);

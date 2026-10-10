@@ -46,6 +46,7 @@ import {
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
@@ -57,11 +58,32 @@ export const resolveSessionFolders = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
+		// Snapshot-only callers can resolve without relay services. Live relays
+		// provide both services, including in the provider turn's captured context.
+		// A second tab may have read session.created before the draft's launch
+		// move finished. Wait and reread; rollback must never fall back to main.
+		const savedWorkspace =
+			workspace._tag === "Some" && read._tag === "Some"
+				? yield* workspace.value.withLaunch(
+						Effect.gen(function* () {
+							const row = yield* read.value.getSession(session.id);
+							if (!row)
+								return yield* Effect.fail(
+									new RelayError(`Session ${session.id} not found`, {
+										code: "SESSION_NOT_FOUND",
+									}),
+								);
+							return row.workspace;
+						}),
+					)
+				: session.workspace;
 		const state =
-			session.workspace == null
+			savedWorkspace == null
 				? null
 				: yield* Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
-						session.workspace,
+						savedWorkspace,
 					);
 		const workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
 		if (!existsSync(workspaceRoot))
@@ -94,6 +116,26 @@ export const resolveSessionFolders = (
 			}
 		}
 		return { workspaceRoot, extraFolders };
+	});
+
+/** Browser requests identify a session; project-level requests keep the primary folder. */
+export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
+	Effect.gen(function* () {
+		if (sessionId === undefined) {
+			const config = yield* ConfigTag;
+			return {
+				workspaceRoot: config.projectDir,
+				extraFolders: config.extraFolders ?? [],
+			};
+		}
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!session)
+			return yield* Effect.fail(
+				new RelayError(`Session ${sessionId} not found`, {
+					code: "SESSION_NOT_FOUND",
+				}),
+			);
+		return yield* resolveSessionFolders(session);
 	});
 
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {

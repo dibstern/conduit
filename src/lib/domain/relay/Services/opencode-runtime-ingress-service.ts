@@ -9,6 +9,7 @@ import {
 	ProjectionRunnerEffectTag,
 	type ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import {
 	isSettled,
 	snapshotPayload,
@@ -20,6 +21,7 @@ import {
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
 import {
+	canSeedSession,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
@@ -468,6 +470,22 @@ export class EffectOpenCodeRuntimeIngress
 					),
 				);
 			if (events.length > 0) {
+				if (!(yield* this.hasProjectedSession(sessionId))) {
+					const parentId = this.parentIds.get(sessionId);
+					const knownParentId =
+						parentId &&
+						((yield* this.hasProjectedSession(parentId)) ||
+							(yield* this.withSql(isSessionDeleted(parentId))))
+							? parentId
+							: undefined;
+					events.unshift(
+						opencodeSessionCreatedRuntimeEvent(
+							sessionId,
+							providerInstanceId,
+							knownParentId,
+						),
+					);
+				}
 				this.log.info("opencode-runtime-ingress: reconciling REST history", {
 					sessionId,
 					events: events.length,
@@ -484,6 +502,7 @@ export class EffectOpenCodeRuntimeIngress
 						SELECT id, rest_digest, rest_event_id FROM messages
 						WHERE session_id = ${sessionId} ORDER BY created_at ASC, id ASC`;
 							complete =
+								(yield* this.hasProjectedSession(sessionId)) &&
 								rest.every(isSettled) &&
 								rows.length === rest.length &&
 								rows.every(
@@ -599,6 +618,11 @@ export class EffectOpenCodeRuntimeIngress
 		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult, unknown> {
 		return Effect.gen(this, function* () {
+			if (yield* this.withSql(isSessionDeleted(sessionId))) {
+				this.removeSession(sessionId);
+				this.stats.eventsSkipped++;
+				return { ok: false, reason: "no-session" } as const;
+			}
 			if (this.backfillsInFlight.has(sessionId)) {
 				this.historyRevisions.set(
 					sessionId,
@@ -616,6 +640,25 @@ export class EffectOpenCodeRuntimeIngress
 				typeof info.parentID === "string"
 			) {
 				this.parentIds.set(sessionId, info.parentID);
+			}
+			const cachedParentId = this.parentIds.get(sessionId);
+			if (
+				cachedParentId &&
+				(yield* this.withSql(isSessionDeleted(cachedParentId)))
+			) {
+				yield* this.ingestion.ingestBatch(
+					[
+						opencodeSessionCreatedRuntimeEvent(
+							sessionId,
+							providerInstanceId,
+							cachedParentId,
+						),
+					],
+					{ publishToRelay: false },
+				);
+				this.removeSession(sessionId);
+				this.stats.eventsSkipped++;
+				return { ok: false, reason: "no-session" } as const;
 			}
 			const translation = this.translator.forkSession(sessionId);
 			const translated = yield* Effect.try({
@@ -643,7 +686,9 @@ export class EffectOpenCodeRuntimeIngress
 					if (!(yield* this.hasProjectedSession(sessionId))) {
 						const parentId = this.parentIds.get(sessionId);
 						const knownParentId =
-							parentId && (yield* this.hasProjectedSession(parentId))
+							parentId &&
+							((yield* this.hasProjectedSession(parentId)) ||
+								(yield* this.withSql(isSessionDeleted(parentId))))
 								? parentId
 								: undefined;
 						yield* this.ingestion.ingestBatch(
@@ -656,8 +701,10 @@ export class EffectOpenCodeRuntimeIngress
 							],
 							{ publishToRelay: false },
 						);
-						this.seenSessions.add(sessionId);
-						this.parentIds.delete(sessionId);
+						if (yield* this.hasProjectedSession(sessionId)) {
+							this.seenSessions.add(sessionId);
+							this.parentIds.delete(sessionId);
+						}
 					}
 					yield* this.startBackfill(sessionId, providerInstanceId);
 				}
@@ -675,16 +722,18 @@ export class EffectOpenCodeRuntimeIngress
 				} satisfies OpenCodeRuntimeIngressResult;
 			}
 
-			const sessionSeeded = !this.seenSessions.has(sessionId);
+			const sessionSeeded =
+				translated.some(canSeedSession) && !this.seenSessions.has(sessionId);
 			const shouldAppendSessionCreation =
 				sessionSeeded && !(yield* this.hasProjectedSession(sessionId));
-			// The parent is kept only once it is a row: sessions.parent_id is a
-			// foreign key, and an unknown parent would fail the batch forever.
+			// Unknown parents cannot satisfy the FK. Deleted parents are retained
+			// so ingestion can durably delete their late-discovered children too.
 			const parentId = this.parentIds.get(sessionId);
 			const knownParentId =
 				shouldAppendSessionCreation &&
 				parentId !== undefined &&
-				(yield* this.hasProjectedSession(parentId))
+				((yield* this.hasProjectedSession(parentId)) ||
+					(yield* this.withSql(isSessionDeleted(parentId))))
 					? parentId
 					: undefined;
 			const runtimeEvents: ProviderRuntimeEvent[] = [
@@ -718,16 +767,22 @@ export class EffectOpenCodeRuntimeIngress
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
 					: {}),
-				afterCommit: Effect.sync(() => {
+				afterCommit: Effect.gen(this, function* () {
 					this.translator.commitSession(sessionId, translation);
 					if (translation.droppedRewrite) this.syncedSessions.delete(sessionId);
-					this.seenSessions.add(sessionId);
-					this.parentIds.delete(sessionId);
+					if (
+						!this.seenSessions.has(sessionId) &&
+						(yield* this.hasProjectedSession(sessionId))
+					) {
+						this.seenSessions.add(sessionId);
+						this.parentIds.delete(sessionId);
+					}
 				}),
 			});
 
 			yield* this.refreshSyncedSession(sessionId, event);
 			if (
+				event.type !== "session.deleted" &&
 				!translation.droppedRewrite &&
 				this.shouldStartBackfill(sessionId, event)
 			)

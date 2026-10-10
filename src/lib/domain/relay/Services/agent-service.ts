@@ -1,4 +1,4 @@
-import { type Cause, Context, Effect, Layer } from "effect";
+import { type Cause, Context, Effect, Layer, Option } from "effect";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
@@ -7,7 +7,7 @@ import {
 } from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
 import type { ProviderAgentInfo } from "../../../provider/types.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import {
 	clearAgent,
@@ -145,15 +145,13 @@ const scopedAgentList = (
 	agents: readonly WireAgent[],
 	sessionId: string | undefined,
 	instanceId?: ProviderInstanceId,
+	clearMissing = instanceId === undefined,
 ) =>
-	Effect.map(
-		withActiveAgent(agents, sessionId, instanceId === undefined),
-		(result) => ({
-			...(instanceId === undefined ? {} : { instanceId }),
-			providerScope,
-			...result,
-		}),
-	);
+	Effect.map(withActiveAgent(agents, sessionId, clearMissing), (result) => ({
+		...(instanceId === undefined ? {} : { instanceId }),
+		providerScope,
+		...result,
+	}));
 
 const resolveBuiltInInstanceDriver = (
 	instanceId: ProviderInstanceId,
@@ -166,11 +164,11 @@ const resolveBuiltInInstanceDriver = (
 export const AgentServiceLive: Layer.Layer<
 	AgentServiceTag,
 	never,
-	OpenCodeAPITag | LoggerTag | OverridesStateTag | OrchestrationEngineTag
+	OpenCodeInstancesTag | LoggerTag | OverridesStateTag | OrchestrationEngineTag
 > = Layer.effect(
 	AgentServiceTag,
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
 		const log = yield* LoggerTag;
 		const overridesRef = yield* OverridesStateTag;
 		const engine = yield* OrchestrationEngineTag;
@@ -252,8 +250,23 @@ export const AgentServiceLive: Layer.Layer<
 						return yield* listClaudeAgents();
 					}
 
+					const running = yield* instances.ifRunning(
+						defaultInstanceIdForDriver("opencode"),
+					);
+					if (Option.isNone(running)) {
+						// A stopped instance has no catalog to validate the saved selection against.
+						return yield* provideOverrides(
+							scopedAgentList(
+								OPENCODE_PROVIDER_SCOPE,
+								[],
+								activeSessionId,
+								instanceId,
+								false,
+							),
+						);
+					}
 					const rawAgentsResult = yield* Effect.either(
-						Effect.tryPromise(() => client.app.agents()),
+						Effect.tryPromise(() => running.value.app.agents()),
 					);
 					if (rawAgentsResult._tag === "Right") {
 						return yield* provideOverrides(
@@ -293,7 +306,7 @@ export const AgentServiceLive: Layer.Layer<
 						);
 					}
 					return yield* Effect.fail(rawAgentsResult.left);
-				}),
+				}).pipe(Effect.scoped),
 			getActiveAgent: (sessionId) => provideOverrides(getAgent(sessionId)),
 			switchAgent: ({ clientId, sessionId, agentId }) =>
 				Effect.gen(function* () {

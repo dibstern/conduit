@@ -122,6 +122,7 @@ const withHandlerStack = async (
 	} satisfies SessionEventBus);
 	const persistence = makePersistenceEffectLayer(
 		join(dir, "events.db"),
+		"test-project",
 		createAllEffectProjectors(),
 		bus,
 	);

@@ -55,7 +55,7 @@ export function makeHandlerLogger(): Logger {
 /** What a session model-settings write needs: a store to commit its event to. */
 export function makeSessionSettingsLayer() {
 	return Layer.merge(
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 	);
 }

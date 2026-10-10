@@ -257,6 +257,7 @@ describe("WsRpcServerLayer GetModels", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-model-execution-"));
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
+				"test-project",
 			);
 			const orchestrationEngine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({

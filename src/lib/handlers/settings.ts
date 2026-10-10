@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 
 export const MAX_PROJECT_TITLE_LENGTH = 100;
 
@@ -26,10 +28,15 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 
 		const listClaudeCommands = () =>
 			Effect.gen(function* () {
+				const primaryFolder = (yield* ConfigTag).projectDir;
+				const workspaceRoot = activeSessionId
+					? yield* (yield* SessionWorkspaceTag).get(activeSessionId)
+					: primaryFolder;
 				const result = yield* Effect.either(
 					engine.dispatchEffect({
 						type: "discover",
 						providerId: "claude",
+						workspaceRoot,
 					}),
 				);
 				if (result._tag === "Left") {
@@ -52,7 +59,9 @@ export const getCommandsForSession = (activeSessionId: string | undefined) =>
 		}
 
 		const settingsService = yield* OpenCodeSettingsServiceTag;
-		const openCodeResult = yield* Effect.either(settingsService.listCommands());
+		const openCodeResult = yield* Effect.either(
+			settingsService.listCommands({ startIfStopped: false }),
+		);
 		if (openCodeResult._tag === "Right") {
 			return openCodeResult.right.map((command) => ({
 				name: command.name,
@@ -85,10 +94,16 @@ export const getSkillNamesForSession = (sessionId: string) =>
 		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
 		const commands =
 			providerId === "claude"
-				? (yield* engine.dispatchEffect({
-						type: "discover",
-						providerId: "claude",
-					})).commands
+				? yield* Effect.gen(function* () {
+						const workspaceRoot = yield* (yield* SessionWorkspaceTag).get(
+							sessionId,
+						);
+						return (yield* engine.dispatchEffect({
+							type: "discover",
+							providerId: "claude",
+							workspaceRoot,
+						})).commands;
+					})
 				: yield* (yield* OpenCodeSettingsServiceTag).listCommands();
 		return new Set(
 			commands

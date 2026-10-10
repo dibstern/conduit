@@ -4,7 +4,8 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { type ConfigError, Layer, type ManagedRuntime } from "effect";
 import {
 	makePersistenceServiceLive,
-	type PersistenceError,
+	PersistenceError,
+	PersistenceProjectTag,
 	type PersistenceServiceTag,
 } from "../../domain/persistence/Services/persistence-service.js";
 import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
@@ -41,6 +42,7 @@ export type PersistenceEffectContext =
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
 	| PersistenceServiceTag
+	| PersistenceProjectTag
 	| EventStoreEffectTag
 	| ProjectorCursorEffectTag
 	| ProjectionRunnerEffectTag
@@ -57,6 +59,7 @@ export type PersistenceEffectRuntime = ManagedRuntime.ManagedRuntime<
 
 export function makePersistenceEffectLayer(
 	filename: string,
+	projectId: string,
 	projectors: readonly EffectProjector[] = createAllEffectProjectors(),
 	// When supplied, the SAME shared bus layer used by the ingestion choke point.
 	// Wiring it here lets ClaudeEventPersistEffect publish committed writes (e.g.
@@ -65,15 +68,25 @@ export function makePersistenceEffectLayer(
 	// publishers and subscribers meet on one PubSub under Effect memoization.
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
 ) {
+	if (!projectId || projectId.trim().length === 0)
+		throw new PersistenceError({
+			operation: "bindProject",
+			cause: "A store requires a non-empty project id",
+		});
+	const projectLayer = Layer.succeed(PersistenceProjectTag, { projectId });
 	const sqliteLayer = SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
 	);
 
 	const persistenceServiceLayer = makePersistenceServiceLive.pipe(
-		Layer.provide(sqliteLayer),
+		Layer.provide(Layer.merge(sqliteLayer, projectLayer)),
 	);
 
-	const baseLayer = Layer.merge(sqliteLayer, persistenceServiceLayer);
+	const baseLayer = Layer.mergeAll(
+		sqliteLayer,
+		projectLayer,
+		persistenceServiceLayer,
+	);
 
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,

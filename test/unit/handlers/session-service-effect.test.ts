@@ -79,7 +79,7 @@ function makeSessionMetadataLayer(options: {
 	const logger = options.logger ?? makeMockLogger();
 
 	const baseLayer = Layer.mergeAll(
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),

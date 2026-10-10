@@ -153,12 +153,13 @@ for (const transcriptOnlySubagents of [false, true]) {
 					try {
 						const childRows = db
 							.prepare(
-								"SELECT id, title, provider_sid AS sid, (SELECT COUNT(*) FROM events WHERE session_id = s.id) AS events FROM sessions s WHERE parent_id = ? ORDER BY created_at",
+								"SELECT id, title, status, provider_sid AS sid, (SELECT COUNT(*) FROM events WHERE session_id = s.id) AS events FROM sessions s WHERE parent_id = ? ORDER BY created_at",
 							)
 							.all(parentId)
 							.map((row) => ({
 								id: String(row["id"]),
 								title: String(row["title"]),
+								status: String(row["status"]),
 								sid: row["sid"],
 								events: Number(row["events"]),
 							}));
@@ -329,6 +330,13 @@ for (const transcriptOnlySubagents of [false, true]) {
 							placement().childTools[AGENT_A_TASK]?.map((tool) => tool.id),
 						)
 						.toEqual(AGENT_STEPS[AGENT_A_TASK]);
+					await expect
+						.poll(
+							() =>
+								placement().children.find((child) => child.sid === AGENT_A_TASK)
+									?.status,
+						)
+						.toBe("busy");
 					await record("agent-a-working");
 					expectAgentStepsInChild("agent A working", placement());
 
@@ -337,6 +345,9 @@ for (const transcriptOnlySubagents of [false, true]) {
 						.poll(() => chat.getLastAssistantText(), { timeout: 60_000 })
 						.toContain("The top-level 40-second shell finished.");
 					await chat.waitForStreamingComplete();
+					await expect
+						.poll(() => placement().children.map((child) => child.status))
+						.toEqual(AGENT_TASK_IDS.map(() => "idle"));
 					await record("background-work-finished");
 					expectAllAgentSteps("background work finished", placement());
 
