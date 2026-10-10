@@ -388,18 +388,29 @@ export const usageSettingsHandlers: StepHandler[] = [
 				await expect(forecast).toHaveCSS("border-radius", "12px");
 				await expect(forecast).toHaveCSS("padding", "10px 12px");
 			} else await expect(forecast).toHaveCSS("margin-top", "9px");
-			const forecastBox = await forecast.boundingBox();
-			const bars = world.page.getByTestId(
-				framed
-					? "usage-settings-single-five_hour-bar"
-					: `usage-settings-card-${match[1]}-seven_day-bar`,
-			);
-			const barsBox = await bars.boundingBox();
-			if (!forecastBox || !barsBox)
-				throw new Error("Missing forecast or usage bars");
-			if (framed)
-				expect(forecastBox.y + forecastBox.height).toBeLessThan(barsBox.y);
-			else expect(forecastBox.y).toBeGreaterThan(barsBox.y + barsBox.height);
+			const bars = framed
+				? "usage-settings-single-five_hour-bar"
+				: `usage-settings-card-${match[1]}-seven_day-bar`;
+			// One snapshot of both boxes, retried, so a settling layout cannot
+			// pair a stale forecast position with a fresh bar position.
+			await expect
+				.poll(() =>
+					world.page.evaluate(
+						([forecastId, barsId, isFramed]) => {
+							const [forecastBox, barsBox] = [forecastId, barsId].map((id) =>
+								document
+									.querySelector(`[data-testid="${id}"]`)
+									?.getBoundingClientRect(),
+							);
+							if (!forecastBox || !barsBox) return "missing";
+							return isFramed
+								? forecastBox.bottom < barsBox.top
+								: forecastBox.top > barsBox.bottom;
+						},
+						[prefix, bars, framed] as const,
+					),
+				)
+				.toBe(true);
 		},
 	},
 	{

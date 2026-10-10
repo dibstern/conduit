@@ -367,5 +367,6 @@
 		"requires": "switchTrigger",
 		"reason": "conduit-test-eon2.9: AccountSwitch takes its trigger as a snippet so the session-bar account pill can share the picker and confirm. The strip's Switch account button, with its gap and phone centring, moved verbatim into UsageLimitStrip's trigger snippet."
 	},
-	"src/lib/frontend/components/input/AccountSwitch.svelte :: className,primary": "Not CSS classes: the removed `class` and `primary` props' expressions. The strip now renders its own Switch account trigger and chooses primary there."
+	"src/lib/frontend/components/input/AccountSwitch.svelte :: className,primary": "Not CSS classes: the removed `class` and `primary` props' expressions. The strip now renders its own Switch account trigger and chooses primary there.",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: left-0,px-[14px],py-[16px],right-[66px]": "The phone usage strip became a solid bottom bar: inset-x-0 replaces left-0 and right-[66px] (the bar spans the width and pr-[66px] keeps chips clear of the new-session button); pt/pr/pl plus a safe-area padding-bottom replace px/py so the bar reaches the screen edge."
 }

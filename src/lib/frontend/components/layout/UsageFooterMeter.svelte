@@ -82,7 +82,7 @@
 		data-testid="usage-footer-phone"
 		bind:clientHeight={height}
 		style:display={accounts.length > 1 || phoneSingle ? undefined : "none"}
-		class="usage-phone-footer pointer-events-none absolute left-0 right-[66px] z-[var(--z-raised)] flex flex-wrap items-center gap-[10px] px-[14px] py-[16px] text-[10.5px]"
+		class="usage-phone-footer pointer-events-none absolute inset-x-0 bottom-0 z-[var(--z-raised)] flex flex-wrap items-center gap-[10px] border-t border-border-subtle bg-bg pt-[22px] pr-[66px] pl-[14px] text-[10.5px]"
 	>
 		{#if accounts.length === 1 && phoneSingle}
 			{@const reading = accounts[0]}
@@ -164,9 +164,10 @@
 {/if}
 
 <style>
+	/* The page runs under the home indicator (viewport-fit=cover), so the bar
+	   reaches the bottom edge; a floating strip let rows show beneath it. */
 	.usage-phone-footer {
-		bottom: calc(9px + env(safe-area-inset-bottom, 0px));
-		background: linear-gradient(transparent, var(--color-bg) 40%);
+		padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
 	}
 
 	.account-row {
