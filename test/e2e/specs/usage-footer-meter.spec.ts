@@ -1,7 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import { usageForecastTime } from "../../../src/lib/frontend/utils/continuation.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -190,6 +191,213 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 		await testInfo.attach("usage-warning", {
 			path: warningScreenshot,
 			contentType: "image/png",
+		});
+	});
+});
+
+test.describe("send at an account's reset", () => {
+	test.use({
+		harnessOptions: {
+			restartProof: true,
+			continuationSweepIntervalMs: 1000,
+		},
+	});
+
+	// Failures: a never-cut-off session dispatches a limited send, no reset is
+	// scheduled, the tray loses its release caption, or stale usage holds it
+	// beyond the reset. Provider marks prove the input reaches the fake SDK.
+	test("an idle session queues a limited account's input and dispatches it after reset", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		test.setTimeout(120_000);
+		const artifacts = resolve(
+			"test-results/composer-send-at-reset",
+			`${testInfo.project.name}-${testInfo.retry}`,
+		);
+		mkdirSync(artifacts, { recursive: true });
+		const browser = await harness.connect();
+		const configDir = mkdtempSync(join(harness.root, "reset-account-"));
+		const writeUsage = (utilization: number, resetsAt: string | null) => {
+			const response = {
+				subscription_type: "max",
+				rate_limits_available: true,
+				rate_limits: {
+					five_hour: { utilization, resets_at: resetsAt },
+					seven_day: { utilization: 22, resets_at: null },
+				},
+			} satisfies Pick<
+				SDKControlGetUsageResponse,
+				"subscription_type" | "rate_limits_available" | "rate_limits"
+			>;
+			writeFileSync(
+				join(configDir, "conduit-test-usage-response.json"),
+				JSON.stringify(response),
+			);
+		};
+		writeUsage(41, null);
+		const { addedInstanceId } = await Effect.runPromise(
+			browser.rpc.AddInstance({
+				name: "Reset account",
+				driver: "claude",
+				configDir,
+			}),
+		);
+		if (!addedInstanceId) throw new Error("No reset account ID");
+		await Effect.runPromise(
+			browser.rpc.SetUsageLimitsSetting({
+				usageLimits: {
+					autoResume: false,
+					autoSwitch: false,
+					warnAt: 80,
+					order: [addedInstanceId],
+				},
+			}),
+		);
+		const { savedSlug: projectSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({
+				folders: [mkdtempSync(join(harness.root, "reset-project-"))],
+				instanceId: addedInstanceId,
+			}),
+		);
+		if (!projectSlug) throw new Error("No reset project slug");
+		const { sessionId } = await Effect.runPromise(
+			browser.rpc.CreateSession({
+				projectSlug,
+				instanceId: Schema.decodeUnknownSync(
+					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				)(addedInstanceId),
+				model: { modelId: "harness", providerId: "claude" },
+				originId: browser.originId,
+			}),
+		);
+		const app = new AppPage(page);
+		await app.goto(
+			`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
+		);
+		await expect(app.input).toBeVisible();
+		const resetAt = Date.now() + 8_000;
+		const resetAtMonotonic =
+			process.hrtime.bigint() + BigInt(resetAt - Date.now()) * 1_000_000n;
+		writeUsage(100, new Date(resetAt).toISOString());
+		// QuotaForAccounts refreshes the same shared feed used by the warning
+		// strip. No provider error or cut-off is needed to queue this input.
+		await expect
+			.poll(async () => {
+				const readings = await Effect.runPromise(
+					browser.rpc.QuotaForAccounts({
+						projectSlug,
+						originId: browser.originId,
+					}),
+				);
+				return readings
+					.find((reading) => reading.accountId === addedInstanceId)
+					?.windows.find((window) => window.kind === "five_hour")?.utilization;
+			})
+			.toBe(100);
+		await expect(app.sendBtn).toHaveAttribute("data-send-mode", "at-reset");
+		await expect(page.getByTestId("cut-off-tag")).toHaveCount(0);
+		const prompt = "send-at-reset-without-a-cut-off";
+		await app.sendMessage(prompt);
+		const row = page.getByTestId("pending-input-row");
+		await expect(row).toHaveCount(1);
+		await expect(row.getByTestId("pending-input-text")).toHaveText(prompt);
+		await expect(row.getByTestId("pending-input-state")).toHaveText("Queued");
+		const caption = `Sends at ${usageForecastTime(resetAt, Date.now())}`;
+		await expect(row.getByTestId("pending-input-sends-at")).toHaveText(caption);
+		await expect(row.getByTestId("pending-input-edit")).toBeVisible();
+		await expect(row.getByTestId("pending-input-remove")).toBeVisible();
+		const heldAt = Date.now();
+		expect(heldAt).toBeLessThan(resetAt);
+		expect(harness.claudeOptions().find((call) => call.prompt === prompt)).toBe(
+			undefined,
+		);
+		expect(
+			harness.marks.some(
+				(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+			),
+		).toBe(false);
+		const heldHistory = await Effect.runPromise(
+			browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+		);
+		expect(JSON.stringify(heldHistory.messages)).not.toContain(prompt);
+		const heldScreenshot = join(artifacts, "queued-at-reset.png");
+		await page.locator("#input-area").screenshot({ path: heldScreenshot });
+		await testInfo.attach("queued-at-reset", {
+			path: heldScreenshot,
+			contentType: "image/png",
+		});
+
+		// The reset expires even while the cached reading remains limited.
+		await expect
+			.poll(() => Date.now(), { timeout: 15_000 })
+			.toBeGreaterThan(resetAt);
+		writeUsage(1, null);
+		await expect
+			.poll(async () => {
+				const readings = await Effect.runPromise(
+					browser.rpc.QuotaForAccounts({
+						projectSlug,
+						originId: browser.originId,
+					}),
+				);
+				return readings
+					.find((reading) => reading.accountId === addedInstanceId)
+					?.windows.find((window) => window.kind === "five_hour")?.utilization;
+			})
+			.toBe(1);
+		await expect
+			.poll(
+				() =>
+					harness.marks.find(
+						(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+					),
+				{ timeout: 20_000 },
+			)
+			.toBeTruthy();
+		const dispatched = harness.marks.find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+		);
+		if (dispatched?.kind !== "enqueue")
+			throw new Error("The reset input never reached the provider");
+		expect(BigInt(dispatched.at)).toBeGreaterThanOrEqual(resetAtMonotonic);
+		expect(
+			harness.claudeOptions().find((call) => call.prompt === prompt),
+		).toMatchObject({
+			configDir,
+		});
+		await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+		await expect(page.locator("#messages")).toContainText(`done(${prompt})`);
+		const dispatchedScreenshot = join(artifacts, "dispatched-after-reset.png");
+		await page.screenshot({ path: dispatchedScreenshot });
+		await testInfo.attach("dispatched-after-reset", {
+			path: dispatchedScreenshot,
+			contentType: "image/png",
+		});
+		const evidence = {
+			accountId: addedInstanceId,
+			configDir,
+			projectSlug,
+			sessionId,
+			resetAt,
+			resetAtMonotonic: resetAtMonotonic.toString(),
+			heldAt,
+			caption,
+			heldHistory,
+			providerMarks: harness.marks.filter(
+				(mark) => "prompt" in mark && mark.prompt === prompt,
+			),
+			history: await Effect.runPromise(
+				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+			),
+		};
+		writeFileSync(
+			join(artifacts, "reset.json"),
+			JSON.stringify(evidence, null, 2),
+		);
+		await testInfo.attach("send-at-reset-evidence", {
+			body: JSON.stringify(evidence),
+			contentType: "application/json",
 		});
 	});
 });

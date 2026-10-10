@@ -57,6 +57,7 @@
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
@@ -66,6 +67,7 @@
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
+	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -152,10 +154,36 @@
 		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
+	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const accountId = $derived(composerAccountId(currentSession, projectState.projects.find((project) => project.slug === composerProjectSlug)));
+	const usageReading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
+	const sendsAt = $derived.by(() => {
+		if (usageReading?.status !== "limited") return undefined;
+		const resets = planUsageWindows(usageReading)
+			.filter((window) => window.utilization >= 100)
+			.map((window) => Date.parse(window.resetsAt ?? ""))
+			.filter((at) => at > clock.now);
+		return resets.length > 0 ? Math.max(...resets) : undefined;
+	});
+	const sendMode = $derived.by(() => {
+		if (sendsAt !== undefined) return "at-reset";
+		const warnAt = usageState.limits.warnAt;
+		return usageReading?.status === "available" && warnAt !== "off" &&
+			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
+			? "warning" : "normal";
+	});
+	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
+	const pendingSendsAt = $derived.by(() => {
+		const recovery = currentSession?.limitRecovery;
+		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
+		return scheduledAt === undefined ? sendsAt : scheduledAt * 1000;
+	});
 	const placeholder = $derived(
-		currentSession?.settledAt != null ? "Message to un-settle…" :
-		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
+		sendsAt !== undefined
+			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
+			: currentSession?.settledAt != null ? "Message to un-settle…" :
+			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+			discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -376,11 +404,13 @@
 	);
 	const canSend = $derived(!unsupportedDraftFolders && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
-		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
-			? "Reply"
-			: isProcessing()
-				? "Queue message"
-				: "Send",
+		sendMode === "at-reset"
+			? `Send at ${sendAtTime}`
+			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+				? "Reply"
+				: isProcessing()
+					? "Queue message"
+					: "Send",
 	);
 	/** Whether a send could steer the running turn, from the server's inbox arm:
 	 *  hidden (undefined) when idle or the provider can't steer, disabled while a
@@ -664,9 +694,9 @@
 		const sentToSessionId = sid;
 		// An input the inbox hands straight off starts the sender's turn now; the
 		// row reports busy once the provider picks it up and ends the turn when it
-		// goes idle (ni8.35). A queued or paused input starts nothing.
+		// goes idle (ni8.35). A queued, paused or reset-held input starts nothing.
 		const { activity, messages } = getOrCreateSessionSlot(sid);
-		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
+		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid) && sendMode !== "at-reset"
 			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
 		if (startsTurn) phaseToProcessing(activity);
 		steerRefusal = null;
@@ -1020,7 +1050,7 @@
 			</div>
 		{/if}
 
-		<UsageWarningStrip session={currentSession} projectSlug={currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? ""} />
+		<UsageWarningStrip session={currentSession} projectSlug={composerProjectSlug} />
 
 		{#if contextWarning && !compacting}
 			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
@@ -1032,13 +1062,14 @@
 			</div>
 		{/if}
 
-		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
+		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
 		{/if}
 
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
+			sendsAt={pendingSendsAt}
 			{steer}
 			onEdit={takeBackQueuedInput}
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
@@ -1181,6 +1212,9 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
+					{#snippet sendAtLabel()}
+						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
+					{/snippet}
 					<!-- Send / Stop buttons. While working, send only shows once there is
 					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
@@ -1192,13 +1226,14 @@
 						tone="inherit"
 						hoverFill="none"
 						disabledStyle="undimmed"
-						iconOnly
-						icon={isGoalCommand ? "target" : "arrow-up"}
-						iconSize={17}
+						{...(sendMode === "at-reset" ? { iconOnly: false as const, children: sendAtLabel } : { iconOnly: true as const })}
+						icon={sendMode === "at-reset" ? "clock" : isGoalCommand ? "target" : "arrow-up"}
+						iconSize={sendMode === "at-reset" ? 13 : 17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
+						data-send-mode={sendMode}
 						type="button"
-						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
+						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : 'w-[32px] rounded-[10px] ' + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
 						disabled={!canSend}
 						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
@@ -1260,9 +1295,12 @@
 	}
 	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
 	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
-	:global(#send[data-goal="true"]) {
+	:global(#send[data-goal="true"]:not([data-send-mode="at-reset"])) {
 		background: var(--color-status-violet);
 		color: var(--color-bg);
+	}
+	:global(#send[data-send-mode="warning"]) {
+		box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3.5px var(--color-status-amber);
 	}
 
 	.composer-goal-hint, .composer-goal-met, .composer-goal-cleared {

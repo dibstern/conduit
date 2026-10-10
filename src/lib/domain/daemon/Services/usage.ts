@@ -24,6 +24,10 @@ import type {
 
 export interface UsageService {
 	readonly readings: Stream.Stream<readonly UsageReading[]>;
+	/** The latest completed reading, without probing or starting the sampler. */
+	readonly latest: (
+		accountId: string,
+	) => Effect.Effect<UsageReading | undefined>;
 	readonly refresh: (
 		accountIds?: readonly string[],
 	) => Effect.Effect<readonly UsageReading[]>;
@@ -388,6 +392,7 @@ export const makeUsage = (options: {
 			});
 		return {
 			readings,
+			latest: (accountId) => Effect.sync(() => latest.get(accountId)),
 			refresh,
 			turnEnded,
 			pickFailover,

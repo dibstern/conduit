@@ -247,6 +247,7 @@ for (const scenario of [
 					.pipe(
 						Effect.provideService(Usage, {
 							readings: Stream.empty,
+							latest: () => Effect.succeed(undefined),
 							turnEnded: () => Effect.void,
 							refresh: () =>
 								Effect.gen(function* () {

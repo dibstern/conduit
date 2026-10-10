@@ -12,11 +12,10 @@
 
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { usageState } from "../../stores/usage.svelte.js";
+	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import { usageWarning } from "../../utils/continuation.js";
 	import { openSettings } from "../layout/chrome-actions.js";
@@ -28,9 +27,7 @@
 	let { session, projectSlug }: { session: Immutable<SessionInfo> | undefined; projectSlug: string } = $props();
 
 	const key = $derived(session?.id ?? projectSlug);
-	const accountId = $derived(session
-		? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id]
-		: projectState.projects.find((project) => project.slug === projectSlug)?.instanceId);
+	const accountId = $derived(composerAccountId(session, projectState.projects.find((project) => project.slug === projectSlug)));
 	const reading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
 	const severalAccounts = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== accountId));
 	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, getInstanceById(accountId ?? "")?.name ?? "Claude", severalAccounts, clock.now));

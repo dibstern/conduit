@@ -13,7 +13,7 @@ const cutOffMessageId = "msg-cut-off";
 const pickerRow = (page: Page, name: string) =>
 	page.getByTestId("account-switch-option").filter({ hasText: name });
 
-function currentSessionId(page: Page): string {
+export function currentSessionId(page: Page): string {
 	const sessionId = new URL(page.url()).pathname.split("/")[2];
 	if (!sessionId) throw new Error("The usage limit steps need an open session");
 	return sessionId;
@@ -37,7 +37,7 @@ function sendTranscript(
 /** The session row's limitRecovery, as the server last projected it. */
 const limits = new WeakMap<Page, Record<string, unknown>>();
 
-function projectLimit(page: Page, limitRecovery: unknown): void {
+export function projectLimit(page: Page, limitRecovery: unknown): void {
 	setSessionRowStatus(page, currentSessionId(page), "idle", {
 		title: "Provider tests",
 		limitRecovery,
