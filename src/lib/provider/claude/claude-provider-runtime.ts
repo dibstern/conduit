@@ -590,7 +590,7 @@ export class ClaudeProviderRuntime {
 							yield* this.placeUserMessageEffect({
 								sessionId,
 								inputId: input.inputId,
-								text: input.prompt,
+								text: input.text ?? input.prompt,
 							}).pipe(
 								Effect.mapError(
 									(cause) =>
@@ -1510,7 +1510,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			input: {
 				sessionId: input.sessionId,
 				inputId: input.inputId,
-				text: input.prompt,
+				text: input.text ?? input.prompt,
 			},
 		}).pipe(
 			Effect.asVoid,

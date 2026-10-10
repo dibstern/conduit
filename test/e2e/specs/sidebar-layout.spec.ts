@@ -77,7 +77,7 @@ test("shell feed adds and removes sidebar roots", async ({
 	});
 	await expect(page.locator("#messages")).toContainText("Chat before deletion");
 	rpc.sendChunk("SubscribeShell", [
-		{ _tag: "remove", sequence: 3, id: "feed-root" },
+		{ _tag: "remove", sequence: 3, id: "feed-root", deleted: true },
 	]);
 	await expect(
 		page.locator('#session-list [data-session-id="feed-root"]'),

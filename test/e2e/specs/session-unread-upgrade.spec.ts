@@ -41,6 +41,7 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 		db.exec("DROP TABLE IF EXISTS message_tombstones");
 		db.exec("DROP INDEX IF EXISTS idx_pending_inputs_session_version");
 		db.exec("DROP TABLE IF EXISTS pending_inputs");
+		db.exec("DROP TABLE IF EXISTS session_sidebar_horizon");
 		// Main's ledger ends before session_attention, so every later
 		// migration is unrecorded too.
 		db.exec(

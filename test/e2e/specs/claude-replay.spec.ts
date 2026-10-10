@@ -81,37 +81,6 @@ function recordSends(page: Page): Send[] {
 	return sends;
 }
 
-/** Records every `done` the page receives for the session, in arrival order.
- *  Register before navigation. */
-// The status poller can repeat a turn's done under the same alertId, which the
-// browser treats as one; count each alertId once.
-function recordDones(page: Page, sessionId: string): unknown[] {
-	const dones: unknown[] = [];
-	const seen = new Set<unknown>();
-	const visit = (value: unknown): void => {
-		if (Array.isArray(value)) {
-			value.forEach(visit);
-			return;
-		}
-		if (value === null || typeof value !== "object") return;
-		const record = value as Record<string, unknown>;
-		if (record["type"] === "done" && record["sessionId"] === sessionId) {
-			const alertId = record["alertId"];
-			if (alertId === undefined || !seen.has(alertId)) dones.push(record);
-			seen.add(alertId);
-			return;
-		}
-		Object.values(record).forEach(visit);
-	};
-	page.on("websocket", (ws) => {
-		ws.on("framereceived", ({ payload }) => {
-			if (typeof payload === "string" && payload.includes('"done"'))
-				visit(JSON.parse(payload));
-		});
-	});
-	return dones;
-}
-
 const makeWsRpcClient = RpcClient.make(WsRpcGroup);
 type WsRpcClient = Effect.Effect.Success<typeof makeWsRpcClient>;
 
@@ -1028,6 +997,11 @@ test.describe("Claude replay lane", () => {
 					timeout: 30_000,
 				});
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+				// The cut-off turn never reached the provider, so the row never went
+				// busy and an interrupt is no turn end: nothing tells this live tab
+				// its optimistic turn is over. A fresh load reads the closed turn.
+				await page.reload();
+				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
 				await expect(chat.stopBtn).toBeHidden();
 				await page.waitForTimeout(1_500);
 				const restarted = ledger(dbPath, sessionId);
@@ -1144,7 +1118,6 @@ test.describe("Claude replay lane", () => {
 					),
 				);
 			const sends = recordSends(page);
-			const dones = recordDones(page, sessionId);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			await app.goto(relayUrl);
@@ -1152,7 +1125,6 @@ test.describe("Claude replay lane", () => {
 				sessionId,
 				dbPath: harness.eventsDbPath,
 				sends,
-				dones,
 				app,
 				chat,
 				submit: (text: string, delivery: "queue" | "steer") => {
@@ -1186,7 +1158,7 @@ test.describe("Claude replay lane", () => {
 				claudeReplay: { turns: ["steer-during-tool-folds"], delayMs: 100 },
 			});
 
-			test("joins at the tool boundary: one result, two turns, one done", async ({
+			test("joins at the tool boundary: one result, two turns, one turn end", async ({
 				page,
 				relayUrl,
 				harness,
@@ -1210,7 +1182,7 @@ test.describe("Claude replay lane", () => {
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("steer-during-tool-proof.json", {
 					body: JSON.stringify(
-						{ inputs: { a, b }, steering, dones: s.dones, ...proof },
+						{ inputs: { a, b }, steering, ...proof },
 						null,
 						2,
 					),
@@ -1240,14 +1212,13 @@ test.describe("Claude replay lane", () => {
 							e.sequence > bPlaced,
 					),
 				).toHaveLength(1);
-				// One result: one turn end and one done, yet two turns — Alpha's
+				// One result: one turn end, yet two turns — Alpha's
 				// closed by the steer's message, which is marked steered.
 				expect(
 					proof.events
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.completed"]);
-				expect(s.dones).toHaveLength(1);
 				const bMessage = proof.userMessages.find((m) => m.id === b);
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
@@ -1299,7 +1270,6 @@ test.describe("Claude replay lane", () => {
 						{
 							sends: s.sends,
 							transcript,
-							dones: s.dones,
 							...ledger(s.dbPath, s.sessionId),
 						},
 						null,
@@ -1326,7 +1296,7 @@ test.describe("Claude replay lane", () => {
 				claudeReplay: { turns: ["steer-misses-boundary"], delayMs: 30 },
 			});
 
-			test("runs as its own turn after the first: two results, two dones", async ({
+			test("runs as its own turn after the first: two results, two turn ends", async ({
 				page,
 				relayUrl,
 				harness,
@@ -1351,7 +1321,7 @@ test.describe("Claude replay lane", () => {
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("steer-misses-boundary-proof.json", {
 					body: JSON.stringify(
-						{ inputs: { a, b }, steering, dones: s.dones, ...proof },
+						{ inputs: { a, b }, steering, ...proof },
 						null,
 						2,
 					),
@@ -1369,7 +1339,6 @@ test.describe("Claude replay lane", () => {
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.completed", "turn.completed"]);
-				expect(s.dones).toHaveLength(2);
 				// Alpha had ended when Bravo started, so Bravo closed no turn.
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
@@ -1417,7 +1386,7 @@ test.describe("Claude replay lane", () => {
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("two-steers-proof.json", {
 					body: JSON.stringify(
-						{ inputs: { a, b, c }, steering, dones: s.dones, ...proof },
+						{ inputs: { a, b, c }, steering, ...proof },
 						null,
 						2,
 					),
@@ -1447,7 +1416,6 @@ test.describe("Claude replay lane", () => {
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.completed"]);
-				expect(s.dones).toHaveLength(1);
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
 					[b, 1],
@@ -1513,7 +1481,7 @@ test.describe("Claude replay lane", () => {
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("stop-with-steer-proof.json", {
 					body: JSON.stringify(
-						{ inputs: { a, b, c }, steering, dones: s.dones, ...proof },
+						{ inputs: { a, b, c }, steering, ...proof },
 						null,
 						2,
 					),
@@ -1532,8 +1500,6 @@ test.describe("Claude replay lane", () => {
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.interrupted", "turn.completed"]);
-				// One done per result, plus the one Stop sends itself.
-				expect(s.dones).toHaveLength(3);
 				// Alpha was interrupted before Bravo started: Bravo closed no turn.
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
@@ -1580,7 +1546,7 @@ test.describe("Claude replay lane", () => {
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("send-now-steer-proof.json", {
 					body: JSON.stringify(
-						{ inputs: { a, b }, queued, steering, dones: s.dones, ...proof },
+						{ inputs: { a, b }, queued, steering, ...proof },
 						null,
 						2,
 					),
@@ -1598,7 +1564,6 @@ test.describe("Claude replay lane", () => {
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.completed"]);
-				expect(s.dones).toHaveLength(1);
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
 					[b, 1],
@@ -1643,7 +1608,6 @@ test.describe("Claude replay lane", () => {
 					body: JSON.stringify(
 						{
 							sends: s.sends,
-							dones: s.dones,
 							...ledger(s.dbPath, s.sessionId),
 						},
 						null,

@@ -394,6 +394,7 @@ export class ProviderSideEffectReactor {
 									commandAttempt,
 									instanceId: payload.instanceId ?? row.provider_id,
 									prompt: prepared?.prompt ?? payload.prompt,
+									text: payload.prompt,
 									configDir: prepared?.configDir,
 									resumeSessionId: prepared?.resumeSessionId,
 									startFreshNativeSession:

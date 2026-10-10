@@ -198,6 +198,8 @@ export interface SendTurnInput {
 	readonly commandAttempt?: number;
 	readonly sessionId: string;
 	readonly prompt: string;
+	/** What the user sent, when the prompt wraps it in a hidden handoff. */
+	readonly text?: string;
 	readonly handoff?: SessionHandoffDeliveredPayload;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;

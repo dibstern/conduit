@@ -141,6 +141,7 @@ export const recoverClaudeRunnerCommands = (
 													...input,
 													instanceId,
 													prompt: prepared.prompt,
+													text: input.prompt,
 													configDir: prepared.configDir,
 													resumeSessionId: prepared.resumeSessionId,
 													startFreshNativeSession:

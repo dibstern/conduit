@@ -69,7 +69,12 @@ describe("queued input across a restart", () => {
 		void browser.send(sessionId, "upgrade-long-turn").catch(() => undefined);
 		await browser.waitFor(
 			(message) =>
-				message["type"] === "delta" && message["sessionId"] === sessionId,
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				message["sessionId"] === sessionId &&
+				(
+					message["parts"] as { type: string; text?: string }[] | undefined
+				)?.some((part) => part.type === "text" && Boolean(part.text)) === true,
 		);
 		const queuedId = randomUUID();
 		await Effect.runPromise(
@@ -101,12 +106,12 @@ describe("queued input across a restart", () => {
 			turns: ["running"],
 		});
 
-		const done = reconnected.waitFor(
-			(message) =>
-				message["type"] === "done" && message["sessionId"] === sessionId,
+		const done = reconnected.waitForTurnEnd(
+			sessionId,
+			reconnected.frames.length,
 		);
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
-		expect((await done)["code"]).toBe(0);
+		expect((await done)["status"]).toBe("idle");
 		const resumed = harness;
 		await vi.waitFor(
 			() =>

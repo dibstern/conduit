@@ -26,6 +26,7 @@ import {
 	type ClaudeSDKCommandLifecycleMessage,
 	decodeClaudeSDKMessage,
 } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
+import type { HistoryMessagePart } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
@@ -50,7 +51,8 @@ async function capture(options: {
 	modelId: string;
 	/** Later prompts are sent once the first turn reports `sendLaterOn`. */
 	prompts: readonly [string, ...string[]];
-	/** The browser frame that sends later prompts (default: a tool running). */
+	/** What in the first reply sends later prompts: a tool running (default)
+	 *  or its text. */
 	sendLaterOn?: "tool_executing" | "delta";
 	/** How later prompts are sent: queued, steered, or queued then promoted to
 	 *  a steer with sendNow (default: queue). */
@@ -138,7 +140,7 @@ async function capture(options: {
 				const frames = browser.frames.slice(cursor);
 				for (const { message } of frames) {
 					if (
-						message["type"] !== "permission_request" ||
+						message["type"] !== "permission_pending" ||
 						answered.has(message["requestId"])
 					)
 						continue;
@@ -149,7 +151,17 @@ async function capture(options: {
 					laterSends.length < laterPrompts.length &&
 					frames.some(
 						({ message }) =>
-							message["type"] === (options.sendLaterOn ?? "tool_executing"),
+							message["type"] === "transcript_message" &&
+							message["sessionId"] === sessionId &&
+							message["role"] === "assistant" &&
+							(message["parts"] as HistoryMessagePart[] | undefined)?.some(
+								(part) =>
+									options.sendLaterOn === "delta"
+										? part.type === "text" && Boolean(part.text)
+										: part.type === "tool" &&
+											(part.state?.status === "running" ||
+												part.state?.status === "completed"),
+							) === true,
 					)
 				) {
 					// Mid-turn: the first turn is running its tool, or replying.
@@ -170,24 +182,35 @@ async function capture(options: {
 								),
 						);
 				}
-				// One done per provider result, and Stop sends one of its own.
-				expect(
-					frames.filter(
+				// Done once every input went out, the trace holds every provider
+				// result, and the session row has gone idle (after Stop, if any).
+				expect(laterSends.length).toBeGreaterThanOrEqual(laterPrompts.length);
+				const captured = readFileSync(
+					join(captureDir, `${sessionId}.jsonl`),
+					"utf8",
+				)
+					.split("\n")
+					.filter((line) => line.trim() !== "")
+					.map((line) => (JSON.parse(line) as Raw)["type"]);
+				expect(captured.filter((type) => type === "result")).toHaveLength(
+					results,
+				);
+				const row = frames
+					.filter(
 						({ message }) =>
-							message["type"] === "done" && message["sessionId"] === sessionId,
-					),
-				).toHaveLength(results + (options.stopAfterMs === undefined ? 0 : 1));
+							message["type"] === "session_row" && message["id"] === sessionId,
+					)
+					.at(-1);
+				expect(row?.message["status"]).toBe("idle");
 			},
 			{ timeout: 240_000, interval: 100 },
 		);
 		await Promise.all(laterSends);
-		const reply = browser.frames
-			.slice(cursor)
-			.filter(
-				({ message }) =>
-					message["type"] === "delta" && message["sessionId"] === sessionId,
-			)
-			.map(({ message }) => String(message["text"]))
+		const reply = (await browser.history(sessionId))
+			.filter((message) => message.role === "assistant")
+			.flatMap((message) => message.parts ?? [])
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
 			.join("");
 		expect(reply).toContain(options.expectReply);
 
