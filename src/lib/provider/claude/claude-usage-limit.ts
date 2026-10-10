@@ -69,6 +69,22 @@ export const interceptClaudeUsageLimit = (
 		if (rejected || (message.type === "result" && ctx.usageLimit))
 			yield* emitClaudeUsageLimit(ctx, rejected);
 		if (message.type === "rate_limit_event" || limitAssistant) return [];
+		// A real model reply means the held synthetic round was not a limit
+		// notice (e.g. /goal's "Goal set: …" before the turn continues).
+		const modelReply =
+			message.type === "stream_event"
+				? message.parent_tool_use_id == null &&
+					message.event.type === "message_start" &&
+					message.event.message.model !== "<synthetic>"
+				: message.type === "assistant" &&
+					message.parent_tool_use_id == null &&
+					isRecord(message.message) &&
+					message.message.model !== "<synthetic>";
+		if (ctx.pendingSyntheticMessages && modelReply && !ctx.usageLimit) {
+			const pending = ctx.pendingSyntheticMessages;
+			ctx.pendingSyntheticMessages = undefined;
+			return [...pending, message];
+		}
 		if (message.type === "stream_event" && message.parent_tool_use_id == null) {
 			if (ctx.usageLimit) return [];
 			if (

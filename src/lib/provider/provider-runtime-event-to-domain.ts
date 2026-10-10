@@ -341,8 +341,10 @@ export function translateProviderRuntimeEventToDomain(
 			const duration =
 				numberFieldValue(data["duration"]) ??
 				numberFieldValue(data["durationMs"]);
+			const userMessageId = stringField(data["userMessageId"]);
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
+				...(userMessageId ? { userMessageId } : {}),
 				...(cost != null ? { cost } : {}),
 				...(tokens != null ? { tokens } : {}),
 				...(duration != null ? { duration } : {}),

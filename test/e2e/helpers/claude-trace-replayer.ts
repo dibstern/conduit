@@ -39,6 +39,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
 export type ClaudeTraceName =
 	| "api-retry-pong-turn"
+	| "background-shell-ends-between-turns"
 	| "background-shell-turn"
 	| "enter-worktree-turn"
 	| "exit-worktree-keep-turn"
@@ -51,6 +52,7 @@ export type ClaudeTraceName =
 	| "steer-during-tool-folds"
 	| "steer-misses-boundary"
 	| "stop-with-steer-pending"
+	| "subagent-task-error-turn"
 	| "subagent-task-turn"
 	| "two-steers-one-boundary";
 

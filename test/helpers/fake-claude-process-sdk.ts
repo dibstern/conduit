@@ -410,6 +410,11 @@ function query(params: {
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
 	let livePermissionMode = params.options?.permissionMode;
+	// Messages the real SDK interleaves into a running turn, such as the bare
+	// status it reports on a permission-mode change. Only a held turn polls,
+	// so they are collected only while one is held.
+	const outOfBand: SDKMessage[] = [];
+	let turnHeld = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -842,6 +847,39 @@ function query(params: {
 				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
 				continue;
 			}
+			// SDK-local work, like a manual /compact: no stream and no assistant
+			// message, only a result once the work ends.
+			if (request === "local-work-turn" && proof) {
+				mark({ kind: "pre-assistant-held", prompt, queryId });
+				while (
+					!existsSync(join(dirname(proof), "release-local-work")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "result",
+					subtype: "success",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: false,
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 1,
+					result: "",
+					stop_reason: null,
+					total_cost_usd: 0,
+					usage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						cache_read_input_tokens: 0,
+						cache_creation_input_tokens: 0,
+					},
+					modelUsage: {},
+					permission_denials: [],
+				} as unknown as SDKMessage;
+				continue;
+			}
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",
@@ -855,8 +893,12 @@ function query(params: {
 			for (const [index, text] of responseChunks(prompt).entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
-					while (!existsSync(release) && !closed)
+					turnHeld = true;
+					while (!existsSync(release) && !closed) {
+						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
 					if (closed) return;
 				}
 				if (request.startsWith("restart-"))
@@ -1447,6 +1489,15 @@ function query(params: {
 		},
 		setPermissionMode: async (permissionMode: Options["permissionMode"]) => {
 			livePermissionMode = permissionMode;
+			if (turnHeld)
+				outOfBand.push({
+					type: "system",
+					subtype: "status",
+					status: null,
+					permissionMode,
+					uuid: randomUUID(),
+					session_id: sessionId,
+				} as unknown as SDKMessage);
 			mark({
 				kind: "query-update",
 				queryId,

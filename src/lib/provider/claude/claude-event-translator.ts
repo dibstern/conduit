@@ -594,6 +594,10 @@ export class ClaudeEventTranslator {
 					// time the main agent resumed after a subagent (this is the
 					// only status the main chain emits while blocked on a Task).
 					// Only an explicit null status means "no operation".
+					// A turn in flight is still working, though: the SDK also sends
+					// a bare null status mid-turn when the permission mode changes,
+					// and endTurn reports the turn's real idle.
+					if (message.status !== "requesting" && ctx.turnInFlight) return;
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
@@ -1729,6 +1733,13 @@ export class ClaudeEventTranslator {
 				makeProviderRuntimeEvent("turn.completed", ctx.sessionId, {
 					messageId:
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+					// SDK-local work (/compact, a slash command) ends with a bare
+					// result and no assistant message of its own, so messageId
+					// above names the previous turn's answer. Key the completion
+					// to the prompt this result answers so that turn settles.
+					...(!this.currentAssistantMessageId && ctx.currentUserMessageId
+						? { userMessageId: ctx.currentUserMessageId }
+						: {}),
 					cost: result.total_cost_usd,
 					tokens,
 					duration: result.duration_ms,

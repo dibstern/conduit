@@ -137,7 +137,13 @@ const steer = (
 	if (reason) return { _tag: "Rejected", reason };
 	return {
 		_tag: "Accepted",
-		events: [...events, sent(sessionId, input.inputId)],
+		events: [
+			...events,
+			{
+				type: "input.sent",
+				data: { sessionId, inputId: input.inputId, steer: true },
+			},
+		],
 		handoff: input,
 		steer: true,
 	};

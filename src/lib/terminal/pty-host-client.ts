@@ -504,17 +504,30 @@ export class PtyHostClient {
 
 	async create(options: {
 		cwd: string;
+		projectDir?: string;
 		cols?: number | undefined;
 		rows?: number | undefined;
 		shell?: string;
 		env?: Record<string, string>;
 	}): Promise<HostedPtySession> {
+		if (
+			options.projectDir !== undefined &&
+			resolve(options.projectDir) !== resolve(options.cwd) &&
+			!this.hello.supportsProjectDir
+		)
+			throw new PtyHostError({
+				message:
+					"The running PTY host predates session workspaces; restart it before opening a worktree terminal.",
+			});
 		const env: Record<string, string> = {};
 		for (const [key, value] of Object.entries(options.env ?? process.env))
 			if (value !== undefined) env[key] = value;
 		const reply = await this.request({
 			type: "create",
 			cwd: resolve(options.cwd),
+			...(options.projectDir
+				? { projectDir: resolve(options.projectDir) }
+				: {}),
 			cols: options.cols ?? 80,
 			rows: options.rows ?? 24,
 			shell:
@@ -527,7 +540,7 @@ export class PtyHostClient {
 			throw new PtyHostError({
 				message: "Unexpected PTY host create response",
 			});
-		return this.attach(reply.pty.id, options.cwd);
+		return this.attach(reply.pty.id, options.projectDir ?? options.cwd);
 	}
 
 	async attach(ptyId: string, cwd: string): Promise<HostedPtySession> {

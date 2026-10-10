@@ -251,6 +251,11 @@ const main = Effect.gen(function* () {
 		const queryLaunchOptions = { ...effectiveOptions, ...replayedSettings };
 		const queryOptions = {
 			...queryLaunchOptions,
+			// Lets the agent's tools name the Conduit session they run in.
+			env: {
+				...(queryLaunchOptions.env ?? process.env),
+				CONDUIT_SESSION_ID: sessionId,
+			},
 			allowedTools: [
 				...new Set([
 					...(queryLaunchOptions.allowedTools ?? []),

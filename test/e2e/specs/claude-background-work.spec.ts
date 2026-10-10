@@ -184,3 +184,84 @@ test.describe("Claude background work", () => {
 		await testInfo.attach("after-stop.png", { path, contentType: "image/png" });
 	});
 });
+
+// The shell ending between turns, before the SDK's wake-up turn (the trace is
+// background-shell-turn cut there), restarts its Bash tool under a message id
+// no turn owns. Bug (conduit-test-jyr9.14): that reopened the finished turn
+// with no reply to close it, so the inbox queued every later message.
+// Failure cases: the turn reads as running again; the next message queues
+// instead of sending.
+test.describe("Claude background shell ending between turns", () => {
+	test.use({
+		claudeReplay: {
+			turns: ["background-shell-ends-between-turns", "pong-thinking-text-turn"],
+		},
+	});
+
+	test("leaves the finished turn finished, so the next message sends", async ({
+		page,
+		relayUrl,
+		harness,
+	}, testInfo) => {
+		const sessionId = decodeURIComponent(
+			harness.projectUrl.slice("/s/".length),
+		);
+		const ledger = () => {
+			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			try {
+				const column = (sql: string) =>
+					db
+						.prepare(sql)
+						.all(sessionId)
+						.map((row) => String(row["value"]));
+				return {
+					turns: column(
+						"SELECT state AS value FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+					),
+					toolsStartedAfterTurnEnd: column(
+						"SELECT json_extract(data, '$.toolName') AS value FROM events WHERE session_id = ?1 AND type = 'tool.started' AND sequence > (SELECT MIN(sequence) FROM events WHERE session_id = ?1 AND type = 'turn.completed')",
+					),
+					queued: column(
+						"SELECT input_id AS value FROM pending_inputs WHERE session_id = ? AND state = 'queued'",
+					),
+					sent: column(
+						"SELECT json_extract(data, '$.inputId') AS value FROM events WHERE session_id = ? AND type = 'input.sent'",
+					).length,
+				};
+			} finally {
+				db.close();
+			}
+		};
+		const report: Record<string, ReturnType<typeof ledger>> = {};
+		try {
+			const app = new AppPage(page);
+			await app.goto(relayUrl);
+			await app.sendMessage("Run sleep 8 in the background");
+			await expect
+				.poll(() => ledger().toolsStartedAfterTurnEnd)
+				.toHaveLength(1);
+			report["shellEnded"] = ledger();
+			expect(
+				report["shellEnded"],
+				"the shell ending between turns reopened the finished turn",
+			).toMatchObject({ turns: ["completed"], queued: [], sent: 1 });
+
+			await app.sendMessage("ping");
+			await expect
+				.poll(ledger, { message: "the next message queued behind the turn" })
+				.toMatchObject({
+					turns: ["completed", "completed"],
+					queued: [],
+					sent: 2,
+				});
+			report["nextSent"] = ledger();
+		} finally {
+			const path = testInfo.outputPath("between-turns-report.json");
+			writeFileSync(path, JSON.stringify({ sessionId, report }, null, 2));
+			await testInfo.attach("between-turns-report.json", {
+				path,
+				contentType: "application/json",
+			});
+		}
+	});
+});
