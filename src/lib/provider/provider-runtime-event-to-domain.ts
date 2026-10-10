@@ -433,6 +433,12 @@ export function translateProviderRuntimeEventToDomain(
 			return singleEvent(event, state, "session.created", payload);
 		}
 
+		case "session.deleted": {
+			return singleEvent(event, state, "session.deleted", {
+				sessionId: event.sessionId,
+			});
+		}
+
 		case "session.renamed": {
 			const title = stringField(data["title"]);
 			if (title == null || title.length === 0) return { events: [], state };
