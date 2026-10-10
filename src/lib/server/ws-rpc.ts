@@ -243,6 +243,9 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.resumeBase === undefined
 					? {}
 					: { resumeBase: request.resumeBase }),
+				...(request.resumePoint === undefined
+					? {}
+					: { resumePoint: request.resumePoint }),
 			}).pipe(
 				(stream) =>
 					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
@@ -528,6 +531,9 @@ export const makeRoutedWsRpcServerLayer = (
 					...(request.resumeBase === undefined
 						? {}
 						: { resumeBase: request.resumeBase }),
+					...(request.resumePoint === undefined
+						? {}
+						: { resumePoint: request.resumePoint }),
 				});
 				return request.textSuffixes === true
 					? encodeSessionDetail(source)

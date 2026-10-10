@@ -826,6 +826,7 @@ describe("switchModelForSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2317,6 +2318,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2416,6 +2418,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2707,6 +2710,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 			readInboxState: () => Effect.succeed(undefined),
+			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
@@ -3231,6 +3235,7 @@ describe("handleMessage", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -3489,6 +3494,7 @@ describe("handleMessage", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),

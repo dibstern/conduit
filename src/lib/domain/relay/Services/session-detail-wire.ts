@@ -4,11 +4,10 @@ import {
 	SENT_PART_LIMIT,
 	type SessionDetailEnvelope,
 } from "../../../contracts/ws-rpc.js";
-import type { Envelope } from "./read-model-subscription.js";
 import type { SessionDetailItem } from "./session-detail-subscription.js";
 
 export const encodeSessionDetail = <E, R>(
-	input: Stream.Stream<Envelope<SessionDetailItem>, E, R>,
+	input: Stream.Stream<SessionDetailEnvelope, E, R>,
 ): Stream.Stream<SessionDetailEnvelope, E, R> =>
 	Stream.suspend(() => {
 		// Owned by this execution, not by the socket or the reusable stream value.

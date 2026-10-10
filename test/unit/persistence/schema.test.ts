@@ -48,6 +48,7 @@ describe("Schema Migration", () => {
 				"session_sidebar",
 				"session_sidebar_horizon",
 				"sessions",
+				"store_identity",
 				"tool_content",
 				"turns",
 			]);

@@ -69,6 +69,7 @@ export const SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION =
 export const PROJECT_PROVENANCE_MIGRATION = "0044_project_provenance.sql";
 export const MESSAGE_PART_VERSIONS_MIGRATION = "0045_message_part_versions.sql";
 export const SESSION_GIT_PUBLISHED_MIGRATION = "0046_session_git_published.sql";
+export const STORE_IDENTITY_MIGRATION = "0047_store_identity.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

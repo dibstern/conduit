@@ -29,6 +29,7 @@ import {
 	Schedule,
 	Scope,
 } from "effect";
+import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import { trackControlSocket } from "./connection-status.svelte.js";
 import { makeResumeLedger, type ResumeLedger, resumeStream } from "./resume.js";
 import { decodeSessionDetail } from "./session-detail-wire.js";
@@ -105,9 +106,11 @@ const makeSubscriptions = (
 		/** What the view resumed from has applied; the caller keeps it with
 		 *  the view, so a resume from its high-water mark is checked too. */
 		readonly ledger?: ResumeLedger;
+		/** A snapshot saved by an earlier page load, delivered first. */
+		readonly saved?: SessionDetailEnvelope | undefined;
 	}) =>
 		resumeStream(
-			(resumeFromSequence, resumeBase) =>
+			(resumeFromSequence, resumeBase, resumePoint) =>
 				sockets.stream
 					.SubscribeSessionDetail({
 						projectSlug,
@@ -115,11 +118,13 @@ const makeSubscriptions = (
 						textSuffixes: true,
 						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 						...(resumeBase === undefined ? {} : { resumeBase }),
+						...(resumePoint === undefined ? {} : { resumePoint }),
 					})
 					.pipe(decodeSessionDetail),
 			{
 				from: options.resumeFromSequence,
 				ledger: options.ledger ?? makeResumeLedger(),
+				saved: options.saved,
 			},
 		),
 	/** One session's todo list. Low-rate, so it rides the control socket. */

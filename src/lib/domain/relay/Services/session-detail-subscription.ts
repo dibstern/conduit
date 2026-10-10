@@ -15,7 +15,7 @@
 // shell's to report.
 
 import type { SqlError } from "@effect/sql/SqlError";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
 import type {
 	MessageVersion,
 	PartVersion,
@@ -23,6 +23,8 @@ import type {
 import {
 	PartRemovalId,
 	type ResumeBase,
+	ResumePoint,
+	type SessionDetailEnvelope,
 	type SessionDetailItemSchema,
 } from "../../../contracts/ws-rpc.js";
 import {
@@ -42,7 +44,7 @@ import {
 } from "../../../persistence/session-history-adapter.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
-import { type Envelope, stream } from "./read-model-subscription.js";
+import { stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 
@@ -120,6 +122,21 @@ const PAGE_MESSAGES = 50;
 const partRowId = (messageId: string, partId: string) =>
 	Schema.encodeSync(PartRemovalId)([messageId, partId]);
 
+/**
+ * What a {@link ResumePoint} says, readable only here: the store that sent
+ * the snapshot, and the base a resume from it is checked against.
+ */
+const ResumePointBody = Schema.compose(
+	Schema.StringFromBase64Url,
+	Schema.parseJson(
+		Schema.Struct({
+			store: Schema.String,
+			sequence: Schema.Number,
+			cursor: Schema.optional(Schema.NonEmptyString),
+		}),
+	),
+);
+
 export type SessionDetailSubscriptionError =
 	| ReadQueryEffectError
 	| SqlError
@@ -139,8 +156,10 @@ export const subscribeSessionDetail = (options: {
 	readonly sessionId: string;
 	readonly resumeFromSequence?: number;
 	readonly resumeBase?: ResumeBase;
+	/** Resume from a saved snapshot; one from another store starts cold. */
+	readonly resumePoint?: ResumePoint;
 }): Stream.Stream<
-	Envelope<SessionDetailItem>,
+	SessionDetailEnvelope,
 	SessionDetailSubscriptionError,
 	ReadQueryEffectTag | SessionEventBusTag
 > =>
@@ -172,6 +191,31 @@ export const subscribeSessionDetail = (options: {
 						yield* ingress.value.reconcileSession(options.sessionId);
 				}
 			}
+			const store = yield* readQuery.readStoreIdentity();
+			const point = Option.getOrUndefined(
+				Option.filter(
+					Option.fromNullable(options.resumePoint).pipe(
+						Option.flatMap(Schema.decodeOption(ResumePointBody)),
+					),
+					(body) => body.store === store,
+				),
+			);
+			// A saved snapshot resumes from the base its point names; a point
+			// this store did not send gets a fresh snapshot.
+			const resume =
+				options.resumePoint === undefined
+					? options
+					: point === undefined
+						? {}
+						: {
+								resumeFromSequence: options.resumeFromSequence,
+								resumeBase: {
+									sequence: point.sequence,
+									...(point.cursor === undefined
+										? {}
+										: { cursor: point.cursor }),
+								},
+							};
 			return stream<SessionDetailItem, SessionDetailSubscriptionError>({
 				bus,
 				source: {
@@ -328,12 +372,30 @@ export const subscribeSessionDetail = (options: {
 						newestRowsWithin(rows, PAGE_FRAME_BUDGET).length === rows.length,
 					resume: "catchUp",
 				},
-				...(options.resumeFromSequence === undefined
+				...(resume.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: options.resumeFromSequence }),
-				...(options.resumeBase === undefined
+					: { resumeFromSequence: resume.resumeFromSequence }),
+				...(resume.resumeBase === undefined
 					? {}
-					: { resumeBase: options.resumeBase }),
-			});
+					: { resumeBase: resume.resumeBase }),
+			}).pipe(
+				Stream.map(
+					(envelope): SessionDetailEnvelope =>
+						envelope._tag === "snapshot" && store !== undefined
+							? {
+									...envelope,
+									resumePoint: ResumePoint.make(
+										Schema.encodeSync(ResumePointBody)({
+											store,
+											sequence: envelope.sequence,
+											...(envelope.cursor === undefined
+												? {}
+												: { cursor: envelope.cursor }),
+										}),
+									),
+								}
+							: envelope,
+				),
+			);
 		}),
 	);

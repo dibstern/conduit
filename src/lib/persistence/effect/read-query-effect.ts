@@ -655,6 +655,12 @@ export interface ReadQueryEffect {
 		| undefined,
 		ReadQueryEffectError
 	>;
+	/** This store's random name, minted once by migration. Resume points carry
+	 *  it so a point from another store is refused. */
+	readonly readStoreIdentity: () => Effect.Effect<
+		string | undefined,
+		ReadQueryEffectError
+	>;
 }
 
 export interface PendingInputRow {
@@ -1826,6 +1832,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const readStoreIdentity = () =>
+		sql<{ value: string }>`SELECT value FROM store_identity WHERE id = 1`.pipe(
+			Effect.map(([row]) => row?.value),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "readStoreIdentity", cause }),
+			),
+		);
+
 	const readPendingInputs = (
 		sessionId: string,
 		range: { readonly after?: number; readonly through: number },
@@ -1994,5 +2009,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getLatestTurnModelExecution,
 		readPendingInputs,
 		readInboxState,
+		readStoreIdentity,
 	} satisfies ReadQueryEffect;
 });

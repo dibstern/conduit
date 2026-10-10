@@ -48,6 +48,7 @@ import {
 	SESSIONS_SNOOZED_MIGRATION,
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
+	STORE_IDENTITY_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -1121,6 +1122,9 @@ export const effectMigrationEntries = {
 	),
 	"0047_session_git_published": executeSqlStatements(
 		readMigrationSql(SESSION_GIT_PUBLISHED_MIGRATION),
+	),
+	"0048_store_identity": executeSqlStatements(
+		readMigrationSql(STORE_IDENTITY_MIGRATION),
 	),
 } satisfies Record<
 	string,

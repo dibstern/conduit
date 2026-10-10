@@ -114,6 +114,7 @@ const makeLayer = (options: {
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 					readInboxState: () => Effect.succeed(undefined),
+					readStoreIdentity: () => Effect.succeed("store"),
 					readSessionTranscriptPage: () =>
 						options.failRead
 							? Effect.fail(readFailure)
@@ -259,7 +260,9 @@ describe("RpcTest subscription stream semantics", () => {
 				_tag: "snapshot",
 				rows: [],
 				sequence: 0,
-				...(member === "SubscribeSessionDetail" ? { hasMore: false } : {}),
+				...(member === "SubscribeSessionDetail"
+					? { hasMore: false, resumePoint: expect.any(String) }
+					: {}),
 			},
 			{ _tag: "synchronized" },
 		];

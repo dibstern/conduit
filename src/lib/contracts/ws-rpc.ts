@@ -53,6 +53,16 @@ export const ResumeBase = Schema.Struct({
 export type ResumeBase = typeof ResumeBase.Type;
 
 /**
+ * Where a saved snapshot can resume from, named by the store that sent it
+ * (conduit-test-y7eo.14). Opaque: only the server makes one and only the
+ * server reads one, so a client can keep it and hand it back but cannot
+ * forge or alter what it says. A point from another store is refused with a
+ * fresh snapshot.
+ */
+export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
+export type ResumePoint = typeof ResumePoint.Type;
+
+/**
  * A subscription's base set after a catch-up, as {@link digestRows} of the ids
  * and versions it holds, and how many rows that is. Only the server
  * subscription helper makes one; a client checks it against its own digest of
@@ -401,7 +411,14 @@ const TextSuffixSchema = Schema.Struct({
 });
 const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
 export const SessionDetailEnvelopeSchema = Schema.Union(
-	DetailEnvelope.members[0],
+	DetailEnvelope.members[0].pipe(
+		Schema.extend(
+			Schema.Struct({
+				// What a client that saves this snapshot resumes it from.
+				resumePoint: Schema.optional(ResumePoint),
+			}),
+		),
+	),
 	DetailEnvelope.members[1],
 	DetailEnvelope.members[2].pipe(
 		Schema.extend(
@@ -2219,6 +2236,8 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
+		// From a saved snapshot: the server resumes from this, not resumeBase.
+		resumePoint: Schema.optional(ResumePoint),
 		// Only clients that decode textSuffix may opt into compressed live parts.
 		textSuffixes: Schema.optional(Schema.Boolean),
 	},

@@ -118,6 +118,7 @@ import {
 	digestRows,
 	type ResumeBase,
 	ResumeChecksum,
+	ResumePoint,
 	type WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import type { DetailLengthMismatch } from "./session-detail-wire.js";
@@ -138,6 +139,8 @@ declare global {
  */
 export interface ResumeLedger {
 	base: ResumeBase | undefined;
+	/** The server's name for the base, when its snapshot carried one. */
+	point: ResumePoint | undefined;
 	readonly rows: Map<string, number>;
 	/** The part rows seen under each message, which go when it goes. */
 	readonly parts: Map<string, Set<string>>;
@@ -145,12 +148,14 @@ export interface ResumeLedger {
 
 export const makeResumeLedger = (): ResumeLedger => ({
 	base: undefined,
+	point: undefined,
 	rows: new Map(),
 	parts: new Map(),
 });
 
 const clearLedger = (ledger: ResumeLedger) => {
 	ledger.base = undefined;
+	ledger.point = undefined;
 	ledger.rows.clear();
 	ledger.parts.clear();
 };
@@ -316,6 +321,9 @@ const record = (
 					? { cursor: envelope.cursor }
 					: {}),
 			};
+			const point =
+				"resumePoint" in envelope ? envelope.resumePoint : undefined;
+			ledger.point = Schema.is(ResumePoint)(point) ? point : undefined;
 			const rows: readonly unknown[] =
 				"rows" in envelope && Array.isArray(envelope.rows) ? envelope.rows : [];
 			for (const row of rows) holdRow(ledger, { item: row }, sequence);
@@ -380,17 +388,25 @@ const unsubscribed = Effect.map(
  * `issue` is called with the sequence to resume from — `undefined` on the first
  * attempt unless `from` is given, and again on a drop that completed nothing, so
  * a subscription that never got a snapshot still asks for one. With a `ledger`
- * it is also given the base a resume is checked against.
+ * it is also given the base a resume is checked against, and the server's
+ * point for it when there is one.
+ *
+ * `saved` is a snapshot kept from an earlier page load. It is delivered
+ * first, before anything is asked, and the subscription resumes from it as
+ * from any snapshot it was sent, so the server's checksum confirms it or a
+ * fresh snapshot replaces it.
  */
 export const resumeStream = <A extends object>(
 	issue: (
 		resumeFromSequence: number | undefined,
 		resumeBase?: ResumeBase,
+		resumePoint?: ResumePoint,
 	) => Stream.Stream<A, WsRpcError | RpcClientError | DetailLengthMismatch>,
 	options: {
 		readonly from?: number | undefined;
 		readonly onTransportDrop?: () => void;
 		readonly ledger?: ResumeLedger;
+		readonly saved?: A | undefined;
 	} = {},
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
@@ -408,7 +424,7 @@ export const resumeStream = <A extends object>(
 					Effect.map(Ref.get(cursor), (at) =>
 						at.closed === undefined || ledger?.base === undefined
 							? issue(at.closed)
-							: issue(at.closed, ledger.base),
+							: issue(at.closed, ledger.base, ledger.point),
 					),
 				).pipe(
 					Stream.filterEffect((envelope) =>
@@ -509,6 +525,10 @@ export const resumeStream = <A extends object>(
 					),
 				);
 
-			return attempt();
+			const saved = options.saved;
+			if (saved === undefined || ledger === undefined) return attempt();
+			yield* Ref.update(cursor, (from) => advance(from, saved).cursor);
+			yield* Effect.orDie(record(ledger, saved));
+			return Stream.concat(Stream.make(saved), attempt());
 		}),
 	);

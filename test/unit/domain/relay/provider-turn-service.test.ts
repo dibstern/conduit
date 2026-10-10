@@ -217,6 +217,7 @@ const makeReadQuery = (
 	getSessionMessagesWithParts,
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readStoreIdentity: () => Effect.succeed("store"),
 	getSessionHistoryMetadata,
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),

@@ -27,6 +27,12 @@ import {
 	seedRegistryFromMessages,
 	sessionMessages,
 } from "./chat.svelte.js";
+import {
+	openSavedTranscript,
+	type SavedSnapshot,
+	type SavedTranscript,
+	saveTranscript,
+} from "./saved-transcripts.js";
 import { sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
 
@@ -597,11 +603,14 @@ export function viewTranscript(
 	viewed = { project, sessionId, loaded, settle };
 	const currentGeneration = ++generation;
 	const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
+	// Only a session this page has not loaded yet opens from a saved page.
+	let saved: Promise<SavedTranscript | undefined> = Promise.resolve(undefined);
 	if (slot && sessionId) {
 		if (
 			!slot.messages.transcript ||
 			slot.messages.transcript.project !== project
 		) {
+			saved = openSavedTranscript(sessionId);
 			ledgers.delete(slot.messages);
 			slot.messages.transcript = {
 				rows: [],
@@ -623,24 +632,33 @@ export function viewTranscript(
 	}
 	void stopFeed().then(async () => {
 		if (currentGeneration !== generation || !sessionId || !slot) return;
-		const runtime = await getRuntime();
+		const [runtime, record] = await Promise.all([getRuntime(), saved]);
 		if (currentGeneration !== generation) return;
 		const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
 		ledgers.set(slot.messages, ledger);
+		// Drawn first, once; a restarted feed resumes from what it applied.
+		const opened = record?.project === project ? record.snapshot : undefined;
+		let unopened = opened;
+		// The server's snapshot, saved once it synchronizes with no change
+		// between: only then is it exactly the rows at its sequence.
+		let unsaved: SavedSnapshot | undefined;
 		const next = runtime.runFork(
 			Effect.flatMap(WsRpcClients, (clients) =>
 				Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
 					Stream.runForEach(
 						supervise(
-							Stream.suspend(() =>
-								subscriptions.sessionDetail({
+							Stream.suspend(() => {
+								const drawn = unopened;
+								unopened = undefined;
+								return subscriptions.sessionDetail({
 									sessionId,
 									ledger,
+									saved: drawn,
 									...(slot.messages.transcript?.hwm == null
 										? {}
 										: { resumeFromSequence: slot.messages.transcript.hwm }),
-								}),
-							),
+								});
+							}),
 							(status) => {
 								if (
 									currentGeneration === generation &&
@@ -679,6 +697,17 @@ export function viewTranscript(
 										)
 								)
 									refreshSessionSkills(sessionId);
+								if (envelope._tag === "synchronized" && unsaved)
+									void saveTranscript(
+										sessionId,
+										project,
+										unsaved,
+										opened?.resumePoint,
+									);
+								unsaved =
+									envelope._tag === "snapshot" && envelope !== opened
+										? envelope
+										: undefined;
 								const after = applyTranscriptEnvelope(before, envelope);
 								slot.messages.transcript = after;
 								const now = after.rows.find((row) => row.id === messageId);

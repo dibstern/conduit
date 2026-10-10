@@ -49,6 +49,7 @@ import {
 	seedSessionLoadFixture,
 } from "../../fixtures/session-load.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { savedTranscripts } from "../helpers/saved-transcripts.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 interface Frame {
@@ -694,17 +695,26 @@ test("opens the heavy session after a restart under load", async ({
 	await coldOpener.goto(
 		`${harness.baseUrl}/s/${HEAVY_SESSION_ID}?p=process-test`,
 	);
-	const coldOpenMs = await (
-		await coldOpener.waitForFunction(
-			(text) =>
-				[...document.querySelectorAll(".msg-assistant")].some((message) =>
-					message.textContent?.includes(text),
-				) && Math.round(performance.now()),
-			HEAVY_FINAL_TEXT,
-			{ polling: "raf", timeout: 30_000 },
-		)
-	).jsonValue();
+	const openedMs = async () =>
+		(
+			await coldOpener.waitForFunction(
+				(text) =>
+					[...document.querySelectorAll(".msg-assistant")].some((message) =>
+						message.textContent?.includes(text),
+					) && Math.round(performance.now()),
+				HEAVY_FINAL_TEXT,
+				{ polling: "raf", timeout: 30_000 },
+			)
+		).jsonValue();
+	const coldOpenMs = await openedMs();
 	const coldTo = Date.now();
+	// The same device reloads once the open has saved the session's page
+	// (conduit-test-y7eo.14): it draws that page, then resumes from it.
+	await expect
+		.poll(async () => HEAVY_SESSION_ID in (await savedTranscripts(coldOpener)))
+		.toBe(true);
+	await coldOpener.reload();
+	const cachedOpenMs = await openedMs();
 	await coldOpener.context().close();
 
 	writeFileSync(`${restartMetrics}.stop`, "");
@@ -863,6 +873,7 @@ test("opens the heavy session after a restart under load", async ({
 				cpu: cpuCosts(profile, visibleAt, restartTo),
 			},
 		},
+		cachedOpen: { sessionId: HEAVY_SESSION_ID, ms: cachedOpenMs },
 		coldOpen: {
 			sessionId: HEAVY_SESSION_ID,
 			ms: coldOpenMs,

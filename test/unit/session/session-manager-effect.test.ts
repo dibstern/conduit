@@ -585,6 +585,7 @@ describe("SessionManager Effect", () => {
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),

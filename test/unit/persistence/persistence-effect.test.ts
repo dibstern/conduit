@@ -167,6 +167,7 @@ describe("Persistence Effect", () => {
 					"session_sidebar",
 					"session_sidebar_horizon",
 					"sessions",
+					"store_identity",
 					"tool_content",
 					"turns",
 				],
@@ -308,6 +309,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 45, name: "project_provenance" },
 				{ migration_id: 46, name: "message_part_versions" },
 				{ migration_id: 47, name: "session_git_published" },
+				{ migration_id: 48, name: "store_identity" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
