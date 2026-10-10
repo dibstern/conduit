@@ -19,7 +19,11 @@ import {
 	fmtTokens,
 	forkMessageIdAtReply,
 	isSoloTool,
+	LAUNCH_SETTLE_MS,
 	lastResult,
+	launchMeta,
+	launchRow,
+	launchUsage,
 	partLabel,
 	segmentTurns,
 	skillChapters,
@@ -1206,6 +1210,206 @@ describe("fmtTokens", () => {
 		expect(fmtTokens(1_311)).toBe("1.3k");
 		expect(fmtTokens(47_311)).toBe("47k");
 		expect(fmtTokens(1_200_000)).toBe("1.2M");
+	});
+});
+
+describe("launchRow", () => {
+	const T = 1_800_000_000_000;
+	// The Task call that launched agent A, with the task info the provider
+	// saved on it.
+	const agent = (metadata: Record<string, unknown>) => ({
+		...tool("Task", {
+			tool: "Task",
+			description: "agent A",
+			prompt: "go",
+		}),
+		metadata: { providerTaskId: "taskA", ...metadata },
+	});
+	const started = { backgrounded: true, taskStartedAt: T };
+	const listed = [{ id: "taskA" }];
+
+	it("ignores tool calls that started no task", () => {
+		expect(launchRow(read("a.ts"), listed, T)).toBeUndefined();
+	});
+
+	it("leaves a task that was never backgrounded a foreground step", () => {
+		const row = launchRow(
+			agent({ taskStartedAt: T, outcome: "completed" }),
+			listed,
+			T,
+		);
+		expect(row?.state).toEqual({ kind: "foreground" });
+	});
+
+	it("runs on a live clock from task_started, less paused time", () => {
+		const row = launchRow(
+			agent({
+				...started,
+				pausedMs: 2_000,
+				currentStep: "Running pnpm test",
+				totalTokens: 18_506,
+				toolUses: 2,
+			}),
+			listed,
+			T + 65_000,
+		);
+		expect(row).toEqual({
+			state: { kind: "running" },
+			step: "Running pnpm test",
+			time: 63_000,
+			tokens: 18_506,
+			toolCalls: 2,
+			nested: 0,
+		});
+		expect(row && launchMeta(row)).toBe("1m 3s");
+		expect(row && launchUsage(row)).toBe("19k tokens · 2 tools");
+	});
+
+	it("freezes elapsed time throughout an active pause and resumes afterwards", () => {
+		const paused = agent({ ...started, pausedMs: 2_000, pausedAt: T + 10_000 });
+		expect(launchRow(paused, listed, T + 20_000)?.time).toBe(8_000);
+		expect(launchRow(paused, listed, T + 60_000)?.time).toBe(8_000);
+		const resumed = agent({ ...started, pausedMs: 62_000, pausedAt: null });
+		expect(launchRow(resumed, listed, T + 72_000)?.time).toBe(10_000);
+	});
+
+	it("names the last tool when the step only repeats the task", () => {
+		const row = launchRow(
+			agent({ ...started, currentStep: "agent A", lastToolName: "Read" }),
+			listed,
+			T,
+		);
+		expect(row?.step).toBe("Read");
+	});
+
+	it("shows the active tool before any task progress supplies a step", () => {
+		expect(
+			launchRow(agent({ ...started, activeToolName: "Bash" }), listed, T)?.step,
+		).toBe("Bash");
+	});
+
+	it("becomes a background row once task_updated moves it there", () => {
+		const foreground = agent({ taskStartedAt: T });
+		expect(launchRow(foreground, listed, T)?.state.kind).toBe("foreground");
+		const moved = {
+			...foreground,
+			metadata: { ...foreground.metadata, backgrounded: true },
+		};
+		expect(launchRow(moved, listed, T)?.state.kind).toBe("running");
+	});
+
+	it("folds to the finish message's own duration, not a progress reading", () => {
+		const row = launchRow(
+			agent({
+				...started,
+				outcome: "completed",
+				durationMs: 18_177,
+				taskDurationMs: 18_177,
+				endTime: T + 99_000,
+				totalTokens: 23_551,
+				toolUses: 6,
+			}),
+			[],
+			T + 120_000,
+		);
+		expect(row?.state).toEqual({ kind: "finished", outcome: "completed" });
+		expect(row?.time).toBe(18_177);
+		expect(row?.step).toBeUndefined();
+		expect(row && launchMeta(row)).toBe("done · 18s");
+		expect(row && launchUsage(row)).toBe("24k tokens · 6 tools");
+	});
+
+	it("times a shell with no usage from task_updated end, less paused time", () => {
+		const shell: ToolMessage = {
+			...tool("Bash", { tool: "Bash", command: "sleep 40" }),
+			metadata: {
+				providerTaskId: "shell",
+				...started,
+				durationMs: 3_000, // a stale progress reading, never final
+				outcome: "completed",
+				endTime: T + 41_000,
+				pausedMs: 1_000,
+			},
+		};
+		const row = launchRow(shell, [], T + 600_000);
+		expect(row?.time).toBe(40_000);
+		expect(row && launchMeta(row)).toBe("done · 40s");
+	});
+
+	it("tells failed from stopped, and an outcome wins over the live list", () => {
+		const failed = launchRow(
+			agent({ ...started, outcome: "failed" }),
+			listed,
+			T,
+		);
+		const stopped = launchRow(
+			agent({ ...started, outcome: "stopped" }),
+			listed,
+			T,
+		);
+		expect(failed?.state).toEqual({ kind: "finished", outcome: "failed" });
+		expect(stopped?.state).toEqual({ kind: "finished", outcome: "stopped" });
+		expect(stopped && launchMeta(stopped)).toBe("stopped");
+	});
+
+	it("keeps running just off the list while its outcome is on the way", () => {
+		// The SDK drops a task one message before its outcome, and the two
+		// reach the browser on different feeds.
+		const justDropped = (now: number) =>
+			launchRow(agent(started), [], now, T + 10_000)?.state;
+		expect(justDropped(T + 10_000)).toEqual({ kind: "running" });
+		expect(justDropped(T + 10_000 + LAUNCH_SETTLE_MS - 1)).toEqual({
+			kind: "running",
+		});
+		expect(justDropped(T + 10_000 + LAUNCH_SETTLE_MS)).toEqual({
+			kind: "gone",
+		});
+		// An outcome landing in the window wins at once.
+		expect(
+			launchRow(
+				agent({ ...started, outcome: "completed" }),
+				[],
+				T + 10_001,
+				T + 10_000,
+			)?.state,
+		).toEqual({ kind: "finished", outcome: "completed" });
+	});
+
+	it("is no longer running once off the list with no outcome", () => {
+		// A restart empties the list and the row never saw it listed.
+		const row = launchRow(
+			agent({ ...started, totalTokens: 900 }),
+			[],
+			T + 5_000,
+		);
+		expect(row?.state).toEqual({ kind: "gone" });
+		expect(row?.time).toBeUndefined();
+		expect(row && launchMeta(row)).toBe("no longer running");
+		expect(row && launchUsage(row)).toBe("900 tokens");
+	});
+
+	it("never shows a negative time across clocks", () => {
+		const row = launchRow(
+			agent({ ...started, outcome: "completed", endTime: T - 5_000 }),
+			[],
+			T,
+		);
+		expect(row?.time).toBe(0);
+	});
+
+	it("counts live tasks the agent started, not the agent's siblings", () => {
+		const row = launchRow(
+			agent(started),
+			[
+				{ id: "taskA" },
+				{ id: "shell1", parentTaskId: "taskA" },
+				{ id: "shell2", parentTaskId: "taskA" },
+				{ id: "other", parentTaskId: "taskB" },
+				{ id: "top" },
+			],
+			T,
+		);
+		expect(row?.nested).toBe(2);
 	});
 });
 

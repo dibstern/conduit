@@ -784,6 +784,130 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 	};
 }
 
+/** How long a task just off the live list waits for its outcome. */
+export const LAUNCH_SETTLE_MS = 3_000;
+
+export type LaunchOutcome = "completed" | "failed" | "stopped";
+
+export type LaunchState =
+	| { readonly kind: "foreground" }
+	| { readonly kind: "running" }
+	| { readonly kind: "finished"; readonly outcome: LaunchOutcome }
+	| { readonly kind: "gone" };
+
+/** What a step that launched a background task shows about that task. */
+export interface LaunchRow {
+	readonly state: LaunchState;
+	/** What a running task is doing now, e.g. "Running pnpm test". */
+	readonly step?: string;
+	/** How long it has run, or ran. Absent when the SDK gave no way to know. */
+	readonly time?: number;
+	readonly tokens?: number;
+	readonly toolCalls?: number;
+	/** Live tasks this task started (a shell inside an agent). */
+	readonly nested: number;
+}
+
+/**
+ * The launching row for a tool call that started an SDK task, or undefined for
+ * any other tool. `live` is the root session's live background tasks: the SDK
+ * keeps one list per Claude process, so a Child Session reads its root's.
+ * An outcome wins over the list, which is in no order with start and finish
+ * messages; without one, a backgrounded task off the list is no longer running.
+ * `listedAt` is when the task was last seen on the list: the SDK drops a task
+ * just before its outcome, which arrives on another feed, so a task that has
+ * just left the list still reads running for LAUNCH_SETTLE_MS.
+ */
+export function launchRow(
+	tool: ToolMessage,
+	live: readonly {
+		readonly id: string;
+		readonly parentTaskId?: string | undefined;
+	}[],
+	now: number,
+	listedAt?: number,
+): LaunchRow | undefined {
+	const meta = tool.metadata ?? {};
+	const taskId = meta["providerTaskId"];
+	if (typeof taskId !== "string") return undefined;
+	const num = (key: string) => {
+		const value = meta[key];
+		return typeof value === "number" ? value : undefined;
+	};
+	const outcome = meta["outcome"];
+	const state: LaunchState =
+		meta["backgrounded"] !== true
+			? { kind: "foreground" }
+			: outcome === "completed" || outcome === "failed" || outcome === "stopped"
+				? { kind: "finished", outcome }
+				: live.some((task) => task.id === taskId) ||
+						(listedAt !== undefined && now - listedAt < LAUNCH_SETTLE_MS)
+					? { kind: "running" }
+					: { kind: "gone" };
+	const startedAt = num("taskStartedAt");
+	const endTime = num("endTime");
+	const paused = num("pausedMs") ?? 0;
+	const time =
+		state.kind === "running"
+			? startedAt === undefined
+				? undefined
+				: Math.min(now, num("pausedAt") ?? now) - startedAt - paused
+			: (num("taskDurationMs") ??
+				(endTime === undefined || startedAt === undefined
+					? undefined
+					: endTime - startedAt - paused));
+	const currentStep = meta["currentStep"] ?? meta["activeToolName"];
+	const lastTool = meta["lastToolName"];
+	const step =
+		typeof currentStep === "string" && currentStep !== toolSubject(tool)
+			? currentStep
+			: typeof lastTool === "string"
+				? lastTool
+				: undefined;
+	const tokens = num("taskTotalTokens") ?? num("totalTokens");
+	const toolCalls = num("taskToolUses") ?? num("toolUses");
+	return {
+		state,
+		...(state.kind === "running" && step ? { step } : {}),
+		...(time !== undefined ? { time: Math.max(0, time) } : {}),
+		...(tokens ? { tokens } : {}),
+		...(toolCalls ? { toolCalls } : {}),
+		nested: live.filter((task) => task.parentTaskId === taskId).length,
+	};
+}
+
+export function launchStatus(state: LaunchState): string {
+	switch (state.kind) {
+		case "foreground":
+		case "running":
+			return "running";
+		case "finished":
+			return state.outcome === "completed" ? "done" : state.outcome;
+		case "gone":
+			return "no longer running";
+	}
+}
+
+/** "done · 18s"; a running task shows only its time, which ticks live. */
+export function launchMeta(row: LaunchRow): string {
+	return [
+		row.state.kind === "running" ? "" : launchStatus(row.state),
+		row.time === undefined ? "" : fmtDuration(row.time),
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+/** "24k tokens · 6 tools": what the task used, the first thing to go when narrow. */
+export function launchUsage(row: LaunchRow): string {
+	return [
+		row.tokens === undefined ? "" : `${fmtTokens(row.tokens)} tokens`,
+		plural(row.toolCalls ?? 0, "tool"),
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
 export function fmtTokens(n: number): string {
 	if (n < 1000) return `${n}`;
 	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;

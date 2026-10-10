@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, type Scope } from "effect";
+import { Clock, Duration, Effect, Fiber, type Scope } from "effect";
 import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -10,6 +10,7 @@ import {
 	claudeTaskNotificationMetadata,
 	claudeTaskProgressMetadata,
 	claudeTaskStartedMetadata,
+	claudeTaskUpdatedMetadata,
 	claudeToolProgressMetadata,
 } from "./claude-event-translator.js";
 import type {
@@ -84,15 +85,44 @@ export function decideClaudeMessageOwnershipEffect(
 	) => Effect.Effect<void, ClaudeAdapterError>,
 ): Effect.Effect<void, ClaudeAdapterError> {
 	const permit = (ctx.messageOwnershipPermit ??= Effect.unsafeMakeSemaphore(1));
-	return permit.withPermits(1)(
-		// Once an issuer is registered, deliver its tool before another input can
-		// use it. Finish reserved deliveries before a final read interrupts a poll.
-		Effect.uninterruptible(
-			Effect.suspend(() =>
-				applyDecisions(ctx.messageOwnership?.decide(input) ?? []),
+	return Effect.gen(function* () {
+		const timedInput =
+			input.kind === "sdk"
+				? {
+						...input,
+						receivedAt: input.receivedAt ?? (yield* Clock.currentTimeMillis),
+					}
+				: input;
+		// Sample at SDK ingress, before ownership can hold this start or wait
+		// for another delivery. Duplicate starts keep the earliest receipt.
+		if (
+			ctx.subagentTasks &&
+			timedInput.kind === "sdk" &&
+			timedInput.message.type === "system" &&
+			timedInput.message.subtype === "task_started"
+		) {
+			const message = timedInput.message;
+			const known = ctx.subagentTasks.get(message.task_id);
+			const toolUseId = message.tool_use_id ?? known?.toolUseId;
+			if (toolUseId !== undefined) {
+				const receivedAt = timedInput.receivedAt;
+				ctx.subagentTasks.set(message.task_id, {
+					...known,
+					toolUseId,
+					startedAt: Math.min(known?.startedAt ?? receivedAt, receivedAt),
+				});
+			}
+		}
+		yield* permit.withPermits(1)(
+			// Once an issuer is registered, deliver its tool before another input can
+			// use it. Finish reserved deliveries before a final read interrupts a poll.
+			Effect.uninterruptible(
+				Effect.suspend(() =>
+					applyDecisions(ctx.messageOwnership?.decide(timedInput) ?? []),
+				),
 			),
-		),
-	);
+		);
+	});
 }
 
 export function applyClaudeOwnershipDecisionEffect(
@@ -112,11 +142,14 @@ export function applyClaudeOwnershipDecisionEffect(
 		const failed = (ctx.failedSubagentSessions ??= new Set());
 		if (decision.kind === "route" || decision.kind === "route-transcript") {
 			let childSessionId: string;
+			// The agent task owning this session, when known from a route.
+			let ownerTaskId: string | undefined;
 			if (decision.kind === "route-transcript")
 				childSessionId = decision.childSessionId;
 			else {
 				if (decision.owner.kind === "parent") return;
 				childSessionId = decision.owner.childSessionId;
+				ownerTaskId = decision.owner.taskId;
 			}
 			if (failed.has(childSessionId)) {
 				log.warn(`Dropping Claude messages for failed child ${childSessionId}`);
@@ -160,15 +193,42 @@ export function applyClaudeOwnershipDecisionEffect(
 				metadata = claudeToolProgressMetadata(sdkMessage);
 			} else if (sdkMessage.type === "system") {
 				switch (sdkMessage.subtype) {
-					case "task_started":
-						metadata = claudeTaskStartedMetadata(sdkMessage);
+					case "task_started": {
+						// A task started inside an agent: remember which task started it.
+						const known = ctx.subagentTasks?.get(sdkMessage.task_id);
+						const startedAt =
+							known?.startedAt ?? (yield* Clock.currentTimeMillis);
+						ctx.subagentTasks?.set(sdkMessage.task_id, {
+							...known,
+							toolUseId: decision.tool.toolUseId,
+							...(ownerTaskId ? { parentTaskId: ownerTaskId } : {}),
+							startedAt,
+						});
+						metadata = claudeTaskStartedMetadata(sdkMessage, startedAt);
 						break;
+					}
 					case "task_progress":
 						metadata = claudeTaskProgressMetadata(sdkMessage);
 						break;
 					case "task_notification":
 						metadata = claudeTaskNotificationMetadata(sdkMessage);
 						break;
+					case "task_updated": {
+						const task = ctx.subagentTasks?.get(sdkMessage.task_id);
+						const update = claudeTaskUpdatedMetadata(
+							sdkMessage,
+							decision.receivedAt ?? (yield* Clock.currentTimeMillis),
+							task,
+						);
+						ctx.subagentTasks?.set(sdkMessage.task_id, {
+							...task,
+							toolUseId: decision.tool.toolUseId,
+							pausedAt: update.pausedAt,
+							pausedMs: update.pausedMs,
+						});
+						metadata = update;
+						break;
+					}
 					default:
 						return;
 				}
@@ -223,7 +283,12 @@ export function applyClaudeOwnershipDecisionEffect(
 				return;
 			}
 		}
-		ctx.subagentTasks?.set(taskId, { ...task, childSessionId });
+		ctx.subagentTasks?.set(taskId, {
+			...ctx.subagentTasks.get(taskId),
+			...task,
+			childSessionId,
+			...(issuer.kind === "child" ? { parentTaskId: issuer.taskId } : {}),
+		});
 
 		const childLink = ctx.eventSink
 			? ctx.eventSink

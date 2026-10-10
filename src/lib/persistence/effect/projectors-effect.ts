@@ -614,6 +614,9 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 			}
 
+			// A part write advances the message that owns the part: a task update can
+			// name whichever message is streaming when it lands (a background task
+			// finishing after its turn), and that message's refetch misses this part.
 			if (isEventType(event, "tool.running")) {
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
@@ -636,7 +639,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				return ids(
 					yield* sql<{
 						id: string;
-					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = COALESCE((SELECT message_id FROM message_parts WHERE id = ${event.data.partId}), ${event.data.messageId}) RETURNING id`,
 				);
 			}
 
@@ -658,7 +661,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				return ids(
 					yield* sql<{
 						id: string;
-					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = COALESCE((SELECT message_id FROM message_parts WHERE id = ${event.data.partId}), ${event.data.messageId}) RETURNING id`,
 				);
 			}
 

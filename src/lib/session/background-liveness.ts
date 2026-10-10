@@ -15,13 +15,11 @@ export type BackgroundTaskTransition =
 	| {
 			readonly sessionId: string;
 			readonly kind: "snapshot";
-			readonly tasks: readonly {
-				id: string;
-				type: string;
-				description: string;
-				// Stamped by the runner; absent from runners that predate it.
+			// firstSeenAt is stamped by the runner; absent from runners that
+			// predate it.
+			readonly tasks: readonly (Omit<BackgroundTask, "firstSeenAt"> & {
 				readonly firstSeenAt?: number;
-			}[];
+			})[];
 	  }
 	| {
 			// The SDK process ended: the SDK sends no snapshot at startup, so its
@@ -67,7 +65,9 @@ export function makeSessionBackgroundLiveness(
 					return (
 						before?.type === task.type &&
 						before.description === task.description &&
-						before.firstSeenAt === task.firstSeenAt
+						before.firstSeenAt === task.firstSeenAt &&
+						before.childSessionId === task.childSessionId &&
+						before.parentTaskId === task.parentTaskId
 					);
 				})
 			)

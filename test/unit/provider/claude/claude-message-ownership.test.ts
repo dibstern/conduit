@@ -455,7 +455,16 @@ describe("Claude message ownership", () => {
 		]);
 		expect(
 			ofKind(decisions, "open-child").map((open) => [open.taskId, open.issuer]),
-		).toEqual([["agentY", { kind: "child", childSessionId: CHILD_A }]]);
+		).toEqual([
+			[
+				"agentY",
+				{
+					kind: "child",
+					childSessionId: CHILD_A,
+					taskId: field(46, "task_id"),
+				},
+			],
+		]);
 	});
 
 	// Failure 3.
@@ -530,7 +539,11 @@ describe("Claude message ownership", () => {
 		feed(ownership, lines(1, 21));
 		const update = line(105, { uuid: "update", task_id: "b66c4l9s4" });
 
-		const early = feed(ownership, [update]);
+		const early = ownership.decide({
+			kind: "sdk",
+			message: update,
+			receivedAt: 1500,
+		});
 		const decisions = feed(ownership, lines(22, 27));
 
 		expect(early).toEqual([
@@ -543,6 +556,9 @@ describe("Claude message ownership", () => {
 		expect(ofKind(decisions, "route").at(-1)?.tool).toEqual({
 			toolUseId: field(27, "tool_use_id"),
 			issuingMessageId: field(22, "uuid"),
+		});
+		expect(ofKind(decisions, "route").at(-1)).toMatchObject({
+			receivedAt: 1500,
 		});
 	});
 

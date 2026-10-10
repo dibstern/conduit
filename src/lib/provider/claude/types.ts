@@ -170,6 +170,12 @@ export interface ClaudeSubagentTaskContext {
 	readonly parentMessageId?: string;
 	readonly description?: string;
 	readonly subagentType?: string;
+	/** The task that started this one, for a task started inside an agent. */
+	readonly parentTaskId?: string;
+	/** Epoch ms when conduit first saw task_started: a running task's clock. */
+	readonly startedAt?: number;
+	readonly pausedAt?: number | null;
+	readonly pausedMs?: number;
 }
 
 export interface ClaudeSubagentLivePoller {

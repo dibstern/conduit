@@ -1,5 +1,7 @@
 // test/unit/persistence/projectors-effect/message-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-message-factory.js";
+import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
@@ -20,6 +22,10 @@ import {
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 } from "../../../../src/lib/persistence/events.js";
+import {
+	claudeTaskNotificationMetadata,
+	claudeTaskProgressMetadata,
+} from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import {
 	type EffectProjectionHarness,
 	makeEffectProjectionHarness,
@@ -804,6 +810,118 @@ describe("MessageProjector", () => {
 				childSessionId: "claude-subagent-abc",
 				providerTaskId: "task-1",
 				sdkSubagentId: "agent-abc",
+			});
+		});
+
+		it.each([
+			false,
+			true,
+		])("keeps a task's final usage after stale progress and reload (replay=%s)", async (replaying) => {
+			const finish = claudeTaskNotificationMetadata({
+				type: "system",
+				subtype: "task_notification",
+				task_id: "task-1",
+				tool_use_id: "tool1",
+				status: "completed",
+				output_file: "/tmp/task-output",
+				summary: "Done",
+				usage: { total_tokens: 1000, tool_uses: 10, duration_ms: 9000 },
+				uuid: "00000000-0000-0000-0000-000000000501",
+				session_id: "sdk-session",
+			});
+			const progress = claudeTaskProgressMetadata({
+				type: "system",
+				subtype: "task_progress",
+				task_id: "task-1",
+				tool_use_id: "tool1",
+				description: "Earlier work",
+				usage: { total_tokens: 400, tool_uses: 4, duration_ms: 4000 },
+				uuid: "00000000-0000-0000-0000-000000000502",
+				session_id: "sdk-session",
+			});
+			const events = [
+				makeStored(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						role: "assistant",
+						sessionId: "s1",
+					},
+					1,
+				),
+				makeStored(
+					"tool.started",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						toolName: "Task",
+						callId: "tool1",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+					},
+					2,
+				),
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: { backgrounded: true, taskStartedAt: 1000, ...finish },
+					},
+					3,
+				),
+				makeStored(
+					"tool.completed",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						result: "Done",
+						duration: 0,
+					},
+					4,
+				),
+				makeStored(
+					"tool.running",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						metadata: progress,
+					},
+					5,
+				),
+			];
+			for (const event of events)
+				await project(event, { replaying, version: 1 });
+			const part = await queryOne<MessagePartRow>(
+				"SELECT * FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(part?.status).toBe("completed");
+			const metadata = JSON.parse(part?.metadata ?? "{}") as Record<
+				string,
+				unknown
+			>;
+			const row = launchRow(
+				createToolMessage({
+					uuid: "tool1",
+					id: "tool1",
+					name: "Task",
+					status: "completed",
+					input: { tool: "Task", description: "Audit", prompt: "Go" },
+					metadata,
+				}),
+				[],
+				20_000,
+			);
+			expect(row).toMatchObject({
+				state: { kind: "finished", outcome: "completed" },
+				time: 9000,
+				tokens: 1000,
+				toolCalls: 10,
 			});
 		});
 

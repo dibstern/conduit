@@ -7,9 +7,16 @@ import {
 	ProviderRuntimeEventSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
+import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-message-factory.js";
+import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { createClaudeMessageOwnership } from "../../../../src/lib/provider/claude/claude-message-ownership.js";
+import {
+	applyClaudeOwnershipDecisionEffect,
+	decideClaudeMessageOwnershipEffect,
+} from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -2029,6 +2036,604 @@ describe("ClaudeEventTranslator", () => {
 		} as unknown as SDKMessage);
 
 		expect(sink.events).toHaveLength(0);
+	});
+
+	it.each([
+		"local_bash",
+		"local_agent",
+	])("keeps the first SDK receipt time when a nested %s start is held and duplicated", async (taskType) => {
+		const ownership = createClaudeMessageOwnership({
+			childSessionIdFor: (taskId) => `claude-subagent-${taskId}`,
+		});
+		const runtimeCtx = makeCtx({
+			messageOwnership: ownership,
+			subagentTasks: new Map(),
+			eventSink: sink,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "assistant",
+				uuid: "parent-message",
+				parent_tool_use_id: null,
+				message: {
+					content: [
+						{ type: "tool_use", id: "agent-tool", name: "Agent", input: {} },
+					],
+				},
+			} as unknown as SDKMessage,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "system",
+				subtype: "task_started",
+				task_id: "agent-task",
+				tool_use_id: "agent-tool",
+				task_type: "local_agent",
+				description: "Parent agent",
+			} as unknown as SDKMessage,
+		});
+		const start = {
+			type: "system",
+			subtype: "task_started",
+			task_id: "nested-task",
+			tool_use_id: "nested-tool",
+			task_type: taskType,
+			description: "Nested work",
+			is_backgrounded: true,
+		} as unknown as SDKMessage;
+		const apply: Parameters<typeof decideClaudeMessageOwnershipEffect>[2] = (
+			decisions,
+		) =>
+			Effect.forEach(
+				decisions,
+				(decision) =>
+					applyClaudeOwnershipDecisionEffect(undefined, runtimeCtx, decision),
+				{ discard: true },
+			);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(1000);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+				yield* TestClock.setTime(1200);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "sdk",
+						message: {
+							type: "system",
+							subtype: "task_updated",
+							task_id: "nested-task",
+							patch: { status: "completed", end_time: 1500 },
+						} as unknown as SDKMessage,
+					},
+					apply,
+				);
+				yield* TestClock.setTime(2500);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "transcript",
+						taskId: "agent-task",
+						messages: [
+							{
+								type: "assistant",
+								uuid: "agent-message",
+								session_id: "sdk-sess",
+								parent_tool_use_id: null,
+								parent_agent_id: null,
+								message: {
+									content: [
+										{
+											type: "tool_use",
+											id: "nested-tool",
+											name: "Bash",
+											input: {},
+										},
+									],
+								},
+							},
+						],
+					},
+					apply,
+				);
+				yield* TestClock.setTime(3000);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+
+		const metadata: Record<string, unknown> = {};
+		const starts: unknown[] = [];
+		for (const event of sink.events) {
+			if (
+				event.type !== "tool.running" ||
+				dataOf(event)["partId"] !== "nested-tool"
+			)
+				continue;
+			const patch = dataOf(event)["metadata"] as Record<string, unknown>;
+			if (patch["taskStartedAt"] !== undefined)
+				starts.push(patch["taskStartedAt"]);
+			Object.assign(metadata, patch);
+		}
+		expect(starts).toEqual([1000, 1000, 1000]);
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "nested-tool",
+					id: "nested-tool",
+					name: "Bash",
+					status: "completed",
+					metadata,
+				}),
+				[],
+				3000,
+			),
+		).toMatchObject({ state: { kind: "finished" }, time: 500 });
+	});
+
+	it.each([
+		false,
+		true,
+	])("uses ingress time for a held nested pause (resumed while held=%s)", async (resumedWhileHeld) => {
+		const ownership = createClaudeMessageOwnership({
+			childSessionIdFor: (taskId) => `claude-subagent-${taskId}`,
+		});
+		const runtimeCtx = makeCtx({
+			messageOwnership: ownership,
+			subagentTasks: new Map(),
+			eventSink: sink,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "assistant",
+				uuid: "parent-message",
+				parent_tool_use_id: null,
+				message: {
+					content: [
+						{ type: "tool_use", id: "agent-tool", name: "Agent", input: {} },
+					],
+				},
+			} as unknown as SDKMessage,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "system",
+				subtype: "task_started",
+				task_id: "agent-task",
+				tool_use_id: "agent-tool",
+				task_type: "local_agent",
+				description: "Parent agent",
+			} as unknown as SDKMessage,
+		});
+		const apply: Parameters<typeof decideClaudeMessageOwnershipEffect>[2] = (
+			decisions,
+		) =>
+			Effect.forEach(
+				decisions,
+				(decision) =>
+					applyClaudeOwnershipDecisionEffect(undefined, runtimeCtx, decision),
+				{ discard: true },
+			);
+		const metadata: Record<string, unknown> = {};
+		let seen = 0;
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const messages: readonly (readonly [number, SDKMessage])[] = [
+					[
+						1000,
+						{
+							type: "system",
+							subtype: "task_started",
+							task_id: "nested-task",
+							tool_use_id: "nested-tool",
+							task_type: "local_bash",
+							description: "Nested work",
+							is_backgrounded: true,
+						} as unknown as SDKMessage,
+					],
+					[
+						1500,
+						{
+							type: "system",
+							subtype: "task_updated",
+							task_id: "nested-task",
+							patch: { status: "paused" },
+						} as unknown as SDKMessage,
+					],
+					...(resumedWhileHeld
+						? [
+								[
+									2000,
+									{
+										type: "system",
+										subtype: "task_updated",
+										task_id: "nested-task",
+										patch: { status: "running" },
+									} as unknown as SDKMessage,
+								] as const,
+								[
+									2200,
+									{
+										type: "system",
+										subtype: "task_updated",
+										task_id: "nested-task",
+										patch: { status: "paused" },
+									} as unknown as SDKMessage,
+								] as const,
+							]
+						: []),
+				];
+				for (const [at, message] of messages) {
+					yield* TestClock.setTime(at);
+					yield* decideClaudeMessageOwnershipEffect(
+						runtimeCtx,
+						{ kind: "sdk", message },
+						apply,
+					);
+				}
+				yield* TestClock.setTime(2500);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "transcript",
+						taskId: "agent-task",
+						messages: [
+							{
+								type: "assistant",
+								uuid: "agent-message",
+								session_id: "sdk-sess",
+								parent_tool_use_id: null,
+								parent_agent_id: null,
+								message: {
+									content: [
+										{
+											type: "tool_use",
+											id: "nested-tool",
+											name: "Bash",
+											input: {},
+										},
+									],
+								},
+							},
+						],
+					},
+					apply,
+				);
+				for (const [at, status, now, time, pausedAt] of [
+					[
+						2500,
+						undefined,
+						3000,
+						resumedWhileHeld ? 700 : 500,
+						resumedWhileHeld ? 2200 : 1500,
+					],
+					[
+						3500,
+						"paused",
+						4000,
+						resumedWhileHeld ? 700 : 500,
+						resumedWhileHeld ? 2200 : 1500,
+					],
+					[4500, "running", 5000, resumedWhileHeld ? 1200 : 1000, null],
+					[5500, "paused", 6000, resumedWhileHeld ? 1700 : 1500, 5500],
+					[6500, "running", 7000, resumedWhileHeld ? 2200 : 2000, null],
+				] as const) {
+					yield* TestClock.setTime(at);
+					if (status)
+						yield* decideClaudeMessageOwnershipEffect(
+							runtimeCtx,
+							{
+								kind: "sdk",
+								message: {
+									type: "system",
+									subtype: "task_updated",
+									task_id: "nested-task",
+									patch: { status },
+								} as unknown as SDKMessage,
+							},
+							apply,
+						);
+					for (const event of sink.events.slice(seen)) {
+						if (
+							event.type === "tool.running" &&
+							dataOf(event)["partId"] === "nested-tool"
+						)
+							Object.assign(metadata, dataOf(event)["metadata"]);
+					}
+					seen = sink.events.length;
+					expect(
+						launchRow(
+							createToolMessage({
+								uuid: "nested-tool",
+								id: "nested-tool",
+								name: "Bash",
+								status: "running",
+								metadata,
+							}),
+							[{ id: "nested-task" }],
+							now,
+						)?.time,
+					).toBe(time);
+					expect(metadata["pausedAt"]).toBe(pausedAt);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+	});
+
+	it("shows the latest step from either task progress or tool progress", async () => {
+		seededToolPartIds = new Set(["progress-tool"]);
+		ctx = makeCtx({ lastAssistantUuid: "assistant" });
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "progress-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		const toolProgress = (toolName: string): SDKMessage =>
+			({
+				type: "tool_progress",
+				tool_use_id: `active-${toolName}`,
+				parent_tool_use_id: "progress-tool",
+				task_id: "progress-task",
+				tool_name: toolName,
+				elapsed_time_seconds: 1,
+				uuid: `progress-${toolName}`,
+				session_id: "sdk-session",
+			}) as unknown as SDKMessage;
+		const taskProgress = (description: string): SDKMessage =>
+			({
+				type: "system",
+				subtype: "task_progress",
+				task_id: "progress-task",
+				tool_use_id: "progress-tool",
+				description,
+				usage: { total_tokens: 100, tool_uses: 1, duration_ms: 1000 },
+				uuid: `progress-${description}`,
+				session_id: "sdk-session",
+			}) as unknown as SDKMessage;
+		let seen = 0;
+		for (const [message, step] of [
+			[toolProgress("Bash"), "Bash"],
+			[taskProgress("Running pnpm test"), "Running pnpm test"],
+			[toolProgress("Read"), "Read"],
+			[taskProgress("Writing docs"), "Writing docs"],
+		] as const) {
+			await runTranslate(translator, ctx, message);
+			for (const event of sink.events.slice(seen)) {
+				if (event.type === "tool.running")
+					Object.assign(metadata, dataOf(event)["metadata"]);
+			}
+			seen = sink.events.length;
+			expect(
+				launchRow(
+					createToolMessage({
+						uuid: "progress-tool",
+						id: "progress-tool",
+						name: "Task",
+						status: "running",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+						metadata,
+					}),
+					[{ id: "progress-task" }],
+					1000,
+				)?.step,
+			).toBe(step);
+		}
+	});
+
+	it("persists the active pause start and clears it on resume", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(10_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "paused", total_paused_ms: 2_000 },
+				} as unknown as SDKMessage);
+				yield* TestClock.setTime(70_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "running", total_paused_ms: 62_000 },
+				} as unknown as SDKMessage);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const updates = sink.events.filter(
+			(event) => event.type === "tool.running",
+		);
+		expect(dataOf(updates[0])["metadata"]).toMatchObject({
+			pausedAt: 10_000,
+			pausedMs: 2_000,
+		});
+		expect(dataOf(updates[1])["metadata"]).toMatchObject({
+			pausedAt: null,
+			pausedMs: 62_000,
+		});
+	});
+
+	it("accounts for status-only resumes, authoritative totals, and later pauses", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		let seen = 0;
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				for (const [at, patch, now, time, pausedAt] of [
+					[
+						10_000,
+						{ status: "paused", total_paused_ms: 2_000 },
+						20_000,
+						8_000,
+						10_000,
+					],
+					[70_000, { status: "running" }, 72_000, 10_000, null],
+					[71_000, { total_paused_ms: 60_000 }, 72_000, 12_000, null],
+					[73_000, { status: "paused" }, 78_000, 13_000, 73_000],
+					[80_000, { status: "running" }, 83_000, 16_000, null],
+					[81_000, { status: "running" }, 83_000, 16_000, null],
+				] as const) {
+					yield* TestClock.setTime(at);
+					yield* translator.translate(ctx, {
+						type: "system",
+						subtype: "task_updated",
+						task_id: "paused-task",
+						patch,
+					} as unknown as SDKMessage);
+					for (const event of sink.events.slice(seen)) {
+						if (event.type === "tool.running")
+							Object.assign(metadata, dataOf(event)["metadata"]);
+					}
+					seen = sink.events.length;
+					expect(
+						launchRow(
+							createToolMessage({
+								uuid: "paused-tool",
+								id: "paused-tool",
+								name: "Task",
+								status: "running",
+								metadata,
+							}),
+							[{ id: "paused-task" }],
+							now,
+						)?.time,
+					).toBe(time);
+					expect(metadata["pausedAt"]).toBe(pausedAt);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+	});
+
+	it("keeps the current pause start across repeated paused patches", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				for (const at of [10_000, 40_000]) {
+					yield* TestClock.setTime(at);
+					yield* translator.translate(ctx, {
+						type: "system",
+						subtype: "task_updated",
+						task_id: "paused-task",
+						patch: { status: "paused", total_paused_ms: 2_000 },
+					} as unknown as SDKMessage);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		for (const event of sink.events) {
+			if (event.type === "tool.running")
+				Object.assign(metadata, dataOf(event)["metadata"]);
+		}
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "paused-tool",
+					id: "paused-tool",
+					name: "Task",
+					status: "running",
+					metadata,
+				}),
+				[{ id: "paused-task" }],
+				50_000,
+			)?.time,
+		).toBe(8_000);
+		expect(metadata["pausedAt"]).toBe(10_000);
+	});
+
+	it.each([
+		"completed",
+		"failed",
+		"killed",
+	] as const)("ends an active pause at the SDK end time when %s arrives late", async (status) => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(10_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "paused", total_paused_ms: 2_000 },
+				} as unknown as SDKMessage);
+				yield* TestClock.setTime(25_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status, end_time: 20_000 },
+				} as unknown as SDKMessage);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		for (const event of sink.events) {
+			if (event.type === "tool.running")
+				Object.assign(metadata, dataOf(event)["metadata"]);
+		}
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "paused-tool",
+					id: "paused-tool",
+					name: "Task",
+					status: "running",
+					metadata,
+				}),
+				[{ id: "paused-task" }],
+				30_000,
+			),
+		).toMatchObject({
+			state: {
+				kind: "finished",
+				outcome: status === "killed" ? "stopped" : status,
+			},
+			time: 8_000,
+		});
+		expect(metadata["pausedAt"]).toBeNull();
 	});
 
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {

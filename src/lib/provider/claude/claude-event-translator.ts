@@ -48,6 +48,7 @@ import { normalizeToolInput } from "./normalize-tool-input.js";
 import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
 	ClaudeSessionContext,
+	ClaudeSubagentTaskContext,
 	SDKAssistantMessage,
 	SDKMessage,
 	SDKPartialAssistantMessage,
@@ -97,12 +98,26 @@ export function claudeTurnErrorEvent(
 	});
 }
 
+// Launching-row keys (conduit-test-i7fy.7). `backgrounded` and `outcome` are
+// only ever set, never cleared, so a late message cannot undo them through the
+// shallow metadata merge.
+const TASK_OUTCOMES = {
+	completed: "completed",
+	failed: "failed",
+	stopped: "stopped",
+	killed: "stopped",
+} as const;
+
+/** startedAt: when conduit first saw this task start, the running clock's origin. */
 export function claudeTaskStartedMetadata(
 	message: SDKSystemLike & { subtype: "task_started" },
+	startedAt: number,
 ): Record<string, unknown> {
 	return {
 		providerTaskId: message.task_id,
 		status: "running",
+		taskStartedAt: startedAt,
+		...(message.is_backgrounded ? { backgrounded: true } : {}),
 		description: message.description,
 		...(message.task_type ? { subagentType: message.task_type } : {}),
 		...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
@@ -123,6 +138,8 @@ export function claudeTaskProgressMetadata(
 		status: "running",
 		description: message.description,
 		...(typeof subagentType === "string" ? { subagentType } : {}),
+		// What the task is doing now, e.g. "Running pnpm test".
+		currentStep: message.description,
 		totalTokens: usage["total_tokens"] ?? 0,
 		toolUses: usage["tool_uses"] ?? 0,
 		durationMs: usage["duration_ms"] ?? 0,
@@ -138,6 +155,7 @@ export function claudeTaskNotificationMetadata(
 	return {
 		providerTaskId: message.task_id,
 		status: message.status,
+		outcome: TASK_OUTCOMES[message.status],
 		outputFile: message.output_file,
 		summary: message.summary,
 		...(usage
@@ -145,11 +163,46 @@ export function claudeTaskNotificationMetadata(
 					totalTokens: usage["total_tokens"] ?? 0,
 					toolUses: usage["tool_uses"] ?? 0,
 					durationMs: usage["duration_ms"] ?? 0,
+					// Unlike durationMs, never a progress reading: the final duration.
+					taskDurationMs: usage["duration_ms"] ?? 0,
+					taskTotalTokens: usage["total_tokens"] ?? 0,
+					taskToolUses: usage["tool_uses"] ?? 0,
 				}
 			: {}),
 		...(message.skip_transcript !== undefined
 			? { skipTranscript: message.skip_transcript }
 			: {}),
+	};
+}
+
+/** A foreground task moved to the background, a status change, or its end. */
+export function claudeTaskUpdatedMetadata(
+	message: SDKSystemLike & { subtype: "task_updated" },
+	now: number,
+	task?: Pick<ClaudeSubagentTaskContext, "pausedAt" | "pausedMs">,
+): Record<string, unknown> & { pausedAt: number | null; pausedMs: number } {
+	const { patch } = message;
+	const outcome =
+		patch.status === "completed" ||
+		patch.status === "failed" ||
+		patch.status === "killed"
+			? TASK_OUTCOMES[patch.status]
+			: undefined;
+	let pausedAt = task?.pausedAt ?? null;
+	let pausedMs = patch.total_paused_ms ?? task?.pausedMs ?? 0;
+	if (patch.status === "paused") pausedAt ??= now;
+	else if (patch.status === "running" || outcome) {
+		if (patch.total_paused_ms === undefined && pausedAt !== null)
+			pausedMs += Math.max(0, (patch.end_time ?? now) - pausedAt);
+		pausedAt = null;
+	}
+	return {
+		providerTaskId: message.task_id,
+		...(patch.is_backgrounded ? { backgrounded: true } : {}),
+		...(outcome ? { outcome } : {}),
+		pausedAt,
+		pausedMs,
+		...(patch.end_time !== undefined ? { endTime: patch.end_time } : {}),
 	};
 }
 
@@ -161,6 +214,8 @@ export function claudeToolProgressMetadata(
 		parentToolUseId: message.parent_tool_use_id,
 		activeToolUseId: message.tool_use_id,
 		activeToolName: message.tool_name,
+		// Both progress sources write this key: the latest delivered step wins.
+		currentStep: message.tool_name,
 		elapsedTimeSeconds: message.elapsed_time_seconds,
 	};
 }
@@ -343,8 +398,14 @@ export class ClaudeEventTranslator {
 	private readonly ledger = new AssistantTextLedger();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
-	// The runner outlives server restarts, and the SDK provides no start time.
-	private backgroundTaskFirstSeenAt = new Map<string, number>();
+	// The SDK's last live set. firstSeenAt: the runner outlives server
+	// restarts, and the SDK provides no start time.
+	private backgroundTasks: readonly {
+		readonly id: string;
+		readonly type: string;
+		readonly description: string;
+		readonly firstSeenAt: number;
+	}[] = [];
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
 	// reads re-count the whole prompt per tool round), so it wildly overstates
@@ -547,13 +608,17 @@ export class ClaudeEventTranslator {
 	translate(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
+		receivedAt?: number,
 	): Effect.Effect<void, EventSinkError> {
-		return this.collectWrites(() => this.translateMessage(ctx, message));
+		return this.collectWrites(() =>
+			this.translateMessage(ctx, message, receivedAt),
+		);
 	}
 
 	private translateMessage(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
+		receivedAt?: number,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			// Capture SDK session id for resume cursor on any message.
@@ -579,7 +644,7 @@ export class ClaudeEventTranslator {
 					if (message.state === "started") this.currentAssistantMessageId = "";
 					return;
 				case "system":
-					return yield* this.translateSystem(ctx, message);
+					return yield* this.translateSystem(ctx, message, receivedAt);
 				case "stream_event":
 					return yield* this.translateStreamEvent(ctx, message);
 				case "assistant":
@@ -622,6 +687,7 @@ export class ClaudeEventTranslator {
 	private translateSystem(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike,
+		receivedAt?: number,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			switch (message.subtype) {
@@ -762,11 +828,28 @@ export class ClaudeEventTranslator {
 					return yield* this.translateTaskNotification(ctx, message);
 				}
 
+				// task_updated names no tool call: its task_started did.
+				case "task_updated": {
+					const task = ctx.subagentTasks?.get(message.task_id);
+					if (!task) return;
+					const metadata = claudeTaskUpdatedMetadata(
+						message,
+						receivedAt ?? (yield* Clock.currentTimeMillis),
+						task,
+					);
+					ctx.subagentTasks?.set(message.task_id, {
+						...task,
+						pausedAt: metadata.pausedAt,
+						pausedMs: metadata.pausedMs,
+					});
+					return yield* this.pushTaskMetadata(ctx, task.toolUseId, metadata);
+				}
+
 				// The full live set, replacing the previous one. Ambient tasks
 				// (watchers, housekeeping) are not activity, per the SDK.
 				case "background_tasks_changed": {
 					const now = yield* Clock.currentTimeMillis;
-					const tasks = message.tasks
+					this.backgroundTasks = message.tasks
 						.filter(
 							(task) =>
 								!task.ambient &&
@@ -778,18 +861,10 @@ export class ClaudeEventTranslator {
 							type: task.task_type,
 							description: task.description,
 							firstSeenAt:
-								this.backgroundTaskFirstSeenAt.get(task.task_id) ?? now,
+								this.backgroundTasks.find(({ id }) => id === task.task_id)
+									?.firstSeenAt ?? now,
 						}));
-					this.backgroundTaskFirstSeenAt = new Map(
-						tasks.map((task) => [task.id, task.firstSeenAt]),
-					);
-					const transition = this.deps.onBackgroundTask?.({
-						sessionId: ctx.sessionId,
-						kind: "snapshot",
-						tasks,
-					});
-					if (transition) yield* transition;
-					return;
+					return yield* this.publishBackgroundTasks(ctx);
 				}
 
 				case "init": {
@@ -877,16 +952,48 @@ export class ClaudeEventTranslator {
 		});
 	}
 
+	/**
+	 * Publishes the live set with what ownership knows of each task: its Child
+	 * Session and the task that started it. The SDK often lists a task before
+	 * its task_started, so this runs again once each task is known.
+	 */
+	publishBackgroundTasks(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<void, EventSinkError> {
+		const transition = this.deps.onBackgroundTask?.({
+			sessionId: ctx.sessionId,
+			kind: "snapshot",
+			tasks: this.backgroundTasks.map((task) => {
+				const known = ctx.subagentTasks?.get(task.id);
+				return {
+					...task,
+					...(known?.childSessionId
+						? { childSessionId: known.childSessionId }
+						: {}),
+					...(known?.parentTaskId ? { parentTaskId: known.parentTaskId } : {}),
+				};
+			}),
+		});
+		return transition ? transition : Effect.void;
+	}
+
 	private translateTaskStarted(
 		ctx: ClaudeSessionContext,
 		message: SDKSystemLike & { subtype: "task_started" },
 	): Effect.Effect<void, EventSinkError> {
-		if (!message.tool_use_id) return Effect.void;
-		return this.pushTaskMetadata(
-			ctx,
-			message.tool_use_id,
-			claudeTaskStartedMetadata(message),
-		);
+		return Effect.gen(this, function* () {
+			if (!message.tool_use_id) return;
+			const startedAt =
+				ctx.subagentTasks?.get(message.task_id)?.startedAt ??
+				(yield* Clock.currentTimeMillis);
+			yield* this.pushTaskMetadata(
+				ctx,
+				message.tool_use_id,
+				claudeTaskStartedMetadata(message, startedAt),
+			);
+			const task = ctx.subagentTasks?.get(message.task_id);
+			if (task) ctx.subagentTasks?.set(message.task_id, { ...task, startedAt });
+		});
 	}
 
 	private translateTaskProgress(

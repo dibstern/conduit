@@ -2468,7 +2468,11 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					message,
 				);
 				for (const translatedMessage of translatedMessages)
-					yield* translator.translate(ctx, translatedMessage);
+					yield* translator.translate(
+						ctx,
+						translatedMessage,
+						decision.receivedAt,
+					);
 				if (parentChildLink) {
 					yield* parentChildLink;
 					parentChildLink = undefined;
@@ -2486,6 +2490,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					ctx.interruptRequested = false;
 				}
 			}
+			// The SDK may list a task before it starts, when its owner is not
+			// yet known: publish the live set again now that it is.
+			if (
+				decisions.some(
+					(decision) =>
+						decision.kind === "route" &&
+						decision.message.type === "system" &&
+						decision.message.subtype === "task_started",
+				)
+			)
+				yield* translator.publishBackgroundTasks(ctx);
 		});
 	}
 

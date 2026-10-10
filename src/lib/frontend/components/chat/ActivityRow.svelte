@@ -15,6 +15,11 @@
 		fmtDuration,
 		fmtTokens,
 		isSoloTool,
+		launchMeta,
+		launchRow,
+		launchStatus,
+		launchUsage,
+		plural,
 		thinkingVerb,
 		toolCommand,
 		skillName,
@@ -23,7 +28,8 @@
 		toolVerb,
 	} from "../../utils/turns.js";
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { rootBackgroundTasks, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { partStyle } from "./activity-style.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolOutputMore from "./ToolOutputMore.svelte";
@@ -39,24 +45,52 @@
 	const style = $derived(partStyle(part));
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	const railed = $derived(part.type === "tool" && isSoloTool(part));
+	// When this row's task was last on the live list. Plain, not $state: it only
+	// bridges the moment between the task leaving the list and its outcome.
+	let listedAt: number | undefined;
+	// A step that launched a background task tracks that task. Foreground tasks
+	// stay ordinary steps.
+	const launch = $derived.by(() => {
+		if (part.type !== "tool") return undefined;
+		const taskId = part.metadata?.["providerTaskId"];
+		if (taskId === undefined) return undefined;
+		const live = rootBackgroundTasks(sessionState.currentId ?? "");
+		if (live.some((task) => task.id === taskId)) listedAt = clock.now;
+		const row = launchRow(part, live, clock.now, listedAt);
+		return row?.state.kind === "foreground" ? undefined : row;
+	});
+	const launchTone = $derived(
+		launch?.state.kind === "running"
+			? "text-brand-b"
+			: launch?.state.kind === "finished"
+				? { completed: "text-success", failed: "text-error", stopped: "text-warning" }[launch.state.outcome]
+				: "text-text-dimmer",
+	);
 	const childSession = $derived(
 		part.type === "tool" && isSubagentToolName(part.name) ? subagentSessionId(part) : null,
 	);
 
 	const rowClass =
-		"flex items-center gap-2 w-full py-1 px-2 rounded text-xs text-left cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.04)]";
+		"flex items-center gap-2 w-full min-w-0 py-1 px-2 rounded text-xs text-left cursor-pointer hover:bg-[rgba(var(--overlay-rgb),0.04)]";
 </script>
 
 {#if part.type === "tool"}
-	{@const running = part.status === "running" || part.status === "pending"}
+	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending"}
 	{@const failed = part.status === "error" || part.isError}
+	{@const verb = toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
-	<div class="tool-item relative" data-part={part.uuid} data-tool-id={part.id} data-tool-status={part.status}>
+	<div
+		class="tool-item relative"
+		data-part={part.uuid}
+		data-tool-id={part.id}
+		data-tool-status={part.status}
+		data-launch-state={launch?.state.kind === "finished" ? launch.state.outcome : launch?.state.kind}
+	>
 		{#if railed}
 			<!-- Out of flow on purpose: an inline rail would shift these rows a
 			     couple of pixels right and break the icon column every other row. -->
@@ -65,7 +99,18 @@
 		<div class="flex items-center gap-1.5">
 			<button
 				type="button"
-				class="{rowClass} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
+				class="{rowClass} {launch ? '@container' : ''} {highlight ? 'bg-[rgba(var(--overlay-rgb),0.06)]' : ''}"
+				aria-label={launch
+					? [
+							`${verb} ${subject}`,
+							launchStatus(launch.state),
+							launch.step,
+							launch.time === undefined ? undefined : fmtDuration(launch.time),
+							launch.nested > 0 ? `${plural(launch.nested, "nested task")} running` : undefined,
+						]
+							.filter(Boolean)
+							.join(", ")
+					: undefined}
 				onclick={() => {
 					expanded = !expanded;
 				}}
@@ -74,18 +119,35 @@
 					<Icon name={style.icon} size={14} />
 				</span>
 				<span class="shrink-0 font-medium {running ? 'text-text' : 'text-text-secondary'}">
-					{toolVerb(part, running ? "present" : "past")}
+					{verb}
 				</span>
 				{#if tag}
 					<!-- Which kind of subagent ran. Worth its own slot: two Task rows
 					     differ by this far more than by their descriptions. -->
 					<span class="shrink-0 px-1.5 py-px rounded font-mono text-[10px] {style.text} bg-[rgba(var(--overlay-rgb),0.06)]">{tag}</span>
 				{/if}
-				<span class="flex-1 truncate font-mono {running ? 'text-text-secondary' : 'text-text-muted'}">
+				<span class="{launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1'} truncate font-mono {running ? 'text-text-secondary' : 'text-text-muted'}">
 					{subject}
 				</span>
-				{#if meta}<span class="shrink-0 font-mono text-text-dimmer">{meta}</span>{/if}
-				{#if running}
+				{#if launch}
+					<!-- One line per task: what it is doing now, how long, and what it
+					     used. The outcome's colour carries failed vs stopped too. -->
+					{#if launch.step}
+						<span class="launch-step flex-1 min-w-0 truncate text-text-dimmer">· {launch.step}</span>
+					{/if}
+					{#if launch.nested > 0}
+						<span class="launch-nested shrink-0 px-1.5 py-px rounded font-mono text-[10px] text-text-secondary bg-[rgba(var(--overlay-rgb),0.06)]">+{plural(launch.nested, "task")}</span>
+					{/if}
+					{@const lead = launchMeta(launch)}
+					{@const usage = launchUsage(launch)}
+					<!-- Status and time stay whole; a narrow row drops the usage. -->
+					<span class="launch-meta shrink-0 whitespace-nowrap font-mono"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
+				{:else if meta}<span class="shrink-0 font-mono text-text-dimmer">{meta}</span>{/if}
+				{#if launch?.state.kind === "finished"}
+					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
+						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
+					</span>
+				{:else if running}
 					<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 				{:else if failed}
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">

@@ -12,6 +12,7 @@ import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
+import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
@@ -31,6 +32,7 @@ const driver = new PlaywrightDriver();
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...backgroundTasksHandlers,
+	...launchingRowsHandlers,
 	...sideThreadsHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,

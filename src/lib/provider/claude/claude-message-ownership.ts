@@ -10,10 +10,21 @@ import type { SDKMessage, SessionMessage } from "./types.js";
 
 export type ClaudeMessageOwner =
 	| { readonly kind: "parent" }
-	| { readonly kind: "child"; readonly childSessionId: string };
+	// taskId: the task whose Child Session this is, so a task it starts can
+	// name the task that started it.
+	| {
+			readonly kind: "child";
+			readonly childSessionId: string;
+			readonly taskId: string;
+	  };
+type ChildOwner = Extract<ClaudeMessageOwner, { kind: "child" }>;
 
 export type ClaudeOwnershipInput =
-	| { readonly kind: "sdk"; readonly message: SDKMessage }
+	| {
+			readonly kind: "sdk";
+			readonly message: SDKMessage;
+			readonly receivedAt?: number;
+	  }
 	| { readonly kind: "live-tasks"; readonly taskIds: readonly string[] }
 	| {
 			readonly kind: "transcript";
@@ -29,6 +40,7 @@ export type ClaudeOwnershipDecision =
 			readonly kind: "route";
 			readonly owner: ClaudeMessageOwner;
 			readonly message: SDKMessage;
+			readonly receivedAt?: number;
 			// For task and tool progress messages: the tool call the message is
 			// about, and the uuid of the SDK message that issued it.
 			readonly tool?: {
@@ -91,14 +103,18 @@ export function createClaudeMessageOwnership(deps: {
 		string,
 		{ owner: ClaudeMessageOwner; issuingMessageId?: string }
 	>();
-	const agents = new Map<string, string>();
+	const agents = new Map<string, ChildOwner>();
 	const tasks = new Map<string, string>();
 	const feeds = new Map<string, string>();
 	const finishedTasks = new Set<string>();
 	const listedTasks = new Set<string>();
 	let liveTasks = new Set<string>();
 	let ended = false;
-	const held: { message: SDKMessage; awaiting: string }[] = [];
+	const held: {
+		message: SDKMessage;
+		awaiting: string;
+		receivedAt?: number;
+	}[] = [];
 
 	return {
 		decide(input) {
@@ -156,7 +172,10 @@ export function createClaudeMessageOwnership(deps: {
 				);
 				if (issuer === undefined) newlyKnown.add(toolUseId);
 			};
-			const decideMessage = (message: SDKMessage): string | undefined => {
+			const decideMessage = (
+				message: SDKMessage,
+				receivedAt?: number,
+			): string | undefined => {
 				let owner: ClaudeMessageOwner = parent;
 				let toolUseId: string | undefined;
 				const finishesTask =
@@ -174,11 +193,11 @@ export function createClaudeMessageOwnership(deps: {
 					case "stream_event": {
 						const parentToolUseId = message.parent_tool_use_id ?? undefined;
 						if (parentToolUseId !== undefined) {
-							const childSessionId = agents.get(parentToolUseId);
-							if (childSessionId === undefined) {
+							const child = agents.get(parentToolUseId);
+							if (child === undefined) {
 								return hold(message, parentToolUseId);
 							}
-							owner = { kind: "child", childSessionId };
+							owner = child;
 						}
 						break;
 					}
@@ -235,7 +254,11 @@ export function createClaudeMessageOwnership(deps: {
 							message.task_id,
 							message,
 						);
-						agents.set(toolUseId, childSessionId);
+						agents.set(toolUseId, {
+							kind: "child",
+							childSessionId,
+							taskId: message.task_id,
+						});
 						newlyKnown.add(toolUseId);
 						decisions.push({
 							kind: "open-child",
@@ -255,7 +278,13 @@ export function createClaudeMessageOwnership(deps: {
 							childSessionId,
 						});
 					}
-					decisions.push({ kind: "route", owner: issuer.owner, message, tool });
+					decisions.push({
+						kind: "route",
+						owner: issuer.owner,
+						message,
+						tool,
+						...(receivedAt === undefined ? {} : { receivedAt }),
+					});
 					if (
 						message.type === "system" &&
 						"task_id" in message &&
@@ -266,7 +295,12 @@ export function createClaudeMessageOwnership(deps: {
 					return;
 				}
 
-				decisions.push({ kind: "route", owner, message });
+				decisions.push({
+					kind: "route",
+					owner,
+					message,
+					...(receivedAt === undefined ? {} : { receivedAt }),
+				});
 				if (message.type === "result" && owner.kind === "parent") {
 					for (const taskId of feeds.keys()) {
 						if (listedTasks.has(taskId) && !liveTasks.has(taskId))
@@ -292,13 +326,10 @@ export function createClaudeMessageOwnership(deps: {
 
 			if (input.kind === "transcript") {
 				const toolUseId = tasks.get(input.taskId);
-				const childSessionId =
+				const owner =
 					toolUseId === undefined ? undefined : agents.get(toolUseId);
-				if (childSessionId === undefined) return decisions;
-				const owner: Extract<ClaudeMessageOwner, { kind: "child" }> = {
-					kind: "child",
-					childSessionId,
-				};
+				if (owner === undefined) return decisions;
+				const { childSessionId } = owner;
 				// Stage the entire issuer batch before releasing lifecycle messages
 				// below. One staging pass avoids cloning the cursor for every message.
 				decisions.push({
@@ -323,9 +354,15 @@ export function createClaudeMessageOwnership(deps: {
 					}
 				}
 			} else {
-				const awaiting = decideMessage(input.message);
+				const awaiting = decideMessage(input.message, input.receivedAt);
 				if (awaiting !== undefined)
-					held.push({ message: input.message, awaiting });
+					held.push({
+						message: input.message,
+						awaiting,
+						...(input.receivedAt === undefined
+							? {}
+							: { receivedAt: input.receivedAt }),
+					});
 			}
 			const ready = new Set<(typeof held)[number]>();
 			while (true) {
@@ -336,7 +373,7 @@ export function createClaudeMessageOwnership(deps: {
 				const entry = held.find((pending) => ready.has(pending));
 				if (entry === undefined) break;
 				ready.delete(entry);
-				const awaiting = decideMessage(entry.message);
+				const awaiting = decideMessage(entry.message, entry.receivedAt);
 				if (awaiting === undefined) held.splice(held.indexOf(entry), 1);
 				else entry.awaiting = awaiting;
 			}

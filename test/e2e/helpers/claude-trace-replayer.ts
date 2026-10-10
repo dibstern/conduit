@@ -236,9 +236,15 @@ function loadTrace(dir: string, name: ClaudeTraceName) {
 	const interrupts = [...holds.values()].filter(
 		(hold) => hold.kind === "interrupt",
 	).length;
+	const stamps = lines.flatMap((line) => {
+		const timestamp: unknown = JSON.parse(line).timestamp;
+		return typeof timestamp === "string" ? [Date.parse(timestamp)] : [];
+	});
 	return {
 		name,
 		lines,
+		/** The capture's first wall-clock stamp, if it recorded any. */
+		capturedAt: stamps[0],
 		reads,
 		holds,
 		inputIds,
@@ -413,6 +419,11 @@ export function createClaudeTraceReplayer(
 					asked: 0,
 				};
 				playing = current;
+				// SDK epoch fields (task_updated end_time) come from the capture's
+				// clock. Shift them into replay time, keeping their distance from the
+				// capture's start, as live they share the machine clock with conduit.
+				const clockShift =
+					trace.capturedAt === undefined ? 0 : Date.now() - trace.capturedAt;
 				const fresh = freshIds(trace, querySessionId);
 				const remapIds = (json: string) =>
 					[
@@ -466,7 +477,19 @@ export function createClaudeTraceReplayer(
 					}
 					if (plan.delayMs) await sleep(plan.delayMs);
 					if (interrupted) break;
-					const message = decodeClaudeSDKMessage(JSON.parse(remapIds(line)));
+					const decoded = decodeClaudeSDKMessage(JSON.parse(remapIds(line)));
+					const message =
+						decoded.type === "system" &&
+						decoded.subtype === "task_updated" &&
+						decoded.patch.end_time !== undefined
+							? {
+									...decoded,
+									patch: {
+										...decoded.patch,
+										end_time: decoded.patch.end_time + clockShift,
+									},
+								}
+							: decoded;
 					if (
 						turn === plan.holdTurnBeforeToolResult &&
 						!heldBeforeToolResult &&

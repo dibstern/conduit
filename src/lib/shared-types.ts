@@ -264,6 +264,10 @@ export const BackgroundTaskSchema = Schema.Struct({
 	description: Schema.String,
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
+	/** An agent's Child Session. */
+	childSessionId: Schema.optional(Schema.String),
+	/** The task that started this one, for a task started inside an agent. */
+	parentTaskId: Schema.optional(Schema.String),
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
