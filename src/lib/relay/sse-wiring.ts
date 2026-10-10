@@ -742,13 +742,15 @@ function wireSSEConsumerWithCallbacks(
 	callbacks: SSEConsumerCallbacks,
 ): void {
 	const { log } = deps;
+	let hasConnected = false;
 
 	// Pending prompts and missed status are recovered upstream by OpenCode
 	// Instances and arrive as ordinary stream events.
 	consumer.on("connected", () => {
 		log.info("Connected to OpenCode event stream");
 
-		callbacks.onReconnect?.();
+		if (hasConnected) callbacks.onReconnect?.();
+		hasConnected = true;
 	});
 	consumer.on("status", (status) => {
 		log.info(`OpenCode ${status}`);

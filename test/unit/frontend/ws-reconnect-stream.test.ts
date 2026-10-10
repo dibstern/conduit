@@ -106,6 +106,8 @@ describe("RPC connection status recovery", () => {
 	});
 
 	afterEach(() => {
+		// Closing an unopened socket probes auth; keep that probe offline.
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 		for (const socket of instances) socket.close();
 		vi.unstubAllGlobals();
 		routerState.path = "/";
@@ -166,28 +168,21 @@ describe("RPC connection status recovery", () => {
 		]);
 	});
 
-	it("routes an unauthenticated relay status response to the PIN page", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify({
-						error: { code: "AUTH_REQUIRED", message: "PIN required" },
-					}),
-					{
-						status: 401,
-						headers: { "content-type": "application/json" },
-					},
-				),
-			),
+	it("routes a rejected upgrade to the PIN page before any project attaches", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ hasPin: true, authenticated: false }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
 		);
+		vi.stubGlobal("fetch", fetchMock);
 
-		attachedProjectState.slug = "conduit";
 		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
-		// An expired PIN session can reject the upgrade before the probe replies.
+		// An expired PIN session rejects the upgrade, so the socket never opens.
 		instances[0]?.close();
 
 		await vi.waitFor(() => expect(routerState.path).toBe("/auth"));
+		expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/auth/status");
 		expect(getCurrentSlug()).toBe("conduit");
 		expect(replaceStateMock).toHaveBeenCalledOnce();
 	});

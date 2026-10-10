@@ -283,6 +283,16 @@ export function applyClaudeOwnershipDecisionEffect(
 				return;
 			}
 		}
+		// Ownership can discover a live child after its launching tool returned.
+		// Its status starts here regardless of that tool part's completion state.
+		yield* ctx.eventSink
+			?.push(
+				claudeRuntimeEvent("session.status", childSessionId, {
+					sessionId: childSessionId,
+					status: "busy",
+				}),
+			)
+			.pipe(Effect.ignore) ?? Effect.void;
 		ctx.subagentTasks?.set(taskId, {
 			...ctx.subagentTasks.get(taskId),
 			...task,
@@ -439,6 +449,16 @@ export function finalReadClaudeSubagentFeedEffect(
 	) => Effect.Effect<void, ClaudeAdapterError>,
 ): Effect.Effect<void> {
 	return Effect.gen(function* () {
+		// A finish or ownership teardown ends the child's work, even if the
+		// final transcript is unavailable or the task never got a poller.
+		yield* ctx.eventSink
+			?.push(
+				claudeRuntimeEvent("session.status", decision.childSessionId, {
+					sessionId: decision.childSessionId,
+					status: "idle",
+				}),
+			)
+			.pipe(Effect.ignore) ?? Effect.void;
 		const poller = ctx.subagentPollers?.get(decision.taskId);
 		if (!poller) return;
 		poller.active = false;
@@ -476,6 +496,22 @@ export function endClaudeMessageOwnershipEffect(
 			Effect.unsafeMakeSemaphore(1));
 		const decisions = yield* permit.withPermits(1)(
 			Effect.sync(() => ctx.messageOwnership?.decide({ kind: "end" }) ?? []),
+		);
+		// Settle every child before a slow final read can consume the shared budget.
+		yield* Effect.forEach(
+			decisions,
+			(decision) =>
+				decision.kind === "final-read"
+					? (ctx.eventSink
+							?.push(
+								claudeRuntimeEvent("session.status", decision.childSessionId, {
+									sessionId: decision.childSessionId,
+									status: "idle",
+								}),
+							)
+							.pipe(Effect.ignore) ?? Effect.void)
+					: Effect.void,
+			{ concurrency: 2, discard: true },
 		);
 		// Final reads re-enter ownership with transcript inputs after end releases
 		// the permit; no SDK input can open another feed once the core has ended.
@@ -530,8 +566,9 @@ export function endClaudeMessageOwnershipEffect(
 				const remaining = Array.from(ctx.subagentPollers?.values() ?? []);
 				for (const poller of remaining) poller.active = false;
 				ctx.subagentPollers?.clear();
-				for (const poller of remaining)
+				for (const poller of remaining) {
 					if (poller.fiber) yield* Fiber.interruptFork(poller.fiber);
+				}
 			}),
 		),
 	);

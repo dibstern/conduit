@@ -1623,6 +1623,69 @@ test.describe("Claude replay lane", () => {
 			});
 		});
 
+		test.describe("a send after background work", () => {
+			test.use({
+				claudeReplay: {
+					turns: ["background-shell-turn", "pong-thinking-text-turn"],
+					holdAfterResult: true,
+				},
+			});
+
+			test("an idle session's send is not steered", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				test.setTimeout(60_000);
+				const s = await open(page, relayUrl, harness);
+				const idle = () =>
+					queryDb<{ status: string }>(
+						s.dbPath,
+						"SELECT status FROM sessions WHERE id = ?",
+						s.sessionId,
+					)[0]?.status;
+				await s.app.sendMessage("Run sleep 8 in the background");
+				await expect.poll(s.turnEnds).toBe(1);
+				// The shell ending wakes the SDK into a turn of its own.
+				harness.claudeReplayer?.release();
+				await expect.poll(s.turnEnds).toBe(2);
+				await expect.poll(idle).toBe("idle");
+				// Stores from before user messages closed open turns kept turns that
+				// never started open, behind newer settled ones (live:
+				// ses_67b1d68b's turn 672459f9, open for five days).
+				await harness.restart(() => {
+					const db = new DatabaseSync(s.dbPath);
+					try {
+						db.prepare(
+							"INSERT INTO turns (id, session_id, state, requested_at) VALUES ('legacy-open-turn', ?, 'pending', 1)",
+						).run(s.sessionId);
+					} finally {
+						db.close();
+					}
+				});
+				const before = ledger(s.dbPath, s.sessionId);
+
+				await s.app.sendMessage("ping");
+				await expect.poll(s.turnEnds).toBe(3);
+				await s.chat.waitForStreamingComplete();
+				const proof = ledger(s.dbPath, s.sessionId);
+				await testInfo.attach("idle-send-proof.json", {
+					body: JSON.stringify({ sends: s.sends, before, ...proof }, null, 2),
+					contentType: "application/json",
+				});
+
+				expect(s.sends.map((send) => send.delivery)).toEqual([
+					"queue",
+					"queue",
+				]);
+				expect(proof.userMessages.map((m) => m.steered)).toEqual([0, 0]);
+				await expect(s.chat.userMessages).toHaveCount(2);
+				await expect(
+					s.chat.userMessages.getByTestId("user-message-steered"),
+				).toHaveCount(0);
+			});
+		});
+
 		test.describe("a steer that cannot join", () => {
 			test.use({
 				claudeReplay: {

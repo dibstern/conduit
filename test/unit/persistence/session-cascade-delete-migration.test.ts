@@ -98,7 +98,9 @@ describe("session cascade delete migration", () => {
 		dir = mkdtempSync(join(tmpdir(), "conduit-session-cascade-migration-"));
 		const filename = join(dir, "events.db");
 		seedLegacyDatabase(filename);
-		const runtime = ManagedRuntime.make(makePersistenceEffectLayer(filename));
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "test-project"),
+		);
 
 		try {
 			await runtime.runPromise(

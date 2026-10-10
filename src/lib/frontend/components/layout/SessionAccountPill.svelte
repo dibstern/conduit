@@ -21,7 +21,9 @@
 
 	let { session }: { session: Immutable<SessionInfo> } = $props();
 
-	const account = $derived(getInstanceById(session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] ?? ""));
+	const accountId = $derived(session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id]);
+	// A session that never switched is bound to the daemon's default "claude" instance, which is not in the configured list.
+	const account = $derived(accountId === undefined ? undefined : { id: accountId, name: getInstanceById(accountId)?.name ?? "Claude" });
 	const canSwitch = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== account?.id));
 	// An open limit on this account carries its cut-off request into the handoff.
 	const limit = $derived.by(() => {
@@ -33,7 +35,7 @@
 	const minimumWidth = $derived(`calc(${Math.min(account?.name.length ?? 0, 5)}ch + 6px + 5px + ${sessionViewState.compact ? 12 : 16}px + 2px + 1px)`);
 </script>
 
-{#if account?.driver === "claude" && canSwitch && projectSlug}
+{#if account && canSwitch && projectSlug}
 	<AccountSwitch sessionId={session.id} {projectSlug} account={account.id} {limit} side="bottom">
 		{#snippet trigger({ props, loading })}
 			<Button

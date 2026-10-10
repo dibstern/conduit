@@ -142,6 +142,7 @@ const history = [
 const stored = history.map((event, index) => ({
 	...event,
 	sequence: index + 1,
+	projectId: "test-project",
 	streamVersion: index,
 })) satisfies StoredEvent[];
 

@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -46,7 +46,7 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
@@ -399,6 +399,35 @@ describe("model handlers with Effect-native model service", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	it.effect("keeps cold model discovery non-starting, refreshes live data and retains it after stop", () => {
+		const catalog = { providers: [], defaults: { fake: "fake-model" }, connected: ["fake"] };
+		const api = makeHandlerOpenCodeAPI({ provider: { list: vi.fn(async () => catalog) } });
+		let running = false;
+		const instances = {
+			...makeOpenCodeInstancesStub({ opencode: api }),
+			use: vi.fn(() => Effect.succeed(api)),
+			ifRunning: vi.fn(() => Effect.succeed(running ? Option.some(api) : Option.none())),
+		};
+		return Effect.gen(function* () {
+			const models = yield* OpenCodeModelServiceTag;
+			expect(yield* models.listProviders()).toEqual({ providers: [], defaults: {}, connected: [] });
+			expect(instances.use).not.toHaveBeenCalled();
+			expect(api.provider.list).not.toHaveBeenCalled();
+			running = true;
+			expect(yield* models.listProviders()).toEqual(catalog);
+			expect(api.provider.list).toHaveBeenCalledOnce();
+			running = false;
+			expect(yield* models.listProviders()).toEqual(catalog);
+			expect(instances.use).not.toHaveBeenCalled();
+			expect(api.provider.list).toHaveBeenCalledOnce();
+		}).pipe(Effect.provide(OpenCodeModelServiceLive.pipe(Layer.provide(Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(OpenCodeInstancesTag, instances),
+			Layer.succeed(ConfigTag, makeMockConfig()),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+		)))));
+	});
 
 	it.effect(
 		"persists OpenCode default model and relocates the config write in the live model service",

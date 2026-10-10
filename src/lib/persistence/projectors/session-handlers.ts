@@ -109,8 +109,11 @@ type SessionHandledType =
 	| "session.resumed"
 	| "session.resume_scheduled"
 	| "session.resume_cancelled"
+	| "tool.running"
+	| "tool.completed"
 	| "turn.completed"
 	| "turn.error"
+	| "turn.interrupted"
 	| "permission.asked"
 	| "question.asked"
 	| "message.created";
@@ -135,6 +138,67 @@ function wakeSession(
 			WHERE ${target} AND snoozed_at IS NOT NULL AND woken_at IS NULL
 			AND snoozed_at <= ? AND (snoozed_until IS NULL OR snoozed_until > ?)`,
 		params: [createdAt, reason, sessionId, createdAt, createdAt],
+	};
+}
+
+// Claude ownership emits child status, while Task tool parts provide a fallback
+// through metadata.childSessionId (conduit-test-zbct). OpenCode children emit
+// their own session.status and
+// name the child under `sessionId`, so none of this touches them. Parts are
+// read before the message projector applies the same event, and corrupt
+// metadata reads as no child rather than failing the projection.
+const PART_CHILD =
+	"CASE WHEN json_valid(p.metadata) THEN json_extract(p.metadata, '$.childSessionId') END";
+const PART_BACKGROUND_RUNNING =
+	"CASE WHEN json_valid(p.metadata) THEN COALESCE(json_extract(p.metadata, '$.backgrounded'), 0) = 1 AND json_extract(p.metadata, '$.outcome') IS NULL ELSE 0 END";
+
+// A parent turn that is interrupted or fails leaves its foreground Task parts
+// open. Background tasks keep running until their own outcome arrives.
+function settleOpenSubagents(
+	parentSessionId: string,
+	createdAt: number,
+): SessionStatement {
+	return {
+		sql: `WITH RECURSIVE foreground(id) AS (
+				SELECT ? UNION
+				SELECT ${PART_CHILD} FROM foreground f
+				JOIN messages m ON m.session_id = f.id
+				JOIN message_parts p ON p.message_id = m.id
+				WHERE p.type = 'tool' AND p.status IN ('started', 'running')
+				AND ${PART_CHILD} IS NOT NULL AND NOT (${PART_BACKGROUND_RUNNING}))
+			UPDATE sessions SET status = 'idle', updated_at = ?
+			WHERE status IN ('busy', 'retry') AND id <> ? AND id IN (SELECT id FROM foreground)`,
+		params: [parentSessionId, createdAt, parentSessionId],
+	};
+}
+
+// A turn's end advances the turn-end version and names the send the turn
+// answered, so a browser can tell a late end of an earlier turn from the end of
+// the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
+// ended turn has no known send.
+function endTurn(
+	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
+	errorAt: number | null,
+	userMessageId: string | null,
+	messageId: string,
+): SessionStatement {
+	return {
+		sql: `UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
+			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
+				THEN (SELECT input_id FROM messages WHERE id = COALESCE(?,
+					(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+				ELSE last_turn_end_input_id END,
+			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
+			WHERE id = ?`,
+		params: [
+			event.createdAt,
+			errorAt,
+			event.streamVersion,
+			userMessageId,
+			messageId,
+			event.streamVersion,
+			event.sessionId,
+		],
 	};
 }
 
@@ -486,29 +550,97 @@ export const sessionHandlers: {
 		},
 	],
 
-	"turn.completed": (event) => {
+	// Task outcomes settle background children. Only the first attach to an
+	// open part starts a child; repeated links cannot reopen a settled child.
+	"tool.running": (event) => {
+		const child = event.data.metadata?.["childSessionId"];
+		const outcome = event.data.metadata?.["outcome"];
+		if (
+			outcome === "completed" ||
+			outcome === "failed" ||
+			outcome === "stopped"
+		)
+			return [
+				{
+					sql: `UPDATE sessions SET status = 'idle', updated_at = ?
+						WHERE status IN ('busy', 'retry') AND id = COALESCE(?,
+							(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))`,
+					params: [
+						event.createdAt,
+						typeof child === "string" ? child : null,
+						event.data.partId,
+					],
+				},
+			];
+		if (event.data.metadata?.["backgrounded"] === true)
+			return [
+				{
+					sql: `UPDATE sessions SET status = 'busy', updated_at = ?
+						WHERE id = COALESCE(?, (SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))
+						AND status <> 'busy' AND NOT EXISTS (
+							SELECT 1 FROM message_parts p WHERE p.id = ? AND json_valid(p.metadata)
+							AND json_extract(p.metadata, '$.outcome') IS NOT NULL)`,
+					params: [
+						event.createdAt,
+						typeof child === "string" ? child : null,
+						event.data.partId,
+						event.data.partId,
+					],
+				},
+			];
+		if (typeof child !== "string") return [];
 		return [
-			wakeSession(event.sessionId, event.createdAt, "turn"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = NULL, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
-				params: [event.createdAt, event.streamVersion, event.sessionId],
+				sql: `UPDATE sessions SET status = 'busy', updated_at = ?
+					WHERE id = ? AND status <> 'busy' AND NOT EXISTS (
+						SELECT 1 FROM message_parts p WHERE p.id = ?
+						AND (p.status IN ('completed', 'error') OR ${PART_CHILD} IS NOT NULL))`,
+				params: [event.createdAt, child, event.data.partId],
 			},
 		];
 	},
-	"turn.error": (event) => {
+	// Completion rarely repeats the child id, so fall back to the one the part
+	// already holds.
+	"tool.completed": (event) => {
+		const child = event.data.metadata?.["childSessionId"];
 		return [
-			wakeSession(event.sessionId, event.createdAt, "error"),
 			{
-				sql: "UPDATE sessions SET updated_at = ?, last_turn_error_at = ?, last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?) WHERE id = ?",
+				sql: `UPDATE sessions SET status = 'idle', updated_at = ?
+					WHERE status IN ('busy', 'retry') AND id = COALESCE(?,
+						(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))
+					AND NOT EXISTS (SELECT 1 FROM message_parts p
+						WHERE p.id = ? AND (${PART_BACKGROUND_RUNNING}))`,
 				params: [
 					event.createdAt,
-					event.createdAt,
-					event.streamVersion,
-					event.sessionId,
+					typeof child === "string" ? child : null,
+					event.data.partId,
+					event.data.partId,
 				],
 			},
 		];
 	},
+	"turn.completed": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "turn"),
+		endTurn(
+			event,
+			null,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
+	],
+	"turn.error": (event) => [
+		wakeSession(event.sessionId, event.createdAt, "error"),
+		endTurn(
+			event,
+			event.createdAt,
+			event.data.userMessageId ?? null,
+			event.data.messageId,
+		),
+		settleOpenSubagents(event.sessionId, event.createdAt),
+	],
+	"turn.interrupted": (event) => [
+		settleOpenSubagents(event.sessionId, event.createdAt),
+	],
 	"permission.asked": (event) => [
 		wakeSession(event.data.sessionId, event.createdAt, "approval"),
 	],

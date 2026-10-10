@@ -29,6 +29,7 @@ export interface SessionRow {
 	/** JSON SessionWorkspace. NULL uses the project's main folders. */
 	workspace?: string | null;
 	last_turn_end_version?: number | null;
+	last_turn_end_input_id?: string | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
@@ -100,6 +101,8 @@ export interface MessageRow {
 	error?: string | null;
 	created_at: number;
 	updated_at: number;
+	/** Result boundary, independent of later message or tool revisions. */
+	completed_at?: number | null;
 }
 
 export interface MessagePartRow {
@@ -122,8 +125,6 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
-	/** Result boundary, independent of later message or tool revisions. */
-	completedAt?: number;
 	turnCost?: number;
 	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {

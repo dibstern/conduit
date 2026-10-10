@@ -1,9 +1,21 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Deferred, Effect, FiberRef, Layer, Ref } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	FiberRef,
+	Layer,
+	Ref,
+	Schema,
+} from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignalProject,
+	makeCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import type {
 	EventStoreEffectTag,
 	EventStoreError,
@@ -12,7 +24,9 @@ import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
-import type { CanonicalEvent } from "../../../persistence/events.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
+import { type CanonicalEvent, EventId } from "../../../persistence/events.js";
+import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import {
 	commitClaudeRunnerOutput,
 	createClaudeRunnerPermissionReplies,
@@ -31,8 +45,33 @@ import type { makeSessionCompactions } from "../../../session/session-compaction
 import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
+import { isRecord } from "../../../utils.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { announceBackgroundWork } from "./session-attention.js";
+
+/** Terminal notifications can update an existing session, but cannot create one. */
+export function canSeedSession(event: ProviderRuntimeEvent): boolean {
+	switch (event.type) {
+		case "session.deleted":
+		case "turn.completed":
+		case "turn.error":
+		case "turn.interrupted":
+		case "message.removed":
+		case "message.part.removed":
+		case "permission.resolved":
+		case "question.resolved":
+			return false;
+		case "session.status":
+			return (
+				isRecord(event.data) &&
+				(event.data["status"] === "busy" || event.data["status"] === "retry")
+			);
+		case "session.compaction":
+			return isRecord(event.data) && event.data["state"] === "started";
+		default:
+			return true;
+	}
+}
 
 export type ProviderRuntimeIngestionError =
 	| EventStoreError
@@ -64,6 +103,16 @@ export interface ProviderRuntimeRelayPublisher {
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
+	/** Resolve before any permit; the returned writer joins the ingestion receipt commit. */
+	readonly workspaceChanged?: (
+		event: Extract<ProviderRuntimeEvent, { type: "workspace.changed" }>,
+	) => Effect.Effect<
+		| ((
+				project: CommitAndSignalProject,
+		  ) => Effect.Effect<void, EventStoreError>)
+		| undefined,
+		EventStoreError
+	>;
 	readonly relayPublisher?: ProviderRuntimeRelayPublisher;
 	readonly compactions?: Pick<
 		ReturnType<typeof makeSessionCompactions>,
@@ -103,197 +152,295 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly afterCommit?: Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
-				ingestSemaphore.withPermits(1)(
-					Effect.gen(function* () {
-						const context = yield* FiberRef.get(currentClaudeRunnerOutput);
-						const permissionReply = yield* FiberRef.get(
-							currentClaudeRunnerPermissionReply,
-						);
-						const receipt = context && !context.consumed ? context : undefined;
-						const currentState = yield* Ref.get(mapperStateRef);
-						let nextState = currentState;
-						const domainEvents: CanonicalEvent[] = [];
-
-						for (const event of events) {
-							if (context && event.type === "tool.completed") {
-								const data = event.data as { partId?: string };
-								const partId =
-									data.partId ?? event.providerRefs.providerToolUseId;
-								if (
-									partId &&
-									!nextState.startedToolPartIds.has(partKey(event, partId))
-								) {
-									const started = yield* sql<{
-										message_id: string;
-									}>`SELECT p.message_id FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE p.id = ${partId} AND m.session_id = ${event.sessionId} AND p.type = 'tool' LIMIT 1`;
-									if (started[0])
-										nextState = restoreRuntimeToolStart(
-											event,
-											nextState,
-											partId,
-											started[0].message_id,
-										);
-								}
-							}
-							const result = translateProviderRuntimeEventToDomain(
-								event,
-								nextState,
+				Effect.gen(function* () {
+					// Slow resolution must hold neither the project commit permit nor the
+					// mapper's ingestion permit, so other sessions can keep appending.
+					const prepared = yield* Effect.forEach(events, (event) =>
+						Effect.gen(function* () {
+							if (event.type !== "workspace.changed")
+								return { event, record: undefined };
+							if (
+								yield* isSessionDeleted(event.sessionId).pipe(
+									Effect.provideService(SqlClient.SqlClient, sql),
+								)
+							)
+								return { event, record: undefined };
+							const path =
+								event.data.source === "start"
+									? yield* realWorkspacePath(event.data.path).pipe(
+											Effect.orElseSucceed(() => event.data.path),
+										)
+									: event.data.path;
+							const normalized = { ...event, data: { ...event.data, path } };
+							const record = yield* options.workspaceChanged?.(normalized) ??
+								Effect.succeed(undefined);
+							return { event: normalized, record };
+						}),
+					);
+					return yield* ingestSemaphore.withPermits(1)(
+						Effect.gen(function* () {
+							const context = yield* FiberRef.get(currentClaudeRunnerOutput);
+							const permissionReply = yield* FiberRef.get(
+								currentClaudeRunnerPermissionReply,
 							);
-							// The mapper synthesizes a tool.started for an orphan
-							// tool.completed so the UI can render something — but an
-							// orphan means an upstream translator broke the tool
-							// lifecycle (2026-07-15: a phantom "Unknown" tool card).
-							// Surface it loudly instead of laundering it silently.
-							const synthesized =
-								event.type === "tool.completed" &&
-								result.events.some((domain) => domain.type === "tool.started");
-							if (synthesized) {
-								yield* Effect.logWarning(
-									"ingress synthesized tool.started for orphan tool.completed — upstream translator emitted completed without started",
-								).pipe(
-									Effect.annotateLogs({
-										providerId: event.providerId,
-										sessionId: event.sessionId,
-										eventId: event.eventId,
-										data: JSON.stringify(event.data),
-									}),
+							const receipt =
+								context && !context.consumed ? context : undefined;
+							const currentState = yield* Ref.get(mapperStateRef);
+							let nextState = currentState;
+							let domainEvents: CanonicalEvent[] = [];
+							const seedableSessions = new Set(
+								events.filter(canSeedSession).map((event) => event.sessionId),
+							);
+
+							for (const { event } of prepared) {
+								if (context && event.type === "tool.completed") {
+									const data = event.data as { partId?: string };
+									const partId =
+										data.partId ?? event.providerRefs.providerToolUseId;
+									if (
+										partId &&
+										!nextState.startedToolPartIds.has(partKey(event, partId))
+									) {
+										const started = yield* sql<{
+											message_id: string;
+										}>`SELECT p.message_id FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE p.id = ${partId} AND m.session_id = ${event.sessionId} AND p.type = 'tool' LIMIT 1`;
+										if (started[0])
+											nextState = restoreRuntimeToolStart(
+												event,
+												nextState,
+												partId,
+												started[0].message_id,
+											);
+									}
+								}
+								const result = translateProviderRuntimeEventToDomain(
+									event,
+									nextState,
+								);
+								// The mapper synthesizes a tool.started for an orphan
+								// tool.completed so the UI can render something — but an
+								// orphan means an upstream translator broke the tool
+								// lifecycle (2026-07-15: a phantom "Unknown" tool card).
+								// Surface it loudly instead of laundering it silently.
+								const synthesized =
+									event.type === "tool.completed" &&
+									result.events.some(
+										(domain) => domain.type === "tool.started",
+									);
+								if (synthesized) {
+									yield* Effect.logWarning(
+										"ingress synthesized tool.started for orphan tool.completed — upstream translator emitted completed without started",
+									).pipe(
+										Effect.annotateLogs({
+											providerId: event.providerId,
+											sessionId: event.sessionId,
+											eventId: event.eventId,
+											data: JSON.stringify(event.data),
+										}),
+									);
+								}
+								domainEvents.push(...result.events);
+								nextState = result.state;
+							}
+
+							let appended = true;
+							const acceptedLimits: string[] = [];
+							let skippedLimits = 0;
+							const beforeCommit = Effect.gen(function* () {
+								yield* ingestOptions.beforeCommit ?? Effect.void;
+								if (permissionReply) {
+									yield* createClaudeRunnerPermissionReplies(sql);
+									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
+								}
+							});
+							const afterCommit = Effect.gen(function* () {
+								if (appended) {
+									yield* Ref.set(mapperStateRef, nextState);
+									for (const sessionId of acceptedLimits)
+										yield* continuation.queueLimitPolicy(sessionId);
+									yield* ingestOptions.afterCommit ?? Effect.void;
+								}
+								if (receipt) {
+									receipt.consumed = true;
+									yield* Deferred.succeed(receipt.committed, undefined);
+									if (appended) receipt.onCommitted?.();
+								}
+							});
+							const commitOptions = {
+								publish: ingestOptions.publishToBus ?? true,
+								afterCommit,
+							};
+							yield* commitAndSignal
+								.write(
+									(project) =>
+										Effect.gen(function* () {
+											// Claim inside the append transaction, before event IDs or
+											// projections are written. Replayed and fenced frames are no-ops.
+											if (context && (receipt || context.attachmentId))
+												appended = receipt
+													? yield* commitClaudeRunnerOutput(sql, receipt)
+													: yield* ownsClaudeRunnerAttachment(sql, context);
+											if (!appended) return;
+											// Check under the same write permit and transaction as local
+											// deletion. Neither seeding nor publication may revive a deletion.
+											const sessionIds = new Set(
+												domainEvents.map((event) => event.sessionId),
+											);
+											for (const { event, record } of prepared)
+												if (record) sessionIds.add(event.sessionId);
+											for (const event of domainEvents)
+												if (
+													event.type === "session.created" &&
+													event.data.parentId
+												)
+													sessionIds.add(event.data.parentId);
+											const deleted = new Set<string>();
+											for (const id of sessionIds)
+												if (yield* isSessionDeleted(id)) deleted.add(id);
+											const ids = JSON.stringify(
+												domainEvents.map((event) => event.sessionId),
+											);
+											const existing = new Set(
+												(yield* sql<{ id: string }>`
+										SELECT id FROM sessions WHERE id IN (SELECT value FROM json_each(${ids}))`).map(
+													(row) => row.id,
+												),
+											);
+											const accepted: CanonicalEvent[] = [];
+											for (let event of domainEvents) {
+												if (deleted.has(event.sessionId)) continue;
+												if (
+													event.type === "session.created" &&
+													event.data.parentId &&
+													deleted.has(event.data.parentId)
+												) {
+													// A child discovered after cascading deletion belongs to that
+													// deletion too. Keep its tombstone for parentless late events.
+													event = {
+														...event,
+														eventId: Schema.decodeSync(EventId)(
+															`evt_parent_deleted_session_${event.sessionId}`,
+														),
+														type: "session.deleted",
+														data: { sessionId: event.sessionId },
+													};
+												}
+												if (
+													!existing.has(event.sessionId) &&
+													!seedableSessions.has(event.sessionId) &&
+													event.type !== "session.deleted"
+												)
+													continue;
+												if (event.type === "session.deleted") {
+													deleted.add(event.sessionId);
+													const subtree = yield* sql.unsafe<{ id: string }>(
+														SESSION_SUBTREE_SQL,
+														[event.sessionId],
+													);
+													for (const row of subtree) deleted.add(row.id);
+													for (const previous of accepted)
+														if (
+															previous.type === "session.created" &&
+															previous.data.parentId &&
+															deleted.has(previous.data.parentId)
+														)
+															deleted.add(previous.sessionId);
+												}
+												accepted.push(event);
+											}
+											domainEvents = accepted;
+											// Started compactions and retries ride transient shell status;
+											// their outcomes persist so they survive reloads.
+											const persistentEvents = accepted.filter(
+												(event) =>
+													!(
+														event.type === "session.compaction" &&
+														event.data.state === "started"
+													) &&
+													!(
+														event.type === "session.status" &&
+														event.data.status === "retry"
+													),
+											);
+											// Content for an unseen session needs a row for FK projection.
+											// Explicit creation belongs to the session projector; deletion
+											// and terminal-only notifications never need a seed.
+											const createdHere = new Set(
+												persistentEvents
+													.filter((event) => event.type === "session.created")
+													.map((event) => event.sessionId),
+											);
+											const needsSessionRow = new Map<string, string>();
+											for (const event of persistentEvents) {
+												if (
+													event.type !== "session.deleted" &&
+													!createdHere.has(event.sessionId)
+												)
+													needsSessionRow.set(event.sessionId, event.provider);
+											}
+											for (const [sessionId, provider] of needsSessionRow) {
+												const seededAt = Date.now();
+												yield* sql`INSERT OR IGNORE INTO sessions
+											(id, provider, title, status, created_at, updated_at)
+											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+											}
+											for (const { event, record } of prepared)
+												if (!deleted.has(event.sessionId))
+													yield* record?.(project) ?? Effect.void;
+											let pending: CanonicalEvent[] = [];
+											for (const event of persistentEvents) {
+												if (event.type === "session.usage_limited") {
+													if (pending.length > 0) {
+														yield* project(yield* appendEvents(pending));
+														pending = [];
+													}
+													if (yield* continuation.intakeLimit(event, project))
+														acceptedLimits.push(event.sessionId);
+													else skippedLimits++;
+												} else pending.push(event);
+											}
+											if (pending.length > 0)
+												yield* project(yield* appendEvents(pending));
+											yield* beforeCommit;
+										}),
+									commitOptions,
+								)
+								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							if (!appended) return 0;
+
+							// A compaction in progress and a retry live in memory, not the
+							// log (C1). Stamp their rows so the shell re-reads them.
+							yield* Effect.forEach(
+								new Set([
+									...(options.compactions?.observe(domainEvents) ?? []),
+									...(options.retries?.observe(domainEvents) ?? []),
+								]),
+								announceBackgroundWork,
+								{ discard: true },
+							).pipe(
+								Effect.provide(services),
+								Effect.catchAllCause((cause) =>
+									Effect.logWarning(
+										"failed to announce transient status",
+										cause,
+									),
+								),
+							);
+
+							if (
+								options.relayPublisher &&
+								ingestOptions.publishToRelay !== false
+							) {
+								yield* publishRelayMessages(
+									domainEvents,
+									options.relayPublisher,
 								);
 							}
-							domainEvents.push(...result.events);
-							nextState = result.state;
-						}
 
-						// A compaction's "started" notice and a provider retry are
-						// transient status (C1) that rides the shell row (see
-						// `compactions` and `retries` below). A compaction's outcome,
-						// completed or failed, persists so the divider or the failure
-						// notice survives a reload.
-						const persistentEvents = domainEvents.filter(
-							(event) =>
-								!(
-									event.type === "session.compaction" &&
-									event.data.state === "started"
-								) &&
-								!(
-									event.type === "session.status" &&
-									event.data.status === "retry"
-								),
-						);
-
-						// Projectors write rows that reference sessions(id), and a
-						// provider can stream events for a session Conduit never created
-						// — Claude subagents arrive mid-turn under their own id. The FK
-						// then rejects the projection, which used to be swallowed, so
-						// subagent messages rendered live and were gone after a reload.
-						// ClaudeEventPersistEffect.persistEvent already guards its own
-						// path with ensureSession; this is the same guard on this one.
-						// session.created is left to the session projector, which owns
-						// the row and upserts it.
-						const createdHere = new Set(
-							persistentEvents
-								.filter((event) => event.type === "session.created")
-								.map((event) => event.sessionId),
-						);
-						const needsSessionRow = new Map<string, string>();
-						for (const event of persistentEvents) {
-							if (createdHere.has(event.sessionId)) continue;
-							if (!needsSessionRow.has(event.sessionId)) {
-								needsSessionRow.set(event.sessionId, event.provider);
-							}
-						}
-						const ensureSessions = Effect.gen(function* () {
-							for (const [sessionId, provider] of needsSessionRow) {
-								const seededAt = Date.now();
-								yield* sql`
-									INSERT OR IGNORE INTO sessions
-									(id, provider, title, status, created_at, updated_at)
-									VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
-							}
-						});
-						let appended = true;
-						const acceptedLimits: string[] = [];
-						let skippedLimits = 0;
-						const beforeCommit = Effect.gen(function* () {
-							yield* ingestOptions.beforeCommit ?? Effect.void;
-							if (permissionReply) {
-								yield* createClaudeRunnerPermissionReplies(sql);
-								yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
-							}
-						});
-						const afterCommit = Effect.gen(function* () {
-							if (appended) {
-								yield* Ref.set(mapperStateRef, nextState);
-								for (const sessionId of acceptedLimits)
-									yield* continuation.queueLimitPolicy(sessionId);
-								yield* ingestOptions.afterCommit ?? Effect.void;
-							}
-							if (receipt) {
-								receipt.consumed = true;
-								yield* Deferred.succeed(receipt.committed, undefined);
-								if (appended) receipt.onCommitted?.();
-							}
-						});
-						const commitOptions = {
-							publish: ingestOptions.publishToBus ?? true,
-							afterCommit,
-						};
-						yield* commitAndSignal.write(
-							(project) =>
-								Effect.gen(function* () {
-									// Claim inside the append transaction, before event IDs or
-									// projections are written. Replayed and fenced frames are no-ops.
-									if (context && (receipt || context.attachmentId))
-										appended = receipt
-											? yield* commitClaudeRunnerOutput(sql, receipt)
-											: yield* ownsClaudeRunnerAttachment(sql, context);
-									if (!appended) return;
-									yield* ensureSessions;
-									let pending: CanonicalEvent[] = [];
-									for (const event of persistentEvents) {
-										if (event.type === "session.usage_limited") {
-											if (pending.length > 0) {
-												yield* project(yield* appendEvents(pending));
-												pending = [];
-											}
-											if (yield* continuation.intakeLimit(event, project))
-												acceptedLimits.push(event.sessionId);
-											else skippedLimits++;
-										} else pending.push(event);
-									}
-									if (pending.length > 0)
-										yield* project(yield* appendEvents(pending));
-									yield* beforeCommit;
-								}),
-							commitOptions,
-						);
-						if (!appended) return 0;
-
-						// A compaction in progress and a retry live in memory, not the
-						// log (C1). Stamp their rows so the shell re-reads them.
-						yield* Effect.forEach(
-							new Set([
-								...(options.compactions?.observe(domainEvents) ?? []),
-								...(options.retries?.observe(domainEvents) ?? []),
-							]),
-							announceBackgroundWork,
-							{ discard: true },
-						).pipe(
-							Effect.provide(services),
-							Effect.catchAllCause((cause) =>
-								Effect.logWarning("failed to announce transient status", cause),
-							),
-						);
-
-						if (
-							options.relayPublisher &&
-							ingestOptions.publishToRelay !== false
-						) {
-							yield* publishRelayMessages(domainEvents, options.relayPublisher);
-						}
-
-						return domainEvents.length - skippedLimits;
-					}),
-				);
+							return domainEvents.length - skippedLimits;
+						}),
+					);
+				});
 
 			return {
 				ingest: (event) => ingestBatch([event]),

@@ -6,7 +6,8 @@
 	import { onFileBrowser, applyGetFileContentResponse } from "../../stores/ws-listeners.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
 	import hljs from "highlight.js";
 	import Button from "../ui/Button.svelte";
@@ -83,6 +84,8 @@
 		const requestId = ++fileContentRequestId;
 		if (!path) return;
 		const slug = getCurrentSlug();
+		const sessionId = getCurrentSessionId();
+		const scope = fileTreeState.scope;
 		if (!slug) return;
 		filePath = path;
 		content = null;
@@ -90,8 +93,10 @@
 		truncated = false;
 		loadError = null;
 		loading = true;
-		void getFileContentRpc({ projectSlug: slug, path })
-			.then(applyGetFileContentResponse)
+		void getFileContentRpc({ projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
+			.then((response) => {
+				if (requestId === fileContentRequestId && fileTreeState.scope === scope) applyGetFileContentResponse(response);
+			})
 			.catch(() => {
 				if (requestId !== fileContentRequestId) return;
 				loading = false;

@@ -3,6 +3,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect } from "effect";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 
 export class CursorError extends Data.TaggedError("CursorError")<{
 	readonly operation: string;
@@ -10,6 +11,7 @@ export class CursorError extends Data.TaggedError("CursorError")<{
 }> {}
 
 export interface ProjectorCursor {
+	readonly projectId: string;
 	readonly projectorName: string;
 	readonly lastAppliedSeq: number;
 	readonly updatedAt: number;
@@ -22,6 +24,7 @@ interface CursorRow {
 }
 
 export interface ProjectorCursorEffect {
+	readonly projectId: string;
 	readonly get: (
 		projectorName: string,
 	) => Effect.Effect<ProjectorCursor | undefined, CursorError | SqlError>;
@@ -43,8 +46,9 @@ export class ProjectorCursorEffectTag extends Context.Tag(
 	"ProjectorCursorEffect",
 )<ProjectorCursorEffectTag, ProjectorCursorEffect>() {}
 
-function rowToCursor(row: CursorRow): ProjectorCursor {
+function rowToCursor(row: CursorRow, projectId: string): ProjectorCursor {
 	return {
+		projectId,
 		projectorName: row.projector_name,
 		lastAppliedSeq: row.last_applied_seq,
 		updatedAt: row.updated_at,
@@ -53,6 +57,7 @@ function rowToCursor(row: CursorRow): ProjectorCursor {
 
 export const makeProjectorCursorEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
 
 	const get = (
 		projectorName: string,
@@ -63,7 +68,7 @@ export const makeProjectorCursorEffect = Effect.gen(function* () {
 				FROM projector_cursors
 				WHERE projector_name = ${projectorName}`;
 			const row = rows[0];
-			return row ? rowToCursor(row) : undefined;
+			return row ? rowToCursor(row, projectId) : undefined;
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof CursorError
@@ -81,7 +86,7 @@ export const makeProjectorCursorEffect = Effect.gen(function* () {
 				SELECT projector_name, last_applied_seq, updated_at
 				FROM projector_cursors
 				ORDER BY projector_name ASC`;
-			return rows.map(rowToCursor);
+			return rows.map((row) => rowToCursor(row, projectId));
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof CursorError
@@ -125,5 +130,11 @@ export const makeProjectorCursorEffect = Effect.gen(function* () {
 			),
 		);
 
-	return { get, listAll, upsert, minCursor } satisfies ProjectorCursorEffect;
+	return {
+		projectId,
+		get,
+		listAll,
+		upsert,
+		minCursor,
+	} satisfies ProjectorCursorEffect;
 });

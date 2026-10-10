@@ -1,7 +1,4 @@
-import type {
-	ProviderRuntimeEvent,
-	ProviderRuntimeEventType,
-} from "../../contracts/providers/provider-runtime-event.js";
+import type { ProviderRuntimeEventType } from "../../contracts/providers/provider-runtime-event.js";
 import {
 	createEventId,
 	type EventPayloadMap,
@@ -12,7 +9,7 @@ export function claudeRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: createEventId(),
 		type,

@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { expect, it } from "vitest";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeEventStoreEffect } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "../../../../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -27,8 +28,16 @@ it("reads ordered, filtered history with bounded pages and recoverable errors", 
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
-			const store = yield* makeEventStoreEffect;
-			const cursors = yield* makeProjectorCursorEffect;
+			const store = yield* makeEventStoreEffect.pipe(
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: "test-project",
+				}),
+			);
+			const cursors = yield* makeProjectorCursorEffect.pipe(
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: "test-project",
+				}),
+			);
 			const projector = yield* makeProjectionRunnerEffect(
 				createAllEffectProjectors(),
 			).pipe(Effect.provideService(ProjectorCursorEffectTag, cursors));

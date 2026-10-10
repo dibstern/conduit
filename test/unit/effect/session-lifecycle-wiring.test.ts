@@ -4,15 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, PubSub } from "effect";
+import { Effect, Layer, Option, PubSub } from "effect";
 import { expect, vi } from "vitest";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 import {
 	DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
@@ -104,6 +108,8 @@ function makeTestLayer(
 	services: ReturnType<typeof makeMockServices>,
 	deps: ReturnType<typeof makeMockDeps>,
 ) {
+	const client = makeMockOpenCodeAPI();
+	client.session.messages = services.client.session.messages;
 	const wiringLayer = makeSessionLifecycleWiringLive({
 		translator: deps.translator as any,
 		sseTracker: deps.sseTracker as any,
@@ -112,6 +118,10 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
 		Layer.succeed(OpenCodeAPITag, services.client as any),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),
 		Layer.succeed(StatusPollerTag, services.statusPoller),
@@ -127,6 +137,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	deps: ReturnType<typeof makeMockDeps>,
 	api: ReturnType<typeof makeMockOpenCodeAPI>,
 	persistenceLayer: Layer.Layer<ROut, E, RIn>,
+	instances = makeOpenCodeInstancesStub({ opencode: api }),
 ) {
 	const wiringLayer = makeSessionLifecycleWiringLive({
 		translator: deps.translator as any,
@@ -140,10 +151,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
-		Layer.succeed(
-			OpenCodeInstancesTag,
-			makeOpenCodeInstancesStub({ opencode: api }),
-		),
+		Layer.succeed(OpenCodeInstancesTag, instances),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(PollerManagerTag, services.pollerManager as any),
 		Layer.succeed(StatusPollerTag, services.statusPoller),
@@ -166,13 +174,18 @@ function makeServiceLifecycleTestLayer(
 	deps: ReturnType<typeof makeMockDeps>,
 	api = makeMockOpenCodeAPI(),
 	dbFile?: string,
+	instances?: OpenCodeInstances,
 ) {
-	const persistenceLayer = makePersistenceEffectLayer(dbFile ?? ":memory:");
+	const persistenceLayer = makePersistenceEffectLayer(
+		dbFile ?? ":memory:",
+		"test-project",
+	);
 	const { baseLayer, serviceLayer } = makeServiceLifecycleLayers(
 		services,
 		deps,
 		api,
 		persistenceLayer,
+		instances,
 	);
 	return serviceLayer.pipe(Layer.provideMerge(baseLayer));
 }
@@ -187,7 +200,7 @@ function makeDurableServiceLifecycleTestLayer(
 		services,
 		deps,
 		api,
-		makePersistenceEffectLayer(dbFile),
+		makePersistenceEffectLayer(dbFile, "test-project"),
 	);
 	return Layer.provideMerge(serviceLayer, baseLayer);
 }
@@ -216,6 +229,70 @@ function mockPino() {
 // subscription scope.
 
 describe("SessionLifecycleWiringLive", () => {
+	it.live(
+		"keeps Claude creation quiet and starts OpenCode only for OpenCode creation",
+		() => {
+			// Failure modes: the lifecycle read starts a stopped instance, seeds a
+			// Claude poller, or prevents an explicit OpenCode create from starting.
+			const services = makeMockServices();
+			const deps = makeMockDeps();
+			const api = makeMockOpenCodeAPI();
+			let running = false;
+			const instances = {
+				...makeOpenCodeInstancesStub(),
+				use: vi.fn(() =>
+					Effect.sync(() => {
+						running = true;
+						return api;
+					}),
+				),
+				ifRunning: vi.fn(() =>
+					Effect.sync(() => (running ? Option.some(api) : Option.none())),
+				),
+			} satisfies OpenCodeInstances;
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				yield* flushSubscribers;
+				yield* service.createSession("Claude", { providerId: "claude" });
+				yield* waitForAssertion(() =>
+					expect(instances.ifRunning).toHaveBeenCalledOnce(),
+				);
+				expect(instances.use).not.toHaveBeenCalled();
+				expect(api.session.create).not.toHaveBeenCalled();
+				expect(api.session.messages).not.toHaveBeenCalled();
+				expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
+
+				const session = yield* service.createSession("OpenCode", {
+					instanceId: defaultInstanceIdForDriver("opencode"),
+					providerId: "opencode",
+				});
+				yield* waitForAssertion(() =>
+					expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
+						session.id,
+						[],
+					),
+				);
+				expect(instances.use).toHaveBeenCalledOnce();
+				expect(api.session.create).toHaveBeenCalledOnce();
+				expect(api.session.messages).toHaveBeenCalledWith(session.id);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.fresh(
+						makeServiceLifecycleTestLayer(
+							services,
+							deps,
+							api,
+							undefined,
+							instances,
+						),
+					),
+				),
+			);
+		},
+	);
+
 	it.effect("maps history rebuild rejection into a typed lifecycle error", () =>
 		Effect.gen(function* () {
 			const services = makeMockServices();

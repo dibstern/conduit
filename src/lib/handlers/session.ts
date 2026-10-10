@@ -103,12 +103,13 @@ export const handleViewSession = (
 		sessionId: payload.sessionId,
 	});
 
-export const createSessionForClient = ({
+export const createSessionForClient = <E = never>({
 	clientId,
 	title,
 	instanceId,
 	providerId,
 	model,
+	initializeWorkspace,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
@@ -119,40 +120,63 @@ export const createSessionForClient = ({
 		readonly providerId: string;
 		readonly variant?: string | undefined;
 	};
+	readonly initializeWorkspace?: (sessionId: string) => Effect.Effect<void, E>;
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
 
-		const session =
+		const create =
 			instanceId != null || providerId != null
-				? yield* sessionManagerService.createSession(title, {
+				? sessionManagerService.createSession(title, {
 						...(instanceId != null ? { instanceId } : {}),
 						...(providerId != null ? { providerId } : {}),
 					})
-				: yield* sessionManagerService.createSession(title);
-		if (model) {
-			const override = { providerID: model.providerId, modelID: model.modelId };
-			yield* selectSessionModel(session.id, override);
-			// The draft lists the default model's efforts, so keep a picked
-			// effort only if this model offers it. Without one, use the model's
-			// saved effort: the first turn would otherwise inherit the default's.
-			const { variant: saved, variants } = yield* savedVariantFor(override);
-			const picked = model.variant;
-			yield* selectSessionVariant(
-				session.id,
-				picked === "" || (picked !== undefined && variants.includes(picked))
-					? picked
-					: saved,
-			);
-		}
-
-		yield* switchClientToSession(clientId, session.id, {
-			skipPollerSeed: true,
-		});
-
-		log.info(`client=${clientId} Created: ${session.id}`);
-		return session;
+				: sessionManagerService.createSession(title);
+		return yield* Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				// Protect the id handoff for workspace initialization, then allow
+				// discovery and Git checks to be interrupted with rollback installed.
+				const session = yield* initializeWorkspace ? create : restore(create);
+				return yield* restore(
+					Effect.gen(function* () {
+						if (initializeWorkspace) yield* initializeWorkspace(session.id);
+						if (model) {
+							const override = {
+								providerID: model.providerId,
+								modelID: model.modelId,
+							};
+							yield* selectSessionModel(session.id, override);
+							// Keep a draft effort only if this model offers it; otherwise
+							// inherit the picked model's saved effort rather than the default's.
+							const { variant: saved, variants } =
+								yield* savedVariantFor(override);
+							const picked = model.variant;
+							yield* selectSessionVariant(
+								session.id,
+								picked === "" ||
+									(picked !== undefined && variants.includes(picked))
+									? picked
+									: saved,
+							);
+						}
+						yield* switchClientToSession(clientId, session.id, {
+							skipPollerSeed: true,
+						});
+						log.info(`client=${clientId} Created: ${session.id}`);
+						return session;
+					}),
+				).pipe(
+					Effect.onError(() =>
+						initializeWorkspace
+							? sessionManagerService
+									.deleteSession(session.id)
+									.pipe(Effect.orDie)
+							: Effect.void,
+					),
+				);
+			}),
+		);
 	});
 
 export const handleNewSession = (

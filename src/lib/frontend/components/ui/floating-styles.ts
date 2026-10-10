@@ -31,8 +31,7 @@ const FLOATING_SURFACE_BASE_CLASSES =
 
 // The portaled overlays: Popover, Menu, Tooltip. They float above everything,
 // including the dropdowns.
-export const FLOATING_SURFACE_CLASSES =
-	`${FLOATING_SURFACE_BASE_CLASSES} ` + "z-[var(--z-popover)]";
+export const FLOATING_SURFACE_CLASSES = `${FLOATING_SURFACE_BASE_CLASSES} z-[var(--z-popover)]`;
 
 // The inline detached listboxes: CommandMenu, FileMenu, DirectoryAutocomplete.
 // All three are anchored inside the composer or a form rather than portaled,

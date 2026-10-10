@@ -528,12 +528,11 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return discoverCapabilitiesEffect(
-			this.deps.workspaceRoot,
+			workspaceRoot ?? this.deps.workspaceRoot,
 			this.deps.capabilitiesService,
 		).pipe(
 			Effect.mapError(
@@ -598,6 +597,19 @@ export class ClaudeProviderRuntime {
 										}),
 								),
 							);
+						// The SDK reports busy only once the model streams, so SDK-local
+						// work (a manual /compact, a slash command) ran with the session
+						// idle until its result. A send to an idle session starts its
+						// turn now; the turn's end reports idle as before.
+						if (inFlight === 0)
+							yield* eventSink
+								.push(
+									claudeRuntimeEvent("session.status", sessionId, {
+										sessionId,
+										status: "busy",
+									}),
+								)
+								.pipe(Effect.ignore);
 						const sinkId = claudeRunnerSinkId(
 							input.inputId,
 							input.commandAttempt,
@@ -681,7 +693,7 @@ export class ClaudeProviderRuntime {
 			if (!model) {
 				// Discovery is shared with sends; cancellation only stops this waiter.
 				const discovery = yield* Effect.forkIn(
-					this.discoverEffect(),
+					this.discoverEffect(input.workspaceRoot),
 					this.providerScope,
 				);
 				const { models } = yield* Fiber.join(discovery);
@@ -1567,14 +1579,13 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
 			discoverCapabilitiesEffect(
-				this.deps.workspaceRoot,
+				workspaceRoot ?? this.deps.workspaceRoot,
 				this.deps.capabilitiesService,
 			),
 		);

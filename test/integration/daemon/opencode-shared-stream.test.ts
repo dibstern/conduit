@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -24,7 +24,11 @@ describe("daemon shared OpenCode global stream", () => {
 	let scenario = "routing";
 	let evidence: Record<string, unknown> = {};
 
-	async function start(name: string, managedOpenCode = false) {
+	async function start(
+		name: string,
+		managedOpenCode = false,
+		opencodeIdleTimeoutMs?: number,
+	) {
 		scenario = name;
 		evidence = { ticket: "conduit-test-pa3r.3", at: new Date().toISOString() };
 		harness = ProcessHarness.create({
@@ -33,7 +37,9 @@ describe("daemon shared OpenCode global stream", () => {
 			autoStartOpenCode: true,
 			managedOpenCode,
 		});
-		await harness.restart();
+		await harness.restart(
+			opencodeIdleTimeoutMs === undefined ? {} : { opencodeIdleTimeoutMs },
+		);
 		return harness;
 	}
 
@@ -80,6 +86,7 @@ describe("daemon shared OpenCode global stream", () => {
 		try {
 			await fixture.terminate();
 			evidence["streamConnections"] = fixture.opencodeStreamConnections();
+			evidence["requests"] = fixture.opencodeRequests();
 			evidence["failures"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
 		} finally {
@@ -89,7 +96,7 @@ describe("daemon shared OpenCode global stream", () => {
 			} finally {
 				mkdirSync("test-results", { recursive: true });
 				writeFileSync(
-					`test-results/pa3r-3-${scenario}.json`,
+					`test-results/${scenario.startsWith("directory-removal-") ? "rqbc-2" : "pa3r-3"}-${scenario}.json`,
 					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
 				);
 				harness = undefined;
@@ -326,6 +333,121 @@ describe("daemon shared OpenCode global stream", () => {
 				true,
 			);
 		});
+	}, 90_000);
+
+	it.each([
+		"busy",
+		"permission",
+		"question",
+	] as const)("drops a removed directory's %s demand and lets the shared instance idle-stop", async (kind) => {
+		const graceMs = 3_000;
+		const fixture = await start(`directory-removal-${kind}`, false, graceMs);
+		evidence["ticket"] = "conduit-test-rqbc.2";
+		const a = await fixture.connect();
+		const sessionA = await a.createSession("Removed A", "opencode", "opencode");
+		await a.view(sessionA);
+		await a.followSessions();
+		if (kind === "busy") {
+			await fixture.setOpenCodeStatus(fixture.projectDir, sessionA, {
+				type: "busy",
+			});
+			await a.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionA &&
+					message["status"] === "busy",
+			);
+		} else {
+			const id = `rqbc-2-removed-${kind}`;
+			await fixture.addOpenCodePrompt(kind, fixture.projectDir, {
+				id,
+				sessionID: sessionA,
+				...(kind === "permission"
+					? {
+							permission: "bash",
+							patterns: ["echo removed"],
+							metadata: {},
+							always: [],
+						}
+					: {
+							questions: [
+								{
+									question: "Proceed?",
+									header: "Proceed",
+									options: [{ label: "Yes" }],
+								},
+							],
+						}),
+			});
+			await a.waitFor(
+				(message) =>
+					message["type"] === `${kind}_pending` &&
+					message[kind === "permission" ? "requestId" : "toolId"] === id,
+			);
+		}
+		const directoryB = join(fixture.root, "project-b");
+		const slugB = await addProject(fixture, directoryB);
+		const b = await fixture.connect(undefined, undefined, slugB);
+		await b.createSession("Idle B", "opencode", "opencode");
+		const pids = readFileSync(
+			join(fixture.configDir, "fake-opencode-pids.jsonl"),
+			"utf8",
+		)
+			.trim()
+			.split("\n")
+			.flatMap((line) => {
+				const { pid, childPid, groupPid } = JSON.parse(line) as {
+					pid: number;
+					childPid: number;
+					groupPid: number;
+				};
+				return [pid, childPid, groupPid];
+			});
+		const livePids = () =>
+			pids.filter((pid) => {
+				try {
+					process.kill(pid, 0);
+					return true;
+				} catch {
+					return false;
+				}
+			});
+		// Each demand kind alone retains the process through two grace periods.
+		await new Promise<void>((done) => setTimeout(done, 2 * graceMs + 1_000));
+		evidence["beforeRemoval"] = { kind, pids: livePids() };
+		expect(livePids()).toHaveLength(3);
+		expect((await b.instanceStatus("opencode")).instance?.status).toBe(
+			"healthy",
+		);
+		await a.close();
+		await removeProject(fixture, "process-test");
+		const cursor = fixture.opencodeRequests().length;
+		evidence["removedAt"] = Date.now();
+		await vi.waitFor(() => expect(livePids()).toEqual([]), {
+			timeout: 15_000,
+			interval: 250,
+		});
+		const removedDirectoryRequests = fixture
+			.opencodeRequests()
+			.slice(cursor)
+			.filter(
+				({ directory }) => directory === realpathSync(fixture.projectDir),
+			);
+		evidence["afterRemoval"] = {
+			pids: livePids(),
+			status: (await b.instanceStatus("opencode")).instance?.status,
+			removedDirectoryRequests,
+		};
+		expect(evidence["afterRemoval"]).toEqual({
+			pids: [],
+			status: "stopped",
+			removedDirectoryRequests: [],
+		});
+		expect(
+			fixture
+				.opencodeStreamConnections()
+				.filter(({ action }) => action === "close"),
+		).toHaveLength(1);
 	}, 90_000);
 
 	it("keeps the stream through relay removal and reuses it for a new scope", async () => {

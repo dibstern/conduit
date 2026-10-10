@@ -203,7 +203,7 @@ it.each([
 			),
 			Effect.provideService(LoggerTag, makeMockLogger()),
 			Effect.provide(makeOverridesStateLive()),
-			Effect.provide(makePersistenceEffectLayer(":memory:")),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),
 	);
 });

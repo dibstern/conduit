@@ -11,6 +11,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
 describe("agent selection state", () => {
 	it.effect("uses the switched agent when sending the next prompt", () => {
@@ -59,6 +60,7 @@ describe("agent selection state", () => {
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
+						seedEvents: [makeSessionCreatedEvent("session-1")],
 					}),
 				),
 			),
@@ -106,6 +108,7 @@ describe("agent selection state", () => {
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
+						seedEvents: [makeSessionCreatedEvent("session-1")],
 					}),
 				),
 			),

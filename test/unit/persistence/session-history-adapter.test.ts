@@ -80,7 +80,7 @@ describe("messageRowsToHistory", () => {
 						}
 					: {}),
 			}),
-			completedAt: 2000,
+			completed_at: 2000,
 		};
 		expect(
 			messageRowsToHistory([row], { pageSize: 50 }).messages[0]?.time,

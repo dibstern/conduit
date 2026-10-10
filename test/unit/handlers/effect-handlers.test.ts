@@ -232,7 +232,13 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 }
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.merge(
 		apiLayer,
 		OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
@@ -255,7 +261,13 @@ function projectManagementLayer(
 }
 
 function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, client);
+	const apiLayer = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
+	);
 	return Layer.mergeAll(
 		apiLayer,
 		OpenCodeModelServiceLive.pipe(
@@ -289,7 +301,7 @@ function mockConfig(
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = Layer.merge(
-	makePersistenceEffectLayer(":memory:"),
+	makePersistenceEffectLayer(":memory:", "test-project"),
 	Layer.succeed(ClaudeEventPersistEffectTag, {
 		persistHandoffDelivered: () => Effect.void,
 		persistEvent: () => Effect.void,
@@ -1227,7 +1239,7 @@ function makeForkSessionLayer(options?: {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:")));
+	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")));
 
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
@@ -2815,7 +2827,7 @@ describe("sendMessageToSession", () => {
 ),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
-						makePersistenceEffectLayer(dbFile),
+						makePersistenceEffectLayer(dbFile, "test-project"),
 						Layer.succeed(
 							OrchestrationEngineTag,
 							new OrchestrationEngine({ registry: new ProviderRegistry() }),
@@ -3600,6 +3612,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, status, created_at, updated_at)
+					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0)`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",
@@ -3612,7 +3628,6 @@ describe("handleMessage", () => {
 				);
 				// The failure is recorded as the turn's error; the relay's failed
 				// `done` idles the composer from there.
-				const sql = yield* SqlClient.SqlClient;
 				const failures = yield* sql<{ code: string; error: string }>`
 					SELECT json_extract(data, '$.code') AS code,
 						json_extract(data, '$.error') AS error

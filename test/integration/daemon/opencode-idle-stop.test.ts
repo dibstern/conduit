@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
@@ -66,6 +67,24 @@ describe("Managed OpenCode stops when idle", () => {
 		spawned(fixture)
 			.flatMap(({ pid, childPid, groupPid }) => [pid, childPid, groupPid])
 			.filter(alive);
+
+	function persistedRecovery(fixture: ProcessHarness, sessionId: string) {
+		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		try {
+			return {
+				session: db
+					.prepare("SELECT status FROM sessions WHERE id = ?")
+					.get(sessionId) as { status: string } | undefined,
+				pending: db
+					.prepare(
+						"SELECT id, type FROM pending_approvals WHERE session_id = ? AND status = 'pending'",
+					)
+					.all(sessionId) as Array<{ id: string; type: string }>,
+			};
+		} finally {
+			db.close();
+		}
+	}
 
 	/** Stream connections opened without a logged close. */
 	function openStreams(fixture: ProcessHarness) {
@@ -137,7 +156,7 @@ describe("Managed OpenCode stops when idle", () => {
 			} finally {
 				mkdirSync("test-results", { recursive: true });
 				writeFileSync(
-					`test-results/pa3r-8-${scenario}.json`,
+					`test-results/${scenario.startsWith("rqbc-2-") ? scenario : `pa3r-8-${scenario}`}.json`,
 					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
 				);
 				harness = undefined;
@@ -326,8 +345,9 @@ describe("Managed OpenCode stops when idle", () => {
 		);
 	}, 120_000);
 
-	it("re-adopts a busy survivor across a restart without a second spawn, and conduit stop ends it", async () => {
-		const fixture = await start("restart-survival");
+	it("recovers an unviewed busy survivor and its pending permission after restart, and conduit stop ends it", async () => {
+		const fixture = await start("rqbc-2-unviewed-busy");
+		evidence["ticket"] = "conduit-test-rqbc.2";
 		const first = await fixture.connect();
 		const sessionId = await first.createSession(
 			"Survivor",
@@ -337,13 +357,48 @@ describe("Managed OpenCode stops when idle", () => {
 		await fixture.setOpenCodeStatus(fixture.projectDir, sessionId, {
 			type: "busy",
 		});
+		await vi.waitFor(() =>
+			expect(persistedRecovery(fixture, sessionId).session?.status).toBe(
+				"busy",
+			),
+		);
 		await first.close();
 		await fixture.terminate();
 		const survivor = livePids(fixture);
 		expect(survivor).toHaveLength(3);
 
-		await fixture.restart();
+		// The ask arrives during downtime. Only startup recovery can discover it
+		// before any browser attaches, and no OpenCode use may be needed.
+		await fixture.addOpenCodePrompt("permission", fixture.projectDir, {
+			id: "rqbc-2-survivor-permission",
+			sessionID: sessionId,
+			permission: "bash",
+			patterns: ["echo recovery"],
+			metadata: {},
+			always: [],
+		});
+		await fixture.restart({ skipBrowserProbe: true });
+		await sleep(pastGraceMs);
+		evidence["unviewed"] = {
+			waitMs: pastGraceMs,
+			graceMs,
+			livePids: livePids(fixture),
+			spawned: spawned(fixture).length,
+			persisted: persistedRecovery(fixture, sessionId),
+		};
+		expect(livePids(fixture)).toEqual(survivor);
+		expect(spawned(fixture)).toHaveLength(1);
+		await vi.waitFor(() =>
+			expect(persistedRecovery(fixture, sessionId).pending).toEqual([
+				{ id: "rqbc-2-survivor-permission", type: "permission" },
+			]),
+		);
 		const browser = await fixture.connect();
+		evidence["recoveredPermission"] = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				message["requestId"] === "rqbc-2-survivor-permission",
+		);
 		evidence["readopted"] = await keptRunning(fixture, browser);
 		expect(livePids(fixture)).toEqual(survivor);
 
@@ -358,5 +413,70 @@ describe("Managed OpenCode stops when idle", () => {
 			survivor,
 			livePids: livePids(fixture),
 		};
+	}, 120_000);
+
+	it.each([
+		"permission",
+		"question",
+	] as const)("recovers an unviewed idle survivor awaiting a %s after restart", async (kind) => {
+		const fixture = await start(`rqbc-2-unviewed-${kind}`);
+		evidence["ticket"] = "conduit-test-rqbc.2";
+		const first = await fixture.connect();
+		const sessionId = await first.createSession(
+			"Awaiting input",
+			instanceId,
+			"opencode",
+		);
+		const id = `rqbc-2-persisted-${kind}`;
+		await fixture.addOpenCodePrompt(kind, fixture.projectDir, {
+			id,
+			sessionID: sessionId,
+			...(kind === "permission"
+				? {
+						permission: "bash",
+						patterns: ["echo recovery"],
+						metadata: {},
+						always: [],
+					}
+				: {
+						questions: [
+							{
+								question: "Proceed?",
+								header: "Proceed",
+								options: [{ label: "Yes" }],
+							},
+						],
+					}),
+		});
+		await first.waitFor(
+			(message) =>
+				message["type"] === `${kind}_pending` &&
+				(message["requestId"] ?? message["toolId"]) === id,
+		);
+		expect(persistedRecovery(fixture, sessionId)).toEqual({
+			session: { status: "idle" },
+			pending: [{ id, type: kind }],
+		});
+		await first.close();
+		await fixture.terminate();
+		const survivor = livePids(fixture);
+		await fixture.restart({ skipBrowserProbe: true });
+		await sleep(pastGraceMs);
+		evidence["unviewed"] = {
+			waitMs: pastGraceMs,
+			graceMs,
+			livePids: livePids(fixture),
+			spawned: spawned(fixture).length,
+			persisted: persistedRecovery(fixture, sessionId),
+		};
+		expect(livePids(fixture)).toEqual(survivor);
+		expect(livePids(fixture)).toHaveLength(3);
+		expect(spawned(fixture)).toHaveLength(1);
+		const browser = await fixture.connect();
+		evidence["recoveredPrompt"] = await browser.waitFor(
+			(message) =>
+				message["type"] === `${kind}_pending` &&
+				(message["requestId"] ?? message["toolId"]) === id,
+		);
 	}, 120_000);
 });

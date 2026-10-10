@@ -17,13 +17,14 @@ import {
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 function makeCostRuntime(filename: string) {
-	const persistence = makePersistenceEffectLayer(filename);
+	const persistence = makePersistenceEffectLayer(filename, "test-project");
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistence,
@@ -180,6 +181,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 			for (const rows of histories) {
 				const assistant = rows.find((row) => row.id === "a1");
 				expect(assistant?.updated_at).toBe(9000);
+				expect(assistant?.completed_at).toBe(2000);
 				expect(assistant?.parts[0]?.updated_at).toBe(9000);
 				const history = messageRowsToHistory(rows, { pageSize: 50 });
 				expect(
@@ -194,6 +196,378 @@ describe("Claude turn economics through SQLite persistence", () => {
 		await runtime.runPromise(assertBoundary);
 		await runtime.runPromise(rebuildCosts);
 		await runtime.runPromise(assertBoundary);
+	});
+
+	// Migration leaves existing rows null. Rebuilding follows ledger order,
+	// answerless results, message lifecycles and REST snapshot protection.
+	it("leaves existing completion boundaries null until new events or a projection rebuild", async () => {
+		stamp = 1000;
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* seedSession("s1");
+				yield* seedTurn("s1", "u1", "a1");
+				yield* persist.persistEvents([
+					completion("s1", "a1", 0.1, "sdk-session", 3000),
+					completion("s1", "a1", 0.2, "sdk-session", 2000),
+					canonicalEvent(
+						"message.created",
+						"s1",
+						{
+							messageId: "u2",
+							role: "user",
+							sessionId: "s1",
+						},
+						{ provider: "claude", createdAt: 4000 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{
+							messageId: "a1",
+							userMessageId: "u2",
+						},
+						{ provider: "claude", createdAt: 5000 },
+					),
+					canonicalEvent(
+						"message.snapshot",
+						"s1",
+						{
+							messageId: "rest-only",
+							message: {
+								id: "rest-only",
+								sessionID: "s1",
+								role: "assistant",
+								parentID: "u1",
+								time: { created: 5000, completed: 6000 },
+								parts: [],
+							},
+							digest: "rest-only",
+						},
+						{
+							provider: "opencode",
+							createdAt: 6000,
+							metadata: { rawSource: "opencode.rest" },
+						},
+					),
+					completion("s1", "rest-only", 0.3, "sdk-session", 7000),
+					canonicalEvent(
+						"tool.started",
+						"s1",
+						{
+							messageId: "a1",
+							partId: "late",
+							toolName: "Bash",
+							callId: "late",
+							input: { tool: "Bash", command: "echo done" },
+						},
+						{ provider: "claude", createdAt: 8000 },
+					),
+					canonicalEvent(
+						"tool.running",
+						"s1",
+						{
+							messageId: "a1",
+							partId: "late",
+							metadata: { backgrounded: true },
+						},
+						{ provider: "claude", createdAt: 9000 },
+					),
+					canonicalEvent(
+						"message.snapshot",
+						"s1",
+						{
+							messageId: "a1",
+							message: {
+								id: "a1",
+								sessionID: "s1",
+								role: "assistant",
+								parentID: "u1",
+								time: { created: 1002, completed: 9000 },
+								parts: [],
+							},
+							digest: "a1",
+						},
+						{
+							provider: "opencode",
+							createdAt: 10000,
+							metadata: { rawSource: "opencode.rest" },
+						},
+					),
+					completion("s1", "a1", 0.4, "sdk-session", 12000),
+					canonicalEvent(
+						"message.snapshot",
+						"s1",
+						{
+							messageId: "reused",
+							message: {
+								id: "reused",
+								sessionID: "s1",
+								role: "assistant",
+								parentID: "u2",
+								parts: [],
+							},
+							digest: "reused",
+						},
+						{
+							provider: "opencode",
+							createdAt: 13000,
+							metadata: { rawSource: "opencode.rest" },
+						},
+					),
+					completion("s1", "reused", 0.5, "sdk-session", 14000),
+					canonicalEvent(
+						"message.removed",
+						"s1",
+						{ messageId: "reused" },
+						{
+							provider: "claude",
+							createdAt: 15000,
+						},
+					),
+					canonicalEvent(
+						"message.created",
+						"s1",
+						{
+							messageId: "reused",
+							role: "assistant",
+							sessionId: "s1",
+							parentID: "u2",
+						},
+						{ provider: "claude", createdAt: 16000 },
+					),
+					completion("s1", "reused", 0.6, "sdk-session", 17000),
+					completion("s1", "not-yet-created", 0.7, "sdk-session", 18000),
+					canonicalEvent(
+						"message.created",
+						"s1",
+						{
+							messageId: "not-yet-created",
+							role: "assistant",
+							sessionId: "s1",
+							parentID: "u2",
+						},
+						{ provider: "claude", createdAt: 19000 },
+					),
+				]);
+				yield* seedSession("s2", "opencode");
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"message.created",
+						"s2",
+						{
+							messageId: "opencode-answer",
+							role: "assistant",
+							sessionId: "s2",
+						},
+						{ provider: "opencode", createdAt: 20000 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s2",
+						{ messageId: "opencode-answer" },
+						{
+							provider: "opencode",
+							createdAt: 21000,
+						},
+					),
+				]);
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"text.delta",
+						"s1",
+						{
+							messageId: "implicit",
+							partId: "implicit-text",
+							text: "Created from a delta",
+						},
+						{ provider: "claude", createdAt: 22000 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "implicit" },
+						{
+							provider: "claude",
+							createdAt: 23000,
+						},
+					),
+					canonicalEvent(
+						"message.snapshot",
+						"s1",
+						{
+							messageId: "unshielded",
+							digest: "unshielded",
+							message: {
+								id: "unshielded",
+								sessionID: "s1",
+								role: "assistant",
+								parts: [
+									{ id: "snapshot-text", type: "text", text: "Original" },
+								],
+							},
+						},
+						{
+							provider: "opencode",
+							createdAt: 24000,
+							metadata: { rawSource: "opencode.rest" },
+						},
+					),
+					canonicalEvent(
+						"message.part.removed",
+						"s1",
+						{
+							messageId: "unshielded",
+							partId: "absent",
+						},
+						{ provider: "opencode", createdAt: 25000 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "unshielded" },
+						{
+							provider: "claude",
+							createdAt: 26000,
+						},
+					),
+					canonicalEvent(
+						"message.part.removed",
+						"s1",
+						{
+							messageId: "unshielded",
+							partId: "snapshot-text",
+						},
+						{ provider: "opencode", createdAt: 27000 },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "unshielded" },
+						{
+							provider: "claude",
+							createdAt: 28000,
+						},
+					),
+					canonicalEvent(
+						"message.part.removed",
+						"s1",
+						{
+							messageId: "unshielded",
+							partId: "snapshot-text",
+						},
+						{ provider: "opencode", createdAt: 29000 },
+					),
+				]);
+			}),
+		);
+		const boundaries = Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			return yield* sql<{
+				id: string;
+				completed_at: number | null;
+				updated_at: number;
+			}>`
+				SELECT id, completed_at, updated_at FROM messages ORDER BY id`;
+		});
+		const projected = await runtime.runPromise(boundaries);
+		expect(
+			projected.map(({ id, completed_at }) => ({ id, completed_at })),
+		).toEqual([
+			{ id: "a1", completed_at: null },
+			{ id: "implicit", completed_at: 23000 },
+			{ id: "not-yet-created", completed_at: null },
+			{ id: "opencode-answer", completed_at: 21000 },
+			{ id: "rest-only", completed_at: null },
+			{ id: "reused", completed_at: 17000 },
+			{ id: "u1", completed_at: null },
+			{ id: "u2", completed_at: null },
+			{ id: "unshielded", completed_at: 28000 },
+		]);
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				// Remove only the new column/ledger entry to recreate the pre-migration schema.
+				yield* sql`ALTER TABLE messages DROP COLUMN completed_at`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE name = 'messages_completed_at'`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[47, "messages_completed_at"],
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}),
+		);
+		expect(await runtime.runPromise(boundaries)).toEqual(
+			projected.map((row) => ({ ...row, completed_at: null })),
+		);
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const read = yield* ReadQueryEffectTag;
+				for (const sessionId of ["s1", "s2"]) {
+					const rows = yield* read.getSessionMessagesWithParts(sessionId);
+					const history = messageRowsToHistory(rows, { pageSize: 50 });
+					for (const row of rows.filter(
+						(row) => row.role === "assistant" && !row.rest_payload,
+					)) {
+						expect(row.completed_at).toBeNull();
+						expect(
+							history.messages.find((message) => message.id === row.id)?.time
+								?.completed,
+						).toBe(row.updated_at);
+					}
+				}
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* seedTurn("s1", "u3", "a3");
+				yield* persist.persistEvents([
+					completion("s1", "a3", 0.8, "sdk-session", 30000),
+					canonicalEvent(
+						"tool.started",
+						"s1",
+						{
+							messageId: "a3",
+							partId: "new-late",
+							toolName: "Task",
+							callId: "new-late",
+							input: { tool: "Task", description: "Audit", prompt: "Go" },
+						},
+						{ provider: "claude", createdAt: 31000 },
+					),
+					canonicalEvent(
+						"tool.running",
+						"s1",
+						{
+							messageId: "a3",
+							partId: "new-late",
+							metadata: { backgrounded: true },
+						},
+						{ provider: "claude", createdAt: 32000 },
+					),
+				]);
+			}),
+		);
+		const assertNewBoundary = Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const rows = yield* read.getSessionMessagesWithParts("s1");
+			expect(rows.find((row) => row.id === "a3")).toMatchObject({
+				completed_at: 30000,
+				updated_at: 32000,
+			});
+			expect(
+				messageRowsToHistory(rows, { pageSize: 50 }).messages.find(
+					(message) => message.id === "a3",
+				)?.time?.completed,
+			).toBe(30000);
+		});
+		await runtime.runPromise(assertNewBoundary);
+		const newRows = (await runtime.runPromise(boundaries)).filter(
+			(row) => row.id === "u3" || row.id === "a3",
+		);
+		await runtime.runPromise(rebuildCosts);
+		expect(await runtime.runPromise(boundaries)).toEqual(
+			[...projected, ...newRows].sort((left, right) =>
+				left.id.localeCompare(right.id),
+			),
+		);
+		await runtime.runPromise(assertNewBoundary);
 	});
 
 	it("keeps usage and context independent through history, reopening and rebuilding, including legacy rows", async () => {

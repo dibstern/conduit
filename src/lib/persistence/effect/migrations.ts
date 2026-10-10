@@ -13,12 +13,14 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
+	MESSAGES_COMPLETED_AT_MIGRATION,
 	MESSAGES_CONTEXT_TOKENS_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	MESSAGES_INPUT_ID_MIGRATION,
 	MESSAGES_STEERED_MIGRATION,
 	PENDING_APPROVALS_VERSION_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
+	PROJECT_PROVENANCE_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -33,6 +35,7 @@ import {
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
+	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
@@ -148,6 +151,7 @@ const expectedTableColumns = {
 		"metadata",
 		"provider",
 		"created_at",
+		"project_id",
 	],
 	message_parts: [
 		"id",
@@ -470,6 +474,7 @@ const appendedSessionColumns = [
 	"resumes",
 	"root_id",
 	"workspace",
+	"last_turn_end_input_id",
 ] as const;
 
 function sameStrings(
@@ -574,6 +579,9 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		const actualColumns = columns.map((column) => column.name);
 		const matchesKnownSchema =
 			sameStrings(actualColumns, expectedColumns) ||
+			// The pre-provenance event schema lacks the final project_id column.
+			(tableName === "events" &&
+				sameStrings(actualColumns, expectedColumns.slice(0, -1))) ||
 			((tableName === "sessions" || tableName === "messages") &&
 				sameStrings(actualColumns, [...expectedColumns, "version"])) ||
 			(tableName === "command_receipts" &&
@@ -1096,10 +1104,25 @@ export const effectMigrationEntries = {
 		"steered",
 		readMigrationSql(MESSAGES_STEERED_MIGRATION),
 	),
-	"0044_messages_context_tokens": runAddColumnMigrationIfMissing(
+	"0044_sessions_last_turn_end_input_id": runAddColumnMigrationIfMissing(
+		"sessions",
+		"last_turn_end_input_id",
+		readMigrationSql(SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION),
+	),
+	"0045_project_provenance": runAddColumnMigrationIfMissing(
+		"events",
+		"project_id",
+		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),
+	),
+	"0046_messages_context_tokens": runAddColumnMigrationIfMissing(
 		"messages",
 		"context_tokens",
 		readMigrationSql(MESSAGES_CONTEXT_TOKENS_MIGRATION),
+	),
+	"0047_messages_completed_at": runAddColumnMigrationIfMissing(
+		"messages",
+		"completed_at",
+		readMigrationSql(MESSAGES_COMPLETED_AT_MIGRATION),
 	),
 } satisfies Record<
 	string,

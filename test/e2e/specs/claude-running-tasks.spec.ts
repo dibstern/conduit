@@ -69,7 +69,12 @@ async function readSurfaces(page: Page, sessionId: string) {
 	};
 }
 
-function recorder(page: Page, testInfo: TestInfo, sessionId: string) {
+function recorder(
+	page: Page,
+	testInfo: TestInfo,
+	sessionId: string,
+	eventsDbPath: string,
+) {
 	const report: {
 		step: string;
 		surfaces: Awaited<ReturnType<typeof readSurfaces>>;
@@ -85,7 +90,26 @@ function recorder(page: Page, testInfo: TestInfo, sessionId: string) {
 		},
 		async write(name: string) {
 			const path = testInfo.outputPath(name);
-			writeFileSync(path, JSON.stringify({ sessionId, report }, null, 2));
+			const db = new DatabaseSync(eventsDbPath, { readOnly: true });
+			try {
+				const sessions = db
+					.prepare("SELECT id, parent_id, side_thread, status FROM sessions")
+					.all();
+				const statuses = db
+					.prepare(
+						`SELECT sequence, session_id, created_at,
+							json_extract(data, '$.status') AS status
+						FROM events WHERE type = 'session.status'
+						ORDER BY sequence DESC LIMIT 20`,
+					)
+					.all();
+				writeFileSync(
+					path,
+					JSON.stringify({ sessionId, report, sessions, statuses }, null, 2),
+				);
+			} finally {
+				db.close();
+			}
 			await testInfo.attach(name, { path, contentType: "application/json" });
 		},
 	};
@@ -107,7 +131,7 @@ test.describe("Claude running tasks", () => {
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
-		const steps = recorder(page, testInfo, sessionId);
+		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
 		const pill = page.locator(".turn-running");
 		const tasksRow = page.getByTestId("background-tasks-row");
 		const sidebarRow = page.locator(
@@ -246,7 +270,7 @@ test.describe("Claude running tasks", () => {
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
-		const steps = recorder(page, testInfo, sessionId);
+		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
 		const tasksRow = page.getByTestId("background-tasks-row");
 		const sidebarRow = page.locator(
 			`#session-list [data-session-id="${sessionId}"]`,

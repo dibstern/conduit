@@ -3,6 +3,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
 import {
@@ -18,6 +19,7 @@ export class EventStoreError extends Data.TaggedError("EventStoreError")<{
 const DEFAULT_READ_LIMIT = 1000;
 
 export interface EventStoreEffect {
+	readonly projectId: string;
 	readonly append: (
 		event: CanonicalEvent,
 	) => Effect.Effect<StoredEvent, EventStoreError | SqlError>;
@@ -74,6 +76,7 @@ const validateCanonicalEvent = (
 
 export const makeEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
 
 	const getNextStreamVersion = (
 		sessionId: string,
@@ -109,9 +112,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 			const rows = yield* sql<StoredEventRow>`
 				${sql.literal(isOpenCodeSessionSeed ? "INSERT OR IGNORE" : "INSERT")} INTO events (
-					event_id, session_id, stream_version, type, data, metadata, provider, created_at
+					project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
 				)
 				SELECT
+					${projectId},
 					${event.eventId},
 					${event.sessionId},
 					COALESCE(MAX(stream_version) + 1, 0),
@@ -123,14 +127,14 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 				FROM events
 				WHERE session_id = ${event.sessionId}
 				RETURNING
-					sequence, event_id, session_id, stream_version,
+					project_id, sequence, event_id, session_id, stream_version,
 					type, data, metadata, provider, created_at`;
 
 			let row = rows[0];
 			if (!row && isOpenCodeSessionSeed) {
 				// Retry projection with the durable seed after a failed projection.
 				const existingRows = yield* sql<StoredEventRow>`
-					SELECT sequence, event_id, session_id, stream_version,
+					SELECT project_id, sequence, event_id, session_id, stream_version,
 						type, data, metadata, provider, created_at
 					FROM events
 					WHERE event_id = ${event.eventId}`;
@@ -186,7 +190,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const effectiveLimit = limit ?? DEFAULT_READ_LIMIT;
 			const rows = yield* sql<StoredEventRow>`
-					SELECT sequence, event_id, session_id, stream_version,
+					SELECT project_id, sequence, event_id, session_id, stream_version,
 						type, data, metadata, provider, created_at
 					FROM events
 					WHERE sequence > ${afterSequence}
@@ -210,7 +214,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			const afterSeq = fromSequence ?? 0;
 			if (limit != null) {
 				const rows = yield* sql<StoredEventRow>`
-						SELECT sequence, event_id, session_id, stream_version,
+						SELECT project_id, sequence, event_id, session_id, stream_version,
 							type, data, metadata, provider, created_at
 						FROM events
 						WHERE session_id = ${sessionId} AND sequence > ${afterSeq}
@@ -219,7 +223,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 				return yield* Effect.forEach(rows, decodeEventStoreRow);
 			}
 			const rows = yield* sql<StoredEventRow>`
-					SELECT sequence, event_id, session_id, stream_version,
+					SELECT project_id, sequence, event_id, session_id, stream_version,
 						type, data, metadata, provider, created_at
 					FROM events
 					WHERE session_id = ${sessionId} AND sequence > ${afterSeq}
@@ -240,6 +244,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		readBySession(sessionId, fromSequence, undefined);
 
 	return {
+		projectId,
 		append,
 		appendBatch,
 		readFromSequence,

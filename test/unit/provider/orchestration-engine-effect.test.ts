@@ -129,7 +129,9 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
 					"claude",
 				);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect(
