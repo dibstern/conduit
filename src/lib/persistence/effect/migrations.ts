@@ -33,6 +33,7 @@ import {
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
+	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
@@ -471,6 +472,7 @@ const appendedSessionColumns = [
 	"resumes",
 	"root_id",
 	"workspace",
+	"last_turn_end_input_id",
 ] as const;
 
 function sameStrings(
@@ -1100,7 +1102,12 @@ export const effectMigrationEntries = {
 		"steered",
 		readMigrationSql(MESSAGES_STEERED_MIGRATION),
 	),
-	"0044_project_provenance": runAddColumnMigrationIfMissing(
+	"0044_sessions_last_turn_end_input_id": runAddColumnMigrationIfMissing(
+		"sessions",
+		"last_turn_end_input_id",
+		readMigrationSql(SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION),
+	),
+	"0045_project_provenance": runAddColumnMigrationIfMissing(
 		"events",
 		"project_id",
 		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),

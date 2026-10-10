@@ -135,9 +135,11 @@ export type OpenCodeProjectList = Awaited<
 export interface OpenCodeFileService {
 	list(
 		path: string,
+		directory?: string,
 	): Effect.Effect<OpenCodeFileEntry[], Cause.UnknownException>;
 	read(
 		path: string,
+		directory?: string,
 	): Effect.Effect<OpenCodeFileContent, Cause.UnknownException>;
 }
 
@@ -155,10 +157,14 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		return {
-			list: (path: string) =>
-				Effect.tryPromise((signal) => client.file.list(path, { signal })),
-			read: (path: string) =>
-				Effect.tryPromise((signal) => client.file.read(path, { signal })),
+			list: (path: string, directory?: string) =>
+				Effect.tryPromise((signal) =>
+					client.file.list(path, { signal, directory }),
+				),
+			read: (path: string, directory?: string) =>
+				Effect.tryPromise((signal) =>
+					client.file.read(path, { signal, directory }),
+				),
 		};
 	}),
 );

@@ -536,7 +536,7 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			busy !== isBusy(previousRow) ||
 			(!busy && turnEnded(previousRow, change.item))
 		)
-			followSessionBusy(change.item.id, busy);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
 	}
 }
 

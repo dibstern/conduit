@@ -50,6 +50,17 @@ export const Populated: Story = {
 	},
 };
 
+export const WorktreeFiles: Story = {
+	play: async ({ canvasElement }) => {
+		await showDirectory(".", [
+			{ name: ".gitignore", type: "file" },
+			{ name: "worktree-only.txt", type: "file", size: 42 },
+		]);
+		await within(canvasElement).findByText("worktree-only.txt");
+		expect(within(canvasElement).queryByText("main-only.txt")).toBeNull();
+	},
+};
+
 export const ExpandedDirectory: Story = {
 	play: async ({ canvasElement }) => {
 		await showDirectory(".", mockFileTree);

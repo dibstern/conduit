@@ -83,7 +83,7 @@ async function stagePreProvenanceStore(filename: string) {
 	await Effect.runPromise(
 		Effect.scoped(
 			makeEffectSqlMigrator(
-				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 43)),
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 44)),
 			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
 		),
 	);

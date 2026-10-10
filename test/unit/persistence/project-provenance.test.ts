@@ -56,7 +56,7 @@ async function oldStore() {
 	await Effect.runPromise(
 		Effect.scoped(
 			makeEffectSqlMigrator(
-				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 43)),
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 44)),
 			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
 		),
 	);
@@ -88,13 +88,14 @@ async function oldStore() {
 }
 
 describe("Bound project provenance", () => {
-	it("registers provenance after main's input migrations with the file/key offset", () => {
-		expect(PROJECT_PROVENANCE_MIGRATION).toBe("0043_project_provenance.sql");
-		expect(Object.keys(effectMigrationEntries).slice(-4)).toEqual([
+	it("registers provenance after main's migrations with the file/key offset", () => {
+		expect(PROJECT_PROVENANCE_MIGRATION).toBe("0044_project_provenance.sql");
+		expect(Object.keys(effectMigrationEntries).slice(-5)).toEqual([
 			"0041_messages_input_id",
 			"0042_pending_inputs",
 			"0043_messages_steered",
-			"0044_project_provenance",
+			"0044_sessions_last_turn_end_input_id",
+			"0045_project_provenance",
 		]);
 	});
 

@@ -96,6 +96,26 @@ export const resolveSessionFolders = (
 		return { workspaceRoot, extraFolders };
 	});
 
+/** Browser requests identify a session; project-level requests keep the primary folder. */
+export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
+	Effect.gen(function* () {
+		if (sessionId === undefined) {
+			const config = yield* ConfigTag;
+			return {
+				workspaceRoot: config.projectDir,
+				extraFolders: config.extraFolders ?? [],
+			};
+		}
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!session)
+			return yield* Effect.fail(
+				new RelayError(`Session ${sessionId} not found`, {
+					code: "SESSION_NOT_FOUND",
+				}),
+			);
+		return yield* resolveSessionFolders(session);
+	});
+
 const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
 	push: () => Effect.void,
 	requestPermission: () => Effect.succeed({ decision: "once" as const }),

@@ -77,6 +77,7 @@ const expectedNames = [
 	"messages_input_id",
 	"pending_inputs",
 	"messages_steered",
+	"sessions_last_turn_end_input_id",
 	"project_provenance",
 ];
 const legacyNames = [
@@ -627,7 +628,8 @@ describe("Effect migration lineage", () => {
 				[41, "messages_input_id"],
 				[42, "pending_inputs"],
 				[43, "messages_steered"],
-				[44, "project_provenance"],
+				[44, "sessions_last_turn_end_input_id"],
+				[45, "project_provenance"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -708,7 +710,8 @@ describe("Effect migration lineage", () => {
 					[41, "messages_input_id"],
 					[42, "pending_inputs"],
 					[43, "messages_steered"],
-					[44, "project_provenance"],
+					[44, "sessions_last_turn_end_input_id"],
+					[45, "project_provenance"],
 				]);
 				const rows = yield* sql<{
 					id: string;

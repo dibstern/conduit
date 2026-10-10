@@ -1,13 +1,17 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+// Failure modes:
+// - A crash leaves a durable event ahead of its projection or cursor.
+// - A merged crash simulation omits the store's required project owner.
+// - Producers publish before another connection can read their projection.
+
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
@@ -18,8 +22,20 @@ import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/sessi
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
+import {
+	makeProjectionRunnerEffect,
+	ProjectionRunnerEffectTag,
+} from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	makeProjectorCursorEffect,
+	ProjectorCursorEffectTag,
+} from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -33,21 +49,51 @@ import {
 it("a kill after append leaves no durable event ahead of its projection", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-atomic-crash-"));
 	const filename = join(dir, "events.db");
+	const killed = join(dir, "killed.db");
 	try {
-		const child = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				fileURLToPath(
-					new URL("./fixtures/atomic-append-crash.ts", import.meta.url),
-				),
-				filename,
-			],
-			{ encoding: "utf8", timeout: 8000 },
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES ('crash-session', 'opencode', 'Before', 1, 1)`;
+				const store = yield* makeEventStoreEffect;
+				const cursors = yield* makeProjectorCursorEffect;
+				const runner = yield* makeProjectionRunnerEffect([
+					{
+						name: "kill-before-projection",
+						handles: ["session.renamed"],
+						// A kill here leaves the files exactly as they are now: SQLite's
+						// unwritten pages are lost and no rollback runs. Copying them is
+						// that kill, without a child process whose startup races a timer.
+						project: () =>
+							Effect.sync(() => {
+								copyFileSync(filename, killed);
+								if (existsSync(`${filename}-wal`))
+									copyFileSync(`${filename}-wal`, `${killed}-wal`);
+							}).pipe(Effect.andThen(Effect.die("killed"))),
+					},
+					...createAllEffectProjectors(),
+				]).pipe(Effect.provideService(ProjectorCursorEffectTag, cursors));
+				yield* runner.markRecovered();
+				const commit = yield* makeCommitAndSignal.pipe(
+					Effect.provideService(EventStoreEffectTag, store),
+					Effect.provideService(ProjectionRunnerEffectTag, runner),
+				);
+				yield* Effect.exit(
+					commit([
+						canonicalEvent("session.renamed", "crash-session", {
+							sessionId: "crash-session",
+							title: "After",
+						}),
+					]),
+				);
+			}).pipe(
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: "test-project",
+				}),
+				Effect.provide(EffectSqliteClient.layer({ filename })),
+			),
 		);
-		expect(child.stderr).toBe("");
-		expect(child.signal).toBe("SIGKILL");
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -60,7 +106,7 @@ it("a kill after append leaves no durable event ahead of its projection", async 
 				expect(
 					yield* sql`SELECT last_applied_seq FROM projector_cursors`,
 				).toEqual([]);
-			}).pipe(Effect.provide(EffectSqliteClient.layer({ filename }))),
+			}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: killed }))),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

@@ -232,6 +232,8 @@ export type CanonicalToolInput =
 
 export interface TurnCompletedPayload {
 	readonly messageId: string;
+	/** Names the turn when no assistant message of its own answered it. */
+	readonly userMessageId?: string;
 	readonly cost?: number;
 	readonly tokens?: {
 		readonly input?: number;
@@ -290,6 +292,8 @@ export interface InputAdmittedPayload {
 export interface InputSentPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
+	/** Handed into the running turn rather than starting one. */
+	readonly steer?: true;
 }
 
 export interface InputCancelledPayload {
@@ -891,6 +895,7 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
+	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
@@ -938,6 +943,7 @@ const InputAdmittedPayloadSchema = Schema.Struct({
 const InputSentPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
+	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
 const InputCancelledPayloadSchema = Schema.Struct({

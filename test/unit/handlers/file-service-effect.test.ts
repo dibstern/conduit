@@ -28,8 +28,11 @@ describe("file reads with Effect-native file service", () => {
 			return getFileListResponse().pipe(
 				Effect.provideService(OpenCodeFileServiceTag, fileService),
 				Effect.tap((reply) => {
-					expect(fileService.list).toHaveBeenCalledWith(".");
-					expect(fileService.read).toHaveBeenCalledWith(".gitignore");
+					expect(fileService.list).toHaveBeenCalledWith(".", undefined);
+					expect(fileService.read).toHaveBeenCalledWith(
+						".gitignore",
+						undefined,
+					);
 					expect(reply).toEqual({
 						path: ".",
 						entries: [

@@ -64,7 +64,9 @@ export const SESSIONS_WORKSPACE_MIGRATION = "0039_sessions_workspace.sql";
 export const MESSAGES_INPUT_ID_MIGRATION = "0040_messages_input_id.sql";
 export const PENDING_INPUTS_MIGRATION = "0041_pending_inputs.sql";
 export const MESSAGES_STEERED_MIGRATION = "0042_messages_steered.sql";
-export const PROJECT_PROVENANCE_MIGRATION = "0043_project_provenance.sql";
+export const SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION =
+	"0043_sessions_last_turn_end_input_id.sql";
+export const PROJECT_PROVENANCE_MIGRATION = "0044_project_provenance.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

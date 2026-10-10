@@ -17,7 +17,12 @@ function resetTerminal() {
  *  Rows go in the way the server sends them; the labels are set the way the
  *  user would set them. */
 function setTabs(
-	entries: Array<{ ptyId: string; title: string; exited?: boolean }>,
+	entries: Array<{
+		ptyId: string;
+		title: string;
+		exited?: boolean;
+		cwd?: string;
+	}>,
 	activeId?: string,
 ) {
 	handlePtySnapshot(
@@ -26,7 +31,7 @@ function setTabs(
 				id: e.ptyId,
 				title: e.title,
 				command: "bash",
-				cwd: "/repo",
+				cwd: e.cwd ?? "/repo",
 				status: e.exited ? ("exited" as const) : ("running" as const),
 				pid: 1000,
 			},
@@ -73,6 +78,18 @@ export const MultipleTabs: Story = {
 				{ ptyId: "pty-003", title: "dev server" },
 			],
 			"pty-002",
+		);
+	},
+};
+
+export const SessionWorktreeTerminals: Story = {
+	beforeEach: () => {
+		setTabs(
+			[
+				{ ptyId: "pty-main", title: "Existing terminal", cwd: "/repo" },
+				{ ptyId: "pty-worktree", title: "New terminal", cwd: "/repo-worktree" },
+			],
+			"pty-worktree",
 		);
 	},
 };
