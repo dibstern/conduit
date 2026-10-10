@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
-import type { Page } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 import { Effect } from "effect";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
@@ -1574,11 +1574,16 @@ test.describe("Claude replay lane", () => {
 				]);
 			});
 
-			test("the queued row's Steer promotes it from the tray", async ({
-				page,
-				relayUrl,
-				harness,
-			}, testInfo) => {
+			async function steerFromTray(
+				page: Page,
+				relayUrl: string,
+				harness: {
+					projectUrl: string;
+					relayPort: number;
+					eventsDbPath: string;
+				},
+				testInfo: TestInfo,
+			) {
 				test.setTimeout(60_000);
 				const s = await open(page, relayUrl, harness);
 				await s.app.sendMessage("Alpha");
@@ -1607,6 +1612,7 @@ test.describe("Claude replay lane", () => {
 				await testInfo.attach("tray-steer-proof.json", {
 					body: JSON.stringify(
 						{
+							provider: sessionProvider(s.dbPath, s.sessionId),
 							sends: s.sends,
 							...ledger(s.dbPath, s.sessionId),
 						},
@@ -1620,6 +1626,49 @@ test.describe("Claude replay lane", () => {
 					["Alpha", "queue"],
 					["Bravo", "queue"],
 				]);
+				return s;
+			}
+
+			function sessionProvider(dbPath: string, sessionId: string) {
+				const db = new DatabaseSync(dbPath, { readOnly: true });
+				try {
+					return (
+						db
+							.prepare("select provider from sessions where id = ?")
+							.get(sessionId) as { provider: string } | undefined
+					)?.provider;
+				} finally {
+					db.close();
+				}
+			}
+
+			test("the queued row's Steer promotes it from the tray", async ({
+				page,
+				relayUrl,
+				harness,
+			}, testInfo) => {
+				await steerFromTray(page, relayUrl, harness, testInfo);
+			});
+
+			// A named account (a second Claude login) is a provider instance whose id
+			// is not its driver; Steer must still be offered for it.
+			test.describe("on a named Claude account", () => {
+				test.use({
+					claudeReplay: {
+						turns: ["queued-input-promoted-to-steer"],
+						delayMs: 100,
+						instanceId: "work-claude",
+					},
+				});
+
+				test("the queued row's Steer promotes it from the tray", async ({
+					page,
+					relayUrl,
+					harness,
+				}, testInfo) => {
+					const s = await steerFromTray(page, relayUrl, harness, testInfo);
+					expect(sessionProvider(s.dbPath, s.sessionId)).toBe("work-claude");
+				});
 			});
 		});
 
