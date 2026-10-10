@@ -1099,7 +1099,9 @@ export const makeTurnProjector = (): EffectProjector => ({
 				// reads like a bug and is not: cost is cumulative for the whole
 				// SDK session (two completions in one turn read 38.53 then 39.84),
 				// so the latest value wins. Tokens are per-execution, so a turn
-				// that ran twice sums them.
+				// that ran twice sums them. A result-only turn (Claude /compact)
+				// has no reply of its own and its messageId names the previous
+				// turn's, so it is keyed by its prompt instead.
 				const tokens = event.data.tokens;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
@@ -1108,7 +1110,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
 							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
-						WHERE assistant_message_id = ${event.data.messageId}
+						WHERE ${
+							event.data.userMessageId
+								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
+								: sql`assistant_message_id = ${event.data.messageId}`
+						}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
 			}

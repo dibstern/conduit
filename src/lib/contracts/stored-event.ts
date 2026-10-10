@@ -232,6 +232,8 @@ export type CanonicalToolInput =
 
 export interface TurnCompletedPayload {
 	readonly messageId: string;
+	/** Names the turn when no assistant message of its own answered it. */
+	readonly userMessageId?: string;
 	readonly cost?: number;
 	readonly tokens?: {
 		readonly input?: number;
@@ -892,6 +894,7 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
+	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
