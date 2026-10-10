@@ -24,12 +24,14 @@
 	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import Banners from "../overlays/Banners.svelte";
+	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
 	// True while this sidebar is the phone's full-screen session list.
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
 	let addProjectOpen = $state(false);
 	let listMenuOpen = $state(false);
+	let phoneUsageHeight = $state(0);
 
 	function handleCloseSidebar() {
 		collapseSidebar();
@@ -93,7 +95,7 @@
 <!-- Sidebar -->
 <div
 	id="sidebar"
-	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
+	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} @container/sidebar border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
 	style={sidebarStyle}
 >
 	<!-- Sidebar header: title + count, then actions. Literal px per the design:
@@ -228,7 +230,7 @@
 	{#if listScreen}<Banners />{/if}
 
 	<!-- Sidebar nav -->
-	<nav id="sidebar-nav" class="relative flex-1 flex flex-col overflow-hidden">
+	<nav id="sidebar-nav" class:phone-list={listScreen} style:--phone-usage-height="{phoneUsageHeight}px" class="relative flex-1 flex flex-col overflow-hidden">
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -241,6 +243,7 @@
 		</div>
 
 		{#if sessionViewState.compact}
+			{#if listScreen}<UsageFooterMeter phone bind:height={phoneUsageHeight} />{/if}
 			<Button
 				id="new-session-btn"
 				variant="ghost"
@@ -257,6 +260,7 @@
 			/>
 		{/if}
 	</nav>
+	{#if !sessionViewState.compact}<UsageFooterMeter />{/if}
 
 </div>
 
@@ -269,3 +273,9 @@
 		returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
 	/>
 {/if}
+
+<style>
+	.phone-list :global(#session-list-scroller) {
+		padding-bottom: calc(max(55px, var(--phone-usage-height, 0px) + 9px) + 12px + env(safe-area-inset-bottom, 0px));
+	}
+</style>

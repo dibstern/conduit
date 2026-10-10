@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	instanceSlug,
@@ -12,18 +13,22 @@ const usageLimits = (
 	autoResume: boolean,
 	autoSwitch = false,
 	order: string[] = [],
+	warnAt: UsageLimitsSetting["warnAt"] = 80,
 ) => ({
-	usageLimits: { autoResume, autoSwitch, order },
+	usageLimits: { autoResume, autoSwitch, order, warnAt },
 });
 
 /** The daemon saves what it is sent and answers with it. */
-function seedUsageLimits(
+export function seedUsageLimits(
 	page: Page,
 	setting: ReturnType<typeof usageLimits>,
 ): void {
 	const rpc = requireRpcControl(page);
 	rpc.setResponse("GetUsageLimitsSetting", setting);
-	rpc.setHandler("SetUsageLimitsSetting", (params) => params);
+	rpc.setHandler("SetUsageLimitsSetting", (params) => {
+		rpc.setResponse("GetUsageLimitsSetting", params);
+		return params;
+	});
 }
 
 const usageLimitToggles = {
@@ -107,23 +112,29 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match:
 			/^the SetUsageLimitsSetting RPC saves auto-resume (on|off), auto-switch (on|off), order (.+)$/,
 		run: async ({ world, match }) => {
-			const expected = JSON.stringify(
-				usageLimits(
-					match[1] === "on",
-					match[2] === "on",
-					listOf(match[3] ?? ""),
-				).usageLimits,
-			);
+			const expected = usageLimits(
+				match[1] === "on",
+				match[2] === "on",
+				listOf(match[3] ?? ""),
+			).usageLimits;
 			const seen: unknown[] = [];
 			await requireRpcControl(world.page)
 				.waitForRequest((candidate) => {
 					if (candidate.tag !== "SetUsageLimitsSetting") return false;
 					seen.push(candidate.payload);
-					return JSON.stringify(candidate.payload["usageLimits"]) === expected;
+					const saved = candidate.payload["usageLimits"] as
+						| UsageLimitsSetting
+						| undefined;
+					return (
+						saved?.autoResume === expected.autoResume &&
+						saved.autoSwitch === expected.autoSwitch &&
+						saved.warnAt === expected.warnAt &&
+						JSON.stringify(saved.order) === JSON.stringify(expected.order)
+					);
 				})
 				.catch(() => {
 					throw new Error(
-						`No SetUsageLimitsSetting saved ${expected}; saw ${JSON.stringify(seen.slice(-3))}`,
+						`No SetUsageLimitsSetting saved ${JSON.stringify(expected)}; saw ${JSON.stringify(seen.slice(-3))}`,
 					);
 				});
 		},
@@ -134,7 +145,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				world.page
-					.locator("#usage-limit-settings")
+					.locator("#usage-settings")
 					.getByTestId("usage-limit-account-name"),
 			).toHaveText(listOf(match[1] ?? ""));
 		},
@@ -144,12 +155,12 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^the account (.+) shows (.+) quota$/,
 		run: async ({ world, match }) => {
 			const row = world.page
-				.locator("#usage-limit-settings")
+				.locator("#usage-settings")
 				.getByTestId("sortable-row")
 				.filter({ hasText: match[1] ?? "" });
-			await expect(row.getByTestId("quota-meter-caption")).toHaveText(
-				match[2] ?? "",
-			);
+			await expect(
+				row.locator('[data-testid^="usage-settings-status-"]'),
+			).toHaveText(match[2] ?? "");
 		},
 	},
 	{
@@ -157,7 +168,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^I move (.+) to the top of the account order by (keyboard|touch)$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
-			const section = page.locator("#usage-limit-settings");
+			const section = page.locator("#usage-settings");
 			const handle = section.getByRole("button", {
 				name: `Reorder ${match[1]}`,
 			});
@@ -181,7 +192,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 			if (!from || !top) throw new Error("No handle or first row box");
 			const x = from.x + from.width / 2;
 			const startY = from.y + from.height / 2;
-			const endY = top.y + 2;
+			// Past the list top: a tall card must carry its centre above a short first card's.
+			const endY = Math.max(4, top.y - 40);
 			const touch = await page.context().newCDPSession(page);
 			try {
 				await touch.send("Input.dispatchTouchEvent", {

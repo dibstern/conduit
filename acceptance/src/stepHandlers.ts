@@ -9,6 +9,7 @@ import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
 import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
+import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
@@ -25,7 +26,10 @@ import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
+import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
+import { usageSettingsHandlers } from "./steps/usageSettings.js";
+import { usageWarningStripHandlers } from "./steps/usageWarningStrip.js";
 import { visualHandlers } from "./steps/visual.js";
 
 const driver = new PlaywrightDriver();
@@ -42,6 +46,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...mockAppHandlers,
 	...modelDriftHandlers,
 	...usageLimitStripHandlers,
+	...usageFooterMeterHandlers,
+	...usageSettingsHandlers,
+	...usageWarningStripHandlers,
+	...composerSendAtResetHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".

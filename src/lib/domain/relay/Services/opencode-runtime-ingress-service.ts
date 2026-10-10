@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
@@ -10,6 +11,7 @@ import {
 	type ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
+import { createEventId } from "../../../persistence/events.js";
 import {
 	isSettled,
 	snapshotPayload,
@@ -25,6 +27,7 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
+import { ConfigTag, SessionRetriesTag } from "./services.js";
 
 export interface OpenCodeRuntimeIngressLog {
 	warn(msg: string, context?: Record<string, unknown>): void;
@@ -55,6 +58,10 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		providerInstanceId: string,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+	onInstanceStopped(
+		providerInstanceId: string,
+		isCurrent: () => boolean,
+	): Effect.Effect<void>;
 	reconcileSession(sessionId: string): Effect.Effect<void>;
 	shutdown(): void;
 	isHistoryComplete(sessionId: string): Effect.Effect<boolean>;
@@ -92,6 +99,9 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		sessionId: string,
 		messageId: string,
 	) => string | undefined;
+	readonly retryingOf?: (sessionId: string) => string | undefined;
+	/** The default OpenCode binding aliases this relay's selected instance. */
+	readonly selectedInstanceId?: string;
 }
 
 const BACKFILL_TIMEOUT = "15 seconds";
@@ -132,7 +142,11 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly sql: SqlClient.SqlClient;
 	private readonly projectionRunner: ProjectionRunnerEffect;
 	private readonly ingestion: ProviderRuntimeIngestion;
+	private readonly retryingOf:
+		| EffectOpenCodeRuntimeIngressOptions["retryingOf"]
+		| undefined;
 	private readonly log: OpenCodeRuntimeIngressLog;
+	private readonly selectedInstanceId: string;
 	private stopped = false;
 	private readonly fetchSessionMessages:
 		| EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"]
@@ -184,7 +198,10 @@ export class EffectOpenCodeRuntimeIngress
 		this.sql = opts.sql;
 		this.projectionRunner = opts.projectionRunner;
 		this.ingestion = opts.ingestion;
+		this.retryingOf = opts.retryingOf;
 		this.log = opts.log;
+		this.selectedInstanceId =
+			opts.selectedInstanceId ?? defaultInstanceIdForDriver("opencode");
 		this.sessionCreationGate =
 			opts.sessionCreationGate ?? Effect.unsafeMakeSemaphore(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
@@ -804,6 +821,110 @@ export class EffectOpenCodeRuntimeIngress
 		});
 	}
 
+	/** Settle interrupted work without turning a stop into a successful turn end. */
+	onInstanceStopped(
+		providerInstanceId: string,
+		isCurrent: () => boolean,
+	): Effect.Effect<void> {
+		return this.withSql(
+			Effect.gen(this, function* () {
+				if (this.stopped || !isCurrent()) return;
+				const sql = yield* SqlClient.SqlClient;
+				const defaultId = defaultInstanceIdForDriver("opencode");
+				const instanceIds =
+					providerInstanceId === defaultId ||
+					providerInstanceId === this.selectedInstanceId
+						? [defaultId, this.selectedInstanceId]
+						: [providerInstanceId];
+				const candidates = yield* sql<{
+					id: string;
+					provider: string;
+					status: string;
+				}>`
+					SELECT id, provider, status FROM sessions WHERE provider IN ${sql.in(instanceIds)}`;
+				for (const {
+					id: sessionId,
+					provider: boundInstanceId,
+					status,
+				} of candidates) {
+					if (
+						status !== "busy" &&
+						status !== "retry" &&
+						this.retryingOf?.(sessionId) === undefined
+					)
+						continue;
+					yield* this.sessionGate(sessionId).withPermits(1)(
+						Effect.gen(this, function* () {
+							if (this.stopped || !isCurrent()) return;
+							// An in-flight event may have changed the binding or added an ask
+							// while this stop waited for the session's ingestion gate.
+							const rows = yield* sql<{
+								provider_sid: string | null;
+								status: string;
+							}>`
+								SELECT s.provider_sid, s.status FROM sessions s
+								WHERE s.id = ${sessionId} AND s.provider = ${boundInstanceId}
+									AND EXISTS (
+										SELECT 1 FROM session_providers sp
+											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
+											AND sp.status = 'active')
+									AND NOT EXISTS (
+										SELECT 1 FROM pending_approvals pa
+										WHERE pa.session_id = s.id AND pa.status = 'pending'
+											AND pa.type IN ('permission', 'question'))`;
+							const row = rows[0];
+							if (
+								!row ||
+								this.stopped ||
+								!isCurrent() ||
+								(row.status !== "busy" &&
+									row.status !== "retry" &&
+									this.retryingOf?.(sessionId) === undefined)
+							)
+								return;
+							yield* this.ingestion.ingestBatch(
+								[
+									{
+										eventId: createEventId(),
+										type: "session.status",
+										providerId: "opencode",
+										sessionId,
+										providerRefs: row.provider_sid
+											? { providerSessionId: row.provider_sid }
+											: {},
+										rawSource: { kind: "conduit.opencode.instance-stopped" },
+										createdAt: Date.now(),
+										data: { sessionId, status: "idle" },
+										metadata: {
+											synthetic: true,
+											source: "managed-instance-stop",
+										},
+									},
+								],
+								{
+									beforeCommit: Effect.suspend(() =>
+										this.stopped || !isCurrent()
+											? Effect.interrupt
+											: Effect.void,
+									),
+								},
+							);
+						}),
+					);
+				}
+			}),
+		).pipe(
+			Effect.catchAll((cause) =>
+				Effect.sync(() =>
+					this.log.warn("Failed to settle stopped OpenCode sessions", {
+						providerInstanceId,
+						error: formatErrorDetail(cause),
+					}),
+				),
+			),
+		);
+	}
+
 	/** The SSE callback is synchronous. A stale REST result cannot mark a
 	 *  reconnected session complete; live commits never wait for that result. */
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError> {
@@ -975,6 +1096,8 @@ export const makeEffectOpenCodeRuntimeIngress = (
 		const creationGate = yield* Effect.serviceOption(
 			OpenCodeSessionCreationGateTag,
 		);
+		const retries = yield* Effect.serviceOption(SessionRetriesTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
 		const ingress = new EffectOpenCodeRuntimeIngress({
 			sql,
 			projectionRunner,
@@ -985,6 +1108,10 @@ export const makeEffectOpenCodeRuntimeIngress = (
 				: {}),
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
+			...(retries._tag === "Some" ? { retryingOf: retries.value } : {}),
+			...(config._tag === "Some" && config.value.openCodeInstanceId
+				? { selectedInstanceId: config.value.openCodeInstanceId }
+				: {}),
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.

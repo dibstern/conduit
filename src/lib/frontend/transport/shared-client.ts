@@ -160,6 +160,7 @@ const makeSubscriptions = (
 	 * the project; low-rate, so both ride the control socket.
 	 */
 	instances: () => resumeStream(() => sockets.control.SubscribeInstances({})),
+	usage: () => resumeStream(() => sockets.control.SubscribeUsage({})),
 	projects: () => resumeStream(() => sockets.control.SubscribeProjects({})),
 	/** The daemon's protocol, build and restart state, plus a revision that
 	 *  moves when the cross-project session lists go stale. */

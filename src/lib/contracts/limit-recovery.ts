@@ -106,6 +106,9 @@ export type SessionResume = typeof SessionResumeSchema.Type;
 export const UsageLimitsSettingSchema = Schema.Struct({
 	autoResume: Schema.Boolean,
 	autoSwitch: Schema.Boolean,
+	warnAt: Schema.optionalWith(Schema.Literal(70, 80, 90, "off"), {
+		default: () => 80 as const,
+	}),
 	/** Claude instance IDs, in the order auto-switch tries them. */
 	order: Schema.Array(Schema.String),
 });
@@ -115,6 +118,7 @@ export type UsageLimitsSetting = typeof UsageLimitsSettingSchema.Type;
 export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 	autoResume: false,
 	autoSwitch: false,
+	warnAt: 80,
 	order: [],
 };
 
@@ -126,26 +130,56 @@ export const HandoffSummarySchema = Schema.Struct({
 });
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 
-export const QuotaWindowSchema = Schema.Struct({
-	utilization: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-	/** Unix seconds, matching session limitRecovery. */
-	resetsAt: Schema.optional(Schema.Number),
-});
+const usageWindowFields = {
+	utilization: Schema.Number.pipe(Schema.finite(), Schema.between(0, 100)),
+	/** ISO timestamp from the usage reader. */
+	resetsAt: Schema.optional(Schema.String),
+};
 
-export const QuotaCheckResultSchema = Schema.Union(
+export const UsageHistoryPointSchema = Schema.Struct({
+	/** Epoch milliseconds. */
+	at: Schema.Number.pipe(Schema.finite()),
+	utilization: usageWindowFields.utilization,
+});
+export type UsageHistoryPoint = typeof UsageHistoryPointSchema.Type;
+
+export const UsageForecastSchema = Schema.Union(
 	Schema.Struct({
-		_tag: Schema.Literal("Available"),
-		/** Highest measured utilization percent across the plan windows. */
-		utilization: Schema.optional(Schema.Number),
-		fiveHour: Schema.optional(QuotaWindowSchema),
-		sevenDay: Schema.optional(QuotaWindowSchema),
+		kind: Schema.Literal("under"),
+		atReset: usageWindowFields.utilization,
 	}),
 	Schema.Struct({
-		_tag: Schema.Literal("Limited"),
-		rateLimitType: Schema.String,
-		resetsAt: Schema.optional(Schema.Number),
+		kind: Schema.Literal("runs_out"),
+		/** Epoch milliseconds. */
+		at: Schema.Number.pipe(Schema.finite()),
 	}),
-	Schema.Struct({ _tag: Schema.Literal("Unavailable"), reason: Schema.String }),
-	Schema.Struct({ _tag: Schema.Literal("Unknown") }),
 );
-export type QuotaCheckResult = typeof QuotaCheckResultSchema.Type;
+export type UsageForecast = typeof UsageForecastSchema.Type;
+
+export const UsageWindowSchema = Schema.Union(
+	Schema.Struct({
+		kind: Schema.Literal("five_hour", "seven_day", "month"),
+		...usageWindowFields,
+		history: Schema.optional(Schema.Array(UsageHistoryPointSchema)),
+		forecast: Schema.optional(UsageForecastSchema),
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("seven_day_model"),
+		model: Schema.optional(Schema.String),
+		...usageWindowFields,
+	}),
+);
+export type UsageWindow = typeof UsageWindowSchema.Type;
+
+export const UsageReadingSchema = Schema.Struct({
+	accountId: Schema.String,
+	harness: Schema.Literal("claude", "codex", "cursor"),
+	status: Schema.Literal("available", "limited", "unavailable", "unknown"),
+	planLabel: Schema.optional(Schema.String),
+	windows: Schema.Array(UsageWindowSchema),
+	/** Epoch milliseconds. */
+	readAt: Schema.Number,
+	stale: Schema.Boolean,
+	reason: Schema.optional(Schema.String),
+});
+export type UsageReading = typeof UsageReadingSchema.Type;

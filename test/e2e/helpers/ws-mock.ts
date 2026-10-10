@@ -29,10 +29,14 @@ const OPENCODE_CONNECTION_STATES = [
 /** Mock-only inputs served over the daemon-global subscriptions. */
 const DAEMON_LIST_TAGS = new Map<
 	string,
-	"SubscribeProjects" | "SubscribeInstances" | "SubscribeServerStatus"
+	| "SubscribeProjects"
+	| "SubscribeInstances"
+	| "SubscribeUsage"
+	| "SubscribeServerStatus"
 >([
 	["project_list", "SubscribeProjects"],
 	["instance_list", "SubscribeInstances"],
+	["usage_readings", "SubscribeUsage"],
 	["server_status", "SubscribeServerStatus"],
 ]);
 

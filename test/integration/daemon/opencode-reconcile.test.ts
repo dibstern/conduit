@@ -12,7 +12,8 @@ import {
 // Failure cases: prompts asked while the stream was down are lost, one
 // project's prompt leaks into another, a reconnect re-delivers a prompt once
 // per subscriber, a relay joining a live stream misses state, and a dropped
-// idle event leaves a session busy forever.
+// idle event leaves a session busy forever, or recovered prompts duplicate
+// canonical events and activities across reconnects and daemon restarts.
 describe("OpenCode Instances recovery and reconciliation", () => {
 	let harness: ProcessHarness | undefined;
 	let scenario = "reconnect";
@@ -86,8 +87,10 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 				fixture.assertNoRunners();
 			} finally {
 				mkdirSync("test-results", { recursive: true });
+				const prefix =
+					evidence["ticket"] === "conduit-test-rqbc.3" ? "rqbc-3" : "pa3r-4";
 				writeFileSync(
-					`test-results/pa3r-4-${scenario}.json`,
+					`test-results/${prefix}-${scenario}.json`,
 					JSON.stringify({ ...evidence, process: fixture.proof() }, null, 2),
 				);
 				harness = undefined;
@@ -171,6 +174,133 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			a: { own: 1, other: 0 },
 			b: { own: 1, other: 0 },
 		});
+	}, 90_000);
+
+	it("stores a recovered permission and question once across two reconnects and a daemon restart", async () => {
+		const fixture = await start("recovered-asks");
+		evidence["ticket"] = "conduit-test-rqbc.3";
+		let browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Recovered asks",
+			"opencode",
+			"opencode",
+		);
+		const permissionId = "rqbc3-permission";
+		const questionId = "rqbc3-question";
+		const question = (id: string) => ({
+			id,
+			sessionID: sessionId,
+			questions: [
+				{
+					question: "Proceed?",
+					header: "Proceed",
+					options: [{ label: "Yes" }],
+				},
+			],
+		});
+		const snapshot = () => {
+			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			try {
+				return {
+					canonical: db
+						.prepare<
+							[string, string, string],
+							{
+								kind: string;
+								requestId: string;
+								eventId: string;
+								sequence: number;
+							}
+						>(`SELECT type AS kind, json_extract(data, '$.id') AS requestId,
+						event_id AS eventId, sequence FROM events
+						WHERE session_id = ? AND type IN ('permission.asked', 'question.asked')
+						AND json_extract(data, '$.id') IN (?, ?) ORDER BY type, sequence`)
+						.all(sessionId, permissionId, questionId),
+					activities: db
+						.prepare<
+							[string, string, string],
+							{
+								kind: string;
+								requestId: string;
+								sequence: number;
+							}
+						>(`SELECT kind, json_extract(payload, '$.id') AS requestId, sequence
+						FROM activities WHERE session_id = ?
+						AND kind IN ('permission.asked', 'question.asked')
+						AND json_extract(payload, '$.id') IN (?, ?) ORDER BY kind, sequence`)
+						.all(sessionId, permissionId, questionId),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		await fixture.addOpenCodePrompt(
+			"permission",
+			fixture.projectDir,
+			permission(permissionId, sessionId),
+		);
+		await fixture.addOpenCodePrompt(
+			"question",
+			fixture.projectDir,
+			question(questionId),
+		);
+		await browser.waitFor((message) => message["requestId"] === permissionId);
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "question_pending" &&
+				message["toolId"] === questionId,
+		);
+		const initial = snapshot();
+		const expected = [
+			{ kind: "permission.asked", requestId: permissionId },
+			{ kind: "question.asked", requestId: questionId },
+		];
+		expect(
+			initial.canonical.map(({ kind, requestId }) => ({ kind, requestId })),
+		).toEqual(expected);
+		expect(
+			initial.activities.map(({ kind, requestId }) => ({ kind, requestId })),
+		).toEqual(expected);
+		evidence["initial"] = initial;
+
+		// Each marker exists only in the provider snapshot. Receiving it proves
+		// reconciliation ingested both earlier asks, even if they wrote no rows.
+		await fixture.dropOpenCodeEvents([{ type: "question.asked" }]);
+		for (let reconnect = 1; reconnect <= 2; reconnect++) {
+			const markerId = `rqbc3-reconnect-${reconnect}`;
+			await fixture.addOpenCodePrompt(
+				"question",
+				fixture.projectDir,
+				question(markerId),
+			);
+			await fixture.closeOpenCodeStreams();
+			await browser.waitFor(
+				(message) =>
+					message["type"] === "question_pending" &&
+					message["toolId"] === markerId,
+			);
+			const recovered = snapshot();
+			evidence[`reconnect${reconnect}`] = recovered;
+			expect(recovered).toEqual(initial);
+		}
+
+		const restartMarker = "rqbc3-restart";
+		await fixture.addOpenCodePrompt(
+			"question",
+			fixture.projectDir,
+			question(restartMarker),
+		);
+		await fixture.terminate();
+		await fixture.restart();
+		browser = await fixture.connect(sessionId);
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "question_pending" &&
+				message["toolId"] === restartMarker,
+		);
+		const restarted = snapshot();
+		evidence["restart"] = restarted;
+		expect(restarted).toEqual(initial);
 	}, 90_000);
 
 	it("reconciles a relay that subscribes after the stream is connected", async () => {

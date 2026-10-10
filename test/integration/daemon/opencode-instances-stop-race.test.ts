@@ -98,6 +98,7 @@ describe("OpenCode Instances use during an idle stop", () => {
 									yield* Effect.promise(() => close(dying.server));
 									endpoint = { ...endpoint, status: "stopped" };
 									timeline.push("stop-end");
+									return true;
 								}),
 							adopted: Effect.succeed([]),
 						},

@@ -13,7 +13,7 @@ const cutOffMessageId = "msg-cut-off";
 const pickerRow = (page: Page, name: string) =>
 	page.getByTestId("account-switch-option").filter({ hasText: name });
 
-function currentSessionId(page: Page): string {
+export function currentSessionId(page: Page): string {
 	const sessionId = new URL(page.url()).pathname.split("/")[2];
 	if (!sessionId) throw new Error("The usage limit steps need an open session");
 	return sessionId;
@@ -37,14 +37,14 @@ function sendTranscript(
 /** The session row's limitRecovery, as the server last projected it. */
 const limits = new WeakMap<Page, Record<string, unknown>>();
 
-function projectLimit(page: Page, limitRecovery: unknown): void {
+export function projectLimit(page: Page, limitRecovery: unknown): void {
 	setSessionRowStatus(page, currentSessionId(page), "idle", {
 		title: "Provider tests",
 		limitRecovery,
 	});
 }
 
-function setClaudeAccounts(
+export function setClaudeAccounts(
 	page: Page,
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
@@ -441,23 +441,39 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				const said = words.join(" ");
 				const used = /^(\d+)% used$/.exec(said)?.[1];
 				const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
-				const quota =
+				const usage =
 					used !== undefined
-						? { _tag: "Available", utilization: Number(used) }
+						? {
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: Number(used) }],
+							}
 						: limitedUntil !== undefined
 							? {
-									_tag: "Limited",
-									rateLimitType: "seven_day",
-									resetsAt: Date.parse(limitedUntil) / 1000,
+									status: "limited",
+									windows: [
+										{
+											kind: "seven_day",
+											utilization: 100,
+											resetsAt: limitedUntil,
+										},
+									],
 								}
 							: said === "unavailable"
-								? { _tag: "Unavailable", reason: "not logged in" }
-								: { _tag: "Unknown" };
-				return { instanceId, quota };
+								? {
+										status: "unavailable",
+										windows: [],
+										reason: "not logged in",
+									}
+								: { status: "unknown", windows: [] };
+				return {
+					accountId: instanceId,
+					harness: "claude",
+					readAt: 0,
+					stale: false,
+					...usage,
+				};
 			});
-			requireRpcControl(world.page).setResponse("QuotaForAccounts", {
-				accounts,
-			});
+			requireRpcControl(world.page).setResponse("QuotaForAccounts", accounts);
 		},
 	},
 	{
@@ -902,11 +918,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert settings are open on the Instances tab",
-		match:
-			/^settings are open on the Instances tab at the usage limit settings$/,
+		name: "assert settings are open on the Usage tab",
+		match: /^settings are open on the Usage tab at the usage limit settings$/,
 		run: async ({ world }) => {
-			await expect(world.page.locator("#instances-settings")).toBeVisible();
+			await expect(world.page.getByTestId("usage-settings")).toBeVisible();
 			await expect(world.page.locator("#usage-limit-settings")).toBeAttached();
 		},
 	},

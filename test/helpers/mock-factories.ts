@@ -134,6 +134,7 @@ import {
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
 import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
+import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
@@ -1051,6 +1052,7 @@ export function makeTestHandlerLayer(
 		wsHandlerLayer,
 		overridesStateLayer,
 		ProjectSettingsLive,
+		RpcSubscriptionScopeLive,
 		AlertsLive,
 		InputDraftsLive,
 		ptyManagerLayer,

@@ -327,20 +327,19 @@ describe("WsRpcServerLayer ListSessions", () => {
 				sessionId: "session-forked",
 				parentId: "session-1",
 				forkMessageId: "message-1",
-				forkPointTimestamp: 9,
 			});
 			// OpenCode cuts before messageID, so the fork keeps message-1.
 			expect(api.session.fork).toHaveBeenCalledWith("session-1", {
 				messageID: "message-2",
 			});
-			// The fork command commits its boundary with creation. The handler
+			// The fork command commits its boundary id with creation. The handler
 			// must not recompute it and append a second lineage event.
 			expect(setForkEntry).not.toHaveBeenCalled();
 			const readQuery = yield* ReadQueryEffectTag;
 			expect(yield* readQuery.getSession("session-forked")).toMatchObject({
 				parent_id: "session-1",
 				fork_point_event: "message-1",
-				fork_point_timestamp: 9,
+				fork_point_timestamp: null,
 				fork_point_message_id: "message-1",
 			});
 			expect(

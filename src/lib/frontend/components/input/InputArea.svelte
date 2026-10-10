@@ -13,6 +13,9 @@
 	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import AccountDot from "../ui/AccountDot.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
@@ -24,6 +27,7 @@
 	import FileMenu from "./FileMenu.svelte";
 	import NewSessionContext from "./NewSessionContext.svelte";
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
+	import UsageWarningStrip from "./UsageWarningStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -34,6 +38,7 @@
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
+	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		conduitCommands,
@@ -59,15 +64,19 @@
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, quotaForAccountsRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
+	import { planUsageWindows, quotaBlocksSwitch, usageForecastTime, type PlanUsageWindow } from "../../utils/continuation.js";
+	import { switchSessionAccount } from "../../utils/account-switch.js";
+	import type { UsageReading } from "../../../contracts/limit-recovery.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -161,10 +170,76 @@
 		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
+	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const accountId = $derived(composerAccountId(currentSession, projectState.projects.find((project) => project.slug === composerProjectSlug)));
+	const usageReading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
+	let sendMenuOpen = $state(false);
+	let sendMenuQuotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
+	let switchingAccount = $state(false);
+	let sendQuotaTicket = 0;
+	const hasOtherClaudeAccount = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== accountId));
+	const sendAccounts = $derived.by(() => {
+		if (!currentSession) return [];
+		return orderedUsageAccounts().flatMap((reading) => {
+			const quota = sendMenuQuotas === undefined ? reading : sendMenuQuotas.get(reading.accountId);
+			const instance = getInstanceById(reading.accountId);
+			if (reading.accountId === accountId || instance?.driver !== "claude" || quota?.harness !== "claude" || quota.status !== "available" || quotaBlocksSwitch(quota)) return [];
+			const fullest = planUsageWindows(quota).reduce<PlanUsageWindow | undefined>(
+				(best, window) => best === undefined || window.utilization > best.utilization || (window.utilization === best.utilization && window.kind === "five_hour") ? window : best,
+				undefined,
+			);
+			return fullest === undefined || fullest.utilization >= 100 ? [] : [{ id: instance.id, name: instance.name, fullest }];
+		});
+	});
+	const switchTarget = $derived(sendAccounts[0]);
+	const sendsAt = $derived.by(() => {
+		if (usageReading?.status !== "limited") return undefined;
+		const resets = planUsageWindows(usageReading)
+			.filter((window) => window.utilization >= 100)
+			.map((window) => Date.parse(window.resetsAt ?? ""))
+			.filter((at) => at > clock.now);
+		return resets.length > 0 ? Math.max(...resets) : undefined;
+	});
+	const sendMode = $derived.by(() => {
+		if (sendsAt !== undefined) return usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset";
+		const warnAt = usageState.limits.warnAt;
+		return usageReading?.status === "available" && warnAt !== "off" &&
+			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
+			? "warning" : "normal";
+	});
+	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
+	const hasSendMenu = $derived((sendMode === "at-reset" || sendMode === "switch") && hasOtherClaudeAccount);
+	$effect(() => {
+		// A quota reply belongs to the session and menu opening that requested it.
+		currentSession?.id;
+		accountId;
+		composerProjectSlug;
+		usageState.readings;
+		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
+		sendQuotaTicket++;
+		sendMenuQuotas = undefined;
+	});
+	async function checkSendQuotas(): Promise<void> {
+		const ticket = ++sendQuotaTicket;
+		sendMenuQuotas = undefined;
+		try {
+			const checked = await quotaForAccountsRpc({ projectSlug: composerProjectSlug, originId: getBrowserClientId() });
+			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map(checked.map((reading) => [reading.accountId, reading]));
+		} catch {
+			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map();
+		}
+	}
+	const pendingSendsAt = $derived.by(() => {
+		const recovery = currentSession?.limitRecovery;
+		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
+		return scheduledAt === undefined ? sendsAt : scheduledAt * 1000;
+	});
 	const placeholder = $derived(
-		currentSession?.settledAt != null ? "Message to un-settle…" :
-		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
+		sendsAt !== undefined
+			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
+			: currentSession?.settledAt != null ? "Message to un-settle…" :
+			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+			discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -385,11 +460,15 @@
 	);
 	const canSend = $derived(!unsupportedDraftFolders && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
-		permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
-			? "Reply"
-			: isProcessing()
-				? "Queue message"
-				: "Send",
+		sendMode === "at-reset"
+			? `Send at ${sendAtTime}`
+			: sendMode === "switch" && switchTarget
+				? `Send on ${switchTarget.name}`
+			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+				? "Reply"
+				: isProcessing()
+					? "Queue message"
+					: "Send",
 	);
 	/** Whether a send could steer the running turn, from the server's inbox arm:
 	 *  hidden (undefined) when idle or the provider can't steer, disabled while a
@@ -517,7 +596,7 @@
 		}
 		if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
 			e.preventDefault();
-			sendMessage(undefined, steer ? "steer" : "queue");
+			sendComposer(steer ? "steer" : "queue");
 			return;
 		}
 		if (e.key === "Enter" && !e.shiftKey) {
@@ -527,8 +606,32 @@
 				return;
 			}
 			e.preventDefault();
-			sendMessage();
+			sendComposer();
 		}
+	}
+
+	async function sendOnAccount(instanceId: string, delivery: InputDelivery = "queue"): Promise<boolean> {
+		const sessionId = sessionState.currentId;
+		const projectSlug = composerProjectSlug;
+		const expectedInstanceId = accountId;
+		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
+		const draft = inputText;
+		const images = pendingImages;
+		switchingAccount = true;
+		try {
+			if (!(await switchSessionAccount({ projectSlug, sessionId, instanceId, expectedInstanceId }))) return false;
+			await tick();
+			// Navigation or edits during the handoff leave the draft for its owner.
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
+			return await sendMessage(undefined, delivery);
+		} finally {
+			switchingAccount = false;
+		}
+	}
+
+	function sendComposer(delivery: InputDelivery = "queue"): Promise<boolean> {
+		if (switchingAccount) return Promise.resolve(false);
+		return sendMode === "switch" && switchTarget ? sendOnAccount(switchTarget.id, delivery) : sendMessage(undefined, delivery);
 	}
 
 	let creatingSession = false;
@@ -684,9 +787,9 @@
 		const sentToSessionId = sid;
 		// An input the inbox hands straight off starts the sender's turn now; the
 		// row reports busy once the provider picks it up and ends the turn when it
-		// goes idle (ni8.35). A queued or paused input starts nothing.
+		// goes idle (ni8.35). A queued, paused or reset-held input starts nothing.
 		const { activity, messages } = getOrCreateSessionSlot(sid);
-		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
+		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid) && sendsAt === undefined
 			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
 		if (startsTurn) {
 			phaseToProcessing(activity);
@@ -772,7 +875,7 @@
 	}
 
 	function handleSendClick(e: MouseEvent) {
-		sendMessage(undefined, steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
+		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
 	function handleAttachCamera() {
@@ -1043,6 +1146,8 @@
 			</div>
 		{/if}
 
+		<UsageWarningStrip session={currentSession} projectSlug={composerProjectSlug} />
+
 		{#if contextWarning && !compacting}
 			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
 				<Icon name="panels-top-left" size={14} class="shrink-0 text-status-amber" />
@@ -1053,13 +1158,14 @@
 			</div>
 		{/if}
 
-		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
+		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
 		{/if}
 
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
+			sendsAt={pendingSendsAt}
 			{steer}
 			onEdit={takeBackQueuedInput}
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
@@ -1202,29 +1308,94 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
+					{#snippet sendAtLabel()}
+						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
+					{/snippet}
 					<!-- Send / Stop buttons. While working, send only shows once there is
 					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
 					{#if !isProcessing() || canSend}
+					{#if hasSendMenu}
+					<div data-testid="composer-send-control" class="inline-flex shrink-0 items-center rounded-full border font-mono text-[10.5px] whitespace-nowrap {sendMode === 'switch' ? 'border-border text-text' : 'border-status-red/50 text-status-red'} {sessionViewState.compact ? 'h-[32px]' : 'h-[26px]'}">
+						<Button
+							variant="ghost"
+							size="content"
+							tone="inherit"
+							hoverFill="none"
+							disabledStyle="undimmed"
+							{...(sendMode === "switch" && sessionViewState.compact ? {} : { icon: sendMode === "switch" ? "arrow-up" : "clock" })}
+							iconSize={13}
+							id="send"
+							data-goal={isGoalCommand ? "true" : "false"}
+							data-send-mode={sendMode}
+							type="button"
+							class="send-btn h-full gap-[5px] rounded-l-full px-[10px] pr-[2px] font-mono text-[10.5px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
+							disabled={!canSend || switchingAccount}
+							title={sendButtonTitle}
+							ariaLabel={sendButtonLabel}
+							onclick={handleSendClick}
+						>
+							{#if sendMode === "switch" && switchTarget}
+								{#if !sessionViewState.compact}<span>Send on</span>{/if}
+								<AccountDot instanceId={switchTarget.id} size={7} />
+								<span data-testid="composer-send-switch-label">{switchTarget.name}</span>
+							{:else}
+								{@render sendAtLabel()}
+							{/if}
+						</Button>
+						<Menu
+							bind:open={sendMenuOpen}
+							onopenchange={(open) => {
+								if (open) void checkSendQuotas();
+								else sendQuotaTicket++;
+							}}
+							presentation={sessionViewState.compact ? "sheet" : "popover"}
+							side="top"
+							align="end"
+							ariaLabel="Send options"
+							class={sessionViewState.compact ? "px-[14px]" : "w-[250px] p-[5px]"}
+							data-testid="composer-send-menu"
+						>
+							{#snippet trigger({ props })}
+								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full w-[24px] rounded-r-full pr-[4px] touch-manipulation hover:not-disabled:opacity-90" />
+							{/snippet}
+							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
+								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
+								<span class="flex-1">Send at {sendAtTime}</span>
+								<span class="font-mono text-[10.5px] text-text-dimmer">{accountId ? getInstanceById(accountId)?.name ?? "Claude" : "Claude"}</span>
+							</MenuItem>
+							{#each sendAccounts as option (option.id)}
+								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
+									<AccountDot instanceId={option.id} size={7} />
+									<span class="flex-1">Send now on {option.name}</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
+								</MenuItem>
+							{/each}
+							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
+						</Menu>
+					</div>
+					{:else}
 					<Button
 						variant="ghost"
 						size="content"
 						tone="inherit"
 						hoverFill="none"
 						disabledStyle="undimmed"
-						iconOnly
-						icon={isGoalCommand ? "target" : "arrow-up"}
-						iconSize={17}
+						{...(sendMode === "at-reset" ? { iconOnly: false as const, children: sendAtLabel } : { iconOnly: true as const })}
+						icon={sendMode === "at-reset" ? "clock" : isGoalCommand ? "target" : "arrow-up"}
+						iconSize={sendMode === "at-reset" ? 13 : 17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
+						data-send-mode={sendMode}
 						type="button"
-						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
+						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : 'w-[32px] rounded-[10px] ' + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
 						disabled={!canSend}
 						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
+					{/if}
 					{/if}
 					{#if isProcessing()}
 						<Button
@@ -1281,9 +1452,12 @@
 	}
 	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
 	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
-	:global(#send[data-goal="true"]) {
+	:global(#send[data-goal="true"]:not([data-send-mode="at-reset"]):not([data-send-mode="switch"])) {
 		background: var(--color-status-violet);
 		color: var(--color-bg);
+	}
+	:global(#send[data-send-mode="warning"]) {
+		box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3.5px var(--color-status-amber);
 	}
 
 	.composer-goal-hint, .composer-goal-met, .composer-goal-cleared {

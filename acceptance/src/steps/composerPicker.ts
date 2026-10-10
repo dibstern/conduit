@@ -46,7 +46,7 @@ const providers = [
 				name: "Sonnet 4",
 				provider: "anthropic",
 				limit: { context: 200_000 },
-				contextWindowOptions: [contextOptions[0]],
+				contextWindowOptions: contextOptions.slice(0, 1),
 			},
 		],
 	},

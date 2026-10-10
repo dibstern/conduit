@@ -1,7 +1,9 @@
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
+import { backgroundOpenCodeAPI } from "../../../src/lib/domain/relay/Layers/relay-core-layers.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -10,7 +12,10 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
-import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
+import {
+	MessagePoller,
+	MessagePollerManager,
+} from "../../../src/lib/relay/message-poller-impl.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -131,6 +136,58 @@ describe("MessagePollerManagerLive", () => {
 
 		expect(drainSpy).toHaveBeenCalledTimes(1);
 		expect(manager.isPolling("s1")).toBe(false);
+	});
+
+	it("keeps fallback polling quiet while OpenCode is stopped and resumes reads when running", async () => {
+		vi.useFakeTimers({ now: 1_000 });
+		let running = false;
+		const fetch = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(async () => Response.json([]));
+		const runningApi = partialFake<OpenCodeAPI>({
+			getBaseUrl: () => "http://managed.test",
+			getAuthHeaders: () => ({}),
+		});
+		const client = await Effect.runPromise(
+			backgroundOpenCodeAPI.pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						Layer.succeed(ConfigTag, makeMockConfig()),
+						Layer.succeed(
+							OpenCodeInstancesTag,
+							partialFake<OpenCodeInstancesTag["Type"]>({
+								ifRunning: () =>
+									Effect.sync(() =>
+										running ? Option.some(runningApi) : Option.none(),
+									),
+							}),
+						),
+					),
+				),
+			),
+		);
+		const log = makeMockLogger();
+		const poller = new MessagePoller({
+			client,
+			log,
+			interval: 750,
+			hasViewers: () => true,
+		});
+		try {
+			poller.startPolling("s1", []);
+			await vi.advanceTimersByTimeAsync(3_000);
+			// A non-starting client is expected to reject without making a request.
+			// Main logs that expected rejection on every fallback tick.
+			expect(fetch).not.toHaveBeenCalled();
+			expect(log.warn).not.toHaveBeenCalled();
+			running = true;
+			await vi.advanceTimersByTimeAsync(750);
+			await poller.drain();
+			expect(log.warn).not.toHaveBeenCalled();
+			expect(fetch).toHaveBeenCalled();
+		} finally {
+			await poller.drain();
+		}
 	});
 
 	it("suppresses duplicate REST synthesis after SSE activity until silence reseeds the snapshot", async () => {

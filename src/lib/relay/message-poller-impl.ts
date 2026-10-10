@@ -6,6 +6,7 @@
 // MessagePoller: single-session poller with SSE suppression + idle timeout.
 // MessagePollerManager: manages multiple concurrent MessagePoller instances.
 
+import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -285,6 +286,7 @@ export class MessagePoller {
 				}
 			}
 		} catch (err) {
+			if (isOpenCodeNotRunningError(err)) return;
 			const msg = err instanceof Error ? err.message : String(err);
 			this.log.warn(`poll failed: ${msg}`);
 		} finally {

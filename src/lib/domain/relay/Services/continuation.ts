@@ -34,7 +34,7 @@ import {
 } from "../../../persistence/events.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
-import { QuotaCheckTag } from "../../daemon/Services/quota-check.js";
+import { Usage } from "../../daemon/Services/usage.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -108,6 +108,8 @@ export interface Continuation {
 			readonly reason: ContinuationReason;
 			/** Unix seconds. A scheduled continuation stays on the same account. */
 			readonly at?: number;
+			/** Inbox admission must preserve a schedule that another request won. */
+			readonly onlyIfUnscheduled?: boolean;
 		},
 	) => Effect.Effect<
 		void,
@@ -122,7 +124,7 @@ export interface Continuation {
 		  >
 		| Effect.Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>,
 		| ConfigTag
-		| QuotaCheckTag
+		| Usage
 		| ProviderTurnServiceTag
 		| OverridesStateTag
 		| ReadQueryEffectTag
@@ -174,12 +176,15 @@ export const makeContinuation = Effect.gen(function* () {
 		recovery?.scheduledAt === expected.scheduledAt &&
 		recovery?.instanceId === expected.instanceId &&
 		recovery?.cutOffMessageId === expected.cutOffMessageId;
-	const cancelledEvent = (sessionId: string) =>
+	const cancelledEvent = (sessionId: string, releaseQueue = false) =>
 		canonicalEvent(
 			"session.resume_cancelled",
 			sessionId,
 			{},
-			{ provider: "claude" },
+			{
+				provider: "claude",
+				...(releaseQueue ? { metadata: { source: "inbox-reset" } } : {}),
+			},
 		);
 	const cancelContinuation = (sessionId: string, expected?: LimitRecovery) =>
 		commit.write((project) =>
@@ -194,7 +199,14 @@ export const makeContinuation = Effect.gen(function* () {
 					(expected && !sameSchedule(recovery, expected))
 				)
 					return;
-				yield* project(yield* store.appendBatch([cancelledEvent(sessionId)]));
+				yield* project(
+					yield* store.appendBatch([
+						cancelledEvent(
+							sessionId,
+							expected !== undefined && expected.cutOffMessageId === undefined,
+						),
+					]),
+				);
 			}),
 		);
 	const stillCutOff = (sessionId: string, recovery: LimitRecovery) =>
@@ -247,6 +259,7 @@ export const makeContinuation = Effect.gen(function* () {
 					if (
 						(!ownRequest && requesting.has(sessionId)) ||
 						(!policy &&
+							options.at === undefined &&
 							(session.status === "busy" ||
 								session.status === "retry" ||
 								(yield* hasActiveProcessingTimeout(sessionId))))
@@ -298,11 +311,36 @@ export const makeContinuation = Effect.gen(function* () {
 							const decision =
 								options.at === undefined
 									? yield* restore(
-											Effect.flatMap(QuotaCheckTag, (quota) =>
-												quota.check(options.instanceId),
+											Effect.flatMap(Usage, (usage) =>
+												usage
+													.refresh([options.instanceId])
+													.pipe(Effect.map((readings) => readings[0])),
 											),
 										)
 									: undefined;
+							const exhausted =
+								decision?.windows.filter(
+									(window) =>
+										(window.kind === "five_hour" ||
+											window.kind === "seven_day") &&
+										window.utilization >= 100,
+								) ?? [];
+							const limit = exhausted[0];
+							const resetTimes = exhausted.map(
+								(window) => Date.parse(window.resetsAt ?? "") / 1000,
+							);
+							const futureResets = resetTimes.filter(
+								(at) => Number.isFinite(at) && (!due || at > due.now),
+							);
+							const resetsAt =
+								futureResets.length > 0 ? Math.max(...futureResets) : undefined;
+							// A cached or fresh limited result cannot re-arm past a reset it
+							// explicitly says has expired. Unknown reset times keep the
+							// cut-off continuation's existing retry policy.
+							const limitExpired =
+								due &&
+								resetTimes.length > 0 &&
+								resetTimes.every((at) => Number.isFinite(at) && at <= due.now);
 							const turns = yield* ProviderTurnServiceTag;
 							if (options.instanceId !== options.expectedInstanceId)
 								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
@@ -314,15 +352,15 @@ export const makeContinuation = Effect.gen(function* () {
 									if (
 										!due &&
 										decision &&
-										(decision._tag === "Limited" ||
-											decision._tag === "Unavailable")
+										(decision.status === "limited" ||
+											decision.status === "unavailable")
 									)
 										return yield* new AccountUnavailable({
 											instanceId: options.instanceId,
 											reason:
-												decision._tag === "Unavailable"
-													? decision.reason
-													: `Account is still limited (${decision.rateLimitType}).`,
+												decision.status === "unavailable"
+													? (decision.reason ?? "Claude account is unavailable")
+													: `Account is still limited (${limit?.kind ?? "usage"}).`,
 										});
 									const recovery =
 										session.limit_recovery === null
@@ -342,14 +380,14 @@ export const makeContinuation = Effect.gen(function* () {
 										}
 									}
 									const switched = session.provider !== options.instanceId;
-									// Dismiss or a reply may have closed it while the probe ran.
-									if (!switched && !recovery?.cutOffMessageId) return;
 									if (options.at !== undefined) {
 										// A schedule resumes the limited account; it never switches.
 										if (
 											switched ||
-											!recovery?.cutOffMessageId ||
-											recovery.instanceId !== options.instanceId
+											(recovery &&
+												recovery.instanceId !== options.instanceId) ||
+											(options.onlyIfUnscheduled &&
+												recovery?.scheduledAt !== undefined)
 										)
 											return;
 										yield* project(
@@ -372,20 +410,22 @@ export const makeContinuation = Effect.gen(function* () {
 										);
 										return;
 									}
+									// Dismiss or a reply may have closed it while the probe ran.
+									if (!switched && !recovery?.cutOffMessageId) return;
 									if (
 										due &&
 										recovery &&
-										(decision?._tag === "Limited" ||
-											decision?._tag === "Unavailable")
+										((decision?.status === "limited" && !limitExpired) ||
+											decision?.status === "unavailable")
 									) {
 										const event =
-											decision._tag === "Limited" && recovery.rearms < 3
+											decision.status === "limited" && recovery.rearms < 3
 												? canonicalEvent(
 														"session.resume_scheduled",
 														sessionId,
 														{
 															instanceId: options.instanceId,
-															at: decision.resetsAt ?? due.now + 300,
+															at: resetsAt ?? due.now + 300,
 														},
 														{
 															provider: "claude",
@@ -549,8 +589,8 @@ export const makeContinuation = Effect.gen(function* () {
 				latest[0].reason === "auto-switch"
 			)
 				return false;
-			const quota = yield* QuotaCheckTag;
-			const instanceId = yield* quota.pickFailover(recovery.instanceId);
+			const usage = yield* Usage;
+			const instanceId = yield* usage.pickFailover(recovery.instanceId);
 			if (instanceId === undefined) return false;
 			yield* requestContinuation(
 				sessionId,

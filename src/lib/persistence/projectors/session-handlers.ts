@@ -521,23 +521,29 @@ export const sessionHandlers: {
 	],
 	"session.resume_scheduled": (event) => {
 		const source = event.metadata.source;
+		// A queue can wait for its account's reset without a cut-off turn.
+		const recovery =
+			"COALESCE(limit_recovery, json_object('instanceId', ?, 'rateLimitType', 'usage', 'resetsAt', ?, 'rearms', 0, 'continued', json('false')))";
 		// The limit policy marks its schedule, a user's schedule clears the mark,
 		// and a sweep re-arm keeps whichever one it re-arms.
 		const marked =
 			source === "limit-policy"
-				? "json_set(limit_recovery, '$.auto', json('true'))"
+				? `json_set(${recovery}, '$.auto', json('true'))`
 				: source === "continuation-sweep"
-					? "limit_recovery"
-					: "json_remove(limit_recovery, '$.auto')";
+					? recovery
+					: `json_remove(${recovery}, '$.auto')`;
 		return [
 			{
 				// Only the sweep re-arms. A user changing the time is still scheduling.
-				sql: `UPDATE sessions SET limit_recovery = json_set(${marked}, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.instanceId') = ?`,
+				sql: `UPDATE sessions SET limit_recovery = json_set(${marked}, '$.scheduledAt', ?, '$.rearms', COALESCE(json_extract(limit_recovery, '$.rearms'), 0) + ?), updated_at = ? WHERE id = ? AND provider = ? AND (limit_recovery IS NULL OR json_extract(limit_recovery, '$.instanceId') = ?)`,
 				params: [
+					event.data.instanceId,
+					event.data.at,
 					event.data.at,
 					source === "continuation-sweep" ? 1 : 0,
 					event.createdAt,
 					event.sessionId,
+					event.data.instanceId,
 					event.data.instanceId,
 				],
 			},
@@ -545,7 +551,10 @@ export const sessionHandlers: {
 	},
 	"session.resume_cancelled": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ?",
+			sql:
+				event.metadata.source === "inbox-reset"
+					? "UPDATE sessions SET limit_recovery = NULL, updated_at = ? WHERE id = ? AND json_extract(limit_recovery, '$.cutOffMessageId') IS NULL"
+					: "UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ?",
 			params: [event.createdAt, event.sessionId],
 		},
 	],
@@ -683,12 +692,14 @@ export function getSessionStatements<K extends CanonicalEventType>(
 	if (event.type !== "session.created" && event.type !== "session.forked") {
 		return statements;
 	}
-	// Both projector implementations execute this writer before publishing the
-	// session. Reads never need the parent message again.
+	// A fork's own boundary copy is authoritative when already projected.
+	// Claude forks reference the parent row; retain that captured fallback.
 	return [
 		...statements,
 		{
 			sql: `UPDATE sessions SET fork_point_timestamp = COALESCE(
+			(SELECT created_at FROM messages
+			 WHERE session_id = sessions.id AND id = sessions.fork_point_event),
 			fork_point_timestamp, ?,
 			(SELECT created_at FROM messages
 			 WHERE session_id = sessions.parent_id AND id = sessions.fork_point_event)
