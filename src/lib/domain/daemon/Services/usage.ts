@@ -3,7 +3,10 @@ import {
 	Context,
 	Deferred,
 	Effect,
-	type Stream,
+	Fiber,
+	FiberMap,
+	Schedule,
+	Stream,
 	SubscriptionRef,
 } from "effect";
 import type { UsageReading } from "../../../contracts/limit-recovery.js";
@@ -18,6 +21,7 @@ export interface UsageService {
 	readonly refresh: (
 		accountIds?: readonly string[],
 	) => Effect.Effect<readonly UsageReading[]>;
+	readonly turnEnded: (accountId: string) => Effect.Effect<void>;
 	readonly pickFailover: (
 		excluding: string,
 	) => Effect.Effect<string | undefined>;
@@ -28,12 +32,18 @@ export class Usage extends Context.Tag("Usage")<Usage, UsageService>() {}
 export const makeUsage = (options: {
 	readonly accounts: Effect.Effect<readonly UsageAccount[]>;
 	readonly order?: Effect.Effect<readonly string[]>;
-	readonly readers: Readonly<Record<UsageAccount["harness"], UsageReader>>;
+	readonly readers: Readonly<
+		Partial<Record<UsageAccount["harness"], UsageReader>>
+	>;
 }) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
 		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([]);
 		const lock = yield* Effect.makeSemaphore(1);
+		const subscriberLock = yield* Effect.makeSemaphore(1);
+		const turnRefreshes = yield* FiberMap.make<string, void>();
+		let subscribers = 0;
+		let sampler: Fiber.RuntimeFiber<void> | undefined;
 		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
 		const latest = new Map<string, UsageReading>();
 		const read = (accountId: string, accounts: readonly UsageAccount[]) =>
@@ -46,15 +56,18 @@ export const makeUsage = (options: {
 							if (existing) return existing;
 							const pending = yield* Deferred.make<UsageReading>();
 							inFlight.set(accountId, pending);
-							const reading = Effect.suspend(() =>
-								account
-									? options.readers[account.harness].read(account)
+							const reading = Effect.suspend(() => {
+								const reader = account && options.readers[account.harness];
+								return account && reader
+									? reader.read(account)
 									: Effect.succeed<UsageRead>({
 											status: "unavailable",
 											windows: [],
-											reason: "Claude account is not configured",
-										}),
-							).pipe(
+											reason: account
+												? "Usage reader is not available for this harness"
+												: "Claude account is not configured",
+										});
+							}).pipe(
 								Effect.timeoutTo({
 									duration: "5 seconds",
 									onTimeout: (): UsageRead => ({
@@ -80,8 +93,16 @@ export const makeUsage = (options: {
 											readAt: yield* Clock.currentTimeMillis,
 											stale: false,
 										};
+										// Decisions get the fresh result; only the published
+										// readings keep showing the last good one, marked stale.
 										yield* Effect.sync(() => {
-											latest.set(accountId, value);
+											const previous = latest.get(accountId);
+											latest.set(
+												accountId,
+												value.status === "unknown" && previous
+													? { ...previous, stale: true }
+													: value,
+											);
 											inFlight.delete(accountId);
 										});
 										yield* Deferred.succeed(pending, value);
@@ -114,6 +135,61 @@ export const makeUsage = (options: {
 				yield* SubscriptionRef.set(current, [...latest.values()]);
 				return readings;
 			});
+		const readings = Stream.unwrapScoped(
+			Effect.gen(function* () {
+				const subscriptionScope = yield* Effect.scope;
+				yield* Effect.acquireRelease(
+					subscriberLock.withPermits(1)(
+						Effect.gen(function* () {
+							subscribers++;
+							if (subscribers === 1)
+								sampler = yield* Effect.forkIn(
+									refresh().pipe(
+										Effect.schedule(Schedule.fixed("5 minutes")),
+										Effect.asVoid,
+										Effect.interruptible,
+									),
+									scope,
+								);
+						}),
+					),
+					() =>
+						subscriberLock.withPermits(1)(
+							Effect.gen(function* () {
+								subscribers--;
+								if (subscribers === 0 && sampler) {
+									yield* Fiber.interrupt(sampler);
+									sampler = undefined;
+								}
+							}),
+						),
+				);
+				let initial = true;
+				return current.changes.pipe(
+					Stream.tap(() => {
+						if (!initial) return Effect.void;
+						initial = false;
+						// changes has captured the snapshot and joined the update stream
+						// before this read can publish, so the snapshot always comes first.
+						return Effect.forkIn(refresh(), subscriptionScope).pipe(
+							Effect.asVoid,
+						);
+					}),
+				);
+			}),
+		);
+		// Only a viewer needs the fresh numbers; its subscription reads on join.
+		const turnEnded: UsageService["turnEnded"] = (accountId) =>
+			subscribers === 0
+				? Effect.void
+				: FiberMap.run(
+						turnRefreshes,
+						accountId,
+						Effect.sleep("10 seconds").pipe(
+							Effect.zipRight(refresh([accountId])),
+							Effect.asVoid,
+						),
+					).pipe(Effect.asVoid);
 		const pickFailover: UsageService["pickFailover"] = (excluding) =>
 			Effect.gen(function* () {
 				const order: readonly string[] = yield* options.order ??
@@ -139,8 +215,9 @@ export const makeUsage = (options: {
 				return undefined;
 			});
 		return {
-			readings: current.changes,
+			readings,
 			refresh,
+			turnEnded,
 			pickFailover,
 		} satisfies UsageService;
 	});

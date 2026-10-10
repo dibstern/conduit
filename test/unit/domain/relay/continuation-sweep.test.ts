@@ -207,6 +207,7 @@ for (const scenario of [
 				yield* continuation.sweepDueContinuations(10).pipe(
 					Effect.provideService(Usage, {
 						readings: Stream.empty,
+						turnEnded: () => Effect.void,
 						refresh: () =>
 							Effect.gen(function* () {
 								probes++;
@@ -285,6 +286,7 @@ for (const scenario of [
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(Usage, {
 					readings: Stream.empty,
+					turnEnded: () => Effect.void,
 					refresh: () => Effect.succeed([usageReading("claude")]),
 					pickFailover: () => Effect.succeed(undefined),
 				}),
@@ -469,6 +471,7 @@ for (const scenario of [
 											: undefined;
 									}).pipe(Effect.orDie),
 								readings: Stream.empty,
+								turnEnded: () => Effect.void,
 								refresh: (accountIds) =>
 									Effect.gen(function* () {
 										const instanceId = accountIds?.[0] ?? "claude";
@@ -656,6 +659,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			Effect.provideService(ConfigTag, config),
 			Effect.provideService(Usage, {
 				readings: Stream.empty,
+				turnEnded: () => Effect.void,
 				refresh: () => Effect.succeed([usageReading("claude")]),
 				pickFailover: () => Effect.succeed(undefined),
 			}),
@@ -722,6 +726,7 @@ for (const freshReset of [42, undefined]) {
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(Usage, {
 					readings: Stream.empty,
+					turnEnded: () => Effect.void,
 					refresh: () =>
 						Effect.sync(() => {
 							probes++;

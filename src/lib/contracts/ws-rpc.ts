@@ -2244,6 +2244,13 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	stream: true,
 });
 
+export const SubscribeUsage = Rpc.make("SubscribeUsage", {
+	payload: {},
+	success: Schema.Struct({ readings: Schema.Array(UsageReadingSchema) }),
+	error: WsRpcError,
+	stream: true,
+});
+
 export const SubscribeProjects = Rpc.make("SubscribeProjects", {
 	payload: {},
 	success: Schema.Struct({
@@ -2401,6 +2408,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,
+	SubscribeUsage,
 	SubscribeServerStatus,
 	SubscribeProjects,
 	Rpc.fromTaggedRequest(GetStatus),

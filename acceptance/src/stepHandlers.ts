@@ -23,6 +23,7 @@ import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
+import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { visualHandlers } from "./steps/visual.js";
 
@@ -38,6 +39,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...mockAppHandlers,
 	...modelDriftHandlers,
 	...usageLimitStripHandlers,
+	...usageFooterMeterHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".

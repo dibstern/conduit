@@ -34,7 +34,12 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 						? (yield* Ref.get(config.value)).claudeConfigDir
 						: undefined;
 					return Array.from(HashMap.values(instances))
-						.filter((instance) => instance.driver === "claude")
+						.filter(
+							(instance) =>
+								instance.driver === "claude" &&
+								!instance.env?.["ANTHROPIC_API_KEY"] &&
+								!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
+						)
 						.map((instance) => {
 							const configDir = instance.configDir ?? fallback;
 							return {

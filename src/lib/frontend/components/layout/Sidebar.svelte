@@ -24,6 +24,7 @@
 	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
 	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import Banners from "../overlays/Banners.svelte";
+	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
 	// True while this sidebar is the phone's full-screen session list.
 	let { listScreen = false }: { listScreen?: boolean } = $props();
@@ -93,7 +94,7 @@
 <!-- Sidebar -->
 <div
 	id="sidebar"
-	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
+	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} @container/sidebar border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
 	style={sidebarStyle}
 >
 	<!-- Sidebar header: title + count, then actions. Literal px per the design:
@@ -257,6 +258,7 @@
 			/>
 		{/if}
 	</nav>
+	{#if !sessionViewState.compact}<UsageFooterMeter />{/if}
 
 </div>
 

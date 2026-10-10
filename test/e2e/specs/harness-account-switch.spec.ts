@@ -767,11 +767,20 @@ for (const decision of [
 			await expect.poll(() => latest()?.status).toBe("idle");
 			const cutOffMessageId = latest()?.limitRecovery?.cutOffMessageId;
 			if (!cutOffMessageId) throw new Error("No open cut-off");
+			const usageProbes = () =>
+				harness.marks.filter(
+					(mark) => mark.kind === "usage-probe" && mark.configDir === configDir,
+				);
+			// Opening the page reads usage once for the usage meter; the
+			// decision's own read is the one after it.
+			let viewed = 0;
 			// The success and the probe refusal are also driven from the strip.
 			if (decision === "available" || decision === "limited") {
 				await app.goto(
 					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
 				);
+				await expect.poll(() => usageProbes().length).toBe(1);
+				viewed = 1;
 				await expect(page.getByTestId("usage-limit-detail")).toHaveText(
 					testInfo.project.name === "mobile"
 						? "Retry account · reset time unavailable"
@@ -865,12 +874,7 @@ for (const decision of [
 			evidence["elapsedMs"] = Date.now() - started;
 			if (!["busy", "stale"].includes(decision))
 				await expect
-					.poll(() =>
-						harness.marks.find(
-							(mark) =>
-								mark.kind === "usage-probe" && mark.configDir === configDir,
-						),
-					)
+					.poll(() => usageProbes()[viewed])
 					.toMatchObject({
 						behavior: ["fail", "hang", "limited", "unavailable"].includes(
 							decision,
@@ -1493,10 +1497,15 @@ for (const scenario of [
 			harness
 				.claudeOptions()
 				.filter((call) => call.prompt === "Continue where you left off.");
+		// Opening the page reads usage once for the usage meter; only later
+		// reads belong to the resume decisions.
+		let viewed = 0;
 		const probes = () =>
-			harness.marks.filter(
-				(mark) => mark.kind === "usage-probe" && mark.configDir === configDir,
-			);
+			harness.marks
+				.filter(
+					(mark) => mark.kind === "usage-probe" && mark.configDir === configDir,
+				)
+				.slice(viewed);
 		const evidence: Record<string, unknown> = {};
 		try {
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
@@ -1548,6 +1557,8 @@ for (const scenario of [
 					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
 				);
 				await expect(strip).toHaveAttribute("data-state", "limited");
+				await expect.poll(() => probes().length).toBe(1);
+				viewed = 1;
 				await resumeAtReset.click();
 			} else
 				await Effect.runPromise(

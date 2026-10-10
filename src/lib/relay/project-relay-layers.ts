@@ -350,6 +350,7 @@ export function createProjectRelayLayers({
 			const sql = yield* SqlClient.SqlClient;
 			const log = yield* LoggerTag;
 			return makeProviderRuntimeIngestionLive({
+				usage: yield* Usage,
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
@@ -379,6 +380,7 @@ export function createProjectRelayLayers({
 				// one PubSub SubscribeAlerts reads.
 				AlertsLive,
 				loggerLayer,
+				usageLayer,
 			),
 		),
 	);

@@ -11,6 +11,7 @@ import type {
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
+import { applyUsageLimitsSetting } from "../stores/usage.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
@@ -1294,6 +1295,7 @@ export async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
 	const result = await runTransportEffect(
 		callControl(undefined, (client) => client.GetUsageLimitsSetting({})),
 	);
+	applyUsageLimitsSetting(result.usageLimits);
 	return result.usageLimits;
 }
 
@@ -1305,6 +1307,7 @@ export async function setUsageLimitsSettingRpc(
 			client.SetUsageLimitsSetting({ usageLimits }),
 		),
 	);
+	applyUsageLimitsSetting(result.usageLimits);
 	return result.usageLimits;
 }
 

@@ -30,6 +30,7 @@ export function usageDisplay(
 	const sevenDay = reading.windows.find(
 		(window) => window.kind === "seven_day",
 	);
+	const month = reading.windows.find((window) => window.kind === "month");
 	const threshold = warnAt === "off" ? Number.POSITIVE_INFINITY : warnAt;
 	const binding =
 		fiveHour &&
@@ -39,7 +40,7 @@ export function usageDisplay(
 			? sevenDay
 			: fiveHour && (!sevenDay || fiveHour.utilization >= sevenDay.utilization)
 				? fiveHour
-				: sevenDay;
+				: (sevenDay ?? month);
 	const used = binding?.utilization;
 	const limited =
 		reading.status === "limited" || (used !== undefined && used >= 100);

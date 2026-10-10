@@ -4,11 +4,265 @@
 // Failover failures: saved order is ignored or stale; excluded/removed accounts
 // are read; duplicate order entries repeat reads; limited/unavailable wins;
 // unknown is skipped or configured accounts missing from the order are lost.
+// Sampling failures: idle services read; subscribing loses the current snapshot;
+// subscribers each start a sampler; one unsubscribe stops other subscribers;
+// turn-end bursts duplicate reads or read unwatched; failures erase the last
+// shown reading or leak it into decisions.
 import { it } from "@effect/vitest";
-import { Clock, Deferred, Effect, Fiber, Ref, TestClock } from "effect";
+import {
+	Chunk,
+	Clock,
+	Deferred,
+	Effect,
+	Fiber,
+	Ref,
+	Stream,
+	TestClock,
+} from "effect";
 import { expect } from "vitest";
 import { makeUsage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import type { UsageReader } from "../../../../src/lib/provider/usage-reader.js";
+
+it.scoped("does not sample with no subscribers", () =>
+	Effect.gen(function* () {
+		let calls = 0;
+		yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				claude: {
+					read: () =>
+						Effect.sync(() => {
+							calls++;
+							return { status: "available", windows: [] };
+						}),
+				},
+			},
+		});
+		yield* TestClock.adjust("15 minutes");
+		expect(calls).toBe(0);
+	}),
+);
+
+it.scoped("emits the current snapshot before refreshing a subscription", () =>
+	Effect.gen(function* () {
+		let calls = 0;
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				claude: {
+					read: () =>
+						Effect.sync(() => ({
+							status: "available",
+							windows: [{ kind: "five_hour", utilization: ++calls * 10 }],
+						})),
+				},
+			},
+		});
+		const previous = yield* service.refresh();
+		const snapshots = yield* Stream.runCollect(
+			Stream.take(service.readings, 2),
+		);
+		expect(Chunk.toArray(snapshots)).toEqual([
+			previous,
+			[{ ...previous[0], windows: [{ kind: "five_hour", utilization: 20 }] }],
+		]);
+		expect(calls).toBe(2);
+	}),
+);
+
+it.scoped("shares a five-minute sampler until the last subscriber leaves", () =>
+	Effect.gen(function* () {
+		const calls: string[] = [];
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "account-1", harness: "claude" },
+				{ id: "account-2", harness: "claude" },
+			]),
+			readers: {
+				claude: {
+					read: (account) =>
+						Effect.sync(() => {
+							calls.push(account.id);
+							return { status: "available", windows: [] };
+						}),
+				},
+			},
+		});
+		const first = yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* TestClock.adjust("0 millis");
+		expect(calls).toEqual(["account-1", "account-2"]);
+		const second = yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* TestClock.adjust("0 millis");
+		expect(calls).toHaveLength(4);
+		yield* TestClock.adjust("299999 millis");
+		expect(calls).toHaveLength(4);
+		yield* TestClock.adjust("1 millis");
+		expect(calls).toHaveLength(6);
+		yield* Fiber.interrupt(first);
+		yield* TestClock.adjust("5 minutes");
+		expect(calls).toHaveLength(8);
+		yield* Fiber.interrupt(second);
+		yield* TestClock.adjust("10 minutes");
+		expect(calls).toHaveLength(8);
+	}),
+);
+
+it.scoped("debounces turn ends per account only while watched", () =>
+	Effect.gen(function* () {
+		const calls: string[] = [];
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "account-1", harness: "claude" },
+				{ id: "account-2", harness: "claude" },
+			]),
+			readers: {
+				claude: {
+					read: (account) =>
+						Effect.sync(() => {
+							calls.push(account.id);
+							return { status: "available", windows: [] };
+						}),
+				},
+			},
+		});
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("10 seconds");
+		expect(calls).toEqual([]);
+		yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* TestClock.adjust("1 millis");
+		calls.length = 0;
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("5 seconds");
+		yield* service.turnEnded("account-1");
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("9999 millis");
+		expect(calls).toEqual([]);
+		yield* TestClock.adjust("1 millis");
+		expect(calls).toEqual(["account-1"]);
+		yield* service.turnEnded("account-1");
+		yield* service.turnEnded("account-2");
+		yield* TestClock.adjust("10 seconds");
+		expect(calls.filter((id) => id === "account-1")).toHaveLength(2);
+		expect(calls.filter((id) => id === "account-2")).toHaveLength(1);
+	}),
+);
+
+it.scoped("keeps five-minute sample times independent of read duration", () =>
+	Effect.gen(function* () {
+		const startedAt: number[] = [];
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				claude: {
+					read: () =>
+						Effect.gen(function* () {
+							startedAt.push(yield* Clock.currentTimeMillis);
+							yield* Effect.sleep("4 seconds");
+							return { status: "available", windows: [] };
+						}),
+				},
+			},
+		});
+		const subscriber = yield* Effect.fork(Stream.runDrain(service.readings));
+		yield* TestClock.adjust("4 seconds");
+		expect(startedAt).toEqual([0]);
+		yield* TestClock.adjust("296 seconds");
+		expect(startedAt).toEqual([0, 300000]);
+		yield* TestClock.adjust("4 seconds");
+		yield* TestClock.adjust("296 seconds");
+		expect(startedAt).toEqual([0, 300000, 600000]);
+		yield* Fiber.interrupt(subscriber);
+	}),
+);
+
+it.scoped(
+	"retains the last successful reading and readAt when a read fails",
+	() =>
+		Effect.gen(function* () {
+			let failed = false;
+			const reader: UsageReader = {
+				read: () =>
+					failed
+						? Effect.fail(new Error("Reader failed"))
+						: Effect.succeed({
+								status: "available",
+								planLabel: "Max",
+								windows: [{ kind: "five_hour", utilization: 41 }],
+							}),
+			};
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: { claude: reader },
+			});
+			const [previous] = yield* service.refresh();
+			failed = true;
+			yield* TestClock.adjust("1 minute");
+			expect(yield* service.refresh()).toMatchObject([{ status: "unknown" }]);
+			expect(
+				yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
+			).toEqual(Chunk.of([{ ...previous, stale: true }]));
+			failed = false;
+			expect(yield* service.refresh()).toMatchObject([
+				{ stale: false, readAt: yield* Clock.currentTimeMillis },
+			]);
+		}),
+);
+
+it.scoped("decides on unknown when a refresh times out after a limit", () =>
+	Effect.gen(function* () {
+		let timedOut = false;
+		const reader: UsageReader = {
+			read: () =>
+				timedOut
+					? Effect.never
+					: Effect.succeed({
+							status: "limited",
+							windows: [{ kind: "seven_day", utilization: 100 }],
+						}),
+		};
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: { claude: reader },
+		});
+		const [previous] = yield* service.refresh();
+		timedOut = true;
+		const pending = yield* Effect.fork(service.refresh());
+		yield* TestClock.adjust("5 seconds");
+		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
+		expect(
+			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
+		).toEqual(Chunk.of([{ ...previous, stale: true }]));
+		const failover = yield* Effect.fork(service.pickFailover("other"));
+		yield* TestClock.adjust("5 seconds");
+		expect(yield* Fiber.join(failover)).toBe("account-1");
+	}),
+);
+
+it.scoped("treats a harness without a reader as unavailable", () =>
+	Effect.gen(function* () {
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "codex-1", harness: "codex" },
+				{ id: "cursor-1", harness: "cursor" },
+			]),
+			readers: {},
+		});
+		expect(yield* service.refresh()).toMatchObject([
+			{
+				accountId: "codex-1",
+				harness: "codex",
+				status: "unavailable",
+				windows: [],
+			},
+			{
+				accountId: "cursor-1",
+				harness: "cursor",
+				status: "unavailable",
+				windows: [],
+			},
+		]);
+	}),
+);
 
 it.scoped(
 	"picks fresh accounts in the live saved order and allows unknown",

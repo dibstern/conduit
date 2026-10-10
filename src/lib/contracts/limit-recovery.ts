@@ -147,7 +147,7 @@ export type UsageWindow = typeof UsageWindowSchema.Type;
 
 export const UsageReadingSchema = Schema.Struct({
 	accountId: Schema.String,
-	harness: Schema.Literal("claude"),
+	harness: Schema.Literal("claude", "codex", "cursor"),
 	status: Schema.Literal("available", "limited", "unavailable", "unknown"),
 	planLabel: Schema.optional(Schema.String),
 	windows: Schema.Array(UsageWindowSchema),
