@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -163,7 +169,7 @@ describe("explicit project registration", () => {
 			yield* removeProjectFromEffectRegistry(first.project.slug);
 			expect(yield* allProjects).toEqual([]);
 			const added = yield* saveProject({ folders: [directory] });
-			expect(added.project.folders[0]).toBe(directory);
+			expect(added.project.folders[0]).toBe(realpathSync(directory));
 			expect(yield* allProjects).toEqual([added.project]);
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});

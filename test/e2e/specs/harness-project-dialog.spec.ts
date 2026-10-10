@@ -1,8 +1,10 @@
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
 	realpathSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -275,6 +277,93 @@ test("keeps a failed creation inline and the draft correctable", async ({
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog).toBeHidden();
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("notes");
+});
+
+test("adding an existing primary folder navigates directly to its project", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const directory = realpathSync(harness.projectDir);
+	const alias = join(realpathSync(harness.root), "project-alias");
+	symlinkSync(directory, alias, "dir");
+	const browser = await harness.connect();
+	const before = await Effect.runPromise(browser.rpc.GetProjects({}));
+	for (const path of [directory, alias]) {
+		const dialog = await openDialog(page, harness);
+		await dialog.getByRole("combobox", { name: "Add folder" }).fill(path);
+		await dialog.getByRole("option", { name: path, exact: true }).click();
+		await dialog.getByRole("button", { name: /^Add project/ }).click();
+		await expect(dialog).toBeHidden();
+		await expect(page).toHaveURL(`${harness.baseUrl}/?p=process-test`);
+		await expect(page.getByTestId("session-scope-chip")).toHaveText(
+			"process-test",
+		);
+	}
+	const after = await Effect.runPromise(browser.rpc.GetProjects({}));
+	expect(after.projects).toEqual(before.projects);
+	writeFileSync(
+		testInfo.outputPath("existing-project.json"),
+		JSON.stringify({ before, after }, null, 2),
+	);
+	await page.screenshot({ path: testInfo.outputPath("existing-project.png") });
+});
+
+test("permission denied stays inline and keeps the selected folder", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const denied = join(realpathSync(harness.root), "denied-folder");
+	mkdirSync(denied);
+	const dialog = await openDialog(page, harness);
+	await dialog.getByRole("combobox", { name: "Add folder" }).fill(denied);
+	await dialog.getByRole("option", { name: denied, exact: true }).click();
+	chmodSync(denied, 0);
+	try {
+		await dialog.getByRole("button", { name: /^Add project/ }).click();
+		await expect(dialog.getByRole("alert")).toContainText("Permission denied");
+		await expect(dialog.getByRole("alert")).toContainText(denied);
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByTestId("project-folder-row")).toHaveAttribute(
+			"aria-label",
+			`Main folder: ${denied}`,
+		);
+		await expect(dialog.getByLabel("Project name")).toHaveValue(
+			"denied-folder",
+		);
+		await page.screenshot({
+			path: testInfo.outputPath("permission-denied.png"),
+		});
+	} finally {
+		chmodSync(denied, 0o755);
+	}
+	await dialog.getByRole("button", { name: /^Add project/ }).click();
+	await expect(dialog).toBeHidden();
+	await expect(page).toHaveURL(/\/new\?/);
+	expect(new URL(page.url()).searchParams.get("p")).toBe("denied-folder");
+	expect(new URL(page.url()).searchParams.get("project")).toBe("denied-folder");
+});
+
+test("permission denied during lookup keeps the folder input", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const denied = join(realpathSync(harness.root), "denied-folder");
+	mkdirSync(denied);
+	chmodSync(denied, 0);
+	try {
+		const dialog = await openDialog(page, harness);
+		const input = dialog.getByRole("combobox", { name: "Add folder" });
+		await input.fill(`${denied}/`);
+		await expect(dialog.getByRole("alert")).toContainText("Permission denied");
+		await expect(dialog.getByRole("alert")).toContainText(denied);
+		await expect(input).toHaveValue(`${denied}/`);
+		await expect(input).toHaveAttribute("aria-invalid", "true");
+		await page.screenshot({
+			path: testInfo.outputPath("permission-denied-input.png"),
+		});
+	} finally {
+		chmodSync(denied, 0o755);
+	}
 });
 
 // Failure cases: suggestions could leak a missing recent folder, list a plain

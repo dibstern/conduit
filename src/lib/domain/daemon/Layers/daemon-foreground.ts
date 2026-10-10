@@ -513,7 +513,8 @@ export async function startForegroundDaemon(
 					Effect.flatMap((projects) => {
 						const normalized = normalizeProjectDirectory(directory);
 						const existing = projects.find(
-							(project) => project.folders[0] === normalized,
+							(project) =>
+								normalizeProjectDirectory(project.folders[0]) === normalized,
 						);
 						return existing
 							? Effect.succeed(existing)
