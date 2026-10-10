@@ -1667,27 +1667,25 @@ export class ClaudeEventTranslator {
 				);
 			}
 
-			// Prefer the last main-chain request's usage: result.usage is
-			// cumulative across all API requests in the turn, which overstates
-			// context occupancy (the context bar consumes these tokens). Fall
-			// back to result.usage when no assistant message was seen (e.g.
-			// non-streaming slash-command turns).
+			// Usage totals describe this result; context is the last main request.
 			const usage = result.usage;
-			const usageTokens: {
-				readonly input?: number;
-				readonly output?: number;
-				readonly cacheRead?: number;
-				readonly cacheWrite?: number;
-			} = this.lastMainRequestUsage ?? {
-				input: usage.input_tokens,
-				output: usage.output_tokens,
-				...(usage.cache_read_input_tokens > 0
+			const usageTokens = {
+				...(usage?.input_tokens != null ? { input: usage.input_tokens } : {}),
+				...(usage?.output_tokens != null
+					? { output: usage.output_tokens }
+					: {}),
+				...((usage?.cache_read_input_tokens ?? 0) > 0
 					? { cacheRead: usage.cache_read_input_tokens }
 					: {}),
-				...(usage.cache_creation_input_tokens > 0
+				...((usage?.cache_creation_input_tokens ?? 0) > 0
 					? { cacheWrite: usage.cache_creation_input_tokens }
 					: {}),
 			};
+			const contextTokens = this.lastMainRequestUsage
+				? (this.lastMainRequestUsage.input ?? 0) +
+					(this.lastMainRequestUsage.cacheRead ?? 0) +
+					(this.lastMainRequestUsage.cacheWrite ?? 0)
+				: undefined;
 			let effectiveWindow: number | undefined;
 			for (const modelUsage of Object.values(result.modelUsage ?? {})) {
 				const contextWindow = modelUsage.contextWindow;
@@ -1713,6 +1711,7 @@ export class ClaudeEventTranslator {
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
 					providerCostTotalUsd: result.total_cost_usd,
 					providerSessionId: result.session_id,
+					...(contextTokens !== undefined ? { contextTokens } : {}),
 					tokens,
 					duration: result.duration_ms,
 				}),

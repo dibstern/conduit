@@ -776,12 +776,13 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 	const duration = workingTime(turn, now);
 	const window = result?.context_window;
 	const used =
-		result &&
+		result?.contextTokens ??
+		(result &&
 		(result.inputTokens !== undefined || result.cacheRead !== undefined)
 			? (result.inputTokens ?? 0) +
 				(result.cacheRead ?? 0) +
 				(result.cacheWrite ?? 0)
-			: undefined;
+			: undefined);
 	let tokensIn: number | undefined;
 	let tokensOut: number | undefined;
 	for (const segment of turn.segments) {

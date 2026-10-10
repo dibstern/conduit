@@ -352,6 +352,7 @@ export function historyToChatMessages(
 			// the step that ends the turn gets a result, billed for every step.
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
+				msg.contextTokens !== undefined ||
 				msg.tokens?.input !== undefined ||
 				msg.tokens?.output !== undefined ||
 				msg.tokens?.context_window !== undefined;
@@ -376,6 +377,9 @@ export function historyToChatMessages(
 						cost: msg.turnCost ?? cost,
 					}),
 					duration,
+					...(msg.contextTokens != null && {
+						contextTokens: msg.contextTokens,
+					}),
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),
 					...(msg.tokens?.output != null && {
 						outputTokens: msg.tokens.output,

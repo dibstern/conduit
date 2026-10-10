@@ -239,6 +239,9 @@ export function messageRowsToHistory(
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
+			...(row.context_tokens != null
+				? { contextTokens: row.context_tokens }
+				: {}),
 			...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 			...(row.role === "user" && row.turnTiming
 				? { turnTiming: row.turnTiming }

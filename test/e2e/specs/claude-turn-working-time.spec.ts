@@ -28,7 +28,7 @@ type TraceLine = {
 };
 const results: {
 	sdkUsage: Usage;
-	reportedUsage: Usage;
+	contextUsage: Usage;
 	contextWindow: number;
 }[] = [];
 let lastRequest: Usage | undefined;
@@ -45,7 +45,7 @@ for (const line of readFileSync(
 	if (!event.usage) throw new Error("trace result has no usage");
 	results.push({
 		sdkUsage: event.usage,
-		reportedUsage: lastRequest ?? event.usage,
+		contextUsage: lastRequest ?? event.usage,
 		contextWindow: Math.max(
 			...Object.values(event.modelUsage ?? {}).map(
 				(model) => model.contextWindow,
@@ -61,19 +61,12 @@ const sdkTokens = results.reduce(
 	}),
 	{ input: 0, output: 0 },
 );
-const reportedTokens = results.reduce(
-	(sum, result) => ({
-		input: sum.input + result.reportedUsage.input_tokens,
-		output: sum.output + result.reportedUsage.output_tokens,
-	}),
-	{ input: 0, output: 0 },
-);
 const last = results.at(-1);
 if (!last) throw new Error("trace has no results");
 const contextUsed =
-	last.sdkUsage.input_tokens +
-	last.sdkUsage.cache_read_input_tokens +
-	last.sdkUsage.cache_creation_input_tokens;
+	last.contextUsage.input_tokens +
+	last.contextUsage.cache_read_input_tokens +
+	last.contextUsage.cache_creation_input_tokens;
 const contextPct = Math.min(
 	100,
 	Math.round((contextUsed / last.contextWindow) * 100),
@@ -112,6 +105,7 @@ test.describe("Claude turn working time", () => {
 				const segments: {
 					firstEventAt: number;
 					endAt: number;
+					contextTokens?: number;
 					tokens: {
 						input?: number;
 						output?: number;
@@ -126,11 +120,15 @@ test.describe("Claude turn working time", () => {
 					if (event["type"] !== "turn.completed") continue;
 					const data = JSON.parse(String(event["data"])) as {
 						tokens: (typeof segments)[number]["tokens"];
+						contextTokens?: number;
 					};
 					segments.push({
 						firstEventAt,
 						endAt: Number(event["created_at"]),
 						tokens: data.tokens,
+						...(data.contextTokens === undefined
+							? {}
+							: { contextTokens: data.contextTokens }),
 					});
 					firstEventAt = undefined;
 				}
@@ -156,13 +154,18 @@ test.describe("Claude turn working time", () => {
 		const report: Record<string, unknown> = {
 			trace: TRACE,
 			sdkTokens,
-			reportedTokens,
 			contextUsed,
 			contextPct,
 			results,
 			toleranceMs: TOLERANCE_MS,
 		};
 		try {
+			await page.addInitScript(() => {
+				localStorage.setItem(
+					"conduit-composer-preferences",
+					JSON.stringify({ controls: "words" }),
+				);
+			});
 			await app.goto(relayUrl);
 			const sentAt = performance.now();
 			await app.sendMessage("Launch the background work");
@@ -240,13 +243,39 @@ test.describe("Claude turn working time", () => {
 				"title",
 				`${Math.round(contextUsed / 1_000)}k of ${(last.contextWindow / 1_000_000).toFixed(1)}M tokens in context when this turn finished`,
 			);
-			// Each result reports its last main request's usage (it doubles as
-			// context occupancy), not the result's total; the trace is the oracle.
-			// Reporting full usage totals is conduit-test-i7fy.11.
 			expect(shownTokens).toEqual({
-				input: `${reportedTokens.input} in`,
-				output: `${reportedTokens.output} out`,
+				input: `${sdkTokens.input} in`,
+				output: `${sdkTokens.output} out`,
 			});
+			expect(final.segments.map((segment) => segment.contextTokens)).toEqual(
+				results.map(
+					(result) =>
+						result.contextUsage.input_tokens +
+						result.contextUsage.cache_read_input_tokens +
+						result.contextUsage.cache_creation_input_tokens,
+				),
+			);
+			const composerContext = page.getByTestId("composer-word-context-usage");
+			await expect(composerContext).toHaveText(`${contextPct}%`);
+			await page.reload();
+			await expect(
+				meta.getByTitle("Fresh input tokens", { exact: true }),
+			).toHaveText(`${sdkTokens.input} in`);
+			await expect(
+				meta.getByTitle("Output tokens", { exact: true }),
+			).toHaveText(`${sdkTokens.output} out`);
+			await expect(context).toContainText(`${contextPct}%`);
+			await expect(composerContext).toHaveText(`${contextPct}%`);
+			report["reloaded"] = {
+				input: await meta
+					.getByTitle("Fresh input tokens", { exact: true })
+					.innerText(),
+				output: await meta
+					.getByTitle("Output tokens", { exact: true })
+					.innerText(),
+				context: await context.innerText(),
+				composerContext: await composerContext.innerText(),
+			};
 		} finally {
 			const path = testInfo.outputPath("turn-working-time-report.json");
 			writeFileSync(path, JSON.stringify(report, null, 2));

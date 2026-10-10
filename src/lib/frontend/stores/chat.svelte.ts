@@ -657,17 +657,19 @@ function updateContextFromTokens(
 				output?: number;
 				cache_read?: number;
 				cache_creation?: number;
+				contextTokens?: number;
 				context_window?: number | undefined;
 		  }
 		| undefined,
 ): void {
 	if (!usage) return;
 	const total =
+		usage.contextTokens ??
 		(usage.input ?? 0) +
-		(usage.output ?? 0) +
-		(usage.cache_read ?? 0) +
-		(usage.cache_creation ?? 0);
-	if (total <= 0) return;
+			(usage.output ?? 0) +
+			(usage.cache_read ?? 0) +
+			(usage.cache_creation ?? 0);
+	if (total <= 0 && usage.contextTokens === undefined) return;
 	const limit =
 		typeof usage.context_window === "number" &&
 		Number.isFinite(usage.context_window) &&
@@ -716,18 +718,22 @@ export function restoreContextFromMessages(messages: SessionMessages): void {
 		}
 		if (message?.type !== "result") continue;
 		const total =
+			message.contextTokens ??
 			(message.inputTokens ?? 0) +
-			(message.outputTokens ?? 0) +
-			(message.cacheRead ?? 0) +
-			(message.cacheWrite ?? 0);
+				(message.outputTokens ?? 0) +
+				(message.cacheRead ?? 0) +
+				(message.cacheWrite ?? 0);
 		// Skip zero-token results (e.g. the `/compact` turn) so the walk falls
 		// through to the compaction divider that carries the true post size.
-		if (total <= 0) continue;
+		if (total <= 0 && message.contextTokens === undefined) continue;
 		updateContextFromTokens(messages, {
 			...(message.inputTokens != null && { input: message.inputTokens }),
 			...(message.outputTokens != null && { output: message.outputTokens }),
 			...(message.cacheRead != null && { cache_read: message.cacheRead }),
 			...(message.cacheWrite != null && { cache_creation: message.cacheWrite }),
+			...(message.contextTokens != null && {
+				contextTokens: message.contextTokens,
+			}),
 			...(message.context_window != null && {
 				context_window: message.context_window,
 			}),

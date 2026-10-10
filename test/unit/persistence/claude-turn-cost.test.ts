@@ -2,17 +2,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, Logger, ManagedRuntime } from "effect";
+import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import {
+	economics,
+	segmentTurns,
+} from "../../../src/lib/frontend/utils/turns.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 function makeCostRuntime(filename: string) {
 	const persistence = makePersistenceEffectLayer(filename);
@@ -24,7 +32,7 @@ function makeCostRuntime(filename: string) {
 	);
 }
 
-describe("Claude turn costs through SQLite persistence", () => {
+describe("Claude turn economics through SQLite persistence", () => {
 	let dir: string;
 	let filename: string;
 	let runtime: ReturnType<typeof makeCostRuntime>;
@@ -118,6 +126,106 @@ describe("Claude turn costs through SQLite persistence", () => {
 		yield* runner.recover();
 		expect(yield* runner.getFailures()).toEqual([]);
 		return yield* costs;
+	});
+
+	it("keeps usage and context independent through history, reopening and rebuilding, including legacy rows", async () => {
+		const snapshot = Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			return {
+				messages:
+					yield* sql`SELECT id, cost, tokens_in, tokens_out, tokens_cache_read,
+					tokens_cache_write, context_tokens, context_window, created_at, updated_at
+					FROM messages ORDER BY id`,
+				turns:
+					yield* sql`SELECT id, cost, tokens_in, tokens_out, requested_at, started_at,
+					completed_at FROM turns ORDER BY id`,
+			};
+		});
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const read = yield* ReadQueryEffectTag;
+				for (const session of ["new", "old", "opencode", "context-only"]) {
+					const provider = session === "opencode" ? "opencode" : "claude";
+					yield* seedSession(session, provider);
+					yield* seedTurn(session, `${session}-u`, `${session}-a`);
+					yield* persist.persistEvent(
+						canonicalEvent(
+							"turn.completed",
+							session,
+							{
+								messageId: `${session}-a`,
+								cost: 0.1,
+								...(session === "new" || session === "context-only"
+									? { contextTokens: 40_000 }
+									: {}),
+								tokens:
+									session === "context-only"
+										? { contextWindow: 200_000 }
+										: {
+												input: 500,
+												output: 20_000,
+												cacheRead: 3_300_000,
+												cacheWrite: 80_000,
+												contextWindow: 200_000,
+											},
+							},
+							{ provider, createdAt: stamp++ },
+						),
+					);
+					const history = messageRowsToHistory(
+						yield* read.getSessionMessagesWithParts(session),
+						{ pageSize: 50 },
+					);
+					const assistant = history.messages.find(
+						(message) => message.role === "assistant",
+					);
+					expect(assistant).toBeDefined();
+					const wire =
+						Schema.decodeUnknownSync(HistoryMessageSchema)(assistant);
+					expect(wire).toEqual(assistant);
+					const [turn] = segmentTurns(
+						historyToChatMessages(history.messages),
+						false,
+					);
+					if (!turn) throw new Error("expected hydrated turn");
+					const bill = economics(turn, 0);
+					expect(bill.tokensIn).toBe(
+						session === "context-only" ? undefined : 500,
+					);
+					expect(bill.tokensOut).toBe(
+						session === "context-only" ? undefined : 20_000,
+					);
+					if (session === "new" || session === "context-only") {
+						expect(wire["contextTokens"]).toBe(40_000);
+						expect(bill.context).toEqual({
+							used: 40_000,
+							window: 200_000,
+							pct: 20,
+						});
+					} else {
+						expect(wire).not.toHaveProperty("contextTokens");
+						expect(bill.context).toEqual({
+							used: 3_380_500,
+							window: 200_000,
+							pct: 100,
+						});
+					}
+					expect(
+						(yield* read.getSessionHistoryMetadata(session)).cumulativeTokens,
+					).toBe(session === "context-only" ? 0 : 3_400_500);
+				}
+			}),
+		);
+		const before = await runtime.runPromise(snapshot);
+		await runtime.dispose();
+		runtime = makeCostRuntime(filename);
+		await runtime.runPromise(
+			Effect.flatMap(ProjectionRunnerEffectTag, (runner) => runner.recover()),
+		);
+		expect(await runtime.runPromise(snapshot)).toEqual(before);
+		await runtime.runPromise(rebuildCosts);
+		expect(await runtime.runPromise(snapshot)).toEqual(before);
 	});
 
 	it("continues the durable baseline after closing and reopening SQLite, then rebuilds", async () => {

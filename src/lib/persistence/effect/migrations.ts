@@ -13,6 +13,7 @@ import {
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
+	MESSAGES_CONTEXT_TOKENS_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
 	PENDING_APPROVALS_VERSION_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
@@ -1071,6 +1072,11 @@ export const effectMigrationEntries = {
 			counter?.value ?? 0,
 		);
 	}),
+	"0040_messages_context_tokens": runAddColumnMigrationIfMissing(
+		"messages",
+		"context_tokens",
+		readMigrationSql(MESSAGES_CONTEXT_TOKENS_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
