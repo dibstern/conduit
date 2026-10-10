@@ -1554,11 +1554,11 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 		},
 	},
 	titleQuery: async function* (params: Parameters<ClaudeTitleQueryFactory>[0]) {
-		const file = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
+		const file = process.env["CONDUIT_TEST_CLAUDE_TITLES_FILE"];
 		if (file)
 			appendFileSync(
 				file,
-				`${JSON.stringify({ pid: process.pid, prompt: params.prompt, options: { cwd: params.options?.cwd, persistSession: params.options?.persistSession } })}\n`,
+				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd })}\n`,
 			);
 		yield {
 			type: "result",

@@ -739,6 +739,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 						this.root,
 						"claude-options.jsonl",
 					),
+					// Title queries run in the daemon, so they stay out of the runner log.
+					CONDUIT_TEST_CLAUDE_TITLES_FILE: join(
+						this.root,
+						"claude-titles.jsonl",
+					),
 					...(this.claudeCaptureDir
 						? { CONDUIT_CLAUDE_SDK_CAPTURE: this.claudeCaptureDir }
 						: {}),
@@ -1168,6 +1173,15 @@ Object.assign(ClaudeDriver, { create: deps => {
 						resumeId?: string | null;
 					},
 			);
+	}
+
+	claudeTitles(): readonly { prompt: string; cwd?: string }[] {
+		const file = join(this.root, "claude-titles.jsonl");
+		if (!existsSync(file)) return [];
+		return readFileSync(file, "utf8")
+			.split("\n")
+			.filter((line) => line.trim() !== "")
+			.map((line) => JSON.parse(line) as { prompt: string; cwd?: string });
 	}
 
 	async connect(
