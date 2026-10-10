@@ -41,6 +41,7 @@ export interface OverridesState {
 	sessions: Map<string, SessionState>;
 	processingTimeoutFibers: FiberMap.FiberMap<string, void>;
 	defaultModel: ModelOverride | undefined;
+	nativeDefaultModel: ModelOverride | undefined;
 	defaultAgent: string | undefined;
 	defaultVariant: string;
 	defaultPermissionMode: SessionPermissionMode;
@@ -64,6 +65,7 @@ export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
 				sessions: new Map(),
 				processingTimeoutFibers,
 				defaultModel: undefined,
+				nativeDefaultModel: undefined,
 				defaultAgent: undefined,
 				defaultVariant: "",
 				defaultPermissionMode: "ask",
@@ -150,7 +152,7 @@ export const getDefaultModel = () =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.defaultModel;
+		return state.defaultModel ?? state.nativeDefaultModel;
 	});
 
 /** Set the global default agent. */

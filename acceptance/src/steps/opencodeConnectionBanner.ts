@@ -81,7 +81,9 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setResponse("GetModels", {
 				projectSlug: "myapp",
-				providers: dualDriverProviders,
+				providers: dualDriverProviders.filter(
+					(provider) => provider.id !== "claude",
+				),
 				active: {
 					model: claudeModel ? "claude-opus-4-1" : "claude-sonnet-4",
 					provider: claudeModel ? "claude" : "anthropic",

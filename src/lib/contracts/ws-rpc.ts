@@ -335,6 +335,7 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
+	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
@@ -2331,6 +2332,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("opencodeConnection", {
 		instanceId: Schema.String,
 		status: OpenCodeConnectionStatusSchema,
+	}),
+	/** The shared Claude catalog, including an empty discovery result. */
+	Schema.TaggedStruct("providerModels", {
+		providers: Schema.Array(ProviderInfoSchema),
 	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;

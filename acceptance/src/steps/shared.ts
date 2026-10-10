@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { GetModelsResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import type { RpcMockControl } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
@@ -72,14 +73,24 @@ export async function refetchModelCatalog(page: Page): Promise<void> {
 	await expect.poll(fetches).toBeGreaterThan(before);
 }
 
-/** Serve a new GetModels catalog and make the app refetch it. */
+/** Publish Claude's live catalog and refetch OpenCode's catalog. */
 export async function serveModelCatalog(
 	page: Page,
-	response: Record<string, unknown>,
+	response: Omit<GetModelsResponse, "projectSlug">,
 ): Promise<void> {
-	requireRpcControl(page).setResponse("GetModels", {
+	const rpc = requireRpcControl(page);
+	rpc.setResponse("GetModels", {
 		projectSlug: "myapp",
 		...response,
+		providers: response.providers.filter(
+			(provider) => provider.id !== "claude",
+		),
+	});
+	rpc.setProjectSetting({
+		_tag: "providerModels",
+		providers: response.providers.filter(
+			(provider) => provider.id === "claude",
+		),
 	});
 	await refetchModelCatalog(page);
 }

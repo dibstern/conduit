@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { PermissionRuleset } from "../../../src/lib/instance/sdk-types.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
@@ -560,6 +562,75 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(result.status).toBe("error");
 		expect(result.error?.code).toBe("send_failed");
 		expect(result.error?.message).toContain("ECONNREFUSED");
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("does not infer a named-instance migration from a stale facade URL after an endpoint change", async () => {
+		const failure = new OpenCodeApiError({
+			message: "HTTP 404: session not found",
+			endpoint: "session.prompt",
+			responseStatus: 404,
+		});
+		client = makeStubClient({
+			getBaseUrl: () => "http://opencode.invalid:4100",
+		});
+		const freshClient = makeStubClient({
+			getBaseUrl: () => "http://opencode.invalid:4200",
+			session: {
+				prompt: vi.fn(async () => {
+					throw failure;
+				}),
+			},
+		});
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () => Effect.succeed(freshClient),
+			instanceIdForSession: () =>
+				Effect.succeed(defaultInstanceIdForDriver("opencode")),
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+
+		expect(result.status).toBe("error");
+		expect(result.error).toEqual({
+			code: "send_failed",
+			message: failure.message,
+		});
+		expect(freshClient.session.prompt).toHaveBeenCalledOnce();
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("retains the migration diagnostic for an authoritative named-instance binding with the same URL", async () => {
+		client = makeStubClient({
+			getBaseUrl: () => "http://opencode.invalid:4100",
+		});
+		const namedClient = makeStubClient({
+			getBaseUrl: () => "http://opencode.invalid:4100",
+			session: {
+				prompt: vi.fn(async () => {
+					throw new OpenCodeApiError({
+						message: "HTTP 404: session not found",
+						endpoint: "session.prompt",
+						responseStatus: 404,
+					});
+				}),
+			},
+		});
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () => Effect.succeed(namedClient),
+			instanceIdForSession: () => Effect.succeed("oc-b"),
+		});
+
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		);
+
+		expect(result.error?.message).toContain(
+			"may predate named-instance routing",
+		);
 		expect(client.session.prompt).not.toHaveBeenCalled();
 	});
 

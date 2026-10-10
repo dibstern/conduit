@@ -435,26 +435,32 @@ const server = createServer(async (request, response) => {
 			}),
 		);
 	} else if (path === "/config") {
-		response.end("{}");
-	} else if (path === "/provider" && request.method === "GET") {
+		const projectConfig = join(directory ?? process.cwd(), "opencode.json");
 		response.end(
-			JSON.stringify({
-				all: [
-					{
-						id: "fake",
-						name: "Fake Provider",
-						models: {
-							"fake-model": {
-								id: "fake-model",
-								name: "Fake Model",
-								limit: { context: 128000, output: 4096 },
+			existsSync(projectConfig) ? readFileSync(projectConfig, "utf8") : "{}",
+		);
+	} else if (path === "/provider" && request.method === "GET") {
+		const catalogFile = join(configDir, "fake-opencode-model-catalog.json");
+		response.end(
+			existsSync(catalogFile)
+				? readFileSync(catalogFile, "utf8")
+				: JSON.stringify({
+						all: [
+							{
+								id: "fake",
+								name: "Fake Provider",
+								models: {
+									"fake-model": {
+										id: "fake-model",
+										name: "Fake Model",
+										limit: { context: 128000, output: 4096 },
+									},
+								},
 							},
-						},
-					},
-				],
-				default: { fake: "fake-model" },
-				connected: ["fake"],
-			}),
+						],
+						default: { fake: "fake-model" },
+						connected: ["fake"],
+					}),
 		);
 	} else {
 		response.end("[]");

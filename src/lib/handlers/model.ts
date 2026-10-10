@@ -1,4 +1,4 @@
-import { type Cause, Data, Effect } from "effect";
+import { type Cause, Data, Effect, FiberHandle, Ref } from "effect";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
@@ -10,8 +10,13 @@ import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
+	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
-import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
+import {
+	ProjectSettingsTag,
+	publishGlobalProjectSetting,
+	publishProjectSetting,
+} from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -33,7 +38,7 @@ import {
 	getPermissionMode,
 	getVariant,
 	type ModelOverride,
-	type OverridesStateTag,
+	OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -268,6 +273,7 @@ export const getModelsResponse = (
 	| ReadQueryEffectTag
 	| OverridesStateTag
 	| WebSocketHandlerTag
+	| ProjectSettingsTag
 > =>
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
@@ -286,33 +292,100 @@ export const getModelsResponse = (
 				: daemonConfig === null
 					? resolveBuiltInInstanceDriver(instanceId)
 					: resolveInstanceDriver(daemonConfig, instanceId);
+		const { modelDiscovery } = yield* ProjectSettingsTag;
+		if (instanceDriver === undefined || instanceDriver === "claude")
+			yield* engine
+				.dispatchEffect({ type: "discover", providerId: "claude" })
+				.pipe(
+					Effect.map(
+						(capabilities): ProviderInfo => ({
+							id: "claude",
+							name: "Anthropic - claude",
+							configured: true,
+							models: capabilities.models
+								.map((m) => ({
+									id: m.id,
+									name: m.name,
+									provider: "claude",
+									...(m.limit ? { limit: { ...m.limit } } : {}),
+									...(m.variants && Object.keys(m.variants).length > 0
+										? { variants: Object.keys(m.variants) }
+										: {}),
+									...(m.contextWindowOptions &&
+									m.contextWindowOptions.length > 0
+										? {
+												contextWindowOptions:
+													cloneContextWindowOptions(m.contextWindowOptions) ??
+													[],
+											}
+										: {}),
+								}))
+								.sort((a, b) =>
+									a.name.localeCompare(b.name, undefined, {
+										sensitivity: "base",
+									}),
+								),
+						}),
+					),
+					Effect.tap((provider) =>
+						publishProjectSetting({
+							_tag: "providerModels",
+							providers: provider.models.length > 0 ? [provider] : [],
+						}),
+					),
+					Effect.catchAll((error) =>
+						Effect.sync(() =>
+							log.warn(
+								`Claude provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
+							),
+						),
+					),
+					Effect.asVoid,
+					(effect) =>
+						FiberHandle.run(modelDiscovery, effect, { onlyIfMissing: true }),
+				);
 
 		const activeId =
 			input.sessionId ??
 			(input.clientId
 				? yield* resolveSessionFromContext(input.clientId)
 				: undefined);
-		const fallbackModel = activeId
-			? yield* getModel(activeId)
-			: yield* getDefaultModel();
-		const activeProviderId = activeId
-			? yield* engine.getProviderForSessionEffect(activeId)
-			: undefined;
-		const selectedDriver: ProviderDriverKind = isClaudeProvider(
-			activeProviderId ?? fallbackModel?.providerID ?? "",
-		)
-			? "claude"
-			: "opencode";
-		const selectedModelMatchesInstance =
-			instanceDriver === undefined || instanceDriver === selectedDriver;
-
 		const providers: ProviderInfo[] = [];
-		let openCodeFailure: Cause.UnknownException | undefined;
 		if (instanceDriver === undefined || instanceDriver === "opencode") {
 			const openCodeProviderResult = yield* Effect.either(
 				modelService.listProviders(),
 			);
 			if (openCodeProviderResult._tag === "Right") {
+				const nativeDefaultModel = parseDefaultModel(
+					openCodeProviderResult.right.nativeDefaultModel,
+				);
+				const { globalSync } = yield* ProjectSettingsTag;
+				yield* globalSync.withPermits(1)(
+					Effect.gen(function* () {
+						const state = yield* Ref.get(yield* OverridesStateTag);
+						if (
+							state.nativeDefaultModel?.providerID ===
+								nativeDefaultModel?.providerID &&
+							state.nativeDefaultModel?.modelID === nativeDefaultModel?.modelID
+						)
+							return;
+						yield* Ref.update(yield* OverridesStateTag, (current) => ({
+							...current,
+							nativeDefaultModel,
+						}));
+						if (state.defaultModel === undefined)
+							yield* publishProjectSetting({
+								_tag: "defaultModel",
+								...(nativeDefaultModel
+									? {
+											model: nativeDefaultModel.modelID,
+											provider: nativeDefaultModel.providerID,
+										}
+									: {}),
+								variant: state.defaultVariant,
+							});
+					}),
+				);
 				const connectedSet = new Set(openCodeProviderResult.right.connected);
 				providers.push(
 					...openCodeProviderResult.right.providers
@@ -342,64 +415,10 @@ export const getModelsResponse = (
 						.filter((p) => p.configured),
 				);
 			} else {
-				openCodeFailure = openCodeProviderResult.left;
 				log.warn(
 					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
 				);
 			}
-		}
-
-		// Merge Claude in-process models when requested.
-		let claudeDiscoveryFailed = false;
-		if (instanceDriver === undefined || instanceDriver === "claude") {
-			const engineResult = yield* Effect.either(
-				engine.dispatchEffect({
-					type: "discover",
-					providerId: "claude",
-				}),
-			);
-			if (
-				engineResult._tag === "Right" &&
-				engineResult.right.models.length > 0
-			) {
-				for (const p of providers) {
-					if (p.id === "anthropic") {
-						p.name = "Anthropic - opencode";
-					}
-				}
-				providers.push({
-					id: "claude",
-					...(instanceId === undefined ? {} : { instanceId }),
-					name: "Anthropic - claude",
-					configured: true,
-					models: engineResult.right.models.map((m) => ({
-						id: m.id,
-						name: m.name,
-						provider: "claude",
-						...(m.limit ? { limit: { ...m.limit } } : {}),
-						...(m.variants && Object.keys(m.variants).length > 0
-							? { variants: Object.keys(m.variants) }
-							: {}),
-						...(m.contextWindowOptions && m.contextWindowOptions.length > 0
-							? {
-									contextWindowOptions:
-										cloneContextWindowOptions(m.contextWindowOptions) ?? [],
-								}
-							: {}),
-					})),
-				});
-			}
-			if (engineResult._tag === "Left") {
-				claudeDiscoveryFailed = true;
-			}
-		}
-		if (
-			instanceId === undefined &&
-			openCodeFailure !== undefined &&
-			claudeDiscoveryFailed &&
-			providers.length === 0
-		) {
-			return yield* Effect.fail(openCodeFailure);
 		}
 
 		// Provider catalogs arrive in arbitrary order; sort for the picker.
@@ -409,10 +428,41 @@ export const getModelsResponse = (
 			);
 		}
 
+		const activeProviderId = activeId
+			? yield* engine.getProviderForSessionEffect(activeId)
+			: undefined;
+		const activeDriver = activeProviderId
+			? resolveProviderRoutingDriver(
+					daemonConfig ??
+						(isKnownDriverKind(activeProviderId) || !config.configDir
+							? null
+							: loadDaemonConfig(config.configDir)),
+					activeProviderId,
+				)
+			: undefined;
+		// OpenCode owns its native turn default; only its catalog inherits it.
+		const fallbackModel = activeId
+			? ((yield* getModel(activeId)) ??
+				(activeDriver === "opencode" ? yield* getDefaultModel() : undefined))
+			: yield* getDefaultModel();
+		const selectedDriver: ProviderDriverKind =
+			activeDriver ??
+			(isClaudeProvider(fallbackModel?.providerID ?? "")
+				? "claude"
+				: "opencode");
+		const selectedModelMatchesInstance =
+			instanceDriver === undefined || instanceDriver === selectedDriver;
 		const selectedModel = selectedModelMatchesInstance
 			? fallbackModel
 			: undefined;
-		const catalogModel = findCatalogModel(providers, selectedModel);
+		const claudeCatalog = (yield* Ref.get((yield* ProjectSettingsTag).live))
+			.providerModels;
+		const catalogModel = findCatalogModel(
+			selectedDriver === "claude"
+				? (claudeCatalog?.providers ?? [])
+				: providers,
+			selectedModel,
+		);
 		// A stored `opus[1m]` answers as the catalog's `opus`, so the client
 		// carries the id the catalog advertises today. Routing options keep theirs.
 		const activeModel =
@@ -426,7 +476,8 @@ export const getModelsResponse = (
 		const currentVariant = activeId
 			? yield* getVariant(activeId)
 			: yield* getDefaultVariant();
-		const variantList = [...(catalogModel?.variants ?? [])];
+		const variantList =
+			selectedDriver === "claude" ? [] : [...(catalogModel?.variants ?? [])];
 		const currentContextWindow = activeId
 			? yield* getContextWindow(activeId)
 			: yield* getDefaultContextWindow();
@@ -478,7 +529,10 @@ export const getModelsResponse = (
 			},
 			contextWindow: {
 				contextWindow: currentContextWindow,
-				options: catalogModel?.contextWindowOptions ?? [],
+				options:
+					selectedDriver === "claude"
+						? []
+						: (catalogModel?.contextWindowOptions ?? []),
 			},
 			// No session yet: the mode a new session would start in.
 			permissionMode: activeId

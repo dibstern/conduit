@@ -1,13 +1,29 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import {
+	Deferred,
+	Effect,
+	Fiber,
+	FiberHandle,
+	Layer,
+	Option,
+	PubSub,
+	Queue,
+	Stream,
+	Supervisor,
+} from "effect";
 import { expect, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
+import {
+	ProjectSettingsLive,
+	ProjectSettingsTag,
+	refreshGlobalDefaults,
+	subscribeProjectSettings,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -22,6 +38,7 @@ import {
 	getDefaultVariant,
 	getVariant,
 	makeOverridesStateLive,
+	setDefaultModel,
 	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -35,6 +52,8 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
+import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockConfig,
@@ -46,7 +65,7 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
@@ -187,6 +206,13 @@ describe("model handlers with Effect-native model service", () => {
 								},
 							],
 						},
+				]);
+				const catalog = yield* subscribeProjectSettings().pipe(
+					Stream.mapConcat((envelope) => envelope._tag === "snapshot" ? envelope.rows : envelope._tag === "upsert" ? [envelope.item] : []),
+					Stream.filter((setting) => setting._tag === "providerModels"),
+					Stream.runHead, Effect.map(Option.getOrThrow),
+				);
+				expect(catalog.providers).toEqual([
 						{
 							id: "claude",
 							name: "Anthropic - claude",
@@ -200,9 +226,138 @@ describe("model handlers with Effect-native model service", () => {
 							],
 						},
 				]);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(Layer.merge(layer, ProjectSettingsLive)));
 		},
 	);
+
+	for (const fails of [false, true]) {
+		it.effect(`shares one pending Claude discovery and publication, then refreshes after ${fails ? "failure" : "success"}`, () => Effect.gen(function* () {
+			let pending = yield* Deferred.make<ProviderCapabilities, Error>();
+			let discoveries = 0;
+			const capabilities: ProviderCapabilities = {
+				models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }], commands: [],
+				supportsTools: true, supportsThinking: true, supportsPermissions: true,
+				supportsQuestions: true, supportsAttachments: true, supportsFork: true, supportsRevert: true,
+			};
+			const engine = withDispatchEffect({ dispatchEffect: () => Effect.gen(function* () {
+				discoveries += 1;
+				return yield* Deferred.await(pending);
+			}) });
+			const deps = Layer.mergeAll(
+				Layer.succeed(OpenCodeModelServiceTag, {
+					listProviders: () => Effect.succeed({ connected: ["fake"], defaults: {}, providers: [
+						{ id: "fake", name: "Fake", models: [{ id: "model-a", name: "A" }] },
+					] }),
+					cachedProviders: () => Effect.succeedNone,
+					persistDefaultModel: () => Effect.void,
+				}),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
+			);
+			return yield* Effect.gen(function* () {
+				const updates = yield* PubSub.subscribe((yield* ProjectSettingsTag).changes);
+				const supervisor = yield* Supervisor.track;
+				const responses = yield* Effect.forEach(Array.from({ length: 25 }), () => getModelsResponse(), {
+					concurrency: "unbounded",
+				}).pipe(Effect.supervised(supervisor));
+				expect(responses).toHaveLength(25);
+				for (const response of responses) expect(response.providers.map(({ id }) => id)).toEqual(["fake"]);
+				expect(yield* Deferred.isDone(pending)).toBe(false);
+				const fibers = yield* supervisor.value;
+				expect(fibers).toHaveLength(1);
+				expect(discoveries).toBe(1);
+				if (fails) yield* Deferred.fail(pending, new Error("Claude discovery failed"));
+				else yield* Deferred.succeed(pending, capabilities);
+				yield* Effect.forEach(fibers, Fiber.join);
+				const firstUpdates = Array.from(yield* Queue.takeAll(updates));
+				expect(firstUpdates.filter(({ item }) => item._tag === "providerModels")).toHaveLength(fails ? 0 : 1);
+				pending = yield* Deferred.make<ProviderCapabilities, Error>();
+				yield* getModelsResponse().pipe(Effect.supervised(supervisor));
+				expect(discoveries).toBe(2);
+				const refresh = yield* supervisor.value;
+				expect(refresh).toHaveLength(1);
+				yield* Deferred.succeed(pending, { ...capabilities, models: [{ id: "opus", name: "Opus", providerId: "claude" }] });
+				yield* Effect.forEach(refresh, Fiber.join);
+				expect(Array.from(yield* Queue.takeAll(updates))).toMatchObject([
+					{ item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] } },
+				]);
+			}).pipe(Effect.provide(deps), Effect.scoped);
+		}));
+	}
+
+	it.effect("returns OpenCode models while Claude discovery is pending and publishes Claude models when ready", () => {
+		return Effect.gen(function* () {
+			const pending = yield* Deferred.make<ProviderCapabilities>();
+			const started = yield* Deferred.make<void>();
+			let readyCapabilities: ProviderCapabilities | undefined;
+			const modelService = {
+				listProviders: () => Effect.succeed({
+					connected: ["fake"], defaults: {},
+					providers: [{ id: "fake", name: "Fake", models: [{ id: "model-a", name: "A" }] }],
+				}),
+				cachedProviders: () => Effect.succeedNone,
+				persistDefaultModel: () => Effect.void,
+			};
+			const engine = withDispatchEffect({
+				dispatchEffect: () => Deferred.succeed(started, undefined).pipe(
+					Effect.zipRight(readyCapabilities ? Effect.succeed(readyCapabilities) : Deferred.await(pending)),
+				),
+			});
+			const deps = Layer.mergeAll(
+				Layer.succeed(OpenCodeModelServiceTag, modelService),
+				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
+			);
+			return yield* Effect.gen(function* () {
+				const request = yield* Effect.fork(getModelsResponse());
+				yield* Deferred.await(started);
+				const response = yield* Fiber.join(request);
+				expect(yield* Deferred.isDone(pending)).toBe(false);
+				expect(response.providers.map(({ id }) => id)).toEqual(["fake"]);
+				const subscribed = yield* Deferred.make<void>();
+				const update = yield* subscribeProjectSettings().pipe(
+					Stream.tap((envelope) => envelope._tag === "synchronized" ? Deferred.succeed(subscribed, undefined) : Effect.void),
+					Stream.filter((envelope) => envelope._tag === "upsert" && envelope.item._tag === "providerModels"),
+					Stream.runHead, Effect.fork,
+				);
+				yield* Deferred.await(subscribed);
+				yield* Deferred.succeed(pending, {
+					models: [{ id: "sonnet", name: "Sonnet", providerId: "claude", variants: { high: {} } }], commands: [],
+					supportsTools: true, supportsThinking: true, supportsPermissions: true,
+					supportsQuestions: true, supportsAttachments: true, supportsFork: true, supportsRevert: true,
+				});
+				const published = yield* Fiber.join(update);
+				yield* FiberHandle.awaitEmpty((yield* ProjectSettingsTag).modelDiscovery);
+				expect(Option.isSome(published)).toBe(true);
+				if (Option.isSome(published)) expect(published.value).toMatchObject({
+					_tag: "upsert", item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "sonnet", variants: ["high"] }] }] },
+				});
+				const snapshot = yield* subscribeProjectSettings().pipe(Stream.runHead);
+				expect(Option.isSome(snapshot) && snapshot.value._tag === "snapshot" &&
+					snapshot.value.rows.some((row) => row._tag === "providerModels")).toBe(true);
+				readyCapabilities = { ...(yield* Deferred.await(pending)), models: [{ id: "opus", name: "Opus", providerId: "claude" }] };
+				const refreshSubscribed = yield* Deferred.make<void>();
+				const refreshedUpdate = yield* subscribeProjectSettings().pipe(
+					Stream.tap((envelope) => envelope._tag === "synchronized" ? Deferred.succeed(refreshSubscribed, undefined) : Effect.void),
+					Stream.filter((envelope) => envelope._tag === "upsert" && envelope.item._tag === "providerModels"),
+					Stream.runHead, Effect.fork,
+				);
+				yield* Deferred.await(refreshSubscribed);
+				const refreshed = yield* getModelsResponse({ instanceId: "claude" });
+				expect(refreshed.providers).toEqual([]);
+				expect(Option.getOrThrow(yield* Fiber.join(refreshedUpdate))).toMatchObject({
+					_tag: "upsert", item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] },
+				});
+				const refreshedSnapshot = yield* subscribeProjectSettings().pipe(Stream.runHead);
+				expect(Option.isSome(refreshedSnapshot) && refreshedSnapshot.value._tag === "snapshot" &&
+					refreshedSnapshot.value.rows.some((row) => row._tag === "providerModels" && row.providers[0]?.models[0]?.id === "opus")).toBe(true);
+			}).pipe(Effect.provide(deps));
+		});
+	});
 
 	it.effect(
 		"switches OpenCode variants using the model service without requiring the Promise OpenCode API tag",
@@ -427,6 +582,73 @@ describe("model handlers with Effect-native model service", () => {
 			Layer.succeed(ConfigTag, makeMockConfig()),
 			Layer.succeed(LoggerTag, makeMockLogger()),
 		)))));
+	});
+
+	it.effect("honours the running project's native default instead of the first catalog model without starting OpenCode", () => {
+		let running = false;
+		const nativeConfig = { model: "fake/model-b" };
+		const api = makeHandlerOpenCodeAPI({
+			config: { get: vi.fn(async () => nativeConfig) },
+			provider: { list: vi.fn(async () => ({
+				connected: ["fake"],
+				defaults: { fake: "model-a" },
+				providers: [{ id: "fake", name: "Fake", models: [
+					{ id: "model-a", name: "A" },
+					{ id: "model-b", name: "B" },
+				] }],
+			})) },
+		});
+		const instances = {
+			...makeOpenCodeInstancesStub({ opencode: api }),
+			use: vi.fn(() => Effect.succeed(api)),
+			ifRunning: vi.fn(() => Effect.succeed(running ? Option.some(api) : Option.none())),
+		};
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-native-default-"));
+		const config = makeMockConfig({ configDir });
+		writeFileSync(join(configDir, "daemon.json"), JSON.stringify({
+			pid: 1234, port: 0, pinHash: null, tls: false, debug: false,
+			keepAwake: false, dangerouslySkipPermissions: false, projects: [],
+			instances: [{ id: "work-claude", name: "Work Claude", port: 0, managed: false, driver: "claude" }],
+		}));
+		const deps = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(OpenCodeInstancesTag, instances),
+			Layer.succeed(ConfigTag, config),
+			Layer.succeed(LoggerTag, makeMockLogger()),
+			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({
+				getProviderForSessionEffect: (sessionId: string) => Effect.succeed(
+					sessionId === "opencode-session" ? "opencode" : sessionId === "claude-session" ? "claude" : "work-claude",
+				),
+				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
+			})),
+			makeOverridesStateLive(),
+			ProjectSettingsLive,
+		);
+		const models = OpenCodeModelServiceLive.pipe(Layer.provide(deps));
+		return Effect.gen(function* () {
+			const cold = yield* getModelsResponse({ instanceId: "opencode" });
+			expect(cold.providers).toEqual([]);
+			expect(api.config.get).not.toHaveBeenCalled();
+			expect(api.provider.list).not.toHaveBeenCalled();
+			running = true;
+			const live = yield* getModelsResponse({ instanceId: "opencode" });
+			expect(live.active).toEqual({ provider: "fake", model: "model-b" });
+			expect(live.providers[0]?.models.map(({ id }) => id)).toEqual(["model-a", "model-b"]);
+			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
+			yield* refreshGlobalDefaults;
+			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
+			expect((yield* getModelsResponse({ instanceId: "opencode", sessionId: "opencode-session" })).active).toEqual({ provider: "fake", model: "model-b" });
+			for (const sessionId of ["claude-session", "named-claude-session"]) {
+				expect((yield* getModelsResponse({ sessionId })).active).toBeUndefined();
+			}
+			yield* setDefaultModel({ providerID: "fake", modelID: "model-a" });
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			running = false;
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			expect(instances.use).not.toHaveBeenCalled();
+			expect(api.config.get).toHaveBeenCalledTimes(5);
+		}).pipe(Effect.provide(Layer.merge(deps, models)));
 	});
 
 	it.effect(
