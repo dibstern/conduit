@@ -40,6 +40,7 @@ import {
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
+import { readRepositoryIdentity } from "../../../git/repository-identity.js";
 import { withCachedProjectGit } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
@@ -54,7 +55,10 @@ import {
 } from "../../../project-folders.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
-import { requestConfigSave } from "./config-persistence-service.js";
+import {
+	ConfigPersistenceTag,
+	requestConfigSave,
+} from "./config-persistence-service.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -120,7 +124,27 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	lastUsed: project.addedAt,
 	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
+	...(project.repositoryIdentities !== undefined && {
+		repositoryIdentities: project.repositoryIdentities,
+	}),
 });
+
+const deriveRepositoryIdentities = (folders: readonly string[]) =>
+	Effect.forEach(
+		folders,
+		(folder) =>
+			Effect.tryPromise(() => readRepositoryIdentity(folder)).pipe(
+				Effect.catchAll(() => Effect.succeed(undefined)),
+				Effect.map((identity) =>
+					identity ? ([folder, identity] as const) : undefined,
+				),
+			),
+		{ concurrency: 4 },
+	).pipe(
+		Effect.map((entries) =>
+			Object.fromEntries(entries.filter((entry) => entry !== undefined)),
+		),
+	);
 
 const makeInitialProjectState = (
 	projects: ReadonlyArray<StoredProject>,
@@ -213,21 +237,49 @@ export const allProjects = Effect.gen(function* () {
 	return projects.sort((a, b) => (b.lastUsed ?? 0) - (a.lastUsed ?? 0));
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
-export const projectInfos = allProjects.pipe(
-	Effect.map((projects) =>
-		withCachedProjectGit(
-			projects.map((project) => ({
-				slug: project.slug,
-				folders: project.folders,
-				title: project.title,
-				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-				...(project.instanceId !== undefined && {
-					instanceId: project.instanceId,
+export const projectInfos = Effect.gen(function* () {
+	const ref = yield* ProjectRegistryTag;
+	for (const project of yield* allProjects) {
+		if (project.repositoryIdentities !== undefined) continue;
+		const repositoryIdentities = yield* deriveRepositoryIdentities(
+			project.folders,
+		);
+		const changed = yield* Ref.modify(ref, (state) => {
+			const current = HashMap.get(state, project.slug);
+			if (
+				Option.isNone(current) ||
+				current.value.project.folders !== project.folders ||
+				current.value.project.repositoryIdentities !== undefined
+			)
+				return [false, state] as const;
+			return [
+				true,
+				HashMap.set(state, project.slug, {
+					...current.value,
+					project: { ...current.value.project, repositoryIdentities },
 				}),
-			})),
-		),
-	),
-);
+			] as const;
+		});
+		if (changed) {
+			const persistence = yield* Effect.serviceOption(ConfigPersistenceTag);
+			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
+		}
+	}
+	return withCachedProjectGit(
+		(yield* allProjects).map((project) => ({
+			slug: project.slug,
+			folders: project.folders,
+			title: project.title,
+			...(project.repositoryIdentities !== undefined && {
+				repositoryIdentities: project.repositoryIdentities,
+			}),
+			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+			...(project.instanceId !== undefined && {
+				instanceId: project.instanceId,
+			}),
+		})),
+	);
+});
 
 export const broadcastProjectList = Effect.gen(function* () {
 	yield* PubSub.publish(
@@ -458,7 +510,12 @@ export const remove = (slug: string) =>
  */
 export const updateProject = (
 	slug: string,
-	updates: Partial<Pick<StoredProject, "title" | "instanceId" | "folders">>,
+	updates: Partial<
+		Pick<
+			StoredProject,
+			"title" | "instanceId" | "folders" | "repositoryIdentities"
+		>
+	>,
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
@@ -707,7 +764,18 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 	Effect.gen(function* () {
 		const stateRef = yield* DaemonStateTag;
 		const state = yield* Ref.get(stateRef);
-		const initialProjects = state.projects.map(toStoredProject);
+		// Refresh even cached identities before consumers (including HTTP/RPC) start.
+		const initialProjects = yield* Effect.forEach(
+			state.projects,
+			(project) =>
+				deriveRepositoryIdentities(project.folders).pipe(
+					Effect.map((repositoryIdentities) => ({
+						...toStoredProject(project),
+						repositoryIdentities,
+					})),
+				),
+			{ concurrency: 4 },
+		);
 		const ref = yield* Ref.make<ProjectRegistryState>(
 			makeInitialProjectState(initialProjects),
 		);
@@ -921,15 +989,19 @@ export const saveProject = (input: SaveProjectInput) =>
 					),
 				);
 				const canonicalFolders = Arr.map(folders, normalizeProjectDirectory);
+				const repositoryIdentities =
+					yield* deriveRepositoryIdentities(canonicalFolders);
 				const project: StoredProject = existing
 					? {
 							...existing,
 							folders: canonicalFolders,
+							repositoryIdentities,
 							...(title !== undefined && { title }),
 						}
 					: {
 							slug,
 							folders: canonicalFolders,
+							repositoryIdentities,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 							...(input.instanceId !== undefined && {
@@ -939,6 +1011,7 @@ export const saveProject = (input: SaveProjectInput) =>
 				if (existing) {
 					yield* updateProject(slug, {
 						folders: canonicalFolders,
+						repositoryIdentities,
 						title: project.title,
 					});
 				} else {

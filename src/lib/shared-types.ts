@@ -502,12 +502,21 @@ export interface HistoryMessage {
 	[key: string]: unknown;
 }
 
+export const RepositoryIdentitySchema = Schema.Struct({
+	key: Schema.String,
+	name: Schema.String,
+	root: Schema.String,
+});
+export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
+
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
 	title: string;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
+	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
+	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;

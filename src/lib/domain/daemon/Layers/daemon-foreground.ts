@@ -460,6 +460,8 @@ export async function startForegroundDaemon(
 			runtime,
 			Effect.gen(function* () {
 				const relayCache = yield* RelayCacheTag;
+				// Persist startup refreshes even when no project is saved this run.
+				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
 				for (const project of registered) {
 					yield* Effect.gen(function* () {

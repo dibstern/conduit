@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
 	SessionInfoSchema,
@@ -155,6 +156,10 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	/** Keyed by Project Folder path; non-git folders have no entry. */
+	repositoryIdentities: Schema.optional(
+		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+	),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),

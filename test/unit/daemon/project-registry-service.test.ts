@@ -7,7 +7,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import { afterAll, afterEach, expect } from "vitest";
@@ -74,6 +74,58 @@ const testLayer = Layer.mergeAll(
 );
 
 describe("projectInfos", () => {
+	it.effect(
+		"lazily backfills identities once and refreshes them on save",
+		() => {
+			const directory = realpathSync(
+				mkdtempSync(join(tmpdir(), "conduit-registry-identity-")),
+			);
+			fixtureDirs.push(directory);
+			execFileSync("git", ["init", "-q"], { cwd: directory });
+			execFileSync(
+				"git",
+				["remote", "add", "origin", "git@github.com:Owner/Repo.git"],
+				{ cwd: directory },
+			);
+			return Effect.gen(function* () {
+				yield* addWithoutRelay({ ...testProject, folders: [directory] });
+				const repositoryIdentities = {
+					[directory]: {
+						key: "github.com/owner/repo",
+						name: "Repo",
+						root: directory,
+					},
+				};
+				expect((yield* projectInfos)[0]?.repositoryIdentities).toEqual(
+					repositoryIdentities,
+				);
+				expect((yield* allProjects)[0]?.repositoryIdentities).toEqual(
+					repositoryIdentities,
+				);
+				execFileSync("git", ["remote", "set-url", "origin", "invalid remote"], {
+					cwd: directory,
+				});
+				expect((yield* projectInfos)[0]?.repositoryIdentities).toEqual(
+					repositoryIdentities,
+				);
+				const saved = yield* saveProject({
+					slug: testProject.slug,
+					folders: [directory],
+				});
+				// A non-hosted origin falls back to the repository's own git dir.
+				const local = {
+					[directory]: {
+						key: join(directory, ".git"),
+						name: basename(directory),
+						root: directory,
+					},
+				};
+				expect(saved.project.repositoryIdentities).toEqual(local);
+				expect((yield* projectInfos)[0]?.repositoryIdentities).toEqual(local);
+			}).pipe(Effect.provide(Layer.fresh(testLayer)));
+		},
+	);
+
 	it.effect("keeps missing projects and computes missing at list time", () => {
 		const directory = mkdtempSync(join(tmpdir(), "conduit-registry-missing-"));
 		fixtureDirs.push(directory);

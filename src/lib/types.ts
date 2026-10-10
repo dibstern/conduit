@@ -113,6 +113,9 @@ export interface ConnectionHealth {
 export interface StoredProject {
 	readonly slug: string;
 	readonly folders: readonly [string, ...string[]];
+	readonly repositoryIdentities?: Readonly<
+		Record<string, import("./shared-types.js").RepositoryIdentity>
+	>;
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
