@@ -44,7 +44,7 @@ export function projectLimit(page: Page, limitRecovery: unknown): void {
 	});
 }
 
-function setClaudeAccounts(
+export function setClaudeAccounts(
 	page: Page,
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {

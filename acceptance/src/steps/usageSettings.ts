@@ -17,7 +17,7 @@ const usageValues = {
 	limit: [100, 71],
 } as const;
 
-function accountReading(
+export function accountReading(
 	accountId: string,
 	planLabel: string,
 	values: readonly [number, number],

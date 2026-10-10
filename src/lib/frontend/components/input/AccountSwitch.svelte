@@ -14,10 +14,10 @@
 	import type { Snippet } from "svelte";
 	import type { HandoffSummary, LimitRecovery, UsageReading } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { instanceState } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { continueSessionRpc, previewContinuationRpc, quotaForAccountsRpc } from "../../transport/ws-rpc-client.js";
+	import { previewContinuationRpc, quotaForAccountsRpc } from "../../transport/ws-rpc-client.js";
+	import { showAccountSwitchRefusal, switchSessionAccount } from "../../utils/account-switch.js";
 	import { accountQuota, limitedQuota, quotaBlocksSwitch, quotaHeadroom, quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -92,17 +92,8 @@
 		} catch (error) {
 			if (ticket !== previewTicket) return;
 			target = undefined;
-			refused(instanceId, error);
+			showAccountSwitchRefusal(instanceId, error);
 		}
-	}
-
-	// The daemon's reason (not logged in, busy, too large) under which account it was.
-	function refused(instanceId: string, error: unknown): void {
-		showToast({
-			title: `Couldn't switch to ${getInstanceById(instanceId)?.name ?? instanceId}`,
-			...(error instanceof Error && error.message ? { body: error.message } : {}),
-			variant: "error",
-		});
 	}
 
 	function closeConfirm(): void {
@@ -114,17 +105,13 @@
 	async function switchAccount(instanceId: string): Promise<void> {
 		busy = true;
 		try {
-			await continueSessionRpc({
+			await switchSessionAccount({
 				projectSlug,
 				sessionId,
 				instanceId,
 				expectedInstanceId: account,
-				originId: getBrowserClientId(),
 			});
 			closeConfirm();
-		} catch (error) {
-			closeConfirm();
-			refused(instanceId, error);
 		} finally {
 			busy = false;
 		}
