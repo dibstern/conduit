@@ -18,7 +18,7 @@
 // golden holds a normalised copy, because stream versions depend on how many
 // text deltas the relay coalesced and so vary from run to run.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -196,6 +196,47 @@ async function screenshotRow(page: Page, sessionId: string, name: string) {
 	await page.mouse.move(0, 0);
 	await expect(row(page, sessionId)).toHaveScreenshot(name, {
 		mask: [row(page, sessionId).locator(".session-item-meta")],
+	});
+}
+
+// A send that never ends leaves its trace in the store: no pending_inputs row
+// means the server never received it, a queued one that the inbox held it,
+// and a sent one with a running turn and no reply that the provider runtime
+// lost it (conduit-test-6ksg).
+async function attachSendState(
+	harness: ReplayHarness,
+	sessionId: string,
+	testInfo: TestInfo,
+) {
+	const rows = (sql: string) =>
+		query<Record<string, unknown>>(harness, sql, sessionId);
+	// A file, not a body: the list reporter prints only an attachment's path.
+	const path = testInfo.outputPath("send-state.json");
+	writeFileSync(
+		path,
+		JSON.stringify(
+			{
+				session: rows("SELECT id, status, provider FROM sessions WHERE id = ?"),
+				pendingInputs: rows(
+					"SELECT input_id, text, state, admitted_at FROM pending_inputs WHERE session_id = ? ORDER BY admitted_at",
+				),
+				outbox: rows(
+					"SELECT command_id, effect_type, status, requested_at FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+				),
+				turns: rows(
+					"SELECT id, state, user_message_id, requested_at, completed_at FROM turns WHERE session_id = ? ORDER BY requested_at",
+				),
+				events: rows(
+					"SELECT sequence, type, stream_version FROM events WHERE session_id = ? ORDER BY sequence DESC LIMIT 40",
+				),
+			},
+			null,
+			2,
+		),
+	);
+	await testInfo.attach("send-state.json", {
+		contentType: "application/json",
+		path,
 	});
 }
 
@@ -1049,6 +1090,16 @@ test.describe("Session unread dot", () => {
 	});
 
 	test.describe("Claude", () => {
+		// Hooks run after a test timeout, while the harness is still up.
+		test.afterEach(async ({ harness }, testInfo) => {
+			if (testInfo.status !== testInfo.expectedStatus)
+				await attachSendState(
+					harness,
+					decodeURIComponent(harness.projectUrl.slice("/s/".length)),
+					testInfo,
+				);
+		});
+
 		test.describe("dot lifecycle", () => {
 			test.use({
 				claudeReplay: {
