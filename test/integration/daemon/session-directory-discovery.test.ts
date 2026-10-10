@@ -365,13 +365,9 @@ describe("Session directory discovery through the built daemon", () => {
 			expect(reply.chunks.join("")).toContain("notes ready");
 			await vi.waitFor(() => {
 				const title = fixture
-					.claudeOptions()
-					.find(
-						({ options, prompt: titlePrompt }) =>
-							options["persistSession"] === false &&
-							titlePrompt?.includes(prompt),
-					);
-				expect(title?.options["cwd"]).toBe(directory);
+					.claudeTitles()
+					.find(({ prompt: titlePrompt }) => titlePrompt.includes(prompt));
+				expect(title?.cwd).toBe(directory);
 			});
 			const used = providerQuery(fixture, sessionId);
 			expect(used).toEqual({ cwd: directory, alwaysThinkingEnabled: thinking });
