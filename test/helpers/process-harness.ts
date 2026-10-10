@@ -232,6 +232,7 @@ export class ProcessHarness {
 		realOpenCode?: string,
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
+		private readonly logLevel?: "warn",
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -470,6 +471,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			capabilityAgents?: readonly ProviderAgentInfo[];
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
+			/** Enable warning diagnostics for provider lifecycle regressions. */
+			logLevel?: "warn";
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
@@ -518,6 +521,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.realOpenCode,
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
+			options.logLevel,
 		);
 	}
 
@@ -881,7 +885,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
 						: {}),
 					NODE_ENV: "test",
-					LOG_LEVEL: this.claudeReplay?.logLevel ?? "error",
+					LOG_LEVEL: this.logLevel ?? this.claudeReplay?.logLevel ?? "error",
 				}),
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
@@ -1080,8 +1084,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.openCodeTestCommand("emit-event", envelope, instanceId);
 	}
 
-	async closeOpenCodeStreams(): Promise<void> {
-		await this.openCodeTestCommand("close-streams", {});
+	async closeOpenCodeStreams(
+		options: { silenceReconnect?: boolean } = {},
+	): Promise<void> {
+		await this.openCodeTestCommand("close-streams", options);
 	}
 
 	/** Serve a status from /session/status and emit it as session.status. */

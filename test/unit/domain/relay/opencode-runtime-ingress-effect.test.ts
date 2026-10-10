@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqlError } from "@effect/sql/SqlError";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
@@ -18,7 +18,10 @@ import {
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
-import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
+import {
+	type ProjectionRunnerEffect,
+	ProjectionRunnerEffectTag,
+} from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
 	makeSSEEvent,
@@ -189,6 +192,59 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 				event_count: 2,
 			},
 		]);
+	});
+
+	it("rolls back stop settlement when a new instance lifecycle starts before commit", async () => {
+		if (!hook || !runtime) throw new Error("test runtime not initialized");
+		await Effect.runPromise(
+			hook.onSSEEventEffect(
+				makeSSEEvent("session.status", {
+					sessionID: SESSION_ID,
+					status: { type: "busy" },
+				}),
+				SESSION_ID,
+				"opencode",
+			),
+		);
+		const entered = await Effect.runPromise(Deferred.make<void>());
+		const release = await Effect.runPromise(Deferred.make<void>());
+		const stopIngress = await runtime.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				return new EffectOpenCodeRuntimeIngress({
+					sql: yield* SqlClient.SqlClient,
+					projectionRunner: yield* ProjectionRunnerEffectTag,
+					log: makeLogger(),
+					ingestion: {
+						...ingestion,
+						ingestBatch: (events, options = {}) =>
+							ingestion.ingestBatch(events, {
+								...options,
+								beforeCommit: Deferred.succeed(entered, undefined).pipe(
+									Effect.zipRight(Deferred.await(release)),
+									Effect.zipRight(options.beforeCommit ?? Effect.void),
+								),
+							}),
+					},
+				});
+			}),
+		);
+		let current = true;
+		const stopped = Effect.runPromiseExit(
+			stopIngress.onInstanceStopped("opencode", () => current),
+		);
+		await Effect.runPromise(Deferred.await(entered));
+		current = false;
+		await Effect.runPromise(Deferred.succeed(release, undefined));
+		await stopped;
+		const rows = await runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{ status: string }>`
+					SELECT status FROM sessions WHERE id = ${SESSION_ID}`;
+			}),
+		);
+		expect(rows).toEqual([{ status: "busy" }]);
 	});
 
 	it("does not recreate a durable OpenCode session after ingress restarts", async () => {

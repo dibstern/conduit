@@ -40,14 +40,20 @@ appendFileSync(
 );
 const streams = new Map();
 let streamId = 0;
-const sessionsFile = join(configDir, "fake-opencode-sessions.json");
+let silenceReconnect = false;
+// Multiple instances in one harness can opt into separate provider stores.
+const statePrefix = process.env.CONDUIT_TEST_OPENCODE_STATE_PREFIX;
+const stateStem = statePrefix
+	? `fake-opencode-${statePrefix}`
+	: "fake-opencode";
+const sessionsFile = join(configDir, `${stateStem}-sessions.json`);
 const sessions = () =>
 	existsSync(sessionsFile)
 		? JSON.parse(readFileSync(sessionsFile, "utf8"))
 		: [];
 // Per-directory status and pending prompts, kept in a file so they survive a
 // managed restart like sessions do. Idle sessions are absent, as in OpenCode.
-const stateFile = join(configDir, "fake-opencode-state.json");
+const stateFile = join(configDir, `${stateStem}-state.json`);
 const readState = () =>
 	existsSync(stateFile)
 		? JSON.parse(readFileSync(stateFile, "utf8"))
@@ -200,6 +206,7 @@ const server = createServer(async (request, response) => {
 		return;
 	}
 	if (path === "/test/close-streams" && request.method === "POST") {
+		silenceReconnect = JSON.parse(body).silenceReconnect === true;
 		for (const client of streams.keys()) client.end();
 		response.end("{}");
 		return;
@@ -268,7 +275,9 @@ const server = createServer(async (request, response) => {
 		streams.set(response, stream);
 		streamLog("open", stream);
 		response.setHeader("Content-Type", "text/event-stream");
+		response.flushHeaders();
 		const write = (type) => {
+			if (silenceReconnect) return;
 			const payload = { id: `evt_${randomUUID()}`, type, properties: {} };
 			response.write(
 				`data: ${JSON.stringify(path === "/global/event" ? { payload } : payload)}\n\n`,

@@ -1,5 +1,6 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenCodeConnectionStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	makeOpenCodeInstancesLive,
 	type OpenCodeEndpoint,
@@ -20,9 +21,15 @@ import { makeSSETestServices } from "../../helpers/sse-effect-harness.js";
 
 // Failure modes: idle reconnects disappear behind lifecycle-state deduplication,
 // first connections or late subscriptions backfill, one project's reconnect is
-// lost, and secondary-instance reconnects invalidate the selected instance.
+// lost, secondary-instance reconnects invalidate the selected instance, a held
+// health probe blocks another instance, and stopped metadata is lost on replay
+// or before a secondary instance's first provider event. A refused process stop
+// must not settle sessions whose managed endpoint is still running.
 describe("Shared OpenCode stream reconnect", () => {
 	let runtime: ManagedRuntime.ManagedRuntime<OpenCodeInstancesTag, never>;
+	let endpoints: Map<string, OpenCodeEndpoint>;
+	let checkHealth = vi.fn((_instanceId: string) => Effect.void);
+	let stopProcess = vi.fn((_instanceId: string) => Effect.void);
 	let streams: {
 		instanceId: string;
 		send: (frame: unknown) => void;
@@ -33,7 +40,8 @@ describe("Shared OpenCode stream reconnect", () => {
 	beforeEach(() => {
 		streams = [];
 		disposers = [];
-		const endpoints = new Map<string, OpenCodeEndpoint>(
+		checkHealth = vi.fn((_instanceId: string) => Effect.void);
+		endpoints = new Map<string, OpenCodeEndpoint>(
 			["opencode", "secondary"].map((instanceId) => [
 				instanceId,
 				{
@@ -42,6 +50,13 @@ describe("Shared OpenCode stream reconnect", () => {
 					managed: true,
 				},
 			]),
+		);
+		stopProcess = vi.fn((instanceId: string) =>
+			Effect.sync(() => {
+				const endpoint = endpoints.get(instanceId);
+				if (endpoint)
+					endpoints.set(instanceId, { ...endpoint, status: "stopped" });
+			}),
 		);
 		vi.stubGlobal(
 			"fetch",
@@ -99,7 +114,25 @@ describe("Shared OpenCode stream reconnect", () => {
 		runtime = ManagedRuntime.make(
 			makeOpenCodeInstancesLive(
 				(instanceId) => Effect.sync(() => endpoints.get(instanceId)),
-				{ log: createSilentLogger(), idleTimeoutMs: 120_000 },
+				{
+					log: createSilentLogger(),
+					idleTimeoutMs: 120_000,
+					control: {
+						start: (instanceId) =>
+							Effect.sync(() => {
+								const endpoint = endpoints.get(instanceId);
+								if (endpoint)
+									endpoints.set(instanceId, { ...endpoint, status: "healthy" });
+							}),
+						stop: (instanceId) => stopProcess(instanceId),
+						adopted: Effect.succeed([]),
+						crashes: {
+							checkHealth: (instanceId) => checkHealth(instanceId),
+							statusChanges: Stream.empty,
+							restart: () => Effect.void,
+						},
+					},
+				},
 			),
 		);
 	});
@@ -128,6 +161,14 @@ describe("Shared OpenCode stream reconnect", () => {
 		disposers.push(() => project.dispose());
 		const stream = await project.runPromise(SSEStreamTag);
 		const onReconnect = vi.fn((_instanceId?: string) => Effect.void);
+		const onInstanceStopped = vi.fn((_instanceId: string) => Effect.void);
+		const onStatus = vi.fn(
+			(
+				_instanceId: string,
+				_status: OpenCodeConnectionStatus,
+				_managedStopped?: boolean,
+			) => {},
+		);
 		const onSSEEventEffect = vi.fn(() =>
 			Effect.succeed({
 				ok: false as const,
@@ -135,21 +176,40 @@ describe("Shared OpenCode stream reconnect", () => {
 			}),
 		);
 		const deps = createMockSSEWiringDeps({
-			opencodeRuntimeIngress: { onReconnect, onSSEEventEffect },
+			opencodeRuntimeIngress: {
+				onReconnect,
+				onSSEEventEffect,
+				onInstanceStopped,
+			},
 		});
 		await project.runPromise(wireSSEConsumerEffect(deps, stream));
+		stream.on("status", (status, managedStopped) =>
+			onStatus("opencode", status, managedStopped),
+		);
 		const connected = vi.fn();
 		stream.on("connected", connected);
 		await project.runPromise(
 			stream.wireInstanceStreams((channel, instanceId) =>
-				wireSSEConsumerEffect(
-					{ ...deps, providerInstanceId: instanceId },
-					channel,
-				),
+				Effect.gen(function* () {
+					channel.on("status", (status, managedStopped) =>
+						onStatus(instanceId, status, managedStopped),
+					);
+					yield* wireSSEConsumerEffect(
+						{ ...deps, providerInstanceId: instanceId },
+						channel,
+					);
+				}),
 			),
 		);
 		await project.runPromise(stream.connectEffect());
-		return { stream, connected, onReconnect, onSSEEventEffect };
+		return {
+			stream,
+			connected,
+			onReconnect,
+			onSSEEventEffect,
+			onInstanceStopped,
+			onStatus,
+		};
 	}
 
 	const start = (instanceId = "opencode") =>
@@ -158,6 +218,96 @@ describe("Shared OpenCode stream reconnect", () => {
 				Effect.scoped(instances.use(instanceId)),
 			),
 		);
+
+	it("checks another managed instance while the first instance's health probe is held", async () => {
+		const release = await Effect.runPromise(Deferred.make<void>());
+		checkHealth.mockImplementation((instanceId) =>
+			instanceId === "opencode" ? Deferred.await(release) : Effect.void,
+		);
+		try {
+			await start();
+			await start("secondary");
+			streams.find(({ instanceId }) => instanceId === "opencode")?.close();
+			await vi.waitFor(() =>
+				expect(checkHealth).toHaveBeenCalledWith("opencode"),
+			);
+			streams.find(({ instanceId }) => instanceId === "secondary")?.close();
+			await vi.waitFor(() =>
+				expect(checkHealth).toHaveBeenCalledWith("secondary"),
+			);
+		} finally {
+			await Effect.runPromise(Deferred.succeed(release, undefined));
+		}
+	});
+
+	it.each([
+		"opencode",
+		"secondary",
+	])("replays a stopped managed %s instance to a late project before provider events", async (instanceId) => {
+		await start(instanceId);
+		await runtime.runPromise(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.stop(instanceId),
+			),
+		);
+		const late = await attachProject("/project-a");
+		await vi.waitFor(() => {
+			expect(late.onStatus).toHaveBeenCalledWith(instanceId, "stopped", true);
+			expect(late.onInstanceStopped.mock.calls.map(([id]) => id)).toEqual([
+				instanceId,
+			]);
+		});
+		expect(late.onSSEEventEffect).not.toHaveBeenCalled();
+	});
+
+	it("settles a secondary instance stopped before its first project provider event", async () => {
+		const project = await attachProject("/project-a");
+		await start("secondary");
+		expect(project.onSSEEventEffect).not.toHaveBeenCalled();
+		await runtime.runPromise(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.stop("secondary"),
+			),
+		);
+		await vi.waitFor(() => {
+			expect(project.onStatus).toHaveBeenCalledWith(
+				"secondary",
+				"stopped",
+				true,
+			);
+			expect(project.onInstanceStopped.mock.calls.map(([id]) => id)).toEqual([
+				"secondary",
+			]);
+		});
+		expect(project.onSSEEventEffect).not.toHaveBeenCalled();
+	});
+
+	it("does not settle sessions when managed stop leaves the process running", async () => {
+		const project = await attachProject("/project-a");
+		await start();
+		await vi.waitFor(() => expect(project.connected).toHaveBeenCalledOnce());
+		// Production catches a rejected ownership/termination check. The stream
+		// closes, but the instance manager retains its healthy process status.
+		stopProcess.mockImplementation(() => Effect.void);
+		await runtime.runPromise(
+			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+				instances.stop("opencode"),
+			),
+		);
+		await vi.waitFor(() =>
+			expect(
+				project.onStatus.mock.calls.some(
+					([instanceId, status]) =>
+						instanceId === "opencode" && status === "stopped",
+				),
+			).toBe(true),
+		);
+		expect
+			.soft(project.onStatus)
+			.toHaveBeenCalledWith("opencode", "stopped", undefined);
+		expect.soft(project.onInstanceStopped).not.toHaveBeenCalled();
+		expect(endpoints.get("opencode")?.status).toBe("healthy");
+	});
 
 	it("reconnects every project after an idle managed stream closes without a lifecycle transition", async () => {
 		const projects = await Promise.all([

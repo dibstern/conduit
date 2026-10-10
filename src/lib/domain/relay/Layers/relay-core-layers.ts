@@ -55,7 +55,7 @@ const makeOpenCodeAPI = (startsInstance: boolean) =>
 									Effect.fail(
 										new OpenCodeUnavailable({
 											instanceId,
-											reason: "unreachable",
+											reason: "not-running",
 											message: `OpenCode instance "${instanceId}" is not running`,
 										}),
 									),

@@ -547,88 +547,81 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	return configs;
 }).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
-/**
- * Start periodic health polling for an instance.
- * Uses raw HTTP fetch to the instance port. Publishes status changes
- * via DaemonEventBusTag. Stops polling if instance is removed or if
- * a managed instance enters stopped/unhealthy state.
- */
-export const startHealthPoller = (instanceId: string) =>
+/** Verify process health, including immediately after a managed stream loss. */
+export const checkInstanceHealth = (instanceId: string) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
-		const fibers = yield* PollerFibersTag;
 		const healthCheck = yield* InstanceHealthCheckTag;
-		const initialState = yield* Ref.get(stateRef);
-		const { config } = initialState;
-		const initialInstance = HashMap.get(initialState.instances, instanceId);
+		const state = yield* Ref.get(stateRef);
+		const instanceOpt = HashMap.get(state.instances, instanceId);
+		if (Option.isNone(instanceOpt)) return;
+		const instance = instanceOpt.value;
 		if (
-			Option.isNone(initialInstance) ||
-			initialInstance.value.driver === "claude"
+			instance.driver === "claude" ||
+			(instance.managed &&
+				(instance.status === "stopped" || instance.status === "unhealthy"))
 		) {
 			return;
 		}
 
-		const pollOnce = Effect.gen(function* () {
-			const state = yield* Ref.get(stateRef);
-			const instanceOpt = HashMap.get(state.instances, instanceId);
-			if (Option.isNone(instanceOpt)) return;
-
-			const instance = instanceOpt.value;
-			if (instance.driver === "claude") return;
-
-			// Guard: stop polling managed instances in stopped/unhealthy state
-			if (
-				instance.managed &&
-				(instance.status === "stopped" || instance.status === "unhealthy")
-			) {
-				return;
-			}
-
-			const externalUrl = HashMap.get(state.externalUrls, instanceId);
-			const instanceUrl = Option.isSome(externalUrl)
+		const externalUrl = HashMap.get(state.externalUrls, instanceId);
+		const isHealthy = yield* healthCheck.check({
+			instance: {
+				...instance,
+				env:
+					(instance.managed
+						? yield* getManagedOpenCodeProcessEnv(instance.id)
+						: instance.env) ?? {},
+			},
+			url: Option.isSome(externalUrl)
 				? externalUrl.value
-				: `http://localhost:${instance.port}`;
-			const isHealthy = yield* healthCheck.check({
-				instance: {
-					...instance,
-					env:
-						(instance.managed
-							? yield* getManagedOpenCodeProcessEnv(instance.id)
-							: instance.env) ?? {},
-				},
-				url: instanceUrl,
-			});
-
-			const newStatus = isHealthy
-				? ("healthy" as const)
-				: ("unhealthy" as const);
-
-			// Only update + publish on transition
-			if (newStatus !== instance.status) {
-				const now = yield* Clock.currentTimeMillis;
-				yield* Ref.update(stateRef, (s) => ({
+				: `http://localhost:${instance.port}`,
+		});
+		const newStatus = isHealthy ? ("healthy" as const) : ("unhealthy" as const);
+		if (newStatus === instance.status) return;
+		const now = yield* Clock.currentTimeMillis;
+		const changed = yield* Ref.modify(stateRef, (s) => {
+			// A stop, start, removal or another health check owns the newer state.
+			if (
+				Option.getOrUndefined(HashMap.get(s.instances, instanceId)) !== instance
+			)
+				return [false, s];
+			return [
+				true,
+				{
 					...s,
-					instances: HashMap.modify(s.instances, instanceId, (inst) => ({
-						...inst,
+					instances: HashMap.set(s.instances, instanceId, {
+						...instance,
 						status: newStatus,
 						lastHealthCheck: now,
-					})),
-				}));
-				yield* publishInstanceStatusChanged(instanceId);
-			}
-		}).pipe(
-			Effect.catchAll(() =>
-				Effect.logWarning("Health check error").pipe(
-					Effect.annotateLogs("instanceId", instanceId),
-				),
+					}),
+				},
+			];
+		});
+		if (changed) yield* publishInstanceStatusChanged(instanceId);
+	}).pipe(
+		Effect.catchAll(() =>
+			Effect.logWarning("Health check error").pipe(
+				Effect.annotateLogs("instanceId", instanceId),
 			),
-		);
+		),
+		Effect.withSpan("instance.checkHealth"),
+	);
+
+/** Start periodic health polling; stream losses also verify through this seam. */
+export const startHealthPoller = (instanceId: string) =>
+	Effect.gen(function* () {
+		const stateRef = yield* InstanceManagerStateTag;
+		const fibers = yield* PollerFibersTag;
+		const { instances, config } = yield* Ref.get(stateRef);
+		const instance = HashMap.get(instances, instanceId);
+		if (Option.isNone(instance) || instance.value.driver === "claude") return;
 
 		yield* FiberMap.run(
 			fibers,
 			pollerKey(instanceId),
 			Effect.repeat(
-				pollOnce,
+				checkInstanceHealth(instanceId),
 				Schedule.spaced(Duration.millis(config.healthPollIntervalMs)),
 			),
 		);
@@ -1044,7 +1037,7 @@ export const scheduleRestart = (instanceId: string) =>
 		);
 
 		if (recentRestarts.length >= config.maxRestartsPerWindow) {
-			// Give up — mark stopped, publish error
+			// Give up — publish the terminal process status as well as the error.
 			yield* Ref.update(stateRef, (s) => ({
 				...s,
 				instances: HashMap.modify(s.instances, instanceId, (inst) => ({
@@ -1052,6 +1045,7 @@ export const scheduleRestart = (instanceId: string) =>
 					status: "stopped" as const,
 				})),
 			}));
+			yield* publishInstanceStatusChanged(instanceId);
 			yield* publishInstanceError(
 				instanceId,
 				`Crashed ${recentRestarts.length} times in ${config.restartWindowMs / 1000}s — giving up`,

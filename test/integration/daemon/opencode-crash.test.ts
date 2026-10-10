@@ -116,6 +116,7 @@ describe("Managed OpenCode crash handling", () => {
 
 	it("restarts a crash mid-turn on its own and delivers the turn's later events", async () => {
 		const fixture = await start("crash-busy");
+		evidence["regressionTicket"] = "conduit-test-rqbc.4";
 		const viewer = await fixture.connect();
 		browser = viewer;
 		const sessionId = await viewer.createSession(
@@ -135,8 +136,27 @@ describe("Managed OpenCode crash handling", () => {
 				message["status"] === "busy",
 		);
 
+		// Crash just after a periodic health request, not at an arbitrary point
+		// in the manager's 5s poll. Main then waits almost a full poll before
+		// starting its 1s restart backoff, exceeding this 3s latency bound.
+		const healthRequests = () =>
+			fixture.opencodeRequests().filter(({ url }) => url === "/global/health");
+		const healthCursor = healthRequests().length;
+		await vi.waitFor(
+			() => expect(healthRequests().length).toBeGreaterThan(healthCursor),
+			{ timeout: 30_000, interval: 25 },
+		);
+		evidence["lastHealthRequest"] = healthRequests().at(-1);
 		const cursor = viewer.frames.length;
-		evidence["crash"] = crash(fixture);
+		const crashed = crash(fixture);
+		evidence["crash"] = crashed;
+		await vi.waitFor(() => expect(spawned(fixture)).toHaveLength(2), {
+			timeout: 3_000,
+			interval: 25,
+		});
+		const replacementLatencyMs = Date.now() - crashed.at;
+		evidence["replacementLatencyMs"] = replacementLatencyMs;
+		expect(replacementLatencyMs).toBeLessThan(3_000);
 		await vi.waitFor(
 			() =>
 				expect(states(viewer, cursor)).toEqual(["reconnecting", "connected"]),
