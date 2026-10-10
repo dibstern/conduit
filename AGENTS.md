@@ -264,3 +264,13 @@ Issues live in Dolt; `.beads/*.jsonl` files are passive git exports. Commit trac
 - Run `bd prime` for detailed command reference and session close protocol
 - Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
 <!-- END BEADS INTEGRATION -->
+
+### Which session holds a bead
+
+Every session claims as the same user, so the assignee can't tell sessions apart. Inside a Conduit Claude session, `CONDUIT_SESSION_ID` names the session; record it when you claim:
+
+```bash
+bd update <id> --claim ${CONDUIT_SESSION_ID:+--set-metadata=conduit_session=$CONDUIT_SESSION_ID}
+```
+
+`bd show <id> --long` then answers "which session is working on this?", and `bd list --metadata-field conduit_session=<session id>` answers the reverse. The session's title is one indexed lookup: `sqlite3 -readonly ~/.config/conduit/projects/<slug>/events.db "select title, status from sessions where id='<session id>'"`.

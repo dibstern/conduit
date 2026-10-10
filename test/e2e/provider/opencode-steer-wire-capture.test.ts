@@ -434,4 +434,135 @@ describe.skipIf(!RUN_EXPENSIVE)("OpenCode steer wire capture", () => {
 			rmSync(directory, { recursive: true, force: true });
 		}
 	}, 300_000);
+
+	// conduit-test-jyr9.11: could conduit steer through the v2 engine, either
+	// for steers alone or for every turn? Pins the facts the design note
+	// (docs/plans/2026-10-05-steer-and-queue/opencode-v2.md) rests on.
+	it("shows the v2 engine can't stand in for the classic one", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "opencode-v2-gaps-work-"));
+		const spawned = await spawnOpenCode({
+			timeoutMs: 60_000,
+			env: { OPENCODE_CONFIG_CONTENT: '{"permission":{"bash":"ask"}}' },
+		});
+		const evidence: Record<string, unknown> = {
+			ticket: "conduit-test-jyr9.11",
+			at: new Date().toISOString(),
+		};
+		const classicPrompt = (wire: Wire, sessionID: string, text: string) =>
+			wire.post(`/session/${sessionID}/prompt_async`, {
+				parts: [{ type: "text", text }],
+				model: { providerID: MODEL.providerID, modelID: MODEL.id },
+			});
+		const classicTypes = /^(message\.|permission\.|session\.(status|idle)$)/;
+		const turnEnded = (sessionID: string) => (event: WireEvent) =>
+			ofSession(sessionID, "session.next.step.ended")(event) &&
+			event.properties["finish"] !== "tool-calls";
+		try {
+			await recordScenario(spawned.url, directory, "mixed", async (wire) => {
+				// A classic turn, then a v2 prompt on the same session: the v2
+				// engine keeps its own history, so it answers without the
+				// classic turn's context, and the classic side never sees it.
+				const sessionID = (
+					(await wire.post("/session", { title: "mixed" })).body as {
+						id: string;
+					}
+				).id;
+				await classicPrompt(
+					wire,
+					sessionID,
+					"Remember the code word PINEAPPLE. Reply with just OK.",
+				);
+				await wire.waitFor(
+					"session.idle",
+					ofSession(sessionID, "session.idle"),
+				);
+				const before = wire.events.length;
+				const v2 = await wire.post(`/api/session/${sessionID}/prompt`, {
+					prompt: {
+						text: "What was the code word I asked you to remember? Reply with it only, or NONE.",
+					},
+					delivery: "steer",
+				});
+				await wire.waitFor("the v2 turn to end", turnEnded(sessionID));
+				const after = wire.events
+					.slice(before)
+					.filter((e) => JSON.stringify(e.properties).includes(sessionID));
+				const v2History = (await wire.get(
+					`/api/session/${sessionID}/message`,
+				)) as { data: { type: string; text?: string }[] };
+				const classicHistory = (await wire.get(
+					`/session/${sessionID}/message`,
+				)) as { info: { id: string; role: string } }[];
+				expect(v2.status).toBe(200);
+				expect(
+					v2History.data
+						.filter((m) => m.type === "user")
+						.map((m) => m.text?.slice(0, 20)),
+				).toEqual(["What was the code wo"]);
+				expect(classicHistory.map((m) => m.info.role)).toEqual([
+					"user",
+					"assistant",
+				]);
+				expect(after.filter((e) => classicTypes.test(e.type))).toEqual([]);
+				evidence["mixed"] = {
+					sessionID,
+					v2Answer: after
+						.filter((e) => e.type === "session.next.text.ended")
+						.map((e) => e.properties["text"]),
+					v2History: v2History.data.map((m) => m.type),
+					classicHistory: classicHistory.map((m) => m.info.role),
+				};
+			});
+			await recordScenario(spawned.url, directory, "gaps", async (wire) => {
+				const create = async (title: string) =>
+					((await wire.post("/session", { title })).body as { id: string }).id;
+				const bash =
+					"Use the bash tool to run exactly: sleep 5 && echo hi . Then reply DONE.";
+				// The classic engine asks before running bash under "bash": "ask".
+				const classic = await create("classic-permission");
+				await classicPrompt(wire, classic, bash);
+				await wire.waitFor(
+					"permission.asked",
+					ofSession(classic, "permission.asked"),
+				);
+				// Left waiting: aborting would raise a session.error that waitFor
+				// treats as a failure.
+				// The v2 engine runs it without asking, and reports the running
+				// turn only on /api/session/active, not /session/status.
+				const v2 = await create("v2-permission");
+				await wire.post(`/api/session/${v2}/model`, { model: MODEL });
+				await wire.post(`/api/session/${v2}/prompt`, {
+					prompt: { text: bash },
+				});
+				await wire.waitFor(
+					"the v2 bash call",
+					ofSession(v2, "session.next.tool.called"),
+				);
+				const classicStatus = (await wire.get("/session/status")) as Record<
+					string,
+					unknown
+				>;
+				const active = (await wire.get("/api/session/active")) as {
+					data: Record<string, { type: string }>;
+				};
+				await wire.waitFor("the v2 turn to end", turnEnded(v2));
+				const v2Types = wire.events
+					.filter((e) => JSON.stringify(e.properties).includes(v2))
+					.map((e) => e.type);
+				expect(v2Types).toContain("session.next.tool.success");
+				expect(v2Types.filter((t) => classicTypes.test(t))).toEqual([]);
+				expect(classicStatus[v2]).toBeUndefined();
+				expect(active.data[v2]).toEqual({ type: "running" });
+				evidence["gaps"] = { classic, v2, v2Types, classicStatus, active };
+			});
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/jyr9-11-opencode-v2-gaps.json",
+				JSON.stringify(evidence, null, 2),
+			);
+			spawned.stop();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	}, 300_000);
 });

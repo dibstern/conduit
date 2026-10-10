@@ -278,7 +278,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("handles later ticks while an earlier lineage refresh is pending", async () => {
+	it("holds later ticks until an earlier lineage refresh finishes", async () => {
 		let releaseRefresh: (() => void) | undefined;
 		const lineageRefresh = new Promise<void>((resolve) => {
 			releaseRefresh = resolve;
@@ -295,11 +295,12 @@ describe("wireMonitoring shutdown", () => {
 		await flushPromises();
 		harness.emitStatus({ s1: { type: "idle" } });
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		expect(harness.pollerEvents).toEqual([]);
+		expect(harness.alerts()).toEqual([]);
 		releaseRefresh?.();
 		await flushPromises();
-		expect(harness.alerts()).toEqual([]);
+		expect(harness.pollerEvents).toEqual(["stop:s1"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
 		harness.result.stopMonitoring();
 	});
@@ -544,7 +545,7 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("drops an older busy snapshot that reaches reduction after a newer idle one", async () => {
+	it("reports done for a busy tick whose lineage refresh outlasts the next idle tick", async () => {
 		let releaseFirst: (() => void) | undefined;
 		const first = new Promise<void>((resolve) => {
 			releaseFirst = resolve;
@@ -553,20 +554,15 @@ describe("wireMonitoring shutdown", () => {
 			.fn(() => Effect.void)
 			.mockImplementationOnce(() => Effect.promise(() => first));
 		const harness = await createEffectHarness(refreshSessionLineage);
-		harness.result.setMonitoringState({
-			sessions: new Map([
-				["s1", { phase: "busy-polling", busySince: 0, pollerStartedAt: 1 }],
-			]),
-		});
 		harness.emitStatus({ s1: { type: "busy" } }, true);
 		await flushPromises();
 		harness.emitStatus({ s1: { type: "idle" } }, true);
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
-		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
+		// The idle tick waits for the busy one rather than overtaking it.
+		expect(harness.alerts()).toEqual([]);
 		releaseFirst?.();
 		await flushPromises();
-		expect(harness.pollerEvents).toEqual(["stop:s1"]);
+		expect(harness.alerts().map((alert) => alert.kind)).toEqual(["done"]);
 		expect(harness.result.getMonitoringState().sessions.size).toBe(0);
 		harness.result.stopMonitoring();
 	});

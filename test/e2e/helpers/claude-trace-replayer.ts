@@ -51,6 +51,7 @@ export type ClaudeTraceName =
 	| "steer-during-tool-folds"
 	| "steer-misses-boundary"
 	| "stop-with-steer-pending"
+	| "subagent-task-error-turn"
 	| "subagent-task-turn"
 	| "two-steers-one-boundary";
 
