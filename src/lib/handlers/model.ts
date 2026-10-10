@@ -10,6 +10,7 @@ import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
 	resolveInstanceDriver,
+	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import {
@@ -50,7 +51,7 @@ import {
 	type ProviderInfo,
 } from "../shared-types.js";
 
-class RelaySettingsSaveError extends Data.TaggedError(
+export class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",
 )<{
 	readonly cause: unknown;
@@ -278,8 +279,7 @@ export const getModelsResponse = (
 			input.instanceId === undefined
 				? undefined
 				: ProviderInstanceIdSchema.make(input.instanceId);
-		const daemonConfig =
-			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
+		const daemonConfig = loadDaemonConfig(config.configDir);
 		const instanceDriver =
 			instanceId === undefined
 				? undefined
@@ -298,13 +298,20 @@ export const getModelsResponse = (
 		const activeProviderId = activeId
 			? yield* engine.getProviderForSessionEffect(activeId)
 			: undefined;
-		const selectedDriver: ProviderDriverKind = isClaudeProvider(
-			activeProviderId ?? fallbackModel?.providerID ?? "",
+		// A model runs only on its own harness. A session or instance on the
+		// other harness runs that harness's own default, so it has no model here.
+		const modelDriver: ProviderDriverKind = isClaudeProvider(
+			fallbackModel?.providerID ?? "",
 		)
 			? "claude"
 			: "opencode";
-		const selectedModelMatchesInstance =
-			instanceDriver === undefined || instanceDriver === selectedDriver;
+		const sessionDriver =
+			activeProviderId === undefined
+				? undefined
+				: resolveProviderRoutingDriver(daemonConfig, activeProviderId);
+		const selectedModelMatchesInstance = [instanceDriver, sessionDriver].every(
+			(driver) => driver === undefined || driver === modelDriver,
+		);
 
 		const providers: ProviderInfo[] = [];
 		let openCodeFailure: Cause.UnknownException | undefined;
@@ -473,7 +480,8 @@ export const getModelsResponse = (
 					}
 				: {}),
 			variant: {
-				variant: currentVariant,
+				// An effort belongs to its model, so no model means no effort.
+				variant: selectedModel ? currentVariant : "",
 				variants: variantList,
 			},
 			contextWindow: {
@@ -555,10 +563,6 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 				engine.unbindSession(sessionId);
 			}
 			yield* applyLiveSessionSettings(sessionId);
-		} else {
-			log.warn(
-				`client=${input.clientId} model switch with no session; sending client-local state only`,
-			);
 		}
 
 		log.info(

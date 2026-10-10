@@ -25,7 +25,8 @@ import {
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
-	instanceIdForProviderId,
+	getSessionInstanceId,
+	handleVariantInfo,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
@@ -234,11 +235,9 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 
 export const model: ComposerSetting<ComposerModel> = {
 	get options() {
-		const providerId = discoveryState.currentProviderId;
-		const instanceId =
-			sessionState.currentId && providerId
-				? instanceIdForProviderId(providerId)
-				: getEffectiveInstanceId();
+		const instanceId = sessionState.currentId
+			? getSessionInstanceId(sessionState.currentId)
+			: getEffectiveInstanceId();
 		return getProviderGroupsForInstance(instanceId).flatMap((group) =>
 			group.models.flatMap((entry) =>
 				[
@@ -264,19 +263,25 @@ export const model: ComposerSetting<ComposerModel> = {
 		const undo = chooseModel(value);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug || !sessionId) return;
+		if (!projectSlug) return;
 		switchSetting(
 			"model",
 			undo,
 			() =>
-				switchModelRpc({ projectSlug, sessionId, ...value }).then(
-					(response) => {
-						applyModelSwitched(response);
-						void getAgentsRpc({ projectSlug, sessionId })
-							.then((response) => applyGetAgentsResponse(response, sessionId))
-							.catch(() => undefined);
-					},
-				),
+				sessionId
+					? switchModelRpc({ projectSlug, sessionId, ...value }).then(
+							(response) => {
+								applyModelSwitched(response);
+								void getAgentsRpc({ projectSlug, sessionId })
+									.then((response) =>
+										applyGetAgentsResponse(response, sessionId),
+									)
+									.catch(() => undefined);
+							},
+						)
+					: // A draft has no session to switch. This reads the efforts and
+						// saved effort of the model its first turn will run.
+						switchModelRpc({ projectSlug, ...value }).then(handleVariantInfo),
 			`Couldn't switch model to "${value.modelId}"`,
 		);
 	},

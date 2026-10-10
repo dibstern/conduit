@@ -15,7 +15,7 @@ import {
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import { savedVariantFor } from "./model.js";
+import { savedVariantFor, switchVariantForSession } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 interface ViewSessionPayload {
@@ -134,17 +134,23 @@ export const createSessionForClient = ({
 		if (model) {
 			const override = { providerID: model.providerId, modelID: model.modelId };
 			yield* selectSessionModel(session.id, override);
-			// The draft lists the default model's efforts, so keep a picked
-			// effort only if this model offers it. Without one, use the model's
-			// saved effort: the first turn would otherwise inherit the default's.
+			// Keep a picked effort only if this model offers it, and save it as a
+			// session pick would be. Without one, use the model's saved effort: the
+			// first turn would otherwise inherit the default model's.
 			const { variant: saved, variants } = yield* savedVariantFor(override);
 			const picked = model.variant;
-			yield* selectSessionVariant(
-				session.id,
-				picked === "" || (picked !== undefined && variants.includes(picked))
-					? picked
-					: saved,
-			);
+			if (
+				picked === "" ||
+				(picked !== undefined && variants.includes(picked))
+			) {
+				yield* switchVariantForSession({
+					clientId,
+					sessionId: session.id,
+					variant: picked,
+				});
+			} else {
+				yield* selectSessionVariant(session.id, saved);
+			}
 		}
 
 		yield* switchClientToSession(clientId, session.id, {

@@ -453,6 +453,18 @@ export function getEffectiveInstanceId(): string {
 	return available[0]?.id ?? derived;
 }
 
+/** The instance a session's picker is locked to. Only built-in instances'
+ *  catalogues are fetched, so a custom instance shows its driver's. Until
+ *  GetAgents reports the binding, assume the composer's aim, which is where a
+ *  new session runs. The session's model can't tell: one left on the default
+ *  has none of its own. */
+export function getSessionInstanceId(sessionId: string): string {
+	const bound = getAvailableInstances().find(
+		(instance) => instance.id === serverDiscovery.sessionInstanceIds[sessionId],
+	);
+	return bound?.driver ?? getEffectiveInstanceId();
+}
+
 /** Select a harness instance (pre-creation only). Persists the draft and, if
  *  the active model falls outside the instance, re-aims the local model
  *  selection at the instance's default-or-first visible model. */
@@ -624,6 +636,12 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 	});
 	if (response.active) {
 		handleModelInfo(response.active);
+	} else {
+		// The harness picks its own model, so drop the last session's.
+		serverDiscovery.currentModelId = "";
+		serverDiscovery.currentProviderId = "";
+		choice.modelId = null;
+		choice.providerId = null;
 	}
 	if (response.variant) {
 		handleVariantInfo({
