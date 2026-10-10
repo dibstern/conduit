@@ -218,7 +218,7 @@ describe("segmentTurns", () => {
 		expect(turn.segments[1]?.activity).toEqual([next]);
 		expect(lastResult(turn)).toBe(end);
 		expect(economics(turn, 500).cost).toBe(0.02);
-		expect(workingTime(turn, 500)).toBe(500);
+		expect(workingTime(turn, 500)).toBe(400);
 	});
 
 	it("settles again after resumed work finishes", () => {
@@ -711,6 +711,241 @@ describe("stepWeights", () => {
 });
 
 describe("workingTime", () => {
+	it("excludes every idle gap, starting after the result rather than the reply", () => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				read("/a.ts", 1_000),
+				say("First reply", 3_000),
+				result({ createdAt: 4_000 }),
+				think(20_000),
+				read("/b.ts", 21_000),
+				say("Second reply", 24_000),
+				result({ createdAt: 25_000 }),
+				read("/c.ts", 40_000),
+				result({ createdAt: 44_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 100_000)).toBe(13_000);
+		expect(workingTime(turn, 200_000)).toBe(13_000);
+	});
+
+	it.each([
+		["activity", [think(8_000), read("/b.ts", 9_000)], 4_000],
+		["reply", [say("Awake", 8_000)], 4_000],
+		["hand-back", [tool("AskUserQuestion", {}, { createdAt: 8_000 })], 4_000],
+		["compaction", [compaction("completed", { createdAt: 8_000 })], 4_000],
+		["later stamped activity", [think(), read("/b.ts", 8_000)], 4_000],
+	] satisfies [
+		string,
+		ChatMessage[],
+		number,
+	][])("finds the wake-up's first stamp in %s", (_name, wakeUp, expected) => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				result({ createdAt: 2_000 }),
+				...wakeUp,
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(expected);
+	});
+
+	it("uses a tool's completion when the preceding result has no stamp", () => {
+		const work = read("/a.ts", 1_000);
+		work.endedAt = 4_000;
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				work,
+				result(),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(6_000);
+	});
+
+	it.each([
+		["contained approval", [{ from: 3_000, to: 7_000 }], 4_000],
+		["containing approval", [{ from: 1_000, to: 9_000 }], 2_000],
+		["overlapping approval", [{ from: 1_000, to: 4_000 }], 3_000],
+		["open approval", [{ from: 4_000 }], 2_000],
+		[
+			"adjacent approvals",
+			[
+				{ from: 8_000, to: 9_000 },
+				{ from: 1_000, to: 2_000 },
+			],
+			2_000,
+		],
+		[
+			"out-of-range approvals",
+			[
+				{ from: -2_000, to: 1_000 },
+				{ from: 9_000, to: 12_000 },
+			],
+			2_000,
+		],
+	] satisfies [
+		string,
+		{ from: number; to?: number }[],
+		number,
+	][])("subtracts the union of the gap and %s without mutating waits", (_name, waits, expected) => {
+		const prompt = user(undefined, 0);
+		const approvals = waits.map((wait, index) => ({
+			...wait,
+			id: `approval-${index}`,
+		}));
+		prompt.turnTiming = { startedAt: 0, endedAt: 10_000, waits: approvals };
+		const original = structuredClone(prompt.turnTiming);
+		Object.freeze(approvals);
+		const [turn] = segmentTurns(
+			[
+				prompt,
+				read("/a.ts", 1_000),
+				result({ createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(expected);
+		expect(prompt.turnTiming).toEqual(original);
+	});
+
+	it("clips an open wait spanning several gaps only once", () => {
+		const prompt = user(undefined, 0);
+		prompt.turnTiming = {
+			startedAt: 0,
+			waits: [{ id: "approval", from: 1_000 }],
+		};
+		const [turn] = segmentTurns(
+			[
+				prompt,
+				result({ createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+				read("/c.ts", 12_000),
+			],
+			true,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 15_000)).toBe(1_000);
+		expect(workingTime(turn, 15_000, 5_000)).toBe(1_000);
+	});
+
+	it.each([
+		[0, 0],
+		[1_000, 1_000],
+		[2_000, 2_000],
+		[5_000, 2_000],
+		[8_000, 2_000],
+		[9_000, 3_000],
+		[20_000, 4_000],
+	])("clips working time at %i, including inside a gap", (until, expected) => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				result({ createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000, until)).toBe(expected);
+	});
+
+	it("keeps the open final segment working after excluding its preceding gap", () => {
+		const [turn] = segmentTurns(
+			[user(undefined, 0), result({ createdAt: 2_000 }), read("/b.ts", 8_000)],
+			true,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 10_000)).toBe(4_000);
+		expect(workingTime(turn, 12_000)).toBe(6_000);
+	});
+
+	it.each([
+		"AskUserQuestion",
+		"ExitPlanMode",
+	])("excludes the gap following %s", (name) => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				tool(name, {}, { createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(4_000);
+	});
+
+	it.each([
+		0, 1_000, 2_000,
+	])("ignores zero or overlapping gaps starting at %i", (createdAt) => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				result({ createdAt: 2_000 }),
+				read("/b.ts", createdAt),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(10_000);
+	});
+
+	it("does not invent a gap across an entirely unstamped segment", () => {
+		const [turn] = segmentTurns(
+			[
+				user(undefined, 0),
+				result({ createdAt: 2_000 }),
+				read("/b.ts"),
+				result(),
+				read("/c.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(10_000);
+	});
+
+	it("clips gaps to the persisted turn bounds", () => {
+		const prompt = user(undefined, 0);
+		prompt.turnTiming = { startedAt: 4_000, endedAt: 9_000, waits: [] };
+		const [turn] = segmentTurns(
+			[
+				prompt,
+				result({ createdAt: 2_000 }),
+				read("/b.ts", 8_000),
+				result({ createdAt: 10_000 }),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBe(1_000);
+	});
+
+	it("keeps an empty turn's duration unknown", () => {
+		const [turn] = segmentTurns([user(undefined, 0)], false);
+		assert.exists(turn);
+		expect(workingTime(turn, 50_000)).toBeUndefined();
+	});
+
 	it("uses stamped work instead of the duration the provider reported", () => {
 		const turns = segmentTurns(
 			[user(undefined, 0), read("/a.ts", 1_000), result({ duration: 42_300 })],
@@ -765,6 +1000,134 @@ describe("economics", () => {
 		assert.exists(turn, "expected turn");
 		return economics(turn, 0);
 	};
+
+	it("sums tokens across segments while using only the last result's context", () => {
+		const [turn] = segmentTurns(
+			[
+				user(),
+				read("/a.ts"),
+				result({
+					inputTokens: 100,
+					outputTokens: 200,
+					cacheRead: 5_000,
+					cacheWrite: 1_000,
+					context_window: 100_000,
+				}),
+				read("/b.ts"),
+				tool("AskUserQuestion"),
+				read("/c.ts"),
+				result({
+					inputTokens: 20,
+					outputTokens: 30,
+					cacheRead: 2_000,
+					cacheWrite: 300,
+					context_window: 10_000,
+				}),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(economics(turn, 0)).toMatchObject({
+			tokensIn: 120,
+			tokensOut: 230,
+			context: { used: 2_320, window: 10_000, pct: 23 },
+		});
+	});
+
+	it.each([
+		[
+			"input only",
+			[{ inputTokens: 10 }, {}, { inputTokens: 0 }],
+			10,
+			undefined,
+		],
+		[
+			"output only",
+			[{ outputTokens: 20 }, {}, { outputTokens: 0 }],
+			undefined,
+			20,
+		],
+		[
+			"separate counters",
+			[{ inputTokens: 10 }, { outputTokens: 20 }, {}],
+			10,
+			20,
+		],
+		["reported zeros", [{ inputTokens: 0, outputTokens: 0 }, {}], 0, 0],
+		["no usage", [{}, {}], undefined, undefined],
+	] satisfies [
+		string,
+		Partial<ResultMessage>[],
+		number | undefined,
+		number | undefined,
+	][])("preserves missing and zero token counts for %s", (_name, results, tokensIn, tokensOut) => {
+		const [turn] = segmentTurns(
+			[user(), ...results.flatMap((fields) => [read("/a.ts"), result(fields)])],
+			false,
+		);
+		assert.exists(turn);
+		const bill = economics(turn, 0);
+		expect(bill.tokensIn).toBe(tokensIn);
+		expect(bill.tokensOut).toBe(tokensOut);
+		expect(bill.context).toBeUndefined();
+	});
+
+	it("retains previous segment totals and context while a wake-up is live", () => {
+		const [turn] = segmentTurns(
+			[
+				user(),
+				read("/a.ts"),
+				result({ inputTokens: 10, outputTokens: 20 }),
+				read("/b.ts"),
+				result({ inputTokens: 30, outputTokens: 40, context_window: 100 }),
+				read("/c.ts"),
+			],
+			true,
+		);
+		assert.exists(turn);
+		expect(economics(turn, 0)).toMatchObject({
+			tokensIn: 40,
+			tokensOut: 60,
+			context: { used: 30, window: 100, pct: 30 },
+		});
+	});
+
+	it.each([
+		{},
+		{ inputTokens: 2 },
+		{ inputTokens: 2, context_window: 0 },
+	])("does not reuse an earlier context when the last result lacks a reading: %j", (last) => {
+		const [turn] = segmentTurns(
+			[
+				user(),
+				read("/a.ts"),
+				result({ inputTokens: 10, outputTokens: 20, context_window: 100 }),
+				read("/b.ts"),
+				result(last),
+			],
+			false,
+		);
+		assert.exists(turn);
+		expect(economics(turn, 0).context).toBeUndefined();
+	});
+
+	it("keeps token totals scoped to one user turn", () => {
+		const turns = segmentTurns(
+			[
+				user(),
+				read("/a.ts"),
+				result({ inputTokens: 10, outputTokens: 20 }),
+				user(),
+				read("/b.ts"),
+				result({ inputTokens: 30, outputTokens: 40 }),
+			],
+			false,
+		);
+		expect(turns.map((turn) => economics(turn, 0))).toEqual([
+			{ tokensIn: 10, tokensOut: 20 },
+			{ tokensIn: 30, tokensOut: 40 },
+		]);
+	});
 
 	it("sums fresh input, cache reads and cache writes into context used", () => {
 		const e = withResult({
