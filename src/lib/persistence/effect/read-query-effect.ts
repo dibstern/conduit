@@ -555,6 +555,7 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 >() {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
@@ -634,6 +635,7 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
@@ -645,6 +647,7 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
 						turnTiming: {
@@ -681,7 +684,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
-	const turnTimingColumns = sql`
+	const turnMetadataColumns = sql`
+		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
+			THEN turns.cost ELSE NULL END AS turn_cost,
 		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
 			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
 		) AS turn_started_at,
@@ -1006,7 +1011,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
 					turns.actual_model AS turn_actual_model,
-					${turnTimingColumns}
+					${turnMetadataColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
 				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1184,7 +1189,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1200,7 +1205,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1214,7 +1219,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1461,7 +1466,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							turns.requested_model AS turn_requested_model,
 							turns.expected_model AS turn_expected_model,
 							turns.actual_model AS turn_actual_model,
-							${turnTimingColumns}
+							${turnMetadataColumns}
 						FROM messages
 						LEFT JOIN turns ON turns.id = messages.turn_id
 						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'

@@ -185,7 +185,8 @@ function plannedRuntimeEventsForClaudeSdkFixture(
 			createdAt: Date.now(),
 			data: {
 				messageId,
-				cost: message.total_cost_usd,
+				providerCostTotalUsd: message.total_cost_usd,
+				providerSessionId: message.session_id,
 				tokens: {
 					input: message.usage.input_tokens,
 					output: message.usage.output_tokens,
@@ -1051,7 +1052,8 @@ describe("ClaudeEventTranslator", () => {
 			},
 			data: {
 				messageId: "assistant-result-1",
-				cost: 0.12,
+				providerCostTotalUsd: 0.12,
+				providerSessionId: "sdk-session-1",
 				tokens: {
 					input: 10,
 					output: 20,
@@ -1458,7 +1460,7 @@ describe("ClaudeEventTranslator", () => {
 
 	// 13. result (success)
 
-	it("translates result/success to turn.completed with tokens, cost, duration", async () => {
+	it("keeps the Claude session total and identity for durable cost conversion", async () => {
 		// Set assistant uuid so messageId is populated
 		ctx.lastAssistantUuid = "assist-uuid-1";
 
@@ -1493,7 +1495,9 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["output"]).toBe(50);
 		expect(tokens["cacheRead"]).toBe(10);
 		expect(tokens["cacheWrite"]).toBe(5);
-		expect(data["cost"]).toBeCloseTo(0.0123);
+		expect(data["providerCostTotalUsd"]).toBe(0.0123);
+		expect(data["providerSessionId"]).toBe("sdk-sess");
+		expect(data["cost"]).toBeUndefined();
 		expect(data["duration"]).toBe(1200);
 	});
 
@@ -1662,8 +1666,9 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["output"]).toBe(800);
 		expect(tokens["cacheRead"]).toBe(110_000);
 		expect(tokens["cacheWrite"]).toBe(1_500);
-		// Cost and duration still reflect the whole turn
-		expect(dataOf(turnCompleted)["cost"]).toBeCloseTo(1.5);
+		// The raw session total is converted only when the result is persisted.
+		expect(dataOf(turnCompleted)["providerCostTotalUsd"]).toBe(1.5);
+		expect(dataOf(turnCompleted)["cost"]).toBeUndefined();
 	});
 
 	// 13b. result (success, no streaming, text in result field)

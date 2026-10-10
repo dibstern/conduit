@@ -2,10 +2,11 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Deferred, Effect, FiberRef, Layer, Ref } from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
-import {
+import type {
 	EventStoreEffectTag,
-	type EventStoreError,
+	EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -82,7 +83,7 @@ export const makeProviderRuntimeIngestionLive = (
 		ProviderRuntimeIngestionTag,
 		Effect.gen(function* () {
 			const commitAndSignal = yield* makeCommitAndSignal;
-			const eventStore = yield* EventStoreEffectTag;
+			const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 			const sql = yield* SqlClient.SqlClient;
 			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
@@ -251,7 +252,7 @@ export const makeProviderRuntimeIngestionLive = (
 									for (const event of persistentEvents) {
 										if (event.type === "session.usage_limited") {
 											if (pending.length > 0) {
-												yield* project(yield* eventStore.appendBatch(pending));
+												yield* project(yield* appendEvents(pending));
 												pending = [];
 											}
 											if (yield* continuation.intakeLimit(event, project))
@@ -260,7 +261,7 @@ export const makeProviderRuntimeIngestionLive = (
 										} else pending.push(event);
 									}
 									if (pending.length > 0)
-										yield* project(yield* eventStore.appendBatch(pending));
+										yield* project(yield* appendEvents(pending));
 									yield* beforeCommit;
 								}),
 							commitOptions,

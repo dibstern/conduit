@@ -1711,7 +1711,8 @@ export class ClaudeEventTranslator {
 				makeProviderRuntimeEvent("turn.completed", ctx.sessionId, {
 					messageId:
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
-					cost: result.total_cost_usd,
+					providerCostTotalUsd: result.total_cost_usd,
+					providerSessionId: result.session_id,
 					tokens,
 					duration: result.duration_ms,
 				}),

@@ -163,6 +163,7 @@ export function sdkResultToTurnResult(
 	else if (isInterrupted) status = "interrupted";
 	return {
 		status,
+		// Session running total; canonical event cost is computed during persistence.
 		cost: result.total_cost_usd ?? 0,
 		tokens: {
 			input: result.usage?.input_tokens ?? 0,

@@ -117,6 +117,7 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	turnCost?: number;
 	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {
 		requestedModel?: string;
