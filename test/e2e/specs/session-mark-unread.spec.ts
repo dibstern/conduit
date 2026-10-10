@@ -59,7 +59,7 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 	await expect(page.getByTestId("session-filter-chip-unread")).toContainText(
 		"1",
 	);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 
 	await row.focus();
@@ -245,7 +245,7 @@ test.describe("phone", () => {
 		await expect(
 			page.getByRole("status").filter({ hasText: "Marked unread" }),
 		).toHaveCount(1);
-		await page.getByTestId("toast-action").last().click();
+		await page.getByTestId("toast-action").first().click();
 		await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 
 		await row.click();

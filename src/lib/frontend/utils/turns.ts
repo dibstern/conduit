@@ -86,13 +86,11 @@ export function appendActivity(segment: OpenSegment, part: ActivityPart): void {
  * back into activity, but only within the same open segment.
  *
  * @param processing whether the session is currently producing output — only
- *   the last started turn can be live, according to its last segment's signal.
- * @param turnEpoch the session's current epoch, to tell queued prompts apart.
+ *   the last turn can be live, according to its last segment's signal.
  */
 export function segmentTurns(
 	messages: ChatMessage[],
 	processing: boolean,
-	turnEpoch?: number,
 ): Turn[] {
 	const turns: Turn[] = [];
 	for (const msg of messages) {
@@ -139,38 +137,14 @@ export function segmentTurns(
 			};
 		} else appendActivity(segment, msg);
 	}
-	const last = startedTurn(turns, turnEpoch, processing);
+	// A queued prompt waits in the tray, so the transcript's last turn is the live one.
+	const last = turns.at(-1);
 	// A closed segment is the only thing that settles a turn, and a closed
 	// segment can never receive more work — the types see to that. So a result
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
 	if (last) last.live = processing && last.segments.at(-1)?.end === undefined;
 	return turns;
-}
-
-/** Queued rows sort below running work, so they cannot select the active turn. */
-export function startedTurn(
-	turns: readonly Turn[],
-	turnEpoch: number | undefined,
-	processing: boolean,
-): Turn | undefined {
-	return turns
-		.filter((turn) => !turn.user || !isQueued(turn.user, turnEpoch, processing))
-		.at(-1);
-}
-
-/** Sent while an earlier turn ran, and that turn has not finished yet. */
-export function isQueued(
-	user: UserMessage,
-	turnEpoch: number | undefined,
-	processing: boolean,
-): boolean {
-	return (
-		(user.waitingBehindReply === true && processing) ||
-		(user.sentDuringEpoch !== undefined &&
-			turnEpoch !== undefined &&
-			turnEpoch <= user.sentDuringEpoch)
-	);
 }
 
 /** Latest reported usage remains available even when later work is running. */

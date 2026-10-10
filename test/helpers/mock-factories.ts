@@ -33,6 +33,7 @@ import {
 } from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+import { SessionWorkspaceLive } from "../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	type AgentList,
 	type AgentService,
@@ -45,14 +46,16 @@ import { InputDraftsLive } from "../../src/lib/domain/relay/Services/input-draft
 import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipLive } from "../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../../src/lib/domain/relay/Services/provider-turn-service.js";
+import {
+	ProviderTurnServiceLive,
+	ProviderTurnServiceTag,
+} from "../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
@@ -74,6 +77,7 @@ import {
 	type WebSocketHandlerShape,
 	WebSocketHandlerTag,
 } from "../../src/lib/domain/relay/Services/services.js";
+import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceLive,
@@ -83,7 +87,10 @@ import {
 	makeSessionManagerStateLive,
 	type SessionManagerState,
 } from "../../src/lib/domain/relay/Services/session-manager-state.js";
-import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	makeOverridesStateLive,
+	OverridesStateTag,
+} from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
@@ -886,7 +893,6 @@ export function makeTestHandlerLayer(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
-	const pendingSendOwnershipLayer = PendingSendOwnershipLive;
 	const openCodeInstancesLayer = Layer.succeed(
 		OpenCodeInstancesTag,
 		makeOpenCodeInstancesStub({ opencode: api }),
@@ -965,7 +971,6 @@ export function makeTestHandlerLayer(
 						openCodeInstancesLayer,
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						overridesStateLayer,
-						pendingSendOwnershipLayer,
 						sessionManagerOrchestrationLayer,
 						persistenceLayer,
 					),
@@ -986,7 +991,6 @@ export function makeTestHandlerLayer(
 				configLayer,
 				sessionManagerServiceLayer,
 				PendingInteractionServiceLive,
-				pendingSendOwnershipLayer,
 				overridesStateLayer,
 				orchestrationLayer,
 				providerTurnPersistenceLayer,
@@ -999,6 +1003,16 @@ export function makeTestHandlerLayer(
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
+		SessionWorkspaceLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					openCodeApiLayer,
+					configLayer,
+					loggerLayer,
+					providerTurnPersistenceLayer,
+				),
+			),
+		),
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -1012,8 +1026,10 @@ export function makeTestHandlerLayer(
 		openCodeTerminalServiceLayer,
 		instanceManagementServiceLayer,
 		PendingInteractionServiceLive,
-		pendingSendOwnershipLayer,
 		providerTurnServiceLayer,
+		PassThroughSessionInbox.pipe(
+			Layer.provide(Layer.merge(providerTurnServiceLayer, overridesStateLayer)),
+		),
 		sessionManagerServiceLayer,
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),
 		wsHandlerLayer,
@@ -1098,6 +1114,37 @@ export function makeTestFullLayer(
 		makeTestDaemonStateLayer(opts),
 	);
 }
+
+/**
+ * A Session Inbox that hands every submit straight to ProviderTurnService, as
+ * an idle session does. For handler tests that exercise the send path around
+ * the inbox; the inbox itself is proven by the Claude replay lane.
+ */
+export const PassThroughSessionInbox = Layer.effect(
+	SessionInboxTag,
+	Effect.gen(function* () {
+		const turns = yield* ProviderTurnServiceTag;
+		const overrides = yield* OverridesStateTag;
+		return {
+			submit: ({ inputId, request, ...input }) =>
+				turns
+					.sendTurn({
+						clientId: input.clientId,
+						commandId: inputId,
+						sessionId: input.sessionId,
+						...request,
+					})
+					.pipe(
+						Effect.provideService(OverridesStateTag, overrides),
+						Effect.as({ handedOff: true }),
+					),
+			// Nothing ever queues here, so nothing can be removed or sent now.
+			cancel: () => Effect.succeed("already_started" as const),
+			sendNow: () => Effect.succeed("already_started" as const),
+			start: Effect.void,
+		};
+	}),
+);
 
 /** Drops every event: for tests whose turns never reach the store. */
 export const NoopProviderRuntimeIngestionLive = Layer.succeed(

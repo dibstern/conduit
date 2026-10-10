@@ -3,6 +3,8 @@
      current checkout exists today; worktrees and other branches come later. -->
 
 <script lang="ts">
+	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -21,6 +23,11 @@
 	const project = $derived(projectState.projects.find((p) => p.slug === slug));
 	const title = $derived(project?.title || slug || "Choose a project");
 	const branch = $derived(project?.git?.branch);
+	const multiFolder = $derived((project?.folders.length ?? 0) > 1);
+	const instance = $derived(getAvailableInstances().find((provider) => provider.id === getEffectiveInstanceId()));
+	const providerName = $derived(getInstanceById(instance?.id ?? "")?.name ?? instance?.label ?? "This provider");
+	const uid = $props.id();
+	const explanationId = `${uid}-provider-explanation`;
 	const available = $derived(projectState.projects.filter((p) => !p.missing));
 	const missing = $derived(projectState.projects.filter((p) => p.missing));
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
@@ -70,7 +77,7 @@
 
 	<Menu ariaLabel="Where the session starts" {presentation}>
 		{#snippet trigger({ props })}
-			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip">
+			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : undefined}>
 				<Icon name={branch ? "git-branch" : "folder"} size={12} />
 				<span class="truncate">{branch ?? "Current folder"}</span>
 				<Icon name="chevron-down" size={12} />
@@ -80,7 +87,7 @@
 			<MenuRadioGroup value="current">
 				<MenuRadioItem value="current" class={rowClass}>Current checkout</MenuRadioItem>
 			</MenuRadioGroup>
-			<MenuItem disabled class={rowClass}>New worktree <span class="ml-auto text-text-dimmer">soon</span></MenuItem>
+			<MenuItem disabled class={rowClass}>New worktree <span class="ml-auto text-text-dimmer">{instance?.capabilities?.supportsWorktree === false ? `Not supported by ${providerName}` : "soon"}</span></MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />
@@ -95,3 +102,7 @@
 
 	{#if branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-dimmer">current checkout</span>{/if}
 </div>
+
+{#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
+	<p id={explanationId} role="status" data-testid="draft-provider-explanation" class="px-1 pt-1 text-[11px] text-text-secondary">{providerName} works in the main folder only. Pick another provider to use every folder.</p>
+{/if}

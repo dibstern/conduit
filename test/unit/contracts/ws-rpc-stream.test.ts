@@ -112,6 +112,8 @@ const makeLayer = (options: {
 					getSessionHistoryMetadata: () =>
 						Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 					getSessionMessagesWithParts: () => Effect.succeed([]),
+					readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+					readInboxState: () => Effect.succeed(undefined),
 					readSessionTranscriptPage: () =>
 						options.failRead
 							? Effect.fail(readFailure)

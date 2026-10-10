@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
@@ -145,7 +145,7 @@ describe("daemon RPC handlers", () => {
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
 				yield* client.SaveProject({ folders: [directory] });
 				expect((yield* client.GetProjects({})).projects).toMatchObject([
-					{ folders: [directory] },
+					{ folders: [realpathSync(directory)] },
 				]);
 			}).pipe(
 				Effect.provide(

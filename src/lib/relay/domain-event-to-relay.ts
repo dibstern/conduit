@@ -123,6 +123,13 @@ export function translateDomainEventToRelay(
 		case "turn.model_resolved":
 			return silent("persistence/ws-rpc-only event");
 
+		case "input.admitted":
+		case "input.sent":
+		case "input.cancelled":
+			return silent(
+				"persistence-only; browsers read pending inputs from the detail stream",
+			);
+
 		case "session.status":
 			return silent(
 				"the shell row carries session status, including a retry; the terminal done covers completion",
@@ -164,6 +171,8 @@ export function translateDomainEventToRelay(
 
 		case "session.goal_changed":
 			return silent("delivered as the shell row's goalState");
+		case "session.workspace_changed":
+			return silent("delivered as the shell row's workspace and git");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; it does, as the session's shell row (ni8.12).

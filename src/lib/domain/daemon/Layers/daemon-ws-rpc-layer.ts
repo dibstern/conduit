@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
@@ -219,6 +220,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					"instances",
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
+						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 					})),
 				),
 			SubscribeProjects: () =>
@@ -391,7 +393,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			GetInstances: () =>
 				run(
 					getInstances.pipe(
-						Effect.map((instances) => ({ instances: Array.from(instances) })),
+						Effect.map((instances) => ({
+							instances: Array.from(instances),
+							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						})),
 					),
 				),
 			GetInstanceStatus: (request) =>
@@ -412,7 +417,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SaveProject: (request) =>
 				Effect.gen(function* () {
-					const { project, warnings } = yield* handle.saveProject({
+					const { kind, project, warnings } = yield* handle.saveProject({
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
@@ -421,10 +426,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
-					if (request.slug === undefined)
+					if (request.slug === undefined && kind !== "existing")
 						yield* rememberNewSessionProject(project.slug);
 					const projects = yield* projectList;
 					return {
+						kind,
 						projectSlug: request.projectSlug,
 						...(request.projectSlug ? { current: request.projectSlug } : {}),
 						projects,
@@ -684,16 +690,21 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					),
 				),
 			FindFolders: (request) =>
-				run(
-					Effect.gen(function* () {
-						const projects = yield* allProjects;
-						return yield* findFolders(request.query, {
-							recent: getRecent(loadRecentProjects(configDir)).map(
-								(project) => project.directory,
-							),
-							projectFolders: projects.flatMap((project) => project.folders),
-						});
-					}),
+				Effect.gen(function* () {
+					const projects = yield* allProjects;
+					return yield* findFolders(request.query, {
+						recent: getRecent(loadRecentProjects(configDir)).map(
+							(project) => project.directory,
+						),
+						projectFolders: projects.flatMap((project) => project.folders),
+					});
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof ProjectSaveRejected
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			DetectProxy: wsRpcHandlers.DetectProxy,
 			SetLogLevel: wsRpcHandlers.SetLogLevel,

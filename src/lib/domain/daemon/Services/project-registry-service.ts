@@ -11,7 +11,14 @@
 // Relay lifecycle is delegated to RelayCacheTag.
 
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdirSync, rmSync, statSync } from "node:fs";
+import {
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import {
@@ -20,6 +27,7 @@ import {
 	Data,
 	Duration,
 	Effect,
+	Either,
 	HashMap,
 	Layer,
 	Option,
@@ -32,6 +40,7 @@ import {
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
+import { readRepositoryIdentity } from "../../../git/repository-identity.js";
 import { withCachedProjectGit } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
@@ -39,10 +48,17 @@ import {
 	projectEventsDbPath,
 	projectStorageDir,
 } from "../../../persistence/project-storage.js";
-import { checkFolders, type FolderIssue } from "../../../project-folders.js";
+import {
+	checkFolders,
+	type FolderIssue,
+	isPermissionDenied,
+} from "../../../project-folders.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
-import { requestConfigSave } from "./config-persistence-service.js";
+import {
+	ConfigPersistenceTag,
+	requestConfigSave,
+} from "./config-persistence-service.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
@@ -108,7 +124,27 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	lastUsed: project.addedAt,
 	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
+	...(project.repositoryIdentities !== undefined && {
+		repositoryIdentities: project.repositoryIdentities,
+	}),
 });
+
+const deriveRepositoryIdentities = (folders: readonly string[]) =>
+	Effect.forEach(
+		folders,
+		(folder) =>
+			Effect.tryPromise(() => readRepositoryIdentity(folder)).pipe(
+				Effect.catchAll(() => Effect.succeed(undefined)),
+				Effect.map((identity) =>
+					identity ? ([folder, identity] as const) : undefined,
+				),
+			),
+		{ concurrency: 4 },
+	).pipe(
+		Effect.map((entries) =>
+			Object.fromEntries(entries.filter((entry) => entry !== undefined)),
+		),
+	);
 
 const makeInitialProjectState = (
 	projects: ReadonlyArray<StoredProject>,
@@ -181,8 +217,9 @@ export const findByDirectory = (directory: string) =>
 		const ref = yield* ProjectRegistryTag;
 		const state = yield* Ref.get(ref);
 		const entries = HashMap.values(state);
+		const normalized = normalizeProjectDirectory(directory);
 		for (const entry of entries) {
-			if (entry.project.folders[0] === directory) {
+			if (normalizeProjectDirectory(entry.project.folders[0]) === normalized) {
 				return Option.some(entry);
 			}
 		}
@@ -200,21 +237,49 @@ export const allProjects = Effect.gen(function* () {
 	return projects.sort((a, b) => (b.lastUsed ?? 0) - (a.lastUsed ?? 0));
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
-export const projectInfos = allProjects.pipe(
-	Effect.map((projects) =>
-		withCachedProjectGit(
-			projects.map((project) => ({
-				slug: project.slug,
-				folders: project.folders,
-				title: project.title,
-				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-				...(project.instanceId !== undefined && {
-					instanceId: project.instanceId,
+export const projectInfos = Effect.gen(function* () {
+	const ref = yield* ProjectRegistryTag;
+	for (const project of yield* allProjects) {
+		if (project.repositoryIdentities !== undefined) continue;
+		const repositoryIdentities = yield* deriveRepositoryIdentities(
+			project.folders,
+		);
+		const changed = yield* Ref.modify(ref, (state) => {
+			const current = HashMap.get(state, project.slug);
+			if (
+				Option.isNone(current) ||
+				current.value.project.folders !== project.folders ||
+				current.value.project.repositoryIdentities !== undefined
+			)
+				return [false, state] as const;
+			return [
+				true,
+				HashMap.set(state, project.slug, {
+					...current.value,
+					project: { ...current.value.project, repositoryIdentities },
 				}),
-			})),
-		),
-	),
-);
+			] as const;
+		});
+		if (changed) {
+			const persistence = yield* Effect.serviceOption(ConfigPersistenceTag);
+			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
+		}
+	}
+	return withCachedProjectGit(
+		(yield* allProjects).map((project) => ({
+			slug: project.slug,
+			folders: project.folders,
+			title: project.title,
+			...(project.repositoryIdentities !== undefined && {
+				repositoryIdentities: project.repositoryIdentities,
+			}),
+			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+			...(project.instanceId !== undefined && {
+				instanceId: project.instanceId,
+			}),
+		})),
+	);
+});
 
 export const broadcastProjectList = Effect.gen(function* () {
 	yield* PubSub.publish(
@@ -445,7 +510,12 @@ export const remove = (slug: string) =>
  */
 export const updateProject = (
 	slug: string,
-	updates: Partial<Pick<StoredProject, "title" | "instanceId" | "folders">>,
+	updates: Partial<
+		Pick<
+			StoredProject,
+			"title" | "instanceId" | "folders" | "repositoryIdentities"
+		>
+	>,
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
@@ -694,7 +764,18 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 	Effect.gen(function* () {
 		const stateRef = yield* DaemonStateTag;
 		const state = yield* Ref.get(stateRef);
-		const initialProjects = state.projects.map(toStoredProject);
+		// Refresh even cached identities before consumers (including HTTP/RPC) start.
+		const initialProjects = yield* Effect.forEach(
+			state.projects,
+			(project) =>
+				deriveRepositoryIdentities(project.folders).pipe(
+					Effect.map((repositoryIdentities) => ({
+						...toStoredProject(project),
+						repositoryIdentities,
+					})),
+				),
+			{ concurrency: 4 },
+		);
 		const ref = yield* Ref.make<ProjectRegistryState>(
 			makeInitialProjectState(initialProjects),
 		);
@@ -710,7 +791,13 @@ export const normalizeProjectDirectory = (directory: string): string => {
 		directory === "~" || directory.startsWith("~/")
 			? directory.replace(/^~/, homedir())
 			: directory;
-	return resolve(expanded);
+	const path = resolve(expanded);
+	try {
+		return realpathSync(path);
+	} catch {
+		// Missing paths may be created; save validation reports inaccessible paths.
+		return path;
+	}
 };
 
 const titleForDirectory = (directory: string): string =>
@@ -732,29 +819,52 @@ export const saveProject = (input: SaveProjectInput) =>
 				);
 				const { errors, warnings } = checkFolders(
 					folders,
-					projects.filter((project) => project.slug !== input.slug),
+					projects
+						.filter((project) => project.slug !== input.slug)
+						.map((project) => ({
+							...project,
+							folders: project.folders.map(normalizeProjectDirectory),
+						})),
 				);
-				const issues: FolderIssue[] = [...errors];
+				const taken = errors.find((issue) => issue.kind === "main-taken");
+				const issues: FolderIssue[] = errors.filter(
+					(issue) => input.slug !== undefined || issue.kind !== "main-taken",
+				);
 				if (input.slug !== undefined && existing === undefined) {
 					issues.push({ kind: "unknown-project", slug: input.slug });
 				}
 				for (const folder of inputs) {
 					const disk = yield* Effect.try({
-						try: () =>
-							folder.create ? lstatSync(folder.path) : statSync(folder.path),
-						catch: (cause) => cause,
-					}).pipe(Effect.option);
-					if (folder.create) {
-						if (Option.isSome(disk))
-							issues.push({ kind: "create-exists", path: folder.path });
-					} else if (Option.isNone(disk)) {
-						issues.push({ kind: "missing", path: folder.path });
-					} else if (!disk.value.isDirectory()) {
+						try: () => {
+							const disk = folder.create
+								? lstatSync(folder.path)
+								: statSync(folder.path);
+							if (!folder.create && disk.isDirectory())
+								readdirSync(folder.path);
+							return disk;
+						},
+						catch: (cause): FolderIssue => ({
+							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
+							path: folder.path,
+						}),
+					}).pipe(Effect.either);
+					if (Either.isLeft(disk)) {
+						if (!folder.create || disk.left.kind === "permission-denied")
+							issues.push(disk.left);
+					} else if (folder.create) {
+						issues.push({ kind: "create-exists", path: folder.path });
+					} else if (!disk.right.isDirectory()) {
 						issues.push({ kind: "not-a-folder", path: folder.path });
 					}
 				}
 				if (issues.length > 0)
 					return yield* new ProjectSaveRejected({ issues });
+				if (input.slug === undefined && taken?.kind === "main-taken")
+					return {
+						kind: "existing" as const,
+						project: yield* getProject(taken.slug),
+						warnings: [],
+					};
 				if (!Arr.isNonEmptyReadonlyArray(folders))
 					return yield* new ProjectSaveRejected({
 						issues: [{ kind: "empty" }],
@@ -770,7 +880,8 @@ export const saveProject = (input: SaveProjectInput) =>
 					});
 				const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 				const mainChanged =
-					existing !== undefined && existing.folders[0] !== mainFolder;
+					existing !== undefined &&
+					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
 					if (
 						projectEventsDbPath({ configDir, ...existing }) !==
@@ -837,6 +948,11 @@ export const saveProject = (input: SaveProjectInput) =>
 								try: () =>
 									execFileSync("git", ["init"], {
 										cwd: folder.path,
+										env: {
+											...process.env,
+											GIT_DIR: undefined,
+											GIT_INDEX_FILE: undefined,
+										},
 										stdio: "pipe",
 										timeout: 30_000,
 									}),
@@ -872,15 +988,20 @@ export const saveProject = (input: SaveProjectInput) =>
 						),
 					),
 				);
+				const canonicalFolders = Arr.map(folders, normalizeProjectDirectory);
+				const repositoryIdentities =
+					yield* deriveRepositoryIdentities(canonicalFolders);
 				const project: StoredProject = existing
 					? {
 							...existing,
-							folders,
+							folders: canonicalFolders,
+							repositoryIdentities,
 							...(title !== undefined && { title }),
 						}
 					: {
 							slug,
-							folders,
+							folders: canonicalFolders,
+							repositoryIdentities,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 							...(input.instanceId !== undefined && {
@@ -889,7 +1010,8 @@ export const saveProject = (input: SaveProjectInput) =>
 						};
 				if (existing) {
 					yield* updateProject(slug, {
-						folders,
+						folders: canonicalFolders,
+						repositoryIdentities,
 						title: project.title,
 					});
 				} else {
@@ -897,8 +1019,11 @@ export const saveProject = (input: SaveProjectInput) =>
 				}
 				if (
 					existing &&
-					(existing.folders.length !== folders.length ||
-						existing.folders.some((folder, index) => folder !== folders[index]))
+					(existing.folders.length !== canonicalFolders.length ||
+						existing.folders.some(
+							(folder, index) =>
+								normalizeProjectDirectory(folder) !== canonicalFolders[index],
+						))
 				) {
 					yield* replaceRelay(slug);
 					if (mainChanged) {
@@ -914,7 +1039,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						);
 					}
 				}
-				return { project: yield* getProject(slug), warnings };
+				return { kind: undefined, project: yield* getProject(slug), warnings };
 			}),
 		),
 	).pipe(

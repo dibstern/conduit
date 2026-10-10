@@ -14,7 +14,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -150,7 +149,6 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 		Layer.succeed(StatusPollerTag, services.statusPoller),
 		Layer.succeed(LoggerTag, services.log),
 		makeSessionManagerStateLive(),
-		PendingSendOwnershipLive,
 		DaemonEventBusLive,
 		persistenceLayer,
 		Layer.succeed(

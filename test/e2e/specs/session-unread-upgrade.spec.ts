@@ -29,7 +29,17 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 				.all()
 				.map((column) => String(column["name"])),
 		);
-		for (const column of ["unread", "seen_version", "last_turn_end_version"])
+		// The sidebar migrations recreate these unguarded, and root_id cannot
+		// be dropped while indexed.
+		db.exec("DROP INDEX IF EXISTS idx_sessions_root");
+		db.exec("DROP TABLE IF EXISTS session_sidebar");
+		db.exec("DROP TABLE IF EXISTS session_sidebar_horizon");
+		for (const column of [
+			"unread",
+			"seen_version",
+			"last_turn_end_version",
+			"root_id",
+		])
 			if (columns.has(column))
 				db.exec(`ALTER TABLE sessions DROP COLUMN ${column}`);
 		for (const column of ["read_at", "marked_unread_at"])
@@ -39,6 +49,9 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 		// that do not have an idempotent column guard when they run again.
 		db.exec("DROP INDEX IF EXISTS idx_message_tombstones_session_version");
 		db.exec("DROP TABLE IF EXISTS message_tombstones");
+		db.exec("DROP INDEX IF EXISTS idx_pending_inputs_session_version");
+		db.exec("DROP TABLE IF EXISTS pending_inputs");
+		db.exec("DROP TABLE IF EXISTS session_sidebar_horizon");
 		// Main's ledger ends before session_attention, so every later
 		// migration is unrecorded too.
 		db.exec(

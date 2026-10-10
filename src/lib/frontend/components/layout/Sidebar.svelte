@@ -41,8 +41,13 @@
 		applyProjectList(response);
 		setSessionScope(response.savedSlug);
 		const params = getCurrentSearchParams();
-		params.set(DRAFT_PROJECT_PARAM, response.savedSlug);
-		navigate(`/new?${params}`);
+		if (response.kind === "existing") {
+			params.delete(DRAFT_PROJECT_PARAM);
+			navigate(`/?${params}`);
+		} else {
+			params.set(DRAFT_PROJECT_PARAM, response.savedSlug);
+			navigate(`/new?${params}`);
+		}
 		addProjectOpen = false;
 	}
 

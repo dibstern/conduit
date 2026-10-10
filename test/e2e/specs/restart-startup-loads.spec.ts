@@ -22,9 +22,11 @@ const startupLoads = [
 	"ListDaemonSessions",
 ];
 
-// Socket retry cap (1 s) + resume re-issue cap (1 s) + the reads, with headroom
-// for a loaded machine. Measured 1.6-3.0 s; the old 5 s retry cap measured 5.1 s.
-const reloadBudgetMs = 4_000;
+// Socket retry cap (1 s) + resume re-issue cap (1 s), with headroom. Timed to
+// the last startup request sent, not answered: the answers wait on the server,
+// which a loaded machine slows past any budget (7.9 s in a full parallel run).
+// The old 5 s retry cap would exceed it on its own.
+const resendBudgetMs = 3_000;
 
 test.use({ claudeReplay: { turns: [] } });
 
@@ -72,7 +74,11 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 	const initialAnswered = new Set<string>();
 	const restartAnswered = new Set<string>();
 	let allAnsweredAt: number | undefined;
+	let allSentAt: number | undefined;
+	const restartSent = new Set<string>();
 	let releasedAt = 0;
+	const sentMs = () =>
+		allSentAt === undefined ? null : allSentAt - releasedAt;
 	const reloadMs = () =>
 		allAnsweredAt === undefined ? null : allAnsweredAt - releasedAt;
 	page.on("websocket", (socket) => {
@@ -88,7 +94,10 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				};
 				if (request._tag === "Request" && startupLoads.includes(request.tag)) {
 					requests.set(request.id, request.tag);
+					if (restarting) restartSent.add(request.tag);
 				}
+				if (restarting && restartSent.size === startupLoads.length)
+					allSentAt ??= Date.now();
 			}
 		});
 		socket.on("framereceived", ({ payload }) => {
@@ -151,13 +160,14 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				{ timeout: 20_000 },
 			)
 			.toEqual({ answeredExits: startupLoads, loadErrors: [] });
-		expect(reloadMs()).toBeLessThan(reloadBudgetMs);
+		expect(sentMs()).toBeLessThan(resendBudgetMs);
 	} finally {
 		const artifact = testInfo.outputPath("restart-startup-loads.json");
 		await writeFile(
 			artifact,
 			JSON.stringify({
 				...hold,
+				sentMs: sentMs(),
 				reloadMs: reloadMs(),
 				answeredExits: startupLoads.filter((tag) => restartAnswered.has(tag)),
 				loadErrors: await page.evaluate(

@@ -5,7 +5,17 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
-import type { ProviderDriverKind } from "./contracts/provider-instance.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "./contracts/provider-instance.js";
+import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+
+export type {
+	SessionWorkspace,
+	WorktreeInfo,
+} from "./contracts/session-workspace.js";
+
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -332,6 +342,7 @@ export const SessionInfoSchema = Schema.Struct({
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
+	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
 	snoozedUntil: Schema.optional(Schema.Number),
 	wokenAt: Schema.optional(Schema.Number),
 	wokeBecause: Schema.optional(
@@ -477,6 +488,10 @@ export interface HistoryMessage {
 	role: "user" | "assistant";
 	/** True when reconstructed from provider REST history rather than observed live. */
 	isBackfilled?: boolean;
+	/** The browser send a user message was placed for. */
+	inputId?: string;
+	/** A user message the provider read mid-turn, closing the turn it joined. */
+	steered?: boolean;
 	parts?: HistoryMessagePart[];
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
@@ -506,12 +521,21 @@ export interface HistoryMessage {
 	[key: string]: unknown;
 }
 
+export const RepositoryIdentitySchema = Schema.Struct({
+	key: Schema.String,
+	name: Schema.String,
+	root: Schema.String,
+});
+export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
+
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
 	title: string;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
+	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
+	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
 	git?: SessionGit;
 	clientCount?: number;
@@ -764,6 +788,7 @@ export interface OpenCodeInstance {
 	port: number;
 	managed: boolean;
 	driver?: ProviderDriverKind;
+	capabilities?: ProviderSessionCapabilities;
 	configDir?: string;
 	url?: string;
 	status: InstanceStatus;

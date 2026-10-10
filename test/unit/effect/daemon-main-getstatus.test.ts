@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -214,6 +214,7 @@ describe("daemon main runtime config status", () => {
 	it("keeps a removed project removed across restart and accepts an explicit re-add", async () => {
 		const projectPath = join(tmpDir, "project");
 		await mkdir(projectPath);
+		const canonicalProjectPath = await realpath(projectPath);
 		const options = {
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
@@ -225,7 +226,7 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon(options);
 		const project = await daemon.addProject(projectPath);
 		expect(daemon.getProjects().map((entry) => entry.folders[0])).toEqual([
-			projectPath,
+			canonicalProjectPath,
 		]);
 		await daemon.removeProject(project.slug);
 		await daemon.stop();
@@ -233,12 +234,12 @@ describe("daemon main runtime config status", () => {
 		daemon = await startForegroundDaemon(options);
 		expect(daemon.getProjects()).toEqual([]);
 		const added = await daemon.addProject(projectPath);
-		expect(added.folders[0]).toBe(projectPath);
+		expect(added.folders[0]).toBe(canonicalProjectPath);
 		expect(daemon.getProjects()).toEqual([added]);
 		await daemon.stop();
 		daemon = null;
 		expect(loadDaemonConfig(tmpDir)?.projects).toEqual([
-			expect.objectContaining({ path: projectPath, slug: added.slug }),
+			expect.objectContaining({ path: canonicalProjectPath, slug: added.slug }),
 		]);
 	});
 });

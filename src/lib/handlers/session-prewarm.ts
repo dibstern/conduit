@@ -5,7 +5,7 @@ import {
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { resolveProjectLaunchFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
+import { resolveSessionFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
 import {
 	ConfigTag,
 	OrchestrationEngineTag,
@@ -54,12 +54,13 @@ export const preWarmSession = (sessionId: string) =>
 		const prepared = yield* prepareTurn(sessionId, providerId);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.
+		const session = yield* readQuery.getSession(sessionId);
 		if (
-			!(yield* readQuery.getSession(sessionId)) ||
+			!session ||
 			(yield* engine.getProviderForSessionEffect(sessionId)) !== providerId
 		)
 			return;
-		const folders = yield* resolveProjectLaunchFolders(sessionId);
+		const folders = yield* resolveSessionFolders(session);
 		yield* instance.preWarmSessionEffect({
 			sessionId,
 			...folders,

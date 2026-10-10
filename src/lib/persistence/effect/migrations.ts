@@ -15,7 +15,10 @@ import {
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_TOKENS_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	MESSAGES_INPUT_ID_MIGRATION,
+	MESSAGES_STEERED_MIGRATION,
 	PENDING_APPROVALS_VERSION_MIGRATION,
+	PENDING_INPUTS_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -40,6 +43,7 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
@@ -371,6 +375,7 @@ const postBaselineTableNames = new Set<string>([
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
+	"pending_inputs", // 0041
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -464,6 +469,7 @@ const appendedSessionColumns = [
 	"limit_recovery",
 	"resumes",
 	"root_id",
+	"workspace",
 ] as const;
 
 function sameStrings(
@@ -1072,7 +1078,25 @@ export const effectMigrationEntries = {
 			counter?.value ?? 0,
 		);
 	}),
-	"0040_messages_context_tokens": runAddColumnMigrationIfMissing(
+	"0040_sessions_workspace": runAddColumnMigrationIfMissing(
+		"sessions",
+		"workspace",
+		readMigrationSql(SESSIONS_WORKSPACE_MIGRATION),
+	),
+	"0041_messages_input_id": runAddColumnMigrationIfMissing(
+		"messages",
+		"input_id",
+		readMigrationSql(MESSAGES_INPUT_ID_MIGRATION),
+	),
+	"0042_pending_inputs": executeSqlStatements(
+		readMigrationSql(PENDING_INPUTS_MIGRATION),
+	),
+	"0043_messages_steered": runAddColumnMigrationIfMissing(
+		"messages",
+		"steered",
+		readMigrationSql(MESSAGES_STEERED_MIGRATION),
+	),
+	"0044_messages_context_tokens": runAddColumnMigrationIfMissing(
 		"messages",
 		"context_tokens",
 		readMigrationSql(MESSAGES_CONTEXT_TOKENS_MIGRATION),

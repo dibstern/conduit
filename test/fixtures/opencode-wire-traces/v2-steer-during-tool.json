@@ -1,0 +1,1018 @@
+{
+	"name": "v2-steer-during-tool",
+	"recordedAt": "2026-10-06T02:05:52.384Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"title": "v2-steer"
+			},
+			"status": 200,
+			"responseBody": {
+				"id": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"slug": "crisp-knight",
+				"projectID": "global",
+				"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "v2-steer",
+				"version": "1.18.34",
+				"time": {
+					"created": 1791252328299,
+					"updated": 1791252328299
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.created",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"info": {
+					"id": "ses_ef10a9094ffej2lOOV3675zLnc",
+					"slug": "crisp-knight",
+					"version": "1.18.34",
+					"projectID": "global",
+					"directory": "/private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"path": "private/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/opencode-steer-work-8YYApU",
+					"title": "v2-steer",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1791252328299,
+						"updated": 1791252328299
+					}
+				}
+			},
+			"delayMs": 114
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a9094ffej2lOOV3675zLnc/model?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"id": "big-pickle"
+				}
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "core/config-reference"
+			},
+			"delayMs": 685
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "agent"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "command"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "skill"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "models-dev"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-agent"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-command"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-skill"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "alibaba"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "amazon-bedrock"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "anthropic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "azure-cognitive-services"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.model.switched",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"messageID": "msg_10ef57217001HqRe0A8ksRGyAF",
+				"timestamp": "2026-10-06T02:05:28.983Z",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a9094ffej2lOOV3675zLnc/prompt?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				}
+			},
+			"status": 200,
+			"responseBody": {
+				"data": {
+					"admittedSeq": 2,
+					"id": "msg_10ef5721e001z3UVEl3fCxDvOw",
+					"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+					"prompt": {
+						"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+					},
+					"delivery": "steer",
+					"timeCreated": 1791252328991
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "azure"
+			},
+			"delayMs": 25
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cerebras"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cloudflare-ai-gateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cloudflare-workers-ai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "cohere"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "deepinfra"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "gateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "github-copilot"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "gitlab"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google-vertex-anthropic"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "google-vertex"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompt.admitted",
+			"properties": {
+				"messageID": "msg_10ef5721e001z3UVEl3fCxDvOw",
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:28.991Z",
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "groq"
+			},
+			"delayMs": 63
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "kilo"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "llmgateway"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "mistral"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "nvidia"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "opencode"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "snowflake-cortex"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openai-compatible"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "openrouter"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "perplexity"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "sap-ai-core"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "togetherai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "catalog.updated",
+			"properties": {},
+			"delayMs": 260
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompted",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:28.991Z",
+				"messageID": "msg_10ef5721e001z3UVEl3fCxDvOw",
+				"prompt": {
+					"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "vercel"
+			},
+			"delayMs": 11
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "venice"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "xai"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "zenmux"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "dynamic-provider"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-plugin"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "config-provider"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "plugin.added",
+			"properties": {
+				"id": "variant"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "reference.updated",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "integration.updated",
+			"properties": {},
+			"delayMs": 105
+		},
+		{
+			"kind": "sse",
+			"type": "catalog.updated",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.started",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"agent": "build",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"timestamp": "2026-10-06T02:05:30.861Z"
+			},
+			"delayMs": 1420
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.started",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"timestamp": "2026-10-06T02:05:30.862Z",
+				"textID": "text-0"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"timestamp": "2026-10-06T02:05:30.872Z",
+				"textID": "text-0",
+				"delta": "I'll"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"timestamp": "2026-10-06T02:05:30.872Z",
+				"textID": "text-0",
+				"delta": " run that command."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.started",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:30.960Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"callID": "call_01a10ef5795c73678c5f3a88",
+				"name": "bash"
+			},
+			"delayMs": 89
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.delta",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:30.962Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"callID": "call_01a10ef5795c73678c5f3a88",
+				"delta": "{\"command\":\"sleep 10 && echo first-done\"}"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.input.ended",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:31.007Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"callID": "call_01a10ef5795c73678c5f3a88",
+				"text": "{\"command\":\"sleep 10 && echo first-done\"}"
+			},
+			"delayMs": 51
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.called",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:31.008Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"callID": "call_01a10ef5795c73678c5f3a88",
+				"tool": "bash",
+				"input": {
+					"command": "sleep 10 && echo first-done"
+				},
+				"provider": {
+					"executed": false
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.ended",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"timestamp": "2026-10-06T02:05:31.011Z",
+				"textID": "text-0",
+				"text": "I'll run that command."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session/ses_ef10a9094ffej2lOOV3675zLnc/prompt?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"requestBody": {
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "steer"
+			},
+			"status": 200,
+			"responseBody": {
+				"data": {
+					"admittedSeq": 10,
+					"id": "msg_10ef57a17001vxX9Pd7gCSHq1X",
+					"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+					"prompt": {
+						"text": "Also reply with the single word SECOND."
+					},
+					"delivery": "steer",
+					"timeCreated": 1791252331031
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompt.admitted",
+			"properties": {
+				"messageID": "msg_10ef57a17001vxX9Pd7gCSHq1X",
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:31.031Z",
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 22
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 7164
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.tool.success",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:41.170Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"callID": "call_01a10ef5795c73678c5f3a88",
+				"structured": {
+					"exit": 0,
+					"truncated": false
+				},
+				"content": [
+					{
+						"type": "text",
+						"text": "first-done\n"
+					},
+					{
+						"type": "text",
+						"text": "Command exited with code 0."
+					}
+				],
+				"outputPaths": [],
+				"provider": {
+					"executed": false
+				}
+			},
+			"delayMs": 2979
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.ended",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:41.172Z",
+				"assistantMessageID": "msg_10ef5796d0014wKfDJoQfYYMR5",
+				"finish": "tool-calls",
+				"cost": 0,
+				"tokens": {
+					"input": 2935,
+					"output": 39,
+					"reasoning": 0,
+					"cache": {
+						"read": 128,
+						"write": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.prompted",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:31.031Z",
+				"messageID": "msg_10ef57a17001vxX9Pd7gCSHq1X",
+				"prompt": {
+					"text": "Also reply with the single word SECOND."
+				},
+				"delivery": "steer"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.context.updated",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"messageID": "msg_10ef5a1bb001o4S1bdTMANFyuP",
+				"timestamp": "2026-10-06T02:05:41.179Z",
+				"text": "Skills provide specialized instructions and workflows for specific tasks.\nUse the skill tool to load a skill when a task matches its description.\n<available_skills>\n  <skill>\n    <name>customize-opencode</name>\n    <description>Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, commands, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself.</description>\n  </skill>\n</available_skills>"
+			},
+			"delayMs": 107
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 6916
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.started",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"agent": "build",
+				"model": {
+					"id": "big-pickle",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"timestamp": "2026-10-06T02:05:51.613Z"
+			},
+			"delayMs": 3414
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.started",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"timestamp": "2026-10-06T02:05:51.614Z",
+				"textID": "text-0"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"timestamp": "2026-10-06T02:05:51.615Z",
+				"textID": "text-0",
+				"delta": "FIRST"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.delta",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"timestamp": "2026-10-06T02:05:52.329Z",
+				"textID": "text-0",
+				"delta": "\n\nSECOND"
+			},
+			"delayMs": 714
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.text.ended",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"timestamp": "2026-10-06T02:05:52.366Z",
+				"textID": "text-0",
+				"text": "FIRST\n\nSECOND"
+			},
+			"delayMs": 41
+		},
+		{
+			"kind": "sse",
+			"type": "session.next.step.ended",
+			"properties": {
+				"sessionID": "ses_ef10a9094ffej2lOOV3675zLnc",
+				"timestamp": "2026-10-06T02:05:52.367Z",
+				"assistantMessageID": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+				"finish": "stop",
+				"cost": 0,
+				"tokens": {
+					"input": 3219,
+					"output": 6,
+					"reasoning": 0,
+					"cache": {
+						"read": 128,
+						"write": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_ef10a9094ffej2lOOV3675zLnc/message?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"status": 200,
+			"responseBody": []
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/api/session/ses_ef10a9094ffej2lOOV3675zLnc/message?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fopencode-steer-work-8YYApU",
+			"status": 200,
+			"responseBody": {
+				"data": [
+					{
+						"id": "msg_10ef5ca7d001bbGcw35Nw20yh4",
+						"time": {
+							"created": 1791252351613,
+							"completed": 1791252352367
+						},
+						"type": "assistant",
+						"agent": "build",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"content": [
+							{
+								"type": "text",
+								"id": "text-0",
+								"text": "FIRST\n\nSECOND"
+							}
+						],
+						"finish": "stop",
+						"cost": 0,
+						"tokens": {
+							"input": 3219,
+							"output": 6,
+							"reasoning": 0,
+							"cache": {
+								"read": 128,
+								"write": 0
+							}
+						}
+					},
+					{
+						"id": "msg_10ef5a1bb001o4S1bdTMANFyuP",
+						"time": {
+							"created": 1791252341179
+						},
+						"type": "system",
+						"text": "Skills provide specialized instructions and workflows for specific tasks.\nUse the skill tool to load a skill when a task matches its description.\n<available_skills>\n  <skill>\n    <name>customize-opencode</name>\n    <description>Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, commands, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself.</description>\n  </skill>\n</available_skills>"
+					},
+					{
+						"id": "msg_10ef57a17001vxX9Pd7gCSHq1X",
+						"time": {
+							"created": 1791252331031
+						},
+						"text": "Also reply with the single word SECOND.",
+						"type": "user"
+					},
+					{
+						"id": "msg_10ef5796d0014wKfDJoQfYYMR5",
+						"time": {
+							"created": 1791252330861,
+							"completed": 1791252341172
+						},
+						"type": "assistant",
+						"agent": "build",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode",
+							"variant": "default"
+						},
+						"content": [
+							{
+								"type": "text",
+								"id": "text-0",
+								"text": "I'll run that command."
+							},
+							{
+								"type": "tool",
+								"id": "call_01a10ef5795c73678c5f3a88",
+								"name": "bash",
+								"provider": {
+									"executed": false
+								},
+								"state": {
+									"status": "completed",
+									"input": {
+										"command": "sleep 10 && echo first-done"
+									},
+									"content": [
+										{
+											"type": "text",
+											"text": "first-done\n"
+										},
+										{
+											"type": "text",
+											"text": "Command exited with code 0."
+										}
+									],
+									"outputPaths": [],
+									"structured": {
+										"exit": 0,
+										"truncated": false
+									}
+								},
+								"time": {
+									"created": 1791252330960,
+									"ran": 1791252331008,
+									"completed": 1791252341170
+								}
+							}
+						],
+						"finish": "tool-calls",
+						"cost": 0,
+						"tokens": {
+							"input": 2935,
+							"output": 39,
+							"reasoning": 0,
+							"cache": {
+								"read": 128,
+								"write": 0
+							}
+						}
+					},
+					{
+						"id": "msg_10ef5721e001z3UVEl3fCxDvOw",
+						"time": {
+							"created": 1791252328991
+						},
+						"text": "Use the bash tool to run exactly: sleep 10 && echo first-done . Then reply with the single word FIRST.",
+						"type": "user"
+					},
+					{
+						"id": "msg_10ef57217001HqRe0A8ksRGyAF",
+						"time": {
+							"created": 1791252328983
+						},
+						"type": "model-switched",
+						"model": {
+							"id": "big-pickle",
+							"providerID": "opencode"
+						}
+					}
+				],
+				"cursor": {
+					"previous": "eyJpZCI6Im1zZ18xMGVmNWNhN2QwMDFiYkdjdzM1TncyMHloNCIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+					"next": "eyJpZCI6Im1zZ18xMGVmNTcyMTcwMDFIcVJlMEE4a3NSR3lBRiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+				}
+			}
+		}
+	]
+}

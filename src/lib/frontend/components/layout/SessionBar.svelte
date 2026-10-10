@@ -21,7 +21,8 @@
 
 <script lang="ts">
 	import { followSessionBusy, isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -55,6 +56,8 @@
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+	import { listWorktreesRpc, moveSessionWorkspaceRpc } from "../../transport/ws-rpc-client.js";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -223,8 +226,20 @@
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
 	// The project list can arrive after the bar; the git pill waits for its directory.
-	const directory = $derived(project?.folders[0]);
-	const git = $derived(session?.git ?? project?.git);
+	const directory = $derived(project ? effectiveWorkingDirectory(project.folders[0], session?.workspace) : undefined);
+	const git = $derived(session?.workspace ? session.git : session?.git ?? project?.git);
+	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
+	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
+	const supportsWorktree = $derived(
+		sessionInstance?.capabilities?.supportsWorktree
+			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsWorktree,
+	);
+	async function loadWorktrees() {
+		return project && session ? await listWorktreesRpc(project.slug, session.id) : { worktrees: [] };
+	}
+	async function moveWorkspace(path: string) {
+		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
+	}
 
 	const attentionCount = $derived(
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
@@ -405,7 +420,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} />{/if}
+			{#if directory}<GitIdentity {directory} {git} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button

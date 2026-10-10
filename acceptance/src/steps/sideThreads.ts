@@ -122,7 +122,7 @@ export const sideThreadsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await requireRpcControl(world.page).waitForRequest(
 				(candidate) =>
-					candidate.tag === "SendMessage" &&
+					candidate.tag === "input.submit" &&
 					candidate.payload["sessionId"] === NEW_SIDE_THREAD &&
 					candidate.payload["text"] === match[1],
 			);

@@ -58,6 +58,7 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.resume_scheduled",
 	"session.resume_cancelled",
 	"session.model_changed", // Relay-owned model settings, appended by the relay's session settings module
+	"session.workspace_changed", // Conduit-originated, recorded by Session Workspace through the session-command seam
 	"session.variant_changed", // Same
 	"session.context_window_changed", // Same
 	"session.settled", // Relay-owned triage state
@@ -73,6 +74,9 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"permission.resolved", // Same
 	"question.asked", // Recorded by the sink's requestQuestion(), not push()
 	"question.resolved", // Same, or by the turn that answers a recovered question
+	"input.admitted", // Relay-owned: the Session Inbox commits it when a send is admitted
+	"input.sent", // Relay-owned: committed with the send_turn outbox row at handoff
+	"input.cancelled", // Relay-owned: the Session Inbox commits it when a queued input is removed
 ] as const satisfies readonly CanonicalEventType[];
 
 // All canonical event types MUST appear in exactly one of the two arrays.

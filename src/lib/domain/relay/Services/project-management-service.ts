@@ -11,6 +11,7 @@ import { ConfigTag } from "./services.js";
 type ProjectOperation = "list" | "save" | "remove" | "setInstance";
 
 export interface SaveProjectResult {
+	readonly kind?: "existing" | undefined;
 	readonly project: ProjectInfo;
 	readonly projects: ReadonlyArray<ProjectInfo>;
 	readonly warnings: readonly FolderIssue[];
@@ -112,7 +113,12 @@ export const ProjectManagementServiceLive: Layer.Layer<
 					const { project } = result;
 					const projects =
 						(yield* listConfigProjects()) ?? withCachedProjectGit([project]);
-					return { project, projects, warnings: result.warnings };
+					return {
+						kind: result.kind,
+						project,
+						projects,
+						warnings: result.warnings,
+					};
 				}),
 			remove: (slug) =>
 				Effect.gen(function* () {

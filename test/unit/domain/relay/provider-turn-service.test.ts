@@ -13,10 +13,6 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "../../../../src/lib/domain/relay/Services/pending-send-ownership.js";
-import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -45,9 +41,7 @@ import { SessionTitleServiceTag } from "../../../../src/lib/domain/relay/Service
 import type { OpenCodeAPI } from "../../../../src/lib/instance/opencode-api.js";
 import {
 	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
-	ClaudeSessionLifecycleError,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import {
@@ -215,6 +209,8 @@ const makeReadQuery = (
 	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts,
+	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+	readInboxState: () => Effect.succeed(undefined),
 	getSessionHistoryMetadata,
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -311,7 +307,6 @@ const serviceLayer = (input: {
 		),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
-		PendingSendOwnershipLive,
 		makeOverridesStateLive(),
 		makePersistenceEffectLayer(":memory:"),
 		Layer.succeed(
@@ -532,11 +527,7 @@ describe("ProviderTurnService", () => {
 					modelID: "default",
 				});
 				expect(yield* isModelUserSelected("session-1")).toBe(false);
-				expect(persist.persistUserMessage).toHaveBeenCalledWith(
-					"session-1",
-					"current prompt",
-					{ messageId: expect.any(String) },
-				);
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalledWith(
 					expect.stringContaining(
 						"reason=no server-side session or default model; inferred from Claude catalog",
@@ -783,7 +774,7 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"dispatches the first Claude turn without reading the transcript and persists the user message",
+		"dispatches the first Claude turn without reading the transcript and leaves user-message placement to the adapter",
 		() => {
 			const engine = makeEngine();
 			const events: string[] = [];
@@ -823,12 +814,8 @@ describe("ProviderTurnService", () => {
 					.calls[0]?.[0] as SendTurnCommand;
 
 				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
-				expect(persist.persistUserMessage).toHaveBeenCalledWith(
-					"session-1",
-					"current prompt",
-					{ messageId: expect.any(String) },
-				);
-				expect(events).toEqual(["persist", "title"]);
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
+				expect(events).toEqual(["title"]);
 				expect(providerState.getState).toHaveBeenCalledWith("session-1");
 				expect(providerState.nativeThread).not.toHaveBeenCalled();
 				expect(command).toMatchObject({
@@ -908,11 +895,7 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
-				expect(persist.persistUserMessage).toHaveBeenCalledWith(
-					"session-1",
-					"current prompt",
-					{ messageId: expect.any(String) },
-				);
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
@@ -1000,11 +983,7 @@ describe("ProviderTurnService", () => {
 					('snapshot-cache', 'session-1', 'assistant', 5, 2, ${JSON.stringify({ id: "snapshot-cache", role: "assistant", parts: [], tokens: { cache: { read: 5, write: 2 } } })}, 3, 3)`;
 				yield* sendTurn();
 
-				expect(persist.persistUserMessage).toHaveBeenCalledWith(
-					"session-1",
-					"current prompt",
-					{ messageId: expect.any(String) },
-				);
+				expect(persist.persistUserMessage).not.toHaveBeenCalled();
 				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -1071,91 +1050,6 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"continues dispatch and logs a warning when Claude user-message persistence fails",
-		() => {
-			const engine = makeEngine({ providerId: "claude" });
-			const persist = makePersistService(
-				vi.fn(() =>
-					Effect.fail(
-						new ClaudeEventPersistEffectError({
-							operation: "persistUserMessage",
-							cause: new Error("sqlite unavailable"),
-						}),
-					),
-				),
-			);
-			const titleService = makeTitleService();
-			const { layer, log } = serviceLayer({ engine, persist, titleService });
-
-			return Effect.gen(function* () {
-				yield* sendTurn();
-
-				expect(persist.persistUserMessage).toHaveBeenCalledWith(
-					"session-1",
-					"current prompt",
-					{ messageId: expect.any(String) },
-				);
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
-				expect(log.warn).toHaveBeenCalledWith(
-					expect.stringContaining(
-						"Non-fatal persistence error for Claude user message",
-					),
-				);
-				expect(engine.dispatchEffect).toHaveBeenCalledWith(
-					expect.objectContaining({ type: "send_turn", providerId: "claude" }),
-				);
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
-		"fails the turn without dispatch when Claude user-message persistence rejects the lifecycle",
-		() => {
-			const engine = makeEngine({ providerId: "claude" });
-			const persist = makePersistService(
-				vi.fn(() =>
-					Effect.fail(
-						new ClaudeSessionLifecycleError({
-							operation: "persistUserMessage",
-							sessionId: "session-1",
-							role: "existing-session",
-							reason: "missing-session",
-						}),
-					),
-				),
-			);
-			const titleService = makeTitleService();
-			const { layer, log } = serviceLayer({ engine, persist, titleService });
-
-			return Effect.gen(function* () {
-				const result = yield* Effect.either(sendTurn());
-
-				expect(result).toMatchObject({
-					_tag: "Left",
-					left: expect.objectContaining({
-						_tag: "ClaudeSessionLifecycleError",
-						sessionId: "session-1",
-					}),
-				});
-				expect(log.error).toHaveBeenCalledWith(
-					"Claude turn persistence rejected by session lifecycle: " +
-						"session=session-1 operation=persistUserMessage " +
-						"role=existing-session reason=missing-session",
-				);
-				expect(log.warn).not.toHaveBeenCalledWith(
-					expect.stringContaining(
-						"Non-fatal persistence error for Claude user message",
-					),
-				);
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
-				expect(engine.dispatchEffect).not.toHaveBeenCalledWith(
-					expect.objectContaining({ type: "send_turn" }),
-				);
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
 		"logs provider-state save failures without failing the turn or sending a browser error",
 		() => {
 			const engine = makeEngine({
@@ -1211,7 +1105,7 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"clears ownership when a thrown OpenCode prompt returns error status",
+		"places the user message when a thrown OpenCode prompt returns error status",
 		() => {
 			const api = makeMockOpenCodeAPI();
 			api.session.prompt = vi.fn(async () => {
@@ -1221,14 +1115,9 @@ describe("ProviderTurnService", () => {
 			registry.registerInstance(new OpenCodeProviderInstance({ client: api }));
 			const engine = new OrchestrationEngine({ registry });
 			engine.bindSession("session-1", "opencode");
-			const { layer, ingestion } = serviceLayer({ engine, api });
+			const persist = makePersistService(vi.fn(() => Effect.void));
+			const { layer, ingestion } = serviceLayer({ engine, api, persist });
 			return Effect.gen(function* () {
-				const ownership = yield* PendingSendOwnershipTag;
-				ownership.register("session-1", {
-					commandId: "cmd-error",
-					originId: "browser",
-					text: "ok",
-				});
 				yield* sendTurn({
 					commandId: "cmd-error",
 					text: "ok",
@@ -1244,9 +1133,15 @@ describe("ProviderTurnService", () => {
 						}),
 					]),
 				);
-				expect(
-					ownership.resolve("session-1", "later-message", "ok"),
-				).toBeUndefined();
+				expect(persist.persistUserMessage).toHaveBeenCalledWith(
+					"session-1",
+					"ok",
+					{
+						messageId: "cmd-error",
+						inputId: "cmd-error",
+						provider: "opencode",
+					},
+				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1411,60 +1306,6 @@ describe("ProviderTurnService", () => {
 			).toBe(false);
 		}).pipe(Effect.provide(layer));
 	});
-
-	it.effect(
-		"interrupt clears pending sends without losing confirmed ownership or other sessions",
-		() => {
-			const { layer } = serviceLayer({});
-			return Effect.gen(function* () {
-				const ownership = yield* PendingSendOwnershipTag;
-				ownership.register("session-1", {
-					commandId: "cmd-confirmed",
-					originId: "confirmed-browser",
-					text: "confirmed",
-				});
-				expect(
-					ownership.resolve("session-1", "confirmed-message", "confirmed"),
-				).toBe("confirmed-browser");
-				ownership.register("session-2", {
-					commandId: "cmd-other",
-					originId: "other-browser",
-					text: "other",
-				});
-				for (const commandId of ["cmd-send-1", "cmd-send-2"]) {
-					ownership.register("session-1", {
-						commandId,
-						originId: "cancelled-browser",
-						text: "cancelled",
-					});
-					yield* sendTurn({ commandId, text: "cancelled" });
-				}
-				yield* interruptTurn();
-				expect(
-					ownership.resolve("session-1", "late-echo", "cancelled"),
-				).toBeUndefined();
-				ownership.register("session-1", {
-					commandId: "cmd-send-2",
-					originId: "duplicate-browser",
-					text: "cancelled",
-				});
-				ownership.register("session-1", {
-					commandId: "cmd-next",
-					originId: "next-browser",
-					text: "next",
-				});
-				expect(ownership.resolve("session-1", "next-message", "next")).toBe(
-					"next-browser",
-				);
-				expect(
-					ownership.resolve("session-1", "confirmed-message", "confirmed"),
-				).toBe("confirmed-browser");
-				expect(ownership.resolve("session-2", "other-message", "other")).toBe(
-					"other-browser",
-				);
-			}).pipe(Effect.provide(layer));
-		},
-	);
 
 	it.effect(
 		"uses OpenCode abort for an unbound session and clears processing timeout",
@@ -1687,6 +1528,7 @@ describe("ProviderTurnService", () => {
 				const interruptTurnEffect = vi.fn(() => Effect.void);
 				const instance: ProviderInstance = {
 					providerId: "claude",
+					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
@@ -1794,6 +1636,7 @@ describe("ProviderTurnService", () => {
 				const dispatchEffect = vi.fn((command) => {
 					if (command.type !== "send_turn") return Effect.void;
 					return Effect.gen(function* () {
+						yield* command.onAccepted ?? Effect.void;
 						yield* Deferred.succeed(sendStarted, undefined);
 						yield* Deferred.await(releaseSend);
 						return yield* Effect.fail(new Error("late send failure"));

@@ -18,6 +18,26 @@ export function isKnownDriverKind(
 	return isKnownProviderDriverKind(value);
 }
 
+export const ProviderSessionCapabilitiesSchema = Schema.Struct({
+	supportsMultiFolder: Schema.Boolean,
+	supportsWorktree: Schema.Boolean,
+});
+export type ProviderSessionCapabilities =
+	typeof ProviderSessionCapabilitiesSchema.Type;
+
+/** Session contracts pinned by provider captures, independent of model discovery. */
+export const PROVIDER_SESSION_CAPABILITIES = {
+	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
+	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
+	claude: { supportsMultiFolder: true, supportsWorktree: true },
+	// The multi-folder-project replay pins external_directory session rules.
+	// No captured session worktree/cwd-switch contract is wired for this adapter.
+	opencode: { supportsMultiFolder: true, supportsWorktree: false },
+} as const satisfies Record<
+	KnownProviderDriverKind,
+	ProviderSessionCapabilities
+>;
+
 export const ProviderInstanceIdSchema = Schema.String.pipe(
 	Schema.brand("ProviderInstanceId"),
 );

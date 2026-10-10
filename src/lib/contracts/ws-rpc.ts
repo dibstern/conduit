@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
 	SessionInfoSchema,
@@ -27,8 +28,17 @@ import {
 	QuotaCheckResultSchema,
 	UsageLimitsSettingSchema,
 } from "./limit-recovery.js";
-import { ProviderDriverKindSchema } from "./provider-instance.js";
-import { StoredEventSchema } from "./stored-event.js";
+import {
+	ProviderDriverKindSchema,
+	ProviderSessionCapabilitiesSchema,
+} from "./provider-instance.js";
+import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
+import {
+	INPUT_DELIVERIES,
+	InputRequestSchema,
+	STEER_BLOCKERS,
+	StoredEventSchema,
+} from "./stored-event.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -155,6 +165,10 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	/** Keyed by Project Folder path; non-git folders have no entry. */
+	repositoryIdentities: Schema.optional(
+		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+	),
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
@@ -174,6 +188,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	capabilities: Schema.optional(
+		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
+	),
 	configDir: Schema.optional(Schema.String),
 	url: Schema.optional(Schema.String),
 	status: InstanceStatusSchema,
@@ -229,6 +246,8 @@ export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
 	role: Schema.Literal("user", "assistant"),
 	isBackfilled: Schema.optional(Schema.Boolean),
+	inputId: Schema.optional(Schema.String),
+	steered: Schema.optional(Schema.Boolean),
 	text: Schema.optional(Schema.String),
 	parts: Schema.optional(Schema.Array(HistoryMessagePartSchema)),
 	time: Schema.optional(
@@ -269,6 +288,28 @@ export const SessionDetailItemSchema = Schema.Union(
 	Schema.Struct({
 		_tag: Schema.Literal("event"),
 		event: StoredEventSchema,
+	}),
+	// One input conduit is holding for the session: queued behind a running
+	// turn, or sent as a steer and not yet placed. Its row id is
+	// `input:<inputId>`, so a `remove` never collides with a message id.
+	Schema.Struct({
+		_tag: Schema.Literal("pendingInput"),
+		input: Schema.Struct({
+			inputId: Schema.String,
+			state: Schema.Literal("queued", "steering"),
+			request: InputRequestSchema,
+			admittedAt: Schema.Number,
+		}),
+	}),
+	// The session's inbox state, computed on read. Paused: inputs wait behind
+	// a turn that was stopped or failed, until Resume or a normal turn. Steer:
+	// why no draft could be steered now (capability or open prompt), or null.
+	Schema.Struct({
+		_tag: Schema.Literal("inbox"),
+		inbox: Schema.Struct({
+			paused: Schema.Boolean,
+			steer: Schema.NullOr(Schema.Literal("no_steering", "prompt_open")),
+		}),
 	}),
 );
 
@@ -420,10 +461,27 @@ export const ViewSessionResponseSchema = Schema.Struct({
 	draft: Schema.optional(Schema.String),
 });
 
-export const SendMessageResponseSchema = Schema.Struct({
-	ok: Schema.Literal(true),
-	sessionId: Schema.String,
+const SteerRefusedSchema = Schema.Struct({
+	ok: Schema.Literal(false),
+	reason: Schema.Literal(...STEER_BLOCKERS),
 });
+
+/** Ok, or a refused steer: nothing was admitted, so the browser keeps the text. */
+export const SubmitInputResponseSchema = Schema.Union(
+	Schema.Struct({ ok: Schema.Literal(true), sessionId: Schema.String }),
+	SteerRefusedSchema,
+);
+
+/** Ok; or the input already started (or never existed) and cannot be changed;
+ *  or Send now could not steer it, so it stays queued. */
+export const InboxCommandResponseSchema = Schema.Union(
+	Schema.Struct({ ok: Schema.Literal(true) }),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		reason: Schema.Literal("already_started"),
+	}),
+	SteerRefusedSchema,
+);
 
 export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -485,6 +543,10 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		slug: Schema.String,
 	}),
 	Schema.Struct({ kind: Schema.Literal("missing"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("permission-denied"),
+		path: Schema.String,
+	}),
 	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
 	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
 	Schema.Struct({
@@ -539,13 +601,20 @@ export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>
 
 export const SaveProjectResponseSchema = Schema.Struct({
 	...ProjectMutationResponseSchema.fields,
+	kind: Schema.optional(Schema.Literal("existing")),
 	savedSlug: Schema.String,
 	warnings: Schema.Array(FolderIssueSchema),
+});
+
+const ProviderCapabilityMapSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 });
 
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
+	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -730,7 +799,8 @@ export type ListDaemonSessionsResponse =
 	typeof ListDaemonSessionsResponseSchema.Type;
 export type CreateSessionResponse = typeof CreateSessionResponseSchema.Type;
 export type ViewSessionResponse = typeof ViewSessionResponseSchema.Type;
-export type SendMessageResponse = typeof SendMessageResponseSchema.Type;
+export type SubmitInputResponse = typeof SubmitInputResponseSchema.Type;
+export type InboxCommandResponse = typeof InboxCommandResponseSchema.Type;
 export type LoadMoreHistoryResponse = typeof LoadMoreHistoryResponseSchema.Type;
 export type ForkSessionResponse = typeof ForkSessionResponseSchema.Type;
 export type PermissionDecision = typeof PermissionDecisionSchema.Type;
@@ -1101,7 +1171,7 @@ export class PtyInput extends Schema.TaggedRequest<PtyInput>()("PtyInput", {
 export class FindFolders extends Schema.TaggedRequest<FindFolders>()(
 	"FindFolders",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(WsRpcError, ProjectSaveRejected),
 		success: FindFoldersResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
@@ -1238,6 +1308,34 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 			sessionId: NonEmptyString,
 			commandId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
+	"ListWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			worktrees: Schema.Array(WorktreeInfoSchema),
+			directory: Schema.optional(Schema.String),
+		}),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorkspace>()(
+	"MoveSessionWorkspace",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			path: NonEmptyString,
 		},
 	},
 ) {}
@@ -1796,18 +1894,52 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 	},
 ) {}
 
-export class SendMessage extends Schema.TaggedRequest<SendMessage>()(
-	"SendMessage",
+/** The composer's only send. The inbox hands it off when the session is idle
+ *  and queues it otherwise, or with delivery "steer" hands it into the running
+ *  turn; a refused steer admits nothing. A retry with the same input id is a
+ *  no-op. */
+export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
+	"input.submit",
 	{
 		failure: WsRpcError,
-		success: SendMessageResponseSchema,
+		success: SubmitInputResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
 			text: Schema.String,
 			images: Schema.optional(Schema.Array(Schema.String)),
+			delivery: Schema.Literal(...INPUT_DELIVERIES),
 			originId: Schema.optional(NonEmptyString),
-			commandId: NonEmptyString,
+		},
+	},
+) {}
+
+/** Remove a queued input (the tray's Remove, and Edit before refilling). */
+export class CancelInput extends Schema.TaggedRequest<CancelInput>()(
+	"input.cancel",
+	{
+		failure: WsRpcError,
+		success: InboxCommandResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
+		},
+	},
+) {}
+
+/** Hand a queued input off now; Resume calls it on the oldest row. */
+export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
+	"input.sendNow",
+	{
+		failure: WsRpcError,
+		success: InboxCommandResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			inputId: NonEmptyString,
+			originId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1915,6 +2047,8 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListWorktrees,
+	MoveSessionWorkspace,
 	MarkSessionUnread,
 	MarkSessionRead,
 	MarkSessionSeen,
@@ -1970,7 +2104,9 @@ export const WsRpcRequest = Schema.Union(
 	RejectQuestion,
 	LoadMoreHistory,
 	RewindSession,
-	SendMessage,
+	SubmitInput,
+	CancelInput,
+	SendInputNow,
 	SyncInputDraft,
 	CancelSession,
 	SetLogLevel,
@@ -2109,7 +2245,10 @@ export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
  */
 export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	payload: {},
-	success: Schema.Struct({ instances: Schema.Array(OpenCodeInstanceSchema) }),
+	success: Schema.Struct({
+		instances: Schema.Array(OpenCodeInstanceSchema),
+		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	}),
 	error: WsRpcError,
 	stream: true,
 });
@@ -2300,6 +2439,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
 	Rpc.fromTaggedRequest(MarkSessionRead),
 	Rpc.fromTaggedRequest(MarkSessionSeen),
@@ -2355,7 +2496,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RejectQuestion),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
-	Rpc.fromTaggedRequest(SendMessage),
+	Rpc.fromTaggedRequest(SubmitInput),
+	Rpc.fromTaggedRequest(CancelInput),
+	Rpc.fromTaggedRequest(SendInputNow),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
 	Rpc.fromTaggedRequest(SetLogLevel),

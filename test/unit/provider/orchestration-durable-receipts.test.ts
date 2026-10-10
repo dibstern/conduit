@@ -39,6 +39,7 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
+		steering: false,
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],
@@ -75,7 +76,7 @@ function sendTurnCommand(
 		providerId: overrides.providerId ?? "opencode",
 		input: {
 			sessionId: "session-1",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: overrides.prompt ?? "hello",
 			history: [],
 			providerState: {},
@@ -135,7 +136,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						...command,
 						input: {
 							...command.input,
-							userMessageId: "current-user",
+							inputId: "current-user",
 							history: [{ role: "assistant", text: "prior transcript" }],
 						},
 					});
@@ -148,7 +149,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					expect(payload).not.toHaveProperty("history");
 					expect(payload).toMatchObject({
 						prompt: "hello",
-						userMessageId: "current-user",
+						inputId: "current-user",
 					});
 					expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
 				}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),

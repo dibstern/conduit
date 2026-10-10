@@ -113,6 +113,9 @@ export interface ConnectionHealth {
 export interface StoredProject {
 	readonly slug: string;
 	readonly folders: readonly [string, ...string[]];
+	readonly repositoryIdentities?: Readonly<
+		Record<string, import("./shared-types.js").RepositoryIdentity>
+	>;
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly instanceId?: string;
@@ -189,6 +192,8 @@ export interface ProjectRelayConfig {
 	listDaemonSessions?: (
 		options: DaemonSessionQueryOptions,
 	) => MaybePromise<DaemonSessionQueryResult>;
+	/** Existing canonical owner, without starting a relay or warming git. */
+	resolveSessionProject?: (sessionId: string) => Promise<string | null>;
 	/** Notify browsers on other project relays that the daemon list changed. */
 	broadcastSessionListChanged?: () => Promise<void>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
@@ -203,6 +208,7 @@ export interface ProjectRelayConfig {
 	saveProject?: (
 		input: import("./contracts/ws-rpc.js").SaveProjectInput,
 	) => Promise<{
+		kind?: "existing" | undefined;
 		project: import("./shared-types.js").ProjectInfo;
 		warnings: readonly import("./project-folders.js").FolderIssue[];
 	}>;

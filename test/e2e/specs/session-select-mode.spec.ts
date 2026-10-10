@@ -93,10 +93,12 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 	await page.getByTestId("select-bar-settle").click();
 	await expect(shelf.locator(`[data-session-id="${firstId}"]`)).toBeVisible();
 	await expect(shelf.locator(`[data-session-id="${secondId}"]`)).toBeVisible();
-	await expect(
-		page.getByRole("status").filter({ hasText: "Settled 2 sessions" }),
-	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	const toast = page
+		.getByRole("status")
+		.filter({ hasText: "Settled 2 sessions" });
+	await expect(toast).toHaveCount(1);
+	// The newest toast stacks on top, so pick this one's Undo by its text.
+	await toast.getByTestId("toast-action").click();
 	await expect(first).toBeVisible();
 	await expect(second).toBeVisible();
 	await expect.poll(() => sectionBefore(first)).toBe(firstSection);
@@ -128,10 +130,12 @@ test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 				.locator(`#session-list [data-session-id="${id}"]`)
 				.getByTitle("Pinned session"),
 		).toBeVisible();
-	await expect(
-		page.getByRole("status").filter({ hasText: "Pinned 2 sessions" }),
-	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	const toast = page
+		.getByRole("status")
+		.filter({ hasText: "Pinned 2 sessions" });
+	await expect(toast).toHaveCount(1);
+	// The newest toast stacks on top, so pick this one's Undo by its text.
+	await toast.getByTestId("toast-action").click();
 	for (const id of ids)
 		await expect(
 			page
@@ -199,10 +203,12 @@ test("bulk Snooze uses one sheet and Undo returns both rows", async ({
 		await expect(
 			page.locator(`#snoozed-shelf-rows [data-session-id="${id}"]`),
 		).toBeVisible();
-	await expect(
-		page.getByRole("status").filter({ hasText: "Snoozed 2 sessions until" }),
-	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	const toast = page
+		.getByRole("status")
+		.filter({ hasText: "Snoozed 2 sessions until" });
+	await expect(toast).toHaveCount(1);
+	// The newest toast stacks on top, so pick this one's Undo by its text.
+	await toast.getByTestId("toast-action").click();
 	for (const id of ids) {
 		await expect(
 			page.locator(`#snoozed-shelf-rows [data-session-id="${id}"]`),

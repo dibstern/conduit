@@ -1,23 +1,21 @@
 import { Data, Effect } from "effect";
+import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
-import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
+import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getContextWindow,
 	getModel,
 	getVariant,
 	isModelUserSelected,
-	PROCESSING_TIMEOUT_DURATION,
-	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 
 // Stores the last draft per session so that a tab switching to it (e.g. on a
 // different device) reads the current draft in its ViewSession response.
@@ -45,24 +43,30 @@ export interface SendMessageToSessionInput {
 	readonly sessionId: string | undefined;
 	readonly text: string;
 	readonly images?: readonly string[];
-	readonly originId?: string;
 	readonly commandId: string;
+	/** A steer joins the running turn of a busy session, or is refused. */
+	readonly delivery?: InputDelivery;
+}
+
+export interface SendMessageToSessionResult {
+	readonly sessionId: string | undefined;
+	/** Why the steer was refused; nothing was admitted. */
+	readonly refused?: SteerBlocker;
 }
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
-		const ownership = yield* PendingSendOwnershipTag;
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
-		const { clientId, text, images, originId } = input;
+		const { clientId, text, images } = input;
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text) return activeId;
+		if (!text) return { sessionId: activeId } as SendMessageToSessionResult;
 		if (!activeId) {
 			log.warn(`client=${clientId} send_turn dropped: no active session`);
-			return activeId;
+			return { sessionId: activeId } as SendMessageToSessionResult;
 		}
 		const originalActiveId = activeId;
 		const sessionModel = yield* getModel(activeId);
@@ -101,59 +105,41 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
 
-		// Clear the input draft
-		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
-		clearSessionInputDraft(activeId);
-
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
+		// The request is captured now: a queued input keeps what was selected
+		// when it was sent, whatever changes before it is handed off.
 		const agentService = yield* AgentServiceTag;
 		const sessionAgent = yield* agentService.getActiveAgent(activeId);
 		const variant = yield* getVariant(activeId);
 		const contextWindow = yield* getContextWindow(activeId);
 
-		const failTurn = yield* makeFailTurn;
-		yield* startProcessingTimeout(activeId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.suspend(() => {
-				ownership.remove(activeId, input.commandId);
-				log.warn(
-					`client=${clientId} session=${activeId} Processing timeout (120s) — failing the turn`,
-				);
-				return failTurn(
-					activeId,
-					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					"PROCESSING_TIMEOUT",
-				);
-			}),
-		);
-
-		ownership.register(activeId, {
-			commandId: input.commandId,
-			text,
-			originId: originalActiveId === activeId ? originId : undefined,
-		});
-		yield* providerTurnService
-			.sendTurn({
-				clientId,
-				sessionId: activeId,
+		const inbox = yield* SessionInboxTag;
+		const submitted = yield* inbox.submit({
+			clientId,
+			sessionId: activeId,
+			inputId: input.commandId,
+			delivery: input.delivery ?? "queue",
+			request: {
 				text,
-				commandId: input.commandId,
 				...(imageList ? { images: imageList } : {}),
 				...(sessionModel ? { model: sessionModel } : {}),
 				modelUserSelected: sessionModelUserSelected,
 				...(sessionAgent ? { agent: sessionAgent } : {}),
 				...(variant ? { variant } : {}),
 				...(contextWindow ? { contextWindow } : {}),
-			})
-			.pipe(
-				Effect.onError(() =>
-					Effect.sync(() => {
-						ownership.remove(activeId, input.commandId);
-					}),
-				),
-			);
-		return activeId;
+			},
+		});
+		// A refused steer admitted nothing: the text stays in the input box.
+		if ("refused" in submitted)
+			return {
+				sessionId: activeId,
+				refused: submitted.refused,
+			} as SendMessageToSessionResult;
+		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
+		clearSessionInputDraft(activeId);
+		return { sessionId: activeId } as SendMessageToSessionResult;
 	});
 
 export const handleMessage = (

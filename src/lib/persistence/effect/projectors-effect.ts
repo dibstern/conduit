@@ -353,6 +353,16 @@ export const makeMessageProjector = (): EffectProjector => ({
 						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
 				if (rows[0]?.rest_digest != null) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
+					// A late provider echo still tags the snapshot row with its send.
+					if (isEventType(event, "message.created") && event.data.inputId) {
+						return ids(
+							yield* sql<{
+								id: string;
+							}>`UPDATE messages SET input_id = ${event.data.inputId}
+								WHERE id = ${event.data.messageId} AND input_id IS NULL
+								RETURNING id`,
+						);
+					}
 					return [];
 				}
 			}
@@ -459,15 +469,24 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const isBackfilled = event.data.backfilled ? 1 : 0;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
+				// A live user message placed while another turn is open was read
+				// mid-turn: a steer. The turn projector closes that turn.
+				const steers = event.data.role === "user" && !isBackfilled;
 				return ids(
 					yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null})
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+							${steers ? 1 : 0} AND EXISTS (SELECT 1 FROM turns
+								WHERE session_id = ${event.data.sessionId}
+								AND state IN ('pending', 'running')
+								AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
-							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END
+							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
+							input_id = COALESCE(messages.input_id, excluded.input_id)
 						WHERE messages.role <> excluded.role
+							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`,
 				);
 			}
@@ -937,15 +956,28 @@ export const makeTurnProjector = (): EffectProjector => ({
 
 			if (isEventType(event, "message.created")) {
 				if (event.data.role === "user") {
+					// A steer closes the turn it joined at its own start time, so a
+					// folded result splits into two turns; the result completes this one.
+					const closed = event.data.backfilled
+						? []
+						: yield* sql<
+								OwnedRow & { id: string }
+							>`UPDATE turns SET state = 'completed',
+							completed_at = ${event.createdAt}
+							WHERE session_id = ${event.data.sessionId}
+							AND state IN ('pending', 'running')
+							AND id != ${event.data.messageId}
+							RETURNING id, session_id`;
 					return {
-						sessions: owners(
-							yield* sql<OwnedRow>`
+						sessions: owners([
+							...closed,
+							...(yield* sql<OwnedRow>`
 								INSERT OR REPLACE INTO turns
 								(id, session_id, state, user_message_id, requested_at)
 								VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
-								RETURNING session_id`,
-						),
-						messages: [],
+								RETURNING session_id`),
+						]),
+						messages: ids(closed),
 					};
 				}
 			}
@@ -976,11 +1008,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 								WHERE messages.id = ${event.data.messageId}
 								AND turns.session_id = ${event.sessionId}`
 							: [];
-				// Without a key, a signal belongs to the newest turn, except that
-				// a prompt queued behind a running turn must not take over that
-				// turn's busy and tool signals. A new reply is what starts the
-				// queued turn. A turn still running from before a later one
-				// settled is a crash leftover, so it never wins.
+				// Without a key, a signal belongs to the newest turn, except that a
+				// newer turn not yet started must not take over a running turn's
+				// busy and tool signals; a new reply is what starts it. A turn still
+				// running from before a later one settled is a crash leftover, so it
+				// never wins.
 				const [turn] = parentTurn.length
 					? parentTurn
 					: yield* sql<{
@@ -999,8 +1031,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 						requested_at DESC, rowid DESC LIMIT 1`;
 				if (!turn) return { sessions: [], messages: [] };
 				// Turns run one at a time, so a reply starting ends every earlier
-				// turn. Claude never closes a turn whose queued successor took
-				// over its streaming SDK turn.
+				// turn still running.
 				const superseded = isEventType(event, "message.created")
 					? yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
@@ -1062,8 +1093,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 					return { sessions: owners(written), messages: ids(written) };
 				}
 				// An error before the reply is named carries no id a turn owns, so
-				// it ends the running turn. Queued prompts stay pending: after an
-				// error result the SDK goes on to send them.
+				// it ends the running turn.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'error', completed_at = ${event.createdAt}
@@ -1075,10 +1105,9 @@ export const makeTurnProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.interrupted")) {
-				// Stop ends the session's work, so whatever is still running stops
-				// with the named turn. That also covers an empty id (stopped before
-				// naming its reply) and an id no turn owns. Prompts queued behind it
-				// stop too: Stop closes the Claude query, which drops them unsent.
+				// Stop ends the session's work, so whatever is still open stops with
+				// the named turn. That also covers an empty id (stopped before naming
+				// its reply) and an id no turn owns.
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'interrupted', completed_at = ${event.createdAt}
@@ -1380,6 +1409,88 @@ export const makeProviderProjector = (): EffectProjector => ({
 		),
 });
 
+// One row per input conduit is holding. Rows are never deleted: a row that
+// leaves the tray turns `removed` and takes the event's version, so catch-up
+// can report it gone. Its owning session moves with every write.
+export const makeInputProjector = (): EffectProjector => ({
+	name: "input",
+	handles: [
+		"input.admitted",
+		"input.sent",
+		"input.cancelled",
+		"message.created",
+	],
+	project: (event: StoredEvent, ctx: ProjectionContext) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+
+			if (isEventType(event, "input.admitted")) {
+				const { request } = event.data;
+				const images = request.images ? encodeJson(request.images) : null;
+				return owners(
+					yield* sql<OwnedRow>`
+						INSERT INTO pending_inputs
+						(input_id, session_id, text, images, request, state, admitted_at, version)
+						VALUES (${event.data.inputId}, ${event.data.sessionId}, ${request.text}, ${images}, ${encodeJson(request)}, 'queued', ${event.createdAt}, ${ctx.version})
+						ON CONFLICT (input_id) DO NOTHING
+						RETURNING session_id`,
+				);
+			}
+
+			// Sent while another turn is open, the input steers that turn and stays
+			// in the tray until its message lands. Otherwise it leaves now.
+			if (isEventType(event, "input.sent")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs
+						SET state = CASE WHEN EXISTS (
+								SELECT 1 FROM turns
+								WHERE session_id = ${event.data.sessionId}
+									AND state IN ('pending', 'running')
+							) THEN 'steering' ELSE 'removed' END,
+							version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state = 'queued'
+						RETURNING session_id`,
+				);
+			}
+
+			if (isEventType(event, "input.cancelled")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs SET state = 'removed', version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state = 'queued'
+						RETURNING session_id`,
+				);
+			}
+
+			if (
+				isEventType(event, "message.created") &&
+				event.data.role === "user" &&
+				event.data.inputId
+			) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs
+						SET state = 'removed', version = ${ctx.version}
+						WHERE input_id = ${event.data.inputId} AND state != 'removed'
+						RETURNING session_id`,
+				);
+			}
+			return [];
+		}).pipe(
+			Effect.mapError((e) =>
+				e instanceof ProjectionError
+					? e
+					: new ProjectionError({
+							projector: "input",
+							operation: "project",
+							cause: e,
+						}),
+			),
+			Effect.flatMap((written) => stampSessions(written, ctx.version)),
+		),
+});
+
 /**
  * Canonical event types that deliberately reach no projector.
  *
@@ -1402,7 +1513,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * Creates all 6 Effect-based projectors in the correct order.
+ * Creates all 7 Effect-based projectors in the correct order.
  * Order matters for FK compliance: SessionProjector first.
  */
 export function createAllEffectProjectors(): EffectProjector[] {
@@ -1413,5 +1524,6 @@ export function createAllEffectProjectors(): EffectProjector[] {
 		makeProviderProjector(),
 		makeApprovalProjector(),
 		makeActivityProjector(),
+		makeInputProjector(),
 	];
 }

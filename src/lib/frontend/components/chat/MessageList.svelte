@@ -130,7 +130,7 @@
 	//   (processing or streaming) OR when an explicit
 	//   scroll request was made (e.g. error messages set this before
 	//   phaseToIdle kills the isProcessing guard). On inactive sessions,
-	//   background events (cross-tab user_message, permission state) must
+	//   background events (another tab's message, permission state) must
 	//   NOT snap to bottom.
 	// NOTE: isProcessing() and consumeScrollRequest() are checked via
 	// untrack() so they act as guards (checked but not tracked). The effect
@@ -219,7 +219,7 @@
 		isProcessing() ? "↓ New activity" : "↓ Latest",
 	);
 
-	const turns = $derived(segmentTurns(currentChat().messages, isProcessing(), currentChat().turnEpoch));
+	const turns = $derived(segmentTurns(currentChat().messages, isProcessing()));
 	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -277,7 +277,7 @@
 		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
 	);
 	const currentTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.current, isProcessing(), currentChat().turnEpoch) : [],
+		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
 	);
 	// Each continuation leaves a divider before the first reply-side message
 	// created at or after it, or after the last message until one arrives. An

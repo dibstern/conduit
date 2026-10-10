@@ -43,12 +43,34 @@
 //    stops before exactly that message, and held() resolves only while the
 //    replay waits at an unreleased hold, or a spec reads a moving state.
 //
-// Also pinned: per-message delay, and interrupt() ending the current trace.
+// A trace may record several inputs (command_uuid, user_message_uuid(s)): each
+// sent prompt answers the next recorded input in plan order, and the replay
+// holds before each later input's command_lifecycle queued frame until conduit
+// pushes that prompt. That adds four modes:
+//
+// 14. Unmatched prompt: a prompt arrives that no recorded input matches (more
+//    prompts than the plan's traces record inputs). It throws into the SDK
+//    stream AND makes assertComplete() throw. Mode 2 is its one-input case.
+// 15. Unsent input: a recorded input is never sent: the query closes while the
+//    replay holds for it, or the test ends with it unconsumed. assertComplete()
+//    names the trace and the input. Mode 3 is its one-input case.
+// 16. Ids mapped out of order: a frame references a later recorded input before
+//    that input's queued frame, i.e. before the prompt it maps to could have
+//    been sent. The trace fails at creation, naming the line.
+// 17. Unrecorded interrupt: interrupt() arrives during a trace that records
+//    several inputs or an interrupt, and the trace has no further interrupt to
+//    answer it with. interrupt() rejects AND assertComplete() throws. A
+//    one-input trace with no recorded interrupt keeps the synthesized stop
+//    (interrupt() drops the rest of the trace) that Stop scenarios rely on.
+//
+// Also pinned: per-message delay, interrupt() ending the current trace, and
+// interrupt() answered with the receipt a trace records.
 // Fresh database per run is the harness's job (mkdtemp configDir per test).
 
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import type {
 	SDKMessage,
@@ -64,11 +86,15 @@ const TRACES_DIR = join(
 	"../../fixtures/claude-sdk-traces",
 );
 
-function userPrompt(text: string): SDKUserMessage {
+function userPrompt(
+	text: string,
+	uuid?: SDKUserMessage["uuid"],
+): SDKUserMessage {
 	return {
 		type: "user",
 		message: { role: "user", content: text },
 		parent_tool_use_id: null,
+		...(uuid ? { uuid } : {}),
 	};
 }
 
@@ -94,8 +120,8 @@ function promptQueue() {
 	};
 	return {
 		iterable,
-		push(text: string) {
-			pending.push(userPrompt(text));
+		push(text: string, uuid?: SDKUserMessage["uuid"]) {
+			pending.push(userPrompt(text, uuid));
 			wake?.();
 		},
 		close() {
@@ -105,22 +131,26 @@ function promptQueue() {
 	};
 }
 
+// A turn can carry frames after its result (command_lifecycle completed), so
+// read the planned trace's length, stopping early only if the stream ends.
 async function readTurn(
 	iterator: AsyncIterator<SDKMessage, void>,
+	name: ClaudeTraceName = "pong-thinking-text-turn",
 ): Promise<SDKMessage[]> {
 	const messages: SDKMessage[] = [];
-	while (true) {
+	while (messages.length < traceLineCount(name)) {
 		const next = await iterator.next();
 		if (next.done) return messages;
 		messages.push(next.value);
-		if (next.value.type === "result") return messages;
 	}
+	return messages;
 }
 
 function envelopeIds(messages: readonly SDKMessage[]): string[] {
 	return messages.flatMap((message) => {
 		const ids = [message.uuid ?? "", message.session_id ?? ""];
 		if (message.type === "assistant") ids.push(message.message.id);
+		if (message.type === "command_lifecycle") ids.push(message.command_uuid);
 		if (
 			message.type === "stream_event" &&
 			message.event.type === "message_start"
@@ -137,6 +167,63 @@ function traceLineCount(name: ClaudeTraceName): number {
 		.filter((line) => line.trim() !== "").length;
 }
 
+const TWO_INPUTS = "second-input-held-to-turn-end";
+const SENT_A = "00000000-0000-4000-8000-00000000000a";
+const SENT_B = "00000000-0000-4000-8000-00000000000b";
+const SENT_C = "00000000-0000-4000-8000-00000000000c";
+
+type Raw = Record<string, unknown>;
+
+function traceJson(name: ClaudeTraceName): Raw[] {
+	return readFileSync(join(TRACES_DIR, `${name}.jsonl`), "utf8")
+		.split("\n")
+		.filter((line) => line.trim() !== "")
+		.map((line) => JSON.parse(line) as Raw);
+}
+
+/** The trace's recorded input ids, in recorded order. */
+function recordedInputs(lines: readonly Raw[]): string[] {
+	return [
+		...new Set(
+			lines.flatMap((line) =>
+				line["type"] === "command_lifecycle"
+					? [String(line["command_uuid"])]
+					: [],
+			),
+		),
+	];
+}
+
+/** How many frames play before the first one naming `id`. */
+function framesBefore(lines: readonly Raw[], id: string): number {
+	return lines.findIndex((line) => JSON.stringify(line).includes(`"${id}"`));
+}
+
+async function read(
+	iterator: AsyncIterator<SDKMessage, void>,
+	count: number,
+): Promise<SDKMessage[]> {
+	const messages: SDKMessage[] = [];
+	while (messages.length < count) {
+		const next = await iterator.next();
+		if (next.done) return messages;
+		messages.push(next.value);
+	}
+	return messages;
+}
+
+const settlesWithin = (promise: Promise<unknown>, ms: number) =>
+	Promise.race([promise.then(() => true), sleep(ms).then(() => false)]);
+
+function writeTrace(lines: readonly Raw[]): string {
+	const dir = mkdtempSync(join(tmpdir(), "claude-trace-replayer-"));
+	writeFileSync(
+		join(dir, `${TWO_INPUTS}.jsonl`),
+		lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+	);
+	return dir;
+}
+
 describe("createClaudeTraceReplayer", () => {
 	it("plays one planned trace per prompt, in plan order", async () => {
 		const replayer = createClaudeTraceReplayer({
@@ -150,12 +237,14 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("first");
 		const first = await readTurn(iterator);
 		prompts.push("second");
-		const second = await readTurn(iterator);
+		const second = await readTurn(iterator, "subagent-task-turn");
 		prompts.close();
 
 		expect(first).toHaveLength(traceLineCount("pong-thinking-text-turn"));
 		expect(second).toHaveLength(traceLineCount("subagent-task-turn"));
-		expect(first.at(-1)).toMatchObject({ type: "result", result: "pong" });
+		expect(first.find((message) => message.type === "result")).toMatchObject({
+			result: "pong",
+		});
 		expect(await iterator.next()).toEqual({ done: true, value: undefined });
 		replayer.assertComplete();
 	});
@@ -184,7 +273,7 @@ describe("createClaudeTraceReplayer", () => {
 		// stable across turns of one session, like the SDK's, but is not the
 		// captured one (that could resolve a real transcript on this machine).
 		const sessionId = turns[0]?.[0]?.session_id;
-		expect(sessionId).not.toBe("6198d280-a44f-49f4-a2ad-cb1af4102adf");
+		expect(sessionId).not.toBe("cfc5d5a4-e87b-4ca1-a1d1-f9d73ff47324");
 		const perTurn = turns.map(
 			(turn) =>
 				new Set(
@@ -252,11 +341,13 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		forkPrompts.push("fork turn");
 		const forkTurn = await readTurn(resumed);
-		expect(forkTurn.at(-1)).toMatchObject({
-			type: "result",
-			result: "pong",
-			session_id: fork.sessionId,
-		});
+		expect(forkTurn.find((message) => message.type === "result")).toMatchObject(
+			{
+				type: "result",
+				result: "pong",
+				session_id: fork.sessionId,
+			},
+		);
 		expect(
 			forkTurn.every((message) => message.session_id === fork.sessionId),
 		).toBe(true);
@@ -410,7 +501,9 @@ describe("createClaudeTraceReplayer", () => {
 			options: { resume: fork.sessionId },
 		});
 		forkPrompts.push("side");
-		expect((await readTurn(side)).at(-1)).toMatchObject({
+		expect(
+			(await readTurn(side)).find((message) => message.type === "result"),
+		).toMatchObject({
 			type: "result",
 			result: "pong",
 		});
@@ -419,7 +512,12 @@ describe("createClaudeTraceReplayer", () => {
 		const next = await resumed;
 		if (next.done) throw new Error("Held turn ended without its messages");
 		expect(next.value.type).toBe("user");
-		const rest = [next.value, ...(await readTurn(parentTurn))];
+		const rest = [next.value];
+		while (rest.at(-1)?.type !== "result") {
+			const more = await parentTurn.next();
+			if (more.done) break;
+			rest.push(more.value);
+		}
 		expect(rest.at(-1)?.type).toBe("result");
 		expect(beforeHold.length + rest.length).toBe(
 			traceLineCount("extra-folder-read-turn"),
@@ -466,8 +564,9 @@ describe("createClaudeTraceReplayer", () => {
 		await readTurn(iterator);
 		prompts.push("unplanned");
 
-		await expect(iterator.next()).rejects.toThrow(/turn 2.*only 1 planned/);
-		expect(() => replayer.assertComplete()).toThrow(/turn 2.*only 1 planned/);
+		const unmatched = /prompt 2 was sent, but no recorded input matches it/;
+		await expect(iterator.next()).rejects.toThrow(unmatched);
+		expect(() => replayer.assertComplete()).toThrow(unmatched);
 	});
 
 	// Failure 3.
@@ -483,7 +582,9 @@ describe("createClaudeTraceReplayer", () => {
 		prompts.push("only one");
 		await readTurn(iterator);
 
-		expect(() => replayer.assertComplete()).toThrow(/played 1 of 2/);
+		expect(() => replayer.assertComplete()).toThrow(
+			/recorded input 1 of trace 2 \(pong-thinking-text-turn\) was never sent \(1 of 2/,
+		);
 	});
 
 	// Failure 5.
@@ -538,6 +639,210 @@ describe("createClaudeTraceReplayer", () => {
 		replayer.assertComplete();
 	});
 
+	it("holds a later input's queued frame until its prompt and maps recorded ids to sent ones", async () => {
+		const lines = traceJson(TWO_INPUTS);
+		const [recordedA = "", recordedB = ""] = recordedInputs(lines);
+		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
+		const prompts = promptQueue();
+		const iterator = replayer.sdk
+			.query({ prompt: prompts.iterable })
+			[Symbol.asyncIterator]();
+
+		prompts.push("first", SENT_A);
+		const first = await read(iterator, framesBefore(lines, recordedB));
+		const held = iterator.next();
+		expect(await settlesWithin(held, 50)).toBe(false);
+		prompts.push("second", SENT_B);
+		const queued = await held;
+		expect(queued.value).toMatchObject({
+			type: "command_lifecycle",
+			command_uuid: SENT_B,
+			state: "queued",
+		});
+		const rest = await read(iterator, lines.length - first.length - 1);
+		prompts.close();
+		expect(await iterator.next()).toEqual({ done: true, value: undefined });
+
+		const replayed = [
+			...first,
+			...(queued.value ? [queued.value] : []),
+			...rest,
+		];
+		expect(replayed).toHaveLength(lines.length);
+		expect(
+			replayed.flatMap((message) =>
+				message.type === "result" ? [message.user_message_uuids] : [],
+			),
+		).toEqual([[SENT_A], [SENT_B]]);
+		const json = JSON.stringify(replayed);
+		expect(json).not.toContain(recordedA);
+		expect(json).not.toContain(recordedB);
+		replayer.assertComplete();
+	});
+
+	// Failure 14.
+	it("fails the stream and assertComplete on a prompt no recorded input matches", async () => {
+		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
+		const prompts = promptQueue();
+		const iterator = replayer.sdk
+			.query({ prompt: prompts.iterable })
+			[Symbol.asyncIterator]();
+
+		prompts.push("a", SENT_A);
+		prompts.push("b", SENT_B);
+		prompts.push("c", SENT_C);
+		await read(iterator, traceLineCount(TWO_INPUTS));
+
+		const unmatched =
+			/prompt 3 was sent, but no recorded input matches it \(the plan records 2\)/;
+		await expect(iterator.next()).rejects.toThrow(unmatched);
+		expect(() => replayer.assertComplete()).toThrow(unmatched);
+	});
+
+	// Failure 15.
+	it("fails assertComplete when a recorded input is never sent", async () => {
+		const lines = traceJson(TWO_INPUTS);
+		const [, recordedB = ""] = recordedInputs(lines);
+		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
+		const prompts = promptQueue();
+		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const iterator = query[Symbol.asyncIterator]();
+
+		prompts.push("a", SENT_A);
+		await read(iterator, framesBefore(lines, recordedB));
+		const held = iterator.next();
+		expect(await settlesWithin(held, 50)).toBe(false);
+		expect(() => replayer.assertComplete()).toThrow(
+			/recorded input 2 of trace 1 \(second-input-held-to-turn-end\) was never sent \(1 of 2/,
+		);
+
+		query.close();
+		expect(await held).toEqual({ done: true, value: undefined });
+		expect(() => replayer.assertComplete()).toThrow(
+			/recorded input 2 of trace 1 \(second-input-held-to-turn-end\) was never sent: the query closed while the replay held for it/,
+		);
+	});
+
+	// Failure 16.
+	it("throws at creation when a frame names a later input before its queued frame", () => {
+		const lines = traceJson(TWO_INPUTS);
+		const [, recordedB = ""] = recordedInputs(lines);
+		const dir = writeTrace(
+			lines.filter((_, index) => index !== framesBefore(lines, recordedB)),
+		);
+
+		expect(() =>
+			createClaudeTraceReplayer({ turns: [TWO_INPUTS], tracesDir: dir }),
+		).toThrow(
+			/second-input-held-to-turn-end\.jsonl:\d+ references recorded input 2 before its command_lifecycle queued frame, so its id would be mapped out of order/,
+		);
+	});
+
+	// Failure 17.
+	it("rejects an interrupt the trace does not record, and fails assertComplete", async () => {
+		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
+		const prompts = promptQueue();
+		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const iterator = query[Symbol.asyncIterator]();
+
+		prompts.push("a", SENT_A);
+		await iterator.next();
+
+		const unrecorded =
+			/interrupt\(\) arrived during second-input-held-to-turn-end, which records no further interrupt/;
+		await expect(query.interrupt()).rejects.toThrow(unrecorded);
+		expect(() => replayer.assertComplete()).toThrow(unrecorded);
+	});
+
+	it("answers a recorded interrupt with the inputs still queued there", async () => {
+		// The two-input trace, cut as the spike's interrupt-steer run shows it
+		// (docs/plans/2026-10-05-steer-and-queue/claude-spike/out-interrupt-steer.txt):
+		// the second input queues while the tool runs, Stop cancels the first,
+		// and the second then runs as its own turn.
+		const lines = traceJson(TWO_INPUTS);
+		const [recordedA = "", recordedB = ""] = recordedInputs(lines);
+		const at = (predicate: (line: Raw) => boolean) => {
+			const line = lines.find(predicate);
+			if (!line) throw new Error("two-input trace changed shape");
+			return line;
+		};
+		const lifecycle = (id: string, state: string) => (line: Raw) =>
+			line["type"] === "command_lifecycle" &&
+			line["command_uuid"] === id &&
+			line["state"] === state;
+		const toolRunning = lines.findIndex(
+			(line) => line["subtype"] === "task_started",
+		);
+		const toolResult = at((line) => line["type"] === "user");
+		const resultA = at(
+			(line) =>
+				line["type"] === "result" &&
+				JSON.stringify(line["user_message_uuids"]) ===
+					JSON.stringify([recordedA]),
+		);
+		const startedB = lines.findIndex(lifecycle(recordedB, "started"));
+		const interrupted: Raw[] = [
+			...lines.slice(0, toolRunning),
+			at(lifecycle(recordedB, "queued")),
+			toolResult,
+			{
+				...toolResult,
+				uuid: "6f1f3b7e-0000-4000-8000-000000000001",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: "[Request interrupted by user for tool use]",
+						},
+					],
+				},
+			},
+			{
+				...resultA,
+				subtype: "error_during_execution",
+				is_error: true,
+				result: undefined,
+				errors: [],
+			},
+			{ ...at(lifecycle(recordedA, "completed")), state: "cancelled" },
+			...lines.slice(startedB),
+		];
+		const replayer = createClaudeTraceReplayer({
+			turns: [TWO_INPUTS],
+			tracesDir: writeTrace(interrupted),
+		});
+		const prompts = promptQueue();
+		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const iterator = query[Symbol.asyncIterator]();
+
+		prompts.push("a", SENT_A);
+		await read(iterator, toolRunning);
+		prompts.push("b", SENT_B);
+		await read(iterator, 1);
+		const held = iterator.next();
+		expect(await settlesWithin(held, 50)).toBe(false);
+
+		await expect(query.interrupt()).resolves.toEqual({
+			still_queued: [SENT_B],
+		});
+		expect((await held).value).toMatchObject({ type: "user" });
+		const rest = await read(iterator, interrupted.length - toolRunning - 2);
+		expect(rest.slice(0, 3)).toMatchObject([
+			{ type: "user" },
+			{ type: "result", subtype: "error_during_execution" },
+			{ type: "command_lifecycle", command_uuid: SENT_A, state: "cancelled" },
+		]);
+		expect(rest.at(-2)).toMatchObject({
+			type: "result",
+			user_message_uuids: [SENT_B],
+		});
+		replayer.assertComplete();
+
+		await expect(query.interrupt()).rejects.toThrow(
+			/records no further interrupt/,
+		);
+	});
 	// Failure 9.
 	it("serves each agent's transcript as it was read at that point of the trace", async () => {
 		const name = "concurrent-background-work-turn";
@@ -666,7 +971,10 @@ describe("createClaudeTraceReplayer", () => {
 			options: { resume: sessionId },
 		});
 		after.push("after restart");
-		const secondTurn = await readTurn(second[Symbol.asyncIterator]());
+		const secondTurn = await readTurn(
+			second[Symbol.asyncIterator](),
+			"concurrent-background-work-after-restart-turn",
+		);
 		after.close();
 
 		expect(secondTurn).toHaveLength(

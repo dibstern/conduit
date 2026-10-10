@@ -458,22 +458,6 @@ describe("segmentTurns", () => {
 		]);
 	});
 
-	// A queued prompt's row is created while the running turn's assistant row is
-	// still growing, so it sorts below that turn's later parts.
-	it("keeps the running turn live while a prompt queued below it waits", () => {
-		const queued: UserMessage = { ...user("next"), sentDuringEpoch: 3 };
-		const messages = [user("one"), read("/a.ts"), queued];
-		expect(segmentTurns(messages, true, 3).map((t) => t.live)).toEqual([
-			true,
-			false,
-		]);
-		// Once the running turn finishes the epoch moves on and the prompt starts.
-		expect(segmentTurns(messages, true, 4).map((t) => t.live)).toEqual([
-			false,
-			true,
-		]);
-	});
-
 	it("does not mark a turn live once its result has landed", () => {
 		const turns = segmentTurns([user(), read("/a.ts"), result()], true);
 		expect(turns[0]?.live).toBe(false);

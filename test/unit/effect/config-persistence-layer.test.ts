@@ -283,6 +283,13 @@ describe("ConfigPersistenceLive", () => {
 							title: "Alpha",
 							lastUsed: 1700000000000,
 							instanceId: "remote-1",
+							repositoryIdentities: {
+								"/tmp/alpha": {
+									key: "github.com/owner/alpha",
+									name: "Alpha",
+									root: "/tmp/alpha",
+								},
+							},
 						},
 						{ silent: true },
 					);
@@ -313,6 +320,13 @@ describe("ConfigPersistenceLive", () => {
 							slug: "alpha",
 							title: "Alpha",
 							addedAt: 1700000000000,
+							repositoryIdentities: {
+								"/tmp/alpha": {
+									key: "github.com/owner/alpha",
+									name: "Alpha",
+									root: "/tmp/alpha",
+								},
+							},
 							instanceId: "remote-1",
 							sessionCount: 3,
 						},

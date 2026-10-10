@@ -181,15 +181,18 @@ export class TestWsClient {
 		const cursor = this.received.length;
 		this.turnCursors.set(sessionId, cursor);
 		const result = await this.rpcCall((client) =>
-			client.SendMessage({
+			client.input.submit({
 				projectSlug: this.projectSlug,
 				sessionId,
 				text,
-				commandId: opts.commandId ?? randomUUID(),
+				inputId: opts.commandId ?? randomUUID(),
+				delivery: "queue",
 				originId: opts.originId ?? this.clientId,
 				...(opts.images ? { images: [...opts.images] } : {}),
 			}),
 		);
+		// A queued submit is never refused; only a steer can be.
+		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		const dispatchedSessionId = result.sessionId;
 		if (dispatchedSessionId !== sessionId)
 			this.turnEndVersions.set(
@@ -753,7 +756,7 @@ export class TestWsClient {
 				for (const item of items)
 					if (item._tag === "event")
 						this.receive({ ...item.event, type: item.event.type, sessionId });
-					else
+					else if (item._tag === "transcriptMessage")
 						this.receive({
 							...item.message,
 							type: "transcript_message",

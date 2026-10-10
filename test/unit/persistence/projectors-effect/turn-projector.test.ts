@@ -639,27 +639,36 @@ describe("TurnProjector", () => {
 			expect(row?.completed_at).toBe(now + 3000);
 		});
 
-		it("ends the running turn when messageId matches nothing, leaving queued prompts pending", async () => {
-			await projectRunningWithQueued();
+		it("ends the running turn when messageId matches nothing, leaving settled turns alone", async () => {
+			await projectSteered();
+			await project(
+				makeStored(
+					"session.status",
+					"s1",
+					{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
+					4,
+					now + 150,
+				),
+			);
 			await project(
 				makeStored(
 					"turn.error",
 					"s1",
 					{ messageId: "", error: "boom" } satisfies TurnErrorPayload,
-					4,
+					5,
 					now + 3000,
 				),
 			);
 
 			expect(await turnStates()).toEqual({
-				user_m1: "error",
-				user_m2: "pending",
+				user_m1: "completed",
+				user_m2: "error",
 			});
 		});
 	});
 
-	/** user_m1 running, user_m2 queued behind it. */
-	const projectRunningWithQueued = async () => {
+	/** user_m1 running, then user_m2 steered in: its message closes user_m1. */
+	const projectSteered = async () => {
 		await project(
 			makeStored(
 				"message.created",
@@ -755,7 +764,7 @@ describe("TurnProjector", () => {
 			expect(row?.completed_at).toBe(now + 2000);
 		});
 
-		it("falls back to the running turn when messageId matches nothing", async () => {
+		it("falls back to the session's open turn when messageId matches nothing", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -838,8 +847,8 @@ describe("TurnProjector", () => {
 			expect(row?.state).toBe("pending");
 		});
 
-		it("stops prompts queued behind the running turn", async () => {
-			await projectRunningWithQueued();
+		it("stops the open turn when the id is empty, leaving settled turns alone", async () => {
+			await projectSteered();
 			await project(
 				makeStored(
 					"turn.interrupted",
@@ -851,7 +860,7 @@ describe("TurnProjector", () => {
 			);
 
 			expect(await turnStates()).toEqual({
-				user_m1: "interrupted",
+				user_m1: "completed",
 				user_m2: "interrupted",
 			});
 		});

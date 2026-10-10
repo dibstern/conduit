@@ -33,6 +33,7 @@ import {
 	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
+import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
@@ -194,62 +195,68 @@ describe("RelayFactoryTag", () => {
 		},
 	);
 
-	it.effect("publishes ProjectsChanged only when refreshed git changes", () => {
-		const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
-		const server = createServer();
-		execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
-			cwd: directory,
-		});
-		createProjectRelayMock.mockResolvedValue({
-			stop: async () => undefined,
-		} as ProjectRelay);
-		return Effect.gen(function* () {
-			const project = {
-				slug: "git-project",
-				title: "Git Project",
-				folders: [directory] as const,
-			};
-			yield* addWithoutRelay(project);
-			const subscription = yield* subscribeToDaemonEvents;
-			const serverRef = yield* HttpServerRefTag;
-			yield* Ref.set(serverRef, server);
-			const factory = yield* RelayFactoryTag;
-			yield* factory.create(project);
-			const config = createProjectRelayMock.mock.calls[0]?.[0];
-			expect(config?.refreshSessionGit).toBeTypeOf("function");
-			if (!config?.refreshSessionGit)
-				throw new Error("Missing git refresh callback");
+	it.effect(
+		"publishes cached project git when the relay reports changes",
+		() => {
+			const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
+			const server = createServer();
+			execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
+				cwd: directory,
+			});
+			createProjectRelayMock.mockResolvedValue({
+				stop: async () => undefined,
+			} as ProjectRelay);
+			return Effect.gen(function* () {
+				const project = {
+					slug: "git-project",
+					title: "Git Project",
+					folders: [directory] as const,
+				};
+				yield* addWithoutRelay(project);
+				const subscription = yield* subscribeToDaemonEvents;
+				const serverRef = yield* HttpServerRefTag;
+				yield* Ref.set(serverRef, server);
+				const factory = yield* RelayFactoryTag;
+				yield* factory.create(project);
+				const config = createProjectRelayMock.mock.calls[0]?.[0];
+				expect(config?.refreshSessionGit).toBeTypeOf("function");
+				if (!config?.refreshSessionGit || !config.broadcastSessionListChanged)
+					throw new Error("Missing git publication callbacks");
 
-			yield* Effect.promise(config.refreshSessionGit);
-			const first = yield* Queue.take(subscription);
-			expect(first).toMatchObject({ _tag: "ProjectsChanged" });
-			expect(yield* projectInfos).toMatchObject([
-				{ slug: "git-project", git: { branch: "main", dirty: false } },
-			]);
-			yield* Queue.take(subscription); // DaemonSessionsChanged
-			yield* Effect.promise(config.refreshSessionGit);
-			expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
+				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
+				yield* Effect.promise(config.refreshSessionGit);
+				yield* Effect.promise(config.broadcastSessionListChanged);
+				const first = yield* Queue.take(subscription);
+				expect(first).toMatchObject({ _tag: "ProjectsChanged" });
+				expect(yield* projectInfos).toMatchObject([
+					{ slug: "git-project", git: { branch: "main", dirty: false } },
+				]);
+				yield* Queue.take(subscription); // DaemonSessionsChanged
+				expect(Array.from(yield* Queue.takeAll(subscription))).toHaveLength(0);
 
-			writeFileSync(join(directory, "untracked"), "changed");
-			yield* Effect.promise(config.refreshSessionGit);
-			const changed = yield* Queue.take(subscription);
-			expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
-			expect(yield* projectInfos).toMatchObject([
-				{ slug: "git-project", git: { dirty: true } },
-			]);
-			yield* Queue.take(subscription);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(Layer.fresh(factoryLayer)),
-			Effect.ensuring(
-				Effect.sync(() => {
-					server.close();
-					rmSync(directory, { recursive: true, force: true });
-					createProjectRelayMock.mockReset();
-				}),
-			),
-		);
-	});
+				writeFileSync(join(directory, "untracked"), "changed");
+				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
+				yield* Effect.promise(config.refreshSessionGit);
+				yield* Effect.promise(config.broadcastSessionListChanged);
+				const changed = yield* Queue.take(subscription);
+				expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
+				expect(yield* projectInfos).toMatchObject([
+					{ slug: "git-project", git: { dirty: true } },
+				]);
+				yield* Queue.take(subscription);
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(Layer.fresh(factoryLayer)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						server.close();
+						rmSync(directory, { recursive: true, force: true });
+						createProjectRelayMock.mockReset();
+					}),
+				),
+			);
+		},
+	);
 });
 
 describe("RelayFactoryError", () => {

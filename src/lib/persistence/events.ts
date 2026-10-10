@@ -49,6 +49,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	// sideThread and permissionMode are optional so historical creations still decode.
 	"session.created": ["sessionId", "title", "provider"],
 	"session.renamed": ["sessionId", "title"],
+	"session.workspace_changed": ["sessionId", "cause", "worktrees", "origin"],
 	"session.read": ["sessionId"],
 	"session.unread": ["sessionId"],
 	"session.settled": ["sessionId"],
@@ -92,6 +93,9 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"turn.error": ["messageId", "error"],
 	"turn.interrupted": ["messageId"],
 	"turn.model_resolved": ["actualModel"],
+	"input.admitted": ["sessionId", "inputId", "delivery", "request"],
+	"input.sent": ["sessionId", "inputId"],
+	"input.cancelled": ["sessionId", "inputId"],
 	"permission.asked": ["id", "sessionId", "toolName"],
 	"permission.resolved": ["id", "decision"],
 	"question.asked": ["id", "sessionId", "questions"],

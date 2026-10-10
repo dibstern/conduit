@@ -69,7 +69,7 @@ function makeStubEventSink(): EventSink & {
 function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 	return {
 		sessionId: "s1",
-		turnId: "t1",
+		inputId: "t1",
 		prompt: "Write hello world",
 		history: [],
 		providerState: {},
@@ -209,7 +209,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	it("resolves concurrent prompts on one session from one completion", async () => {
 		const firstResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t1", prompt: "first" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t1", prompt: "first" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",
@@ -219,7 +219,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		);
 		const secondResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t2", prompt: "second" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",
@@ -248,6 +248,38 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(secondResult).toBe(completion);
 	});
 
+	it("tags user echoes with their sends in handoff order, per session", async () => {
+		const sends = [
+			makeSendTurnInput({ inputId: "t1", prompt: "same" }),
+			makeSendTurnInput({ inputId: "t2", prompt: "same" }),
+			makeSendTurnInput({ sessionId: "s2", inputId: "other", prompt: "same" }),
+		].map((input) => Effect.runPromise(instance.sendTurnEffect(input)));
+		await vi.waitFor(() => {
+			expect(client.session.prompt).toHaveBeenCalledTimes(3);
+		});
+
+		expect(instance.inputIdForUserEcho("s1", "msg_a")).toBe("t1");
+		// A retried translation of the same echo keeps its send.
+		expect(instance.inputIdForUserEcho("s1", "msg_a")).toBe("t1");
+		expect(instance.inputIdForUserEcho("s1", "msg_b")).toBe("t2");
+		// An echo beyond the handed-off sends (e.g. typed in the TUI) is untagged.
+		expect(instance.inputIdForUserEcho("s1", "msg_c")).toBeUndefined();
+		expect(instance.inputIdForUserEcho("s2", "msg_d")).toBe("other");
+
+		const completion = {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		} as const;
+		instance.notifyTurnCompleted("s1", completion);
+		instance.notifyTurnCompleted("s2", completion);
+		await Promise.all(sends);
+		// A finished send no longer claims echoes.
+		expect(instance.inputIdForUserEcho("s1", "msg_a")).toBeUndefined();
+	});
+
 	it("keeps a joined prompt pending when the first prompt cleans up", async () => {
 		let rejectFirstPrompt: ((error: Error) => void) | undefined;
 		const prompt = vi
@@ -269,7 +301,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const firstResultPromise = Effect.runPromise(
 			instance.sendTurnEffect(
-				makeSendTurnInput({ turnId: "t1", prompt: "first" }),
+				makeSendTurnInput({ inputId: "t1", prompt: "first" }),
 			),
 		);
 		await vi.waitFor(() => {
@@ -278,7 +310,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const secondResultPromise = Effect.runPromise(
 			instance
-				.sendTurnEffect(makeSendTurnInput({ turnId: "t2", prompt: "second" }))
+				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
 					Effect.timeoutFail({
 						duration: "500 millis",

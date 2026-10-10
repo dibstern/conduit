@@ -12,6 +12,10 @@
 //    the schema (and capture a fresh trace), don't loosen the assert.
 // 2. Translate: replaying the trace through ClaudeEventTranslator must satisfy
 //    the canonical stream invariants and emit each text exactly once.
+// 3. Provider seam contract (traces that record inputs): every handed-off
+//    input is placed (command_lifecycle started) exactly once, or resolves
+//    unplaced as cancelled; a placement never lands inside an assistant
+//    message, and comes before the result that answers it.
 //
 // To add a fixture: run any real Claude turn (e.g. an integration test) with
 // CONDUIT_CLAUDE_SDK_CAPTURE=<dir>, review the trace for private hook/memory
@@ -224,6 +228,55 @@ describe("Claude SDK captured-trace replay", () => {
 			}
 		});
 
+		it("places every handed-off input exactly once, before its answer (provider seam contract)", () => {
+			const messages = rawLines.map(
+				(raw) => decodeClaudeSDKMessage(raw) as SDKMessage,
+			);
+			const inputs = [
+				...new Set(
+					messages.flatMap((message) =>
+						message.type === "command_lifecycle" ? [message.command_uuid] : [],
+					),
+				),
+			];
+			let assistantOpen = false;
+			const placedAt = new Map<string, number>();
+			const answered = new Set<string>();
+			for (const [index, message] of messages.entries()) {
+				if (message.type === "stream_event") {
+					if (message.event.type === "message_start") assistantOpen = true;
+					if (message.event.type === "message_stop") assistantOpen = false;
+				}
+				if (
+					message.type === "command_lifecycle" &&
+					message.state === "started"
+				) {
+					expect(placedAt.has(message.command_uuid)).toBe(false);
+					expect(assistantOpen).toBe(false);
+					placedAt.set(message.command_uuid, index);
+				}
+				if (message.type === "result") {
+					for (const id of message.user_message_uuids ?? []) {
+						expect(placedAt.has(id)).toBe(true);
+						expect(answered.has(id)).toBe(false);
+						answered.add(id);
+					}
+				}
+			}
+			for (const id of inputs) {
+				if (placedAt.has(id)) continue;
+				expect(answered.has(id)).toBe(false);
+				expect(
+					messages.some(
+						(message) =>
+							message.type === "command_lifecycle" &&
+							message.command_uuid === id &&
+							message.state === "cancelled",
+					),
+				).toBe(true);
+			}
+		});
+
 		it("replays through the translator without violating stream invariants", async () => {
 			const sink = makeStubSink();
 			const ctx = makeCtx();
@@ -257,7 +310,7 @@ describe("Claude SDK captured-trace replay", () => {
 				expect(warning).toContain("(prepended)");
 			}
 			const prepended: Record<string, number> = {
-				"subagent-task-turn.jsonl": 1,
+				"subagent-message-display-hook-turn.jsonl": 1,
 				"concurrent-background-work-turn.jsonl": 4,
 				"concurrent-background-work-after-restart-turn.jsonl": 1,
 				"foreground-agent-backgrounded-turn.jsonl": 2,

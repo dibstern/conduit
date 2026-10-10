@@ -19,6 +19,9 @@ import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
+import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
@@ -132,6 +135,8 @@ const createOrchestrationComponentsEffect = (
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
@@ -200,6 +205,7 @@ const createOrchestrationComponentsEffect = (
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),
@@ -227,6 +233,8 @@ const createOrchestrationComponentsEffect = (
 			now: () => Date.now(),
 			generateId: () => `disp_${randomUUID()}`,
 			ingestion,
+			// A send_turn's input.sent projects and announces with its outbox row.
+			write: (yield* makeCommitAndSignal).write,
 			persistHandoffDelivered: persist.persistHandoffDelivered,
 		};
 		const engine = new OrchestrationEngine({
@@ -291,6 +299,8 @@ export const makeOrchestrationRuntimeLayer = (
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,

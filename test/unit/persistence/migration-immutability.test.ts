@@ -97,7 +97,15 @@ const SHIPPED_MIGRATION_HASHES = {
 		"a127b46ea6bde1e8df71fc15de72232c73874d033ba8be5f284d088ca0ed3c08",
 	"0038_session_sidebar_tombstones.sql":
 		"08be345da1699bd430c0abfb4ee369ef4bb197ddcbfe96af8b4b040cb4e60c0b",
-	"0039_messages_context_tokens.sql":
+	"0039_sessions_workspace.sql":
+		"b37dbcd0febeb5a9d39959263b1341b192104638ef40140772af18e8a2ae61dd",
+	"0040_messages_input_id.sql":
+		"9810a56cd0d51fc664bf8eabbe757997bad9abcff00142052d4ddcc129ba130e",
+	"0041_pending_inputs.sql":
+		"4454f92eb123bac242c514140668577a7c06874a119de4ea42d32b8cfc8716d6",
+	"0042_messages_steered.sql":
+		"bc7e3ec7b28fdd150dc76afbbc5a45f9fde2aa28c6c817c80fca72bd24410afc",
+	"0043_messages_context_tokens.sql":
 		"3c9b9a0d6642743f73d0873401aff4337371fb6b57a1e9af3c6d0e087dbfd758",
 } satisfies Record<string, string>;
 

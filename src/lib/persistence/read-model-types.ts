@@ -26,6 +26,8 @@ export interface SessionRow {
 	limit_recovery?: string | null;
 	/** JSON array of SessionResume, oldest first. */
 	resumes?: string | null;
+	/** JSON SessionWorkspace. NULL uses the project's main folders. */
+	workspace?: string | null;
 	last_turn_end_version?: number | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
@@ -88,6 +90,8 @@ export interface MessageRow {
 	context_window: number | null;
 	is_streaming: number;
 	is_backfilled: number;
+	input_id?: string | null;
+	steered?: number;
 	rest_digest?: string | null;
 	rest_event_id?: string | null;
 	rest_payload?: string | null;

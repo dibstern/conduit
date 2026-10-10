@@ -25,6 +25,7 @@ import {
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../persistence/session-history-adapter.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
@@ -34,6 +35,8 @@ import { SessionEventBusTag } from "./session-event-bus.js";
  * A single detail row shared by the base and the deltas, as the seam requires.
  * - `transcriptMessage`: a projected transcript message — what this source
  *   streams, base and delta alike.
+ * - `pendingInput`: an input conduit holds for the session, queued or steering.
+ * - `inbox`: the session's inbox state (paused), computed on read.
  * - `event`: a raw committed event. Still on the wire for the browser's legacy
  *   delta arm, which conduit-test-ni8.5.20 retires; nothing produces it here.
  */
@@ -66,6 +69,7 @@ export const subscribeSessionDetail = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
+			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 			const sessionRow = yield* Effect.either(
 				readQuery.getSession(options.sessionId),
 			);
@@ -111,26 +115,79 @@ export const subscribeSessionDetail = (options: {
 									options.sessionId,
 									range,
 								));
+							// Pending inputs ride the same window, bounded by the version
+							// this read reports. A base read carries every one still
+							// pending, whatever transcript page it returns.
+							const through = range?.through ?? result.version;
+							const pending = yield* readQuery.readPendingInputs(
+								options.sessionId,
+								{
+									...(range?.after === undefined ? {} : { after: range.after }),
+									through,
+								},
+							);
+							const inputs = pending.rows.map(({ version, ...input }) => ({
+								item: {
+									_tag: "pendingInput" as const,
+									input,
+								} satisfies SessionDetailItem,
+								version,
+							}));
+							// The inbox state moves with the session row. A base read always
+							// carries it; a window carries it when the row moved inside it.
+							const inbox = yield* readQuery.readInboxState(options.sessionId);
+							const inboxRows =
+								inbox &&
+								(range === undefined ||
+									(inbox.version > (range.after ?? -1) &&
+										inbox.version <= through))
+									? [
+											{
+												item: {
+													_tag: "inbox" as const,
+													inbox: {
+														paused: inbox.paused,
+														// Only the reasons that do not depend on the draft.
+														steer:
+															registry._tag === "Some" &&
+															registry.value.getInstance(inbox.provider)
+																?.steering === true
+																? inbox.promptOpen
+																	? "prompt_open"
+																	: null
+																: "no_steering",
+													},
+												} satisfies SessionDetailItem,
+												version: Math.min(inbox.version, through),
+											},
+										]
+									: [];
 							return {
 								// The adapter gets exactly these rows, so index `i` is still row `i`.
 								// That is what lets each item keep the version its row
 								// carries instead of borrowing the read's counter.
-								rows: messageRowsToHistory(result.messages, {
-									pageSize: result.messages.length,
-									toolOutputPreview: true,
-								}).messages.map((message, index) => ({
-									item: {
-										_tag: "transcriptMessage" as const,
-										message,
-									} satisfies SessionDetailItem,
-									version: result.messages[index]?.version ?? result.version,
-								})),
+								rows: [
+									...messageRowsToHistory(result.messages, {
+										pageSize: result.messages.length,
+										toolOutputPreview: true,
+									}).messages.map((message, index) => ({
+										item: {
+											_tag: "transcriptMessage" as const,
+											message,
+										} satisfies SessionDetailItem,
+										version: result.messages[index]?.version ?? result.version,
+									})),
+									...inputs,
+									...inboxRows,
+								],
 								version: result.version,
 								...(range === undefined
 									? {}
 									: {
-											removed:
-												"removed" in result ? (result.removed ?? []) : [],
+											removed: [
+												...("removed" in result ? (result.removed ?? []) : []),
+												...pending.removed,
+											],
 										}),
 								...(page === undefined
 									? {}

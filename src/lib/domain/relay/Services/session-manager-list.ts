@@ -1,5 +1,5 @@
 import { Effect, HashMap, type Option, Ref } from "effect";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
+import { withCachedSessionGit } from "../../../git/session-git.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type {
 	SessionDetail,
@@ -177,10 +177,9 @@ export const makeSessionListOperations = ({
 			const sessions = yield* withEffectRead.pipe(
 				Effect.provideService(RelayStatusSnapshotTag, snapshot),
 			);
-			const git = daemonSessionGitCache.peek(projectDir);
-			return git
-				? sessions.map((session) => ({ ...session, git }))
-				: [...sessions];
+			return sessions.map((session) =>
+				withCachedSessionGit(session, projectDir),
+			);
 		});
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =
 		() =>

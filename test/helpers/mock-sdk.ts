@@ -123,7 +123,7 @@ export function makeBaseSendTurnInput(
 ): SendTurnInput {
 	return {
 		sessionId: "session-1",
-		turnId: "turn-1",
+		inputId: "turn-1",
 		prompt: "Hello",
 		history: [],
 		providerState: {},

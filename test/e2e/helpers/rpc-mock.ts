@@ -1,4 +1,5 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
 	type Alert,
 	type ProjectSetting,
@@ -238,7 +239,7 @@ export class RpcMockControl {
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell"))
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "remove", id, sequence: this.shellSequence },
+				{ _tag: "remove", id, deleted: true, sequence: this.shellSequence },
 			]);
 	}
 
@@ -668,7 +669,7 @@ async function handleMessage(
 						})
 					: raw.tag === "ViewSession"
 						? () => ({ ok: true })
-						: raw.tag === "SendMessage"
+						: raw.tag === "input.submit"
 							? ({ sessionId }) => ({ ok: true, sessionId })
 							: undefined);
 		if (!handler) return;
@@ -690,9 +691,10 @@ async function handleMessage(
 				requestId: raw.id,
 				exit: { _tag: "Success", value: result },
 			});
-			if (raw.tag === "SendMessage") control.onSendMessage?.(raw.payload ?? {});
+			if (raw.tag === "input.submit")
+				control.onSendMessage?.(raw.payload ?? {});
 		} catch (error) {
-			if (error instanceof WsRpcError) {
+			if (error instanceof WsRpcError || error instanceof WorkspaceMoveError) {
 				sendJson(ws, {
 					_tag: "Exit",
 					requestId: raw.id,
@@ -700,7 +702,14 @@ async function handleMessage(
 						_tag: "Failure",
 						cause: {
 							_tag: "Fail",
-							error: { _tag: "WsRpcError", message: error.message },
+							error:
+								error instanceof WorkspaceMoveError
+									? {
+											_tag: "WorkspaceMoveError",
+											path: error.path,
+											reason: error.reason,
+										}
+									: { _tag: "WsRpcError", message: error.message },
 						},
 					},
 				});
@@ -731,7 +740,8 @@ async function handleMessage(
 		control.record(raw.method, raw.params ?? {});
 		const result = await handler(raw.params ?? {}, raw);
 		sendJson(ws, { jsonrpc: "2.0", id: raw.id, result });
-		if (raw.method === "SendMessage") control.onSendMessage?.(raw.params ?? {});
+		if (raw.method === "input.submit")
+			control.onSendMessage?.(raw.params ?? {});
 	} catch (error) {
 		sendJson(ws, {
 			jsonrpc: "2.0",

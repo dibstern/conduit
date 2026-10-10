@@ -31,6 +31,10 @@ import {
 	ProviderInstanceIdSchema,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+import {
+	type RepositoryIdentity,
+	RepositoryIdentitySchema,
+} from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
 import {
@@ -71,6 +75,7 @@ export interface DaemonConfig {
 	projects: Array<{
 		path: string;
 		folders: readonly [string, ...string[]];
+		repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 		slug: string;
 		title?: string;
 		addedAt: number;
@@ -97,6 +102,9 @@ export interface DaemonConfig {
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	repositoryIdentities: Schema.optional(
+		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+	),
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,

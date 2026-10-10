@@ -4,6 +4,7 @@
 // Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
+import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type {
 	SessionGoalChangedPayload,
@@ -96,7 +97,16 @@ export interface EventSink {
 	noteActivity?(event: ProviderRuntimeEvent): void;
 }
 
-export type TurnStatus = "completed" | "error" | "interrupted" | "cancelled";
+/**
+ * `joined`: the provider folded this input into a turn another input owns.
+ * That input's result finalises the turn; a joined input finalises nothing.
+ */
+export type TurnStatus =
+	| "completed"
+	| "error"
+	| "interrupted"
+	| "cancelled"
+	| "joined";
 
 export interface TurnTokens {
 	readonly input: number;
@@ -178,17 +188,19 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
-	/** Durable outbox identity, forwarded to a process session runner. */
-	readonly commandId?: string;
-	/** Persisted user-message owner for process-runner failure events. */
-	readonly userMessageId?: string;
-	/** Resume an open cut-off with a hidden control prompt on its native thread. */
-	readonly continuation?: boolean;
+	/** Per-send identity, shared by the outbox command and Claude message/turn. */
+	readonly inputId: string;
+	/**
+	 * Resume an open cut-off with a hidden control prompt on its native thread.
+	 * No user message is placed; the turn belongs to the cut-off message.
+	 */
+	readonly continuation?: { readonly cutOffMessageId: string };
 	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
 	readonly commandAttempt?: number;
 	readonly sessionId: string;
-	readonly turnId: string;
 	readonly prompt: string;
+	/** What the user sent, when the prompt wraps it in a hidden handoff. */
+	readonly text?: string;
 	readonly handoff?: SessionHandoffDeliveredPayload;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
@@ -301,6 +313,10 @@ export interface ProviderInstance {
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 
+	/** The provider reads an input handed off mid-turn at its next tool
+	 *  boundary and reports when it starts (a steer). */
+	readonly steering: boolean;
+
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(): Effect.Effect<
 		ProviderCapabilities,
@@ -379,6 +395,7 @@ export interface ProviderInstance {
 
 export interface ProviderDriver<Input, R = never, E = never> {
 	readonly providerId: string;
+	readonly capabilities: ProviderSessionCapabilities;
 	readonly create: (
 		input: Input,
 	) => Effect.Effect<ProviderInstance, E, R | Scope.Scope>;

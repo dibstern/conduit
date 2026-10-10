@@ -35,6 +35,7 @@ export interface EffectDaemonHandle {
 	readonly onboardingPort: Effect.Effect<number | null>;
 	readonly saveProject: (input: SaveProjectInput) => Effect.Effect<
 		{
+			readonly kind?: "existing" | undefined;
 			readonly project: StoredProject;
 			readonly warnings: readonly FolderIssue[];
 		},

@@ -46,6 +46,7 @@ describe("Provider wiring with Claude provider instance", () => {
 		// Create a minimal mock for opencode instance
 		const opencode = {
 			providerId: "opencode",
+			steering: false,
 			discoverEffect: () =>
 				Effect.succeed({
 					models: [],
@@ -190,7 +191,7 @@ describe("Provider wiring with Claude provider instance", () => {
 				providerId: "claude",
 				input: makeBaseSendTurnInput({
 					sessionId: "e2e-session-1",
-					turnId: "e2e-turn-1",
+					inputId: "e2e-turn-1",
 					prompt: "End-to-end wiring test",
 					workspaceRoot: workspace,
 					model: { providerId: "claude", modelId: "sonnet" },

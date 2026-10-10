@@ -7,10 +7,6 @@ import {
 	filterAgents,
 } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
@@ -118,7 +114,6 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
-import { ProviderStateEffectError } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -130,8 +125,6 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
-import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
-import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
@@ -153,6 +146,7 @@ import {
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -305,7 +299,7 @@ const persistentHandlerPersistence = Layer.merge(
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, PendingSendOwnershipLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger())))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -815,6 +809,8 @@ describe("switchModelForSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -1238,7 +1234,6 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
-		PendingSendOwnershipLive,
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(
 			StatusPollerTag,
@@ -1286,7 +1281,6 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
-		PendingSendOwnershipLive,
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(
 			StatusPollerTag,
@@ -1640,7 +1634,6 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(ConfigTag, config),
 				Layer.succeed(ProviderRegistryTag, registry),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1691,7 +1684,6 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(ConfigTag, config),
 				Layer.succeed(ProviderRegistryTag, registry),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1747,7 +1739,6 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(ConfigTag, config),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 			);
 
 			return Effect.gen(function* () {
@@ -1796,6 +1787,7 @@ describe("handlePermissionResponse", () => {
 				const releaseSend = yield* Deferred.make<void>();
 				const instance: ProviderInstance = {
 					providerId: "claude",
+					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
@@ -1839,7 +1831,6 @@ describe("handlePermissionResponse", () => {
 					Layer.succeed(ConfigTag, config),
 					Layer.succeed(OrchestrationEngineTag, engine),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 				);
 
 				yield* Effect.gen(function* () {
@@ -1896,7 +1887,6 @@ describe("handlePermissionResponse", () => {
 			Layer.succeed(LoggerTag, log),
 			Layer.succeed(ConfigTag, config),
 			PendingInteractionServiceLive,
-			PendingSendOwnershipLive,
 		);
 
 		return Effect.gen(function* () {
@@ -1976,7 +1966,6 @@ describe("handleQuestionReject", () => {
 				Layer.succeed(LoggerTag, log),
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			);
@@ -2041,7 +2030,6 @@ describe("handleAskUserResponse", () => {
 				),
 				Layer.succeed(ProviderTurnServiceTag, turns),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 			);
 			return Effect.gen(function* () {
@@ -2072,7 +2060,7 @@ describe("handleAskUserResponse", () => {
 					}),
 				);
 				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 	it.effect("answers question via REST API", () => {
@@ -2092,7 +2080,6 @@ describe("handleAskUserResponse", () => {
 					Layer.succeed(WebSocketHandlerTag, ws),
 					Layer.succeed(ConfigTag, mockConfig()),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(LoggerTag, log),
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					makeOverridesStateLive(),
@@ -2103,7 +2090,7 @@ describe("handleAskUserResponse", () => {
 			toolId: "que-1",
 			answers: { "1": "Approve", "0": "Yes" },
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
 				expect(client.question.reply).toHaveBeenCalledWith("que-1", [
 					["Yes"],
@@ -2144,7 +2131,6 @@ describe("handleAskUserResponse", () => {
 					Layer.succeed(LoggerTag, log),
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
@@ -2162,7 +2148,7 @@ describe("handleAskUserResponse", () => {
 					answers: { "0": "Yes" },
 				});
 			}).pipe(
-				Effect.provide(layer),
+				Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 				Effect.tap(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
 					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
@@ -2313,6 +2299,8 @@ describe("handleNewSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2332,7 +2320,6 @@ describe("handleNewSession", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(
 					StatusPollerTag,
 					makeMockStatusPoller({
@@ -2410,6 +2397,8 @@ describe("handleNewSession", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2437,7 +2426,6 @@ describe("handleNewSession", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ReadQueryEffectTag, readQuery),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(
 					OrchestrationEngineTag,
 					withDispatchEffect({
@@ -2699,6 +2687,8 @@ describe("loadMoreHistoryForSession", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+			readInboxState: () => Effect.succeed(undefined),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
@@ -2824,7 +2814,6 @@ describe("sendMessageToSession", () => {
 	makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 ),
 						makeSessionManagerStateLive(),
-						PendingSendOwnershipLive,
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile),
 						Layer.succeed(
@@ -2883,7 +2872,10 @@ describe("sendMessageToSession", () => {
 						sessionId: "s1",
 						text: "Continue",
 						commandId: "cmd1",
-					}).pipe(Effect.provideService(ProviderTurnServiceTag, provider));
+					}).pipe(
+						Effect.provide(PassThroughSessionInbox),
+						Effect.provideService(ProviderTurnServiceTag, provider),
+					);
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
@@ -2897,29 +2889,6 @@ describe("sendMessageToSession", () => {
 					Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
 				);
 			},
-		);
-	}
-	function makeLayer(
-		ws: WebSocketHandlerShape,
-		prepareTurnSession: ProviderTurnService["prepareTurnSession"],
-		sendTurn: ProviderTurnService["sendTurn"] = () => Effect.void,
-	) {
-		const providerTurnService: ProviderTurnService = {
-			holdUserTurnsForAccountSwitch: () => Effect.void,
-			prepareTurnSession,
-			sendTurn,
-			interruptTurn: vi.fn(() => Effect.void),
-		};
-		return Layer.mergeAll(
-			Layer.succeed(ProviderTurnServiceTag, providerTurnService),
-			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
-			Layer.succeed(WebSocketHandlerTag, ws),
-			Layer.succeed(LoggerTag, mockLogger()),
-			Layer.succeed(ConfigTag, mockConfig()),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			PendingInteractionServiceLive,
-			PendingSendOwnershipLive,
-			makeOverridesStateLive(),
 		);
 	}
 
@@ -2948,7 +2917,6 @@ describe("sendMessageToSession", () => {
 			Layer.succeed(ConfigTag, mockConfig()),
 			Layer.succeed(SessionManagerServiceTag, service),
 			PendingInteractionServiceLive,
-			PendingSendOwnershipLive,
 			makeOverridesStateLive(),
 		);
 		return sendMessageToSession({
@@ -2957,265 +2925,10 @@ describe("sendMessageToSession", () => {
 			text: "Continue",
 			commandId: "cmd1",
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => expect(sendTurn).toHaveBeenCalledOnce()),
 		);
 	});
-
-	it.effect(
-		"removes only the failed command on a propagated Effect failure",
-		() => {
-			const layer = makeLayer(
-				mockWsHandler(),
-				(input) => Effect.succeed(input.sessionId),
-				(input) =>
-					input.commandId === "failed"
-						? Effect.fail(
-								new ProviderStateEffectError({
-									operation: "sendTurn",
-									cause: "rejected",
-								}),
-							)
-						: Effect.void,
-			);
-			return Effect.gen(function* () {
-				for (const commandId of ["before", "failed", "after"]) {
-					const exit = yield* Effect.exit(
-						sendMessageToSession({
-							clientId: commandId,
-							originId: commandId,
-							sessionId: "effect-failed",
-							commandId,
-							text: "ok",
-						}),
-					);
-					expect(Exit.isFailure(exit)).toBe(commandId === "failed");
-				}
-				for (const [messageId, originId] of [
-					["first", "before"],
-					["second", "after"],
-					["tui", undefined],
-				]) {
-					const event = translateMessageCreated(
-						{
-							type: "message.created",
-							properties: {
-								sessionID: "effect-failed",
-								messageID: messageId,
-								info: { role: "user", parts: [{ type: "text", text: "ok" }] },
-							},
-						},
-						(yield* PendingSendOwnershipTag).resolve,
-					);
-					if (originId) expect(event).toMatchObject({ originId });
-					else expect(event).not.toHaveProperty("originId");
-				}
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
-		"correlates provider user messages by session FIFO across SSE and polling",
-		() => {
-			const ws = mockWsHandler();
-			const layer = makeLayer(ws, (input) => Effect.succeed(input.sessionId));
-			return Effect.gen(function* () {
-				for (const [sessionId, originId, commandId] of [
-					["fifo-a", "browser-1", "fifo-command-1"],
-					["fifo-b", "browser-3", "fifo-command-3"],
-					["fifo-a", "browser-2", "fifo-command-2"],
-				] as const) {
-					yield* sendMessageToSession({
-						clientId: originId,
-						sessionId,
-						originId,
-						commandId,
-						text: "ok",
-					});
-				}
-				const event = {
-					type: "message.created",
-					properties: {
-						sessionID: "fifo-a",
-						messageID: "msg-first",
-						info: { role: "user", parts: [{ type: "text", text: "ok" }] },
-					},
-				};
-				expect(
-					translateMessageCreated(
-						event,
-						(yield* PendingSendOwnershipTag).resolve,
-					),
-				).toMatchObject({
-					messageId: "msg-first",
-					originId: "browser-1",
-				});
-				expect(
-					translateMessageCreated(
-						event,
-						(yield* PendingSendOwnershipTag).resolve,
-					),
-				).toMatchObject({
-					messageId: "msg-first",
-					originId: "browser-1",
-				});
-				const { events } = diffAndSynthesize(
-					new Map(),
-					[
-						{
-							id: "msg-first",
-							sessionID: "fifo-a",
-							role: "user",
-							parts: [{ id: "part-1", type: "text", text: "ok" }],
-						},
-						{
-							id: "msg-second",
-							sessionID: "fifo-a",
-							role: "user",
-							parts: [{ id: "part-2", type: "text", text: "ok" }],
-						},
-						{
-							id: "msg-third",
-							sessionID: "fifo-b",
-							role: "user",
-							parts: [{ id: "part-3", type: "text", text: "ok" }],
-						},
-					],
-					(yield* PendingSendOwnershipTag).resolve,
-				);
-				expect(events).toEqual([
-					{
-						type: "user_message",
-						text: "ok",
-						messageId: "msg-first",
-						originId: "browser-1",
-					},
-					{
-						type: "user_message",
-						text: "ok",
-						messageId: "msg-second",
-						originId: "browser-2",
-					},
-					{
-						type: "user_message",
-						text: "ok",
-						messageId: "msg-third",
-						originId: "browser-3",
-					},
-				]);
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
-		"drops a stale FIFO owner on different text across SSE and polling",
-		() => {
-			const layer = makeLayer(mockWsHandler(), (input) =>
-				Effect.succeed(input.sessionId),
-			);
-			return Effect.gen(function* () {
-				for (const transport of ["sse", "poll"] as const) {
-					const sessionId = `stale-${transport}`;
-					for (const [commandId, text] of [
-						["stale", "unsent"],
-						["next", "TUI text"],
-					] as const) {
-						yield* sendMessageToSession({
-							clientId: "browser",
-							originId: "browser",
-							sessionId,
-							commandId,
-							text,
-						});
-					}
-					const providerMessage = {
-						id: "foreign",
-						sessionID: sessionId,
-						role: "user" as const,
-						parts: [{ id: "p", type: "text" as const, text: "TUI text" }],
-					};
-					const event = {
-						type: "message.created",
-						properties: {
-							sessionID: sessionId,
-							messageID: "foreign",
-							info: providerMessage,
-						},
-					};
-					const first =
-						transport === "sse"
-							? translateMessageCreated(
-									event,
-									(yield* PendingSendOwnershipTag).resolve,
-								)
-							: diffAndSynthesize(
-									new Map(),
-									[providerMessage],
-									(yield* PendingSendOwnershipTag).resolve,
-								).events[0];
-					expect(first).toEqual({
-						type: "user_message",
-						messageId: "foreign",
-						text: "TUI text",
-					});
-					expect(
-						translateMessageCreated(
-							event,
-							(yield* PendingSendOwnershipTag).resolve,
-						),
-					).not.toHaveProperty("originId");
-					expect(
-						diffAndSynthesize(
-							new Map(),
-							[providerMessage],
-							(yield* PendingSendOwnershipTag).resolve,
-						).events[0],
-					).not.toHaveProperty("originId");
-					expect(
-						translateMessageCreated(
-							{
-								...event,
-								properties: { ...event.properties, messageID: "next" },
-							},
-							(yield* PendingSendOwnershipTag).resolve,
-						),
-					).toMatchObject({ originId: "browser", messageId: "next" });
-				}
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
-		"still attributes same-text TUI messages when an unobservable failed send left an owner",
-		() => {
-			const layer = makeLayer(mockWsHandler(), (input) =>
-				Effect.succeed(input.sessionId),
-			);
-			return Effect.gen(function* () {
-				yield* sendMessageToSession({
-					clientId: "browser",
-					originId: "browser",
-					sessionId: "same-text-stale",
-					commandId: "unsent",
-					text: "ok",
-				});
-				expect(
-					translateMessageCreated(
-						{
-							type: "message.created",
-							properties: {
-								sessionID: "same-text-stale",
-								messageID: "tui",
-								info: { role: "user", parts: [{ type: "text", text: "ok" }] },
-							},
-						},
-						(yield* PendingSendOwnershipTag).resolve,
-					),
-				).toMatchObject({ originId: "browser", messageId: "tui" });
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
 });
 
 describe("cancelSessionById", () => {
@@ -3292,7 +3005,6 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 			),
 		);
@@ -3301,7 +3013,7 @@ describe("handleMessage", () => {
 			text: "hello",
 			commandId: "cmd-no-session",
 		}).pipe(
-			Effect.provide(layer),
+			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
 				expect(log.warn).toHaveBeenCalledWith(
 					expect.stringContaining("no active session"),
@@ -3339,7 +3051,6 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			),
@@ -3361,11 +3072,12 @@ describe("handleMessage", () => {
 					type: "send_turn",
 					providerId: "claude",
 					input: expect.objectContaining({
+						inputId: "cmd-context-window",
 						contextWindow: "1m",
 					}),
 				}),
 			);
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(
@@ -3423,7 +3135,6 @@ describe("handleMessage", () => {
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					Layer.succeed(ConfigTag, config),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					// Production always supplies ProviderRuntimeIngestion for Claude output
 					// (relay-stack builds it from the daemon's always-present persistence
 					// DB). cev.3 makes the seam mandatory, so the Claude event sink needs
@@ -3461,7 +3172,7 @@ describe("handleMessage", () => {
 					"0": "Yes",
 				});
 				yield* Effect.tryPromise(() => questionPromise ?? Promise.resolve({}));
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -3499,6 +3210,8 @@ describe("handleMessage", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -3523,7 +3236,6 @@ describe("handleMessage", () => {
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					Layer.succeed(ConfigTag, config),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					Layer.succeed(ReadQueryEffectTag, readQuery),
 					makeOverridesStateLive(),
@@ -3547,12 +3259,13 @@ describe("handleMessage", () => {
 						type: "send_turn",
 						providerId: "claude",
 						input: expect.objectContaining({
+							inputId: "cmd-sqlite-history",
 							history: [],
 							cumulativeTokens: 42,
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -3612,7 +3325,6 @@ describe("handleMessage", () => {
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					Layer.succeed(ConfigTag, config),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
@@ -3629,7 +3341,7 @@ describe("handleMessage", () => {
 				expect(renameSession).not.toHaveBeenCalled();
 				expect(legacyListSessions).not.toHaveBeenCalled();
 				expect(legacyRenameSession).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -3678,7 +3390,6 @@ describe("handleMessage", () => {
 				Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 				Layer.succeed(ConfigTag, config),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 				makeOverridesStateLive(),
 			),
@@ -3693,7 +3404,7 @@ describe("handleMessage", () => {
 
 			expect(listSessions).not.toHaveBeenCalled();
 			expect(renameSession).not.toHaveBeenCalled();
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(
@@ -3756,6 +3467,8 @@ describe("handleMessage", () => {
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -3789,7 +3502,6 @@ describe("handleMessage", () => {
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					Layer.succeed(ConfigTag, config),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					Layer.succeed(ReadQueryEffectTag, readQuery),
 					makeOverridesStateLive(),
@@ -3802,7 +3514,7 @@ describe("handleMessage", () => {
 					modelID: "big-pickle",
 				});
 
-				const dispatchedSessionId = yield* sendMessageToSession({
+				const { sessionId: dispatchedSessionId } = yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "ses-local-placeholder",
 					text: "Test query",
@@ -3828,6 +3540,7 @@ describe("handleMessage", () => {
 						providerId: "opencode",
 						input: expect.objectContaining({
 							sessionId: "ses-opencode-created",
+							inputId: "cmd-materialize-opencode",
 							prompt: "Test query",
 							model: {
 								providerId: "opencode",
@@ -3843,7 +3556,7 @@ describe("handleMessage", () => {
 						}),
 					}),
 				);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 
@@ -3881,7 +3594,6 @@ describe("handleMessage", () => {
 					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 					Layer.succeed(ConfigTag, config),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					makeOverridesStateLive(),
 				),
@@ -3890,29 +3602,11 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				yield* sendMessageToSession({
 					clientId: "client-1",
-					originId: "browser-rejected",
 					sessionId: "session-rejected",
 					text: "First prompt",
 					commandId: "cmd-dispatch-rejection",
 				});
 				yield* flushDispatchContinuation();
-				expect(
-					translateMessageCreated(
-						{
-							type: "message.created",
-							properties: {
-								sessionID: "session-rejected",
-								messageID: "tui-after-rejection",
-								info: {
-									role: "user",
-									parts: [{ type: "text", text: "First prompt" }],
-								},
-							},
-						},
-						(yield* PendingSendOwnershipTag).resolve,
-					),
-				).not.toHaveProperty("originId");
-
 				expect(yield* hasActiveProcessingTimeout("session-rejected")).toBe(
 					false,
 				);
@@ -3927,52 +3621,9 @@ describe("handleMessage", () => {
 				expect(failures).toEqual([
 					{ code: "SEND_FAILED", error: expect.any(String) },
 				]);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
-
-	it.effect("clears ownership when model discovery prevents dispatch", () => {
-		const engine = withDispatchEffect({
-			getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-			dispatch: vi.fn(async () => ({ models: [] })),
-		});
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, {} as OpenCodeAPI),
-			Layer.succeed(WebSocketHandlerTag, mockWsHandler()),
-			Layer.succeed(LoggerTag, mockLogger()),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-			Layer.succeed(ConfigTag, mockConfig()),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			PendingInteractionServiceLive,
-			PendingSendOwnershipLive,
-			makeOverridesStateLive(),
-			),
-		);
-		return Effect.gen(function* () {
-			yield* sendMessageToSession({
-				clientId: "browser",
-				originId: "browser",
-				sessionId: "no-model",
-				commandId: "no-model-command",
-				text: "ok",
-			});
-			expect(
-				translateMessageCreated(
-					{
-						type: "message.created",
-						properties: {
-							sessionID: "no-model",
-							messageID: "tui",
-							info: { role: "user", parts: [{ type: "text", text: "ok" }] },
-						},
-					},
-					(yield* PendingSendOwnershipTag).resolve,
-				),
-			).not.toHaveProperty("originId");
-		}).pipe(Effect.provide(layer));
-	});
 
 
 });

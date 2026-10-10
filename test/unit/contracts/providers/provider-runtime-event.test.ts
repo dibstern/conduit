@@ -114,6 +114,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.forked",
 			"session.permission_mode_changed",
 			"session.model_changed",
+			"session.workspace_changed",
 			"session.variant_changed",
 			"session.context_window_changed",
 			"session.read",
@@ -125,6 +126,10 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.snoozed",
 			"session.unsnoozed",
 			"session.auto_settle_set",
+			// Relay-owned Session Inbox facts; no provider produces them.
+			"input.admitted",
+			"input.sent",
+			"input.cancelled",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

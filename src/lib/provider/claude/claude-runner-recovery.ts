@@ -18,6 +18,7 @@ import {
 	type ClaudeRunnerSocket,
 	claudeRunnerFailure,
 	claudeRunnerSinkId,
+	normalizeClaudeSessionTurn,
 } from "./claude-runner-protocol.js";
 import type {
 	ClaudeSessionFailure,
@@ -36,11 +37,11 @@ const runningClaudeCommands = (sql: SqlClient.SqlClient, sessionId?: string) =>
 		assistant_message_id: string | null;
 		state: string | null;
 	}>`SELECT outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
-		json_extract(outbox.payload_json, '$.userMessageId') AS user_message_id,
+		COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
-			AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
+			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 		WHERE outbox.status = 'running' AND outbox.effect_type = 'send_turn'
 			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
 		ORDER BY outbox.request_sequence`;
@@ -59,6 +60,14 @@ export const recoverClaudeRunnerCommands = (
 	liveSession: Effect.Effect<
 		ProviderNativeSession | undefined
 	> = Effect.succeed(undefined),
+	/** Prefer a sink the runner still holds under the input id. */
+	resolveSinkId: (
+		commandId: string,
+		inputId: string,
+		attempt: number,
+		nativeResumeFallback?: boolean,
+	) => string = (commandId, _inputId, attempt, nativeResumeFallback) =>
+		claudeRunnerSinkId(commandId, attempt, nativeResumeFallback),
 ) =>
 	Effect.gen(function* () {
 		const config = loadDaemonConfig(deps.daemonConfigDir);
@@ -70,12 +79,14 @@ export const recoverClaudeRunnerCommands = (
 			)
 			.map((row) => {
 				const input = {
-					...(JSON.parse(row.payload_json) as ClaudeSessionTurn),
-					commandId: row.command_id,
+					...normalizeClaudeSessionTurn(
+						JSON.parse(row.payload_json) as ClaudeSessionTurn,
+					),
 					commandAttempt: row.attempt_count,
 				};
-				const sinkId = claudeRunnerSinkId(
+				const sinkId = resolveSinkId(
 					row.command_id,
+					input.inputId,
 					row.attempt_count,
 					input.nativeResumeFallback,
 				);
@@ -102,8 +113,9 @@ export const recoverClaudeRunnerCommands = (
 										liveSession: yield* liveSession,
 										configDir: input.configDir,
 										agent: input.agent,
-										userMessageId: input.userMessageId,
-										continuation: input.continuation,
+										userMessageId:
+											input.continuation?.cutOffMessageId ?? input.inputId,
+										continuation: input.continuation !== undefined,
 										nativeResumeFallback: input.nativeResumeFallback,
 										modelContextWindow:
 											input.contextWindow === "1m" ? 1000000 : undefined,
@@ -113,8 +125,9 @@ export const recoverClaudeRunnerCommands = (
 											row.command_id,
 											{
 												type: "send-turn",
-												sinkId: claudeRunnerSinkId(
+												sinkId: resolveSinkId(
 													row.command_id,
+													input.inputId,
 													row.attempt_count,
 													nativeResumeFallback,
 												),
@@ -128,6 +141,7 @@ export const recoverClaudeRunnerCommands = (
 													...input,
 													instanceId,
 													prompt: prepared.prompt,
+													text: input.prompt,
 													configDir: prepared.configDir,
 													resumeSessionId: prepared.resumeSessionId,
 													startFreshNativeSession:

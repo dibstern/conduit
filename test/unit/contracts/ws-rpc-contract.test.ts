@@ -44,7 +44,6 @@ import {
 	RewindSession,
 	SaveProject,
 	ScanNow,
-	SendMessage,
 	SessionInfoSchema,
 	SetClaudeSettings,
 	SetDefaultModel,
@@ -56,6 +55,7 @@ import {
 	SnoozeSession,
 	StartInstance,
 	StopInstance,
+	SubmitInput,
 	SwitchAgent,
 	SwitchContextWindow,
 	SwitchModel,
@@ -82,6 +82,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 		Effect.provide(
 			WsRpcGroup.toLayer({
 				...daemonOnlyHandlers,
+				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
+				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
 				SubscribeSessionTodos: () => Stream.empty,
@@ -537,8 +539,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 						messageId: request.messageId,
 					}),
-				SendMessage: (request) =>
+				"input.submit": (request) =>
 					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
+				"input.cancel": () => Effect.succeed({ ok: true as const }),
+				"input.sendNow": () => Effect.succeed({ ok: true as const }),
 				SyncInputDraft: () => Effect.succeed({ ok: true as const }),
 				CancelSession: () => Effect.succeed({ ok: true as const }),
 				SetLogLevel: () => Effect.succeed({ ok: true as const }),
@@ -838,7 +842,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(false);
 		expect(WsRpcGroup.requests.has("LoadMoreHistory")).toBe(true);
 		expect(WsRpcGroup.requests.has("RewindSession")).toBe(true);
-		expect(WsRpcGroup.requests.has("SendMessage")).toBe(true);
+		expect(WsRpcGroup.requests.has("input.submit")).toBe(true);
 		expect(WsRpcGroup.requests.has("SyncInputDraft")).toBe(true);
 		expect(WsRpcGroup.requests.has("CancelSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetLogLevel")).toBe(true);
@@ -1334,11 +1338,12 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				expect(
-					yield* client.SendMessage({
+					yield* client.input.submit({
 						projectSlug: "demo",
 						sessionId: "session-1",
 						text: "hello",
-						commandId: "cmd-send-contract",
+						inputId: "cmd-send-contract",
+						delivery: "queue",
 					}),
 				).toEqual({ ok: true, sessionId: "session-1" });
 
@@ -1627,13 +1632,14 @@ describe("browser WebSocket RPC contract", () => {
 			})._tag,
 		).toBe("RewindSession");
 		expect(
-			new SendMessage({
+			new SubmitInput({
 				projectSlug: "demo",
 				sessionId: "session-1",
 				text: "hello",
-				commandId: "cmd-send-contract",
+				inputId: "cmd-send-contract",
+				delivery: "queue",
 			})._tag,
-		).toBe("SendMessage");
+		).toBe("input.submit");
 		expect(
 			new SyncInputDraft({
 				projectSlug: "demo",
@@ -1702,10 +1708,11 @@ describe("browser WebSocket RPC contract", () => {
 
 	it("requires commandId on mutating provider command RPCs", () => {
 		const sendWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
-			_tag: "SendMessage",
+			_tag: "input.submit",
 			projectSlug: "demo",
 			sessionId: "session-1",
 			text: "hello",
+			delivery: "queue",
 		});
 		const cancelWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
 			_tag: "CancelSession",
