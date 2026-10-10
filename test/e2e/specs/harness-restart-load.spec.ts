@@ -4,7 +4,9 @@
 // tickets assert against: it holds today's numbers and only sanity is checked,
 // except that devices watching the same thing share its reads: every device
 // holds the sidebar, two watch the same stream, and no sidebar or detail window
-// is read twice (conduit-test-y7eo.4); a device reconnecting after the
+// is read twice (conduit-test-y7eo.4), nor any session-family or approvals
+// window, and a family read scans no session table (conduit-test-y7eo.15);
+// a device reconnecting after the
 // restart is sent only the sidebar changes it missed (conduit-test-y7eo.3). A
 // long turn's live frames stay flat, and a resume after a restart brings only
 // the parts that moved yet lands on the transcript a cold open shows
@@ -242,6 +244,11 @@ const blocking = (end: ServerMetrics, from: number, to: number) => {
 						atMs: at - from,
 						...statement,
 					}))[0],
+				// Reads of every session row, which a family read no longer makes
+				// (conduit-test-y7eo.15).
+				fullSessionScans: statements.filter(({ sql }) =>
+					/^SELECT [^;]* FROM sessions$/i.test(sql),
+				).length,
 			},
 		}),
 	};
@@ -847,11 +854,25 @@ test("opens the heavy session after a restart under load", async ({
 	// Devices that keep pace ask the same window and share one read of it; one
 	// that falls behind catches up with one read of its own, a different window
 	// (conduit-test-y7eo.4).
+	// The session family and approvals share theirs too (conduit-test-y7eo.15).
 	const shared = report.server.warm.bySource;
-	for (const name of ["shell", `session-detail/${streams[0]}`]) {
+	for (const name of [
+		"shell",
+		`session-detail/${streams[0]}`,
+		"approvals",
+		`session-family/${streams[0]}`,
+	]) {
 		expect(shared[name]?.changesRead, name).toBeGreaterThan(0);
 		expect(shared[name]?.reads["window"], name).toBe(shared[name]?.windowsRead);
 	}
+	// The heavy session's family moves in none of the cold open's windows, yet
+	// is asked each of them: those reads scan no session table, and nothing
+	// else does either (conduit-test-y7eo.15).
+	expect(
+		report.coldOpen.server.bySource[`session-family/${HEAVY_SESSION_ID}`]
+			?.reads["window"],
+	).toBeGreaterThan(0);
+	expect(report.coldOpen.server.database?.fullSessionScans).toBe(0);
 	// Every device reconnects with its cursor and is sent the sidebar changes
 	// past it, not the list again: no base read, and fewer rows across all four
 	// than one list holds (conduit-test-y7eo.3).

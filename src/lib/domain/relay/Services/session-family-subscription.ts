@@ -9,8 +9,12 @@
 // from the advance, kept to ids this family has served so another family's
 // deletion stays silent.
 //
-// The feed anchors on the family root once a base read finds it, so deleting
-// the member it was opened on (a finished subagent) does not orphan it.
+// The feed anchors on the family root, resolved once at subscribe, so deleting
+// the member it was opened on (a finished subagent) does not orphan it, and
+// every device viewing any member of one family asks the same question: the
+// source is named by that root and shares its window reads (y7eo.15). The read
+// is therefore a pure function of the window and the store; the ids served are
+// tracked from the envelopes each subscriber is sent.
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
@@ -39,12 +43,15 @@ export const subscribeSessionFamily = (options: {
 			const config = Option.getOrUndefined(
 				yield* Effect.serviceOption(ConfigTag),
 			);
-			let anchor = options.sessionId;
+			const anchor =
+				(yield* readQuery.getSession(options.sessionId))?.root_id ??
+				options.sessionId;
 			const held = new Set<string>();
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
-					name: `session-family/${options.sessionId}`,
+					name: `session-family/${anchor}`,
+					shareReads: true,
 					read: (range) =>
 						readQuery
 							.readSessionList({ ...range, familyOf: anchor, backgroundOf })
@@ -58,20 +65,6 @@ export const subscribeSessionFamily = (options: {
 											: row.item,
 									})),
 								})),
-								Effect.tap(({ rows }) => {
-									const ids = rows.map(({ item }) => item.id);
-									if (range === undefined) {
-										held.clear();
-										const members = new Set(ids);
-										const root = rows.find(
-											({ item }) =>
-												item.parentID === undefined ||
-												!members.has(item.parentID),
-										);
-										if (root !== undefined) anchor = root.item.id;
-									}
-									for (const id of ids) held.add(id);
-								}),
 							),
 					route: (advance) => {
 						const removed = advance.removedSessionIds.filter((id) =>
@@ -84,6 +77,17 @@ export const subscribeSessionFamily = (options: {
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: options.resumeFromSequence }),
-			});
+			}).pipe(
+				// Pulled in order, so `route` sees every envelope sent before it.
+				Stream.tap((envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") {
+							held.clear();
+							for (const row of envelope.rows) held.add(row.id);
+						} else if (envelope._tag === "upsert") held.add(envelope.item.id);
+						else if (envelope._tag === "remove") held.delete(envelope.id);
+					}),
+				),
+			);
 		}),
 	);

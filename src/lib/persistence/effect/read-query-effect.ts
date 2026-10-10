@@ -35,7 +35,10 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
-import { sessionFamilyWindowQuery } from "../session-family-query.js";
+import {
+	sessionFamilyMembersQuery,
+	sessionFamilyWindowQuery,
+} from "../session-family-query.js";
 import { messageRowsToHistory } from "../session-history-adapter.js";
 import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
@@ -1527,33 +1530,40 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const rows = yield* sql.unsafe<
 						SessionRow & { effective_version: number }
 					>(sessionFamilyWindowQuery, [range.familyOf, floor, ceiling]);
-					const [lineage, approvals, projectedStatuses] = yield* Effect.all([
-						getSessionLineage(),
-						countPendingApprovalsBySession(),
-						getAllSessionStatuses(),
-					]);
+					// A window no member moved in costs the window query alone. The
+					// roll-ups (busy, unread, pending counts) read only the family: a
+					// member's ancestors and descendants are all in it.
+					if (rows.length === 0) return { rows: [], version };
+					const family = yield* sql.unsafe<{
+						id: string;
+						parent_id: string | null;
+						status: string;
+						unread: number;
+						side_thread: number;
+					}>(sessionFamilyMembersQuery, [range.familyOf]);
+					const approvals = yield* sql<PendingApprovalCountRow>`
+						SELECT session_id, type, COUNT(*) AS pending_count
+						FROM pending_approvals
+						WHERE status = 'pending'
+							AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
+						GROUP BY session_id, type`;
 					const pending = pendingApprovalCountsByType(approvals);
 					const items = sessionRowsToSessionInfoList(rows, {
 						sideThreadIds: new Set(
-							lineage.rows.flatMap((row) =>
-								row.side_thread === 1 ? [row.id] : [],
-							),
+							family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 						),
 						parentMap: new Map(
-							lineage.rows.flatMap((row) =>
+							family.flatMap((row) =>
 								row.parent_id === null
 									? []
 									: [[row.id, row.parent_id] as const],
 							),
 						),
 						unreadSessionIds: new Set(
-							lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+							family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 						),
 						statuses: Object.fromEntries(
-							Object.entries(projectedStatuses).map(([id, type]) => [
-								id,
-								{ type },
-							]),
+							family.map((row) => [row.id, { type: row.status }]),
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,

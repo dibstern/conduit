@@ -28,3 +28,8 @@ SELECT s.*, m.effective_version FROM sessions s
 JOIN members m ON m.member_id = s.id
 WHERE m.effective_version > ? AND m.effective_version <= ?
 ORDER BY s.updated_at DESC, s.id DESC`;
+
+// What the family's roll-ups read (`?` family member): every member's lineage
+// and status, and no other session's.
+export const sessionFamilyMembersQuery = `${sessionFamilyCte}
+SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`;
