@@ -29,7 +29,17 @@ function rewindToMain(dbPath: string, sessionId: string, state: MainReadState) {
 				.all()
 				.map((column) => String(column["name"])),
 		);
-		for (const column of ["unread", "seen_version", "last_turn_end_version"])
+		// The sidebar migrations recreate these unguarded, and root_id cannot
+		// be dropped while indexed.
+		db.exec("DROP INDEX IF EXISTS idx_sessions_root");
+		db.exec("DROP TABLE IF EXISTS session_sidebar");
+		db.exec("DROP TABLE IF EXISTS session_sidebar_horizon");
+		for (const column of [
+			"unread",
+			"seen_version",
+			"last_turn_end_version",
+			"root_id",
+		])
 			if (columns.has(column))
 				db.exec(`ALTER TABLE sessions DROP COLUMN ${column}`);
 		for (const column of ["read_at", "marked_unread_at"])

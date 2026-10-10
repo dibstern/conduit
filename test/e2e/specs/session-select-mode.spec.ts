@@ -96,7 +96,7 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 	await expect(
 		page.getByRole("status").filter({ hasText: "Settled 2 sessions" }),
 	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	await expect(first).toBeVisible();
 	await expect(second).toBeVisible();
 	await expect.poll(() => sectionBefore(first)).toBe(firstSection);
@@ -131,7 +131,7 @@ test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 	await expect(
 		page.getByRole("status").filter({ hasText: "Pinned 2 sessions" }),
 	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	for (const id of ids)
 		await expect(
 			page
@@ -202,7 +202,7 @@ test("bulk Snooze uses one sheet and Undo returns both rows", async ({
 	await expect(
 		page.getByRole("status").filter({ hasText: "Snoozed 2 sessions until" }),
 	).toHaveCount(1);
-	await page.getByTestId("toast-action").last().click();
+	await page.getByTestId("toast-action").first().click();
 	for (const id of ids) {
 		await expect(
 			page.locator(`#snoozed-shelf-rows [data-session-id="${id}"]`),

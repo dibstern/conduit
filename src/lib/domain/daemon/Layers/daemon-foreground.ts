@@ -460,6 +460,8 @@ export async function startForegroundDaemon(
 			runtime,
 			Effect.gen(function* () {
 				const relayCache = yield* RelayCacheTag;
+				// Persist startup refreshes even when no project is saved this run.
+				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
@@ -513,7 +515,8 @@ export async function startForegroundDaemon(
 					Effect.flatMap((projects) => {
 						const normalized = normalizeProjectDirectory(directory);
 						const existing = projects.find(
-							(project) => project.folders[0] === normalized,
+							(project) =>
+								normalizeProjectDirectory(project.folders[0]) === normalized,
 						);
 						return existing
 							? Effect.succeed(existing)

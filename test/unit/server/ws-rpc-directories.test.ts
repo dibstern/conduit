@@ -228,7 +228,10 @@ describe("WsRpcServerLayer FindFolders", () => {
 
 				expect(result._tag).toBe("Left");
 				if (result._tag === "Left")
-					expect(result.left.message).toMatch(/EACCES|permission denied/i);
+					expect(result.left).toMatchObject({
+						_tag: "ProjectSaveRejected",
+						issues: [{ kind: "permission-denied", path: `${blocked}/missing` }],
+					});
 			}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
 	);
 });

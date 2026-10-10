@@ -58,6 +58,7 @@ export const projectsHandlers = {
 			});
 			const current = yield* projectService.currentSlug();
 			return {
+				kind: result.kind,
 				projectSlug: request.projectSlug,
 				projects: result.projects,
 				...(current ? { current } : {}),

@@ -91,6 +91,9 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			return {
 				path: project.folders[0],
 				folders: project.folders,
+				...(project.repositoryIdentities !== undefined && {
+					repositoryIdentities: project.repositoryIdentities,
+				}),
 				slug: project.slug,
 				title: project.title,
 				addedAt: project.lastUsed ?? Date.now(),

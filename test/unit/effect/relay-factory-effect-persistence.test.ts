@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -223,6 +223,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						folders: [projectDir],
 						instanceId: "opencode",
 						missing: false,
+						repositoryIdentities: {},
 					},
 				]);
 				expect(instances).toEqual([
@@ -636,7 +637,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(added).toEqual(
 					expect.objectContaining({
 						title: "added",
-						folders: [join(dir, "added")],
+						folders: [realpathSync(join(dir, "added"))],
 						instanceId: "remote",
 					}),
 				);

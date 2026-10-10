@@ -7,6 +7,7 @@
 // Components that need data while disconnected (SettingsPanel, ConnectOverlay)
 // should use `getCachedInstances()` or `getCachedInstanceById()`.
 
+import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
 import type {
 	DetectProxyResponse,
 	InstanceListResponse,
@@ -19,6 +20,10 @@ import type { InstanceStatus, OpenCodeInstance } from "../types.js";
 
 export const instanceState = $state({
 	instances: [] as OpenCodeInstance[],
+	providerCapabilities: {} as Record<
+		string,
+		ProviderSessionCapabilities | undefined
+	>,
 });
 
 /**
@@ -99,7 +104,7 @@ export function applyScanNowResponse(response: ScanNowResponse): void {
 
 /** Apply a full instance list: the subscription's, or a mutation's reply. */
 export function applyInstanceListResponse(
-	response: Pick<InstanceListResponse, "instances">,
+	response: Pick<InstanceListResponse, "instances" | "providerCapabilities">,
 ): void {
 	const instances: OpenCodeInstance[] = response.instances.map((instance) => ({
 		id: instance.id,
@@ -110,6 +115,9 @@ export function applyInstanceListResponse(
 		restartCount: instance.restartCount,
 		createdAt: instance.createdAt,
 		...(instance.driver != null ? { driver: instance.driver } : {}),
+		...(instance.capabilities != null
+			? { capabilities: instance.capabilities }
+			: {}),
 		...(instance.configDir != null ? { configDir: instance.configDir } : {}),
 		...(instance.url != null ? { url: instance.url } : {}),
 		...(instance.pid != null ? { pid: instance.pid } : {}),
@@ -123,6 +131,9 @@ export function applyInstanceListResponse(
 			: {}),
 	}));
 	instanceState.instances = instances;
+	if (response.providerCapabilities) {
+		instanceState.providerCapabilities = { ...response.providerCapabilities };
+	}
 	// Keep a cached copy that survives disconnect
 	cachedInstances = [...instances];
 }
@@ -173,6 +184,7 @@ export function instanceStatusColor(
 
 export function clearInstanceState(): void {
 	instanceState.instances = [];
+	instanceState.providerCapabilities = {};
 	proxyDetection = null;
 	scanInFlight = false;
 	if (proxyDetectTimer) {

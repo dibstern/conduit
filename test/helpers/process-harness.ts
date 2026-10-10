@@ -7,6 +7,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -209,7 +210,7 @@ export class ProcessHarness {
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
 	) {
-		this.root = mkdtempSync(rootPrefix);
+		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.projectDir = join(this.root, "process-test");
 		this.configDir = join(
 			this.root,

@@ -1,5 +1,7 @@
 // Agents, models, providers, and commands.
 
+import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+
 import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
@@ -114,6 +116,7 @@ export interface InstanceOption {
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
 	readonly status?: InstanceStatus;
+	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
 const DRIVER_LABELS = { claude: "Claude", opencode: "OpenCode" } as const;
@@ -385,6 +388,7 @@ export function getAvailableInstances(): InstanceOption[] {
 				driver,
 				label: id === driver ? DRIVER_LABELS[driver] : id,
 				isCustom: id !== driver,
+				capabilities: instanceState.providerCapabilities[driver],
 			});
 		}
 	}
@@ -393,7 +397,12 @@ export function getAvailableInstances(): InstanceOption[] {
 			inst.driver === "claude" ? "claude" : "opencode";
 		const existing = byId.get(inst.id);
 		if (existing) {
-			byId.set(inst.id, { ...existing, status: inst.status });
+			byId.set(inst.id, {
+				...existing,
+				status: inst.status,
+				capabilities:
+					inst.capabilities ?? instanceState.providerCapabilities[driver],
+			});
 			continue;
 		}
 		byId.set(inst.id, {
@@ -402,6 +411,8 @@ export function getAvailableInstances(): InstanceOption[] {
 			label: inst.name || inst.id,
 			isCustom: inst.id !== "claude" && inst.id !== "opencode",
 			status: inst.status,
+			capabilities:
+				inst.capabilities ?? instanceState.providerCapabilities[driver],
 		});
 	}
 	const rank = (i: InstanceOption) => {

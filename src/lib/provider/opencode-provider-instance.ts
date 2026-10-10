@@ -5,6 +5,7 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { Deferred, Effect, type Scope } from "effect";
+import { PROVIDER_SESSION_CAPABILITIES } from "../contracts/provider-instance.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -656,5 +657,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 export const OpenCodeDriver: ProviderDriver<OpenCodeProviderInstanceOptions> = {
 	providerId: "opencode",
+	capabilities: PROVIDER_SESSION_CAPABILITIES.opencode,
 	create: (options) => Effect.sync(() => new OpenCodeProviderInstance(options)),
 };

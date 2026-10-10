@@ -239,7 +239,7 @@ export class RpcMockControl {
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell"))
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "remove", id, sequence: this.shellSequence },
+				{ _tag: "remove", id, deleted: true, sequence: this.shellSequence },
 			]);
 	}
 
