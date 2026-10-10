@@ -9,6 +9,7 @@
 	import {
 		terminalState,
 		getTabList,
+		getPendingTabTitle,
 		getCanCreateTab,
 		beginCreateTab,
 		failCreateTab,
@@ -28,6 +29,7 @@
 	let { onTabBarTouchStart }: { onTabBarTouchStart?: (e: TouchEvent) => void } = $props();
 
 	const tabs = $derived(getTabList());
+	const pendingTitle = $derived(getPendingTabTitle());
 	const canCreate = $derived(getCanCreateTab());
 	const activeTabId = $derived(terminalState.activeTabId);
 	const statusMessage = $derived(terminalState.statusMessage);
@@ -272,6 +274,24 @@
 						</span>
 					</div>
 				{/each}
+				{#if pendingTitle}
+					<!--
+						The terminal being created. Not a tab yet: until the server
+						creates it there is nothing to select or close. The empty
+						slot keeps the width of the close glyph, so nothing shifts
+						when the real tab replaces it.
+					-->
+					<div
+						class="term-tab-pending flex items-center gap-1 py-1.5 px-2.5 text-xs font-sans whitespace-nowrap border-b-2 shrink-0 text-text-dimmer max-[480px]:py-[5px] max-[480px]:px-2 max-[480px]:text-sm
+							{activeTabId === null ? 'border-b-accent bg-bg-surface' : 'border-transparent'}"
+						aria-hidden="true"
+					>
+						<span class="overflow-hidden text-ellipsis max-w-[120px] max-[480px]:max-w-[80px]">
+							{pendingTitle}
+						</span>
+						<span class="w-[18px] h-[18px] shrink-0"></span>
+					</div>
+				{/if}
 			</div>
 
 			<!-- New Terminal button -->
@@ -343,6 +363,11 @@
 
 		<!-- Terminal body area -->
 		<div class="term-body flex-1 relative overflow-hidden bg-code-bg">
+			{#if pendingTitle && activeTabId === null}
+				<p class="term-starting p-2 font-mono text-xs text-text-dimmer" role="status">
+					Starting terminal…
+				</p>
+			{/if}
 			<!-- xterm is large, so it loads when the panel first opens. -->
 			{#await import("./TerminalTab.svelte") then { default: TerminalTab }}
 				{#each tabs as tab (tab.ptyId)}

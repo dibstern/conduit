@@ -56,6 +56,8 @@ interface OwnedHost {
 	child: ChildProcess;
 	exited: Promise<void>;
 	finished: boolean;
+	/** Exited non-zero, by signal, or never spawned. A losing contender exits 0. */
+	failed: boolean;
 	cancelled: boolean;
 }
 
@@ -115,23 +117,25 @@ function spawnHost(configDir: string): OwnedHost {
 				exited = done;
 			}),
 			finished: false,
+			failed: false,
 			cancelled: false,
 		};
 		const hosts = ownedHosts.get(key) ?? new Set<OwnedHost>();
 		ownedHosts.set(key, hosts);
 		hosts.add(host);
-		const finish = (): void => {
+		const finish = (failed: boolean): void => {
 			if (host.finished) return;
 			host.finished = true;
+			host.failed = failed;
 			hosts.delete(host);
 			if (hosts.size === 0 && ownedHosts.get(key) === hosts)
 				ownedHosts.delete(key);
 			exited();
 		};
-		child.once("exit", finish);
+		child.once("exit", (code) => finish(code !== 0));
 		child.once("error", (error) => {
 			console.error(`Could not spawn PTY host: ${error.message}`);
-			finish();
+			finish(true);
 		});
 		child.unref();
 		return host;
@@ -395,13 +399,19 @@ export class PtyHostClient {
 				if (!start || !isPtyHostUnavailable(error)) throw error;
 			}
 			let candidate = spawnHost(configDir);
-			const deadline = Date.now() + 5000;
+			// A live candidate can take many seconds to start on a loaded machine,
+			// so wait for it; one that failed never will. The deadline is only a
+			// backstop for a host that hangs (conduit-test-ni8.59).
+			const deadline = Date.now() + 15_000;
 			for (;;) {
 				await new Promise<void>((done) => setTimeout(done, 25));
 				if (candidate.cancelled)
 					throw new PtyHostError({
 						message: "PTY host startup was explicitly stopped",
 					});
+				// Read before connecting, so a failed candidate still gets one attempt
+				// after its exit: another server's host may have won the socket.
+				const failed = candidate.failed;
 				try {
 					const client = await PtyHostClient.open({ ...options, configDir });
 					if (candidate.child.pid !== client.hello.pid) {
@@ -423,7 +433,9 @@ export class PtyHostClient {
 					return client;
 				} catch (error) {
 					if (!isPtyHostUnavailable(error)) throw error;
-					if (Date.now() >= deadline)
+					// A host still starting at the backstop is left to finish: the next
+					// connect adopts it, and unused it exits on its idle timeout.
+					if (failed || Date.now() >= deadline)
 						throw new PtyHostError({
 							message: `PTY host did not start; see ${join(configDir, "pty-host.log")}`,
 							cause: error,
