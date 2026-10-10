@@ -75,7 +75,10 @@ afterEach(async () => {
 
 async function persistentInteractions(permissionTimeoutMs?: number) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-interaction-resolution-"));
-	const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
+	const persistenceLayer = makePersistenceEffectLayer(
+		join(dir, "events.db"),
+		"test-project",
+	);
 	const persistence = ManagedRuntime.make(
 		Layer.merge(
 			makeProviderRuntimeIngestionLive().pipe(
@@ -348,7 +351,7 @@ describe("Claude runner interaction transport", () => {
 					expect(
 						(yield* runtime.sendTurnEffect(
 							makeBaseSendTurnInput({
-								turnId: "turn-2",
+								inputId: "turn-2",
 								model: { providerId: "claude", modelId: "sonnet" },
 							}),
 						)).status,

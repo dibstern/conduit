@@ -1,4 +1,7 @@
-import { getCurrentSlug } from "../../stores/router.svelte.js";
+import {
+	getCurrentSessionId,
+	getCurrentSlug,
+} from "../../stores/router.svelte.js";
 import {
 	getFileContentRpc,
 	getFileListRpc,
@@ -109,7 +112,12 @@ export function fetchFileContent(
 	slug = getCurrentSlug(),
 ): Promise<{ content: string; binary?: boolean }> {
 	if (!slug) return Promise.reject(new Error("No project selected"));
-	return getFileContentRpc({ projectSlug: slug, path }).then((response) => ({
+	const sessionId = getCurrentSessionId();
+	return getFileContentRpc({
+		projectSlug: slug,
+		path,
+		...(sessionId ? { sessionId } : {}),
+	}).then((response) => ({
 		content: response.content,
 		...(response.binary != null ? { binary: response.binary } : {}),
 	}));
@@ -121,14 +129,18 @@ export function fetchDirectoryListing(
 ): Promise<string> {
 	const requestPath = path.replace(/\/$/, "");
 	if (!slug) return Promise.reject(new Error("No project selected"));
-	return getFileListRpc({ projectSlug: slug, path: requestPath }).then(
-		(response) =>
-			response.entries
-				.map((e) =>
-					e.type === "directory"
-						? `${e.name}/ (directory)`
-						: `${e.name} (${formatFileSize(e.size ?? 0)}, file)`,
-				)
-				.join("\n"),
+	const sessionId = getCurrentSessionId();
+	return getFileListRpc({
+		projectSlug: slug,
+		path: requestPath,
+		...(sessionId ? { sessionId } : {}),
+	}).then((response) =>
+		response.entries
+			.map((e) =>
+				e.type === "directory"
+					? `${e.name}/ (directory)`
+					: `${e.name} (${formatFileSize(e.size ?? 0)}, file)`,
+			)
+			.join("\n"),
 	);
 }

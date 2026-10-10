@@ -58,7 +58,7 @@ describe("two-tier reactivity", () => {
 	it("getOrCreateSessionActivity creates a new activity slot", () => {
 		const activity = getOrCreateSessionActivity(TEST_ID);
 		expect(activity.phase).toBe("idle");
-		expect(activity.turnEpoch).toBe(0);
+		expect(activity.turnGeneration).toBe(0);
 		expect(activity.currentMessageId).toBeNull();
 	});
 

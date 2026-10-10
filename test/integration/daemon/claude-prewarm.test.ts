@@ -1044,11 +1044,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		if (state === "approval") {
 			const cursor = browser.frames.length;
 			await Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug: "process-test",
 					sessionId,
 					originId: browser.originId,
-					commandId: randomUUID(),
+					inputId: randomUUID(),
+					delivery: "queue",
 					text: "approval-query-shutdown",
 				}),
 			);

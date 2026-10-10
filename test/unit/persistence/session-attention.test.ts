@@ -54,6 +54,7 @@ const withPersistence = async (
 					Layer.merge(
 						makePersistenceEffectLayer(
 							join(dir, "events.db"),
+							"test-project",
 							createAllEffectProjectors(),
 							bus,
 						),

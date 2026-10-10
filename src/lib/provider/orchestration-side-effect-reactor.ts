@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -235,7 +236,8 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
-			if (turn.status !== "completed") {
+			// A joined input was delivered and answered by another input's turn.
+			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.
 				// TurnResult { status: "error" | "interrupted" }). Record the true
 				// failed outcome durably so restart replay never synthesizes a
@@ -388,12 +390,12 @@ export class ProviderSideEffectReactor {
 					instance.sendTurnEffect({
 						...payload,
 						history: payload.history ?? [],
-						commandId: row.command_id,
 						...(driver === "claude"
 							? {
 									commandAttempt,
 									instanceId: payload.instanceId ?? row.provider_id,
 									prompt: prepared?.prompt ?? payload.prompt,
+									text: payload.prompt,
 									configDir: prepared?.configDir,
 									resumeSessionId: prepared?.resumeSessionId,
 									startFreshNativeSession:
@@ -409,7 +411,11 @@ export class ProviderSideEffectReactor {
 				const result =
 					driver === "claude"
 						? yield* Effect.gen(function* () {
-								const state = yield* makeProviderStateEffect;
+								const state = yield* makeProviderStateEffect.pipe(
+									Effect.provideService(PersistenceProjectTag, {
+										projectId: row.project_key,
+									}),
+								);
 								const read = yield* makeReadQueryEffect;
 								return yield* sendPreparedClaudeTurn({
 									sessionId: payload.sessionId,
@@ -422,8 +428,9 @@ export class ProviderSideEffectReactor {
 										) ?? Effect.succeed(undefined),
 										configDir: payload.configDir,
 										agent: payload.agent,
-										userMessageId: payload.userMessageId,
-										continuation: payload.continuation,
+										userMessageId:
+											payload.continuation?.cutOffMessageId ?? payload.inputId,
+										continuation: payload.continuation !== undefined,
 										nativeResumeFallback: payload.nativeResumeFallback,
 										modelContextWindow:
 											payload.contextWindow === "1m" ? 1000000 : undefined,
@@ -464,6 +471,9 @@ export class ProviderSideEffectReactor {
 					result.providerStateUpdates?.length
 				) {
 					yield* makeProviderStateEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, {
+							projectId: row.project_key,
+						}),
 						Effect.flatMap((state) =>
 							state.saveUpdates(
 								payload.sessionId,
@@ -540,11 +550,39 @@ export class ProviderSideEffectReactor {
 			try: (): unknown => JSON.parse(row.payload_json),
 			catch: toParseFailure,
 		}).pipe(
-			Effect.flatMap((payload) =>
-				isSendTurnOutboxPayload(payload)
-					? Effect.succeed(payload)
-					: Effect.fail(toParseFailure("Invalid send_turn outbox payload")),
-			),
+			Effect.flatMap((payload) => {
+				if (!isRecord(payload))
+					return Effect.fail(
+						toParseFailure("Invalid send_turn outbox payload"),
+					);
+				// Pre-inbox continuations carried a boolean and the cut-off id in
+				// userMessageId; their own identity was the command id.
+				const legacyContinuation =
+					payload["continuation"] === true &&
+					typeof payload["userMessageId"] === "string";
+				const inputId = legacyContinuation
+					? payload["commandId"]
+					: (payload["inputId"] ??
+						payload["userMessageId"] ??
+						payload["commandId"] ??
+						payload["turnId"]);
+				const {
+					turnId: _turnId,
+					userMessageId: _userMessageId,
+					commandId: _commandId,
+					...input
+				} = payload;
+				const normalized = {
+					...input,
+					inputId,
+					...(legacyContinuation
+						? { continuation: { cutOffMessageId: payload["userMessageId"] } }
+						: {}),
+				};
+				return isSendTurnOutboxPayload(normalized)
+					? Effect.succeed(normalized)
+					: Effect.fail(toParseFailure("Invalid send_turn outbox payload"));
+			}),
 		);
 	}
 
@@ -723,7 +761,7 @@ function isSendTurnOutboxPayload(
 	if (!isRecord(value)) return false;
 	return (
 		typeof value["sessionId"] === "string" &&
-		typeof value["turnId"] === "string" &&
+		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		(value["history"] === undefined || Array.isArray(value["history"])) &&
 		isRecord(value["providerState"]) &&

@@ -99,6 +99,16 @@ const SHIPPED_MIGRATION_HASHES = {
 		"08be345da1699bd430c0abfb4ee369ef4bb197ddcbfe96af8b4b040cb4e60c0b",
 	"0039_sessions_workspace.sql":
 		"b37dbcd0febeb5a9d39959263b1341b192104638ef40140772af18e8a2ae61dd",
+	"0040_messages_input_id.sql":
+		"9810a56cd0d51fc664bf8eabbe757997bad9abcff00142052d4ddcc129ba130e",
+	"0041_pending_inputs.sql":
+		"4454f92eb123bac242c514140668577a7c06874a119de4ea42d32b8cfc8716d6",
+	"0042_messages_steered.sql":
+		"bc7e3ec7b28fdd150dc76afbbc5a45f9fde2aa28c6c817c80fca72bd24410afc",
+	"0043_sessions_last_turn_end_input_id.sql":
+		"c053fb26981748d594cb750829156ea93b7b9a8913ee744a4660d17579c3e092",
+	"0044_project_provenance.sql":
+		"74c70d168dd3e2a3b6ba8d79e082c9c5399a9134596e4326f35e04eaa8fa6880",
 } satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {

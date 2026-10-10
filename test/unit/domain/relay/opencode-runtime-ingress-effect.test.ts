@@ -28,7 +28,7 @@ import {
 const SESSION_ID = "sess-effect-runtime-ingress-001";
 
 function makeRuntime(filename: string) {
-	const persistenceLayer = makePersistenceEffectLayer(filename);
+	const persistenceLayer = makePersistenceEffectLayer(filename, "test-project");
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
@@ -61,6 +61,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		),
 		recover: vi.fn(() =>
 			Effect.succeed({
+				projectId: "test-project",
 				startCursor: 0,
 				endCursor: 0,
 				totalReplayed: 0,

@@ -29,6 +29,7 @@ export interface SessionRow {
 	/** JSON SessionWorkspace. NULL uses the project's main folders. */
 	workspace?: string | null;
 	last_turn_end_version?: number | null;
+	last_turn_end_input_id?: string | null;
 	seen_version?: number | null;
 	/** Generated: 1 while a root or fork has a turn end newer than seen. */
 	unread?: number;
@@ -89,6 +90,8 @@ export interface MessageRow {
 	context_window: number | null;
 	is_streaming: number;
 	is_backfilled: number;
+	input_id?: string | null;
+	steered?: number;
 	rest_digest?: string | null;
 	rest_event_id?: string | null;
 	rest_payload?: string | null;

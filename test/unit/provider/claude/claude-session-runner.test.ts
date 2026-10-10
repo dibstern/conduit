@@ -24,15 +24,15 @@ function roundTrip<T>(message: T): T {
 }
 
 const send = (
-	turnId: string,
+	inputId: string,
 ): Extract<ClaudeSessionCommand, { type: "send-turn" }> => ({
 	type: "send-turn",
-	sinkId: turnId,
+	sinkId: inputId,
 	aborted: false,
 	input: {
 		sessionId: "session-1",
-		turnId,
-		prompt: turnId,
+		inputId,
+		prompt: inputId,
 		history: [],
 		providerState: {},
 		workspaceRoot: "/tmp/ws",

@@ -23,17 +23,17 @@ export type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 
 export class ClaudeProviderInstance implements ProviderInstance {
 	readonly providerId = "claude";
+	readonly steering = true;
 	private readonly runtime: ClaudeProviderRuntime;
 
 	constructor(runtime: ClaudeProviderRuntime) {
 		this.runtime = runtime;
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
-		return this.runtime.discoverEffect();
+	discoverEffect(
+		workspaceRoot?: string,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
+		return this.runtime.discoverEffect(workspaceRoot);
 	}
 
 	sendTurnEffect(

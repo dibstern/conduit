@@ -90,6 +90,35 @@ Scenario: A status for another instance shows no banner
   When the mock relay reports OpenCode reconnecting for instance work-oc
   Then the OpenCode connection banner reads Reconnecting to OpenCode…
 
+Scenario: Rejected agent discovery still shows the viewed instance's stored warning
+  Given the OpenCode session is persisted on instance work-oc with another instance healthy
+  When the mock relay reports OpenCode reconnecting for instance work-oc
+  And I view the OpenCode session on instance work-oc with rejected agent discovery
+  Then the OpenCode connection banner reads Reconnecting to OpenCode…
+  And the generic instance health warning is not visible
+  When the mock relay reports OpenCode failed for instance work-oc
+  Then the OpenCode connection banner reads OpenCode failed to start
+
+Scenario: Persisted project default uses the relay's connection alias when discovery fails
+  Given the OpenCode session is persisted on instance work-oc as the project default with another instance healthy
+  When the mock relay reports OpenCode reconnecting
+  And I view the OpenCode session on instance work-oc with rejected agent discovery
+  Then the OpenCode connection banner reads Reconnecting to OpenCode…
+  And the generic instance health warning is not visible
+
+Scenario: Rejected discovery on a persisted Claude instance does not show an OpenCode warning
+  Given the Claude session is persisted on instance work-claude with another instance healthy
+  When the mock relay reports OpenCode reconnecting
+  And I view the Claude session on instance work-claude with rejected agent discovery
+  Then the OpenCode connection banner is not visible
+
+Scenario: The first send shows why the selected OpenCode instance cannot create a session
+  Given creating a session on instance work-oc fails with CreateSession failed: OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
+  When I type diagnose this outage into the composer
+  And I send the composer message
+  Then an error toast contains OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
+  And the composer still contains diagnose this outage
+
 Scenario Outline: Starting shows a non-warning indicator
   When I view the OpenCode session
   And the mock relay reports OpenCode starting

@@ -58,8 +58,9 @@
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { viewInputDraft } from "../../stores/input-draft.js";
-	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyProjectList, followDaemonLists, getDraftProject } from "../../stores/project.svelte.js";
+	import { applyGetFileTreeResponse, requestFileTree, clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { applyProjectList, followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
@@ -101,6 +102,27 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
+	const commandSessionId = $derived(getCurrentSessionId());
+	const commandWorkspace = $derived(JSON.stringify(commandSessionId ? findSession(commandSessionId)?.workspace ?? null : null));
+	let previousCommandContext: { sessionId: string | null; workspace: string } | undefined;
+	$effect(() => {
+		const sessionId = commandSessionId;
+		const workspace = commandWorkspace;
+		const previous = previousCommandContext;
+		previousCommandContext = { sessionId, workspace };
+		// Selection and connect fetch commands; moves and leaving a session
+		// also change which folder supplies the catalog.
+		const moved = previous?.sessionId === sessionId && previous.workspace !== workspace;
+		const leftSession = previous?.sessionId != null && sessionId === null;
+		if (!moved && !leftSession) return;
+		const projectSlug = attachedProjectState.slug;
+		if (!projectSlug) return;
+		let active = true;
+		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) }).then((response) => {
+			if (active) applyGetCommandsResponse(response);
+		}).catch(() => undefined);
+		return () => { active = false; };
+	});
 
 	const phoneListScreen = $derived.by(() => {
 		const route = getCurrentRoute();
@@ -369,6 +391,7 @@
 			if (slug !== previousSlug) return;
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
+			const workspace = commandWorkspace;
 			// With no session in the route, scope the agent fetch to the
 			// client-persisted harness draft so the agent list matches the
 			// picker's pre-creation selection after a reload.
@@ -396,7 +419,7 @@
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetCommandsResponse(response);
+					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace) applyGetCommandsResponse(response);
 				})
 				.catch(() => undefined);
 			void getProjectsRpc({ projectSlug: slug })
@@ -405,14 +428,6 @@
 				})
 				.catch(() => {
 					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
-				});
-			requestFileTree();
-			void getFileTreeRpc({ projectSlug: slug })
-				.then((response) => {
-					if (generation === attachGeneration) applyGetFileTreeResponse(response);
-				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load file tree", { variant: "error" });
 				});
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
@@ -431,6 +446,40 @@
 	// Project navigation requests attachment through RPC on the existing socket.
 	// This also covers browser history and project-only links from every caller.
 	const connected = $derived(getIsConnected());
+	const fileScope = $derived.by(() => {
+		const slug = attachedProjectState.slug;
+		const sessionId = getCurrentSessionId();
+		const session = sessionId ? findSession(sessionId) : undefined;
+		const primary = projectState.projects.find((project) => project.slug === slug)?.folders[0] ?? "";
+		const directory = effectiveWorkingDirectory(primary, session?.workspace);
+		return JSON.stringify([slug, sessionId, directory]);
+	});
+	$effect(() => {
+		const scope = fileScope;
+		const slug = untrack(() => attachedProjectState.slug);
+		const sessionId = untrack(getCurrentSessionId);
+		if (!connected || !slug) return;
+		let cancelled = false;
+		untrack(() => {
+			if (fileTreeState.scope !== scope) {
+				clearFileTreeState();
+				fileTreeState.scope = scope;
+				closeFileViewer();
+			}
+			requestFileTree();
+		});
+		void getFileTreeRpc({ projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
+			.then((response) => {
+				if (!cancelled) applyGetFileTreeResponse(response);
+			})
+			.catch(() => {
+				if (!cancelled) {
+					fileTreeState.loading = false;
+					showToast("Failed to load file tree", { variant: "error" });
+				}
+			});
+		return () => { cancelled = true; };
+	});
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? sessionState.currentId : null;

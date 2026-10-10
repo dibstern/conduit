@@ -50,6 +50,8 @@ function snapshotRowToHistory(
 		role: parsed.role,
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+		...(row.input_id ? { inputId: row.input_id } : {}),
+		...(row.steered === 1 ? { steered: true } : {}),
 		...(row.role === "user" && row.turnTiming
 			? { turnTiming: row.turnTiming }
 			: {}),
@@ -231,6 +233,8 @@ export function messageRowsToHistory(
 			id: row.id,
 			role: row.role as "user" | "assistant",
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+			...(row.input_id ? { inputId: row.input_id } : {}),
+			...(row.steered === 1 ? { steered: true } : {}),
 			time: {
 				created: row.created_at,
 				completed: row.updated_at,

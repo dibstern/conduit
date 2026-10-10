@@ -79,7 +79,7 @@ function makeSessionMetadataLayer(options: {
 	const logger = options.logger ?? makeMockLogger();
 
 	const baseLayer = Layer.mergeAll(
-		makePersistenceEffectLayer(":memory:"),
+		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -198,6 +198,8 @@ describe("session handler metadata", () => {
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
+			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+			readInboxState: () => Effect.succeed(undefined),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(
 				(

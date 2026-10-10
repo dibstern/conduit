@@ -22,7 +22,8 @@
 //     and a subscriber never re-reads it.
 //  8. A streamed chunk moves the version (every device resends and reorders),
 //     or a status change or turn boundary does not.
-//  9. Backfill on an existing store is wrong or slow (well under 1 s on 10k).
+//  9. Backfill on an existing store is wrong, or slow: it reads families one
+//     at a time, or does more than write one row per root (10k sessions).
 // 10. A family re-created after removal does not come back.
 // 11. Background work is stored (it is in-memory liveness), or announcing it
 //     does not move the row so no device re-reads it.
@@ -100,8 +101,37 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { seedSessionLoadFixture } from "../../fixtures/session-load.js";
 
 const openStore = (filename: string) =>
-	ManagedRuntime.make(makePersistenceEffectLayer(filename));
+	ManagedRuntime.make(makePersistenceEffectLayer(filename, "test-project"));
 type Store = ReturnType<typeof openStore>;
+
+/** Records the text of every SQL statement run under it. */
+const recordQueries = (queries: string[]): Tracer.Tracer =>
+	Tracer.make({
+		span: (name, parent, context, links, startTime, kind) => ({
+			_tag: "Span",
+			name,
+			spanId: "query",
+			traceId: "query",
+			parent,
+			context,
+			status: { _tag: "Started", startTime },
+			attributes: new Map(),
+			links,
+			sampled: true,
+			kind,
+			end: () => {},
+			attribute: (key, value) => {
+				if (key === "db.query.text" && typeof value === "string")
+					queries.push(value);
+			},
+			event: () => {},
+			addLinks: () => {},
+		}),
+		context: (f) => f(),
+	});
+
+/** A read of whole families, one row per member. */
+const FAMILY_READ = /FROM sessions\s+WHERE root_id IN/;
 
 type Command =
 	| {
@@ -164,6 +194,15 @@ const byId = (items: readonly Item[]) =>
  * Drive one store through commands, checking the sidebar against the full
  * computation after each one. Returns what the sidebar showed last.
  */
+/** Undo the migrations after the sidebar's, so the migrator re-runs from it. */
+const undoLaterMigrations = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	yield* sql`DROP TABLE pending_inputs`;
+	yield* sql`DROP INDEX idx_messages_input_id`;
+	yield* sql`ALTER TABLE messages DROP COLUMN input_id`;
+	yield* sql`ALTER TABLE messages DROP COLUMN steered`;
+});
+
 const scenario = (store: Store) => {
 	let clock = Date.UTC(2026, 0, 1);
 	let messages = 0;
@@ -618,6 +657,7 @@ const scenario = (store: Store) => {
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
 				// The tombstone migration rebuilds the table the backfill creates.
+				yield* undoLaterMigrations;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
 				yield* makeEffectSqlMigrator();
 				expect(yield* roots, "backfilled roots").toEqual(kept);
@@ -1034,8 +1074,9 @@ describe("sidebar table on the 10k-session fixture", () => {
 		expect(median).toBeLessThan(5);
 	});
 
-	it("backfills an existing store in well under a second", async () => {
-		const ms = await store.runPromise(
+	it("backfills an existing store in one pass over its families", async () => {
+		const queries: string[] = [];
+		const roots = await store.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				// Back to the store as the previous release left it.
@@ -1043,14 +1084,21 @@ describe("sidebar table on the 10k-session fixture", () => {
 				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
+				yield* undoLaterMigrations;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
-				const started = performance.now();
-				yield* makeEffectSqlMigrator();
-				return performance.now() - started;
+				yield* makeEffectSqlMigrator().pipe(
+					Effect.withTracer(recordQueries(queries)),
+				);
+				const [roots] = yield* sql<{ count: number }>`
+					SELECT COUNT(*) AS count FROM sessions WHERE parent_id IS NULL`;
+				return roots?.count ?? 0;
 			}),
 		);
-		console.info(`sidebar backfill ${ms.toFixed(0)} ms`);
-		expect(ms).toBeLessThan(1000);
+		// Counts, not timings, which fail whenever the machine is busy. Slow is
+		// work per family: every family read in one query, and a statement per
+		// root only to write its row. The rest is the migrations' fixed DDL.
+		expect(queries.filter((query) => FAMILY_READ.test(query))).toHaveLength(1);
+		expect(queries.length).toBeLessThan(roots + 100);
 		await store.runPromise(compare);
 	}, 30_000);
 });
@@ -1060,33 +1108,6 @@ describe("sidebar upkeep in a large family", () => {
 	// once per commit: once per event makes a commit cost events x family size,
 	// all of it inside the write transaction.
 	const FAMILY = 1500;
-	const FAMILY_READ = /FROM sessions\s+WHERE root_id IN/;
-
-	/** Records the text of every SQL statement run under it. */
-	const recordQueries = (queries: string[]): Tracer.Tracer =>
-		Tracer.make({
-			span: (name, parent, context, links, startTime, kind) => ({
-				_tag: "Span",
-				name,
-				spanId: "query",
-				traceId: "query",
-				parent,
-				context,
-				status: { _tag: "Started", startTime },
-				attributes: new Map(),
-				links,
-				sampled: true,
-				kind,
-				end: () => {},
-				attribute: (key, value) => {
-					if (key === "db.query.text" && typeof value === "string")
-						queries.push(value);
-				},
-				event: () => {},
-				addLinks: () => {},
-			}),
-			context: (f) => f(),
-		});
 
 	it("reads the family once per commit, however many events it holds", async () => {
 		const store = openStore(":memory:");

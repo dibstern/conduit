@@ -31,6 +31,7 @@ const CLAUDE_PRODUCED_TYPES = [
 	"session.compaction",
 	"session.permission_mode_changed",
 	"session.goal_changed", // Goal tracker translates SDK facts and transcript settlement through the event sink
+	"session.workspace_started", // The workspace.changed startup report maps to a durable observation.
 ] as const satisfies readonly CanonicalEventType[];
 
 /**
@@ -74,6 +75,9 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"permission.resolved", // Same
 	"question.asked", // Recorded by the sink's requestQuestion(), not push()
 	"question.resolved", // Same, or by the turn that answers a recovered question
+	"input.admitted", // Relay-owned: the Session Inbox commits it when a send is admitted
+	"input.sent", // Relay-owned: committed with the send_turn outbox row at handoff
+	"input.cancelled", // Relay-owned: the Session Inbox commits it when a queued input is removed
 ] as const satisfies readonly CanonicalEventType[];
 
 // All canonical event types MUST appear in exactly one of the two arrays.

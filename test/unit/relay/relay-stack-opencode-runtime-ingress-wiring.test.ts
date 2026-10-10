@@ -1,4 +1,8 @@
 // Regression guard: relay-stack should use Effect OpenCode runtime ingress only.
+// Isolated race failures (public ContinueSession refuses busy turns):
+// - A provider switch during workspace resolution aborts unrelated provider events.
+// - A refused move leaves its runner receipt uncommitted and is replayed.
+// - A refused move changes the workspace or loses its warning.
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -14,17 +18,35 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import {
+	type Context,
+	Deferred,
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+} from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+import {
+	currentClaudeRunnerOutput,
+	makeClaudeRunnerReceiptStore,
+} from "../../../src/lib/provider/claude/claude-runner-receipts.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 interface MockOpenCode {
 	readonly url: string;
@@ -233,7 +255,10 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 
 	it("EffectOpenCodeRuntimeIngress can process SSE events with Effect persistence", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-runtime-ingress-"));
-		const persistenceLayer = makePersistenceEffectLayer(join(dir, "events.db"));
+		const persistenceLayer = makePersistenceEffectLayer(
+			join(dir, "events.db"),
+			"test-project",
+		);
 		const runtime = ManagedRuntime.make(
 			Layer.mergeAll(
 				persistenceLayer,
@@ -370,6 +395,145 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				]),
 			);
 		} finally {
+			if (relay != null) await relay.stop();
+			await closeServer(relayServer);
+			await mock.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("commits provider output when a resolved workspace move is refused", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-workspace-provider-race-"));
+		const projectDir = join(dir, "project");
+		mkdirSync(projectDir);
+		const mock = await createMockOpenCode(projectDir);
+		const relayServer = createServer();
+		await listenOnRandomPort(relayServer);
+		const log = createSilentLogger();
+		const warning = vi.spyOn(log, "warn");
+		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		try {
+			relay = await createProjectRelay({
+				httpServer: relayServer,
+				opencodeUrl: mock.url,
+				projectDir,
+				configDir: dir,
+				persistenceDbPath: join(dir, "events.db"),
+				publishGlobalSetting: () => Effect.void,
+				slug: "workspace-provider-race",
+				log,
+				statusPollerInterval: 60_000,
+				messagePollerInterval: 60_000,
+			});
+			const program = Effect.scoped(
+				Effect.gen(function* () {
+					const sessionId = "workspace-provider-race";
+					yield* applySessionCommand(
+						{
+							type: "session.created",
+							data: {
+								sessionId,
+								title: "Workspace race",
+								provider: "claude",
+							},
+						},
+						{ upstreamAdapter: null },
+					);
+					const sql = yield* SqlClient.SqlClient;
+					const receipts = yield* makeClaudeRunnerReceiptStore(sql);
+					const runnerId = "workspace-race-runner";
+					const attachmentId = "workspace-race-attachment";
+					yield* receipts.attach(runnerId, attachmentId);
+					const committed = yield* Deferred.make<void>();
+					const resolved = yield* Deferred.make<void>();
+					const release = yield* Deferred.make<void>();
+					const workspace = yield* SessionWorkspaceTag;
+					const resolve = vi
+						.spyOn(workspace, "resolve")
+						.mockImplementationOnce(() =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(resolved, undefined);
+								yield* Deferred.await(release);
+								return {
+									path: projectDir,
+									projectFolder: projectDir,
+									reset: true,
+									provider: "claude",
+								};
+							}),
+						);
+					return yield* Effect.gen(function* () {
+						const ingestion = yield* ProviderRuntimeIngestionTag;
+						const receipt = {
+							runnerId,
+							attachmentId,
+							sequence: 1,
+							committed,
+							consumed: false,
+						};
+						const append = yield* Effect.fork(
+							ingestion
+								.ingestBatch([
+									providerRuntimeEvent("workspace.changed", sessionId, {
+										path: projectDir,
+										source: "tool",
+									}),
+									providerRuntimeEvent("session.status", sessionId, {
+										sessionId,
+										status: "busy",
+									}),
+								])
+								.pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+						);
+						yield* Deferred.await(resolved);
+						yield* applySessionCommand(
+							{
+								type: "session.provider_changed",
+								data: {
+									sessionId,
+									oldProvider: "claude",
+									newProvider: "opencode",
+									reason: "user",
+								},
+							},
+							{ upstreamAdapter: null },
+						);
+						yield* Deferred.succeed(release, undefined);
+						yield* Fiber.join(append);
+						const read = yield* ReadQueryEffectTag;
+						const store = yield* EventStoreEffectTag;
+						return {
+							row: yield* read.getSession(sessionId),
+							events: yield* store.readBySession(sessionId),
+							checkpoint: yield* receipts.read(runnerId),
+							consumed: receipt.consumed,
+						};
+					}).pipe(Effect.ensuring(Effect.sync(() => resolve.mockRestore())));
+				}),
+			);
+			// fullBaseLayers supplies these services; the public runtime exposes a narrower facade.
+			const context = (await relay.effectRuntime.runtime.runtime())
+				.context as Context.Context<Effect.Effect.Context<typeof program>>;
+			const result = await relay.effectRuntime.runtime.runPromise(
+				Effect.provide(program, context),
+			);
+			expect(result.row).toMatchObject({
+				provider: "opencode",
+				status: "busy",
+				workspace: null,
+			});
+			expect(result.events.map(({ type }) => type)).toContain("session.status");
+			expect(result.events.map(({ type }) => type)).not.toContain(
+				"session.workspace_changed",
+			);
+			expect(result.checkpoint.sequence).toBe(1);
+			expect(result.consumed).toBe(true);
+			expect(warning).toHaveBeenCalledWith(
+				"Invalid agent workspace move",
+				expect.objectContaining({ reason: "unsupported-provider" }),
+			);
+		} finally {
+			warning.mockRestore();
 			if (relay != null) await relay.stop();
 			await closeServer(relayServer);
 			await mock.close();

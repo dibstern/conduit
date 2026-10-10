@@ -32,6 +32,7 @@ describe("merged Effect projection", () => {
 						{ provider: "claude", createdAt: 100 },
 					),
 					sequence: 1,
+					projectId: "test-project",
 					streamVersion: 1,
 				};
 				yield* projector.project(read, { version: 41 });
@@ -46,6 +47,7 @@ describe("merged Effect projection", () => {
 						{ provider: "claude", createdAt: 101 },
 					),
 					sequence: 2,
+					projectId: "test-project",
 					streamVersion: 2,
 				};
 				yield* projector.project(unread, { version: 42 });
@@ -60,6 +62,7 @@ describe("merged Effect projection", () => {
 						{ provider: "claude", createdAt: 102 },
 					),
 					sequence: 3,
+					projectId: "test-project",
 					streamVersion: 3,
 				};
 				yield* projector.project(settled, { version: 43 });
@@ -95,6 +98,7 @@ describe("merged Effect projection", () => {
 						{ provider: "claude", createdAt: 200 },
 					),
 					sequence: 7,
+					projectId: "test-project",
 					streamVersion: 1,
 				};
 				const touch = yield* makeMessageProjector().project(event, {
@@ -130,6 +134,7 @@ describe("merged Effect projection", () => {
 						{ provider: "claude", createdAt: 200 },
 					),
 					sequence: 8,
+					projectId: "test-project",
 					streamVersion: 1,
 				};
 				const touch = yield* makeSessionProjector().project(event, {
@@ -168,6 +173,7 @@ describe("merged Effect projection", () => {
 							{ provider: "claude", createdAt: 200 + sequence },
 						),
 						sequence,
+						projectId: "test-project",
 						streamVersion: sequence,
 					};
 					yield* makeTurnProjector().project(event, { version: 43 + sequence });

@@ -669,7 +669,7 @@ async function handleMessage(
 						})
 					: raw.tag === "ViewSession"
 						? () => ({ ok: true })
-						: raw.tag === "SendMessage"
+						: raw.tag === "input.submit"
 							? ({ sessionId }) => ({ ok: true, sessionId })
 							: undefined);
 		if (!handler) return;
@@ -691,7 +691,8 @@ async function handleMessage(
 				requestId: raw.id,
 				exit: { _tag: "Success", value: result },
 			});
-			if (raw.tag === "SendMessage") control.onSendMessage?.(raw.payload ?? {});
+			if (raw.tag === "input.submit")
+				control.onSendMessage?.(raw.payload ?? {});
 		} catch (error) {
 			if (error instanceof WsRpcError || error instanceof WorkspaceMoveError) {
 				sendJson(ws, {
@@ -739,7 +740,8 @@ async function handleMessage(
 		control.record(raw.method, raw.params ?? {});
 		const result = await handler(raw.params ?? {}, raw);
 		sendJson(ws, { jsonrpc: "2.0", id: raw.id, result });
-		if (raw.method === "SendMessage") control.onSendMessage?.(raw.params ?? {});
+		if (raw.method === "input.submit")
+			control.onSendMessage?.(raw.params ?? {});
 	} catch (error) {
 		sendJson(ws, {
 			jsonrpc: "2.0",

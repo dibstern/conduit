@@ -530,7 +530,7 @@ export class MockOpenCodeServer {
 				const afterPrompts = currentSegment;
 				if (ix.method === "POST" && ix.path.includes("/prompt_async")) {
 					currentSegment++;
-					this.sseSegments[currentSegment] = [];
+					this.sseSegments[currentSegment] ??= [];
 					// Extract the recording's session ID from the prompt URL
 					const match = /\/session\/([^/]+)\/prompt_async/.exec(ix.path);
 					if (match?.[1]) {
@@ -575,10 +575,25 @@ export class MockOpenCodeServer {
 							? fork.forkIndex
 							: fork.updateIndex
 						: undefined;
+				// OpenCode publishes a prompt's user message before the POST returns,
+				// so the recording logs it just ahead of that prompt. Replayed with
+				// the previous segment, it would show the next turn before it is sent.
+				const nextRest = interactions.find(
+					(following, at) => at > index && following.kind === "rest",
+				);
+				const leadsPrompt =
+					ix.type === "message.updated" &&
+					info?.["role"] === "user" &&
+					nextRest?.kind === "rest" &&
+					nextRest.method === "POST" &&
+					nextRest.path.split("?")[0] ===
+						`/session/${String(sessionId)}/prompt_async`;
 				const events =
-					ownerIndex === undefined
-						? this.sseSegments[currentSegment]
-						: mutationEvents.get(ownerIndex);
+					ownerIndex !== undefined
+						? mutationEvents.get(ownerIndex)
+						: leadsPrompt
+							? (this.sseSegments[currentSegment + 1] ??= [])
+							: this.sseSegments[currentSegment];
 				events?.push({
 					type: ix.type,
 					properties: ix.properties,
@@ -728,15 +743,23 @@ export class MockOpenCodeServer {
 				this.getActiveQueue(this.normalizedQueues, normalized);
 			if (!queue) {
 				// Return a minimal project directory listing so integration
-				// tests that check for common project files can pass.
+				// tests that check for common project files can pass. Only the
+				// root has it: listing every folder the same made the tree
+				// infinite (src/src/test/...), so each GetFileTree walked ~1250
+				// folders and, under load, ran to its 15 s deadline.
+				const dir = new URL(path, "http://mock").searchParams.get("path");
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(
-					JSON.stringify([
-						{ name: "package.json", type: "file" },
-						{ name: "tsconfig.json", type: "file" },
-						{ name: "src", type: "directory" },
-						{ name: "test", type: "directory" },
-					]),
+					JSON.stringify(
+						dir && dir !== "."
+							? []
+							: [
+									{ name: "package.json", type: "file" },
+									{ name: "tsconfig.json", type: "file" },
+									{ name: "src", type: "directory" },
+									{ name: "test", type: "directory" },
+								],
+					),
 				);
 				return;
 			}

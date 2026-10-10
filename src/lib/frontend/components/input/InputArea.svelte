@@ -10,6 +10,7 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { tick, untrack } from "svelte";
+	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Textarea from "../ui/Textarea.svelte";
@@ -29,8 +30,9 @@
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
+	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { addUserMessage, currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence } from "../../stores/chat.svelte.js";
+	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -62,12 +64,13 @@
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
-	import { isPaused, segmentTurns, startedTurn, workingTime } from "../../utils/turns.js";
+	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
 	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
+	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
@@ -109,10 +112,8 @@
 		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
 		return () => clearTimeout(timer);
 	});
-	const turn = $derived.by(() => {
-		const chat = currentChat();
-		return startedTurn(segmentTurns(chat.messages, isProcessing(), chat.turnEpoch), chat.turnEpoch, isProcessing());
-	});
+	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
+	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
 	const paused = $derived(turn !== undefined && isPaused(turn));
 	const working = $derived(isProcessing() || paused || Boolean(currentSession && sessionAttention(currentSession) === "working"));
 	const elapsed = $derived.by(() => {
@@ -128,14 +129,13 @@
 		const sessionId = sessionState.currentId;
 		if (!sessionId) return;
 		const chat = currentChat();
-		const key = JSON.stringify([sessionId, chat.turnEpoch]);
+		const key = JSON.stringify([sessionId, turn?.id ?? null]);
 		if (reportedMissingPrompts.has(key)) return;
 		reportedMissingPrompts.add(key);
 		const lastRow = chat.transcript?.rows.at(-1);
 		const last = chat.messages.at(-1);
 		console.error("[turn-clock] Working session has no prompt to time from", {
 			sessionId,
-			turnEpoch: chat.turnEpoch,
 			messageCount: chat.messages.length,
 			lastMessageRole: lastRow?.role ?? last?.type ?? null,
 			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
@@ -146,12 +146,7 @@
 		for (let i = chat.messages.length - 1; i >= 0; i--) {
 			const part = chat.messages[i];
 			if (!part) continue;
-			if (part.type === "user") {
-				// A queued steering message doesn't end the current activity.
-				if (part.sentDuringEpoch != null && part.sentDuringEpoch >= chat.turnEpoch) continue;
-				return "";
-			}
-			if (part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
+			if (part.type === "user" || part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
 			if (part.type === "thinking" && !part.done) return "Thinking";
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
@@ -169,7 +164,6 @@
 	const placeholder = $derived(
 		currentSession?.settledAt != null ? "Message to un-settle…" :
 		currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-		isProcessing() ? "Reply to steer…" :
 		discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
 	);
 
@@ -395,8 +389,33 @@
 			? "Reply"
 			: isProcessing()
 				? "Queue message"
-				: "Send message",
+				: "Send",
 	);
+	/** Whether a send could steer the running turn, from the server's inbox arm:
+	 *  hidden (undefined) when idle or the provider can't steer, disabled while a
+	 *  prompt is open. Draft-dependent refusals only come back from a steer. */
+	const steer = $derived.by(() => {
+		const reason = currentChat().transcript?.steer;
+		if (!isProcessing() || reason === undefined || reason === "no_steering") return undefined;
+		return reason ?? "ready";
+	});
+	const sendButtonTitle = $derived(
+		isGoalCommand ? "Set goal"
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to steer`
+		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
+		: sendButtonLabel,
+	);
+	const steerPending = $derived(currentChat().transcript?.pending.some((input) => input.state === "steering") ?? false);
+	/** The last steer the server refused, shown beside the input box until the draft changes. */
+	let steerRefusal = $state<{ sessionId: string; reason: SteerBlocker } | null>(null);
+	const STEER_REFUSALS: Record<SteerBlocker, string> = {
+		no_steering: "This provider can't steer.",
+		prompt_open: "Answer the open prompt first.",
+		model_differs: "The running turn uses a different model.",
+		agent_differs: "The running turn uses a different agent.",
+		variant_differs: "The running turn uses a different effort.",
+		slash_command: "Commands can't steer; they queue.",
+	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
 	const compacting = $derived.by(() => {
 		const messages = currentChat().messages;
@@ -447,6 +466,7 @@
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
 		lastLocalEditAt = Date.now();
+		steerRefusal = null;
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -495,6 +515,11 @@
 			handleCommandClose();
 			return;
 		}
+		if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+			e.preventDefault();
+			sendMessage(undefined, steer ? "steer" : "queue");
+			return;
+		}
 		if (e.key === "Enter" && !e.shiftKey) {
 			if (isMobile()) {
 				// Mobile: Enter inserts newline (default textarea behavior).
@@ -509,7 +534,7 @@
 	let creatingSession = false;
 	let startingSideThread = false;
 
-	async function sendMessage(textOverride?: string): Promise<boolean> {
+	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (unsupportedDraftFolders) return false;
 		let text = textOverride ?? inputText.trim();
 		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
@@ -606,9 +631,8 @@
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
-		// Always send immediately — OpenCode queues server-side when busy.
-		// When the LLM is processing, `sentDuringEpoch` is recorded so the
-		// UI can derive the "Queued" shimmer reactively.
+		// Always send immediately: conduit queues a busy send in the session's
+		// tray, and the transcript shows the message once the adapter places it.
 		let sid = sideThread?.sessionId ?? sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
@@ -639,43 +663,67 @@
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch (error) {
-				let message = "Failed to create session";
 				if (Schema.is(WorkspaceMoveError)(error)) {
-					switch (error.reason) {
-						case "missing": message = "Could not start session: that worktree no longer exists"; break;
-						case "not-a-worktree": message = "Could not start session: that folder is not a git worktree"; break;
-						case "other-repository": message = "Could not start session: that worktree belongs to another repository"; break;
-						case "unsupported-provider": message = "Could not start session: this provider does not support worktrees"; break;
-					}
+					const body = {
+						missing: "That worktree no longer exists.",
+						"not-a-worktree": "That folder is not a git worktree.",
+						"other-repository": "That worktree belongs to another repository.",
+						"unsupported-provider": "This provider does not support worktrees.",
+					}[error.reason];
+					showToast({ title: "Could not start session", variant: "error", body });
+				} else {
+					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
 				}
-				showToast(message, { variant: "error" });
 				return false;
 			} finally {
 				creatingSession = false;
 			}
 		}
-		const { activity, messages } = getOrCreateSessionSlot(sid);
-		addUserMessage(activity, messages, messageText, imageUrls, isProcessing());
-		// The turn starts now for the sender; its row reports busy once the
-		// provider picks the prompt up, and ends the turn when it goes idle.
-		phaseToProcessing(activity);
+		const commandId = crypto.randomUUID();
+		if (!isProcessing()) requestScrollOnNextContent();
 		const sentToSessionId = sid;
-		rateLimitChatSend(() => {
-			void sendMessageRpc({
+		// An input the inbox hands straight off starts the sender's turn now; the
+		// row reports busy once the provider picks it up and ends the turn when it
+		// goes idle (ni8.35). A queued or paused input starts nothing.
+		const { activity, messages } = getOrCreateSessionSlot(sid);
+		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid)
+			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
+		if (startsTurn) {
+			phaseToProcessing(activity);
+			activity.awaitingInputId = commandId;
+		}
+		steerRefusal = null;
+		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
+			sendMessageRpc({
 				projectSlug,
 				sessionId: sentToSessionId,
 				text: messageText,
-				commandId: crypto.randomUUID(),
+				commandId,
+				...(delivery === "steer" ? { delivery } : {}),
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
+				if (!response.ok) {
+					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
+					return resolve(false);
+				}
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
+				resolve(true);
 			}).catch(() => {
-				if (!isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
+				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
 				showToast("Failed to send message", { variant: "error" });
+				resolve(false);
 			});
-		});
+		}));
+		if (delivery === "steer") {
+			// A refused steer admits nothing, so its draft stays until the server takes it.
+			if (!(await sent)) return false;
+			if (sessionState.currentId !== sentToSessionId) {
+				inputDrafts.delete(sentToSessionId);
+				return true;
+			}
+		}
 		if (textOverride !== undefined) return true;
 		if (sideThread && (sessionState.currentId !== sideThread.sessionId || inputText !== "" || pendingImages.length > 0)) return true;
 		clearComposer();
@@ -723,8 +771,8 @@
 		});
 	}
 
-	function handleSendClick() {
-		sendMessage();
+	function handleSendClick(e: MouseEvent) {
+		sendMessage(undefined, steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
 	function handleAttachCamera() {
@@ -797,6 +845,18 @@
 			};
 			reader.readAsDataURL(file);
 		}
+	}
+
+	/** Edit on a queued row: its text and images come back to the composer. */
+	function takeBackQueuedInput(text: string, images: readonly string[]) {
+		inputText = inputText.trim() ? `${inputText}\n\n${text}` : text;
+		handleInput();
+		cursorPos = inputText.length;
+		pendingImages = [
+			...pendingImages,
+			...images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl, name: "image", size: dataUrl.length })),
+		];
+		textareaEl?.focus();
 	}
 
 	function removePendingImage(id: string) {
@@ -997,6 +1057,22 @@
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
 		{/if}
 
+		<PendingInputTray
+			inputs={currentChat().transcript?.pending ?? []}
+			paused={currentChat().transcript?.paused ?? false}
+			{steer}
+			onEdit={takeBackQueuedInput}
+			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
+		/>
+
+		{#if steerRefusal && steerRefusal.sessionId === sessionState.currentId}
+			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[steerRefusal.reason]}</span>
+				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; }} />
+			</div>
+		{/if}
+
 		<div
 			id="input-row"
 			class:goal={goal.border === "solid"}
@@ -1145,7 +1221,7 @@
 						type="button"
 						class="send-btn shrink-0 w-[32px] h-[32px] rounded-[10px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white'} disabled:bg-send-off-bg disabled:text-send-off"
 						disabled={!canSend}
-						title={isGoalCommand ? "Set goal" : sendButtonLabel}
+						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
 						onclick={handleSendClick}
 					/>
@@ -1159,7 +1235,7 @@
 							id="stop"
 							type="button"
 							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
-							title="Stop generating"
+							title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"}
 							ariaLabel="Stop generating"
 							onclick={handleStop}
 						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>

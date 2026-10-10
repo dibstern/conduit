@@ -36,12 +36,12 @@ export function testActivity(sessionId?: string): SessionActivity {
 	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
 	const a: SessionActivity = {
 		phase: "idle",
-		turnEpoch: 0,
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),
 		currentMessageId: null,
 		currentPartId: null,
+		awaitingInputId: null,
 		replayGeneration: 0,
 		doneMessageIds: new SvelteSet(),
 		seenMessageIds: new SvelteSet(),

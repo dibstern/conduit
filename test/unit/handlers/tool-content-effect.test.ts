@@ -36,7 +36,10 @@ describe("getToolContentValue with Effect read persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-tool-content-effect-"));
 			const filename = join(dir, "events.db");
-			const persistenceLayer = makePersistenceEffectLayer(filename);
+			const persistenceLayer = makePersistenceEffectLayer(
+				filename,
+				"test-project",
+			);
 			const layer = ToolContentServiceLive.pipe(
 				Layer.provideMerge(persistenceLayer),
 			);

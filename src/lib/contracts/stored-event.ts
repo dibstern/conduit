@@ -3,6 +3,7 @@ import {
 	type ContinuationReason,
 	ContinuationReasonSchema,
 } from "./limit-recovery.js";
+import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
@@ -56,9 +57,13 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.error",
 	"turn.interrupted",
 	"turn.model_resolved",
+	"input.admitted",
+	"input.sent",
+	"input.cancelled",
 	"session.created",
 	"session.renamed",
 	"session.workspace_changed",
+	"session.workspace_started",
 	"session.read",
 	"session.unread",
 	"session.settled",
@@ -99,6 +104,8 @@ export interface MessageCreatedPayload {
 	readonly sessionId: string;
 	readonly parentID?: string;
 	readonly turnId?: string;
+	/** The browser send this user message was placed for. */
+	readonly inputId?: string;
 	/** Imported from the provider's own record rather than observed streaming
 	 *  (OpenCode history backfill, conduit-test-iea). */
 	readonly backfilled?: true;
@@ -227,6 +234,8 @@ export type CanonicalToolInput =
 
 export interface TurnCompletedPayload {
 	readonly messageId: string;
+	/** Names the turn when no assistant message of its own answered it. */
+	readonly userMessageId?: string;
 	readonly cost?: number;
 	readonly tokens?: {
 		readonly input?: number;
@@ -248,6 +257,50 @@ export interface TurnErrorPayload {
 
 export interface TurnInterruptedPayload {
 	readonly messageId: string;
+}
+
+export const INPUT_DELIVERIES = ["queue", "steer"] as const;
+export type InputDelivery = (typeof INPUT_DELIVERIES)[number];
+
+/** Why an input cannot be steered into the running turn. */
+export const STEER_BLOCKERS = [
+	"no_steering",
+	"prompt_open",
+	"model_differs",
+	"agent_differs",
+	"variant_differs",
+	"slash_command",
+] as const;
+export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
+
+/** The send request captured when an input is admitted; its handoff uses it. */
+export interface InputRequest {
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly model?: { readonly providerID: string; readonly modelID: string };
+	readonly modelUserSelected: boolean;
+	readonly agent?: string;
+	readonly variant?: string;
+	readonly contextWindow?: string;
+}
+
+export interface InputAdmittedPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+	readonly delivery: InputDelivery;
+	readonly request: InputRequest;
+}
+
+export interface InputSentPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+	/** Handed into the running turn rather than starting one. */
+	readonly steer?: true;
+}
+
+export interface InputCancelledPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
 }
 
 export interface TurnModelResolvedPayload {
@@ -315,6 +368,12 @@ export interface SessionRenamedPayload {
 
 export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
+}
+
+/** The runner's reported startup folder, independent of recorded workspace moves. */
+export interface SessionWorkspaceStartedPayload {
+	readonly sessionId: string;
+	readonly path: string;
 }
 
 export interface SessionDeletedPayload {
@@ -502,6 +561,7 @@ export interface QuestionResolvedPayload {
  * Map from event type to its payload shape.
  */
 export interface EventPayloadMap {
+	"workspace.changed": ProviderWorkspaceChangedData;
 	"message.created": MessageCreatedPayload;
 	"message.removed": MessageRemovedPayload;
 	"message.part.removed": MessagePartRemovedPayload;
@@ -523,9 +583,13 @@ export interface EventPayloadMap {
 	"turn.error": TurnErrorPayload;
 	"turn.interrupted": TurnInterruptedPayload;
 	"turn.model_resolved": TurnModelResolvedPayload;
+	"input.admitted": InputAdmittedPayload;
+	"input.sent": InputSentPayload;
+	"input.cancelled": InputCancelledPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
+	"session.workspace_started": SessionWorkspaceStartedPayload;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
 	"session.settled": SessionSettledPayload;
@@ -599,6 +663,7 @@ export type CanonicalEvent = {
 }[CanonicalEventType];
 
 export type StoredEvent = CanonicalEvent & {
+	readonly projectId: string;
 	readonly sequence: number;
 	readonly streamVersion: number;
 };
@@ -651,6 +716,7 @@ const MessageCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	parentID: Schema.optionalWith(Schema.String, { exact: true }),
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	inputId: Schema.optionalWith(Schema.String, { exact: true }),
 	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
@@ -839,6 +905,7 @@ const ToolInputUpdatedPayloadSchema = Schema.Struct({
 
 const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
+	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
@@ -861,6 +928,37 @@ const TurnModelResolvedPayloadSchema = Schema.Struct({
 	requestedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
 	expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
 	actualModel: NonEmptyStringSchema,
+});
+
+export const InputRequestSchema = Schema.Struct({
+	text: Schema.String,
+	images: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
+	model: Schema.optionalWith(
+		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
+		{ exact: true },
+	),
+	modelUserSelected: Schema.Boolean,
+	agent: Schema.optionalWith(Schema.String, { exact: true }),
+	variant: Schema.optionalWith(Schema.String, { exact: true }),
+	contextWindow: Schema.optionalWith(Schema.String, { exact: true }),
+});
+
+const InputAdmittedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+	delivery: Schema.Literal(...INPUT_DELIVERIES),
+	request: InputRequestSchema,
+});
+
+const InputSentPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+});
+
+const InputCancelledPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
 });
 
 const SessionCreatedPayloadSchema = Schema.Struct({
@@ -889,6 +987,11 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	...SessionWorkspaceSchema.fields,
+});
+
+const SessionWorkspaceStartedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	path: Schema.String,
 });
 
 const SessionReadPayloadSchema = Schema.Struct({
@@ -1156,6 +1259,18 @@ const TurnModelResolvedEventSchema = eventEnvelope(
 	"turn.model_resolved",
 	TurnModelResolvedPayloadSchema,
 );
+const InputAdmittedEventSchema = eventEnvelope(
+	"input.admitted",
+	InputAdmittedPayloadSchema,
+);
+const InputSentEventSchema = eventEnvelope(
+	"input.sent",
+	InputSentPayloadSchema,
+);
+const InputCancelledEventSchema = eventEnvelope(
+	"input.cancelled",
+	InputCancelledPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -1167,6 +1282,10 @@ const SessionRenamedEventSchema = eventEnvelope(
 const SessionWorkspaceChangedEventSchema = eventEnvelope(
 	"session.workspace_changed",
 	SessionWorkspaceChangedPayloadSchema,
+);
+const SessionWorkspaceStartedEventSchema = eventEnvelope(
+	"session.workspace_started",
+	SessionWorkspaceStartedPayloadSchema,
 );
 const SessionReadEventSchema = eventEnvelope(
 	"session.read",
@@ -1309,9 +1428,13 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnErrorEventSchema,
 	TurnInterruptedEventSchema,
 	TurnModelResolvedEventSchema,
+	InputAdmittedEventSchema,
+	InputSentEventSchema,
+	InputCancelledEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionWorkspaceChangedEventSchema,
+	SessionWorkspaceStartedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
 	SessionSettledEventSchema,
@@ -1347,6 +1470,7 @@ export const CanonicalEventSchema = Schema.Union(
 export const StoredEventSchema = Schema.extend(
 	CanonicalEventSchema,
 	Schema.Struct({
+		projectId: Schema.NonEmptyString,
 		sequence: Schema.Number,
 		streamVersion: Schema.Number,
 	}),

@@ -93,7 +93,7 @@ function makeSharedPersistenceRuntime(
 		persistence: ReturnType<typeof makePersistenceEffectLayer>,
 	) => ReturnType<typeof makePersistenceEffectLayer>,
 ) {
-	const persistence = makePersistenceEffectLayer(":memory:");
+	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	return ManagedRuntime.make(
 		Layer.merge(
 			makeOrchestrationRuntimeLayer().pipe(
@@ -105,7 +105,7 @@ function makeSharedPersistenceRuntime(
 }
 
 async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
-	const persistence = makePersistenceEffectLayer(":memory:");
+	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	const runtime = ManagedRuntime.make(
 		makeOrchestrationRuntimeLayer(options).pipe(
 			Layer.provide(orchestrationDeps(persistence, options.client)),
@@ -134,7 +134,7 @@ describe("Orchestration wiring", () => {
 
 	it("exposes orchestration services through the scoped runtime layer", async () => {
 		const client = makeStubClient();
-		const persistence = makePersistenceEffectLayer(":memory:");
+		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const runtime = ManagedRuntime.make(
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(orchestrationDeps(persistence, client)),

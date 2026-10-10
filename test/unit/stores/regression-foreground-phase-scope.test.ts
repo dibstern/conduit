@@ -21,7 +21,7 @@ afterEach(() => {
 	sessionState.currentId = null;
 });
 
-it("keeps a background session's queued row in its own slot", () => {
+it("keeps a background session's row in its own slot", () => {
 	const foreground = getOrCreateSessionSlot("A");
 	const background = getOrCreateSessionSlot("B");
 	sessionState.currentId = "A";
@@ -32,7 +32,7 @@ it("keeps a background session's queued row in its own slot", () => {
 		hwm: null,
 		hasMore: false,
 		status: { _tag: "live" as const },
-		carriedUsers: new Map(),
+		pending: [],
 	};
 	const running = applyTranscriptEnvelope(entry, {
 		_tag: "upsert",
@@ -59,16 +59,10 @@ it("keeps a background session's queued row in its own slot", () => {
 			},
 		},
 	});
-	const derived = deriveTranscriptMessages(next, [], {
-		live: true,
-		active: true,
-		turnEpoch: background.activity.turnEpoch,
-		newUserIds: new Set(["u"]),
-	});
-	background.messages.messages = derived.messages;
+	background.messages.messages = deriveTranscriptMessages(next, []);
 	expect(background.messages.messages[1]).toMatchObject({
 		type: "user",
-		sentDuringEpoch: 0,
+		text: "queued",
 	});
 	expect(foreground.messages.messages).toHaveLength(0);
 	expect(foreground.activity.phase).toBe("idle");
@@ -85,7 +79,7 @@ it("the row going idle finalizes the visible turn once", () => {
 			hwm: null,
 			hasMore: false,
 			status: { _tag: "live" as const },
-			carriedUsers: new Map(),
+			pending: [],
 		},
 		{
 			_tag: "upsert",
@@ -100,15 +94,11 @@ it("the row going idle finalizes the visible turn once", () => {
 			},
 		},
 	);
-	messages.messages = deriveTranscriptMessages(entry, [], {
-		live: true,
-		active: true,
-		turnEpoch: 0,
-	}).messages;
+	messages.messages = deriveTranscriptMessages(entry, []);
 	followSessionBusy("A", false);
 	followSessionBusy("A", false);
 	expect(activity.phase).toBe("idle");
-	expect(activity.turnEpoch).toBe(1);
+	expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	expect(messages.messages[0]).toMatchObject({
 		type: "assistant",
 		finalized: true,

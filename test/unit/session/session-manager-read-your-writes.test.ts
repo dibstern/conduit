@@ -9,7 +9,6 @@ import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -310,12 +309,12 @@ describe("SessionManager read-your-writes parity", () => {
 				const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 				const persistenceLayer = makePersistenceEffectLayer(
 					join(dir, "events.db"),
+					"test-project",
 				);
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
 						makeSessionManagerStateLive(),
-						PendingSendOwnershipLive,
 						Layer.succeed(OpenCodeAPITag, api),
 						loggerLayer,
 						configLayer,

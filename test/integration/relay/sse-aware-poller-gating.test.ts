@@ -276,7 +276,7 @@ async function createTestHarness(
 					);
 				}
 			}
-		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath))),
+		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "test-project"))),
 	);
 	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-sse-gating-"));
 

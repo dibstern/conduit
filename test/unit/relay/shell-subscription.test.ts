@@ -17,7 +17,6 @@ import {
 import { expect, vi } from "vitest";
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
@@ -105,6 +104,7 @@ const makeShellTestLayer = (
 	const filename = join(dir, "events.db");
 	const persistenceLayer = makePersistenceEffectLayer(
 		filename,
+		"test-project",
 		undefined,
 		SessionEventBusLive,
 	);
@@ -114,7 +114,6 @@ const makeShellTestLayer = (
 		),
 	);
 	return Layer.mergeAll(
-		PendingSendOwnershipLive,
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		persistenceLayer,

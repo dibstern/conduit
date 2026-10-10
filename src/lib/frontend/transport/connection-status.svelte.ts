@@ -19,25 +19,15 @@ export function getIsConnected(): boolean {
 	return connectionState.status === "connected";
 }
 
-/** Non-blocking relay readiness and PIN-session recovery for the current dial. */
+/** Non-blocking relay readiness for the current dial. */
 function fetchRelayStatus(slug: string): void {
 	const generation = ++relayStatusGeneration;
-	// Every attach/dial starts a new probe. A close alone must still allow the
-	// current probe's 401 to recover from a rejected WebSocket upgrade.
 	const isCurrent = () =>
 		attachedProjectState.slug === slug && relayStatusGeneration === generation;
 	connectionState.relayStatus = undefined;
 	connectionState.relayError = undefined;
 	fetch(`/p/${slug}/api/status`)
-		.then((res) => {
-			if (!isCurrent()) return null;
-			if (res.status === 401) {
-				replaceRoute("/auth");
-				return null;
-			}
-			if (!res.ok) return null;
-			return res.json();
-		})
+		.then((res) => (isCurrent() && res.ok ? res.json() : null))
 		.then((data: { status?: string; error?: string } | null) => {
 			if (!data || !isCurrent()) return;
 			if (data.status === "registering" || data.status === "ready") {
@@ -59,6 +49,22 @@ function fetchRelayStatus(slug: string): void {
 
 onProjectAttached(fetchRelayStatus);
 
+/**
+ * A rejected upgrade only surfaces as a close before open, and RPC redials
+ * forever. Ask the public auth endpoint so an expired PIN session shows the
+ * PIN page even when no project is attached.
+ */
+function redirectIfPinRequired(): void {
+	fetch("/api/auth/status")
+		.then((res) => (res.ok ? res.json() : null))
+		.then((auth: { hasPin?: boolean; authenticated?: boolean } | null) => {
+			if (auth?.hasPin && !auth.authenticated) replaceRoute("/auth");
+		})
+		.catch(() => {
+			// Daemon unreachable: keep redialing.
+		});
+}
+
 /** Called by the control constructor on every dial, including RPC retries. */
 export function trackControlSocket(socket: WebSocket): void {
 	controlSocket = socket;
@@ -69,8 +75,10 @@ export function trackControlSocket(socket: WebSocket): void {
 	connectionState.relayStatus = undefined;
 	connectionState.relayError = undefined;
 	wsDebugLog("rpc:connect", connectionState.status);
+	let opened = false;
 
 	socket.addEventListener("open", () => {
+		opened = true;
 		if (controlSocket !== socket) return;
 		lastMessageAt = Date.now();
 		connectionState.status = "connected";
@@ -86,6 +94,7 @@ export function trackControlSocket(socket: WebSocket): void {
 		connectionState.status = "disconnected";
 		connectionState.statusText = "Disconnected";
 		wsDebugLog("rpc:close", connectionState.status);
+		if (!opened) redirectIfPinRequired();
 	});
 	socket.addEventListener("message", () => {
 		if (controlSocket === socket) lastMessageAt = Date.now();

@@ -61,6 +61,8 @@ const makeReadQuery = (
 		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 	),
 	getSessionMessagesWithParts: () => Effect.succeed([]),
+	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+	readInboxState: () => Effect.succeed(undefined),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
@@ -255,6 +257,7 @@ describe("WsRpcServerLayer GetModels", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-model-execution-"));
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
+				"test-project",
 			);
 			const orchestrationEngine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
@@ -361,7 +364,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					});
 					yield* instance.sendTurnEffect({
 						sessionId,
-						turnId: `${sessionId}-turn`,
+						inputId: `${sessionId}-turn`,
 						prompt: "Use Sonnet with a 1M context window",
 						history: [],
 						providerState: {},

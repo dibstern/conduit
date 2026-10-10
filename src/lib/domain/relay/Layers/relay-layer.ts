@@ -10,7 +10,6 @@ import { makeInstanceManagerStateLive } from "../../daemon/Services/instance-man
 import { AlertsLive } from "../Services/alerts.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
-import { PendingSendOwnershipLive } from "../Services/pending-send-ownership.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
@@ -32,7 +31,6 @@ import { RateLimiterLive } from "./rate-limiter-layer.js";
 
 const sessionManagerDepsLive = Layer.mergeAll(
 	makeSessionManagerStateLive(),
-	PendingSendOwnershipLive,
 	DaemonEventBusLive,
 	RelayStatusSnapshotLive,
 );

@@ -10,13 +10,16 @@ import {
 	HashSet,
 	Layer,
 	Ref,
+	Schema,
 } from "effect";
+import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { makeClaudeSdkEnv } from "../../../provider/claude/claude-sdk-env.js";
+import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 
 const TITLE_GENERATION_TIMEOUT = Duration.seconds(30);
@@ -230,10 +233,18 @@ export const makeSessionTitleServiceLive = (
 			const queryFactory =
 				options.queryFactory ?? ((params) => sdkQuery(params));
 			const now = options.now ?? (() => new Date());
-			const cwd = config.projectDir ?? process.cwd();
+			const primaryFolder = config.projectDir;
 
-			const generateTitle = (firstMessage: string) =>
+			const generateTitle = (sessionId: string, firstMessage: string) =>
 				Effect.gen(function* () {
+					const session = yield* readQuery.getSession(sessionId);
+					const workspace =
+						session?.workspace == null
+							? null
+							: yield* Schema.decodeUnknown(
+									Schema.parseJson(SessionWorkspaceSchema),
+								)(session.workspace);
+					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
 					const abortController = new AbortController();
 					const rawTitle = yield* Effect.tryPromise({
 						try: async () => {
@@ -302,7 +313,14 @@ export const makeSessionTitleServiceLive = (
 						});
 					}
 					return title;
-				});
+				}).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionTitleGenerationFailure({
+								reason: generationFailureReason(cause),
+							}),
+					),
+				);
 
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
 				Effect.gen(function* () {
@@ -361,7 +379,7 @@ export const makeSessionTitleServiceLive = (
 			}) =>
 				Effect.gen(function* () {
 					const titleResult = yield* Effect.either(
-						generateTitle(input.firstMessage),
+						generateTitle(input.sessionId, input.firstMessage),
 					);
 					if (titleResult._tag === "Right") {
 						yield* applyTitleIfStillDefault(input.sessionId, titleResult.right);

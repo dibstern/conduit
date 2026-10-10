@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -44,8 +43,7 @@ describe("managed OpenCode survives server replacement", () => {
 	/** Managed OpenCode spawns on first use, not with the server. */
 	const firstUse = () => {
 		if (!harness) throw new Error("No process harness");
-		return sendRpcRequest(
-			join(harness.configDir, "relay.sock"),
+		return harness.requestRpc(
 			new StartInstance({ instanceId: "managed-test" }),
 		);
 	};
@@ -77,16 +75,15 @@ describe("managed OpenCode survives server replacement", () => {
 
 	afterEach(async (context) => {
 		if (harness && context.task.result?.state === "fail") {
-			const proof = harness.proof() as {
-				logTail: string;
-				generations: unknown;
-			};
+			const proof = harness.proof();
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
 				"test-results/85kb-12-failure.json",
 				JSON.stringify({
 					logTail: proof.logTail,
 					generations: proof.generations,
+					buildIdentity: proof.buildIdentity,
+					rpcDecodeFailures: proof.rpcDecodeFailures,
 				}),
 			);
 		}

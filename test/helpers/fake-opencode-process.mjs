@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	writeFileSync,
@@ -328,6 +329,33 @@ const server = createServer(async (request, response) => {
 				sessions().find(({ id }) => path === `/session/${id}`) ?? {},
 			),
 		);
+	} else if (path === "/file" || path === "/file/content") {
+		try {
+			const target = join(
+				directory ?? configDir,
+				url.searchParams.get("path") ?? ".",
+			);
+			response.end(
+				JSON.stringify(
+					path === "/file"
+						? readdirSync(target, { withFileTypes: true }).map((entry) => ({
+								name: entry.name,
+								path: entry.name,
+								absolute: join(target, entry.name),
+								type: entry.isDirectory() ? "directory" : "file",
+								ignored: false,
+							}))
+						: { type: "text", content: readFileSync(target, "utf8") },
+				),
+			);
+		} catch {
+			response.writeHead(404).end(
+				JSON.stringify({
+					name: "NotFoundError",
+					data: { message: "File not found" },
+				}),
+			);
+		}
 	} else if (path === "/path") {
 		response.end(
 			JSON.stringify({

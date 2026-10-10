@@ -120,6 +120,7 @@ function makeHarness(options?: {
 	});
 
 	const eventStore = {
+		projectId: "test-project",
 		append,
 		appendBatch,
 		readFromSequence: vi.fn(() => Effect.succeed([])),
@@ -132,6 +133,7 @@ function makeHarness(options?: {
 		projectBatch,
 		recover: vi.fn(() =>
 			Effect.succeed({
+				projectId: "test-project",
 				startCursor: 0,
 				endCursor: 0,
 				totalReplayed: 0,

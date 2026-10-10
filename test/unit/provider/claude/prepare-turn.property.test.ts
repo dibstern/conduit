@@ -10,6 +10,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import fc from "fast-check";
 import { expect, it } from "vitest";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
@@ -209,7 +210,11 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 						expect(yield* state.nativeThread("s1", "personal")).toEqual(
 							receipt,
 						);
-					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+					}).pipe(
+						Effect.provide(
+							makePersistenceEffectLayer(":memory:", "test-project"),
+						),
+					),
 				);
 			},
 		),
@@ -366,7 +371,11 @@ it("retries only startup-rejected native conversations once, preserving other re
 							"Current request",
 						])
 							expect(calls[1]?.prompt).toContain(text);
-					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+					}).pipe(
+						Effect.provide(
+							makePersistenceEffectLayer(":memory:", "test-project"),
+						),
+					),
 				);
 			},
 		),
@@ -482,7 +491,11 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 								limit: 50,
 							})).messages.find((message) => message.id === "current")?.text,
 						).toBe(text);
-					}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+					}).pipe(
+						Effect.provide(
+							makePersistenceEffectLayer(":memory:", "test-project"),
+						),
+					),
 				);
 			},
 		),
@@ -509,8 +522,16 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 				await Effect.runPromise(
 					Effect.gen(function* () {
 						yield* makeEffectSqlMigrator();
-						const store = yield* makeEventStoreEffect;
-						const cursors = yield* makeProjectorCursorEffect;
+						const store = yield* makeEventStoreEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: "test-project",
+							}),
+						);
+						const cursors = yield* makeProjectorCursorEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: "test-project",
+							}),
+						);
 						const runner = yield* makeProjectionRunnerEffect(
 							createAllEffectProjectors(),
 						).pipe(Effect.provideService(ProjectorCursorEffectTag, cursors));
@@ -603,7 +624,11 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 							);
 						}
 						yield* runner.projectBatch(yield* store.appendBatch(events));
-						const state = yield* makeProviderStateEffect;
+						const state = yield* makeProviderStateEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: "test-project",
+							}),
+						);
 						const read = yield* makeReadQueryEffect;
 						const prepare = (options: Parameters<typeof makePrepareTurn>[0]) =>
 							makePrepareTurn(options).pipe(

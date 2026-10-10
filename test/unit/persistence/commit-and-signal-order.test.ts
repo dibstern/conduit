@@ -22,7 +22,12 @@ import {
 } from "../../helpers/mock-factories.js";
 
 const testLayer = Layer.merge(
-	makePersistenceEffectLayer(":memory:", undefined, SessionEventBusLive),
+	makePersistenceEffectLayer(
+		":memory:",
+		"test-project",
+		undefined,
+		SessionEventBusLive,
+	),
 	SessionEventBusLive,
 );
 

@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -122,6 +123,8 @@ describe("managed OpenCode through CLI server replacement", () => {
 
 	it("preserves the same OpenCode PID after SIGTERM and serve, then terminates it on stop", async () => {
 		harness = await ProcessHarness.start({ managedOpenCode: true });
+		// Managed OpenCode starts lazily, so nothing listens until first use.
+		await harness.requestRpc(new StartInstance({ instanceId: "managed-test" }));
 		const before = await health();
 		const port = recorded().port;
 		const daemonBefore = harness.generations[0];

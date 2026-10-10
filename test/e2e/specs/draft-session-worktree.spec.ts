@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import type { WorktreeInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
@@ -124,7 +124,7 @@ test.afterEach(async ({ page }, testInfo) => {
 			.get(page)
 			?.getRequests()
 			.filter(({ tag }) =>
-				["ListWorktrees", "CreateSession", "SendMessage"].includes(tag),
+				["ListWorktrees", "CreateSession", "input.submit"].includes(tag),
 			)
 			.map(({ tag, payload }) => ({
 				tag,
@@ -154,6 +154,9 @@ for (const mode of [
 ]) {
 	test.describe(mode.name, () => {
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
+		// Phone menus open on a touch tap, as a real finger would.
+		const press = (target: Locator) =>
+			mode.hasTouch ? target.tap() : target.click();
 
 		test("lists the project repositories' worktrees and sends the choice on first creation", async ({
 			page,
@@ -161,7 +164,7 @@ for (const mode of [
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
 			await page.locator("#input").fill("Start in docs");
-			await page.getByTestId("draft-start-chip").click();
+			await press(page.getByTestId("draft-start-chip"));
 			await expect(
 				page.getByRole("menuitemradio", { name: "Current checkout" }),
 			).toHaveAttribute("aria-checked", "true");
@@ -171,9 +174,9 @@ for (const mode of [
 			await expect(
 				page.getByRole("menuitem", { name: /New branch/ }),
 			).toHaveAttribute("aria-disabled", "true");
-			await page
-				.getByRole("menuitem", { name: "Existing worktree", exact: true })
-				.click();
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
+			);
 			for (const { path } of worktrees)
 				await expect(
 					page
@@ -184,8 +187,11 @@ for (const mode of [
 			const list = await rpc.waitForRequest(
 				({ tag }) => tag === "ListWorktrees",
 			);
-			expect(list.payload).toEqual({ projectSlug: "e2e-replay" });
-			await page.getByRole("menuitemradio", { name: /feature\/docs/ }).click();
+			expect(list.payload).toEqual({
+				_tag: "ListWorktrees",
+				projectSlug: "e2e-replay",
+			});
+			await press(page.getByRole("menuitemradio", { name: /feature\/docs/ }));
 			await expect(page.getByTestId("draft-start-chip")).toHaveText(
 				"feature/docs",
 			);
@@ -193,15 +199,15 @@ for (const mode of [
 			expect(rpc.getRequests().some(({ tag }) => tag === "CreateSession")).toBe(
 				false,
 			);
-			await page.getByTestId("draft-start-chip").click();
-			await page
-				.getByRole("menuitem", { name: "Existing worktree", exact: true })
-				.click();
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
+			);
 			await expect(
 				page.getByRole("menuitemradio", { name: /feature\/docs/ }),
 			).toHaveAttribute("aria-checked", "true");
 			await page.keyboard.press("Escape");
-			await page.locator("#send").click();
+			await press(page.locator("#send"));
 			const create = await rpc.waitForRequest(
 				({ tag }) => tag === "CreateSession",
 			);
@@ -209,7 +215,9 @@ for (const mode of [
 				projectSlug: "e2e-replay",
 				worktreePath: docsLinked,
 			});
-			const send = await rpc.waitForRequest(({ tag }) => tag === "SendMessage");
+			const send = await rpc.waitForRequest(
+				({ tag }) => tag === "input.submit",
+			);
 			expect(send.payload).toMatchObject({
 				sessionId: "draft-session",
 				text: "Start in docs",
@@ -224,23 +232,23 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
-			await page.getByTestId("draft-start-chip").click();
-			await page
-				.getByRole("menuitem", { name: "Existing worktree", exact: true })
-				.click();
-			await page.getByRole("menuitemradio", { name: /feature\/draft/ }).click();
-			await page.getByTestId("draft-start-chip").click();
-			await page
-				.getByRole("menuitemradio", { name: "Current checkout" })
-				.click();
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
+			);
+			await press(page.getByRole("menuitemradio", { name: /feature\/draft/ }));
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "Current checkout" }),
+			);
 			await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 			await page.locator("#input").fill("Use main");
-			await page.locator("#send").click();
+			await press(page.locator("#send"));
 			const create = await rpc.waitForRequest(
 				({ tag }) => tag === "CreateSession",
 			);
 			expect(create.payload).not.toHaveProperty("worktreePath");
-			await rpc.waitForRequest(({ tag }) => tag === "SendMessage");
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 		});
 
 		test("a project change drops the previous project's worktree choice", async ({
@@ -248,22 +256,20 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
-			await page.getByTestId("draft-start-chip").click();
-			await page
-				.getByRole("menuitem", { name: "Existing worktree", exact: true })
-				.click();
-			await page.getByRole("menuitemradio", { name: /feature\/draft/ }).click();
-			await page.getByTestId("draft-project-chip").click();
-			await page.getByRole("menuitemradio", { name: /Other/ }).click();
-			await expect(page.getByTestId("draft-start-chip")).toHaveText("dev");
-			await page.locator("#input").fill("Other project");
-			await page.locator("#send").click();
-			const create = await rpc.waitForRequest(
-				({ tag }) => tag === "CreateSession",
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
 			);
-			expect(create.payload["projectSlug"]).toBe("other");
-			expect(create.payload).not.toHaveProperty("worktreePath");
-			await rpc.waitForRequest(({ tag }) => tag === "SendMessage");
+			await press(page.getByRole("menuitemradio", { name: /feature\/draft/ }));
+			await press(page.getByTestId("draft-project-chip"));
+			await press(page.getByRole("menuitemradio", { name: /Other/ }));
+			await expect(page.getByTestId("draft-start-chip")).toHaveText("dev");
+			await expect(
+				page.getByText("current checkout", { exact: true }),
+			).toBeVisible();
+			expect(rpc.getRequests().some(({ tag }) => tag === "CreateSession")).toBe(
+				false,
+			);
 		});
 
 		test("a provider without worktree support cannot list or select existing worktrees", async ({
@@ -271,7 +277,7 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl, false);
-			await page.getByTestId("draft-start-chip").click();
+			await press(page.getByTestId("draft-start-chip"));
 			await expect(
 				page.getByRole("menuitem", { name: /Existing worktree/ }),
 			).toHaveAttribute("aria-disabled", "true");
@@ -292,21 +298,21 @@ for (const mode of [
 				throw new WorkspaceMoveError({ path: linked, reason: "missing" });
 			});
 			await page.locator("#input").fill("Keep this prompt");
-			await page.getByTestId("draft-start-chip").click();
-			await page
-				.getByRole("menuitem", { name: "Existing worktree", exact: true })
-				.click();
-			await page.getByRole("menuitemradio", { name: /feature\/draft/ }).click();
-			await page.locator("#send").click();
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
+			);
+			await press(page.getByRole("menuitemradio", { name: /feature\/draft/ }));
+			await press(page.locator("#send"));
 			await expect(
-				page.getByText(
-					"Could not start session: that worktree no longer exists",
-					{ exact: true },
-				),
+				page.getByText("Could not start session", { exact: true }),
+			).toBeVisible();
+			await expect(
+				page.getByText("That worktree no longer exists.", { exact: true }),
 			).toBeVisible();
 			await expect(page).toHaveURL(/\/new\?project=e2e-replay$/);
 			await expect(page.locator("#input")).toHaveValue("Keep this prompt");
-			expect(rpc.getRequests().some(({ tag }) => tag === "SendMessage")).toBe(
+			expect(rpc.getRequests().some(({ tag }) => tag === "input.submit")).toBe(
 				false,
 			);
 		});

@@ -13,12 +13,16 @@ import {
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
+import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import {
@@ -55,7 +59,6 @@ export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
@@ -71,7 +74,6 @@ export interface OrchestrationRuntimeLayerOptions {
 	) => void;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
@@ -128,9 +130,12 @@ const createOrchestrationComponentsEffect = (
 	never,
 	| Scope.Scope
 	| SqlClient.SqlClient
+	| PersistenceProjectTag
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
@@ -139,6 +144,7 @@ const createOrchestrationComponentsEffect = (
 		// the session binding read model and durable command receipts, so
 		// orchestration shares the relay's single database connection.
 		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
 		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
 			sql,
 		);
@@ -203,6 +209,7 @@ const createOrchestrationComponentsEffect = (
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			materializeSubagents,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),
@@ -223,13 +230,15 @@ const createOrchestrationComponentsEffect = (
 		// relay/UI snapshot or message history.
 		const durableCommands = {
 			sql,
-			snapshot: yield* new CommandReadModelRepository(sql)
+			snapshot: yield* new CommandReadModelRepository(sql, projectId)
 				.bootstrap()
 				.pipe(Effect.orDie),
-			projectKey: options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+			projectKey: projectId,
 			now: () => Date.now(),
 			generateId: () => `disp_${randomUUID()}`,
 			ingestion,
+			// A send_turn's input.sent projects and announces with its outbox row.
+			write: (yield* makeCommitAndSignal).write,
 			persistHandoffDelivered: persist.persistHandoffDelivered,
 		};
 		const engine = new OrchestrationEngine({
@@ -291,9 +300,12 @@ export const makeOrchestrationRuntimeLayer = (
 	never,
 	| OpenCodeAPITag
 	| SqlClient.SqlClient
+	| PersistenceProjectTag
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,
@@ -312,9 +324,6 @@ export const makeOrchestrationRuntimeLayer = (
 					? { workspaceRoot: options.workspaceRoot }
 					: {}),
 				extraFolders: options.extraFolders ?? [],
-				...(options.projectKey != null
-					? { projectKey: options.projectKey }
-					: {}),
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }

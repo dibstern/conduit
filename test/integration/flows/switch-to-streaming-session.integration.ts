@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -7,16 +7,14 @@ import {
 describe("Integration: Switch to Streaming Session", () => {
 	let harness: RelayHarness;
 
+	// No resetQueues() here: relay startup already consumed the recording's
+	// first POST /session, and re-arming it would hand Session B that same id.
 	beforeAll(async () => {
 		harness = await createRelayHarness();
 	}, 30_000);
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(() => {
-		harness.mock.resetQueues();
 	});
 
 	it("returns completed transcript content after switching away and back", async () => {

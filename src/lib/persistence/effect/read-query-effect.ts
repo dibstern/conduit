@@ -7,6 +7,8 @@ import {
 } from "../../contracts/limit-recovery.js";
 import { SessionWorkspaceSchema } from "../../contracts/session-workspace.js";
 import {
+	type InputRequest,
+	InputRequestSchema,
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
@@ -252,6 +254,9 @@ export const sessionRowsToSessionInfoList = (
 			...(unread ? { unread: true } : {}),
 			...(row.last_turn_end_version != null
 				? { lastTurnEndVersion: row.last_turn_end_version }
+				: {}),
+			...(row.last_turn_end_input_id != null
+				? { lastTurnEndInputId: row.last_turn_end_input_id }
 				: {}),
 			...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
 			limitRecovery:
@@ -555,7 +560,60 @@ export interface ReadQueryEffect {
 		TurnModelExecutionRow | undefined,
 		ReadQueryEffectError | SqlError
 	>;
+
+	/**
+	 * The session's pending inputs that moved inside `range`, oldest first.
+	 * Without `after` it is a base read: every input still pending, and no
+	 * removals. With it, inputs that left the tray come back as `removed`.
+	 * Pass `through` so the answer never runs ahead of the version the caller
+	 * reports.
+	 */
+	readonly readPendingInputs: (
+		sessionId: string,
+		range: { readonly after?: number; readonly through: number },
+	) => Effect.Effect<
+		{
+			readonly rows: readonly PendingInputRow[];
+			readonly removed: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
+		},
+		ReadQueryEffectError | SqlError
+	>;
+
+	/**
+	 * The session's inbox facts, computed on read. A queue is paused while
+	 * inputs wait behind a turn stopped or failed since the latest handoff,
+	 * or behind a usage limit's open cut-off; the next handoff, or the
+	 * cut-off's reply or dismissal, un-pauses it. `version` is the session row's, which
+	 * every turn end, prompt and pending-input write stamps. Undefined for a
+	 * session that has never held an input, which has no queue to pause and no
+	 * turn to steer into.
+	 */
+	readonly readInboxState: (sessionId: string) => Effect.Effect<
+		| {
+				readonly paused: boolean;
+				readonly promptOpen: boolean;
+				readonly provider: string;
+				readonly version: number;
+		  }
+		| undefined,
+		ReadQueryEffectError
+	>;
 }
+
+export interface PendingInputRow {
+	readonly inputId: string;
+	readonly state: "queued" | "steering";
+	readonly request: InputRequest;
+	readonly admittedAt: number;
+	readonly version: number;
+}
+
+const decodeInputRequest = Schema.decodeUnknown(
+	Schema.parseJson(InputRequestSchema),
+);
 
 export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 	ReadQueryEffectTag,
@@ -1518,6 +1576,85 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				),
 			);
 
+	const readInboxState = (sessionId: string) =>
+		sql<{
+			paused: number;
+			prompt_open: number;
+			provider: string;
+			version: number;
+		}>`
+			SELECT version, provider,
+				EXISTS (SELECT 1 FROM pending_inputs
+					WHERE session_id = ${sessionId} AND state = 'queued')
+				AND (EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
+					AND state IN ('interrupted', 'error')
+					AND completed_at >= COALESCE(
+						(SELECT MAX(requested_at) FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
+						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
+						0))
+					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
+				EXISTS (SELECT 1 FROM pending_approvals
+					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
+			FROM sessions WHERE id = ${sessionId}
+				AND EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId})`.pipe(
+			Effect.map(([row]) =>
+				row
+					? {
+							paused: row.paused === 1,
+							promptOpen: row.prompt_open === 1,
+							provider: row.provider,
+							version: row.version,
+						}
+					: undefined,
+			),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "readInboxState", cause }),
+			),
+		);
+
+	const readPendingInputs = (
+		sessionId: string,
+		range: { readonly after?: number; readonly through: number },
+	) =>
+		Effect.gen(function* () {
+			const floor = range.after ?? BEFORE_FIRST_VERSION;
+			const rows = yield* sql<{
+				input_id: string;
+				state: "queued" | "steering" | "removed";
+				request: string;
+				admitted_at: number;
+				version: number;
+			}>`
+				SELECT input_id, state, request, admitted_at, version FROM pending_inputs
+				WHERE session_id = ${sessionId}
+					AND version > ${floor} AND version <= ${range.through}
+				ORDER BY admitted_at, rowid`;
+			const live: PendingInputRow[] = [];
+			const removed: { id: string; version: number }[] = [];
+			for (const row of rows) {
+				if (row.state === "removed") {
+					if (range.after !== undefined)
+						removed.push({ id: `input:${row.input_id}`, version: row.version });
+					continue;
+				}
+				live.push({
+					inputId: row.input_id,
+					state: row.state,
+					request: yield* decodeInputRequest(row.request),
+					admittedAt: row.admitted_at,
+					version: row.version,
+				});
+			}
+			return { rows: live, removed };
+		}).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ReadQueryEffectError
+					? cause
+					: new ReadQueryEffectError({ operation: "readPendingInputs", cause }),
+			),
+		);
 	const readSessionTodos = (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
@@ -1642,5 +1779,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readSessionTranscript,
 		readSessionTodos,
 		getLatestTurnModelExecution,
+		readPendingInputs,
+		readInboxState,
 	} satisfies ReadQueryEffect;
 });

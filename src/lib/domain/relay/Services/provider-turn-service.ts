@@ -5,13 +5,13 @@ import type { EventStoreEffectTag } from "../../../persistence/effect/event-stor
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { CanonicalEvent } from "../../../persistence/events.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
 } from "./pending-interaction-service.js";
-import type { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
@@ -33,11 +33,8 @@ import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	OverridesStateTag,
-	PROCESSING_TIMEOUT_DURATION,
-	startProcessingTimeout,
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
-import { makeFailTurn } from "./turn-failure.js";
 
 export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
 
@@ -57,6 +54,10 @@ export interface ProviderTurnServiceSendInput {
 	readonly agent?: string;
 	readonly variant?: string;
 	readonly contextWindow?: string;
+	/** A steer joins the running turn, whose status and timeout already run. */
+	readonly steer?: boolean;
+	/** Committed with the handoff's outbox row, in one transaction. */
+	readonly events?: readonly CanonicalEvent[];
 }
 
 export interface ProviderTurnServicePrepareInput {
@@ -118,7 +119,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ConfigTag
 		| SessionManagerServiceTag
 		| PendingInteractionServiceTag
-		| PendingSendOwnershipTag
 		| OverridesStateTag
 		| OrchestrationEngineTag
 		| ReadQueryEffectTag
@@ -182,24 +182,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 				// A user may already have prepared before the switch acquired its
 				// hold. Wait again before routing; the switch's own turn owns the hold.
 				if (!input.continuation) yield* awaitStop(input.sessionId);
-				if (input.continuation) {
-					const failTurn = yield* makeFailTurn;
-					yield* startProcessingTimeout(
-						input.sessionId,
-						PROCESSING_TIMEOUT_DURATION,
-						() =>
-							failTurn(
-								input.sessionId,
-								"The continuation received no response. Try again.",
-								"PROCESSING_TIMEOUT",
-							),
-					);
-				}
+				// The handoff arms a non-steer turn's timeout; a failure that escapes
+				// the dispatch must not leave it to fire on an idle session.
 				yield* sendTurn(input).pipe(
 					Effect.onError(() =>
-						input.continuation
-							? clearProcessingTimeout(input.sessionId)
-							: Effect.void,
+						input.steer ? Effect.void : clearProcessingTimeout(input.sessionId),
 					),
 				);
 			}).pipe(Effect.provide(providedContext)),
@@ -234,7 +221,6 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| ConfigTag
 	| SessionManagerServiceTag
 	| PendingInteractionServiceTag
-	| PendingSendOwnershipTag
 	| OverridesStateTag
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag

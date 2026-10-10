@@ -43,7 +43,10 @@ export class TerminalServiceError extends Data.TaggedError(
 }> {}
 
 export interface OpenCodeTerminalService {
-	create(clientId: string): Effect.Effect<void, TerminalServiceError>;
+	create(
+		clientId: string,
+		cwd?: string,
+	): Effect.Effect<void, TerminalServiceError>;
 	/** Restore hosted PTYs, discover OpenCode's, and re-attach running ones. */
 	list(): Effect.Effect<PtyInfo[], TerminalServiceError>;
 	/** Every tracked PTY with its scrollback. Synchronous, so a subscriber can
@@ -85,6 +88,7 @@ export interface LocalPtyService {
 	): Effect.Effect<LocalPtySession, TerminalServiceError>;
 	create(options: {
 		readonly cwd: string;
+		readonly projectDir?: string;
 		readonly cols?: number | undefined;
 		readonly rows?: number | undefined;
 	}): Effect.Effect<LocalPtySession, TerminalServiceError>;
@@ -328,11 +332,16 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		}).pipe(terminalLock.withPermits(1));
 
 		return {
-			create: (clientId: string) =>
+			create: (clientId: string, cwd = config.projectDir) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
 					const createResult = yield* Effect.either(
-						localPty.create({ cwd: config.projectDir }),
+						localPty.create({
+							cwd,
+							...(cwd !== config.projectDir
+								? { projectDir: config.projectDir }
+								: {}),
+						}),
 					);
 					if (createResult._tag === "Left") {
 						log.warn(

@@ -42,6 +42,7 @@ const withStore = async <A>(
 		Layer.merge(
 			makePersistenceEffectLayer(
 				dbPath,
+				"test-project",
 				createAllEffectProjectors(),
 				silentBus,
 			),

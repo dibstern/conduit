@@ -3,6 +3,9 @@
 exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all canonical event types — breaks when new types added 1`] = `
 [
   "file.attached",
+  "input.admitted",
+  "input.cancelled",
+  "input.sent",
   "message.created",
   "message.part.removed",
   "message.removed",
@@ -40,6 +43,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.usage_limited",
   "session.variant_changed",
   "session.workspace_changed",
+  "session.workspace_started",
   "text.delta",
   "thinking.delta",
   "thinking.end",

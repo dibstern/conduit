@@ -104,7 +104,7 @@ export interface WsMockOptions {
 
 	/**
 	 * Map of user-message-text → response messages.
-	 * When the frontend sends a SendMessage RPC, we match the text
+	 * When the frontend sends an input.submit RPC, we match the text
 	 * and send back the corresponding response sequence.
 	 */
 	responses: Map<string, MockMessage[]>;
@@ -238,7 +238,11 @@ export class WsMockControl {
 
 	/** Update RPC projection state, with or without a connected client. */
 	sendMessage(msg: MockMessage): void {
-		if (msg.type === "mock_transcript_snapshot") {
+		if (
+			msg.type === "mock_transcript_snapshot" ||
+			msg.type === "mock_pending_input" ||
+			msg.type === "mock_pending_input_removed"
+		) {
 			projectLegacyRelayMessage(this.page, msg);
 			return;
 		}
@@ -264,12 +268,15 @@ export class WsMockControl {
 			const status = OPENCODE_CONNECTION_STATES.find(
 				(state) => state === msg["status"],
 			);
-			if (status)
-				sendMockProjectSetting(this.page, {
-					_tag: "opencodeConnection",
-					instanceId: "opencode",
-					status,
-				});
+			if (!status)
+				throw new Error(
+					`Unsupported connection_status: ${JSON.stringify(msg["status"])}`,
+				);
+			sendMockProjectSetting(this.page, {
+				_tag: "opencodeConnection",
+				instanceId: "opencode",
+				status,
+			});
 			return;
 		}
 		const modelState = legacyModelState(msg);

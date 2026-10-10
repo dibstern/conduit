@@ -5,10 +5,6 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import {
-	PendingSendOwnershipLive,
-	PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -37,6 +33,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -67,7 +64,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		const client = makeHandlerOpenCodeAPI({
 			session: { prompt: vi.fn(async () => undefined) },
 		});
-		const persistence = makePersistenceEffectLayer(":memory:");
+		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const layer = Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
@@ -81,7 +78,6 @@ describe("prompt processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
@@ -89,7 +85,16 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
 				Layer.succeed(
 					OrchestrationEngineTag,
-					withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.never) }),
+					withDispatchEffect({
+						dispatchEffect: vi.fn(
+							(command: { onAccepted?: Effect.Effect<void> }) =>
+								// The engine commits the handoff, then the turn runs on.
+								Effect.zipRight(
+									command.onAccepted ?? Effect.void,
+									Effect.never,
+								),
+						),
+					}),
 				),
 			),
 		);
@@ -103,16 +108,7 @@ describe("prompt processing timeouts through Effect state", () => {
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 			yield* TestClock.adjust("120 seconds");
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			const ownership = yield* PendingSendOwnershipTag;
-			ownership.register("session-1", {
-				commandId: "cmd-next-send",
-				originId: "origin-next-send",
-				text: "next message",
-			});
-			expect(
-				ownership.resolve("session-1", "next-provider-message", "next message"),
-			).toBe("origin-next-send");
-		}).pipe(Effect.provide(layer));
+		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
 
 	it.effect(
@@ -122,7 +118,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			const client = makeHandlerOpenCodeAPI({
 				session: { abort: vi.fn(async () => undefined) },
 			});
-			const persistence = makePersistenceEffectLayer(":memory:");
+			const persistence = makePersistenceEffectLayer(
+				":memory:",
+				"test-project",
+			);
 			const baseLayer = Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
@@ -134,7 +133,6 @@ describe("prompt processing timeouts through Effect state", () => {
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
-				PendingSendOwnershipLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),

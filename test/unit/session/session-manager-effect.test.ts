@@ -8,7 +8,6 @@ import { expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -96,9 +95,8 @@ describe("SessionManager Effect", () => {
 		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 		return Layer.mergeAll(
 			makeSessionManagerStateLive(),
-			PendingSendOwnershipLive,
 			Layer.succeed(OpenCodeAPITag, mockApi),
-			makePersistenceEffectLayer(":memory:"),
+			makePersistenceEffectLayer(":memory:", "test-project"),
 			configLayer,
 			loggerLayer,
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
@@ -119,7 +117,10 @@ describe("SessionManager Effect", () => {
 		configDir?: string,
 		projectors?: readonly EffectProjector[],
 	) => {
-		const persistenceLayer = makePersistenceEffectLayer(filename);
+		const persistenceLayer = makePersistenceEffectLayer(
+			filename,
+			"test-project",
+		);
 		const projectionRunnerOverride = projectors
 			? Layer.effect(
 					ProjectionRunnerEffectTag,
@@ -581,6 +582,8 @@ describe("SessionManager Effect", () => {
 					Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 				),
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -633,7 +636,7 @@ describe("SessionManager Effect", () => {
 					"full",
 				);
 			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename)),
+				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -666,7 +669,7 @@ describe("SessionManager Effect", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.merge(
-						makePersistenceEffectLayer(filename),
+						makePersistenceEffectLayer(filename, "test-project"),
 						Layer.fresh(makeOverridesStateLive()),
 					),
 				),

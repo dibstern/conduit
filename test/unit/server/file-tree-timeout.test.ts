@@ -4,15 +4,21 @@ import { Cause, Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import { GetFileTree } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeFileServiceTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { getFileTreeEntries } from "../../../src/lib/handlers/files.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
-import { makeMockLogger } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeMockLogger,
+} from "../../helpers/mock-factories.js";
 
 describe("file tree time limits", () => {
 	it.effect("preserves breadth-first order and gitignore filtering", () =>
@@ -164,6 +170,11 @@ describe("file tree time limits", () => {
 					list,
 					read: () => Effect.succeed({ content: "" }),
 				}),
+				Effect.provideService(ConfigTag, makeMockConfig()),
+				Effect.provide(AlertsLive),
+				Effect.provide(
+					makePersistenceEffectLayer(":memory:", "private-project"),
+				),
 			);
 		},
 	);

@@ -31,6 +31,7 @@ function makeStored<T extends StoredEvent["type"]>(
 ): StoredEvent {
 	return {
 		sequence,
+		projectId: "test-project",
 		streamVersion: sequence - 1,
 		eventId: createEventId(),
 		sessionId,
@@ -137,6 +138,7 @@ describe("TurnProjector", () => {
 				...recorded,
 				eventId: `recorded-${recorded.sequence}`,
 				sessionId,
+				projectId: "test-project",
 				streamVersion: index,
 				metadata: {},
 			} as StoredEvent;
@@ -327,7 +329,7 @@ describe("TurnProjector", () => {
 			expect(row?.started_at).toBe(now + 200);
 		});
 
-		it("ignores non-busy status changes", async () => {
+		it("settles a prompt still waiting for its reply on idle", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -358,8 +360,9 @@ describe("TurnProjector", () => {
 			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row?.state).toBe("pending");
+			expect(row?.state).toBe("completed");
 			expect(row?.started_at).toBeNull();
+			expect(row?.completed_at).toBe(now + 200);
 		});
 	});
 
@@ -527,6 +530,11 @@ describe("TurnProjector", () => {
 				        ('latest', 's1', ?, ?, ?, ?, 'a1')`,
 				[now, state, now, now + 1, now + 2],
 			);
+			// The tool belongs to the turn's reply; one no turn owns cannot reopen it.
+			await harness.query(
+				"INSERT INTO messages (id, session_id, role, turn_id, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 'latest', ?, ?)",
+				[now + 1, now + 1],
+			);
 			const activity =
 				resume === "busy"
 					? makeStored("session.status", "s1", {
@@ -639,27 +647,36 @@ describe("TurnProjector", () => {
 			expect(row?.completed_at).toBe(now + 3000);
 		});
 
-		it("ends the running turn when messageId matches nothing, leaving queued prompts pending", async () => {
-			await projectRunningWithQueued();
+		it("ends the running turn when messageId matches nothing, leaving settled turns alone", async () => {
+			await projectSteered();
+			await project(
+				makeStored(
+					"session.status",
+					"s1",
+					{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
+					4,
+					now + 150,
+				),
+			);
 			await project(
 				makeStored(
 					"turn.error",
 					"s1",
 					{ messageId: "", error: "boom" } satisfies TurnErrorPayload,
-					4,
+					5,
 					now + 3000,
 				),
 			);
 
 			expect(await turnStates()).toEqual({
-				user_m1: "error",
-				user_m2: "pending",
+				user_m1: "completed",
+				user_m2: "error",
 			});
 		});
 	});
 
-	/** user_m1 running, user_m2 queued behind it. */
-	const projectRunningWithQueued = async () => {
+	/** user_m1 running, then user_m2 steered in: its message closes user_m1. */
+	const projectSteered = async () => {
 		await project(
 			makeStored(
 				"message.created",
@@ -755,7 +772,7 @@ describe("TurnProjector", () => {
 			expect(row?.completed_at).toBe(now + 2000);
 		});
 
-		it("falls back to the running turn when messageId matches nothing", async () => {
+		it("falls back to the session's open turn when messageId matches nothing", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -838,8 +855,8 @@ describe("TurnProjector", () => {
 			expect(row?.state).toBe("pending");
 		});
 
-		it("stops prompts queued behind the running turn", async () => {
-			await projectRunningWithQueued();
+		it("stops the open turn when the id is empty, leaving settled turns alone", async () => {
+			await projectSteered();
 			await project(
 				makeStored(
 					"turn.interrupted",
@@ -851,7 +868,7 @@ describe("TurnProjector", () => {
 			);
 
 			expect(await turnStates()).toEqual({
-				user_m1: "interrupted",
+				user_m1: "completed",
 				user_m2: "interrupted",
 			});
 		});

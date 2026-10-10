@@ -11,6 +11,7 @@ import { Effect, Layer, Logger } from "effect";
 import { expect } from "vitest";
 import {
 	makePersistenceServiceLive,
+	PersistenceProjectTag,
 	PersistenceServiceTag,
 	withTransaction,
 } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -20,6 +21,12 @@ import {
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
+
+const testPersistenceServiceLive = makePersistenceServiceLive.pipe(
+	Layer.provide(
+		Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+	),
+);
 
 function makeTestSqlLayer(setup?: (filename: string) => void) {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-persistence-effect-"));
@@ -57,7 +64,7 @@ function makeReadonlySqlLayer() {
 
 function makePersistenceLayer(setup?: (filename: string) => void) {
 	return Layer.provideMerge(
-		makePersistenceServiceLive,
+		testPersistenceServiceLive,
 		makeTestSqlLayer(setup),
 	);
 }
@@ -141,6 +148,7 @@ describe("Persistence Effect", () => {
 					"message_tombstones",
 					"messages",
 					"pending_approvals",
+					"pending_inputs",
 					"projection_failures",
 					"projector_cursors",
 					"provider_command_interactions",
@@ -234,6 +242,7 @@ describe("Persistence Effect", () => {
 				"metadata",
 				"provider",
 				"created_at",
+				"project_id",
 			]);
 			const turnColumns = yield* sql<{ name: string }>`
 				PRAGMA table_info(turns)`;
@@ -290,6 +299,11 @@ describe("Persistence Effect", () => {
 				{ migration_id: 38, name: "session_sidebar" },
 				{ migration_id: 39, name: "session_sidebar_tombstones" },
 				{ migration_id: 40, name: "sessions_workspace" },
+				{ migration_id: 41, name: "messages_input_id" },
+				{ migration_id: 42, name: "pending_inputs" },
+				{ migration_id: 43, name: "messages_steered" },
+				{ migration_id: 44, name: "sessions_last_turn_end_input_id" },
+				{ migration_id: 45, name: "project_provenance" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -321,7 +335,7 @@ describe("Persistence Effect", () => {
 		}).pipe(
 			Effect.provide(
 				Layer.provideMerge(
-					makePersistenceServiceLive,
+					testPersistenceServiceLive,
 					EffectSqliteClient.layer({ filename: ":memory:" }),
 				),
 			),
@@ -354,7 +368,7 @@ describe("Persistence Effect", () => {
 				const filename = join(dir, "events.db");
 				seedDatabase(filename, seedTrippedDatabase);
 				const layer = Layer.provideMerge(
-					makePersistenceServiceLive,
+					testPersistenceServiceLive,
 					EffectSqliteClient.layer({ filename }),
 				);
 
@@ -472,7 +486,7 @@ describe("Persistence Effect", () => {
 				}).pipe(
 					Effect.provide(
 						Layer.provideMerge(
-							makePersistenceServiceLive,
+							testPersistenceServiceLive,
 							EffectSqliteClient.layer({ filename }),
 						),
 					),
@@ -491,7 +505,7 @@ describe("Persistence Effect", () => {
 				}).pipe(
 					Effect.provide(
 						Layer.provideMerge(
-							makePersistenceServiceLive,
+							testPersistenceServiceLive,
 							makeReadonlySqlLayer(),
 						),
 					),

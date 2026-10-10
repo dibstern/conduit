@@ -29,6 +29,7 @@ describe("Schema Migration", () => {
 				"message_tombstones",
 				"messages",
 				"pending_approvals",
+				"pending_inputs",
 				"projection_failures",
 				"projector_cursors",
 				"provider_command_interactions",
@@ -121,6 +122,7 @@ describe("Schema Migration", () => {
 					table: "message_tombstones",
 					unique: false,
 				},
+				{ name: "idx_messages_input_id", table: "messages", unique: false },
 				{
 					name: "idx_messages_session_created",
 					table: "messages",
@@ -141,6 +143,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_pending_approvals_version",
 					table: "pending_approvals",
+					unique: false,
+				},
+				{
+					name: "idx_pending_inputs_session_version",
+					table: "pending_inputs",
 					unique: false,
 				},
 				{
@@ -227,6 +234,7 @@ describe("Schema Migration", () => {
 				"metadata",
 				"provider",
 				"created_at",
+				"project_id",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
 	);

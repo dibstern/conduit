@@ -23,7 +23,10 @@ describe("CommandReadModelRepository", () => {
 					VALUES (42, 'evt-42', 'session-2', 0, 'session.created', '{}', 'claude', 2000)`;
 
 				const queries: string[] = [];
-				const snapshot = yield* new CommandReadModelRepository(sql)
+				const snapshot = yield* new CommandReadModelRepository(
+					sql,
+					"test-project",
+				)
 					.bootstrap()
 					.pipe(
 						Statement.withTransformer((statement) =>
@@ -55,6 +58,8 @@ describe("CommandReadModelRepository", () => {
 				expect(queryText).not.toMatch(
 					/\b(sessions|messages|message_parts|turns|pending_approvals)\b/,
 				);
-			}).pipe(Effect.provide(makePersistenceEffectLayer(":memory:"))),
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 });

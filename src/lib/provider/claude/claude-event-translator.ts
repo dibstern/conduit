@@ -8,7 +8,7 @@
  * the ClaudeSessionContext passed in. This keeps a single translator
  * usable across many concurrent sessions.
  *
- * Event type mappings use EXISTING canonical types only:
+ * Event type mappings include:
  *   text.delta (text) or thinking.delta (thinking)
  *   tool.started (tool_use, text, thinking block starts)
  *   tool.running (input_json_delta on fingerprint change)
@@ -17,6 +17,7 @@
  *   session.status (system init, status updates)
  *   session.compaction (compaction progress and results)
  *   turn.completed (result)
+ *   workspace.changed (startup cwd, declared worktree results)
  *
  * All payloads match the EventPayloadMap interfaces.
  */
@@ -69,7 +70,7 @@ function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	sessionId: string,
 	data: EventPayloadMap[K],
 	metadata?: Readonly<Record<string, unknown>>,
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: createEventId(),
 		type,
@@ -505,6 +506,11 @@ export class ClaudeEventTranslator {
 			switch (message.type) {
 				case "active_goal":
 					return;
+				case "command_lifecycle":
+					// A started input is answered by a new assistant message, even
+					// when the SDK folds it into a turn that is still streaming.
+					if (message.state === "started") this.currentAssistantMessageId = "";
+					return;
 				case "system":
 					return yield* this.translateSystem(ctx, message);
 				case "stream_event":
@@ -588,6 +594,10 @@ export class ClaudeEventTranslator {
 					// time the main agent resumed after a subagent (this is the
 					// only status the main chain emits while blocked on a Task).
 					// Only an explicit null status means "no operation".
+					// A turn in flight is still working, though: the SDK also sends
+					// a bare null status mid-turn when the permission mode changes,
+					// and endTurn reports the turn's real idle.
+					if (message.status !== "requesting" && ctx.turnInFlight) return;
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent("session.status", ctx.sessionId, {
@@ -745,11 +755,19 @@ export class ClaudeEventTranslator {
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
 						);
 					}
-					// init lands ~1s after the prompt starts, so reporting idle
-					// unconditionally blanks the bounce bar and the sidebar dot at
-					// the top of every first turn. It is still the only thing that
-					// clears a busy status stranded by a crash mid-turn, so keep it
-					// for the case where no turn is actually running.
+					const cwd = message.cwd;
+					const validCwd = cwd.length > 0 && cwd === cwd.trim();
+					if (!ctx.workspaceStartReported && validCwd) {
+						ctx.workspaceStartReported = true;
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+								path: cwd,
+								source: "start",
+							}),
+						);
+					}
+					// A startup without a running turn clears status stranded by a crash.
 					if (!ctx.turnInFlight) {
 						yield* this.push(
 							ctx,
@@ -1147,16 +1165,7 @@ export class ClaudeEventTranslator {
 			// back to its own per-block UUID — creating dozens of separate messages
 			// in the persistence layer instead of one cohesive assistant message.
 			const msgId = event.message.id;
-			// A queued prompt was enqueued mid-turn (the SDK keeps one streaming
-			// turn open across queued sends, so no `result` reset happens): the
-			// next API round answers the queued message — start a fresh
-			// assistant message instead of merging into the previous one.
-			const boundary =
-				ctx.pendingAssistantBoundary === true &&
-				Boolean(msgId) &&
-				msgId !== this.currentAssistantMessageId;
-			if (boundary) ctx.pendingAssistantBoundary = false;
-			if (msgId && (boundary || !this.currentAssistantMessageId)) {
+			if (msgId && !this.currentAssistantMessageId) {
 				this.currentAssistantMessageId = msgId;
 				// Emit message.created so MessageProjector creates the row
 				// and TurnProjector can link the turn to its assistant message.
@@ -1444,16 +1453,7 @@ export class ClaudeEventTranslator {
 			}
 
 			const snapshotId = this.assistantSnapshotMessageId(message);
-			let messageId: string;
-			if (
-				ctx.pendingAssistantBoundary === true &&
-				snapshotId !== this.currentAssistantMessageId
-			) {
-				ctx.pendingAssistantBoundary = false;
-				messageId = snapshotId;
-			} else {
-				messageId = this.currentAssistantMessageId || snapshotId;
-			}
+			const messageId = this.currentAssistantMessageId || snapshotId;
 			this.currentAssistantMessageId = messageId;
 			// A turn with partial messages has already opened this scope from
 			// `message_start`, so this is a no-op there; a turn without them
@@ -1507,6 +1507,10 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
+			const singleToolResult =
+				content.filter(
+					(block) => typeof block !== "string" && block.type === "tool_result",
+				).length === 1;
 
 			for (const block of content) {
 				if (typeof block === "string") continue;
@@ -1527,6 +1531,34 @@ export class ClaudeEventTranslator {
 				if (!matchedTool || matchedIndex === undefined) continue;
 
 				const resultContent = serializeToolResultContent(block.content);
+				const entered = matchedTool.toolName === "EnterWorktree";
+				const workspaceTool =
+					entered || matchedTool.toolName === "ExitWorktree";
+				if (
+					workspaceTool &&
+					!singleToolResult &&
+					message.parent_tool_use_id == null &&
+					!block.is_error
+				) {
+					(this.deps.logger ?? defaultLog).warn(
+						`Claude ${matchedTool.toolName} workspace result was not applied: multiple tool results in one message; session=${ctx.sessionId} call=${toolUseId}`,
+					);
+				}
+				const result = message.tool_use_result;
+				const reportedPath =
+					workspaceTool &&
+					singleToolResult &&
+					message.parent_tool_use_id == null &&
+					!block.is_error &&
+					isRecord(result)
+						? result[entered ? "worktreePath" : "originalCwd"]
+						: undefined;
+				const path =
+					typeof reportedPath === "string" &&
+					reportedPath.length > 0 &&
+					reportedPath === reportedPath.trim()
+						? reportedPath
+						: undefined;
 
 				if (resultContent.length > 0) {
 					yield* this.push(
@@ -1548,6 +1580,15 @@ export class ClaudeEventTranslator {
 					}),
 				);
 				ctx.inFlightTools.delete(matchedIndex);
+				if (path !== undefined) {
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+							path,
+							source: "tool",
+						}),
+					);
+				}
 			}
 		});
 	}
@@ -1565,7 +1606,10 @@ export class ClaudeEventTranslator {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
 			}
 			yield* this.settleGoal(ctx);
-			if (isInterruptedResult(result)) {
+			if (
+				isInterruptedResult(result) ||
+				(ctx.interruptRequested && result.subtype !== "success")
+			) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.push(
 					ctx,
@@ -1689,6 +1733,13 @@ export class ClaudeEventTranslator {
 				makeProviderRuntimeEvent("turn.completed", ctx.sessionId, {
 					messageId:
 						this.currentAssistantMessageId || ctx.lastAssistantUuid || "",
+					// SDK-local work (/compact, a slash command) ends with a bare
+					// result and no assistant message of its own, so messageId
+					// above names the previous turn's answer. Key the completion
+					// to the prompt this result answers so that turn settles.
+					...(!this.currentAssistantMessageId && ctx.currentUserMessageId
+						? { userMessageId: ctx.currentUserMessageId }
+						: {}),
 					cost: result.total_cost_usd,
 					tokens,
 					duration: result.duration_ms,

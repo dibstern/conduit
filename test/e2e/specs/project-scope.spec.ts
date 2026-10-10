@@ -396,7 +396,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		.poll(() =>
 			control.rpc
 				.getRequests()
-				.filter((request) => request.tag === "SendMessage"),
+				.filter((request) => request.tag === "input.submit"),
 		)
 		.toHaveLength(1);
 });

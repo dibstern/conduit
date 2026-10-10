@@ -11,6 +11,7 @@ import {
 } from "../daemon/config-persistence.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import {
 	type ClaudeSettingsChildRunner,
 	resolveClaudeSettingsFromDisk,
@@ -69,7 +70,10 @@ export const setClaudeSettingsForRelay = (input: {
 	});
 
 export const resolveClaudeSettingsForInstance = (
-	input: { readonly instanceId: string },
+	input: {
+		readonly instanceId: string;
+		readonly sessionId?: string | undefined;
+	},
 	runChild?: ClaudeSettingsChildRunner,
 ) =>
 	Effect.gen(function* () {
@@ -84,9 +88,13 @@ export const resolveClaudeSettingsForInstance = (
 			});
 		}
 
+		const primaryFolder = config.projectDir;
+		const workspaceRoot = input.sessionId
+			? yield* (yield* SessionWorkspaceTag).get(input.sessionId)
+			: primaryFolder;
 		return yield* resolveClaudeSettingsFromDisk(
 			{
-				workspaceRoot: config.projectDir,
+				workspaceRoot,
 				configDir: resolveClaudeInstanceConfigDir(
 					daemonConfig,
 					input.instanceId,

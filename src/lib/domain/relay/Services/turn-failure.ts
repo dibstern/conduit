@@ -24,13 +24,15 @@ export const makeFailTurn = Effect.gen(function* () {
 		sessionId: string,
 		error: string,
 		code: string,
+		/** The failed send's user message, so a turn that never ran ends too. */
+		userMessageId?: string,
 	): Effect.Effect<void> => {
 		const errorId = createEventId();
-		const event = (
+		const event = <K extends ProviderRuntimeEvent["type"]>(
 			eventId: string,
-			type: ProviderRuntimeEvent["type"],
+			type: K,
 			data: Record<string, unknown>,
-		): ProviderRuntimeEvent => ({
+		) => ({
 			eventId,
 			type,
 			providerId: "conduit",
@@ -44,7 +46,12 @@ export const makeFailTurn = Effect.gen(function* () {
 			.ingestBatch([
 				// Its own id: no assistant message of this turn may exist, and the
 				// mapper would otherwise fall back to the previous turn's.
-				event(errorId, "turn.error", { messageId: errorId, error, code }),
+				event(errorId, "turn.error", {
+					messageId: errorId,
+					error,
+					code,
+					...(userMessageId ? { userMessageId } : {}),
+				}),
 				event(createEventId(), "session.status", { sessionId, status: "idle" }),
 			])
 			.pipe(

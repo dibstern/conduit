@@ -16,6 +16,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	MOCK_PROJECT_DIR,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -65,7 +66,11 @@ const runTest = <E>(
 		const discover = vi
 			.spyOn(engine, "dispatchEffect")
 			.mockImplementation((command) => {
-				expect(command).toEqual({ type: "discover", providerId: "claude" });
+				expect(command).toEqual({
+					type: "discover",
+					providerId: "claude",
+					workspaceRoot: MOCK_PROJECT_DIR,
+				});
 				return options.discoveryFails
 					? Effect.fail(
 							new ProviderInstanceFailure({
@@ -106,7 +111,11 @@ const runTest = <E>(
 					Layer.provideMerge(
 						// RpcTest requests inherit these services as well as handler context.
 						Layer.merge(
-							makeTestHandlerLayer({ api, orchestrationEngine: engine }),
+							makeTestHandlerLayer({
+								api,
+								orchestrationEngine: engine,
+								readQueryEffect,
+							}),
 							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
 						),
 					),

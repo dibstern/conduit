@@ -336,6 +336,8 @@ export const SessionInfoSchema = Schema.Struct({
 	unread: Schema.optional(Schema.Boolean),
 	/** Stream version of the latest turn end; what a sidebar pick reports as seen. */
 	lastTurnEndVersion: Schema.optional(Schema.Number),
+	/** The send whose turn ended at `lastTurnEndVersion`, when known. */
+	lastTurnEndInputId: Schema.optional(Schema.String),
 	settledAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
@@ -488,6 +490,10 @@ export interface HistoryMessage {
 	role: "user" | "assistant";
 	/** True when reconstructed from provider REST history rather than observed live. */
 	isBackfilled?: boolean;
+	/** The browser send a user message was placed for. */
+	inputId?: string;
+	/** A user message the provider read mid-turn, closing the turn it joined. */
+	steered?: boolean;
 	parts?: HistoryMessagePart[];
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
