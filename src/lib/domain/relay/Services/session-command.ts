@@ -249,13 +249,11 @@ export const applySessionCommand = (
 			);
 		}
 
-		const defaultAdapter =
-			row !== undefined && isClaudeSessionRow(row, config.configDir)
-				? claudeUpstreamAdapter
-				: openCodeUpstreamAdapter(api);
 		const adapter =
 			options.upstreamAdapter === undefined
-				? defaultAdapter
+				? row !== undefined && isClaudeSessionRow(row, config.configDir)
+					? claudeUpstreamAdapter
+					: openCodeUpstreamAdapter(api)
 				: options.upstreamAdapter;
 
 		if (adapter !== null)

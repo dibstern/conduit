@@ -3,6 +3,7 @@ import {
 	type ContinuationReason,
 	ContinuationReasonSchema,
 } from "./limit-recovery.js";
+import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
@@ -62,6 +63,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.created",
 	"session.renamed",
 	"session.workspace_changed",
+	"session.workspace_started",
 	"session.read",
 	"session.unread",
 	"session.settled",
@@ -368,6 +370,12 @@ export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
 }
 
+/** The runner's reported startup folder, independent of recorded workspace moves. */
+export interface SessionWorkspaceStartedPayload {
+	readonly sessionId: string;
+	readonly path: string;
+}
+
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
 }
@@ -553,6 +561,7 @@ export interface QuestionResolvedPayload {
  * Map from event type to its payload shape.
  */
 export interface EventPayloadMap {
+	"workspace.changed": ProviderWorkspaceChangedData;
 	"message.created": MessageCreatedPayload;
 	"message.removed": MessageRemovedPayload;
 	"message.part.removed": MessagePartRemovedPayload;
@@ -580,6 +589,7 @@ export interface EventPayloadMap {
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
+	"session.workspace_started": SessionWorkspaceStartedPayload;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
 	"session.settled": SessionSettledPayload;
@@ -979,6 +989,11 @@ export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	...SessionWorkspaceSchema.fields,
 });
 
+const SessionWorkspaceStartedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	path: Schema.String,
+});
+
 const SessionReadPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 });
@@ -1268,6 +1283,10 @@ const SessionWorkspaceChangedEventSchema = eventEnvelope(
 	"session.workspace_changed",
 	SessionWorkspaceChangedPayloadSchema,
 );
+const SessionWorkspaceStartedEventSchema = eventEnvelope(
+	"session.workspace_started",
+	SessionWorkspaceStartedPayloadSchema,
+);
 const SessionReadEventSchema = eventEnvelope(
 	"session.read",
 	SessionReadPayloadSchema,
@@ -1415,6 +1434,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionWorkspaceChangedEventSchema,
+	SessionWorkspaceStartedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
 	SessionSettledEventSchema,

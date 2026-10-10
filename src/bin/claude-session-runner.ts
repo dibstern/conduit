@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, chmodSync } from "node:fs";
+import { appendFileSync, chmodSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -476,6 +476,40 @@ const main = Effect.gen(function* () {
 										},
 									},
 									(output) => {
+										if (
+											output.type === "event" &&
+											output.event.type === "workspace.changed" &&
+											snapshot
+										) {
+											let workspaceRoot = output.event.data.path;
+											try {
+												workspaceRoot = realpathSync(workspaceRoot);
+											} catch {
+												// The relay validates folders. Retain the actual reported cwd
+												// for restart comparison if the directory has disappeared.
+											}
+											if (workspaceRoot !== snapshot.input.workspaceRoot) {
+												const workspaceDirectories =
+													snapshot.workspaceDirectories ?? [
+														snapshot.input.workspaceRoot,
+														...(snapshot.input.extraFolders ?? []),
+													];
+												snapshot = {
+													...snapshot,
+													workspacePreviousRoot: snapshot.input.workspaceRoot,
+													workspaceDirectories,
+													input: { ...snapshot.input, workspaceRoot },
+													options: {
+														...snapshot.options,
+														cwd: workspaceRoot,
+														additionalDirectories: workspaceDirectories.filter(
+															(folder) => folder !== workspaceRoot,
+														),
+													},
+												};
+												if (frozenSnapshot) frozenSnapshot = snapshot;
+											}
+										}
 										if (output.type === "background-task") {
 											backgroundSnapshot =
 												output.transition.kind === "snapshot" &&
@@ -646,6 +680,19 @@ const main = Effect.gen(function* () {
 						if (command.type === "pre-warm" && command.settingsSnapshot)
 							frozenSnapshot = command.settingsSnapshot;
 						const input = command.input;
+						if (
+							snapshot?.workspacePreviousRoot !== undefined &&
+							snapshot.input.workspaceRoot === input.workspaceRoot
+						) {
+							const { workspacePreviousRoot: _previousRoot, ...launch } =
+								snapshot;
+							const extraFolders = input.extraFolders ?? [];
+							snapshot = {
+								...launch,
+								input: { ...launch.input, extraFolders },
+							};
+							if (frozenSnapshot) frozenSnapshot = snapshot;
+						}
 						launchInput = {
 							sessionId: input.sessionId,
 							workspaceRoot: input.workspaceRoot,

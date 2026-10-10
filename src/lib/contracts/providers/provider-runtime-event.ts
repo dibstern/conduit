@@ -45,6 +45,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"session.permission_mode_changed",
 	"session.goal_changed",
 	"session.usage_limited",
+	"workspace.changed",
 	"permission.asked",
 	"permission.resolved",
 	"question.asked",
@@ -173,20 +174,43 @@ const hasOnlyProviderRuntimeEventEnvelopeKeys = (value: unknown) =>
 	REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS.every((key) => hasOwnKey(value, key)) &&
 	Object.keys(value).every((key) => providerRuntimeEventEnvelopeKeys.has(key));
 
-const ProviderRuntimeEventEnvelopeSchema = Schema.Struct({
+const ProviderRuntimeEventEnvelopeFields = {
 	eventId: NonBlankString,
-	type: ProviderRuntimeEventTypeSchema,
 	providerId: NonBlankString,
 	sessionId: NonBlankString,
 	turnId: Schema.optional(NonBlankString),
 	providerRefs: ProviderRuntimeProviderRefsSchema,
 	rawSource: ProviderRuntimeRawSourceSchema,
 	createdAt: ProviderRuntimeCreatedAtSchema,
-	data: RequiredUnknown,
 	metadata: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
+};
+
+export const ProviderWorkspaceChangedDataSchema = Schema.Struct({
+	path: NonBlankString,
+	source: Schema.Literal("tool", "start"),
 });
+export type ProviderWorkspaceChangedData = Schema.Schema.Type<
+	typeof ProviderWorkspaceChangedDataSchema
+>;
+
+const ProviderRuntimeEventEnvelopeSchema = Schema.Union(
+	Schema.Struct({
+		...ProviderRuntimeEventEnvelopeFields,
+		type: Schema.Literal("workspace.changed"),
+		data: ProviderWorkspaceChangedDataSchema,
+	}),
+	Schema.Struct({
+		...ProviderRuntimeEventEnvelopeFields,
+		type: Schema.Literal(
+			...PROVIDER_RUNTIME_EVENT_TYPES.filter(
+				(type) => type !== "workspace.changed",
+			),
+		),
+		data: RequiredUnknown,
+	}),
+);
 
 export const ProviderRuntimeEventSchema = Schema.Unknown.pipe(
 	Schema.filter(hasOnlyProviderRuntimeEventEnvelopeKeys),

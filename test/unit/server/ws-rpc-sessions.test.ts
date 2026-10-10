@@ -10,8 +10,10 @@ import { expect, vi } from "vitest";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
@@ -146,6 +148,48 @@ describe("WsRpcServerLayer ListSessions", () => {
 			),
 		);
 	});
+
+	it.scoped(
+		"preserves an unavailable instance's cause in the CreateSession error without auth details",
+		() => {
+			const cause = Object.assign(
+				new OpenCodeUnavailable({
+					instanceId: "work-oc",
+					reason: "unreachable",
+					message:
+						'OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused',
+				}),
+				{
+					authHeaders: { Authorization: "Basic private-auth-header" },
+					password: "private-instance-password",
+				},
+			);
+			const layer = makeTestHandlerLayer({
+				sessionManagerService: makeMockSessionManagerService({
+					createSession: () =>
+						Effect.fail(
+							new SessionManagerError({ operation: "createSession", cause }),
+						),
+				}),
+			});
+
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				const error = yield* Effect.flip(
+					client.CreateSession({
+						projectSlug: "project-a",
+						originId: "browser-tab-a",
+						instanceId: ProviderInstanceIdSchema.make("work-oc"),
+						providerId: "opencode",
+					}),
+				);
+				expect(error.message).toBe(`CreateSession failed: ${cause.message}`);
+				expect(error.message).not.toMatch(
+					/Authorization|private-auth-header|private-instance-password/,
+				);
+			}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+		},
+	);
 
 	it.effect("views a session for the originating browser tab", () => {
 		const wsHandler = makeMockWebSocketHandler();

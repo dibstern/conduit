@@ -787,12 +787,12 @@ export function opencodeSessionCreatedRuntimeEvent(
 	};
 }
 
-function opencodeRuntimeEvent(
-	type: ProviderRuntimeEvent["type"],
+function opencodeRuntimeEvent<K extends ProviderRuntimeEvent["type"]>(
+	type: K,
 	sessionId: string,
 	source: SSEEvent,
 	data: Record<string, unknown>,
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: createEventId(),
 		type,

@@ -8,7 +8,7 @@
  * the ClaudeSessionContext passed in. This keeps a single translator
  * usable across many concurrent sessions.
  *
- * Event type mappings use EXISTING canonical types only:
+ * Event type mappings include:
  *   text.delta (text) or thinking.delta (thinking)
  *   tool.started (tool_use, text, thinking block starts)
  *   tool.running (input_json_delta on fingerprint change)
@@ -17,6 +17,7 @@
  *   session.status (system init, status updates)
  *   session.compaction (compaction progress and results)
  *   turn.completed (result)
+ *   workspace.changed (startup cwd, declared worktree results)
  *
  * All payloads match the EventPayloadMap interfaces.
  */
@@ -69,7 +70,7 @@ function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	sessionId: string,
 	data: EventPayloadMap[K],
 	metadata?: Readonly<Record<string, unknown>>,
-): ProviderRuntimeEvent {
+) {
 	return {
 		eventId: createEventId(),
 		type,
@@ -754,11 +755,19 @@ export class ClaudeEventTranslator {
 							`Claude model drift: session=${ctx.sessionId} requested=${ctx.currentModel ?? "<none>"} expected=${ctx.expectedApiModelId} actual=${message.model}`,
 						);
 					}
-					// init lands ~1s after the prompt starts, so reporting idle
-					// unconditionally blanks the bounce bar and the sidebar dot at
-					// the top of every first turn. It is still the only thing that
-					// clears a busy status stranded by a crash mid-turn, so keep it
-					// for the case where no turn is actually running.
+					const cwd = message.cwd;
+					const validCwd = cwd.length > 0 && cwd === cwd.trim();
+					if (!ctx.workspaceStartReported && validCwd) {
+						ctx.workspaceStartReported = true;
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+								path: cwd,
+								source: "start",
+							}),
+						);
+					}
+					// A startup without a running turn clears status stranded by a crash.
 					if (!ctx.turnInFlight) {
 						yield* this.push(
 							ctx,
@@ -1498,6 +1507,10 @@ export class ClaudeEventTranslator {
 		return Effect.gen(this, function* () {
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
+			const singleToolResult =
+				content.filter(
+					(block) => typeof block !== "string" && block.type === "tool_result",
+				).length === 1;
 
 			for (const block of content) {
 				if (typeof block === "string") continue;
@@ -1518,6 +1531,34 @@ export class ClaudeEventTranslator {
 				if (!matchedTool || matchedIndex === undefined) continue;
 
 				const resultContent = serializeToolResultContent(block.content);
+				const entered = matchedTool.toolName === "EnterWorktree";
+				const workspaceTool =
+					entered || matchedTool.toolName === "ExitWorktree";
+				if (
+					workspaceTool &&
+					!singleToolResult &&
+					message.parent_tool_use_id == null &&
+					!block.is_error
+				) {
+					(this.deps.logger ?? defaultLog).warn(
+						`Claude ${matchedTool.toolName} workspace result was not applied: multiple tool results in one message; session=${ctx.sessionId} call=${toolUseId}`,
+					);
+				}
+				const result = message.tool_use_result;
+				const reportedPath =
+					workspaceTool &&
+					singleToolResult &&
+					message.parent_tool_use_id == null &&
+					!block.is_error &&
+					isRecord(result)
+						? result[entered ? "worktreePath" : "originalCwd"]
+						: undefined;
+				const path =
+					typeof reportedPath === "string" &&
+					reportedPath.length > 0 &&
+					reportedPath === reportedPath.trim()
+						? reportedPath
+						: undefined;
 
 				if (resultContent.length > 0) {
 					yield* this.push(
@@ -1539,6 +1580,15 @@ export class ClaudeEventTranslator {
 					}),
 				);
 				ctx.inFlightTools.delete(matchedIndex);
+				if (path !== undefined) {
+					yield* this.push(
+						ctx,
+						makeProviderRuntimeEvent("workspace.changed", ctx.sessionId, {
+							path,
+							source: "tool",
+						}),
+					);
+				}
 			}
 		});
 	}

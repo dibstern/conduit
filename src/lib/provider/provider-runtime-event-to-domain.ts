@@ -47,6 +47,23 @@ export function translateProviderRuntimeEventToDomain(
 	const data = dataRecord(event);
 
 	switch (event.type) {
+		case "workspace.changed":
+			// Session Workspace validates moves and remains their only canonical writer.
+			return {
+				events:
+					event.data.source === "start"
+						? [
+								canonicalEvent(
+									"session.workspace_started",
+									event.sessionId,
+									{ sessionId: event.sessionId, path: event.data.path },
+									eventOptions(event),
+								),
+							]
+						: [],
+				state,
+			};
+
 		case "message.removed": {
 			return {
 				events: [
@@ -516,7 +533,7 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		default: {
-			const _exhaustive: never = event.type;
+			const _exhaustive: never = event;
 			return { events: [], state };
 		}
 	}

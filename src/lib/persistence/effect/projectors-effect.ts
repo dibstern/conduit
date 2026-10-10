@@ -1540,6 +1540,7 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
 	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
+	"session.workspace_started", // Startup observation is read from history by Session Workspace.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",
