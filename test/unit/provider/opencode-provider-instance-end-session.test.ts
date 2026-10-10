@@ -42,7 +42,7 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 	return {
 		sessionId: "sess-1",
-		turnId: "turn-1",
+		inputId: "turn-1",
 		prompt: "continue",
 		history: [],
 		providerState: {},

@@ -209,7 +209,6 @@ test.describe("Turn working clock", () => {
 				// Distinct traces: a replay keeps tool ids, and a repeat would merge.
 				turns: ["extra-folder-read-turn", "skill-loads-turn"],
 				delayMs: 1_000,
-				joinOpenTurn: true,
 			},
 		});
 		test.describe.configure({ timeout: 120_000 });
@@ -228,7 +227,7 @@ test.describe("Turn working clock", () => {
 			const sentB = Date.now();
 			await app.sendMessage("Load the skill");
 
-			// B takes over at A's next model round; the composer then times B.
+			// B waits in the tray and starts when A finishes; the composer then times B.
 			const composer = async () =>
 				clockSeconds((await readClocks(page)).composer ?? "0:00");
 			let lastA = await composer();
@@ -303,10 +302,10 @@ test.describe("Turn working clock", () => {
 	test.describe("Stop while a prompt waits in the queue", () => {
 		test.use({
 			claudeReplay: {
-				// Stop drops the queued prompt unsent, so only A and C play.
+				// Stop pauses the queue and the queued prompt is removed unsent,
+				// so only A and C play.
 				turns: ["extra-folder-read-turn", "skill-loads-turn"],
 				delayMs: 1_000,
-				joinOpenTurn: true,
 			},
 		});
 		test.describe.configure({ timeout: 120_000 });
@@ -320,7 +319,7 @@ test.describe("Turn working clock", () => {
 			const idle = async (label: string) => {
 				await expect(chat.stopBtn).toBeHidden();
 				await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
-				await expect(page.locator(".queued-shimmer")).toHaveCount(0);
+				await expect(page.getByTestId("pending-input-row")).toHaveCount(0);
 				await page.screenshot({ path: testInfo.outputPath(`${label}.png`) });
 			};
 			await app.goto(relayUrl);
@@ -329,8 +328,11 @@ test.describe("Turn working clock", () => {
 				timeout: 30_000,
 			});
 			await app.sendMessage("Queued prompt");
+			await expect(page.getByTestId("pending-input-row")).toHaveCount(1);
 			await chat.stopBtn.click();
 			await chat.waitForStreamingComplete();
+			await expect(page.getByTestId("pending-input-paused")).toBeVisible();
+			await page.getByTestId("pending-input-remove").click();
 			await idle("stopped");
 
 			await app.sendMessage("Load the skill");

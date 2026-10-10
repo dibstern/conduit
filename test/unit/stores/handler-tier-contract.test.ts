@@ -29,7 +29,6 @@ import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 function snapActivity(a: SessionActivity) {
 	return {
 		phase: a.phase,
-		turnEpoch: a.turnEpoch,
 		turnGeneration: a.turnGeneration,
 		endedGeneration: a.endedGeneration,
 		terminalTurnIds: [...a.terminalTurnIds],

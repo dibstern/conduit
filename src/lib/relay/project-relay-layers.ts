@@ -73,7 +73,6 @@ import {
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipTag } from "../domain/relay/Services/pending-send-ownership.js";
 import { ProjectManagementServiceLive } from "../domain/relay/Services/project-management-service.js";
 import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
@@ -92,6 +91,7 @@ import {
 	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
+import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
@@ -438,6 +438,9 @@ export function createProjectRelayLayers({
 	const providerOrchestrationDeps = Layer.mergeAll(
 		openCodeApiLayer,
 		persistenceEffectLayer,
+		// The engine commits input.sent through commit-and-signal, which
+		// announces on the relay's one bus.
+		SessionEventBusLive,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
 	);
@@ -583,12 +586,7 @@ export function createProjectRelayLayers({
 		AgentServiceLive,
 		relayStateBridgesAndStatus,
 	);
-	const translatorLayer = Layer.effect(
-		TranslatorTag,
-		Effect.map(PendingSendOwnershipTag, (ownership) =>
-			createTranslator(ownership.resolve),
-		),
-	);
+	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
 	const baseLayers = Layer.provideMerge(
 		translatorLayer,
 		relayStateServicesAndBridges,
@@ -624,9 +622,11 @@ export function createProjectRelayLayers({
 		sessionLifecycleWiringLayer,
 		defaultCommandQueueLayer,
 	).pipe(Layer.provide(baseLayers));
+	// The inbox drains on the relay's one bus (memoised by layer reference).
+	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
 	const fullLayer = Layer.provideMerge(
 		RpcSubscriptionScopeLive,
-		Layer.provideMerge(wiringLayers, fullBaseLayers),
+		Layer.provideMerge(Layer.merge(wiringLayers, inboxLayer), fullBaseLayers),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

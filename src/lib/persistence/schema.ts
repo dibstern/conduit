@@ -61,6 +61,9 @@ export const SESSION_SIDEBAR_MIGRATION = "0037_session_sidebar.sql";
 export const SESSION_SIDEBAR_TOMBSTONES_MIGRATION =
 	"0038_session_sidebar_tombstones.sql";
 export const SESSIONS_WORKSPACE_MIGRATION = "0039_sessions_workspace.sql";
+export const MESSAGES_INPUT_ID_MIGRATION = "0040_messages_input_id.sql";
+export const PENDING_INPUTS_MIGRATION = "0041_pending_inputs.sql";
+export const MESSAGES_STEERED_MIGRATION = "0042_messages_steered.sql";
 
 export function readMigrationSql(filename: string): string {
 	return readFileSync(

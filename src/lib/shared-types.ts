@@ -488,6 +488,10 @@ export interface HistoryMessage {
 	role: "user" | "assistant";
 	/** True when reconstructed from provider REST history rather than observed live. */
 	isBackfilled?: boolean;
+	/** The browser send a user message was placed for. */
+	inputId?: string;
+	/** A user message the provider read mid-turn, closing the turn it joined. */
+	steered?: boolean;
 	parts?: HistoryMessagePart[];
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */

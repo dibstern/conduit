@@ -122,6 +122,13 @@ export function translateDomainEventToRelay(
 		case "turn.model_resolved":
 			return silent("persistence/ws-rpc-only event");
 
+		case "input.admitted":
+		case "input.sent":
+		case "input.cancelled":
+			return silent(
+				"persistence-only; browsers read pending inputs from the detail stream",
+			);
+
 		case "session.status":
 			return silent(
 				"the shell row carries session status, including a retry; the terminal done covers completion",

@@ -49,7 +49,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			const result = await Effect.runPromise(
 				instance.sendTurnEffect({
 					sessionId: `e2e-real-sdk-test-${Date.now()}`,
-					turnId: "turn-1",
+					inputId: "turn-1",
 					prompt: "Reply with exactly: hello world",
 					history: [],
 					providerState: {},
@@ -94,7 +94,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			const result = await Effect.runPromise(
 				instance.sendTurnEffect({
 					sessionId: `e2e-real-sdk-subagent-${Date.now()}`,
-					turnId: "turn-1",
+					inputId: "turn-1",
 					prompt:
 						"Use the Task tool to launch exactly one general-purpose subagent " +
 						"whose entire job is to reply with the word banana. Do not do the " +

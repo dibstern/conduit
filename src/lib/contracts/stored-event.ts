@@ -56,6 +56,9 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.error",
 	"turn.interrupted",
 	"turn.model_resolved",
+	"input.admitted",
+	"input.sent",
+	"input.cancelled",
 	"session.created",
 	"session.renamed",
 	"session.workspace_changed",
@@ -99,6 +102,8 @@ export interface MessageCreatedPayload {
 	readonly sessionId: string;
 	readonly parentID?: string;
 	readonly turnId?: string;
+	/** The browser send this user message was placed for. */
+	readonly inputId?: string;
 	/** Imported from the provider's own record rather than observed streaming
 	 *  (OpenCode history backfill, conduit-test-iea). */
 	readonly backfilled?: true;
@@ -248,6 +253,48 @@ export interface TurnErrorPayload {
 
 export interface TurnInterruptedPayload {
 	readonly messageId: string;
+}
+
+export const INPUT_DELIVERIES = ["queue", "steer"] as const;
+export type InputDelivery = (typeof INPUT_DELIVERIES)[number];
+
+/** Why an input cannot be steered into the running turn. */
+export const STEER_BLOCKERS = [
+	"no_steering",
+	"prompt_open",
+	"model_differs",
+	"agent_differs",
+	"variant_differs",
+	"slash_command",
+] as const;
+export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
+
+/** The send request captured when an input is admitted; its handoff uses it. */
+export interface InputRequest {
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly model?: { readonly providerID: string; readonly modelID: string };
+	readonly modelUserSelected: boolean;
+	readonly agent?: string;
+	readonly variant?: string;
+	readonly contextWindow?: string;
+}
+
+export interface InputAdmittedPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+	readonly delivery: InputDelivery;
+	readonly request: InputRequest;
+}
+
+export interface InputSentPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+export interface InputCancelledPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
 }
 
 export interface TurnModelResolvedPayload {
@@ -523,6 +570,9 @@ export interface EventPayloadMap {
 	"turn.error": TurnErrorPayload;
 	"turn.interrupted": TurnInterruptedPayload;
 	"turn.model_resolved": TurnModelResolvedPayload;
+	"input.admitted": InputAdmittedPayload;
+	"input.sent": InputSentPayload;
+	"input.cancelled": InputCancelledPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
@@ -661,6 +711,7 @@ const MessageCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	parentID: Schema.optionalWith(Schema.String, { exact: true }),
 	turnId: Schema.optionalWith(Schema.String, { exact: true }),
+	inputId: Schema.optionalWith(Schema.String, { exact: true }),
 	backfilled: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 });
 
@@ -871,6 +922,36 @@ const TurnModelResolvedPayloadSchema = Schema.Struct({
 	requestedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
 	expectedModel: Schema.optionalWith(NonEmptyStringSchema, { exact: true }),
 	actualModel: NonEmptyStringSchema,
+});
+
+export const InputRequestSchema = Schema.Struct({
+	text: Schema.String,
+	images: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
+	model: Schema.optionalWith(
+		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
+		{ exact: true },
+	),
+	modelUserSelected: Schema.Boolean,
+	agent: Schema.optionalWith(Schema.String, { exact: true }),
+	variant: Schema.optionalWith(Schema.String, { exact: true }),
+	contextWindow: Schema.optionalWith(Schema.String, { exact: true }),
+});
+
+const InputAdmittedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+	delivery: Schema.Literal(...INPUT_DELIVERIES),
+	request: InputRequestSchema,
+});
+
+const InputSentPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+});
+
+const InputCancelledPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
 });
 
 const SessionCreatedPayloadSchema = Schema.Struct({
@@ -1166,6 +1247,18 @@ const TurnModelResolvedEventSchema = eventEnvelope(
 	"turn.model_resolved",
 	TurnModelResolvedPayloadSchema,
 );
+const InputAdmittedEventSchema = eventEnvelope(
+	"input.admitted",
+	InputAdmittedPayloadSchema,
+);
+const InputSentEventSchema = eventEnvelope(
+	"input.sent",
+	InputSentPayloadSchema,
+);
+const InputCancelledEventSchema = eventEnvelope(
+	"input.cancelled",
+	InputCancelledPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -1319,6 +1412,9 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnErrorEventSchema,
 	TurnInterruptedEventSchema,
 	TurnModelResolvedEventSchema,
+	InputAdmittedEventSchema,
+	InputSentEventSchema,
+	InputCancelledEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionWorkspaceChangedEventSchema,

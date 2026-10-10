@@ -21,10 +21,6 @@ import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import {
-	PendingSendOwnershipLive,
-	type PendingSendOwnershipTag,
-} from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -36,6 +32,7 @@ import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import type { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
@@ -65,6 +62,7 @@ import {
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	NoopProviderRuntimeIngestionLive,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
@@ -93,7 +91,6 @@ type HandlerStack =
 	| SessionEventBusTag
 	| ConfigTag
 	| PendingInteractionServiceTag
-	| PendingSendOwnershipTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag
@@ -101,7 +98,8 @@ type HandlerStack =
 	| AgentServiceTag
 	| ProviderTurnServiceTag
 	| ProviderRuntimeIngestionTag
-	| OverridesStateTag;
+	| OverridesStateTag
+	| SessionInboxTag;
 
 const withHandlerStack = async (
 	client: OpenCodeAPI,
@@ -132,7 +130,6 @@ const withHandlerStack = async (
 		bus,
 		Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
 		PendingInteractionServiceLive,
-		PendingSendOwnershipLive,
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 		Layer.succeed(LoggerTag, createSilentLogger()),
@@ -176,7 +173,11 @@ const withHandlerStack = async (
 				advances.length = 0;
 
 				yield* body({ advances, pendingQuestions });
-			}).pipe(Effect.provide(layer), Effect.orDie),
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox),
+				Effect.provide(layer),
+				Effect.orDie,
+			),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

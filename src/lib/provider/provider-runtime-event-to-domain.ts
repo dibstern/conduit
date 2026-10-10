@@ -106,6 +106,7 @@ export function translateProviderRuntimeEventToDomain(
 				event.providerId === "opencode"
 					? stringField(data["parentID"])
 					: undefined;
+			const inputId = stringField(data["inputId"]);
 			const nextState =
 				role === "assistant"
 					? withCurrentAssistantMessageId(event, state, messageId)
@@ -121,6 +122,7 @@ export function translateProviderRuntimeEventToDomain(
 							sessionId: stringField(data["sessionId"]) ?? event.sessionId,
 							...(parentID ? { parentID } : {}),
 							...(event.turnId ? { turnId: event.turnId } : {}),
+							...(inputId ? { inputId } : {}),
 							...(data["backfilled"] === true ? { backfilled: true } : {}),
 						},
 						eventOptions(event),

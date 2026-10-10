@@ -49,7 +49,7 @@ describe("chat phase and transcript lifecycle", () => {
 		phaseToProcessing(activity);
 		followSessionBusy("phase-test", false);
 		expect(activity.phase).toBe("idle");
-		expect(activity.turnEpoch).toBe(1);
+		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 
 	it("terminal state is idempotent after a status transition", () => {
@@ -58,6 +58,6 @@ describe("chat phase and transcript lifecycle", () => {
 		phaseToProcessing(activity);
 		applyTerminalTurn(activity, messages);
 		applyTerminalTurn(activity, messages);
-		expect(activity.turnEpoch).toBe(1);
+		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 });

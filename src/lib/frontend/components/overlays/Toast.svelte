@@ -10,11 +10,13 @@
 
   Each card is a bold title, an optional body line with one emphasised term,
   and an action row: primary and secondary actions in order from the left,
-  any dismiss action pushed to the right. Every action closes its toast.
+  any dismiss action pushed to the right. Every action closes its toast, as
+  do the close button and a downward swipe.
   The variant is an accent (an icon beside the title) and decides the live
   region, never the fill.
 -->
 <script lang="ts">
+	import type { Attachment } from "svelte/attachments";
 	import type { Toast, ToastAction } from "../../types.js";
 	import { dismissToast, uiState } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
@@ -25,6 +27,49 @@
 		warn: { name: "triangle-alert", class: "text-warning" },
 		error: { name: "circle-x", class: "text-error" },
 	} as const;
+
+	const SWIPE_DISMISS_PX = 48;
+
+	// `translate`, not `transform`: the entry animation fills `both`, and an
+	// animated transform would override the inline one for the card's lifetime.
+	function swipeDownToDismiss(id: string): Attachment<HTMLElement> {
+		return (card) => {
+			let startY: number | null = null;
+			const settle = (dy: number) => {
+				startY = null;
+				card.style.transition = "translate 150ms ease-out, opacity 150ms ease-out";
+				card.style.translate = "";
+				card.style.opacity = "";
+				if (dy >= SWIPE_DISMISS_PX) dismissToast(id);
+			};
+			const down = (event: PointerEvent) => {
+				if (event.button !== 0 || (event.target as Element).closest("button")) return;
+				startY = event.clientY;
+				card.setPointerCapture(event.pointerId);
+				card.style.transition = "none";
+			};
+			const move = (event: PointerEvent) => {
+				if (startY === null) return;
+				const dy = Math.max(0, event.clientY - startY);
+				card.style.translate = `0 ${dy}px`;
+				card.style.opacity = String(1 - Math.min(dy / (SWIPE_DISMISS_PX * 3), 0.6));
+			};
+			const up = (event: PointerEvent) => {
+				if (startY !== null) settle(event.clientY - startY);
+			};
+			const cancel = () => settle(0);
+			card.addEventListener("pointerdown", down);
+			card.addEventListener("pointermove", move);
+			card.addEventListener("pointerup", up);
+			card.addEventListener("pointercancel", cancel);
+			return () => {
+				card.removeEventListener("pointerdown", down);
+				card.removeEventListener("pointermove", move);
+				card.removeEventListener("pointerup", up);
+				card.removeEventListener("pointercancel", cancel);
+			};
+		};
+	}
 
 	function act(toast: Toast, action: ToastAction): void {
 		try {
@@ -47,10 +92,12 @@
 				...toast.actions.filter((action) => action.kind === "dismiss"),
 			]}
 			<div
-				class="toast-card pointer-events-auto px-[16px] py-[12px] font-brand text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
+				class="toast-card pointer-events-auto touch-none px-[16px] py-[12px] font-brand text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
 				data-variant={toast.variant}
 				role={toast.variant === "error" ? "alert" : "status"}
 				aria-live={toast.variant === "error" ? "assertive" : "polite"}
+				data-testid="toast"
+				{@attach swipeDownToDismiss(toast.id)}
 			>
 				<div class="flex items-start gap-[6px] text-base leading-snug font-semibold text-text">
 					{#if icon}
@@ -59,6 +106,19 @@
 						</span>
 					{/if}
 					<span class="min-w-0 break-words">{toast.title}</span>
+					<Button
+						variant="toolbar"
+						size="content"
+						touchTarget
+						class="-mr-[4px] ml-auto h-[18px] w-[18px] shrink-0 rounded-full"
+						iconOnly
+						icon="x"
+						iconSize={12}
+						title="Dismiss"
+						ariaLabel="Dismiss notification"
+						data-testid="toast-close"
+						onclick={() => dismissToast(toast.id)}
+					/>
 				</div>
 				{#if toast.body}
 					<p class="mt-[4px] leading-snug break-words">

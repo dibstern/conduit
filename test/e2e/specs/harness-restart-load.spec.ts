@@ -204,12 +204,13 @@ test("opens the heavy session after a restart under load", async ({
 	for (let index = 0; index < STREAMS; index++) {
 		const sessionId = await driver.createSession(`Stream ${index}`);
 		await Effect.runPromise(
-			driver.rpc.SendMessage({
+			driver.rpc.input.submit({
 				projectSlug: "process-test",
 				sessionId,
 				originId: driver.originId,
-				commandId: randomUUID(),
+				inputId: randomUUID(),
 				text: `load-stream-${index}`,
+				delivery: "queue",
 			}),
 		);
 		streams.push(sessionId);

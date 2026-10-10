@@ -19,7 +19,7 @@ function sendTurn(
 		...commandOverrides,
 		input: {
 			sessionId: "session-1",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "hello",
 			history: [],
 			providerState: {},

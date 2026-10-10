@@ -3,6 +3,11 @@ import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { isClaudeSessionRow } from "../../domain/relay/Services/session-command.js";
+import {
+	type SessionInbox,
+	type SessionInboxOutcome,
+	SessionInboxTag,
+} from "../../domain/relay/Services/session-inbox.js";
 import { persistSessionPermissionMode } from "../../domain/relay/Services/session-manager-permission-mode.js";
 import {
 	getPermissionMode,
@@ -22,6 +27,24 @@ import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.j
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
 import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const inboxCommand = <E>(
+	name: string,
+	run: (inbox: SessionInbox) => Effect.Effect<SessionInboxOutcome, E, never>,
+) =>
+	SessionInboxTag.pipe(
+		Effect.flatMap(run),
+		Effect.map((outcome) =>
+			outcome === "accepted"
+				? { ok: true as const }
+				: { ok: false as const, reason: outcome },
+		),
+		Effect.catchAll((error) =>
+			Effect.fail(
+				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
+			),
+		),
+	);
 
 export const conversationHandlers = {
 	SwitchPermissionMode: (request) =>
@@ -117,7 +140,7 @@ export const conversationHandlers = {
 			Effect.as({ ok: true as const }),
 			Effect.catchAll(mapRpcFailure("RejectQuestion")),
 		),
-	SendMessage: (request) =>
+	"input.submit": (request) =>
 		Effect.gen(function* () {
 			const limiter = yield* RateLimiterTag;
 			const result = yield* limiter.checkLimit(
@@ -130,23 +153,41 @@ export const conversationHandlers = {
 					}),
 				);
 			}
-			const sessionId = yield* sendMessageToSession({
+			const sent = yield* sendMessageToSession({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				text: request.text,
-				commandId: request.commandId,
+				commandId: request.inputId,
+				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
-				...(request.originId ? { originId: request.originId } : {}),
 			});
-			return { ok: true as const, sessionId: sessionId ?? request.sessionId };
+			return sent.refused
+				? { ok: false as const, reason: sent.refused }
+				: { ok: true as const, sessionId: sent.sessionId ?? request.sessionId };
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SendMessage failed: ${String(error)}`,
+						message: `input.submit failed: ${String(error)}`,
 					}),
 				),
 			),
+		),
+	"input.cancel": (request) =>
+		inboxCommand("input.cancel", (inbox) =>
+			inbox.cancel({
+				clientId: "rpc",
+				sessionId: request.sessionId,
+				inputId: request.inputId,
+			}),
+		),
+	"input.sendNow": (request) =>
+		inboxCommand("input.sendNow", (inbox) =>
+			inbox.sendNow({
+				clientId: request.originId ?? "rpc",
+				sessionId: request.sessionId,
+				inputId: request.inputId,
+			}),
 		),
 	SyncInputDraft: (request) =>
 		syncInputDraftForSession({
@@ -173,7 +214,9 @@ export const conversationHandlers = {
 	| "RespondPermission"
 	| "AnswerQuestion"
 	| "RejectQuestion"
-	| "SendMessage"
+	| "input.submit"
+	| "input.cancel"
+	| "input.sendNow"
 	| "SyncInputDraft"
 	| "CancelSession"
 >;

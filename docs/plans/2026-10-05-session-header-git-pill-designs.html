@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session header: git pill and a consistent top-right corner</title>
+<style>
+:root {
+	--bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--success: #3fd69a; --warning: #f4b740; --error: #f4607a; --tool: #5aa9f5;
+	--mono: "JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #08090b; color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+main { max-width: 1240px; margin: 0 auto; padding: 32px 24px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h2 { font-size: 16px; margin: 48px 0 4px; padding-top: 20px; border-top: 1px solid var(--border-subtle); }
+h3 { font-size: 13px; color: var(--text-2); margin: 22px 0 8px; font-weight: 600; }
+p, li { color: var(--text-2); max-width: 860px; }
+.lede { color: var(--muted); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--chip); color: var(--text-2); margin-left: 8px; vertical-align: 2px; }
+.tag.rec { border-color: var(--accent); color: var(--accent); }
+img.today { display: block; max-width: 100%; border: 1px solid var(--border-subtle); border-radius: 8px; margin: 8px 0; }
+
+/* Frames are drawn at real app size (12px root) and scaled up for reading. */
+.zoom { zoom: 1.75; }
+.frame { background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.desk { width: 640px; }
+.phone { width: 390px; }
+.bar { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 10px; border-bottom: 1px solid var(--border-subtle); }
+.bar .title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text); }
+.bar .fade { color: var(--dim); }
+.spacer { flex: 1; }
+.row2 { display: flex; align-items: center; gap: 6px; padding: 6px 10px 8px; }
+.back { color: var(--text-2); font-size: 11px; display: inline-flex; align-items: center; gap: 2px; }
+.count { min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--bg); font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.grid { display: grid; gap: 14px; }
+.states { display: grid; grid-template-columns: 170px 1fr; gap: 8px 16px; align-items: center; }
+.states .lbl { color: var(--muted); font-size: 12px; }
+
+/* The existing recipe: Button variant=secondary size=sm (h-8 px-3 text-xs rounded-lg). */
+.pill { height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; font: 500 10px/1 var(--mono); color: var(--text); background: transparent; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; min-width: 0; flex-shrink: 0; position: relative; }
+.pill svg { width: 12px; height: 12px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pill.icon { width: 24px; padding: 0; justify-content: center; }
+.pill.ghost { border-color: transparent; color: var(--text-2); }
+.pill.filled { border-color: transparent; background: var(--bg-alt); color: var(--text-2); }
+.pill.git { flex-shrink: 1; max-width: 240px; }
+.phone .pill.git { max-width: 150px; }
+.pill .proj { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 100000; min-width: 4ch; }
+.pill .sep { color: var(--dim); }
+.pill .br { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pill .mut { color: var(--muted); }
+.pill .ab { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; display: inline-block; }
+.dot.warn { background: var(--warning); }
+.dot.ok { background: var(--success); }
+.dot.err { background: var(--error); }
+.op { color: var(--warning); }
+.merged { color: var(--success); }
+
+/* Variant B: one segmented control. */
+.seg { display: inline-flex; align-items: stretch; height: 24px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; flex-shrink: 1; }
+.seg > .pill { border: 0; border-radius: 0; height: 22px; }
+.seg > .pill + .pill { border-left: 1px solid var(--border); }
+
+/* Popover / sheet mock. */
+.pop { width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; font-size: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.pop .h { padding: 6px 8px 4px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.pop .r { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px; border-radius: 5px; }
+.pop .r span:first-child { color: var(--muted); }
+.pop .r span:last-child { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop .act { color: var(--text-2); }
+.pop .act:hover { background: var(--bg-alt); }
+.pop hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 4px 0; }
+.notes { margin-top: 8px; }
+.notes li { margin: 3px 0; }
+code { color: var(--text); background: var(--bg-alt); padding: 0 4px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+	<defs>
+		<symbol id="branch" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+		<symbol id="worktree" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="12" cy="13" r="2"/><path d="M14 13h3"/><path d="M7 13h3"/></symbol>
+		<symbol id="commit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/></symbol>
+		<symbol id="folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+		<symbol id="sparkles" viewBox="0 0 24 24"><path d="M9.94 14.06 4 12l5.94-2.06L12 4l2.06 5.94L20 12l-5.94 2.06L12 20Z"/></symbol>
+		<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+		<symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+		<symbol id="views" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></symbol>
+		<symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+		<symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+		<symbol id="users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></symbol>
+	</defs>
+</svg>
+<main>
+<h1>Session header: git pill and a consistent top-right corner</h1>
+<p class="lede">2026-10-05 · for c209 / q5u6. Frames are drawn at real app size and shown at 1.75×. Pick one variant (or mix), and I build it.</p>
+
+<h2>Today</h2>
+<img class="today" src="2026-10-05-header-today-desktop.png" alt="Desktop header today">
+<img class="today" src="2026-10-05-header-today-phone.png" alt="Phone header today" style="max-width:560px">
+<ul class="notes">
+	<li><b>Five different treatments in one corner:</b> bare grey text (git), a bordered button (Settle), a bare green dot, a solid pink count, a bare ⋯.</li>
+	<li><b>It shows the wrong checkout.</b> The header reads the <i>project's</i> git, but each session already carries its own (<code>session.git</code>: branch, worktree, dirty, ahead/behind, detached head, rebase/merge in progress, merged). A session running in a linked worktree shows the main checkout's branch today. All variants below read the session's git and fall back to the project's.</li>
+	<li><b>The pink "2" reads like an alert.</b> It's how many browsers are connected. It uses the same accent as the unread count.</li>
+</ul>
+
+<h2>Shared rules for the git pill (all variants)</h2>
+<p>One pill, same recipe as Settle and the skills chip: <code>Button secondary sm</code>, 24px tall, 1px border, 6px radius. It's a button: tap opens the detail popover (desktop) or sheet (phone).</p>
+<div class="zoom"><div class="states">
+	<span class="lbl">On a branch, clean</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span></span></span>
+	<span class="lbl">Uncommitted changes</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span><span class="dot warn"></span></span></span>
+	<span class="lbl">Linked worktree</span>
+	<span><span class="pill git"><svg><use href="#worktree"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">fix/draft-menus</span><span class="dot warn"></span></span> <span class="lbl" style="font-size:9px">&nbsp;icon swaps; worktree name lives in the popover</span></span>
+	<span class="lbl">Ahead / behind upstream</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span><span class="ab">↑3 ↓1</span></span> <span class="lbl" style="font-size:9px">&nbsp;desktop only</span></span>
+	<span class="lbl">Detached HEAD</span>
+	<span><span class="pill git"><svg><use href="#commit"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br mut">a1b2c3d</span></span></span>
+	<span class="lbl">Rebase in progress</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">feat/x</span><span class="op">rebasing</span></span></span>
+	<span class="lbl">Branch already merged</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">feat/x</span><span class="merged">merged</span></span></span>
+	<span class="lbl">Not a git repo</span>
+	<span><span class="pill git"><svg><use href="#folder"/></svg><span class="br">ai-notes</span></span></span>
+	<span class="lbl">Long names</span>
+	<span><span class="pill git"><svg><use href="#branch"/></svg><span class="proj">spm-architecture-deepening</span><span class="sep">/</span><span class="br">docs/architecture-deepening-design</span><span class="dot warn"></span></span> <span class="lbl" style="font-size:9px">&nbsp;project shrinks first, then branch</span></span>
+</div></div>
+
+<h3>Tap → details</h3>
+<div class="zoom"><div class="pop">
+	<div class="h">Checkout</div>
+	<div class="r"><span>Project</span><span>conduit</span></div>
+	<div class="r"><span>Branch</span><span>fix/draft-menus</span></div>
+	<div class="r"><span>Worktree</span><span>conduit-wt-draft</span></div>
+	<div class="r"><span>Folder</span><span>~/src/personal/conduit-wt-draft</span></div>
+	<div class="r"><span>Upstream</span><span>↑3 ↓1</span></div>
+	<div class="r"><span>Changes</span><span style="color:var(--warning)">uncommitted</span></div>
+	<hr>
+	<div class="r act"><span style="color:var(--text-2)">Copy branch name</span><span></span></div>
+	<div class="r act"><span style="color:var(--text-2)">Copy folder path</span><span></span></div>
+</div></div>
+
+<!-- ============ A ============ -->
+<h2>A · One recipe everywhere</h2>
+<p>Every control in the corner is the existing secondary sm button. The connection dot and pink count merge into one quiet pill. Least new code: it's the recipe Settle and skills already use.</p>
+<h3>Desktop</h3>
+<div class="zoom grid">
+	<div class="frame desk"><div class="bar">
+		<span class="title">Activity Timeline Design Variations</span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg>
+		<span class="spacer"></span>
+		<span class="pill tabular"><svg><use href="#sparkles"/></svg>3</span>
+		<span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span><span class="dot warn"></span></span>
+		<span class="pill"><svg><use href="#check"/></svg>Settle</span>
+		<span class="pill"><span class="dot ok"></span>2</span>
+		<span class="pill icon ghost"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame desk"><div class="bar">
+		<span class="title">Worktree session, offline</span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg>
+		<span class="spacer"></span>
+		<span class="pill git"><svg><use href="#worktree"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">fix/draft-menus</span><span class="ab">↑3</span></span>
+		<span class="pill"><svg><use href="#check"/></svg>Settle</span>
+		<span class="pill"><span class="dot err"></span>offline</span>
+		<span class="pill icon ghost"><svg><use href="#more"/></svg></span>
+	</div></div>
+</div>
+<h3>Phone (390px)</h3>
+<p>Row 1 drops the project name from the pill (the sheet shows it). Order per c209: skills · git · Views.</p>
+<div class="zoom grid">
+	<div class="frame phone">
+		<div class="bar">
+			<span class="back"><svg width="12" height="12" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#left"/></svg>Sessions</span><span class="count">2</span>
+			<span class="spacer"></span>
+			<span class="pill"><svg><use href="#sparkles"/></svg>3</span>
+			<span class="pill git"><svg><use href="#branch"/></svg><span class="br">main</span><span class="dot warn"></span></span>
+			<span class="pill"><svg><use href="#views"/></svg>Views</span>
+		</div>
+		<div class="row2"><span class="title" style="font-size:13px">Activity Timeline Design…</span><span class="spacer"></span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg></div>
+	</div>
+	<div class="frame phone">
+		<div class="bar">
+			<span class="back"><svg width="12" height="12" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#left"/></svg>Sessions</span>
+			<span class="spacer"></span>
+			<span class="pill git"><svg><use href="#worktree"/></svg><span class="br">fix/draft-menus-and-a-long-tail</span><span class="dot warn"></span></span>
+			<span class="pill"><svg><use href="#views"/></svg>Views</span>
+		</div>
+		<div class="row2"><span class="title" style="font-size:13px">No skills yet, linked worktree</span><span class="spacer"></span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg></div>
+	</div>
+</div>
+
+<!-- ============ B ============ -->
+<h2>B · One segmented toolbar <span class="tag rec">chosen 2026-10-05</span></h2>
+<p><b>Decided:</b> Views folds into ⋯ on phone (same menu as the island); the project label is the basename of the project's primary directory and shrinks first, never below 4 characters.</p>
+<p>Skills, git and Settle share one border with dividers, so the corner reads as a single control. Connection becomes a bare dot + count, ⋯ stays ghost. Calmest look; needs a small new "segmented" wrapper.</p>
+<h3>Desktop</h3>
+<div class="zoom grid">
+	<div class="frame desk"><div class="bar">
+		<span class="title">Activity Timeline Design Variations</span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg>
+		<span class="spacer"></span>
+		<span class="seg">
+			<span class="pill"><svg><use href="#sparkles"/></svg>3</span>
+			<span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span><span class="dot warn"></span></span>
+			<span class="pill"><svg><use href="#check"/></svg>Settle</span>
+		</span>
+		<span class="pill ghost" style="padding:0 4px"><span class="dot ok"></span>2</span>
+		<span class="pill icon ghost"><svg><use href="#more"/></svg></span>
+	</div></div>
+</div>
+<h3>Phone (390px)</h3>
+<div class="zoom grid">
+	<div class="frame phone">
+		<div class="bar">
+			<span class="back"><svg width="12" height="12" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#left"/></svg>Sessions</span><span class="count">2</span>
+			<span class="spacer"></span>
+			<span class="seg">
+				<span class="pill"><svg><use href="#sparkles"/></svg>3</span>
+				<span class="pill git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">main</span><span class="dot warn"></span></span>
+			</span>
+			<span class="pill icon ghost"><svg><use href="#more"/></svg></span>
+		</div>
+		<div class="row2"><span class="title" style="font-size:13px">Activity Timeline Design…</span><span class="spacer"></span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg></div>
+	</div>
+</div>
+
+<!-- ============ C ============ -->
+<h2>C · Info is filled, actions are outlined</h2>
+<p>Things that describe the session (skills, git) are soft filled pills; things that do something (Settle) keep the border. Connection is a bare dot + count. Clearest meaning, but two recipes side by side.</p>
+<h3>Desktop</h3>
+<div class="zoom grid">
+	<div class="frame desk"><div class="bar">
+		<span class="title">Activity Timeline Design Variations</span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg>
+		<span class="spacer"></span>
+		<span class="pill filled"><svg><use href="#sparkles"/></svg>3</span>
+		<span class="pill filled git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br" style="color:var(--text)">main</span><span class="dot warn"></span></span>
+		<span class="pill"><svg><use href="#check"/></svg>Settle</span>
+		<span class="pill ghost" style="padding:0 4px"><span class="dot ok"></span>2</span>
+		<span class="pill icon ghost"><svg><use href="#more"/></svg></span>
+	</div></div>
+</div>
+<h3>Phone (390px)</h3>
+<div class="zoom grid">
+	<div class="frame phone">
+		<div class="bar">
+			<span class="back"><svg width="12" height="12" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#left"/></svg>Sessions</span><span class="count">2</span>
+			<span class="spacer"></span>
+			<span class="pill filled"><svg><use href="#sparkles"/></svg>3</span>
+			<span class="pill filled git"><svg><use href="#branch"/></svg><span class="br" style="color:var(--text)">main</span><span class="dot warn"></span></span>
+			<span class="pill"><svg><use href="#views"/></svg>Views</span>
+		</div>
+		<div class="row2"><span class="title" style="font-size:13px">Activity Timeline Design…</span><span class="spacer"></span><svg width="12" height="12" style="stroke:var(--dim);fill:none;stroke-width:2"><use href="#chev"/></svg></div>
+	</div>
+</div>
+
+<h2>Not changing</h2>
+<ul class="notes">
+	<li>Phone touch targets stay 44px via the existing <code>touchTarget</code> hit area; only the paint is 24px.</li>
+	<li>The instance badge, unread chip and state chips stay where c209 put them (row 2 on phone, beside the title on desktop).</li>
+	<li>Picking a branch or worktree for a <i>new</i> session is x259, next after this.</li>
+</ul>
+</main>
+</body>
+</html>

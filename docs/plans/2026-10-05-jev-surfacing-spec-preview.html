@@ -1,0 +1,1504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev surfacing: what the spec builds, and where it departs from the mockups</title>
+<style>
+:root {
+	--bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--error: #f4607a; --success: #3fd69a; --tool: #5aa9f5; --warning: #f4b740;
+	--teal: #1aa3b3; --gold: #b8962e; --rose: #c2305a;
+	--mono: "JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	--radius: 10px;
+	--accent-bg: rgba(254,55,129,.12);
+	--t-ask: #fe3781; --t-blocked: #f4607a; --t-risk: #f4b740; --t-scope: #f29a4a; --t-replan: #1aa3b3; --t-correction: #b58cf5; --t-decision: #5aa9f5; --t-finding: #3fd69a; --t-milestone: #9fb86a; --t-perf: #e0c341;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+a { color: var(--tool); }
+code { font-family: var(--mono); font-size: 0.92em; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 5px; padding: 0 5px; }
+button { font-family: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 1px solid var(--tool); outline-offset: 2px; }
+.t-ask { color: var(--t-ask); } .t-blocked { color: var(--t-blocked); } .t-risk { color: var(--t-risk); } .t-scope { color: var(--t-scope); } .t-replan { color: var(--t-replan); } .t-correction { color: var(--t-correction); } .t-decision { color: var(--t-decision); } .t-finding { color: var(--t-finding); } .t-milestone { color: var(--t-milestone); } .t-perf { color: var(--t-perf); } .t-recap { color: var(--text-2); } .t-routine { color: var(--dim); }
+
+/* Page chrome */
+.page { max-width: 1240px; margin: 0 auto; padding: 40px 24px 140px; }
+h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+.lede { color: var(--text-2); max-width: 860px; margin: 6px 0; }
+.how { margin: 16px 0 0; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface); color: var(--text-2); max-width: 900px; }
+.how b { color: var(--text); }
+nav.toc { position: sticky; top: 0; z-index: 50; background: rgba(13,14,17,.93); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-subtle); margin: 22px -24px 0; padding: 10px 24px; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+nav.toc a { color: var(--text-2); text-decoration: none; padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 12px; }
+nav.toc a:hover { color: var(--text); border-color: var(--chip); }
+nav.toc .tl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; align-self: center; margin-left: 6px; }
+h2.part { margin: 56px 0 4px; font-size: 19px; }
+h2.part + p { color: var(--muted); margin: 0 0 8px; max-width: 900px; }
+.comp { margin: 30px 0 40px; padding-top: 18px; border-top: 1px solid var(--border-subtle); scroll-margin-top: 64px; }
+.comp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
+.comp-head h3 { margin: 0; font-size: 16px; }
+.bead { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--chip); color: var(--muted); }
+.comp-head p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-2); max-width: 920px; }
+.frames { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.frames.one { grid-template-columns: 1fr; }
+.frames.three { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 1000px) { .frames, .frames.three { grid-template-columns: 1fr; } }
+.state { margin: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.state > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.state > figcaption button { all: unset; cursor: pointer; text-transform: none; letter-spacing: 0; color: var(--text-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: 11px; }
+.state > figcaption button:hover { color: var(--text); }
+.state > figcaption button[disabled] { opacity: .4; cursor: default; }
+.stage { padding: 16px; display: flex; flex-direction: column; gap: 12px; position: relative; }
+dl.spec { display: grid; grid-template-columns: 130px 1fr; gap: 5px 14px; margin: 14px 0 0; color: var(--text-2); font-size: 12px; max-width: 1000px; }
+dl.spec dt { color: var(--muted); }
+dl.spec dd { margin: 0; }
+.user-msg { align-self: flex-end; max-width: 85%; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.reply p { margin: 0 0 6px; }
+.tchip { display: inline-block; font-size: 10.5px; padding: 0 6px; border-radius: 4px; border: 1px solid currentColor; line-height: 16px; white-space: nowrap; }
+.pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+.run { animation: pulse 1.6s ease-in-out infinite; }
+
+/* Review affordance on every component and departure */
+.verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 11.5px; color: var(--muted); max-width: 1000px; }
+.verdict .sgc button { padding: 2px 9px; }
+.verdict input { flex: 1; min-width: 220px; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text); font: inherit; font-size: 11.5px; padding: 3px 8px; }
+.sgc { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex: none; }
+.sgc button { all: unset; cursor: pointer; padding: 1px 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.sgc button + button { border-left: 1px solid var(--border-subtle); }
+.sgc button:hover { color: var(--text); }
+.sgc button[aria-pressed="true"] { background: var(--bg-alt); color: var(--text); }
+.verdict .sgc button[data-v="ok"][aria-pressed="true"], .dep .sgc button[data-v="keep"][aria-pressed="true"] { color: var(--success); }
+.verdict .sgc button[data-v="change"][aria-pressed="true"], .dep .sgc button[data-v="reverse"][aria-pressed="true"] { color: var(--warning); }
+/* Round-3 shared primitives */
+.reply { color: var(--text); }
+.ta { border: 1px solid var(--border-subtle); border-radius: var(--radius); padding: 6px 10px 8px; }
+.ta.live { border-color: transparent; background: var(--surface); box-shadow: -4px 0 16px rgba(234, 179, 8, 0.15), -3px 0 0 var(--warning); }
+.ta-head { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; overflow: hidden; }
+.ta-head .chev { color: var(--dim); }
+.ta-head .verb { color: var(--text); font-weight: 600; }
+.ta-head .meta { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.ta-head .bill { margin-left: auto; color: var(--dim); font-size: 11px; }
+.strip { display: flex; gap: 2px; height: 4px; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+.strip .seg { background: var(--teal); flex: 1; }
+.strip .seg.gold { background: var(--gold); } .strip .seg.rose { background: var(--rose); } .strip .seg.dim { background: var(--chip); }
+.steps { margin-top: 6px; border-top: 1px solid var(--border-subtle); padding-top: 4px; }
+.step { display: flex; gap: 8px; color: var(--text-2); padding: 2px 0; white-space: nowrap; overflow: hidden; }
+.step .v { color: var(--text-2); font-weight: 600; } .step .t { margin-left: auto; color: var(--dim); }
+.step.narration { color: var(--dim); font-style: italic; }
+.pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.mobile-row { display: grid; grid-template-columns: 390px 390px; justify-content: center; gap: 16px 24px; margin-top: 16px; align-items: start; }
+.mobile-row dl.spec { grid-column: 1 / -1; }
+@media (max-width: 820px) { .mobile-row { grid-template-columns: 1fr; justify-items: center; } }
+.phone { margin: 0; width: 390px; }
+.phone > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 0 4px 6px; display: flex; justify-content: space-between; }
+.phone .screen { height: 760px; border: 1px solid var(--border); border-radius: 34px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--border-subtle); position: relative; }
+.phone .sbar { flex: none; height: 40px; padding: 12px 22px 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2); }
+.phone .appbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+.phone .appbar .back { color: var(--dim); }
+.phone .appbar .title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.phone .body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; font-size: 12.5px; }
+.phone .dock { flex: none; padding: 8px 10px 22px; border-top: 1px solid var(--border-subtle); background: var(--bg); }
+.phone .dock .composer { font-size: 12px; }
+.composer { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--dim); }
+.composer .ph { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer .model { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--muted); }
+.composer .go { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-2); flex: none; }
+.composer .go.stop i { width: 8px; height: 8px; border-radius: 2px; background: var(--warning); }
+.composer.live { flex-wrap: wrap; row-gap: 6px; }
+.composer .status { flex-basis: 100%; display: flex; align-items: center; gap: 7px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.composer .status b { color: var(--text-2); font-weight: 600; }
+.composer .status .jump { margin-left: auto; color: var(--text-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
+.phone .reply code { font-size: 12px; }
+.phone .composer .status { font-size: 12px; }
+
+/* B3 · Scrub and summary (ported) */
+button:focus-visible, .b3-hit:focus-visible, [contenteditable]:focus-visible, input:focus-visible { outline: 1px solid var(--tool); outline-offset: 2px; }
+.b3-hb { all: unset; display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow: hidden; cursor: pointer; }
+.chev { display: inline-block; transition: transform .15s; }
+.ta.b3-open .b3-hb .chev { transform: rotate(90deg); }
+.b3-unread { margin-left: auto; flex: none; background: var(--accent-bg); border: 1px solid rgba(254, 55, 129, .4); color: var(--accent); border-radius: 999px; padding: 0 8px; line-height: 18px; font-size: 11px; cursor: pointer; }
+.ta-head .bill ~ .b3-unread { margin-left: 8px; }
+.b3-unread.b3-zero { background: none; border-color: var(--border-subtle); color: var(--dim); }
+.phone .b3-unread { font-size: 12px; }
+.b3-arg { overflow: hidden; text-overflow: ellipsis; color: var(--muted); min-width: 0; }
+
+/* Scrub strip (from M2) */
+.b3-sc { position: relative; margin-top: 6px; }
+.b3-lane { display: flex; align-items: flex-end; }
+.b3-sc[data-phase="live"] .b3-lane { min-height: 132px; padding-bottom: 9px; }
+.b3-sc.b3-nocard .b3-lane { min-height: 0; padding: 0; }
+.b3-card { position: relative; flex: none; width: 420px; max-width: 100%; background: var(--bg-alt); border: 1px solid var(--border); border-top: 3px solid currentColor; border-radius: 6px 6px 8px 8px; padding: 6px 10px 6px; box-shadow: 0 8px 22px rgba(0, 0, 0, .45); transition: margin-left .12s ease-out; }
+.b3-phone .b3-card { width: 100%; }
+.b3-card[hidden] { display: none; }
+.b3-card::after { content: ""; position: absolute; left: var(--cx, 50%); bottom: -6px; width: 10px; height: 10px; margin-left: -5px; background: var(--bg-alt); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
+.b3-ch { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; }
+.b3-lab { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.b3-need { font-size: 10px; color: #1a0c12; background: var(--t-ask); border-radius: 3px; padding: 0 4px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; line-height: 15px; }
+.b3-mk { font-size: 10.5px; line-height: 15px; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+.b3-mk.up { color: var(--success); background: rgba(63, 214, 154, .12); }
+.b3-mk.dn { color: var(--warning); background: rgba(244, 183, 64, .12); }
+.b3-at { margin-left: auto; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.b3-vw { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; line-height: 20px; font-size: 11px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.b3-vw input { margin: 0; width: 12px; height: 12px; accent-color: var(--tool); cursor: pointer; }
+.b3-vw:has(input:checked) { border-color: rgba(90, 169, 245, .55); background: rgba(90, 169, 245, .1); color: var(--tool); }
+.b3-note { color: var(--dim); font-size: 11px; margin-top: 3px; }
+.b3-tx { color: var(--text); font-size: 12px; line-height: 1.5; margin: 4px 0 5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.b3-cf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 5px; color: var(--muted); font-size: 11px; }
+.b3-sp { flex: 1; }
+.b3-cb { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 6px; padding: 0 7px; line-height: 20px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.b3-cb:hover { border-color: var(--border); color: var(--text); }
+.b3-cb:disabled { color: var(--chip); cursor: default; border-color: transparent; }
+.b3-cb.b3-hot { color: var(--warning); border-color: rgba(244, 183, 64, .4); }
+.b3-act[data-reply][aria-pressed="true"] { color: var(--tool); border-color: rgba(90, 169, 245, .5); }
+.b3-act.up[aria-pressed="true"] { color: var(--success); border-color: rgba(63, 214, 154, .5); background: rgba(63, 214, 154, .08); }
+.b3-act.dn[aria-pressed="true"] { color: var(--warning); border-color: rgba(244, 183, 64, .5); background: rgba(244, 183, 64, .08); }
+.b3-why { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 6px; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px; font-size: 11px; color: var(--text-2); }
+.b3-wq { flex-basis: 100%; }
+.b3-chip { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 0 9px; line-height: 20px; cursor: pointer; font-size: 11px; }
+.b3-chip:hover { border-color: var(--tool); }
+.b3-chip.b3-skip { color: var(--muted); border-style: dashed; }
+.b3-chip.s { cursor: default; }
+.b3-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 6px; padding: 0 9px; line-height: 22px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.b3-btn:hover { color: var(--text); border-color: var(--chip); }
+.b3-btn.pri { background: rgba(63, 214, 154, .13); border-color: rgba(63, 214, 154, .5); color: var(--success); }
+.b3-btn.dng { color: var(--error); }
+.b3-btn.dng:hover { border-color: var(--error); }
+.b3-btn:disabled { opacity: .45; cursor: default; }
+
+.b3-hit { position: relative; cursor: ew-resize; touch-action: none; outline: none; user-select: none; }
+.b3-pins { position: relative; height: 38px; }
+.b3-pin { position: absolute; bottom: 0; transform: translateX(-50%); font: 700 10.5px/15px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg); border: 1px solid currentColor; white-space: nowrap; letter-spacing: -.04em; }
+.b3-phone .b3-pin { font-size: 12px; line-height: 17px; }
+.b3-pin::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 4px; background: currentColor; opacity: .6; }
+.b3-pin.b3-r1 { bottom: 20px; }
+.b3-pin.b3-r1::after { height: 24px; opacity: .35; }
+.b3-pin.b3-seen:not(.b3-on) { opacity: .5; }
+.b3-pin.b3-x { border-style: dashed; }
+.b3-pin sup { font-size: 8px; line-height: 0; vertical-align: 4px; margin-left: 1px; }
+.b3-nd { position: absolute; top: -4px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.b3-pin.b3-on { background: currentColor; opacity: 1; }
+.b3-pin.b3-on b { color: #111318; }
+.b3-pin.b3-ask:not(.b3-on)::before { content: ""; position: absolute; inset: -3px; border-radius: 6px; border: 1px solid var(--t-ask); animation: b3-ring 1.8s ease-out infinite; }
+@keyframes b3-ring { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.35); } }
+.b3-track { position: relative; padding: 4px 0; }
+.b3-track .strip { height: 8px; margin: 0; border-radius: 3px; }
+.b3-thumb { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--bg); pointer-events: none; transition: left .12s ease-out; }
+.b3-thumb::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.b3-drag .b3-thumb, .b3-drag .b3-card { transition: none; }
+.b3-thumb[hidden] { display: none; }
+.b3-run { animation: b3-breathe 1.4s ease-in-out infinite; }
+@keyframes b3-breathe { 50% { opacity: .35; } }
+.b3-axis { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 8px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.b3-askb { background: rgba(254, 55, 129, .1); border: 1px solid rgba(254, 55, 129, .45); color: var(--t-ask); border-radius: 999px; padding: 0 7px; line-height: 18px; cursor: pointer; font-size: inherit; }
+.b3-prog { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 999px; padding: 0 8px; line-height: 18px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: inherit; }
+.b3-prog:hover { border-color: var(--border); color: var(--text); }
+.b3-pb { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; display: inline-block; }
+.b3-pb i { display: block; height: 100%; background: var(--tool); transition: width .2s; }
+.b3-lvs { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 7px; overflow: hidden; margin-left: auto; }
+.b3-lvs button { background: none; border: 0; color: var(--muted); padding: 0 6px; line-height: 18px; cursor: pointer; font-size: inherit; }
+.b3-lvs button[aria-pressed="true"] { background: var(--bg-alt); color: var(--text); }
+.b3-end { background: none; border: 0; color: var(--dim); padding: 0; cursor: default; font-size: inherit; }
+.b3-end.b3-back { color: var(--warning); cursor: pointer; }
+.b3-fin { display: none; }
+.b3-final .b3-fin { display: inline; }
+.b3-final .b3-pins, .b3-final .b3-lane { display: none; }
+
+/* Turn summary */
+.b3-sum { margin-top: 9px; }
+.b3-sum:empty { display: none; }
+.b3-gen { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-2); font-size: 11.5px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.b3-gen:hover { border-color: var(--chip); color: var(--text); }
+.b3-gen b { font-weight: 600; }
+.b3-gen span { margin-left: auto; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.b3-box { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.b3-sh { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; font-size: 11.5px; color: var(--muted); }
+.b3-sum.open .b3-sh { border-bottom: 1px solid var(--border-subtle); background: var(--bg-alt); }
+.b3-sum.open .b3-sh .chev { transform: rotate(90deg); }
+.b3-sh b { color: var(--text); font-weight: 600; }
+.b3-sm { overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+.b3-sr { margin-left: auto; color: var(--text-2); }
+.b3-sb { padding: 8px 10px; }
+.b3-fresh { animation: b3-fade .35s ease-out; }
+@keyframes b3-fade { from { opacity: .2; } }
+.b3-stx { margin: 0; color: var(--text); font-size: 12.5px; line-height: 1.7; }
+.b3-sf { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; color: var(--dim); font-size: 11px; }
+
+/* Composer: pending replies */
+
+/* Phone sizes: text >= 12px, targets >= 32px */
+.b3-phone .b3-t0, .b3-phone .b3-sm { display: none; }
+.b3-phone .b3-tx { font-size: 12.5px; }
+.b3-phone .b3-at, .b3-phone .b3-lab, .b3-phone .b3-note, .b3-phone .b3-why, .b3-phone .b3-mk, .b3-phone .b3-need, .b3-phone .b3-sf { font-size: 12px; }
+.b3-phone .b3-need, .b3-phone .b3-mk { line-height: 18px; }
+.phone .b3-cb, .b3-phone .b3-chip, .phone .b3-btn { line-height: 30px; min-width: 32px; font-size: 12px; }
+.phone .b3-unread, .b3-phone .b3-askb, .b3-phone .b3-prog, .b3-phone .b3-end { line-height: 32px; }
+.b3-phone .b3-lvs button { line-height: 30px; }
+.phone .b3-hb { min-height: 32px; align-items: center; }
+.phone .ta-head .bill { font-size: 12px; }
+.phone .b3-stx .cite { position: relative; }
+.phone .b3-stx code { font-size: 12px; }
+.phone .b3-stx .cite::after { content: ""; position: absolute; inset: -5px -1px; }
+.b3-phone .b3-pin sup { font-size: 12px; vertical-align: 3px; }
+.b3-phone .b3-cf { font-size: 12px; gap: 4px; }
+.b3-phone .b3-cf .b3-cb { padding: 0 6px; }
+/* Phone: Raise, Lower and Retype go glyph-only so the foot stays one row. */
+.b3-phone .b3-cf .b3-wl, .b3-phone .b3-gen .b3-wl { display: none; }
+.b3-phone .b3-vw { line-height: 30px; font-size: 12px; padding: 0 9px; }
+.b3-phone .b3-vw input { width: 15px; height: 15px; }
+.b3-phone .b3-axis { font-size: 12px; }
+.b3-phone .b3-askb, .b3-phone .b3-prog, .b3-phone .b3-lvs button { line-height: 30px; }
+.b3-phone .b3-lvs button { padding: 0 8px; }
+.b3-phone .b3-gen, .b3-phone .b3-sh { font-size: 12px; min-height: 34px; align-items: center; }
+.phone .composer .model { font-size: 12px; }
+
+/* ── Spec adaptations on top of the B3 port ── */
+.ta { position: relative; }
+.b3-sc .b3-lane { min-height: 132px; padding-bottom: 9px; }
+.b3-sc.b3-nocard .b3-lane { min-height: 0; padding: 0; }
+.b3-tx { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.b3-tx p { margin: 0 0 4px; }
+.b3-hit { touch-action: pan-y; }
+.b3-lvs { margin-left: 0; }
+.b3-box { overflow: visible; }
+.b3-sh { cursor: auto; overflow: visible; flex-wrap: wrap; row-gap: 4px; }
+.b3-pin:hover, .b3-grp:hover { z-index: 3; }
+.b3-grp { position: absolute; bottom: 0; transform: translateX(-50%); font: 700 10.5px/15px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg); border: 1px solid currentColor; white-space: nowrap; letter-spacing: -.04em; cursor: pointer; }
+.b3-grp::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 4px; background: currentColor; opacity: .6; }
+.b3-grp.b3-r1 { bottom: 20px; }
+.b3-grp.b3-r1::after { height: 24px; opacity: .35; }
+.b3-grp.b3-on { background: currentColor; }
+.b3-grp.b3-on b, .b3-grp.b3-on i.k { color: #111318; }
+.b3-grp.b3-seen:not(.b3-on) { opacity: .5; }
+.b3-grp i.k { font-style: normal; opacity: .8; font-size: 9.5px; margin-left: 2px; }
+.b3-phone .b3-grp { font-size: 12px; line-height: 17px; }
+.b3-pin.b3-pend { border-style: dashed; color: var(--dim); }
+.b3-lift { transform: translateX(-50%) translateY(-4px); box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px currentColor; z-index: 4; }
+.b3-mk.rt { color: var(--tool); background: rgba(90, 169, 245, .12); }
+.b3-act.rt[aria-pressed="true"] { color: var(--tool); border-color: rgba(90, 169, 245, .5); background: rgba(90, 169, 245, .08); }
+.b3-u { color: var(--text); font-size: 10.5px; }
+.b3-wd { color: var(--dim); flex-basis: 100%; }
+.b3-wi { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; color: var(--text); font: inherit; font-size: 11px; padding: 0 9px; line-height: 20px; width: 150px; }
+.b3-stog { all: unset; display: flex; gap: 8px; align-items: baseline; cursor: pointer; min-width: 0; }
+.b3-sum.open .b3-stog .chev { transform: rotate(90deg); }
+.b3-pw { position: relative; }
+.b3-pill { background: none; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; line-height: 18px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.b3-pill:hover { color: var(--text); border-color: var(--chip); }
+.b3-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.5); min-width: 200px; padding: 4px; display: flex; flex-direction: column; white-space: nowrap; }
+.b3-menu button { all: unset; cursor: pointer; padding: 3px 8px; border-radius: 5px; color: var(--text-2); font-size: 11.5px; display: flex; justify-content: space-between; gap: 12px; }
+.b3-menu button:hover { background: var(--surface); color: var(--text); }
+.b3-menu button[aria-pressed="true"] { color: var(--text); }
+.b3-menu button[aria-pressed="true"]::after { content: "✓"; color: var(--success); }
+.b3-mh { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 5px 8px 2px; }
+.b3-mf { font-size: 10.5px; color: var(--dim); padding: 4px 8px 2px; white-space: normal; max-width: 240px; }
+.b3-lvw { position: relative; margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.b3-lvw .b3-menu { left: auto; right: 0; }
+.b3-dot { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); cursor: pointer; flex: none; }
+.b3-nj { color: var(--muted); }
+.b3-nj::first-letter { color: var(--warning); }
+.b3-none { color: var(--dim); }
+.b3-genrow { display: flex; gap: 6px; align-items: center; }
+.b3-genrow .b3-gen { flex: 1; }
+.b3-gen.b3-busy { cursor: default; color: var(--muted); }
+.b3-gen.b3-fail { border-color: rgba(194, 48, 90, .6); color: var(--text-2); cursor: default; }
+.b3-gen .lnk { color: var(--tool); }
+.b3-stale { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+.b3-new { color: var(--warning); }
+.b3-ver { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.b3-ver button { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 6px; padding: 0 6px; line-height: 18px; cursor: pointer; font-size: 11px; }
+.b3-ver button:disabled { color: var(--chip); cursor: default; border-color: transparent; }
+.b3-vl { color: var(--text-2); }
+.b3-vn { color: var(--dim); }
+.step .sm { margin-left: 6px; display: inline-flex; gap: 2px; flex: none; }
+.step .sm button { background: none; border: 1px solid transparent; color: var(--dim); border-radius: 4px; padding: 0 4px; line-height: 16px; font-size: 10.5px; cursor: pointer; }
+.step .sm button:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
+.step .sm button:disabled { opacity: .35; cursor: default; }
+.step .sm button[aria-pressed="true"] { color: var(--success); border-color: rgba(63, 214, 154, .5); }
+.step .nt { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.state:has(.b3-menu) { overflow: visible; }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 18px; }
+.lg { display: flex; gap: 14px; align-items: center; color: var(--text-2); font-size: 12px; }
+.lp { width: 56px; height: 34px; position: relative; flex: none; }
+.lp > button { left: 50%; bottom: 6px; }
+:where(.ta, .legend) button { font: inherit; }
+
+.lnk { all: unset; cursor: pointer; color: var(--text-2); white-space: nowrap; }
+.lnk:hover { color: var(--text); }
+.lnk.on { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.cite { font: inherit; font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; background: transparent; cursor: pointer; white-space: nowrap; vertical-align: 1px; position: relative; }
+.cite.unread { background: color-mix(in srgb, currentColor 20%, transparent); font-weight: 700; }
+.cite.followed { border-style: dashed; }
+.btn { all: unset; cursor: pointer; font-size: 11px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-2); white-space: nowrap; line-height: 18px; }
+.btn:hover { color: var(--text); border-color: var(--chip); }
+.btn[disabled] { opacity: .35; cursor: default; }
+.btn.pri { color: var(--text); border-color: var(--chip); background: var(--bg-alt); }
+.btn.on { color: var(--text); border-color: var(--text-2); background: var(--bg-alt); }
+.gen { color: var(--text-2); padding: 6px 0; }
+.toast { position: absolute; right: 10px; bottom: -14px; z-index: 25; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 11.5px; display: flex; gap: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.toast .lnk { color: var(--tool); }
+.composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--dim); }
+.composer:focus-within { border-color: var(--chip); }
+.composer .model { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--muted); margin-bottom: 2px; }
+.composer .go { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-2); flex: none; }
+.ed { flex: 1; min-width: 0; color: var(--text); outline: none; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.ed:empty::before { content: attr(data-ph); color: var(--dim); }
+.ref { display: inline-flex; align-items: baseline; gap: 4px; padding: 0 6px; margin: 0 2px; border-radius: 5px; border: 1px solid currentColor; background: var(--bg-alt); font-size: 11px; line-height: 18px; white-space: nowrap; vertical-align: 1px; cursor: default; }
+.ref.pop { animation: pop .7s ease-out; }
+@keyframes pop { from { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 35%, transparent); } }
+.rx { all: unset; cursor: pointer; color: var(--dim); font-size: 11px; }
+.rx:hover { color: var(--text); }
+.sends { font-size: 11px; color: var(--dim); margin-top: 6px; }
+.sends > summary { cursor: pointer; list-style: none; }
+.sends > summary::-webkit-details-marker { display: none; }
+.sends[open] > summary { color: var(--text-2); }
+.sends pre { margin: 4px 0 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; white-space: pre-wrap; color: var(--text-2); font: inherit; font-size: 11px; line-height: 1.5; }
+/* Settings */
+.set { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+.set h4 { margin: 0; font-size: 13px; }
+.set .fine { color: var(--dim); font-size: 11px; }
+.frow { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; align-items: baseline; }
+.frow .fl { color: var(--muted); font-size: 12px; }
+.frow .fv { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.tog { all: unset; cursor: pointer; width: 30px; height: 16px; border-radius: 999px; background: var(--chip); position: relative; flex: none; }
+.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-2); transition: left .15s; }
+.tog[aria-pressed="true"] { background: var(--success); }
+.tog[aria-pressed="true"]::after { left: 16px; background: var(--bg); }
+.fin { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 3px 8px; }
+.kchip { font-size: 10.5px; padding: 0 7px; border-radius: 999px; border: 1px solid currentColor; line-height: 17px; white-space: nowrap; }
+.k-none { color: var(--muted); } .k-valid { color: var(--success); } .k-invalid { color: var(--error); } .k-env { color: var(--tool); }
+.disclose { color: var(--text-2); font-size: 11.5px; border-left: 2px solid var(--warning); padding: 2px 0 2px 10px; }
+.preview { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); padding: 8px 10px; font-size: 12px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.preview b { color: var(--text); }
+.preview .flash { animation: flash .6s ease-out; }
+@keyframes flash { from { color: var(--warning); } }
+.catrow { display: grid; grid-template-columns: 118px 1fr 52px 116px 168px; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+.catrow .what { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catrow .cnt { color: var(--dim); font-size: 11px; text-align: right; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.stepper button { all: unset; cursor: pointer; width: 24px; text-align: center; color: var(--text-2); }
+.stepper button:hover { color: var(--text); background: var(--bg-alt); }
+.stepper input { width: 40px; text-align: center; background: var(--bg); border: 0; border-left: 1px solid var(--border-subtle); border-right: 1px solid var(--border-subtle); color: var(--text); font: inherit; font-size: 12px; padding: 2px 0; }
+.stepper.changed input { color: var(--warning); }
+.cacts { display: flex; gap: 8px; font-size: 11px; white-space: nowrap; }
+.cform { grid-column: 1 / -1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 11.5px; align-items: center; }
+.cform label { color: var(--muted); }
+.cform .fin { width: 100%; }
+.cform .err { color: var(--error); font-size: 11px; grid-column: 2; }
+.cform .acts { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+.sw { display: inline-flex; gap: 4px; align-items: center; }
+.sw button { all: unset; cursor: pointer; width: 14px; height: 14px; border-radius: 4px; }
+.sw button[aria-pressed="true"] { outline: 1px solid var(--text); outline-offset: 1px; }
+.retired { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+.retired .catrow { opacity: .6; }
+.draftbar { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-alt); border: 1px solid var(--warning); border-radius: 8px; font-size: 12px; }
+.draftbar span { flex: 1; color: var(--text-2); }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 900px) { .tiles { grid-template-columns: 1fr 1fr; } }
+.tile { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
+.tile .tk { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+.tile .tv { font-size: 14px; margin-top: 2px; }
+.tile .ts { color: var(--dim); font-size: 11px; }
+table.fgrid { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+table.fgrid th, table.fgrid td { padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; color: var(--text-2); }
+table.fgrid th { color: var(--muted); font-weight: 500; }
+table.fgrid td.z { color: var(--chip); }
+.rec { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 11.5px; }
+.rec .m { color: var(--dim); }
+.rec .x { color: var(--text-2); grid-column: 1; }
+.rec .ag { color: var(--success); } .rec .dg { color: var(--warning); }
+.rec .c { grid-row: 1 / span 3; grid-column: 2; align-self: center; }
+.hunks { display: flex; flex-direction: column; gap: 10px; }
+.hsum { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; background: var(--surface); font-size: 12px; color: var(--text-2); }
+.hsum b { color: var(--text); }
+.hunk { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 11.5px; }
+.hunk.off { opacity: .55; }
+.hunk .hh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--surface); border-bottom: 1px solid var(--border-subtle); }
+.hunk .hh label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.hunk .hh .cost { margin-left: auto; color: var(--dim); }
+.hunk .hb { padding: 8px 10px; display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
+.hunk .hb .k { color: var(--muted); }
+.del { color: var(--error); text-decoration: line-through; } .ins { color: var(--success); }
+.ev { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ev .ok { color: var(--success); } .ev .no { color: var(--warning); }
+/* Departures */
+.dep { margin: 18px 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg); overflow: hidden; scroll-margin-top: 64px; }
+.dep .dh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border-subtle); }
+.dep .dh .num { color: var(--dim); }
+.dep .dh h3 { margin: 0; font-size: 14px; }
+.dep .dh .src { font-size: 10.5px; color: var(--muted); border: 1px solid var(--chip); border-radius: 999px; padding: 0 7px; }
+.dep .dh .new { font-size: 10.5px; color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-radius: 999px; padding: 0 7px; }
+.dep .cols { display: grid; grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) { .dep .cols { grid-template-columns: 1fr; } }
+.dep .col { padding: 12px 14px; min-width: 0; }
+.dep .col + .col { border-left: 1px solid var(--border-subtle); }
+.dep .col .cl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
+.dep .col.was .cl { color: var(--t-correction); } .dep .col.now .cl { color: var(--success); }
+.dep .col p { margin: 0 0 8px; color: var(--text-2); }
+.dep .mini { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); padding: 8px 10px; font-size: 11.5px; color: var(--text-2); margin-top: 6px; }
+.dep .why { padding: 10px 14px; border-top: 1px solid var(--border-subtle); display: grid; grid-template-columns: 110px 1fr; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
+.dep .why dt { color: var(--muted); }
+.dep .why dd { margin: 0; }
+.dep .verdict { margin: 0 14px 12px; max-width: none; }
+.halfpin { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 9px; vertical-align: -3px; margin-right: 2px; }
+.halfpin.f { background: currentColor; } .halfpin.h { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.segstrip { display: flex; gap: 2px; height: 5px; border-radius: 2px; overflow: hidden; margin: 6px 0; }
+.segstrip i { flex: 1; background: var(--teal); } .segstrip i.g { background: var(--gold); } .segstrip i.r { background: var(--rose); } .segstrip i.d { background: var(--chip); }
+.ticks { display: flex; align-items: flex-end; gap: 2px; height: 30px; margin: 6px 0 4px; }
+.ticks i { flex: 1; background: var(--chip); border-radius: 1px; }
+.ticks i.on { background: var(--text-2); }
+.filebox { white-space: pre; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: var(--muted); background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+.dockbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 60; display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.dockbar b { color: var(--text); }
+.dockbar .btn { font-size: 12px; }
+.copied { color: var(--success); }
+textarea.out { width: 100%; height: 220px; margin-top: 10px; background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 11.5px; padding: 8px; }
+table.keys { border-collapse: collapse; font-size: 12px; }
+table.keys td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-2); vertical-align: top; }
+table.keys td:first-child { color: var(--text); white-space: nowrap; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--bg-alt); }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+	<h1>Jev surfacing: what the spec builds</h1>
+	<p class="lede">A review page for epic <code>conduit-test-ahu8</code>. Part 1 shows each component the beads tell an agent to build, using the round-3 scenario: one 44-minute turn with 34 messages, an open Ask at #24, and #1 raised by you. Part 2 lists the <b>16 places the spec departs from the B3, B7 and M4 mockups</b>, each with the reason and what reversing it would cost.</p>
+	<p class="lede">The turns are live and built on <a href="../round-3/#b3">B3 · Scrub and summary</a>: the coloured activity strip, two pin rows, the card above the pins, and the summary with its model pill. The spec's level function runs on real weights, so the counts match the mockups: Key 6, Balanced 16, All 34. Drag along the strip or the pins, tap a pin or a group pill, press ▲ Raise, and use the keyboard once a turn has focus. The other originals are <a href="../round-3/#b7">B7 · Footnoted recap</a> and <a href="../round-3/#m4">M4 · Teach mode</a>.</p>
+	<div class="how"><b>How to review.</b> Each component and departure has a review row. Pick <b>Looks right</b> or <b>Needs change</b> for a component, and <b>Keep departure</b> or <b>Use the mockup</b> for a departure, adding a note if you like. Your choices save in this browser. <b>Copy review</b> in the bottom bar turns them into text you can paste back to me.</div>
+</header>
+<nav class="toc">
+	<span class="tl">Build</span>
+	<a href="#c-card">Card</a><a href="#c-lane">Pin lane</a><a href="#c-states">Card states</a><a href="#c-recap">Summary</a><a href="#c-marks">Marks</a><a href="#c-reply">Reply references</a><a href="#c-keys">Keyboard</a><a href="#c-phone">Phone</a><a href="#c-general">Settings: General</a><a href="#c-categories">Categories</a><a href="#c-feedback">Feedback and tuning</a>
+	<span class="tl">Departures</span>
+	<a href="#departures">All 16</a>
+</nav>
+
+<h2 class="part">Part 1 · What gets built</h2>
+<p>Everything sits inside the existing <code>TurnActivity</code> block, which keeps its head and step log. A pure <code>surfaceTurn</code> function decides what the strip, pins and card show, and the Svelte components just render it. With the feature off, the block looks exactly like today's.</p>
+
+<section class="comp" id="c-card">
+	<div class="comp-head"><h3>The turn: strip, pins, card and summary</h3><span class="bead">.6</span><span class="bead">.11</span><p>From top to bottom: the head with its unread count, the card, the two pin rows, the coloured activity strip with its thumb, the axis, then the summary. The card always sits <b>above</b> the pins, with its caret pointing at the pin it shows, in live and settled turns alike.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Desktop · Live · 38:12 · following the newest</span><button type="button" id="sim">Next message arrives ▸</button></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="card-live"></div><div id="cmp-live"></div></div></figure>
+		<figure class="state"><figcaption><span>Desktop · Settled · 44:30 · opens on the summary</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="card-settled"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. <code>session_switched</code> survives behind <code>CONDUIT_LEGACY_SWITCH=1</code> for one release. One open question: recapture <code>phone-sidebar</code> (a 2px shift), or keep the old paint order?</p></div><div id="cmp-settled"></div></div></figure>
+	</div>
+	<dl class="spec">
+		<dt>Head</dt><dd><code>Working · 38m 12s</code> or <code>Worked · 18 searches · …</code> (click to open the step log), the bill, and <code>N unread</code>, which opens the next unread. It reads <code>All read ✓</code> at zero. Unread covers every surfaced message, not just those at the current level.</dd>
+		<dt>Card</dt><dd>Head: the type label, <code>needs reply</code> on the open Ask, <code>▲ you · reason</code>, <code>● unread</code>, <code>#24 · 31:02 · 7/16</code> and a <b>Read</b> checkbox. Body: the full text as markdown, never clamped. Foot: ↩ Reply, ▲ Raise, ▼ Lower, ⇄ Retype, then <code>now ⇥</code> (live, once you've moved off the newest), ‹ ›, and fold (–) or close (✕).</dd>
+		<dt>Strip</dt><dd>B3's coloured activity strip: gold for edits, rose for failures, grey for reads, and a breathing segment for the step running now. Drag anywhere on it, or on the pins, to scrub: the card follows the nearest pin. Tap a pin to open it.</dd>
+		<dt>Axis</dt><dd><code>00:00</code> · the Ask chip <code>? 1 open · #24</code> · progress <code>21/30 read ›</code> (opens the next unread) · <code>⚠ N not judged</code> · the level control (Final, Key, Balanced, All, with a count) and its override dot · <code>38:12 now</code>, or <code>now ⇥</code> once you've scrubbed away in a live turn.</dd>
+		<dt>Live follow</dt><dd>The card follows the newest message until you pick a pin. <b>Hold rule:</b> a message still waiting for Jev shows as a dashed <code>…</code> pin and holds the card. Once Jev answers, a routine message's pin disappears, the card falls back to the newest surfaced message, and the routine line joins the step log. Try <i>Next message arrives</i>.</dd>
+		<dt>Read</dt><dd>A message becomes read after <b>1s open</b>, but only while the tab is visible and the card is on screen. Scrubbing reads only the pin you stop on. Unchecking Read keeps it unread while it stays open.</dd>
+		<dt>Level</dt><dd>Picking a level other than the default overrides it for this session, and a pink dot appears. Click the dot for <i>Make default</i> or <i>Back to default</i>. Final hides the pins and card and keeps the strip, axis and summary.</dd>
+	</dl>
+	<div class="verdict" data-key="c-card"></div>
+</section>
+
+<section class="comp" id="c-lane">
+	<div class="comp-head"><h3>Pin lane: two rows, group pills, tap and scrub</h3><span class="bead">.16</span><p>Each pin sits at its time offset. Pins are placed most urgent first into two rows, 34px apart (38px on phone). A pin with no room joins its nearest placed neighbour's <b>group pill</b>, which shows the most urgent member and <code>+k</code>. Tapping a pill opens its lead, and tapping again cycles through the members. While a member is open, the pill shows that member's number, filled. The open Ask is never grouped.</p></div>
+	<div class="frames"><figure class="state"><figcaption><span>Desktop · Settled · All · 34 pins</span></figcaption><div class="stage"><div id="card-all"></div></div></figure>
+	<figure class="state"><figcaption><span>Pin states</span></figcaption><div class="stage"><div class="legend" id="pinlegend"></div></div></figure></div>
+	<dl class="spec">
+		<dt>Urgency order</dt><dd>Ask, then Blocked, Risk and Scope, then Replan, Correction and Decision, then Finding and Milestone, then custom categories. Ties go to the higher probability.</dd>
+		<dt>Scrub and tap</dt><dd>Press and drag anywhere on the pins or the strip. A move of 4px or more scrubs, and the card follows. A press that doesn't move picks the pin or pill under it. Drags are horizontal only, so they never fight page scroll on touch.</dd>
+		<dt>Accessibility</dt><dd>Pins and pills are buttons, so Tab reaches them. Names read like "#24 Ask, 31:02, unread, waiting on you". The strip is a slider whose value is the open message. A glyph always goes with the colour.</dd>
+	</dl>
+	<div class="verdict" data-key="c-lane"></div>
+</section>
+
+<section class="comp" id="c-states">
+	<div class="comp-head"><h3>Card states</h3><span class="bead">.6</span><p>Fold, Final, short turns, nothing at this level, Jev failures, and a turn split into several blocks.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Folded · the strip stays, any pin reopens the card</span></figcaption><div class="stage"><div id="card-fold"></div></div></figure>
+		<figure class="state"><figcaption><span>Final · the strip, axis and summary survive</span></figcaption><div class="stage"><div id="card-final"></div></div></figure>
+		<figure class="state"><figcaption><span>Short turn · 3 messages · opens on the newest, no automatic summary</span></figcaption><div class="stage"><div id="card-short"></div></div></figure>
+		<figure class="state"><figcaption><span>Nothing at Key</span></figcaption><div class="stage"><div id="card-none"></div></div></figure>
+		<figure class="state"><figcaption><span>Jev unavailable for 2 messages · live</span></figcaption><div class="stage"><div id="card-nj"></div></div></figure>
+		<figure class="state"><figcaption><span>Hand-back · two blocks, turn-wide numbers</span></figcaption><div class="stage"><div id="card-hb1"></div><div class="reply"><p>Handing back while the visual suite runs. I'll continue with the unread counter.</p></div><div id="card-hb2"></div></div></figure>
+	</div>
+	<dl class="spec">
+		<dt>Fold</dt><dd>– folds the card away. The pins and strip stay, because they are the activity strip. Any pin reopens it. Only the session's latest turn opens unfolded.</dd>
+		<dt>Final</dt><dd>Hides the pins and card, and keeps the strip, the axis with its unread progress, and the summary, plus <code>Final only · N hidden</code>. Opening any message (Ask chip, a citation, <kbd>u</kbd>) switches the session to Balanced.</dd>
+		<dt>Not judged</dt><dd>If Jev fails or the queue overflows, the message gets a failure verdict and stays in the step log. The axis shows a muted <code>⚠ N not judged</code> with a tooltip.</dd>
+		<dt>Hand-back</dt><dd>Each block shows its own pins on its own time span and strip. Numbers run across the whole turn, and the summary sits in the last block.</dd>
+	</dl>
+	<div class="verdict" data-key="c-states"></div>
+</section>
+
+<section class="comp" id="c-recap">
+	<div class="comp-head"><h3>Turn summary</h3><span class="bead">.13</span><p>B3's summary box, with its model pill. Each summary is at most 4 sentences, and each <code>[#n]</code> is a citation chip. Citations to <b>unread</b> messages are bold and filled, a citation you've followed turns dashed, and hovering one lifts its pin. When the turn moves on, you can summarise <b>just what's new since the last summary</b>, and page between the old and new ones with ‹ ›.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>None yet · the pill menu is open</span></figcaption><div class="stage"><div id="rc-none"></div></div></figure>
+		<figure class="state"><figcaption><span>Stale · 4 new since the last summary</span></figcaption><div class="stage"><div id="rc-stale"></div></div></figure>
+		<figure class="state"><figcaption><span>Generating</span></figcaption><div class="stage"><div id="rc-gen"></div></div></figure>
+		<figure class="state"><figcaption><span>Failed</span></figcaption><div class="stage"><div id="rc-fail"></div></div></figure>
+		<figure class="state"><figcaption><span>Summary model Off · no summary, Mark N read moves to the axis</span></figcaption><div class="stage"><div id="rc-off"></div></div></figure>
+	</div>
+	<dl class="spec">
+		<dt>Pill</dt><dd><code>sonnet-5 · at turn end ▾</code> opens a menu with the model (Sonnet, Opus, Off) and timing (When a turn ends, On request). It's the global setting, so it applies to every session, and Settings › Surfacing shows the same values. Try it: every turn on this page follows.</dd>
+		<dt>Versions</dt><dd>Each turn keeps a list of summaries. <i>Whole turn</i> covers #1 to the newest. <i>New since 27:15</i> covers only what arrived after the previous summary. ‹ › pages between them, newest first. Nothing is regenerated by paging.</dd>
+		<dt>Stale</dt><dd>When messages arrive after the newest summary, the head reads <code>· 4 new</code> and the box offers <code>✦ Summarize 4 new · since 38:12</code> (cheap and short) or <code>↻ Whole turn</code>.</dd>
+		<dt>When it costs money</dt><dd>A cached summary is shown as is. A new one generates only when you press a button, or when timing is "when a turn ends" and the turn settled with 4 or more non-routine messages. Off never generates.</dd>
+		<dt>Foot</dt><dd><code>sonnet-5 · 13 updates · 1.8s · written at 44:30</code>, ↻ Regenerate, ✓ Mark N read. Citations are checked against the turn's message numbers, and invalid ones are dropped.</dd>
+	</dl>
+	<div class="verdict" data-key="c-recap"></div>
+</section>
+
+<section class="comp" id="c-marks">
+	<div class="comp-head"><h3>Marks: Raise, Lower, Retype</h3><span class="bead">.10</span><p>Marks are B3's: ▲ Raise and ▼ Lower move a message one level, and ⇄ Retype picks another category. Each opens a one-line <b>Why?</b> row in the card with reason chips and a free-text box. A mark stores the level you chose for that one message, so it doesn't move when weights change. Weights change only through Settings.</p></div>
+	<div class="frames"><figure class="state"><figcaption><span>Desktop · #26 at All · ▲ Raise pressed · step log open</span></figcaption><div class="stage"><div id="card-dis"></div></div></figure></div>
+	<dl class="spec">
+		<dt>Why row</dt><dd><code>▲ Raise #26: All → Balanced. Why?</code>, then Jev's working (<code>● Finding · p .64 × 40 = 26</code>, or <code>routine · p .88</code>), reason chips, your own reason (Enter saves), <i>no reason</i>, and ✕.</dd>
+		<dt>Limits</dt><dd>▲ is disabled at Key, ▼ is disabled once a message is only in the step log, and everything waits while Jev is still judging. Pressing the active ▲ or ▼ again clears the mark.</dd>
+		<dt>After save</dt><dd>The pin gets a ▲, ▼ or ⇄, the card shows <code>▲ you · reason</code>, and a <code>Saved · Undo</code> toast shows for 6s. If a ▼ drops a message below the level, the card keeps it open with "Hidden at this level · in the step log".</dd>
+		<dt>Step log</dt><dd>Routine lines and lowered messages carry ▲ ▼ in the step log, so you can raise narration Jev filed as routine. A raised routine line becomes a glyph-only pin.</dd>
+	</dl>
+	<div class="verdict" data-key="c-marks"></div>
+</section>
+
+<section class="comp" id="c-reply">
+	<div class="comp-head"><h3>Reply references</h3><span class="bead">.12</span><p>The live turn's composer above already holds two tokens, as in the scenario. Press ↩ Reply (or <kbd>r</kbd>) on any message to drop another. Open <i>What the agent receives</i> to see the exact text that gets sent.</p></div>
+	<dl class="spec">
+		<dt>Token</dt><dd>A message token shows the glyph, number and type: <code>? #24 Ask</code>. You write your reply around tokens in the normal composer, so one message can answer several.</dd>
+		<dt>Self-contained</dt><dd>Each token carries its own text block, so it survives draft saving, session switching and cross-device draft sync. It still sends correctly if surfacing is turned off first. It reuses the composer's highlight-backdrop technique for skill chips.</dd>
+		<dt>On send</dt><dd>Each token becomes <code>Re #24 (Ask, 31:02): "&lt;first 280 chars&gt;"</code>, followed by your text. The transcript shows the sent text as is.</dd>
+	</dl>
+	<div class="verdict" data-key="c-reply"></div>
+</section>
+
+<section class="comp" id="c-keys">
+	<div class="comp-head"><h3>Keyboard</h3><span class="bead">.6</span><span class="bead">.10–.13</span><p>Keys work only while focus is inside the turn, never globally, so typing in the composer is never captured. Click a strip and try them.</p></div>
+	<table class="keys">
+		<tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>previous or next pin at the level, first or last</td></tr>
+		<tr><td>digits, then <kbd>Enter</kbd></td><td>open #n; if it's below the level it opens with a note</td></tr>
+		<tr><td><kbd>a</kbd></td><td>open the Ask</td></tr>
+		<tr><td><kbd>u</kbd></td><td>next unread <span style="color:var(--warning)">(B3 used n, see departure 12)</span></td></tr>
+		<tr><td><kbd>s</kbd></td><td>open or close the summary</td></tr>
+		<tr><td><kbd>r</kbd></td><td>reply to the open message</td></tr>
+		<tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>raise or lower the open message</td></tr>
+		<tr><td><kbd>m</kbd></td><td>toggle read <span style="color:var(--warning)">(B3 used v)</span></td></tr>
+		<tr><td><kbd>Esc</kbd></td><td>close the Why row, then menus, then fold or close the card</td></tr>
+	</table>
+	<div class="verdict" data-key="c-keys"></div>
+</section>
+
+<section class="comp" id="c-phone">
+	<div class="comp-head"><h3>Phone</h3><span class="bead">.6</span><span class="bead">.16</span><p>The same components in the same order, at B3's phone sizes: text at least 12px, targets at least 32px tall.</p></div>
+	<div class="mobile-row">
+		<figure class="phone"><figcaption><span>Phone · Live</span><span>38m 12s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="card-phone-live"></div></div><div class="dock"><div id="cmp-phone-live"></div></div></div></figure>
+		<figure class="phone"><figcaption><span>Phone · Settled</span><span>44m 30s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="card-phone"></div><div class="reply"><p>Done. The session list now runs on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div><div class="dock"><div id="cmp-phone"></div></div></div></figure>
+		<dl class="spec">
+			<dt>Pins</dt><dd>12px numbers, rows 38px apart, so more pins group on a narrow strip.</dd>
+			<dt>Card</dt><dd>Full width, buttons 30px tall, and the Read checkbox grows to 15px.</dd>
+			<dt>Axis</dt><dd>Wraps to two lines, drops <code>00:00</code>, and the level shows <code>Bal</code>.</dd>
+			<dt>Summary</dt><dd>Citation chips get an invisible 32px hit area.</dd>
+		</dl>
+	</div>
+	<div class="verdict" data-key="c-phone"></div>
+</section>
+
+<section class="comp" id="c-general">
+	<div class="comp-head"><h3>Settings › Surfacing › General</h3><span class="bead">.3</span><span class="bead">.5</span><p>The flag lives in the daemon, because the daemon makes the paid calls. The feature is active when it's enabled and the key is valid or set by an environment variable. The level, model and timing here are the same values the summary pill and level dot change.</p></div>
+	<figure class="state"><figcaption><span>Desktop · General</span></figcaption><div class="set" id="set-general"></div></figure>
+	<div class="verdict" data-key="c-general"></div>
+</section>
+
+<section class="comp" id="c-categories">
+	<div class="comp-head"><h3>Settings › Surfacing › Categories</h3><span class="bead">.5</span><span class="bead">.9</span><span class="bead">.14</span><p>The categories are edited as a local draft, with Save and Discard. Change a weight and the readout recomputes for free, because verdicts are cached. <b>Save, and every turn on this page re-levels at once</b> (see departure 8).</p></div>
+	<figure class="state"><figcaption><span>Desktop · Categories</span></figcaption><div class="set" id="set-cats"></div></figure>
+	<dl class="spec">
+		<dt>Row</dt><dd>A pill (glyph and label), the <code>what</code> line, a sample count, a weight stepper (±5, or type a value), and actions. Built-ins: Edit definition, Retire, and ↺ Reset when changed. Custom categories: Edit (label, glyph, colour, what, not_for, examples, weight) and Delete, confirmed in the row.</dd>
+		<dt>Preview</dt><dd>Weight edits recompute the readout from <code>score(draft)</code> at no cost. Changing criteria, adding or retiring a category re-scores only when you press <i>Test against my corrections</i>, which shows its Jev call count first.</dd>
+		<dt>Validation</dt><dd>Label 1–24 characters, a single-character glyph, a hex colour, and at most 20 active categories. The id comes from the label and never changes. Built-ins can be retired but never deleted. If Save finds the set was changed elsewhere, it reloads and keeps your draft visible.</dd>
+	</dl>
+	<div class="verdict" data-key="c-categories"></div>
+</section>
+
+<section class="comp" id="c-feedback">
+	<div class="comp-head"><h3>Settings › Surfacing › Feedback and tuning</h3><span class="bead">.10</span><span class="bead">.14</span><p>M4's ledger, now read from the database. Opus proposes changes from your marks, and you review them one by one. <code>score</code> uses the same sample every time, so before and after are comparable. Applying a weight change here re-levels the turns above.</p></div>
+	<figure class="state"><figcaption><span>Desktop · Feedback</span></figcaption><div class="set" id="set-fb"></div></figure>
+	<dl class="spec">
+		<dt>Tiles and grid</dt><dd>The mark count with ▲, ▼ and ⇄ counts, the most raised and most lowered categories, top reasons, and a "Jev said → you said" grid by category.</dd>
+		<dt>Records</dt><dd>Newest first: time, session, <code>#n</code>, an excerpt, Jev's current answer, your mark, your reason, whether the current set agrees, and Clear.</dd>
+		<dt>Propose</dt><dd>Needs 5 marks. The proposal is held in the browser only, with nothing stored on the server. <i>Propose again</i> sends the changes you unticked as <code>avoid</code>.</dd>
+		<dt>Hunk evidence</dt><dd>Agreement with your corrections before → after, and how many other messages move. It isn't what the change would do to this turn (see departure 14).</dd>
+	</dl>
+	<div class="verdict" data-key="c-feedback"></div>
+</section>
+
+<h2 class="part" id="departures">Part 2 · Where the spec departs from the mockups</h2>
+<p>These are the plan's 16 departures from B3, B7 and M4, in the plan's order. For each one, decide whether to keep the departure or go back to the mockup.</p>
+<div id="deps"></div>
+
+</div>
+<div class="dockbar"><span id="tally"></span><button type="button" class="btn pri" id="copy">Copy review</button><span id="copied" class="copied" hidden>Copied</span></div>
+<div class="page" style="padding-top:0" id="outwrap" hidden><textarea class="out" id="out" readonly></textarea></div>
+
+<script>
+const MSGS = [{"n": 1, "t": "01:42", "type": "finding", "p": 0.93, "lvl": "Balanced ▲ you", "settledOnly": false, "text": "`session_switched` has three consumers, not one: MessageList history, the sidebar unread counter and the push deep link. The plan only lists the first."}, {"n": 2, "t": "02:20", "type": "finding", "p": 0.71, "lvl": "All", "settledOnly": false, "text": "MessageList reads history through `loadHistoryPage`, not the store."}, {"n": 3, "t": "03:10", "type": "scope", "p": 0.88, "lvl": "Key", "settledOnly": false, "text": "That makes this bigger than planned: the unread counter and the deep-link handler both have to move to `subscribeSessionDetail` too, or they break when the legacy path goes."}, {"n": 4, "t": "04:05", "type": "finding", "p": 0.66, "lvl": "All", "settledOnly": false, "text": "The unread counter already dedupes by session id, so the move is mostly wiring."}, {"n": 5, "t": "05:30", "type": "milestone", "p": 0.8, "lvl": "All", "settledOnly": false, "text": "Contracts for `subscribeSessionDetail` compile."}, {"n": 6, "t": "06:55", "type": "decision", "p": 0.84, "lvl": "Balanced", "settledOnly": false, "text": "I'm keeping `session_switched` behind `CONDUIT_LEGACY_SWITCH=1` for one release instead of deleting it, so a bad rollout can be reverted without a deploy."}, {"n": 7, "t": "08:10", "type": "finding", "p": 0.69, "lvl": "All", "settledOnly": false, "text": "Push deep links are built in `push-routing.ts`, not the service worker."}, {"n": 8, "t": "09:20", "type": "blocked", "p": 0.95, "lvl": "Key", "settledOnly": false, "text": "`pnpm check` fails at `ws-rpc.ts:1368`: the `ViewSession` schema lives on `feat/ni8-transport`, which isn't merged. I can't finish the sidebar without it."}, {"n": 9, "t": "09:48", "type": "replan", "p": 0.79, "lvl": "Balanced", "settledOnly": false, "text": "Changing order: I'll rebase onto `feat/ni8-transport` locally and build on top, rather than stubbing the schema and redoing it later."}, {"n": 10, "t": "11:02", "type": "finding", "p": 0.62, "lvl": "All", "settledOnly": false, "text": "`feat/ni8-transport` rebases cleanly; 3 trivial conflicts in `ws-rpc.ts`."}, {"n": 11, "t": "12:45", "type": "decision", "p": 0.74, "lvl": "Balanced", "settledOnly": false, "text": "Keeping `ViewSession` field names identical to the legacy payload so stores don't change shape."}, {"n": 12, "t": "14:30", "type": "correction", "p": 0.81, "lvl": "Balanced", "settledOnly": false, "text": "Correction: the deep link doesn't read `session_switched` directly. It goes through `history-logic.ts:178`, so there's one consumer fewer than I said at 01:42."}, {"n": 13, "t": "16:20", "type": "blocked", "p": 0.91, "lvl": "Key", "settledOnly": false, "text": "`pnpm lint` fails on 4 unused imports left by the rebase. Fixing before continuing."}, {"n": 14, "t": "17:30", "type": "finding", "p": 0.6, "lvl": "All", "settledOnly": false, "text": "The sidebar store re-renders on every summary event; it needs a keyed update."}, {"n": 15, "t": "19:05", "type": "risk", "p": 0.9, "lvl": "Key", "settledOnly": false, "text": "The unread counter now subscribes per session. With 293 sessions that's 293 open streams per tab on reconnect, which could exhaust the daemon's socket budget."}, {"n": 16, "t": "20:10", "type": "milestone", "p": 0.82, "lvl": "All", "settledOnly": false, "text": "Sidebar store is on the typed stream. Its unit tests pass."}, {"n": 17, "t": "21:05", "type": "correction", "p": 0.78, "lvl": "Balanced", "settledOnly": false, "text": "The keyed update I mentioned isn't needed: Svelte already skips unchanged rows."}, {"n": 18, "t": "22:40", "type": "decision", "p": 0.72, "lvl": "Balanced", "settledOnly": false, "text": "I'm batching unread subscriptions into one `subscribeSessionSummaries` stream instead of adding a cap, because a cap would silently drop badges."}, {"n": 19, "t": "24:00", "type": "finding", "p": 0.68, "lvl": "All", "settledOnly": false, "text": "Reconnect replays summaries in session order, so badges settle in under 200ms."}, {"n": 20, "t": "25:40", "type": "risk", "p": 0.89, "lvl": "Key", "settledOnly": false, "text": "Two open tabs double the summary stream. Acceptable for now; noting it for later."}, {"n": 21, "t": "27:15", "type": "milestone", "p": 0.86, "lvl": "All", "settledOnly": false, "text": "Sidebar and MessageList are on the typed stream. 523/523 unit files pass, 6,832 tests green."}, {"n": 22, "t": "28:30", "type": "finding", "p": 0.63, "lvl": "All", "settledOnly": false, "text": "The 2px shift only appears on the phone sidebar, not on desktop."}, {"n": 23, "t": "29:50", "type": "milestone", "p": 0.81, "lvl": "All", "settledOnly": false, "text": "Unread badges migrated. `pnpm check` clean."}, {"n": 24, "t": "31:02", "type": "ask", "p": 0.97, "lvl": "Key", "settledOnly": false, "text": "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order? I'll carry on with the deep link meanwhile."}, {"n": 25, "t": "32:15", "type": "decision", "p": 0.73, "lvl": "Balanced", "settledOnly": false, "text": "Carrying on with the deep link while I wait on your phone-sidebar answer."}, {"n": 26, "t": "33:40", "type": "finding", "p": 0.64, "lvl": "All", "settledOnly": false, "text": "The push deep link opens the session before its history loads. That's why it flashed empty on iOS before this change too."}, {"n": 27, "t": "34:50", "type": "finding", "p": 0.61, "lvl": "All", "settledOnly": false, "text": "iOS Safari fires `visibilitychange` before `pageshow`, which is why the deep link raced."}, {"n": 28, "t": "35:30", "type": "milestone", "p": 0.84, "lvl": "All", "settledOnly": false, "text": "The deep link now waits for history. The empty flash is gone in the iOS simulator."}, {"n": 29, "t": "36:10", "type": "finding", "p": 0.65, "lvl": "All", "settledOnly": false, "text": "The sidebar's Storybook stories needed the typed fixture; 3 stories updated."}, {"n": 30, "t": "36:55", "type": "milestone", "p": 0.83, "lvl": "All", "settledOnly": false, "text": "Deep link migrated. `pnpm acceptance:visual` is green except `phone-sidebar`, which is waiting on your answer."}, {"n": 31, "t": "38:40", "type": "finding", "p": 0.67, "lvl": "All", "settledOnly": true, "text": "The legacy handler has no callers left when the flag is off."}, {"n": 32, "t": "40:20", "type": "decision", "p": 0.77, "lvl": "Balanced", "settledOnly": true, "text": "Leaving `phone-sidebar` unrecaptured until you answer. Everything else is committed on `feat/typed-session-list`."}, {"n": 33, "t": "41:30", "type": "decision", "p": 0.75, "lvl": "Balanced", "settledOnly": true, "text": "Defaulting `CONDUIT_LEGACY_SWITCH` to off, since you want it deleted next release."}, {"n": 34, "t": "43:50", "type": "milestone", "p": 0.88, "lvl": "All", "settledOnly": true, "text": "Branch pushed. The legacy path is off by default and can be removed next release."}];
+const CATS = {
+	ask: { g: '?', label: 'Ask', w: 100, what: 'asks the user for a choice, fact, approval or action' },
+	blocked: { g: '✕', label: 'Blocked', w: 80, what: 'reports a failed gate, missing access or stop condition that prevents the next step' },
+	risk: { g: '!', label: 'Risk', w: 80, what: 'names an unresolved plausible harm, regression or hazard' },
+	scope: { g: '±', label: 'Scope', w: 80, what: 'says the agreed deliverables must grow or shrink' },
+	replan: { g: '↻', label: 'Replan', w: 60, what: 'changes method or order because of new evidence' },
+	correction: { g: '↶', label: 'Correction', w: 60, what: 'retracts or materially revises an earlier claim' },
+	decision: { g: '◆', label: 'Decision', w: 60, what: "commits to a consequential choice or trade-off on the user's behalf" },
+	finding: { g: '●', label: 'Finding', w: 40, what: 'establishes a new fact or root cause' },
+	milestone: { g: '✓', label: 'Milestone', w: 40, what: 'reports a completed deliverable or full gate' },
+	perf: { g: '⚡', label: 'Perf', w: 70, custom: true, what: 'reports a measured change in latency, memory, bundle size or resource use' },
+};
+const URG = { ask: 0, blocked: 1, risk: 2, scope: 2, replan: 3, correction: 3, decision: 3, finding: 4, milestone: 4 };
+const weights = Object.fromEntries(Object.entries(CATS).map(([k, c]) => [k, c.w]));
+const retired = new Set();
+const RANK = { hidden: 0, all: 1, balanced: 2, key: 3 };
+const LV = { final: 'Final', key: 'Key', balanced: 'Balanced', all: 'All', hidden: 'hidden' };
+const UP = { hidden: 'all', all: 'balanced', balanced: 'key', key: 'key' };
+const DOWN = { key: 'balanced', balanced: 'all', all: 'hidden', hidden: 'hidden' };
+const ARROW = { up: '▲', down: '▼', retype: '⇄' };
+const REASONS = ['changed the plan', 'users saw this', 'needed my answer', 'just a compile', 'noise'];
+const RECAP_SETTLED = "The plan grew early: `session_switched` had three consumers, so the unread counter and the deep link had to move too [#1][#3], and the legacy path stays behind a flag for one release [#6]. A missing `ViewSession` schema blocked `pnpm check`, so the work was rebased onto `feat/ni8-transport` instead of stubbed [#8][#9]. Per-session unread subscriptions risked 293 open streams per tab, so they were batched into one summary stream [#15][#18]. The branch is pushed with the legacy path off by default [#33][#34], except the phone-sidebar baseline, which waits on your answer [#24].";
+const RECAP_LIVE = "So far: `session_switched` had three consumers, so the unread counter and deep link are moving too [#1][#3], behind a one-release flag [#6]. A missing schema forced a rebase onto `feat/ni8-transport` [#8][#9]. Unread subscriptions are batched into one stream to avoid 293 per tab [#15][#18]. The deep link is migrated and every baseline is green except phone-sidebar, which waits on your answer [#24][#30].";
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+const plain = s => s.replace(/`/g, '');
+const secs = t => { const [m, s] = t.split(':').map(Number); return m * 60 + s; };
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s) % 60).padStart(2, '0')}`;
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+const cat = t => CATS[t] || { g: '·', label: t };
+
+// The spec's surfacingLevel: prominence = weight × p; Key ≥ 70, Balanced ≥ 40, else All. A retired category drops out.
+function jevLevel(m, w = weights, ret = retired) {
+	if (ret.has(m.type)) return 'hidden';
+	const x = (w[m.type] ?? 50) * m.p;
+	return x >= 70 ? 'key' : x >= 40 ? 'balanced' : 'all';
+}
+const effLevel = m => m.mark ? m.mark.level : m.routine ? 'hidden' : jevLevel(m);
+const effType = m => m.mark?.category && CATS[m.mark.category] ? m.mark.category : m.type;
+const shownAt = (m, lvl) => lvl !== 'final' && !m.pending && RANK[effLevel(m)] >= RANK[lvl];
+
+const cards = [];
+const rerenderAll = () => cards.forEach(c => c.render());
+
+class Composer {
+	constructor(root) {
+		root.innerHTML = `<div class="composer"><div class="ed" contenteditable="true" data-ph="Reply… (↩ Reply on a message drops a reference here)"></div><span class="model">sonnet-5</span><span class="go">↑</span></div><details class="sends" data-testid="surfacing-ref-preview" hidden><summary>▸ What the agent receives</summary><pre></pre></details>`;
+		this.ed = root.querySelector('.ed'); this.det = root.querySelector('.sends'); this.pre = root.querySelector('pre');
+		this.ed.addEventListener('input', () => this.update());
+		this.ed.addEventListener('click', e => { if (e.target.matches('.rx')) { e.target.closest('.ref').remove(); this.update(); } });
+	}
+	token(label, cls, block) {
+		const s = document.createElement('span');
+		s.className = `ref ${cls} pop`; s.contentEditable = 'false'; s.dataset.block = block; s.setAttribute('data-testid', 'surfacing-ref-token');
+		s.innerHTML = `${esc(label)}<button class="rx" type="button" aria-label="Remove reference">×</button>`;
+		return s;
+	}
+	insert(node) {
+		const sel = getSelection(), space = document.createTextNode(' ');
+		if (sel.rangeCount && this.ed.contains(sel.anchorNode)) {
+			const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(space); r.insertNode(node); r.setStartAfter(space); r.collapse(true);
+		} else this.ed.append(node, space);
+		this.update();
+	}
+	addMsg(m) { const c = cat(effType(m)); this.insert(this.token(`${c.g} #${m.n} ${c.label}`, `t-${effType(m)}`, `Re #${m.n} (${c.label}, ${m.t}): "${clip(plain(m.text), 280)}"`)); }
+	addExcerpt(m, text) { const c = cat(effType(m)); this.insert(this.token(`${c.g} #${m.n} "${clip(text, 24)}"`, `t-${effType(m)}`, `Re #${m.n} (${c.label}, ${m.t}): "${text}"`)); }
+	addRecap(text) { this.insert(this.token(`✦ Summary "${clip(text, 24)}"`, 't-recap', `Re summary: "${text}"`)); }
+	addText(t) { this.ed.append(document.createTextNode(t)); this.update(); }
+	update() {
+		const blocks = [], text = [];
+		for (const n of this.ed.childNodes) n.nodeType === 1 && n.dataset.block ? blocks.push(n.dataset.block) : text.push(n.textContent);
+		this.det.hidden = !blocks.length;
+		this.pre.textContent = [blocks.join('\n'), text.join('').replace(/\s+/g, ' ').trim()].filter(Boolean).join('\n\n');
+	}
+}
+// ── Turn widget: B3's strip, pins, card and summary, adapted to the spec ──
+// RS is the global Settings › Surfacing state; every widget reads it on render.
+const RS = { model: 'sonnet', when: 'turn-end', level: 'balanced' };
+const MODEL = { sonnet: 'sonnet-5', opus: 'opus-5', off: 'Off' };
+const WHEN = { 'turn-end': 'at turn end', 'on-request': 'on request' };
+const LVB = { final: 'Final', key: 'Key', balanced: 'Balanced', all: 'All' };
+const LNAME = { hidden: 'the log', all: 'All', balanced: 'Balanced', key: 'Key' };
+const byN = n => MSGS.find(m => m.n === n);
+
+const RC_LIVE_NEW = "Since 27:15: one question for you, recapture `phone-sidebar` or keep the old paint order [#24]. The agent found why push deep links flashed empty on iOS [#26] and migrated the deep link [#30]. Visual tests are green except `phone-sidebar`. It is now running `pnpm acceptance:visual`.";
+const RC_SETTLED_NEW = "While you were away (27:15 to 44:30): one answer needed, recapture `phone-sidebar` for a 2px shift or keep the old paint order [#24]. The agent found why push deep links opened empty on iOS [#26], migrated the deep link [#30], and left `phone-sidebar` unrecaptured until you answer [#32]. The branch is pushed and the legacy path is off by default [#34].";
+const RC_TURN = "The job grew: `session_switched` had three consumers, not one [#1], so the unread counter and deep link had to move too [#3], though one was later ruled out [#12]. Rather than delete the legacy path, the agent kept it behind `CONDUIT_LEGACY_SWITCH=1` for a release [#6]. An unmerged schema blocked it [#8], so it rebased onto `feat/ni8-transport` [#9]. Per-session unread streams risked exhausting sockets [#15], so it batched them into one stream [#18]. Everything is migrated and green [#21] [#30], and the branch is pushed [#34]. Waiting on you: `phone-sidebar` [#24].";
+const WHOLE21 = "The job grew: `session_switched` had three consumers, not one [#1], so the unread counter and deep link had to move too [#3]. Rather than delete the legacy path, the agent kept it behind `CONDUIT_LEGACY_SWITCH=1` for a release [#6]. An unmerged schema blocked it [#8], so it rebased onto `feat/ni8-transport` [#9]. Per-session unread streams risked exhausting sockets [#15], so it batched them into one stream [#18], and the sidebar and MessageList are on the typed stream [#21].";
+const DEFAULT_VERSIONS = [
+	{ scope: 'whole', upto: 21, at: '27:15', text: WHOLE21, model: 'sonnet', dur: '1.4s' },
+	{ scope: 'new', from: 22, since: '27:15', upto: 34, at: '44:30', text: RC_SETTLED_NEW, model: 'sonnet', dur: '1.8s' },
+];
+
+const SEG_LIVE = 'g3 _2 d1 _4 g2 _5 r1 _3 d2 _6 g2 _4 _3 r1 _5 g2 _3 d2 _6 g4 _3 _2 r1 _4 g3 _5 d2 G5';
+const SEG_SETTLED = 'g3 _2 d1 _4 g2 _5 r1 _3 d2 _6 g2 _4 _3 r1 _5 g2 _3 d2 _6 g4 _3 _2 r1 _4 g3 _5 d2 _3 g7 _2 _3';
+const SEG = { live: SEG_LIVE, settled: SEG_SETTLED, hb1: SEG_SETTLED.split(' ').slice(0, 10).join(' '), hb2: SEG_SETTLED.split(' ').slice(10).join(' '), short: 'g2 _3 d1 _2 g1' };
+const SEG_CLS = { g: 'gold', d: 'dim', r: 'rose', _: '', G: 'gold b3-run' };
+const segs = s => s.split(' ').map(t => `<span class="seg ${SEG_CLS[t[0]]}" style="flex:${t.slice(1)}"></span>`).join('');
+
+const ROUTINE = { n: 1000, t: '36:01', type: 'replan', p: .88, routine: true, text: "Waiting for the visual run to finish before the Storybook run, so they don't compete for CPU." };
+const STEPS = {
+	live: [{ v: 'Ran', arg: 'pnpm test:unit', t: '1m 48s' }, { msg: 1000 }, { v: 'Running', arg: 'pnpm acceptance:visual', t: '4m 10s', run: true }],
+	settled: [{ v: 'Searched', arg: 'session_switched', t: '1.2s' }, { v: 'Read', arg: 'src/lib/frontend/stores/sidebar.svelte.ts', t: '0.8s' }, { v: 'Edited', arg: 'src/lib/frontend/utils/history-logic.ts', t: '4s' }, { msg: 1000 }, { v: 'Ran', arg: 'pnpm acceptance:visual', t: '6m 10s' }, { more: '+ 166 more tool steps and 41 narration lines' }],
+};
+
+function mountTurn(root, o = {}) {
+	const live = !!o.live, phone = !!o.phone, seeded = !o.msgs;
+	const items = (o.msgs || MSGS.filter(m => live ? !m.settledOnly : true)).map(m => ({ ...m, s: secs(m.t) }));
+	if (seeded) {
+		items.find(m => m.n === 1).mark = { level: 'balanced', dir: 'up', reason: 'changed the plan' };
+		items.push({ ...ROUTINE, s: secs(ROUTINE.t) });
+	}
+	const steps = (o.steps || STEPS[live ? 'live' : 'settled']).filter(r => !r.msg || items.some(m => m.n === r.msg)).map(r => ({ ...r }));
+	const T0 = o.start || 0;
+	let T = o.end || (live ? 2292 : 2670);
+	const it = n => items.find(m => m.n === n);
+	const readUpTo = o.readUpTo ?? 21;
+	const unread = new Set(items.filter(m => m.n > readUpTo && m.n < 1000 && effLevel(m) !== 'hidden').map(m => m.n));
+	const versions = (o.versions ?? (!live && seeded && !o.noRecap ? DEFAULT_VERSIONS : [])).map(v => ({ ...v }));
+	const st = { cur: o.pick ?? null, follow: live && !o.pick, show: live ? !o.folded : !!o.pick, x: null, drag: false, press: null, extra: 0, why: o.why || null, toast: null, sumOpen: o.sumOpen ?? !live, ver: versions.length - 1, gen: o.recapState === 'gen' ? 'whole' : null, fail: o.recapState === 'fail', digits: '', lvMenu: o.menu === 'level', pillMenu: o.menu === 'pill', lv: o.level ?? null, lift: 0, keep: null, followed: new Set(), armedN: null, stepsOpen: !!o.stepsOpen };
+	const real = () => items.filter(m => m.n < 1000);
+	if (!live && !o.pick && real().length < 4) { st.cur = real().at(-1).n; st.show = true; }
+	if (st.why) { st.cur = st.why.n; st.show = true; }
+
+	const lv = () => st.lv ?? RS.level;
+	const recapModel = () => o.recapOff ? 'off' : RS.model;
+	const isAsk = m => effType(m) === 'ask';
+	const openAsk = () => o.noAsk ? null : [...items].filter(m => isAsk(m) && !m.pending).at(-1)?.n ?? null;
+	const urg = m => URG[effType(m)] ?? 5;
+	const list = () => items.filter(m => shownAt(m, lv()) || m.n === st.extra || m.pending).sort((a, b) => a.s - b.s);
+	const unreadN = () => [...unread].filter(n => it(n) && effLevel(it(n)) !== 'hidden').length;
+	if (st.cur && !shownAt(it(st.cur), lv())) st.extra = st.cur;
+
+	root.innerHTML = `<div class="ta${live ? ' live' : ''}${phone ? ' b3-phone' : ''}${st.stepsOpen ? ' b3-open' : ''}" data-testid="surfacing-turn">
+		<div class="ta-head">${live
+			? '<span class="chev">›</span><span class="verb">Working</span><span class="meta">38m 12s — Running pnpm acceptance:visual</span>'
+			: `<button type="button" class="b3-hb" aria-expanded="${st.stepsOpen}"><span class="chev">›</span><span class="verb">Worked</span><span class="meta">· 18 searches · 64 reads · 37 edits · 51 runs</span></button><span class="bill">${o.bill || '44m 30s'}</span>`}<button type="button" class="b3-unread" data-testid="surfacing-head-unread"></button></div>
+		${live ? '' : `<div class="steps"${st.stepsOpen ? '' : ' hidden'}></div>`}
+		<div class="b3-sc">
+			<div class="b3-lane"><div class="b3-card" hidden data-testid="surfacing-card"></div></div>
+			<div class="b3-hit" role="slider" tabindex="0" data-testid="surfacing-scrub" aria-label="Surfaced messages. Drag or use arrows to step, a for the Ask, u next unread, s summary, r reply, + and − raise or lower, m read."><div class="b3-pins"></div><div class="b3-track"><div class="strip">${segs(SEG[o.seg || (live ? 'live' : 'settled')])}</div><span class="b3-thumb"></span></div></div>
+			<div class="b3-axis"></div>
+			<div class="b3-sum"></div>
+		</div>
+		${live ? '<div class="steps"></div>' : ''}
+		<div class="toast" hidden data-testid="surfacing-toast-undo"></div>
+	</div>`;
+	const ta = root.firstElementChild, q = s => ta.querySelector(s);
+	const sc = q('.b3-sc'), hit = q('.b3-hit'), pins = q('.b3-pins'), thumb = q('.b3-thumb'), card = q('.b3-card'), axis = q('.b3-axis'), sum = q('.b3-sum'), stepsEl = q('.steps'), headU = q('.b3-unread'), toast = q('.toast');
+	// While you're tapping or scrubbing, pin the lane's height: an unclamped card then grows
+	// upward over the head instead of pushing the pins out from under the pointer.
+	const lane = q('.b3-lane');
+	hit.addEventListener('pointerdown', () => { if (!card.hidden && !lane.style.height) lane.style.height = lane.offsetHeight + 'px'; }, true);
+	const unpin = () => { if (lane.style.height) { lane.style.height = ''; } };
+	sc.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !st.press) unpin(); });
+	document.addEventListener('pointerdown', e => { if (!sc.contains(e.target)) unpin(); }, true);
+	if (phone) sc.classList.add('b3-phone');
+	const W = () => hit.clientWidth || 1, PAD = 8, xOf = m => PAD + (m.s - T0) / (T - T0) * (W() - 2 * PAD);
+	const nearest = x => { const L = list(); return L.length ? L.reduce((a, m) => Math.abs(xOf(m) - x) < Math.abs(xOf(a) - x) ? m : a) : null; };
+	const label = m => m.pending ? 'Waiting for Jev' : cat(effType(m)).label;
+	const glyph = m => m.pending ? '…' : m.n >= 1000 ? cat(effType(m)).g : cat(effType(m)).g + m.n;
+
+	// ── Head and step log ──
+	const drawHead = () => {
+		const u = unreadN();
+		headU.textContent = u ? `${u} unread` : 'All read ✓';
+		headU.classList.toggle('b3-zero', !u);
+		headU.setAttribute('aria-label', u ? `${u} unread. Open the next unread message` : 'All read');
+	};
+	const markBtns = m => {
+		const e = effLevel(m), pend = !!m.pending;
+		return `<span class="sm"><button type="button" data-smark="up" data-n="${m.n}" data-testid="surfacing-step-mark-${m.n}" aria-label="Raise #${m.n}"${pend ? ' disabled' : ''}>▲</button><button type="button" data-smark="down" data-n="${m.n}" aria-label="Lower #${m.n}"${pend || e === 'hidden' ? ' disabled' : ''}>▼</button></span>`;
+	};
+	const msgRow = m => `<div class="step${m.routine && !m.mark ? ' narration' : ''}"><span class="v t-${effType(m)}">${m.mark ? ARROW[m.mark.dir] : m.routine ? 'routine' : '▼ you'}</span><span class="nt">${md(m.text)}</span><span class="t">${m.t}</span>${markBtns(m)}</div>${st.why && st.why.src === 'step' && st.why.n === m.n ? whyRow(m) : ''}`;
+	const drawSteps = () => {
+		const listed = new Set(steps.filter(r => r.msg).map(r => r.msg));
+		const lowered = items.filter(m => m.n < 1000 && !listed.has(m.n) && effLevel(m) === 'hidden');
+		const rows = steps.flatMap(r => r.more ? [...lowered.map(msgRow), `<div class="step narration">${r.more}</div>`] : [r.msg ? msgRow(it(r.msg)) : `<div class="step"><span class="v">${r.v}</span><span class="b3-arg">${esc(r.arg)}</span><span class="t">${r.run ? '<span class="pulse"></span> ' : ''}${r.t}</span></div>`]);
+		if (!steps.some(r => r.more)) rows.push(...lowered.map(msgRow));
+		stepsEl.innerHTML = rows.join('');
+	};
+
+	// ── Axis ──
+	const drawAxis = () => {
+		const L = items.filter(m => shownAt(m, lv()));
+		const N = items.filter(m => m.n < 1000 && effLevel(m) !== 'hidden' && !m.pending).length, u = unreadN(), r = N - u, a = openAsk(), back = live && !st.follow;
+		const cnt = k => items.filter(m => shownAt(m, k)).length;
+		const lvBtns = Object.keys(LVB).map(k => `<button type="button" data-lv="${k}" aria-pressed="${k === lv()}">${k === 'balanced' ? 'Bal' : LVB[k]}${k === lv() && k !== 'final' ? ' ' + cnt(k) : ''}</button>`).join('');
+		const menu = st.lvMenu ? `<div class="b3-menu" role="menu"><div class="b3-mh">Level for this session</div><button type="button" role="menuitem" data-lvset="default">Make ${LVB[lv()]} the default</button><button type="button" role="menuitem" data-lvset="back">Back to default (${LVB[RS.level]})</button></div>` : '';
+		axis.innerHTML = `${phone || o.start ? '' : '<span class="b3-t0">00:00</span>'}${o.start ? `<span class="b3-t0">${fmt(T0)}</span>` : ''}`
+			+ (a ? `<button type="button" class="b3-askb" data-go="${a}" data-testid="surfacing-ask-chip">? 1 open · #${a}</button>` : '')
+			+ (N ? `<button type="button" class="b3-prog" data-next data-testid="surfacing-progress" aria-label="${r} of ${N} read. Open the next unread"><span class="b3-pb"><i style="width:${(r / N * 100).toFixed(1)}%"></i></span>${r}/${N} read${u ? ' ›' : ''}</button>` : '')
+			+ (o.notJudged ? `<span class="b3-nj" data-testid="surfacing-not-judged" title="Jev couldn't judge ${o.notJudged} messages. They stay in the step log.">⚠ ${o.notJudged} not judged</span>` : '')
+			+ `<span class="b3-fin">Final only · ${cnt('all')} hidden</span>`
+			+ (lv() !== 'final' && !L.length ? `<span class="b3-none">Nothing at ${LVB[lv()]} · <button type="button" class="lnk" data-lv="all">Show All</button></span>` : '')
+			+ (recapModel() === 'off' && u ? `<button type="button" class="b3-prog" data-allv>✓ Mark ${u} read</button>` : '')
+			+ `<span class="b3-lvw"><span class="b3-lvs" role="group" aria-label="Level" data-testid="surfacing-level">${lvBtns}</span>${st.lv && st.lv !== RS.level ? '<button type="button" class="b3-dot" data-lvmenu data-testid="surfacing-level-default-dot" aria-label="This session overrides the default level"></button>' : ''}${menu}</span>`
+			+ `<button type="button" class="b3-end${back ? ' b3-back' : ''}"${back ? ' data-now' : ' tabindex="-1"'}>${back ? 'now ⇥' : live ? (phone ? 'now' : '38:12 now') : fmt(T)}</button>`;
+	};
+
+	// ── Pins: B3's two rows, with group pills instead of dots ──
+	const drawPins = () => {
+		const L = list(), gap = phone ? 38 : 34, rows = [[], []], place = new Map(), a = openAsk();
+		[...L].sort((p, q2) => (isAsk(q2) - isAsk(p)) || urg(p) - urg(q2) || q2.p - p.p).forEach(m => {
+			const x = xOf(m), r = rows.findIndex(row => row.every(v => Math.abs(v - x) >= gap));
+			if (r >= 0) rows[r].push(x);
+			place.set(m.n, r);
+		});
+		const anchors = L.filter(m => place.get(m.n) >= 0), groups = new Map();
+		L.filter(m => place.get(m.n) < 0).forEach(m => {
+			const host = anchors.filter(h => !isAsk(h)).reduce((b, h) => !b || Math.abs(xOf(h) - xOf(m)) < Math.abs(xOf(b) - xOf(m)) ? h : b, null);
+			if (!host) return;
+			if (!groups.has(host.n)) groups.set(host.n, [host]);
+			groups.get(host.n).push(m);
+		});
+		const pinCls = m => `t-${m.pending ? 'routine' : effType(m)}${place.get(m.n) === 1 ? ' b3-r1' : ''}${m.n === st.cur && st.show ? ' b3-on' : ''}${m.n === a ? ' b3-ask' : ''}${unread.has(m.n) || m.pending ? '' : ' b3-seen'}${m.n === st.extra && !shownAt(m, lv()) && !m.pending ? ' b3-x' : ''}${m.pending ? ' b3-pend' : ''}${st.lift === m.n ? ' b3-lift' : ''}`;
+		const aria = m => m.pending ? 'Message waiting for Jev' : `#${m.n} ${label(m)}, ${m.t}${unread.has(m.n) ? ', unread' : ''}${m.n === a ? ', waiting on you' : ''}${m.mark ? `, marked ${m.mark.dir}` : ''}`;
+		const mk = m => m.mark ? `<sup>${ARROW[m.mark.dir]}</sup>` : '';
+		const nd = m => unread.has(m.n) ? '<i class="b3-nd"></i>' : '';
+		pins.innerHTML = anchors.map(h => {
+			const g = groups.get(h.n);
+			if (!g) return `<button type="button" class="b3-pin ${pinCls(h)}" data-n="${h.n}" style="left:${xOf(h).toFixed(1)}px" aria-label="${aria(h)}" data-testid="surfacing-pin-${h.n}"><b>${glyph(h)}</b>${mk(h)}${nd(h)}</button>`;
+			const lead = [...g].sort((p, q2) => urg(p) - urg(q2) || q2.p - p.p)[0];
+			const order = [lead, ...g.filter(m => m !== lead).sort((p, q2) => p.s - q2.s)];
+			const show = order.find(m => m.n === st.cur && st.show) || lead, on = show.n === st.cur && st.show;
+			const un = g.some(m => unread.has(m.n)), lifted = g.some(m => m.n === st.lift);
+			return `<button type="button" class="b3-grp t-${effType(show)}${place.get(h.n) === 1 ? ' b3-r1' : ''}${on ? ' b3-on' : ''}${un ? '' : ' b3-seen'}${lifted ? ' b3-lift' : ''}" data-grp="${order.map(m => m.n).join(',')}" style="left:${xOf(h).toFixed(1)}px" data-testid="surfacing-group" aria-label="${g.length} messages: ${order.map(m => `#${m.n} ${label(m)}`).join(', ')}"><b>${glyph(show)}</b> <i class="k">+${g.length - 1}</i>${mk(show)}${un ? '<i class="b3-nd"></i>' : ''}</button>`;
+		}).join('');
+	};
+
+	// ── Card ──
+	const whyRow = m => {
+		const w = st.why, e = effLevel(m), c = cat(effType(m));
+		const head = w.k === 'retype' && !w.cat
+			? `⇄ Retype #${m.n} as…`
+			: `${ARROW[w.k]} ${w.k === 'up' ? 'Raise' : w.k === 'down' ? 'Lower' : `Retype as ${cat(w.cat).label}`} #${m.n}: ${LNAME[e]} → ${LNAME[target(m, w)]}. Why?`;
+		const jev = m.routine ? `Jev: routine · p ${String(m.p).replace(/^0/, '')}` : `Jev: ${c.g} ${c.label} · p ${String(m.p).replace(/^0/, '')} × ${weights[m.type] ?? 50} = ${Math.round((weights[m.type] ?? 50) * m.p)}`;
+		const chips = w.k === 'retype' && !w.cat
+			? Object.keys(CATS).filter(k => !retired.has(k) && k !== effType(m)).map(k => `<button type="button" class="b3-chip t-${k}" data-rcat="${k}">${CATS[k].g} ${CATS[k].label}</button>`).join('')
+			: (w.k === 'down' ? REASONS.slice(3) : REASONS.slice(0, 3)).map(r => `<button type="button" class="b3-chip" data-why="${r}">${r}</button>`).join('') + `<input class="b3-wi" placeholder="Your reason… ↵" aria-label="Reason"><button type="button" class="b3-chip b3-skip" data-why="">no reason</button>`;
+		return `<div class="b3-why" role="group" aria-label="Reason for the mark" data-testid="surfacing-mark-why"><span class="b3-wq">${head}</span><span class="b3-wd">${jev}</span>${chips}<button type="button" class="b3-cb" data-whyx aria-label="Cancel">✕</button></div>`;
+	};
+	const target = (m, w) => w.k === 'up' ? UP[effLevel(m)] : w.k === 'down' ? DOWN[effLevel(m)] : jevLevel({ ...m, type: w.cat });
+	const drawCard = () => {
+		const L = list(), i = L.findIndex(m => m.n === st.cur), vis = i >= 0 && st.show;
+		card.hidden = !vis; thumb.hidden = !vis && !live; sc.classList.toggle('b3-nocard', !vis);
+		if (i < 0) { if (live && st.follow && L.length) { st.cur = L.at(-1).n; return drawCard(); } return; }
+		const m = L[i], x = st.x ?? xOf(m), c = cat(effType(m)), e = effLevel(m), pend = !!m.pending, a = openAsk();
+		thumb.style.left = x + 'px';
+		hit.setAttribute('aria-valuetext', `#${m.n} ${label(m)}, ${m.t}, ${i + 1} of ${L.length}`);
+		if (!vis) return;
+		card.className = `b3-card t-${pend ? 'routine' : effType(m)}`;
+		const mark = m.mark, act = d => mark && mark.dir === d;
+		const below = m.n === st.extra && !shownAt(m, lv()) && !pend;
+		card.innerHTML = `<div class="b3-ch"><span class="b3-lab">${pend ? '…' : c.g} ${label(m)}</span>${m.n === a ? '<span class="b3-need">needs reply</span>' : ''}${mark ? `<span class="b3-mk ${{ up: 'up', down: 'dn', retype: 'rt' }[mark.dir]}">${ARROW[mark.dir]} you${mark.reason ? ' · ' + esc(mark.reason) : ''}</span>` : ''}${unread.has(m.n) ? '<span class="b3-u">● unread</span>' : ''}<span class="b3-at">${pend ? '' : `#${m.n} · `}${m.t} · ${i + 1}/${L.length}</span>${pend ? '' : `<label class="b3-vw"><input type="checkbox" data-read data-testid="surfacing-read-toggle"${unread.has(m.n) ? '' : ' checked'}><span>Read</span></label>`}</div>`
+			+ (pend ? '<div class="b3-note">Waiting for Jev · the card holds here until it answers</div>' : below ? `<div class="b3-note">${e === 'hidden' ? 'Hidden at this level · in the step log' : `At ${LNAME[e]}, below ${LNAME[lv()] || 'this level'} · opened directly`}</div>` : '')
+			+ `<div class="b3-tx">${md(m.text)}</div>`
+			+ (st.why && st.why.src === 'card' && st.why.n === m.n ? whyRow(m) : '')
+			+ `<div class="b3-cf"><button type="button" class="b3-cb b3-act" data-reply${pend ? ' disabled' : ''}>↩ Reply</button><button type="button" class="b3-cb b3-act up" data-mark="up" aria-pressed="${act('up')}"${pend || (e === 'key' && !act('up')) ? ' disabled' : ''} aria-label="Raise">▲<span class="b3-wl"> Raise</span></button><button type="button" class="b3-cb b3-act dn" data-mark="down" aria-pressed="${act('down')}"${pend || (e === 'hidden' && !act('down')) ? ' disabled' : ''} aria-label="Lower">▼<span class="b3-wl"> Lower</span></button><button type="button" class="b3-cb b3-act rt" data-mark="retype" aria-pressed="${act('retype')}"${pend || m.routine ? ' disabled' : ''} aria-label="Retype">⇄<span class="b3-wl"> Retype</span></button><span class="b3-sp"></span>${live && !st.follow ? '<button type="button" class="b3-cb b3-hot" data-now>now ⇥</button>' : ''}<button type="button" class="b3-cb" data-d="-1" aria-label="Previous"${i === 0 ? ' disabled' : ''}>‹</button><button type="button" class="b3-cb" data-d="1" aria-label="Next"${i === L.length - 1 ? ' disabled' : ''}>›</button><button type="button" class="b3-cb" data-x aria-label="${live ? 'Fold card' : 'Close card'}">${live ? '–' : '✕'}</button></div>`;
+		const cw = card.offsetWidth, left = Math.max(0, Math.min(W() - cw, x - cw / 2));
+		card.style.marginLeft = left + 'px';
+		card.style.setProperty('--cx', Math.max(12, Math.min(cw - 12, x - left)) + 'px');
+		armRead(m);
+	};
+
+	// Read rule: 1s open, tab visible, card on screen. Unchecking Read keeps it unread while open.
+	let readTimer = 0;
+	const armRead = m => {
+		if (st.armedN === m.n) return;
+		st.armedN = m.n; clearTimeout(readTimer);
+		const tick = () => {
+			if (st.cur !== m.n || card.hidden || st.drag || !unread.has(m.n) || st.keep === m.n || m.pending) return;
+			const r = card.getBoundingClientRect();
+			if (document.visibilityState === 'visible' && r.bottom > 0 && r.top < innerHeight) { unread.delete(m.n); render(); }
+			else readTimer = setTimeout(tick, 1000);
+		};
+		readTimer = setTimeout(tick, 1000);
+	};
+
+	// ── Summary ──
+	const count = (from, upto) => items.filter(m => m.n >= from && m.n <= upto && m.n < 1000 && !m.pending).length;
+	const verLabel = v => v.scope === 'whole' ? `Whole turn · ${count(1, v.upto)}` : `New since ${v.since} · ${count(v.from, v.upto)}`;
+	const textFor = v => {
+		const canned = v.scope === 'whole' ? { 34: RC_TURN, 30: RECAP_LIVE, 21: WHOLE21 }[v.upto] : v.from === 22 ? { 30: RC_LIVE_NEW, 34: RC_SETTLED_NEW }[v.upto] : null;
+		if (seeded && canned) return canned;
+		const from = v.scope === 'whole' ? 1 : v.from;
+		const top = items.filter(m => m.n >= from && m.n <= v.upto && m.n < 1000 && !m.pending).sort((p, q2) => (weights[q2.type] ?? 50) * q2.p - (weights[p.type] ?? 50) * p.p).slice(0, 3).sort((p, q2) => p.n - q2.n);
+		return (v.scope === 'new' ? `Since ${v.since}: ` : '') + top.map(m => `${m.text.split(/(?<=\.)\s/)[0].replace(/[.:]$/, '')} [#${m.n}].`).join(' ');
+	};
+	const cites = s => md(s).replace(/\[#(\d+)\]/g, (_, n) => {
+		const m = it(+n); if (!m) return '';
+		const c = cat(effType(m));
+		return `<button type="button" class="cite t-${effType(m)}${unread.has(m.n) ? ' unread' : ''}${st.followed.has(m.n) ? ' followed' : ''}" data-go="${n}" data-cite="${n}" data-testid="surfacing-recap-cite-${n}" aria-label="Open #${n} ${c.label}">${c.g} #${n}</button>`;
+	});
+	const pill = () => `<span class="b3-pw"><button type="button" class="b3-pill" data-pill data-testid="surfacing-summary-settings" aria-expanded="${st.pillMenu}">${MODEL[RS.model]} · ${WHEN[RS.when]} ▾</button>${st.pillMenu ? `<div class="b3-menu" role="menu"><div class="b3-mh">Model</div>${['sonnet', 'opus', 'off'].map(v => `<button type="button" role="menuitemradio" data-rs="model" data-v="${v}" aria-pressed="${RS.model === v}">${{ sonnet: 'Sonnet', opus: 'Opus', off: 'Off' }[v]}</button>`).join('')}<div class="b3-mh">When</div>${[['turn-end', 'When a turn ends'], ['on-request', 'On request']].map(([v, l]) => `<button type="button" role="menuitemradio" data-rs="when" data-v="${v}" aria-pressed="${RS.when === v}">${l}</button>`).join('')}<div class="b3-mf">Applies to every session · Settings › Surfacing</div></div>` : ''}</span>`;
+	const staleK = () => { const top = Math.max(0, ...versions.map(v => v.upto)); return items.filter(m => m.n > top && m.n < 1000 && !m.pending && effLevel(m) !== 'hidden').length; };
+	const drawSum = () => {
+		if (recapModel() === 'off' || o.noRecap) { sum.className = 'b3-sum'; sum.innerHTML = ''; return; }
+		const N = real().filter(m => !m.pending).length;
+		if (st.gen && !versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-gen b3-busy" data-testid="surfacing-summary-generate"><b>✦ Summarising…</b> <span class="run">●</span></div>`; return; }
+		if (st.fail && !versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-gen b3-fail"><b>Summary failed</b><button type="button" class="lnk" data-gen>Retry</button><span>${pill()}</span></div>`; return; }
+		if (!versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-genrow"><button type="button" class="b3-gen" data-gen data-testid="surfacing-summary-generate"><b>✦ Summarize<span class="b3-wl"> ${live ? 'turn so far' : 'turn'}</span> · ${N}</b></button>${pill()}</div>`; return; }
+		const v = versions[st.ver], k = staleK(), top = versions.at(-1), open = st.sumOpen;
+		sum.className = `b3-sum b3-box${open ? ' open' : ''}`;
+		sum.setAttribute('data-testid', 'surfacing-summary');
+		const ver = versions.length > 1
+			? `<span class="b3-ver" data-testid="surfacing-summary-version"><button type="button" data-ver="-1" aria-label="Older summary"${st.ver === 0 ? ' disabled' : ''}>‹</button><span class="b3-vl">${verLabel(v)}</span><button type="button" data-ver="1" aria-label="Newer summary"${st.ver === versions.length - 1 ? ' disabled' : ''}>›</button><span class="b3-vn">${st.ver + 1}/${versions.length}</span></span>`
+			: `<span class="b3-ver" data-testid="surfacing-summary-version"><span class="b3-vl">${verLabel(v)}</span></span>`;
+		sum.innerHTML = `<div class="b3-sh"><button type="button" class="b3-stog" data-stog aria-expanded="${open}"><span class="chev">›</span><b>✦ ${live ? 'Summary so far' : 'Turn summary'}</b></button>${pill()}${k ? `<span class="b3-new">· ${k} new</span>` : ''}${ver}</div>`
+			+ (open ? `<div class="b3-sb">${k ? `<div class="b3-stale">${st.gen ? '<span class="b3-gen b3-busy"><b>✦ Summarising…</b> <span class="run">●</span></span>' : `<button type="button" class="b3-btn pri" data-gennew data-testid="surfacing-summary-new">✦ Summarize ${k} new · since ${top.at}</button><button type="button" class="b3-btn" data-genwhole>↻ Whole turn</button>`}</div>` : ''}<p class="b3-stx">${cites(v.text)}</p><div class="b3-sf"><span>${MODEL[v.model]} · ${count(v.scope === 'whole' ? 1 : v.from, v.upto)} updates · ${v.dur} · written at ${v.at}</span><span class="b3-sp"></span><button type="button" class="b3-btn" data-regen>↻ Regenerate</button>${unreadN() ? `<button type="button" class="b3-btn" data-allv>✓ Mark ${unreadN()} read</button>` : ''}</div></div>` : '');
+	};
+	const generate = scope => {
+		st.gen = scope; st.fail = false; st.sumOpen = true; render();
+		setTimeout(() => {
+			const top = versions.at(-1), upto = Math.max(...real().filter(m => !m.pending).map(m => m.n)), at = live ? '38:12' : fmt(T);
+			const v = scope === 'new' && top ? { scope: 'new', from: top.upto + 1, since: top.at, upto, at } : { scope: 'whole', upto, at };
+			versions.push({ ...v, text: textFor(v), model: RS.model, dur: '1.6s' });
+			st.gen = null; st.ver = versions.length - 1; render();
+		}, 1200);
+	};
+
+	// ── Marks ──
+	let undo = null, toastTimer = 0;
+	const showToast = html => { toast.innerHTML = html; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000); };
+	const setMark = (m, mark, word) => {
+		undo = { n: m.n, prev: m.mark ? { ...m.mark } : null };
+		if (mark) m.mark = mark; else delete m.mark;
+		st.why = null;
+		if (!shownAt(m, lv())) st.extra = m.n;
+		showToast(`${word} · <button type="button" class="lnk" data-undo>Undo</button>`);
+		rerenderAll();
+	};
+	const startMark = (m, k, src) => {
+		if (m.mark && m.mark.dir === k) return setMark(m, null, 'Cleared');
+		st.why = { n: m.n, k, src };
+		render();
+		ta.querySelector('.b3-wi')?.focus({ preventScroll: true });
+	};
+	const saveWhy = reason => {
+		const m = it(st.why.n), w = st.why;
+		setMark(m, { level: target(m, w), dir: w.k, ...(w.cat ? { category: w.cat } : {}), reason }, 'Saved');
+	};
+
+	// ── Navigation ──
+	const reveal = () => { if (phone && !card.hidden) card.scrollIntoView({ block: 'nearest' }); };
+	const go = (n, extra = {}) => {
+		const m = it(n); if (!m) return;
+		if (lv() === 'final') st.lv = 'balanced';
+		st.extra = shownAt(m, lv()) || m.pending ? 0 : n;
+		st.cur = n; st.x = null; st.follow = false; st.show = true;
+		if (st.why && st.why.n !== n) st.why = null;
+		if (st.keep !== n) st.keep = null;
+		Object.assign(st, extra);
+		render();
+	};
+	const toNow = () => { const L = list(); st.follow = true; st.show = true; st.x = null; st.why = null; if (L.length) st.cur = L.at(-1).n; render(); };
+	const step = d => { const L = list(); if (!L.length) return; let i = L.findIndex(m => m.n === st.cur); i = i < 0 ? L.length - 1 : Math.max(0, Math.min(L.length - 1, i + d)); go(L[i].n); };
+	const nextUnread = () => { const L = list().filter(m => unread.has(m.n)), from = st.show && st.cur || 0, u = L.find(m => m.n > from) || L[0] || items.find(m => unread.has(m.n)); if (u) { go(u.n); reveal(); } };
+	const reply = m => { if (!m || m.pending) return; o.composer ? o.composer.addMsg(m) : showToast(`↩ #${m.n} would go to the composer`); };
+	const pickChip = el => {
+		if (el.dataset.n) return go(+el.dataset.n);
+		const ns = el.dataset.grp.split(',').map(Number), i = ns.indexOf(st.cur);
+		go(i >= 0 && st.show ? ns[(i + 1) % ns.length] : ns[0]);
+	};
+	const closeMenus = () => { const had = st.lvMenu || st.pillMenu; st.lvMenu = st.pillMenu = false; return had; };
+
+	const render = () => {
+		sc.classList.toggle('b3-final', lv() === 'final');
+		drawHead(); drawAxis(); drawPins(); drawCard(); drawSum();
+		if (stepsEl) drawSteps();
+	};
+
+	// ── Events ──
+	q('.b3-hb')?.addEventListener('click', e => { st.stepsOpen = !st.stepsOpen; stepsEl.hidden = !st.stepsOpen; ta.classList.toggle('b3-open', st.stepsOpen); e.currentTarget.setAttribute('aria-expanded', String(st.stepsOpen)); });
+	headU.addEventListener('click', nextUnread);
+	ta.addEventListener('click', e => {
+		const b = e.target.closest('button');
+		if (!b || !ta.contains(b)) { if (closeMenus()) render(); return; }
+		const d = b.dataset;
+		if (b.matches('.b3-pin,.b3-grp')) { if (e.detail === 0) pickChip(b); return; }
+		if (!('pill' in d || 'rs' in d || 'lvmenu' in d || 'lvset' in d)) closeMenus();
+		const m = it(st.cur);
+		if (d.lv) { st.lv = d.lv; if (live && st.follow) { const L = list(); st.cur = L.length ? L.at(-1).n : null; } render(); }
+		else if ('lvmenu' in d) { st.lvMenu = !st.lvMenu; render(); }
+		else if (d.lvset) { if (d.lvset === 'default') RS.level = lv(); st.lv = null; st.lvMenu = false; rerenderAll(); }
+		else if ('pill' in d) { st.pillMenu = !st.pillMenu; render(); }
+		else if (d.rs) { RS[d.rs] = d.v; rerenderAll(); }
+		else if (d.d) step(+d.d);
+		else if ('now' in d) toNow();
+		else if ('x' in d) { st.show = false; st.why = null; render(); }
+		else if (d.go) { if (d.cite) st.followed.add(+d.go); go(+d.go); reveal(); }
+		else if ('next' in d) nextUnread();
+		else if ('reply' in d) reply(m);
+		else if (d.mark) startMark(m, d.mark, 'card');
+		else if (d.smark) startMark(it(+d.n), d.smark, 'step');
+		else if (d.rcat) { st.why = { ...st.why, cat: d.rcat }; render(); ta.querySelector('.b3-wi')?.focus({ preventScroll: true }); }
+		else if ('why' in d) saveWhy(d.why);
+		else if ('whyx' in d) { st.why = null; render(); }
+		else if ('undo' in d && undo) { const u = it(undo.n); if (undo.prev) u.mark = undo.prev; else delete u.mark; undo = null; toast.hidden = true; rerenderAll(); }
+		else if ('gen' in d) generate('whole');
+		else if ('gennew' in d) generate('new');
+		else if ('genwhole' in d || 'regen' in d) generate('whole');
+		else if ('stog' in d) { st.sumOpen = !st.sumOpen; render(); }
+		else if (d.ver) { st.ver = Math.max(0, Math.min(versions.length - 1, st.ver + +d.ver)); render(); }
+		else if ('allv' in d) { unread.clear(); render(); }
+		else render();
+	});
+	ta.addEventListener('change', e => {
+		if (!e.target.matches('[data-read]')) return;
+		if (e.target.checked) { unread.delete(st.cur); st.keep = null; } else { unread.add(st.cur); st.keep = st.cur; }
+		render();
+	});
+	ta.addEventListener('keydown', e => { if (e.target.matches('.b3-wi') && e.key === 'Enter' && e.target.value.trim()) { e.preventDefault(); saveWhy(e.target.value.trim()); } });
+	const lift = n => { if (st.lift !== n) { st.lift = n; drawPins(); } };
+	sum.addEventListener('mouseover', e => lift(+(e.target.closest('[data-cite]')?.dataset.cite || 0)));
+	sum.addEventListener('mouseleave', () => lift(0));
+	sum.addEventListener('focusin', e => lift(+(e.target.closest('[data-cite]')?.dataset.cite || 0)));
+	sum.addEventListener('focusout', () => lift(0));
+
+	// Scrub: a press on a pin or pill picks it; any 4px drag scrubs the strip and pins alike.
+	const rx = e => Math.max(0, Math.min(W(), e.clientX - hit.getBoundingClientRect().left));
+	hit.addEventListener('pointerdown', e => {
+		if (!list().length || e.button > 0) return;
+		hit.setPointerCapture(e.pointerId);
+		const chip = e.target.closest('.b3-pin,.b3-grp');
+		st.press = { x0: e.clientX, chip, moved: false };
+		if (!chip) go(nearest(rx(e)).n, { x: rx(e) });
+	});
+	hit.addEventListener('pointermove', e => {
+		if (!st.press) return;
+		if (!st.press.moved && Math.abs(e.clientX - st.press.x0) < 4) return;
+		if (!st.press.moved) { st.press.moved = true; st.drag = true; sc.classList.add('b3-drag'); }
+		const x = rx(e), m = nearest(x);
+		if (!m) return;
+		st.x = x;
+		if (m.n !== st.cur || !st.show) go(m.n, { x }); else drawCard();
+	});
+	hit.addEventListener('pointerup', () => {
+		const p = st.press; st.press = null;
+		if (!p) return;
+		if (p.chip && !p.moved) return pickChip(p.chip);
+		st.drag = false; sc.classList.remove('b3-drag'); st.x = null; render();
+	});
+	hit.addEventListener('pointercancel', () => { st.press = null; st.drag = false; sc.classList.remove('b3-drag'); st.x = null; render(); });
+
+	// Keys work only while focus is inside this turn, never in inputs.
+	ta.addEventListener('keydown', e => {
+		const k = e.key;
+		if ((e.target.closest('input,textarea,[contenteditable="true"]') && k !== 'Escape') || e.metaKey || e.ctrlKey || e.altKey) return;
+		const m = it(st.cur), click = s => { const x = card.querySelector(s); if (x && !x.disabled) x.click(); };
+		let done = true;
+		if (/^[0-9]$/.test(k)) st.digits += k;
+		else if (k === 'Enter' && st.digits) { const n = +st.digits; st.digits = ''; go(n); }
+		else if (k === 'Enter' && e.target === hit) go(st.cur ?? list().at(-1)?.n);
+		else if (k === 'ArrowLeft' || k === 'ArrowRight') step(k === 'ArrowLeft' ? -1 : 1);
+		else if (k === 'Home' || k === 'End') { const L = list(); if (L.length) go((k === 'Home' ? L[0] : L.at(-1)).n); }
+		else if (k === 'a') { const a = openAsk(); if (a) go(a); }
+		else if (k === 'u') nextUnread();
+		else if (k === 's') { st.sumOpen = !st.sumOpen; render(); }
+		else if (k === 'r') reply(m);
+		else if (k === '+' || k === '=') click('[data-mark="up"]');
+		else if (k === '-' || k === '−') click('[data-mark="down"]');
+		else if (k === 'm') click('[data-read]');
+		else if (k === 'Escape') { if (st.why) st.why = null; else if (!closeMenus()) st.show = false; render(); }
+		else done = false;
+		if (done) { e.preventDefault(); if (!/^[0-9]$/.test(k)) st.digits = ''; if (!ta.contains(document.activeElement) || document.activeElement === document.body) hit.focus({ preventScroll: true }); }
+	});
+
+	// Hold rule: a message waiting for Jev holds the card, then resolves.
+	const arrive = (msg, resolve) => {
+		const m = { ...msg, s: secs(msg.t), pending: true };
+		items.push(m); T = Math.max(T, m.s + 20);
+		if (st.follow) st.cur = m.n;
+		render();
+		return new Promise(done => setTimeout(() => { resolve(m); render(); done(); }, msg.routine ? 1200 : 700));
+	};
+	const simulate = async btn => {
+		btn.disabled = true; st.follow = true; st.show = true; st.why = null;
+		await arrive({ n: 1001, t: '38:20', type: 'finding', p: .91, routine: true, text: 'Re-running the phone sidebar story to confirm the 2px shift.' }, m => {
+			items.splice(items.indexOf(m), 1);
+			steps.splice(steps.length - 1, 0, { v: 'Ran', arg: 'pnpm storybook --story phone-sidebar', t: '12s' });
+			st.cur = list().at(-1)?.n ?? null;
+		});
+		for (const s of MSGS.filter(x => x.settledOnly)) {
+			await new Promise(r => setTimeout(r, 700));
+			await arrive(s, m => { delete m.pending; unread.add(m.n); if (st.follow) st.cur = m.n; });
+		}
+		btn.textContent = 'No more messages';
+	};
+
+	render();
+	addEventListener('load', render);
+	addEventListener('resize', render);
+	cards.push({ render });
+	return { simulate };
+}
+
+
+// ── Mount the turns ──
+const $ = id => document.getElementById(id);
+const cLive = new Composer($('cmp-live'));
+const liveTurn = mountTurn($('card-live'), { live: true, composer: cLive });
+cLive.addText('Recapture it, the new paint order is right. ');
+cLive.insert(cLive.token('? #24 Ask', 't-ask', `Re #24 (Ask, 31:02): "${clip(plain(byN(24).text), 280)}"`));
+cLive.addText(' And on ');
+cLive.insert(cLive.token(`◆ #18 "${clip('one subscribeSessionSummaries stream', 24)}"`, 't-decision', 'Re #18 (Decision, 22:40): "one subscribeSessionSummaries stream"'));
+cLive.addText(' keep the batching.');
+document.querySelectorAll('#cmp-live .ref').forEach(r => r.classList.remove('pop'));
+const cPhoneLive = new Composer($('cmp-phone-live'));
+for (const id of ['cmp-live', 'cmp-phone-live']) {
+	const c = $(id).querySelector('.composer');
+	c.classList.add('live');
+	c.insertAdjacentHTML('afterbegin', '<div class="status"><span class="pulse"></span><b>Working 38m 12s</b> · Running pnpm acceptance:visual<span class="jump">↓ live</span></div>');
+	c.querySelector('.go').outerHTML = '<span class="go stop"><i></i></span>';
+}
+$('sim').addEventListener('click', e => liveTurn.simulate(e.currentTarget));
+
+mountTurn($('card-settled'), { composer: new Composer($('cmp-settled')) });
+mountTurn($('card-all'), { level: 'all', pick: 9, sumOpen: false });
+mountTurn($('card-fold'), { live: true, folded: true });
+mountTurn($('card-final'), { level: 'final', sumOpen: false });
+const shortMsgs = [{ ...byN(3), n: 1, t: '01:10' }, { ...byN(6), n: 2, t: '02:40' }, { ...byN(8), n: 3, t: '03:30' }];
+mountTurn($('card-short'), { msgs: shortMsgs, end: secs('04:10'), readUpTo: 1, seg: 'short', bill: '4m 10s', noAsk: true });
+const noneMsgs = [{ ...byN(2), n: 1, t: '00:50' }, { ...byN(4), n: 2, t: '01:40' }, { ...byN(6), n: 3, t: '02:30' }];
+mountTurn($('card-none'), { msgs: noneMsgs, end: secs('03:00'), level: 'key', readUpTo: 3, seg: 'short', bill: '3m 00s', noAsk: true });
+mountTurn($('card-nj'), { live: true, notJudged: 2, folded: true });
+mountTurn($('card-hb1'), { msgs: MSGS.filter(m => m.n <= 12), end: secs('15:00'), noRecap: true, readUpTo: 12, seg: 'hb1', bill: '15m 00s' });
+mountTurn($('card-hb2'), { msgs: MSGS.filter(m => m.n > 12), start: secs('15:00'), end: secs('44:30'), seg: 'hb2', bill: '29m 30s', versions: DEFAULT_VERSIONS });
+
+mountTurn($('rc-none'), { live: true, folded: true, menu: 'pill' });
+mountTurn($('rc-stale'), { live: true, folded: true, msgs: MSGS, end: 2680, sumOpen: true, versions: [
+	{ scope: 'whole', upto: 21, at: '27:15', text: WHOLE21, model: 'sonnet', dur: '1.4s' },
+	{ scope: 'new', from: 22, since: '27:15', upto: 30, at: '38:12', text: RC_LIVE_NEW, model: 'sonnet', dur: '1.6s' },
+] });
+mountTurn($('rc-gen'), { live: true, folded: true, recapState: 'gen' });
+mountTurn($('rc-fail'), { live: true, folded: true, recapState: 'fail' });
+mountTurn($('rc-off'), { live: true, folded: true, recapOff: true });
+
+mountTurn($('card-dis'), { level: 'all', pick: 26, why: { n: 26, k: 'up', src: 'card' }, stepsOpen: true, sumOpen: false });
+mountTurn($('card-phone-live'), { live: true, phone: true, composer: cPhoneLive });
+mountTurn($('card-phone'), { phone: true, composer: new Composer($('cmp-phone')) });
+
+// Pin-state legend: real pins with the card's classes.
+$('pinlegend').innerHTML = [
+	['finding', '', '●26', '<i class="b3-nd"></i>', '<b>Unread</b>: white dot'],
+	['finding', 'b3-seen', '●22', '', '<b>Read</b>: dimmed'],
+	['risk', 'b3-on', '!15', '', '<b>Open in the card</b>: filled'],
+	['ask', 'b3-ask', '?24', '<i class="b3-nd"></i>', '<b>Open Ask</b>: pulsing ring, never grouped'],
+	['finding', 'b3-seen', '●1', '<sup>▲</sup>', '<b>Your mark</b>: ▲ raised, ▼ lowered, ⇄ retyped'],
+	['finding', 'b3-x', '●7', '', '<b>Opened below the level</b>: dashed'],
+	['routine', 'b3-pend', '…', '', '<b>Waiting for Jev</b>: dashed, unnumbered, holds the card'],
+	['blocked', 'b3-grp', '✕8', '', '<b>Group</b>: most urgent member, <code>+k</code> more; tap again to cycle', '<i class="k">+2</i>'],
+	['decision', 'b3-lift', '◆18', '', '<b>Lifted</b>: you are hovering its citation in the summary'],
+].map(([t, cls, g, extra, text, k = '']) => `<div class="lg"><div class="lp"><button type="button" class="${cls.includes('b3-grp') ? '' : 'b3-pin '}t-${t} ${cls}" tabindex="-1"><b>${g}</b>${k ? ' ' + k : ''}${extra}</button></div><span>${text}</span></div>`).join('');
+
+// ── Settings: General ──
+(() => {
+	const root = document.getElementById('set-general');
+	const st = { on: true, key: 'valid' };
+	const chip = { none: ['k-none', 'Not set'], valid: ['k-valid', 'Valid'], invalid: ['k-invalid', 'Rejected by TypeSafe'], env: ['k-env', 'Set by TYPESAFE_API_KEY'] };
+	const seg = (name, cur, opts) => `<span class="sgc">${opts.map(([v, l]) => `<button type="button" aria-pressed="${cur === v}" data-k="${name}" data-v="${v}">${l}</button>`).join('')}</span>`;
+	const draw = () => {
+		root.innerHTML = `<div data-testid="surfacing-settings-general"><div class="frow"><span class="fl">Message surfacing</span><span class="fv"><button class="tog" aria-pressed="${st.on}" data-k="on" aria-label="Message surfacing"></button><span>Experimental</span><span class="fine">${st.on ? (st.key === 'valid' || st.key === 'env' ? 'Active' : 'Inactive until a valid key is set') : 'Off: today\'s view, no calls'}</span></span></div>
+		<div class="disclose">When on, conduit sends each mid-turn message, your request (first 1,000 characters) and your category definitions to TypeSafe so Jev can classify them. About $0.00005 per message. Old sessions are never judged in bulk.</div>
+		<div class="frow"><span class="fl">TypeSafe API key</span><span class="fv">${st.key === 'env' ? '' : `<input class="fin" style="width:260px" value="${st.key === 'none' ? '' : '••••••••••••3f2a'}" placeholder="ts_…" aria-label="TypeSafe API key">`}<span class="kchip ${chip[st.key][0]}">${chip[st.key][1]}</span>${st.key === 'valid' || st.key === 'invalid' ? '<button class="btn" data-k="remove">Remove</button>' : ''}<span class="fine">Preview states:</span>${Object.keys(chip).map(k => `<button class="lnk" style="font-size:11px;${st.key === k ? 'color:var(--text)' : ''}" data-k="key" data-v="${k}">${k}</button>`).join(' ')}</span></div>
+		<div class="frow"><span class="fl">Default level</span><span class="fv">${seg('level', RS.level, [['final', 'Final'], ['key', 'Key'], ['balanced', 'Balanced'], ['all', 'All']])}<span class="fine">Sessions can override it from the level control on the axis.</span></span></div>
+		<div class="frow"><span class="fl">Summary model</span><span class="fv">${seg('model', RS.model, [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['off', 'Off']])}</span></div>
+		<div class="frow"><span class="fl">Summary timing</span><span class="fv">${seg('when', RS.when, [['turn-end', 'When a turn ends'], ['on-request', 'On request']])}<span class="fine">"When a turn ends" summarises only turns with 4+ non-routine messages.</span></span></div>
+		<div class="frow"><span class="fl">Tuning model</span><span class="fv"><select class="fin"><option>Opus 5 (newest)</option><option>Sonnet 5</option></select></span></div>
+		<div class="fine">Summaries and tuning run on your Claude subscription through the daemon. The TypeSafe key stays on the server and is never sent to the browser.</div></div>`;
+	};
+	cards.push({ render: draw });
+	root.addEventListener('click', e => {
+		const b = e.target.closest('[data-k]'); if (!b) return;
+		const k = b.dataset.k;
+		if (k === 'on') st.on = !st.on; else if (k === 'remove') st.key = 'none'; else if (k in RS) { RS[k] = b.dataset.v; rerenderAll(); } else st[k] = b.dataset.v;
+		draw();
+	});
+	draw();
+})();
+
+// ── Settings: Categories (draft) and Feedback (ledger, proposal) ──
+const CORR = [[2, 'balanced'], [7, 'all'], [19, 'balanced'], [31, 'balanced'], [4, 'all'], [10, 'all'], [14, 'all'], [3, 'key'], [8, 'key'], [24, 'key'], [6, 'balanced']];
+const sample = MSGS.filter(m => m.n !== 1);
+function score(w, ret) {
+	const lv = m => jevLevel(m, w, ret);
+	return {
+		agree: CORR.filter(([n, want]) => lv(byN(n)) === want).length, total: CORR.length,
+		bal: MSGS.filter(m => m.n === 1 || RANK[lv(m)] >= 2).length, key: MSGS.filter(m => lv(m) === 'key').length,
+		levels: Object.fromEntries(sample.map(m => [m.n, lv(m)])),
+	};
+}
+const catsUI = (() => {
+	const root = document.getElementById('set-cats');
+	let draft = { w: { ...weights }, ret: new Set(retired) }, editing = null, confirmDel = null, criteriaChanged = false, tested = null, adding = false, addErr = '';
+	const counts = Object.fromEntries(Object.keys(CATS).map(k => [k, MSGS.filter(m => m.type === k).length]));
+	const dirty = () => Object.keys(CATS).some(k => draft.w[k] !== weights[k]) || [...draft.ret].sort().join() !== [...retired].sort().join() || criteriaChanged;
+	const row = k => {
+		const c = CATS[k], w = draft.w[k], changed = w !== c.w;
+		const acts = c.custom
+			? (confirmDel === k ? `<span style="color:var(--warning)">Delete ${c.g} ${c.label}?</span><button class="lnk" style="color:var(--error)" data-a="del-yes" data-k="${k}">Delete</button><button class="lnk" data-a="del-no">Cancel</button>` : `<button class="lnk" data-a="edit" data-k="${k}">Edit</button><button class="lnk" data-a="del" data-k="${k}">Delete</button>`)
+			: `<button class="lnk" data-a="edit" data-k="${k}">Edit definition</button><button class="lnk" data-a="retire" data-k="${k}">Retire</button>${changed ? `<button class="lnk" data-a="reset" data-k="${k}" title="Back to shipped weight ${c.w}">↺</button>` : ''}`;
+		const form = editing === k ? `<div class="cform">${c.custom ? `<label>Label</label><input class="fin" value="${esc(c.label)}" maxlength="24"><label>Glyph</label><input class="fin" value="${c.g}" maxlength="1" style="width:60px"><label>Colour</label><span class="sw">${['#e0c341', '#f29a4a', '#5aa9f5', '#b58cf5', '#3fd69a'].map((h, i) => `<button style="background:${h}" aria-pressed="${i === 0}" aria-label="${h}"></button>`).join('')}<input class="fin" value="#e0c341" style="width:90px"></span>` : ''}<label>Surface when</label><input class="fin" data-f="what" value="${esc(c.what)}"><label>Not for</label><input class="fin" placeholder="e.g. routine check results"><label>Examples</label><input class="fin" placeholder="one per line"><span class="acts"><button class="btn" data-a="edit-cancel">Cancel</button><button class="btn pri" data-a="edit-done" data-k="${k}">Done</button></span></div>` : '';
+		return `<div class="catrow" data-testid="surfacing-category-row-${k}"><span><span class="tchip t-${k}">${c.g} ${c.label}</span></span><span class="what" title="${esc(c.what)}">${esc(c.what)}</span><span class="cnt">${counts[k] || 0} here</span><span class="stepper ${changed ? 'changed' : ''}"><button data-a="w-" data-k="${k}" aria-label="Lower weight">−</button><input data-k="${k}" value="${w}" inputmode="numeric" aria-label="${c.label} weight"><button data-a="w+" data-k="${k}" aria-label="Raise weight">+</button></span><span class="cacts">${acts}</span>${form}</div>`;
+	};
+	const draw = (flash = false) => {
+		const s = score(draft.w, draft.ret);
+		const active = Object.keys(CATS).filter(k => !draft.ret.has(k)), gone = Object.keys(CATS).filter(k => draft.ret.has(k));
+		const testLabel = criteriaChanged ? `Test against my corrections · ${sample.length + CORR.length} Jev calls` : 'Test against my corrections';
+		root.innerHTML = `<div class="preview" data-testid="surfacing-settings-categories"><span>Of the last ${MSGS.length} judged messages:</span><span class="${flash ? 'flash' : ''}">Balanced shows <b>${s.bal}</b> · Key <b>${s.key}</b> · agrees with <b>${s.agree} of ${s.total}</b> corrections</span><button class="btn" data-a="test" ${criteriaChanged ? '' : 'disabled title="Weights are free to preview; only definition changes need Jev"'}>${testLabel}</button>${tested ? `<span class="fine">${tested}</span>` : ''}</div>
+		<div class="fine">Weight changes re-level every message at once, at no cost. Definition changes and new categories apply to messages judged from now on.</div>
+		<div>${adding ? `<div class="cform"><label>Label</label><input class="fin" id="new-label" maxlength="24" placeholder="Perf, Security…"><label>Glyph</label><input class="fin" id="new-glyph" maxlength="1" style="width:60px" placeholder="⚑"><label>Surface when</label><input class="fin" id="new-what" placeholder="the message…"><label>Weight</label><input class="fin" id="new-w" value="50" style="width:70px">${addErr ? `<span class="err">${addErr}</span>` : ''}<span class="acts"><button class="btn" data-a="add-cancel">Cancel</button><button class="btn pri" data-a="add-done">Add</button></span></div>` : `<button class="btn" data-a="add">+ Add category</button> <span class="fine">${active.length} of 20 active</span>`}</div>
+		<div>${active.map(row).join('')}</div>
+		${gone.length ? `<div class="retired"><div style="margin-bottom:4px">Retired</div>${gone.map(k => `<div class="catrow"><span><span class="tchip t-${k}">${CATS[k].g} ${CATS[k].label}</span></span><span class="what">${esc(CATS[k].what)}</span><span></span><span></span><span class="cacts"><button class="lnk" data-a="restore" data-k="${k}">Restore</button></span></div>`).join('')}</div>` : ''}
+		${dirty() ? `<div class="draftbar"><span>Unsaved changes. Save re-levels every card on this page.</span><button class="btn" data-a="discard">Discard</button><button class="btn pri" data-a="save">Save</button></div>` : ''}`;
+	};
+	const setW = (k, v) => { draft.w[k] = Math.max(0, Math.min(100, Math.round(v))); draw(true); };
+	root.addEventListener('click', e => {
+		const b = e.target.closest('[data-a]'); if (!b) return;
+		const k = b.dataset.k;
+		switch (b.dataset.a) {
+			case 'w-': return setW(k, draft.w[k] - 5);
+			case 'w+': return setW(k, draft.w[k] + 5);
+			case 'reset': return setW(k, CATS[k].c0 ?? CATS[k].w);
+			case 'retire': draft.ret.add(k); return draw(true);
+			case 'restore': draft.ret.delete(k); return draw(true);
+			case 'edit': editing = k; return draw();
+			case 'edit-cancel': editing = null; return draw();
+			case 'edit-done': { const v = root.querySelector('[data-f="what"]').value.trim(); if (v && v !== CATS[k].what) { CATS[k].what = v; criteriaChanged = true; tested = null; } editing = null; return draw(); }
+			case 'del': confirmDel = k; return draw();
+			case 'del-no': confirmDel = null; return draw();
+			case 'del-yes': draft.ret.add(k); confirmDel = null; return draw(true);
+			case 'test': tested = `Tested: ${sample.length + CORR.length} calls · agrees with ${score(draft.w, draft.ret).agree} of ${CORR.length}`; criteriaChanged = false; return draw();
+			case 'add': adding = true; addErr = ''; return draw();
+			case 'add-cancel': adding = false; return draw();
+			case 'add-done': {
+				const label = root.querySelector('#new-label').value.trim(), glyph = root.querySelector('#new-glyph').value.trim();
+				const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+				if (!label || label.length > 24) { addErr = 'Label must be 1–24 characters.'; return draw(); }
+				if ([...glyph].length !== 1) { addErr = 'Glyph must be one character.'; return draw(); }
+				if (CATS[id]) { addErr = `A category with id "${id}" already exists.`; return draw(); }
+				CATS[id] = { g: glyph, label, w: 50, custom: true, what: root.querySelector('#new-what').value.trim() || 'the message matches this category' };
+				draft.w[id] = +root.querySelector('#new-w').value || 50; weights[id] = 50; criteriaChanged = true; adding = false; return draw();
+			}
+			case 'discard': draft = { w: { ...weights }, ret: new Set(retired) }; criteriaChanged = false; return draw();
+			case 'save': Object.assign(weights, draft.w); retired.clear(); draft.ret.forEach(x => retired.add(x)); criteriaChanged = false; draw(); return rerenderAll();
+		}
+	});
+	root.addEventListener('change', e => { if (e.target.matches('.stepper input')) setW(e.target.dataset.k, +e.target.value || 0); });
+	draw();
+	return { sync: () => { draft = { w: { ...weights }, ret: new Set(retired) }; draw(true); } };
+})();
+
+(() => {
+	const root = document.getElementById('set-fb');
+	const records = [
+		{ n: 26, when: 'today 12:49', session: 'Typed session list', dir: 'up', level: 'balanced', reason: 'users saw this' },
+		{ n: 1, when: 'today 11:58', session: 'Typed session list', dir: 'up', level: 'balanced', reason: 'changed the plan' },
+		{ n: 5, when: 'yesterday', session: 'Typed session list', dir: 'down', level: 'hidden', reason: 'just a compile' },
+		{ n: 20, when: 'Mon', session: 'Sidebar unread badges', dir: 'retype', level: 'key', category: 'scope', reason: 'this was scope creep' },
+	];
+	const HUNKS = [
+		{ id: 'finding-weight', cat: 'finding', kind: 'weight', from: 40, to: 60, why: '9 of your 23 marks raise Findings that named a root cause. A weight of 60 puts confident ones (p ≥ .67) at Balanced.', ev: [[2, true], [19, true], [31, true], [7, false]] },
+		{ id: 'milestone-notfor', cat: 'milestone', kind: 'criteria', field: 'not_for', del: '', ins: 'build or test runs that only report green', why: 'You lowered 6 Milestones that were routine gate runs.', ev: [[5, true], [16, true], [21, true]] },
+		{ id: 'replan-weight', cat: 'replan', kind: 'weight', from: 60, to: 75, why: 'Replans changed the plan in 3 of 4 marked cases.', ev: [[9, true]] },
+	];
+	const ALT = { id: 'scope-examples', cat: 'scope', kind: 'criteria', field: 'examples', del: '', ins: '"This story spans contracts → daemon → transport → stores…"', why: 'Two retypes to Scope quoted a multi-layer spread like this one.', ev: [[20, true]] };
+	let state = 'idle', hunks = [], ticks = new Set(), avoid = [], applied = false, showMoved = false;
+	const candidate = () => {
+		const w = { ...weights };
+		hunks.filter(h => ticks.has(h.id) && h.kind === 'weight').forEach(h => w[h.cat] = h.to);
+		return w;
+	};
+	const draw = () => {
+		const cur = score(weights, retired), cand = score(candidate(), retired);
+		const moved = sample.filter(m => !CORR.some(([n]) => n === m.n) && cur.levels[m.n] !== cand.levels[m.n]);
+		const jevAns = m => `${cat(m.type).g} ${cat(m.type).label} · p ${m.p.toFixed(2).slice(1)} · ${LV[jevLevel(m)]}`;
+		const tiles = `<div class="tiles"><div class="tile"><div class="tk">Marks</div><div class="tv">23</div><div class="ts">14 ▲ · 9 ▼ · 3 ⇄</div></div><div class="tile"><div class="tk">Agreement now</div><div class="tv">${cur.agree} / ${cur.total}</div><div class="ts">current set vs your marks</div></div><div class="tile"><div class="tk">Most raised</div><div class="tv t-finding">● Finding</div><div class="ts">9 ▲</div></div><div class="tile"><div class="tk">Most lowered</div><div class="tv t-milestone">✓ Milestone</div><div class="ts">6 ▼ · top reason "just a compile"</div></div></div>`;
+		const grid = `<table class="fgrid"><tr><th>Jev said → you said</th><th>▲ raised</th><th>▼ lowered</th><th>⇄ retyped</th></tr>${[['finding', 9, 1, 1], ['milestone', 0, 6, 0], ['risk', 2, 1, 2], ['replan', 3, 0, 0], ['decision', 0, 1, 0]].map(([k, a, b, c]) => `<tr><td><span class="t-${k}">${CATS[k].g} ${CATS[k].label}</span></td>${[a, b, c].map(v => `<td class="${v ? '' : 'z'}">${v}</td>`).join('')}</tr>`).join('')}</table>`;
+		const recs = records.map((r, i) => {
+			const m = byN(r.n), agrees = r.category ? false : jevLevel(m) === r.level;
+			const mark = r.dir === 'retype' ? `⇄ ${CATS[r.category].g} ${CATS[r.category].label} · ${LV[r.level]}` : `${ARROW[r.dir]} ${LV[r.level]}`;
+			return `<div class="rec" data-testid="surfacing-ledger-record"><span class="m">${r.when} · conduit · ${esc(r.session)} · #${r.n}</span><span class="x">"${esc(clip(plain(m.text), 90))}"</span><span class="x">Jev: ${jevAns(m)} → you: <b style="color:var(--text)">${mark}</b> · "${esc(r.reason)}" · <span class="${agrees ? 'ag' : 'dg'}">${agrees ? 'current set agrees' : 'current set disagrees'}</span></span><button class="btn c" data-a="clear" data-i="${i}">Clear</button></div>`;
+		}).join('');
+		let prop = '';
+		if (state === 'idle') prop = `<div style="display:flex;gap:10px;align-items:center"><button class="btn pri" data-a="propose">✦ Propose changes</button><span class="fine">Opus reads your marks and the category set, and proposes edits. Nothing changes until you apply.</span></div>`;
+		else if (state === 'running') prop = `<div class="gen">✦ Reading 23 corrections and ${Object.keys(CATS).length - retired.size} categories…${avoid.length ? ` Avoiding: ${avoid.join(', ')}.` : ''} <span class="run">●</span></div>`;
+		else if (state === 'review') {
+			prop = `<div class="hunks"><div class="hsum">Agrees with <b>${cur.agree} → ${cand.agree}</b> of ${cur.total} corrections · moves <b>${moved.length}</b> other ${moved.length === 1 ? 'message' : 'messages'} <button class="lnk" style="color:var(--tool)" data-a="moved">${showMoved ? '▾' : '▸'}</button>${showMoved ? `<div class="fine" style="margin-top:4px">${moved.map(m => `#${m.n} ${LV[cur.levels[m.n]]} → ${LV[cand.levels[m.n]]}`).join(' · ') || 'none'}</div>` : ''}<div class="fine">Criteria changes can't be scored until Jev re-judges the sample, which costs calls. The count shows on each hunk.</div></div>
+			${hunks.map(h => `<div class="hunk ${ticks.has(h.id) ? '' : 'off'}" data-testid="surfacing-proposal-hunk-${h.id}"><div class="hh"><label><input type="checkbox" data-a="tick" data-id="${h.id}" ${ticks.has(h.id) ? 'checked' : ''}> <span class="t-${h.cat}">${CATS[h.cat].g} ${CATS[h.cat].label}</span> · ${h.kind === 'weight' ? 'weight' : h.field}</label><span class="cost">${h.kind === 'weight' ? 'free to score' : `${sample.length} Jev calls to score`}</span></div><div class="hb"><span class="k">Change</span><span>${h.kind === 'weight' ? `<span class="del">${h.from}</span> → <span class="ins">${h.to}</span>` : `${h.del ? `<span class="del">${esc(h.del)}</span> ` : ''}<span class="ins">+ ${esc(h.ins)}</span>`}</span><span class="k">Why</span><span>${esc(h.why)}</span><span class="k">Evidence</span><span class="ev">${h.ev.map(([n, ok]) => `<span class="${ok ? 'ok' : 'no'}">#${n} ${ok ? '✓ agrees' : '✗ still disagrees'}</span>`).join('')}</span></div></div>`).join('')}
+			<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-a="dismiss">Dismiss</button><button class="btn" data-a="again">Propose again</button><button class="btn pri" data-a="apply" ${ticks.size ? '' : 'disabled'}>Apply ${ticks.size} ${ticks.size === 1 ? 'change' : 'changes'}</button></div></div>`;
+		} else if (state === 'applied') prop = `<div class="hsum">Applied. The category set moved to the next version, and every turn on this page re-levelled. <a href="#c-categories">View in Categories</a> · <button class="lnk" style="color:var(--tool)" data-a="reset-prop">Propose again</button></div>`;
+		root.innerHTML = `<div data-testid="surfacing-settings-feedback" style="display:flex;flex-direction:column;gap:14px">${tiles}${grid}<div><h4 style="margin-bottom:4px">Your marks</h4>${recs || '<div class="fine">No marks yet. Use ▲ Raise or ▼ Lower on any surfaced message.</div>'}</div><div><h4 style="margin-bottom:6px">Improve with Opus</h4>${prop}</div></div>`;
+	};
+	root.addEventListener('click', e => {
+		const b = e.target.closest('[data-a]'); if (!b) return;
+		switch (b.dataset.a) {
+			case 'clear': records.splice(+b.dataset.i, 1); return draw();
+			case 'propose': case 'reset-prop':
+				state = 'running'; draw();
+				return setTimeout(() => { hunks = HUNKS.filter(h => !avoid.includes(h.id)); if (avoid.length) hunks.push(ALT); ticks = new Set(hunks.map(h => h.id)); state = 'review'; draw(); }, 1300);
+			case 'again': avoid = hunks.filter(h => !ticks.has(h.id)).map(h => h.id); state = 'running'; draw();
+				return setTimeout(() => { hunks = [...HUNKS.filter(h => !avoid.includes(h.id) && h.kind === 'weight'), ALT]; ticks = new Set(hunks.map(h => h.id)); state = 'review'; draw(); }, 1300);
+			case 'moved': showMoved = !showMoved; return draw();
+			case 'dismiss': state = 'idle'; return draw();
+			case 'apply': Object.assign(weights, candidate()); state = 'applied'; avoid = []; catsUI.sync(); rerenderAll(); return draw();
+		}
+	});
+	root.addEventListener('change', e => { if (e.target.dataset.a === 'tick') { const id = e.target.dataset.id; ticks.has(id) ? ticks.delete(id) : ticks.add(id); draw(); } });
+	draw();
+})();
+const OLD_DEPS = [
+	{ id: 'half-read', src: 'B7', title: 'No half-read state', listed: true,
+		was: `<p>Pins had three states: filled = unread, <b>half-filled = read via recap</b>, hollow = read. The bar read <code>13 unread · ◐ 5 via recap</code>, and Next unread skipped half-filled pins.</p><div class="mini"><span class="halfpin f t-finding">●</span> unread <span class="halfpin h t-finding">●</span> via recap <span class="halfpin t-finding">●</span> read · <code>13 unread · ◐ 5 via recap</code></div>`,
+		now: `<p>Two states only. The recap never marks anything read. Instead, its citations to unread messages are <b>bold and filled</b>, so you can see what's new in the summary itself.</p><div class="mini">Batched into one stream <span class="cite t-decision unread" style="cursor:default">◆18</span> · pushed <span class="cite t-milestone" style="cursor:default">✓34</span> · <code>13 unread</code></div>`,
+		why: 'Two counts in one bar ("13 unread · ◐ 5") made you work out which number mattered. Reading a sentence that cites #18 isn\'t reading #18.', rev: 'Add a read-via-recap flag next to the read flag (.11), a third pin state, and a count breakdown (.6, .13). Small.' },
+	{ id: 'recap-scope', src: 'B7', title: 'Recap covers the whole turn only', listed: true,
+		was: `<p>Scope setting: <b>Since I last read</b> (default), Whole turn, Whole session. Settled turns opened on the since-last-read recap (27:15 → 44:30), with a toggle to the whole turn.</p><div class="mini"><span class="seg"><button aria-pressed="true">Since I last read</button><button>Whole turn</button><button>Whole session</button></span></div>`,
+		now: `<p>One scope: the whole turn. One cached row per turn, which holds its last covered number. When new messages arrive, the recap goes stale but stays readable.</p><div class="mini">✦ Recap · whole turn · <span style="color:var(--warning)">Stale · covers to #30 · 4 new</span></div>`,
+		why: '"Since I last read" changes every time you read something, so it would rarely hit the cache, and each miss is a paid call. A whole-session recap spans turns and needs its own cache and invalidation.', rev: 'Key the recap cache by (turn, scope, read cursor) and add the segment control (.13, .3). Medium, and it raises recap spend.' },
+	{ id: 'recap-length', src: 'B7', title: 'No recap length setting', listed: true,
+		was: `<p>Length: <b>Short, up to 4 sentences</b> (default), Bullets, Detailed.</p>`,
+		now: `<p>Fixed at up to 4 sentences in v1.</p>`,
+		why: 'Each length is its own prompt to test, and the footnote layout is tuned for prose. Bullets and Detailed broke the "4 sentences, then press u" reading flow that B7 was built around.', rev: 'Add an enum setting and pass it into the recap prompt (.3, .13). Small, plus prompt evaluation.' },
+	{ id: 'recap-codex', src: 'B7', title: 'No Codex recap model', listed: true,
+		was: `<p>Recap model: sonnet-5 (default), opus-5, <b>gpt-6-astra via Codex</b>, Off.</p>`,
+		now: `<p>Sonnet (default), Opus, Off. All recap and tuning calls go through one shared one-shot Claude call, which <code>SessionTitleService</code> also moves onto (.15).</p>`,
+		why: 'A Codex path means a second provider adapter for one-shot calls, a second auth story and a second failure mode, all for a summary.', rev: 'Add a Codex adapter behind the one-shot call. Medium. Better done after .15 lands.' },
+	{ id: 'recap-timing', src: 'B7', title: 'Two recap timings, defaulting to "when a turn ends"', listed: true, newBit: 'the default flip was not listed',
+		was: `<p>When: <b>On request</b> (default), Back after 5+ min away, When 5+ are unread, At the end of the turn.</p>`,
+		now: `<p>When a turn ends (<b>default</b>), or On request. "When a turn ends" only fires for settled turns with 4+ non-routine messages.</p>`,
+		why: '"Back after 5+ min away" and "when 5+ are unread" need presence tracking in each browser, and they fire paid calls based on client state. I flipped the default because B7 opens settled turns on the recap, and with "on request" that recap would never exist.', rev: 'Presence triggers need browser-to-daemon idle signals (.3, .11, .13). Medium. Flipping the default back is one line, but settled turns would then open on the newest message.' },
+	{ id: 'recap-cost', src: 'B7', title: 'No cost in the recap foot', newDep: true,
+		was: `<p>Foot: <code>sonnet-5 · 13 updates · 1.8s · $0.006</code>. Settings quoted "about $0.006 per recap".</p>`,
+		now: `<p>Foot: <code>sonnet · 13 updates · 1.8s</code>. Settings says recaps run on your Claude subscription.</p>`,
+		why: 'Recaps run through the Claude Agent SDK on your subscription, which bills no per-call dollar amount. Any figure shown would be made up.', rev: 'If an API-key path is ever added, show the cost from the response usage. Trivial at that point.' },
+	{ id: 'read-dwell', src: 'B7', title: 'A message is read after 1s open, not on open', newDep: true,
+		was: `<p>Opening a message by tap, pager, footnote or number <b>marked it read immediately</b>. Scrubbing read only the release.</p>`,
+		now: `<p>Read after <b>1s open</b>, only while the tab is visible and the slot is on screen. Scrubbing still reads only the release. Marking a message unread stops it being re-read while it stays open.</p>`,
+		why: 'The live slot follows new messages by itself. With read-on-open, a background tab or an unwatched card would mark everything read. Stepping through with arrow keys would also mark messages you only flicked past.', rev: 'Remove the timer (.11). Trivial, but auto-follow then needs its own rule to avoid marking messages read.' },
+	{ id: 'recap-key', src: 'B7', title: 'Recap is s, Reply is r', newDep: true,
+		was: `<p><kbd>r</kbd> toggled the recap, <kbd>u</kbd> was next unread. Reply had no key.</p>`,
+		now: `<p><kbd>s</kbd> toggles the recap (summary), <kbd>r</kbd> replies, <kbd>d</kbd> opens Disagree, <kbd>m</kbd> toggles read.</p>`,
+		why: 'Reply is the more frequent action and "r for reply" is the convention everywhere else (mail, chat). The spec added keys for reply, disagree and read, which B7 didn\'t have.', rev: 'Swap two key bindings (.6, .12, .13). Trivial.' },
+	{ id: 'no-jsonl', src: 'M4', title: 'Marks live in the database, not feedback.jsonl', listed: true,
+		was: `<p>Each mark appended one JSON line to <code>~/.config/conduit/surfacing/feedback.jsonl</code>, with Open file. The teach panel's <i>Writes</i> showed the exact JSON line.</p><div class="filebox">{"at":"2026-09-26T12:49:03Z","session":"ses_c2d8","msg":26,"mark":"up",…}</div>`,
+		now: `<p>A <code>surfacing_marks</code> table, written only through <code>SurfacingFeedback</code>. <i>Writes</i> previews the record: <code>#26 · level balanced · reason "users saw this"</code>.</p>`,
+		why: 'You asked for feedback stored in a database. It also syncs across devices, is deleted with the session, and follows the read-model rules (ADR-0004).', rev: 'Add an export-to-JSONL button on the ledger if you want the file for agents. Small.' },
+	{ id: 'no-agent-tune', src: 'B7 + M4', title: 'No "Ask an agent to tune" session', listed: true,
+		was: `<p><b>✦ Ask an agent to tune categories</b> started a new conduit session with a prompt to read feedback.jsonl and categories.json and propose a diff, alongside the in-ledger Propose.</p>`,
+		now: `<p>One path: <b>Improve with Opus</b> in Settings › Feedback. It returns hunks with evidence, ticks, Apply, and Propose again with <code>avoid</code>.</p>`,
+		why: 'Two tuning paths that disagree with each other. The session path edits files that no longer exist, and its output can\'t be scored or applied safely.', rev: 'A session prompt that calls the ledger and score RPCs through the CLI. Medium.' },
+	{ id: 'relevel', src: 'M4', title: 'Weight changes re-level past messages', listed: true,
+		was: `<p>M4's copy said past turns keep their levels, and a mark moved a message "one level", so marks were relative.</p>`,
+		now: `<p>A level is computed when the card renders, from the stored probabilities and today's weights. Saving a weight change re-levels every message at once, for free. Marks are absolute ("show this at Balanced"), so they don't drift. <b>Try it:</b> raise Finding in Categories and Save.</p>`,
+		why: 'Freezing levels means storing a level for every message, and then a weight change silently splits old turns from new ones. Because verdicts store probabilities, re-levelling costs nothing.', rev: 'Store the level at judge time in text.surfaced (.2, .4) and stop recomputing it. Medium. Every later weight edit then only affects new messages.' },
+	{ id: 'tick-preview', src: 'B7', title: 'Categories preview is a readout, not a live tick lane', newDep: true,
+		was: `<p>Above the list, a live preview of <b>this turn's</b> lane: 34 ticks whose heights show the level. They moved while you dragged a weight, changed ticks flashed, and a readout updated with them.</p><div class="mini"><div class="ticks">${MSGS.map(m => { const l = jevLevel(m); return `<i class="${l !== 'all' ? 'on' : ''}" style="height:${l === 'key' ? 100 : l === 'balanced' ? 66 : 33}%"></i>`; }).join('')}</div>Balanced shows 16 of 34 · Key 6</div>`,
+		now: `<p>A text readout over your feedback sample (your marks plus the 50 most recent judged messages): <code>Balanced shows 16 · Key 6 · agrees with 8 of 11 corrections</code>.</p>`,
+		why: 'Settings has no "this turn". The sample has to be the same every time so before and after are comparable.', rev: '<b>Cheap to restore:</b> render the sample as ticks next to the readout. Weight edits are free, so the ticks can move live (.5, .14). Small. I lean towards restoring it.' },
+	{ id: 'hunk-evidence', src: 'M4', title: 'Proposal evidence is agreement, not "what it changes in this turn"', newDep: true,
+		was: `<p>Each hunk came with its evidence <b>and what it would have changed in this turn</b>.</p>`,
+		now: `<p>Above the hunks: <code>Agrees with 8 → 10 of 11 corrections · moves N other messages ▸</code>, with the moved list expandable. Each hunk lists its cited marks as agrees or disagrees.</p>`,
+		why: 'Proposals live in Settings, not inside a turn. Agreement with your own corrections is the measure that matters, and "moves N other messages" catches collateral changes.', rev: 'Add a "this session\'s latest turn" mini-lane to the review (.14). Small for weight hunks. Criteria hunks need Jev calls.' },
+	{ id: 'plain-strip', src: 'B7', title: 'The strip is a plain track', listed: true,
+		was: `<p>The strip under the pins was drawn in coloured segments for tool runs (teal, gold, rose).</p><div class="mini"><div class="segstrip"><i></i><i class="g"></i><i></i><i class="r"></i><i></i><i class="d"></i><i></i><i class="g"></i></div></div>`,
+		now: `<p>A plain grey track. It's the scrub target, and the pins carry all the meaning.</p><div class="mini"><div class="segstrip"><i class="d"></i></div></div>`,
+		why: 'Tool segments need tool-run timing on the activity block, which conduit doesn\'t thread through today. Segment colours also compete with the type colours of the pins.', rev: 'Thread tool start and end times into the card and draw segments (.6). Medium.' },
+	{ id: 'rejected-hunks', src: 'M4', title: 'Rejected hunks aren\'t remembered across reviews', listed: true,
+		was: `<p>Rejected hunks were logged, so later proposals wouldn't repeat them.</p>`,
+		now: `<p><code>avoid</code> carries the unticked hunks into <i>Propose again</i> within one review. Closing the review forgets them. Nothing about proposals is stored on the server.</p>`,
+		why: 'Keeps tuning stateless: no proposal table, no expiry rules. A rejection is often about the current set, and the set changes.', rev: 'Add a small rejected-hunk table keyed by hunk content, passed as avoid automatically (.14). Small.' },
+	{ id: 'deep-link', src: 'M4', title: 'No deep link from a ledger record to its message', listed: true,
+		was: `<p>Ledger records opened their message in its session.</p>`,
+		now: `<p>Records show time, session title, #n and an excerpt. No link in v1.</p>`,
+		why: 'Opening a message in another session needs routing to session, turn and part, which conduit doesn\'t have yet. That belongs with push deep links.', rev: 'Add a route that opens session → turn → slot on #n (.14 plus router). Medium.' },
+];
+// ── Departures (the plan's 16, in order) ──
+const mini = s => `<div class="mini">${s}</div>`;
+const OLD = Object.fromEntries(OLD_DEPS.map(d => [d.id, d]));
+const DEPS = [
+	{ id: 'card-above', src: 'B3', title: 'The card sits above the pins in settled turns too',
+		was: `<p>Live turns put the card <b>above</b> the pins. Settled turns opened on the summary and put the card <b>below</b> the strip when you scrubbed.</p>`,
+		now: `<p>One position, always above the pins, with the caret pointing down at the open pin. The summary box keeps its place under the axis.</p>`,
+		why: 'One position is easier to learn, and the card no longer jumps when a turn settles. It also keeps the summary in the same place in both phases.', rev: 'Flip the order in the settled branch of the turn view (.6). Trivial.' },
+	{ id: 'no-clamp', src: 'B3', title: 'The card body is never clamped',
+		was: `<p>The card clamped the message to <b>5 lines</b>, with the rest behind a fade.</p>`,
+		now: `<p>The full message, rendered as markdown. Long messages make the card taller and push the pins down.</p>`,
+		why: 'Reading the whole message is why you opened it. A clamp means a second click for the part you came for.', rev: 'Add a line clamp with "more" (.6). Trivial.' },
+	{ id: 'no-loupe', src: 'B3 (round 2)', title: 'No zoom loupe',
+		was: `<p>Round 2's B3 opened a zoom loupe over crowded parts of the lane to pick between overlapping pins.</p>`,
+		now: `<p>Two pin rows, group pills and scrubbing reach every pin. A pill shows its lead, cycles on repeated taps, and shows the open member's number while it's open.</p>${mini('<span class="cite t-blocked" style="cursor:default">✕8 +2</span> → tap → <span class="cite t-replan unread" style="cursor:default">⟲9</span> filled in the pill')}`,
+		why: 'The loupe was a second mode with its own gestures, and it broke scrubbing. Groups plus scrubbing cover the same need with no new mode.', rev: 'Add the loupe component on long-press over a group (.16). Medium.' },
+	{ ...OLD['half-read'], src: 'B7', title: 'No half-read state' },
+	{ id: 'recap-new', src: 'B3 + B7', title: '"Since you last read" became "New since the last summary"',
+		was: `<p>B3's summary had a scope switch, <b>Since you last read</b> (default) or Whole turn. B7 added a length setting (Short, Bullets, Detailed), a Whole session scope and a Codex model.</p>${mini('<span class="sgc"><button aria-pressed="true">Since you last read · 13</button><button>Whole turn · 34</button></span>')}`,
+		now: `<p>Each turn keeps a list of summaries. When it moves on, you can summarise <b>just the new messages</b> or redo the whole turn, and page between versions. No length setting, no whole-session scope, no Codex model; at most 4 sentences.</p>${mini('<span class="lnk" style="color:var(--text)">✦ Summarize 4 new · since 27:15</span><br>‹ New since 27:15 · 13 › <span style="color:var(--dim)">2/2</span>')}`,
+		why: '"Since you last read" changes every time you read something, so the cache would rarely hit and each miss is a paid call. "New since the last summary" gives the same catch-up, but the same for every viewer and device. Lengths, session scope and Codex each add a prompt or provider to maintain.', rev: 'Key the summary cache by read cursor and bring back the scope switch (.13, .11). Medium, and it raises summary spend.' },
+	{ id: 'reply-tokens', src: 'B3', title: 'Replies are composer tokens',
+		was: `<p>Reply opened an <b>in-card draft</b>. Sent drafts were staged as "2 pending replies" until the next turn, with edit and remove.</p>`,
+		now: `<p>↩ Reply drops a <code>? #24 Ask</code> token into the normal composer. You write around tokens, so one message can answer several. On send each token expands to a quoted block.</p>`,
+		why: 'One place to write. A second draft surface needs its own persistence, sync and send queue, and it competes with the composer you already use.', rev: 'Add the in-card draft and a pending-replies store (.12). Medium.' },
+	{ id: 'no-jsonl', src: 'M4 + B7', title: 'No feedback.jsonl, no "Ask an agent to tune" session',
+		was: OLD['no-jsonl'].was + OLD['no-agent-tune'].was,
+		now: OLD['no-jsonl'].now + OLD['no-agent-tune'].now,
+		why: OLD['no-jsonl'].why + ' ' + OLD['no-agent-tune'].why, rev: OLD['no-jsonl'].rev },
+	{ ...OLD['relevel'], now: OLD['relevel'].now.replace('when the card renders', 'when the turn renders') },
+	{ ...OLD['recap-timing'], title: 'Two summary timings, defaulting to "when a turn ends"', newBit: undefined,
+		was: `<p>When: <b>On request</b> (B3 and B7's default), Back after 5+ min away, When 5+ are unread, At the end of the turn.</p>`,
+		why: OLD['recap-timing'].why.replace('B7 opens settled turns on the recap', 'settled turns open on the summary').replace('that recap would never exist', 'that summary would never exist') },
+	{ id: 'recap-cost', src: 'B3 + B7', title: 'No cost in the summary pill or foot',
+		was: `<p>B3's pill read <code>sonnet-5 · on request ▾</code> with <code>~$0.005</code>. B7's foot showed <code>$0.006</code>.</p>`,
+		now: `<p>The pill reads <code>sonnet-5 · at turn end ▾</code> and the foot <code>sonnet-5 · 13 updates · 1.8s</code>. The model stays; the cost goes.</p>`,
+		why: OLD['recap-cost'].why, rev: OLD['recap-cost'].rev },
+	{ ...OLD['read-dwell'], src: 'B3 + B7', title: 'Read after 1s open, not on open',
+		was: `<p>Opening a message marked it <b>viewed immediately</b>, with a <i>Viewed</i> checkbox. Scrubbing read only the release.</p>`,
+		now: OLD['read-dwell'].now.replace('the slot is on screen', 'the card is on screen') + '<p>The checkbox says <b>Read</b>, to match the unread count.</p>' },
+	{ id: 'recap-key', src: 'B3 + B7', title: 'Keys: s summary, r reply, + − marks, m read, u unread',
+		was: `<p>B3: <kbd>v</kbd> toggled viewed, <kbd>n</kbd> was next unviewed. B7: <kbd>r</kbd> toggled the recap.</p>`,
+		now: `<p><kbd>s</kbd> toggles the summary, <kbd>r</kbd> replies, <kbd>+</kbd> <kbd>−</kbd> raise and lower, <kbd>m</kbd> toggles read, <kbd>u</kbd> is next unread.</p>`,
+		why: '"r for reply" is the convention everywhere else. m and u match the Read and unread words on screen, now that Viewed is gone.', rev: 'Swap the bindings (.6, .10, .12, .13). Trivial.' },
+	OLD['tick-preview'],
+	OLD['hunk-evidence'],
+	{ ...OLD['rejected-hunks'], title: 'Rejected hunks aren\'t remembered across reviews' },
+	{ ...OLD['deep-link'], rev: OLD['deep-link'].rev.replace('slot', 'card') },
+];
+
+const REVIEW_KEY = 'jev-spec-preview-review-v2';
+const review = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}');
+const saveReview = () => { localStorage.setItem(REVIEW_KEY, JSON.stringify(review)); tally(); };
+document.getElementById('deps').innerHTML = DEPS.map((d, i) => `<article class="dep" id="dep-${d.id}"><div class="dh"><span class="num">${i + 1}</span><h3>${d.title}</h3><span class="src">${d.src}</span></div><div class="cols"><div class="col was"><div class="cl">Mockup</div>${d.was}</div><div class="col now"><div class="cl">Spec builds</div>${d.now}</div></div><dl class="why"><dt>Why</dt><dd>${d.why}</dd><dt>To reverse</dt><dd>${d.rev}</dd></dl><div class="verdict" data-key="dep-${d.id}" data-dep="1"></div></article>`).join('');
+
+document.querySelectorAll('.verdict').forEach(v => {
+	const key = v.dataset.key, dep = !!v.dataset.dep;
+	const opts = dep ? [['keep', 'Keep departure'], ['reverse', 'Use the mockup'], ['unsure', 'Discuss']] : [['ok', 'Looks right'], ['change', 'Needs change']];
+	const draw = () => {
+		const r = review[key] || {};
+		v.innerHTML = `<span>${dep ? 'Decision' : 'Review'}</span><span class="sgc">${opts.map(([val, l]) => `<button type="button" data-v="${val}" aria-pressed="${r.v === val}">${l}</button>`).join('')}</span><input placeholder="Note (optional)" value="${esc(r.note || '')}" aria-label="Note">`;
+	};
+	v.addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (!b) return; review[key] = { ...review[key], v: review[key]?.v === b.dataset.v ? undefined : b.dataset.v }; saveReview(); draw(); });
+	v.addEventListener('input', e => { review[key] = { ...review[key], note: e.target.value }; saveReview(); });
+	draw();
+});
+const titleOf = key => key.startsWith('dep-') ? `Departure ${DEPS.findIndex(d => 'dep-' + d.id === key) + 1}: ${DEPS.find(d => 'dep-' + d.id === key).title}` : document.querySelector(`#${key} h3`).textContent;
+function tally() {
+	const keys = [...document.querySelectorAll('.verdict')].map(v => v.dataset.key);
+	const done = keys.filter(k => review[k]?.v).length;
+	const rev = keys.filter(k => review[k]?.v === 'reverse').length, chg = keys.filter(k => review[k]?.v === 'change').length;
+	document.getElementById('tally').innerHTML = `<b>${done}</b> of ${keys.length} reviewed${rev ? ` · <b style="color:var(--warning)">${rev}</b> to reverse` : ''}${chg ? ` · <b style="color:var(--warning)">${chg}</b> need changes` : ''}`;
+}
+document.getElementById('copy').addEventListener('click', async () => {
+	const LBL = { ok: 'Looks right', change: 'Needs change', keep: 'Keep departure', reverse: 'Use the mockup', unsure: 'Discuss' };
+	const lines = [...document.querySelectorAll('.verdict')].map(v => v.dataset.key).filter(k => review[k]?.v || review[k]?.note).map(k => `- ${titleOf(k)}: ${LBL[review[k].v] || 'No decision'}${review[k].note ? ` (${review[k].note})` : ''}`);
+	const text = `Jev surfacing spec preview review\n\n${lines.join('\n') || '(nothing reviewed yet)'}`;
+	const out = document.getElementById('out'); out.value = text; document.getElementById('outwrap').hidden = false;
+	try { await navigator.clipboard.writeText(text); const c = document.getElementById('copied'); c.hidden = false; setTimeout(() => c.hidden = true, 1800); } catch { out.select(); }
+});
+tally();
+</script>
+</body>
+</html>

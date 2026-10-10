@@ -42,6 +42,6 @@ it("routes idle rows to the named background session", () => {
 	applySessionUpsert({ id: "B", title: "B", status: "busy" });
 	applySessionUpsert({ id: "B", title: "B", status: "idle" });
 	expect(b.activity.phase).toBe("idle");
-	expect(b.activity.turnEpoch).toBe(1);
-	expect(a.activity.turnEpoch).toBe(0);
+	expect(b.activity.endedGeneration).toBe(b.activity.turnGeneration);
+	expect(a.activity.endedGeneration).toBe(-1);
 });

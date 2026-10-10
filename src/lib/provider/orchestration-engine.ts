@@ -11,7 +11,12 @@ import type { ProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
+import type {
+	CommitAndSignal,
+	CommitAndSignalFailure,
+} from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
+import type { CanonicalEvent } from "../persistence/events.js";
 import {
 	CommandFingerprintMismatch,
 	CommandIdGenerationFailed,
@@ -68,6 +73,10 @@ export interface SendTurnCommand {
 	readonly commandId: string;
 	readonly providerId: string;
 	readonly input: SendTurnInput;
+	/** Canonical events that commit in the same transaction as the outbox row. */
+	readonly events?: readonly CanonicalEvent[];
+	/** Runs once the command is accepted, before the provider is called. */
+	readonly onAccepted?: Effect.Effect<void>;
 }
 
 export interface InterruptTurnCommand {
@@ -149,6 +158,12 @@ export interface DurableCommandStoreOptions {
 	 * exactly as the inline path did. Absent in narrow unit tests (no-op sink).
 	 */
 	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
+	/**
+	 * The commit-and-signal seam. When present, a send_turn's events are
+	 * projected and announced with the commit that records its outbox row.
+	 * Absent in narrow unit tests, where events are appended unprojected.
+	 */
+	readonly write?: CommitAndSignal["write"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 }
 
@@ -170,6 +185,7 @@ interface DurableCommandRuntime {
 	readonly now: () => number;
 	readonly generateId: () => string;
 	readonly snapshot: CommandReadModelSnapshot;
+	readonly write?: CommitAndSignal["write"];
 }
 
 /**
@@ -248,6 +264,7 @@ export class OrchestrationEngine {
 				now: durable.now,
 				generateId: durable.generateId,
 				snapshot: durable.snapshot,
+				...(durable.write ? { write: durable.write } : {}),
 			};
 		}
 	}
@@ -465,6 +482,7 @@ export class OrchestrationEngine {
 					command.providerId,
 				),
 			);
+			yield* command.onAccepted ?? Effect.void;
 
 			// The reactor is the single provider executor: it performs the call
 			// once, ingests output, and records completion/failure. Its result
@@ -495,44 +513,51 @@ export class OrchestrationEngine {
 		nowMs: number,
 	): Effect.Effect<
 		void,
-		SqlError | EventStoreError | Error | CommandPayloadSerializationFailed
+		| SqlError
+		| EventStoreError
+		| CommitAndSignalFailure
+		| Error
+		| CommandPayloadSerializationFailed
 	> {
 		// The request-sequence read shares the commit transaction so concurrent
 		// dispatches cannot allocate the same sequence.
-		return durable.sql.withTransaction(
-			Effect.gen(function* () {
-				const [maxRow] = yield* durable.sql<{ readonly m: number }>`
+		const commit = Effect.gen(function* () {
+			const [maxRow] = yield* durable.sql<{ readonly m: number }>`
 					SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
-				const requestSequence = (maxRow?.m ?? 0) + 1;
-				const {
-					eventSink: _eventSink,
-					abortSignal: _abortSignal,
-					history: _history,
-					...payload
-				} = command.input;
-				const payloadJson = yield* Effect.try({
-					try: () => JSON.stringify({ ...payload, dispatchId }),
-					catch: (cause) =>
-						new CommandPayloadSerializationFailed({
-							commandId: command.commandId,
-							cause,
-						}),
-				});
-				yield* durable.commit.commit(
-					decideDurableSendTurnCommand({
+			const requestSequence = (maxRow?.m ?? 0) + 1;
+			const {
+				eventSink: _eventSink,
+				abortSignal: _abortSignal,
+				history: _history,
+				...payload
+			} = command.input;
+			const payloadJson = yield* Effect.try({
+				try: () => JSON.stringify({ ...payload, dispatchId }),
+				catch: (cause) =>
+					new CommandPayloadSerializationFailed({
 						commandId: command.commandId,
-						projectKey: durable.projectKey,
-						sessionId: command.input.sessionId,
-						providerId: command.providerId,
-						fingerprintHash: fingerprintHashValue,
-						nowMs,
-						requestSequence,
-						payloadJson,
-						events: [],
+						cause,
 					}),
-				);
-			}),
-		);
+			});
+			return yield* durable.commit.commit(
+				decideDurableSendTurnCommand({
+					commandId: command.commandId,
+					projectKey: durable.projectKey,
+					sessionId: command.input.sessionId,
+					providerId: command.providerId,
+					fingerprintHash: fingerprintHashValue,
+					nowMs,
+					requestSequence,
+					payloadJson,
+					events: command.events ?? [],
+				}),
+			);
+		});
+		// Through the seam the events are projected in the same transaction and
+		// announced once it commits.
+		return durable.write
+			? durable.write((project) => Effect.flatMap(commit, project))
+			: durable.sql.withTransaction(commit).pipe(Effect.asVoid);
 	}
 
 	private handleInlineSendTurnEffect(
@@ -542,6 +567,7 @@ export class OrchestrationEngine {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 			);
+			yield* command.onAccepted ?? Effect.void;
 			return yield* this.sendTurnThroughInstanceEffect(command, instance);
 		});
 	}

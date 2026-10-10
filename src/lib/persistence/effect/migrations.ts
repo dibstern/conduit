@@ -14,7 +14,10 @@ import {
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_CONTEXT_WINDOW_MIGRATION,
+	MESSAGES_INPUT_ID_MIGRATION,
+	MESSAGES_STEERED_MIGRATION,
 	PENDING_APPROVALS_VERSION_MIGRATION,
+	PENDING_INPUTS_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
@@ -371,6 +374,7 @@ const postBaselineTableNames = new Set<string>([
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
+	"pending_inputs", // 0041
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -1077,6 +1081,19 @@ export const effectMigrationEntries = {
 		"sessions",
 		"workspace",
 		readMigrationSql(SESSIONS_WORKSPACE_MIGRATION),
+	),
+	"0041_messages_input_id": runAddColumnMigrationIfMissing(
+		"messages",
+		"input_id",
+		readMigrationSql(MESSAGES_INPUT_ID_MIGRATION),
+	),
+	"0042_pending_inputs": executeSqlStatements(
+		readMigrationSql(PENDING_INPUTS_MIGRATION),
+	),
+	"0043_messages_steered": runAddColumnMigrationIfMissing(
+		"messages",
+		"steered",
+		readMigrationSql(MESSAGES_STEERED_MIGRATION),
 	),
 } satisfies Record<
 	string,

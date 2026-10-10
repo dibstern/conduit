@@ -1365,6 +1365,44 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 			}),
 		));
 
+	it("recovery for a new projector survives legacy rows the current schema rejects", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const cursors = yield* ProjectorCursorEffectTag;
+				const sessionId = "s-legacy-tool-input";
+
+				yield* store.append(makeSessionCreated(sessionId));
+				// Written before tool inputs carried a `tool` discriminator.
+				yield* sql`
+					INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+					VALUES ('evt-legacy-tool', ${sessionId}, 1, 'tool.started',
+						${JSON.stringify({ messageId: "m1", partId: "p1", toolName: "Read", callId: "p1", input: {} })},
+						'{}', 'claude', ${FIXED_TS})`;
+				const [latest] = yield* sql<{
+					seq: number;
+				}>`SELECT MAX(sequence) AS seq FROM events`;
+				const latestSeq = latest?.seq ?? 0;
+				// Every projector replayed these rows long ago except the one just added.
+				for (const name of [
+					"session",
+					"message",
+					"turn",
+					"provider",
+					"approval",
+					"activity",
+				]) {
+					yield* cursors.upsert(name, latestSeq);
+				}
+
+				yield* runner.recover();
+
+				expect((yield* cursors.get("input"))?.lastAppliedSeq).toBe(latestSeq);
+			}),
+		));
+
 	it("cold recovery preserves the first provider owner across historical duplicate creation", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -2587,7 +2625,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 3,
+			totalReplayed: 4,
 		});
 		expect(result.durableFailures).toHaveLength(1);
 		const durableFailure = result.durableFailures[0];
@@ -2630,6 +2668,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.cursors).toEqual([
 			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
@@ -2803,7 +2842,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.retryRecovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 2,
+			totalReplayed: 3,
 		});
 		expect(result.durableFailuresAfterRetry).toEqual([
 			{ projector_name: "message", event_sequence: 1 },
@@ -2811,6 +2850,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.cursorsAfterRetry).toEqual([
 			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
+			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
@@ -2869,7 +2909,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 3,
-			totalReplayed: 6,
+			totalReplayed: 7,
 		});
 		expect(cold.failures).toEqual([]);
 		expect(cold.durableFailures).toEqual([{ count: 0 }]);
@@ -2889,6 +2929,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.cursors).toEqual([
 			{ projector_name: "activity", last_applied_seq: 3 },
 			{ projector_name: "approval", last_applied_seq: 3 },
+			{ projector_name: "input", last_applied_seq: 3 },
 			{ projector_name: "message", last_applied_seq: 3 },
 			{ projector_name: "provider", last_applied_seq: 3 },
 			{ projector_name: "session", last_applied_seq: 3 },
@@ -3039,6 +3080,7 @@ describe("ProjectionRunnerEffect", () => {
 				expect(cursors).toEqual([
 					{ projector_name: "activity", last_applied_seq: 4 },
 					{ projector_name: "approval", last_applied_seq: 4 },
+					{ projector_name: "input", last_applied_seq: 4 },
 					{ projector_name: "message", last_applied_seq: 4 },
 					{ projector_name: "provider", last_applied_seq: 4 },
 					{ projector_name: "session", last_applied_seq: 4 },
@@ -3147,6 +3189,7 @@ describe("ProjectionRunnerEffect", () => {
 				expect(firstCursors).toEqual([
 					{ projector_name: "activity", last_applied_seq: 501 },
 					{ projector_name: "approval", last_applied_seq: 501 },
+					{ projector_name: "input", last_applied_seq: 501 },
 					{ projector_name: "message", last_applied_seq: 501 },
 					{ projector_name: "provider", last_applied_seq: 501 },
 					{ projector_name: "session", last_applied_seq: 501 },
