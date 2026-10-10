@@ -8,7 +8,7 @@ import {
 	makeEffectSqlMigrator,
 	selectLegacySkeletonSessionIds,
 } from "../../../persistence/effect/migrations.js";
-import { PROJECT_PROVENANCE_TABLES } from "../../../persistence/schema.js";
+import { PROJECT_COMMAND_TABLES } from "../../../persistence/schema.js";
 
 export class PersistenceError extends Data.TaggedError("PersistenceError")<{
 	operation: string;
@@ -53,15 +53,36 @@ export const makePersistenceServiceLive: Layer.Layer<
 		// consumer can obtain this store, atomically across every write table.
 		const stampProjectProvenance = sql.withTransaction(
 			Effect.gen(function* () {
-				for (const table of PROJECT_PROVENANCE_TABLES) {
-					const unstamped = "project_id IS NULL OR project_id = ''";
+				const events = yield* sql`SELECT 1 FROM events
+					WHERE project_id IS NULL OR project_id = '' LIMIT 1`;
+				if (events.length > 0)
+					yield* sql`UPDATE events SET project_id = ${projectId}
+						WHERE project_id IS NULL OR project_id = ''`;
+				for (const table of PROJECT_COMMAND_TABLES) {
 					const rows = yield* sql.unsafe(
-						`SELECT 1 FROM ${table} WHERE ${unstamped} LIMIT 1`,
+						`SELECT 1 FROM ${table} WHERE project_key IS NOT ? LIMIT 1`,
+						[projectId],
 					);
 					if (rows.length === 0) continue;
+					if (table === "provider_command_meta") {
+						// Folder keys can converge on the slug's existing PK. Keep the
+						// furthest progress and its metadata before removing stale keys.
+						yield* sql`INSERT INTO provider_command_meta
+							(project_key, last_applied_sequence, schema_version, rebuilt_at)
+							SELECT ${projectId}, last_applied_sequence, schema_version, rebuilt_at
+							FROM provider_command_meta
+							ORDER BY last_applied_sequence DESC, schema_version DESC, rebuilt_at DESC, project_key
+							LIMIT 1
+							ON CONFLICT (project_key) DO UPDATE SET
+								last_applied_sequence = excluded.last_applied_sequence,
+								schema_version = excluded.schema_version,
+								rebuilt_at = excluded.rebuilt_at`;
+						yield* sql`DELETE FROM provider_command_meta WHERE project_key IS NOT ${projectId}`;
+						continue;
+					}
 					yield* sql.unsafe(
-						`UPDATE ${table} SET project_id = ? WHERE ${unstamped}`,
-						[projectId],
+						`UPDATE ${table} SET project_key = ? WHERE project_key IS NOT ?`,
+						[projectId, projectId],
 					);
 				}
 			}),

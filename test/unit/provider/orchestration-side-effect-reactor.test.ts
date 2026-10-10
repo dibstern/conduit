@@ -62,6 +62,7 @@ function makeProvider(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
+		steering: false,
 		discoverEffect: () => Effect.succeed(emptyCapabilities),
 		sendTurnEffect,
 		interruptTurnEffect: () => Effect.void,
@@ -105,7 +106,7 @@ describe("ProviderSideEffectReactor", () => {
 			expect(getNativeSession).toHaveBeenCalledExactlyOnceWith("session-1");
 			expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
 				sessionId: "session-1",
-				turnId: "turn-1",
+				inputId: "legacy-user-1",
 				prompt: "hello",
 				workspaceRoot: "/repo",
 				resumeSessionId: "live-interrupted-cursor",
@@ -933,6 +934,7 @@ function seedSendTurnOutbox(
 					JSON.stringify({
 						sessionId: "session-1",
 						turnId: "turn-1",
+						userMessageId: "legacy-user-1",
 						prompt: "hello",
 						history: [],
 						providerState: {},

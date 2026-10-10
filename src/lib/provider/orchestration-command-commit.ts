@@ -38,16 +38,15 @@ export class DurableCommandCommitRepository {
 				const storedEvents = yield* eventStore.appendBatch(input.events);
 				yield* this.recordReceipt({
 					...input.receipt,
-					projectId: this.projectId,
+					projectKey: this.projectId,
 				});
 				for (const request of input.outboxRequests) {
 					yield* this.recordOutboxRequest(
-						{ ...request, projectId: this.projectId },
+						{ ...request, projectKey: this.projectId },
 						input.receipt.updatedAt,
 					);
 				}
 				yield* this.recordMeta(
-					input.receipt.projectKey,
 					storedEvents.at(-1)?.sequence ?? 0,
 					input.receipt.updatedAt,
 				);
@@ -61,11 +60,10 @@ export class DurableCommandCommitRepository {
 	): Effect.Effect<void, SqlError> {
 		return this.sql`
 			INSERT INTO command_receipts (
-				project_id, command_id, session_id, status, result_sequence, error, created_at,
+				command_id, session_id, status, result_sequence, error, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version,
 				accepted_sequence, side_effect_sequence, error_code, updated_at
 			) VALUES (
-				${receipt.projectId},
 				${receipt.commandId}, ${receipt.sessionId}, ${receipt.status},
 				${receipt.resultSequence ?? null}, ${receipt.errorCode ?? null},
 				${receipt.createdAt}, ${receipt.commandType}, ${receipt.projectKey},
@@ -115,10 +113,9 @@ export class DurableCommandCommitRepository {
 				  AND status IN ('pending', 'retryable_failed')`;
 			yield* this.sql`
 				INSERT INTO provider_command_outbox (
-					project_id, request_sequence, command_id, project_key, session_id, provider_id,
+					request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, status, attempt_count, requested_at, updated_at
 				) VALUES (
-					${request.projectId},
 					${request.requestSequence}, ${request.commandId}, ${request.projectKey},
 					${request.sessionId}, ${request.providerId}, ${request.effectType},
 					${request.payloadJson}, 'pending', 0, ${updatedAt}, ${updatedAt}
@@ -127,14 +124,13 @@ export class DurableCommandCommitRepository {
 	}
 
 	private recordMeta(
-		projectKey: string,
 		lastAppliedSequence: number,
 		updatedAt: number,
 	): Effect.Effect<void, SqlError> {
 		return this.sql`
 			INSERT INTO provider_command_meta (
-				project_id, project_key, last_applied_sequence, schema_version, rebuilt_at
-			) VALUES (${this.projectId}, ${projectKey}, ${lastAppliedSequence}, 1, ${updatedAt})
+				project_key, last_applied_sequence, schema_version, rebuilt_at
+			) VALUES (${this.projectId}, ${lastAppliedSequence}, 1, ${updatedAt})
 			ON CONFLICT (project_key) DO UPDATE SET
 				last_applied_sequence = excluded.last_applied_sequence,
 				schema_version = excluded.schema_version,

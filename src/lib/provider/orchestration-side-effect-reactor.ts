@@ -35,7 +35,6 @@ const REACTOR_COMPLETED_RESULT: TurnResult = {
 };
 
 interface ProviderCommandOutboxRow {
-	readonly project_id: string;
 	readonly request_sequence: number;
 	readonly command_id: string;
 	readonly project_key: string;
@@ -237,7 +236,8 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
-			if (turn.status !== "completed") {
+			// A joined input was delivered and answered by another input's turn.
+			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.
 				// TurnResult { status: "error" | "interrupted" }). Record the true
 				// failed outcome durably so restart replay never synthesizes a
@@ -327,7 +327,7 @@ export class ProviderSideEffectReactor {
 		ProviderCommandStoreFailure
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
-			SELECT project_id, request_sequence, command_id, project_key, session_id, provider_id,
+			SELECT request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
 			WHERE status = 'pending'
@@ -390,12 +390,12 @@ export class ProviderSideEffectReactor {
 					instance.sendTurnEffect({
 						...payload,
 						history: payload.history ?? [],
-						commandId: row.command_id,
 						...(driver === "claude"
 							? {
 									commandAttempt,
 									instanceId: payload.instanceId ?? row.provider_id,
 									prompt: prepared?.prompt ?? payload.prompt,
+									text: payload.prompt,
 									configDir: prepared?.configDir,
 									resumeSessionId: prepared?.resumeSessionId,
 									startFreshNativeSession:
@@ -413,7 +413,7 @@ export class ProviderSideEffectReactor {
 						? yield* Effect.gen(function* () {
 								const state = yield* makeProviderStateEffect.pipe(
 									Effect.provideService(PersistenceProjectTag, {
-										projectId: row.project_id,
+										projectId: row.project_key,
 									}),
 								);
 								const read = yield* makeReadQueryEffect;
@@ -428,8 +428,9 @@ export class ProviderSideEffectReactor {
 										) ?? Effect.succeed(undefined),
 										configDir: payload.configDir,
 										agent: payload.agent,
-										userMessageId: payload.userMessageId,
-										continuation: payload.continuation,
+										userMessageId:
+											payload.continuation?.cutOffMessageId ?? payload.inputId,
+										continuation: payload.continuation !== undefined,
 										nativeResumeFallback: payload.nativeResumeFallback,
 										modelContextWindow:
 											payload.contextWindow === "1m" ? 1000000 : undefined,
@@ -471,7 +472,7 @@ export class ProviderSideEffectReactor {
 				) {
 					yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
-							projectId: row.project_id,
+							projectId: row.project_key,
 						}),
 						Effect.flatMap((state) =>
 							state.saveUpdates(
@@ -508,7 +509,7 @@ export class ProviderSideEffectReactor {
 		ProviderCommandStoreFailure
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
-			SELECT project_id, request_sequence, command_id, project_key, session_id, provider_id,
+			SELECT request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
 			WHERE command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
@@ -549,11 +550,39 @@ export class ProviderSideEffectReactor {
 			try: (): unknown => JSON.parse(row.payload_json),
 			catch: toParseFailure,
 		}).pipe(
-			Effect.flatMap((payload) =>
-				isSendTurnOutboxPayload(payload)
-					? Effect.succeed(payload)
-					: Effect.fail(toParseFailure("Invalid send_turn outbox payload")),
-			),
+			Effect.flatMap((payload) => {
+				if (!isRecord(payload))
+					return Effect.fail(
+						toParseFailure("Invalid send_turn outbox payload"),
+					);
+				// Pre-inbox continuations carried a boolean and the cut-off id in
+				// userMessageId; their own identity was the command id.
+				const legacyContinuation =
+					payload["continuation"] === true &&
+					typeof payload["userMessageId"] === "string";
+				const inputId = legacyContinuation
+					? payload["commandId"]
+					: (payload["inputId"] ??
+						payload["userMessageId"] ??
+						payload["commandId"] ??
+						payload["turnId"]);
+				const {
+					turnId: _turnId,
+					userMessageId: _userMessageId,
+					commandId: _commandId,
+					...input
+				} = payload;
+				const normalized = {
+					...input,
+					inputId,
+					...(legacyContinuation
+						? { continuation: { cutOffMessageId: payload["userMessageId"] } }
+						: {}),
+				};
+				return isSendTurnOutboxPayload(normalized)
+					? Effect.succeed(normalized)
+					: Effect.fail(toParseFailure("Invalid send_turn outbox payload"));
+			}),
 		);
 	}
 
@@ -732,7 +761,7 @@ function isSendTurnOutboxPayload(
 	if (!isRecord(value)) return false;
 	return (
 		typeof value["sessionId"] === "string" &&
-		typeof value["turnId"] === "string" &&
+		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		(value["history"] === undefined || Array.isArray(value["history"])) &&
 		isRecord(value["providerState"]) &&

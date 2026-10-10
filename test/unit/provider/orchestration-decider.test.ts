@@ -8,7 +8,6 @@ describe("orchestration decider", () => {
 
 		const plan = decideDurableSendTurnCommand({
 			commandId: "cmd-1",
-			projectKey: "project-1",
 			sessionId: "session-1",
 			providerId: "claude",
 			fingerprintHash: "sha256:abc",
@@ -22,7 +21,6 @@ describe("orchestration decider", () => {
 		expect(plan.receipt).toMatchObject({
 			commandId: "cmd-1",
 			commandType: "send_turn",
-			projectKey: "project-1",
 			sessionId: "session-1",
 			status: "side_effect_requested",
 			fingerprintHash: "sha256:abc",
@@ -36,7 +34,6 @@ describe("orchestration decider", () => {
 			{
 				requestSequence: 1,
 				commandId: "cmd-1",
-				projectKey: "project-1",
 				sessionId: "session-1",
 				providerId: "claude",
 				effectType: "send_turn",

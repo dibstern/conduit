@@ -270,7 +270,10 @@ export const makeProcessClaudeSessionRunner = (
 			string,
 			{
 				sessionId: string;
+				/** The turn's user message: a continuation's is its cut-off message. */
 				userMessageId?: string;
+				/** What a failed send places when the SDK never started it. */
+				placement?: { inputId: string; text: string };
 				messageId: string;
 				terminal: boolean;
 				pending: boolean;
@@ -527,22 +530,25 @@ export const makeProcessClaudeSessionRunner = (
 						for (const binding of entry.candidate
 							? []
 							: (hello.bindings ?? [])) {
+							let inputId: string | undefined;
 							let userMessageId: string | undefined;
 							let messageId = "";
 							let terminal = false;
 							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
+									input_id: string | null;
 									user_message_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
 									state: string | null;
-								}>`SELECT json_extract(outbox.payload_json, '$.userMessageId') AS user_message_id,
+								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+									COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
-										AND turns.user_message_id = json_extract(outbox.payload_json, '$.userMessageId')
+										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("restore runner history", cause),
@@ -551,6 +557,7 @@ export const makeProcessClaudeSessionRunner = (
 								yield* ensureAttached();
 								const row = rows[0];
 								if (row) {
+									inputId = row.input_id ?? undefined;
 									userMessageId = row.user_message_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
@@ -560,11 +567,14 @@ export const makeProcessClaudeSessionRunner = (
 										row.state !== "running";
 									pending =
 										row.status === "running" &&
-										binding.sinkId ===
+										(binding.sinkId ===
 											claudeRunnerSinkId(
 												binding.commandId ?? binding.sinkId,
 												row.attempt_count,
-											);
+											) ||
+											(inputId !== undefined &&
+												binding.sinkId ===
+													claudeRunnerSinkId(inputId, row.attempt_count)));
 								}
 							}
 							const completed = pending
@@ -1065,6 +1075,20 @@ export const makeProcessClaudeSessionRunner = (
 									() => closing,
 									deps,
 									runner.getNativeSessionEffect(registration.sessionId),
+									(commandId, inputId, attempt, nativeResumeFallback) => {
+										const sinkId = claudeRunnerSinkId(
+											inputId,
+											attempt,
+											nativeResumeFallback,
+										);
+										return sinks.has(sinkId)
+											? sinkId
+											: claudeRunnerSinkId(
+													commandId,
+													attempt,
+													nativeResumeFallback,
+												);
+									},
 								).pipe(
 									Effect.mapError((cause) =>
 										claudeRunnerFailure("recover runner commands", cause),
@@ -1081,9 +1105,9 @@ export const makeProcessClaudeSessionRunner = (
 									if (!binding) {
 										binding = {
 											sessionId: registration.sessionId,
-											...(command.input.userMessageId
-												? { userMessageId: command.input.userMessageId }
-												: {}),
+											userMessageId:
+												command.input.continuation?.cutOffMessageId ??
+												command.input.inputId,
 											messageId: command.messageId,
 											terminal: command.terminal,
 											pending: true,
@@ -1212,9 +1236,17 @@ export const makeProcessClaudeSessionRunner = (
 					command.type === "send-turn"
 						? {
 								sessionId: command.input.sessionId,
-								...(command.input.userMessageId
-									? { userMessageId: command.input.userMessageId }
-									: {}),
+								userMessageId:
+									command.input.continuation?.cutOffMessageId ??
+									command.input.inputId,
+								...(command.input.continuation
+									? {}
+									: {
+											placement: {
+												inputId: command.input.inputId,
+												text: command.input.text ?? command.input.prompt,
+											},
+										}),
 								messageId: "",
 								terminal: false,
 								pending: true,
@@ -1452,10 +1484,28 @@ export const makeProcessClaudeSessionRunner = (
 										},
 									}
 								: command;
-					const commandId =
-						command.type === "send-turn"
-							? (command.input.commandId ?? randomUUID())
-							: randomUUID();
+					let commandId =
+						command.type === "send-turn" ? command.input.inputId : randomUUID();
+					if (
+						command.type === "send-turn" &&
+						sql &&
+						command.input.commandAttempt !== undefined
+					) {
+						// A legacy retry can retain an outbox command id distinct from
+						// its normalized input id. Preserve it for runner reattachment.
+						const rows = yield* sql<{
+							command_id: string;
+						}>`SELECT command_id FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
+								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
+							ORDER BY request_sequence LIMIT 1`.pipe(
+							Effect.mapError((cause) =>
+								claudeRunnerFailure("resolve runner command", cause),
+							),
+						);
+						commandId = rows[0]?.command_id ?? commandId;
+					}
 					if (command.type === "end-session") {
 						const bindings = [...sinks.values()].filter(
 							(binding) => binding.sessionId === sessionId,

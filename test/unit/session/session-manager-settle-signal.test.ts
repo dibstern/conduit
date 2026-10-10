@@ -13,7 +13,6 @@ import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -62,7 +61,6 @@ describe("SessionManagerService settle signal", () => {
 				SessionManagerServiceLive,
 				Layer.mergeAll(
 					makeSessionManagerStateLive(),
-					PendingSendOwnershipLive,
 					Layer.succeed(OpenCodeAPITag, openCodeApi),
 					loggerLayer,
 					configLayer,

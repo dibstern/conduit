@@ -5,20 +5,19 @@
      composer underlined stay plain here — the message is already sent.
      The header carries the send time, rendered from the message's own
      `createdAt` — conduit's timestamps come from the event store, never from
-     text a hook prepended to the message body.
-     When queued, the card is dimmed and shows a shimmering "Queued" label.
-     Queued is derived (utils/turns.ts isQueued), never set and cleared. -->
+     text a hook prepended to the message body. A queued send never renders
+     here: it waits in the pending-input tray until the adapter places it. A
+     steered message carries a "Steered" chip: it joined a running turn. -->
 
 <script lang="ts">
 	import type { UserMessage } from "../../types.js";
-	import { currentChat, isProcessing } from "../../stores/chat.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
 	} from "../../stores/discovery.svelte.js";
 	import { extractDisplayText } from "../../utils/format.js";
 	import { tokenizeSkills } from "../../../skill-recognition.js";
-	import { isQueued } from "../../utils/turns.js";
+	import Badge from "../ui/Badge.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -40,30 +39,16 @@
 	const segments = $derived(
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
-
-	const queued = $derived(
-		isQueued(message, currentChat().turnEpoch, isProcessing()),
-	);
 </script>
 
-<div
-	class="msg-user max-w-[760px] mx-auto mb-3 px-5"
-	class:opacity-50={queued}
-	data-uuid={message.uuid}
->
-	<!-- The queued outline rides in `class` rather than on three `class:`
-	     directives: Svelte has no `class:` on a component, and a dashed border
-	     is one idea, not three. -->
-	<Surface
-		variant="plain"
-		padding="lg"
-		class="relative glow-brand-a {queued
-			? 'border border-dashed border-border'
-			: ''}"
-	>
+<div class="msg-user max-w-[760px] mx-auto mb-3 px-5" data-uuid={message.uuid}>
+	<Surface variant="plain" padding="lg" class="relative glow-brand-a">
 		<div class="flex items-baseline gap-2.5 mb-2">
 			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-a">You</span>
 			<MessageTime createdAt={message.createdAt} />
+			{#if message.steered}
+				<Badge variant="quiet" shape="pill" data-testid="user-message-steered" title="Joined the turn that was already running">Steered</Badge>
+			{/if}
 		</div>
 		<div class="text-base leading-[1.7] break-words whitespace-pre-wrap text-text">
 			{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
@@ -76,11 +61,6 @@
 				⚠ Ran {getModelDisplayName(message.modelExecution.actualModel)}, not {getModelDisplayName(message.modelExecution.requestedModel)}
 			</div>
 		{/if}
-		{#if queued}
-			<div class="flex items-center mt-2">
-				<span class="queued-shimmer text-text-muted text-xs font-mono">Queued</span>
-			</div>
-		{/if}
 	</Surface>
 	{#if onDismissCutOff}
 		<div data-testid="cut-off-tag" class="mt-1 text-right font-mono text-[10px] text-status-amber">
@@ -88,24 +68,3 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	.queued-shimmer {
-		background: linear-gradient(
-			90deg,
-			var(--color-text-muted) 0%,
-			var(--color-text-secondary, #888) 50%,
-			var(--color-text-muted) 100%
-		);
-		background-size: 200% 100%;
-		-webkit-background-clip: text;
-		background-clip: text;
-		-webkit-text-fill-color: transparent;
-		animation: shimmer 2s ease-in-out infinite;
-	}
-
-	@keyframes shimmer {
-		0% { background-position: 200% 0; }
-		100% { background-position: -200% 0; }
-	}
-</style>

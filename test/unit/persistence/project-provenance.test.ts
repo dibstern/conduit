@@ -1,7 +1,11 @@
 // Failure modes beyond the process harness:
 // - A store is constructed without an id or with an empty id.
 // - Empty command tables hide an omitted migration/stamping target.
-// - Stamping changes event ids, sequences or payloads, or overwrites an owner.
+// - Stamping changes event ids, sequences or payloads, or overwrites an event owner.
+// - A caller's folder key overrides the slug bound to command writes.
+// - Command tables gain a redundant project_id alongside project_key.
+// - Legacy folder/empty/null keys remain, or metadata PK collisions lose progress.
+// - Renumbering provenance loses main's migration order or changes shipped SQL.
 // - Reopening runs UPDATEs despite every row already being stamped.
 // - A failed stamp commits only a prefix of the tables.
 // - Stored event, receipt and cursor contracts omit their project's identity.
@@ -23,6 +27,7 @@ import {
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import { ProjectorCursorEffectTag } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
+import { PROJECT_PROVENANCE_MIGRATION } from "../../../src/lib/persistence/schema.js";
 import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
 import type { DurableCommandReceiptWrite } from "../../../src/lib/provider/orchestration-command-contracts.js";
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
@@ -51,7 +56,7 @@ async function oldStore() {
 	await Effect.runPromise(
 		Effect.scoped(
 			makeEffectSqlMigrator(
-				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 40)),
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 43)),
 			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
 		),
 	);
@@ -71,7 +76,10 @@ async function oldStore() {
 			VALUES ('old-folder', 'session', 'gone-session', 1, 'deleted', 1000);
 			INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, requested_at, updated_at)
 			VALUES (1, 'old-command', 'old-folder', 'old-session', 'claude', 'send_turn', '{}', 1000, 1000);
-			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES ('old-folder', 1, 1, 1000);
+			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES ('old-folder', 9, 2, 2000);
+			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES ('alpha', 3, 1, 1000);
+			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES ('', 6, 1, 1500);
+			INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES (NULL, 4, 1, 1200);
 		`);
 	} finally {
 		db.close();
@@ -80,12 +88,22 @@ async function oldStore() {
 }
 
 describe("Bound project provenance", () => {
+	it("registers provenance after main's input migrations with the file/key offset", () => {
+		expect(PROJECT_PROVENANCE_MIGRATION).toBe("0043_project_provenance.sql");
+		expect(Object.keys(effectMigrationEntries).slice(-4)).toEqual([
+			"0041_messages_input_id",
+			"0042_pending_inputs",
+			"0043_messages_steered",
+			"0044_project_provenance",
+		]);
+	});
+
 	it("requires a project id at construction and in stored contracts", () => {
 		expectTypeOf<
 			Parameters<typeof makePersistenceEffectLayer>[1]
 		>().toEqualTypeOf<string>();
 		expectTypeOf<
-			DurableCommandReceiptWrite["projectId"]
+			DurableCommandReceiptWrite["projectKey"]
 		>().toEqualTypeOf<string>();
 		expect(() => makePersistenceEffectLayer(":memory:", "")).toThrow(
 			PersistenceError,
@@ -125,7 +143,7 @@ describe("Bound project provenance", () => {
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					const repository = new DurableCommandCommitRepository(sql, "alpha");
-					yield* repository.commit({
+					const input = {
 						events: [],
 						readModelRows: [],
 						receipt: {
@@ -133,9 +151,9 @@ describe("Bound project provenance", () => {
 							commandType: "send_turn",
 							projectKey: "legacy-key",
 							sessionId: "session-1",
-							status: "accepted",
+							status: "accepted" as const,
 							fingerprintHash: "hash",
-							fingerprintVersion: 2,
+							fingerprintVersion: 2 as const,
 							createdAt: 1,
 							updatedAt: 1,
 						},
@@ -146,11 +164,12 @@ describe("Bound project provenance", () => {
 								projectKey: "legacy-key",
 								sessionId: "session-1",
 								providerId: "claude",
-								effectType: "send_turn",
+								effectType: "send_turn" as const,
 								payloadJson: "{}",
 							},
 						],
-					});
+					};
+					yield* repository.commit(input);
 					const snapshot = yield* new CommandReadModelRepository(
 						sql,
 						"alpha",
@@ -163,8 +182,8 @@ describe("Bound project provenance", () => {
 						"provider_command_meta",
 					])
 						expect(
-							yield* sql.unsafe(`SELECT project_id FROM ${table}`),
-						).toEqual([{ project_id: "alpha" }]);
+							yield* sql.unsafe(`SELECT project_key FROM ${table}`),
+						).toEqual([{ project_key: "alpha" }]);
 				}),
 			);
 		} finally {
@@ -172,7 +191,7 @@ describe("Bound project provenance", () => {
 		}
 	});
 
-	it("stamps every legacy command table, preserving sequences and existing owners; reopens without updates", async () => {
+	it("stamps legacy command keys, merges metadata progress and preserves event owners; reopens without updates", async () => {
 		const filename = await oldStore();
 		const before = new Database(filename);
 		const events = before
@@ -191,9 +210,27 @@ describe("Bound project provenance", () => {
 		try {
 			for (const table of tables)
 				expect(
-					db.prepare(`SELECT project_id FROM ${table}`).all(),
+					db
+						.prepare(
+							`SELECT ${table === "events" ? "project_id" : "project_key"} AS project FROM ${table}`,
+						)
+						.all(),
 					table,
-				).toEqual([{ project_id: "alpha" }]);
+				).toEqual([{ project: "alpha" }]);
+			expect(db.prepare("SELECT * FROM provider_command_meta").all()).toEqual([
+				{
+					project_key: "alpha",
+					last_applied_sequence: 9,
+					schema_version: 2,
+					rebuilt_at: 2000,
+				},
+			]);
+			for (const table of tables.filter((table) => table !== "events"))
+				expect(db.pragma(`table_info(${table})`), table).not.toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ name: "project_id" }),
+					]),
+				);
 			expect(
 				db
 					.prepare(
@@ -203,9 +240,7 @@ describe("Bound project provenance", () => {
 			).toEqual(events);
 			// A populated owner survives even when a caller supplies a different
 			// scope; the expand migration never relabels an already stamped row.
-			db.exec(
-				"UPDATE provider_command_sessions SET project_id = 'existing-owner'",
-			);
+			db.exec("UPDATE events SET project_id = 'existing-owner'");
 			for (const table of tables)
 				db.exec(
 					`CREATE TRIGGER no_stamp_${table} BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'already stamped'); END`,
@@ -220,6 +255,44 @@ describe("Bound project provenance", () => {
 			await reopened.runPromise(EventStoreEffectTag);
 		} finally {
 			await reopened.dispose();
+		}
+	});
+
+	it.each([
+		{ canonical: 20, stale: 9, expected: 20 },
+		{ canonical: 3, stale: 9, expected: 9 },
+		{ canonical: 9, stale: 9, expected: 9 },
+	])("keeps the highest metadata sequence when keys converge: $canonical/$stale", async ({
+		canonical,
+		stale,
+		expected,
+	}) => {
+		const filename = await oldStore();
+		const db = new Database(filename);
+		db.prepare(
+			"UPDATE provider_command_meta SET last_applied_sequence = ? WHERE project_key = 'alpha'",
+		).run(canonical);
+		db.prepare(
+			"UPDATE provider_command_meta SET last_applied_sequence = ? WHERE project_key = 'old-folder'",
+		).run(stale);
+		db.close();
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "alpha"),
+		);
+		try {
+			await runtime.runPromise(EventStoreEffectTag);
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT project_key, last_applied_sequence FROM provider_command_meta`,
+					).toEqual([
+						{ project_key: "alpha", last_applied_sequence: expected },
+					]);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
 		}
 	});
 

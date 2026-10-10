@@ -43,12 +43,12 @@ it("a busy row starts the turn and the row going idle ends it once", () => {
 	upsert("busy");
 	expect(activity().phase).toBe("processing");
 	activity().currentMessageId = "m1";
-	const epoch = activity().turnEpoch;
+	expect(activity().endedGeneration).not.toBe(activity().turnGeneration);
 
 	upsert("idle");
 
 	expect(activity().phase).toBe("idle");
-	expect(activity().turnEpoch).toBe(epoch + 1);
+	expect(activity().endedGeneration).toBe(activity().turnGeneration);
 	expect(activity().currentMessageId).toBeNull();
 });
 
@@ -75,12 +75,12 @@ it("a stale busy write after the turn ended does not restart it", () => {
 	const { activity: slot } = getOrCreateSessionSlot("s");
 	expect(slot.phase).toBe("processing");
 	slot.phase = "idle"; // `done` ended the turn first
-	const epoch = slot.turnEpoch;
+	const generation = slot.turnGeneration;
 
 	upsert("busy");
 
 	expect(slot.phase).toBe("idle");
-	expect(slot.turnEpoch).toBe(epoch);
+	expect(slot.turnGeneration).toBe(generation);
 });
 
 it("a slot opened on a busy session starts processing", () => {

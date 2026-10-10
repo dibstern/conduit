@@ -2,6 +2,7 @@ import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import type { InputDelivery } from "../../contracts/stored-event.js";
 import type {
 	GetSessionSkillsResponse,
 	GetSkillContentResponse,
@@ -32,6 +33,7 @@ import type {
 	GetModelsResponse,
 	GetProjectsResponse,
 	GetToolContentResponse,
+	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
 	LoadMoreHistoryResponse,
@@ -47,10 +49,10 @@ import type {
 	RpcLogLevel,
 	SaveProjectResponse,
 	ScanNowResponse,
-	SendMessageResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
 	SetHiddenEntriesResponse,
+	SubmitInputResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
@@ -472,6 +474,8 @@ export interface SendMessageRpcInput {
 	readonly sessionId: string;
 	readonly text: string;
 	readonly commandId: string;
+	/** "steer" hands the input into the running turn; refused, nothing is admitted. */
+	readonly delivery?: InputDelivery;
 	readonly images?: readonly string[];
 	readonly originId?: string;
 }
@@ -890,11 +894,12 @@ const callRewindSession = (input: RewindSessionRpcInput) =>
 
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client.SendMessage({
+		client.input.submit({
 			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
+			inputId: input.commandId,
 			text: input.text,
-			commandId: input.commandId,
+			delivery: input.delivery ?? "queue",
 			...(input.images ? { images: [...input.images] } : {}),
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
@@ -1421,8 +1426,33 @@ export async function rewindSessionRpc(
 
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
-): Promise<SendMessageResponse> {
+): Promise<SubmitInputResponse> {
 	return await runTransportEffect(callSendMessage(input));
+}
+
+export interface InboxCommandRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+/** Remove a queued input; rejected once it has started. */
+export async function cancelInputRpc(
+	input: InboxCommandRpcInput,
+): Promise<InboxCommandResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.input.cancel(input)),
+	);
+}
+
+/** Send a queued input now: a steer on a busy session (refused, it stays
+ *  queued); on an idle session this resumes the queue. */
+export async function sendInputNowRpc(
+	input: InboxCommandRpcInput,
+): Promise<InboxCommandResponse> {
+	return await runTransportEffect(
+		callControl(input.projectSlug, (client) => client.input.sendNow(input)),
+	);
 }
 
 export async function syncInputDraftRpc(

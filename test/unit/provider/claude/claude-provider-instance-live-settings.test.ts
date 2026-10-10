@@ -197,10 +197,10 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			capabilitiesService: makeCapabilitiesService(),
 		});
 		const sink = createMockEventSink();
-		const turnInput = (turnId: string, variant?: string) =>
+		const turnInput = (inputId: string, variant?: string) =>
 			makeBaseSendTurnInput({
 				sessionId: "s1",
-				turnId,
+				inputId,
 				eventSink: sink,
 				model: { providerId: "claude", modelId: SONNET },
 				...(variant ? { variant } : {}),
@@ -273,7 +273,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s2",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: SONNET },
 				}),
@@ -286,7 +286,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s2",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: OPUS },
 				}),
@@ -331,10 +331,10 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			capabilitiesService: makeCapabilitiesService(),
 		});
 		const sink = createMockEventSink();
-		const turnInput = (turnId: string, modelId: string, variant?: string) =>
+		const turnInput = (inputId: string, modelId: string, variant?: string) =>
 			makeBaseSendTurnInput({
 				sessionId: "s-overlap",
-				turnId,
+				inputId,
 				eventSink: sink,
 				model: { providerId: "claude", modelId },
 				...(variant ? { variant } : {}),
@@ -431,10 +431,10 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			capabilitiesService: makeCapabilitiesService(),
 		});
 		const sink = createMockEventSink();
-		const turnInput = (turnId: string, modelId: string, variant?: string) =>
+		const turnInput = (inputId: string, modelId: string, variant?: string) =>
 			makeBaseSendTurnInput({
 				sessionId: "s-dirty",
-				turnId,
+				inputId,
 				eventSink: sink,
 				model: { providerId: "claude", modelId },
 				...(variant ? { variant } : {}),
@@ -502,7 +502,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s1",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: SONNET },
 				}),
@@ -530,7 +530,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s1",
-					turnId: "turn-2",
+					inputId: "turn-2",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: OPUS },
 					contextWindow: "1m",
@@ -569,7 +569,7 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "s1",
-					turnId: "turn-1",
+					inputId: "turn-1",
 					eventSink: sink,
 					model: { providerId: "claude", modelId: SONNET },
 				}),

@@ -20,6 +20,9 @@ import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
+import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import {
@@ -56,7 +59,6 @@ export interface OrchestrationLayerOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
@@ -72,7 +74,6 @@ export interface OrchestrationRuntimeLayerOptions {
 	) => void;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
-	readonly projectKey?: string;
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
@@ -133,6 +134,8 @@ const createOrchestrationComponentsEffect = (
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
@@ -206,6 +209,7 @@ const createOrchestrationComponentsEffect = (
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			materializeSubagents,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),
@@ -225,15 +229,16 @@ const createOrchestrationComponentsEffect = (
 		// snapshot (receipts + stale-command tombstones), never the full
 		// relay/UI snapshot or message history.
 		const durableCommands = {
-			projectId,
 			sql,
 			snapshot: yield* new CommandReadModelRepository(sql, projectId)
 				.bootstrap()
 				.pipe(Effect.orDie),
-			projectKey: options.projectKey ?? options.workspaceRoot ?? process.cwd(),
+			projectKey: projectId,
 			now: () => Date.now(),
 			generateId: () => `disp_${randomUUID()}`,
 			ingestion,
+			// A send_turn's input.sent projects and announces with its outbox row.
+			write: (yield* makeCommitAndSignal).write,
 			persistHandoffDelivered: persist.persistHandoffDelivered,
 		};
 		const engine = new OrchestrationEngine({
@@ -299,6 +304,8 @@ export const makeOrchestrationRuntimeLayer = (
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 > => {
 	const componentsLayer = Layer.scoped(
 		OrchestrationComponentsTag,
@@ -317,9 +324,6 @@ export const makeOrchestrationRuntimeLayer = (
 					? { workspaceRoot: options.workspaceRoot }
 					: {}),
 				extraFolders: options.extraFolders ?? [],
-				...(options.projectKey != null
-					? { projectKey: options.projectKey }
-					: {}),
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }

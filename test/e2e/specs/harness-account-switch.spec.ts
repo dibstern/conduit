@@ -74,12 +74,13 @@ test("a just-added Claude account can run a session immediately", async ({
 	);
 	const prompt = "immediate-account-session";
 	await Effect.runPromise(
-		browser.rpc.SendMessage({
+		browser.rpc.input.submit({
 			projectSlug: "process-test",
 			sessionId,
 			text: prompt,
-			commandId: "immediate-account-send",
+			inputId: "immediate-account-send",
 			originId: browser.originId,
+			delivery: "queue",
 		}),
 	);
 	await expect
@@ -227,12 +228,13 @@ for (const stale of [false, true]) {
 			const proofMarks = () => readProofMarks(harness.root);
 			const send = (text: string, commandId: string) =>
 				Effect.runPromise(
-					browser.rpc.SendMessage({
+					browser.rpc.input.submit({
 						projectSlug,
 						sessionId,
 						text,
-						commandId,
+						inputId: commandId,
 						originId: browser.originId,
+						delivery: "queue",
 					}),
 				);
 			const switchTo = (instanceId: string, expectedInstanceId: string) =>
@@ -744,12 +746,13 @@ for (const decision of [
 			// Release background duplicates before taking stable gate snapshots.
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			await Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug,
 					sessionId,
 					text: cutOffText,
-					commandId: `cut-off-${decision}`,
+					inputId: `cut-off-${decision}`,
 					originId: browser.originId,
+					delivery: "queue",
 				}),
 			);
 			await expect
@@ -793,12 +796,13 @@ for (const decision of [
 				throw new Error("No native cut-off session");
 			if (decision === "busy") {
 				await Effect.runPromise(
-					browser.rpc.SendMessage({
+					browser.rpc.input.submit({
 						projectSlug,
 						sessionId,
 						text: "upgrade-long-turn",
-						commandId: "held-turn",
+						inputId: "held-turn",
 						originId: browser.originId,
+						delivery: "queue",
 					}),
 				);
 				await expect.poll(() => latest()?.status).toBe("busy");
@@ -1137,12 +1141,13 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			"usage-limit-account-1-no-reset: finish the original request";
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug,
 					sessionId,
 					text,
-					commandId,
+					inputId: commandId,
 					originId: browser.originId,
+					delivery: "queue",
 				}),
 			);
 		try {
@@ -1500,12 +1505,13 @@ for (const scenario of [
 			const at = Math.floor(Date.now() / 1000) + (ui ? 20 : 10);
 			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
 			await Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug,
 					sessionId,
 					text: "usage-limit-account-1: finish the original request after reset",
-					commandId: `cut-off-${scenario}`,
+					inputId: `cut-off-${scenario}`,
 					originId: browser.originId,
+					delivery: "queue",
 				}),
 			);
 			await expect
@@ -1864,14 +1870,15 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			writeFileSync(join(configDir, "conduit-test-quota"), "available");
 			const noReset = scenario === "no-reset";
 			await Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug,
 					sessionId,
 					text: noReset
 						? "usage-limit-account-1-no-reset: finish the original request"
 						: "usage-limit-account-1: finish the original request after reset",
-					commandId: `cut-off-auto-${scenario}`,
+					inputId: `cut-off-auto-${scenario}`,
 					originId: browser.originId,
+					delivery: "queue",
 				}),
 			);
 			const limited = {
@@ -2498,12 +2505,13 @@ for (const behavior of [
 			);
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.SendMessage({
+				browser.rpc.input.submit({
 					projectSlug,
 					sessionId,
 					text,
-					commandId,
+					inputId: commandId,
 					originId: browser.originId,
+					delivery: "queue",
 				}),
 			);
 		const first = `manual-switch-first-request-${behavior}`;
@@ -2881,12 +2889,13 @@ for (const behavior of [
 					]);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
-					browser.rpc.SendMessage({
+					browser.rpc.input.submit({
 						projectSlug,
 						sessionId: fork.sessionId,
 						text: forkPrompt,
-						commandId: `continue-${behavior}`,
+						inputId: `continue-${behavior}`,
 						originId: browser.originId,
+						delivery: "queue",
 					}),
 				);
 				await expect
@@ -3152,12 +3161,13 @@ test("story 16: the session-bar account pill switches the session, not the proje
 	const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
 	const send = (text: string, commandId: string) =>
 		Effect.runPromise(
-			browser.rpc.SendMessage({
+			browser.rpc.input.submit({
 				projectSlug,
 				sessionId,
 				text,
-				commandId,
+				inputId: commandId,
 				originId: browser.originId,
+				delivery: "queue",
 			}),
 		);
 	const first = "session-pill-first-request";

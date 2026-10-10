@@ -56,7 +56,6 @@ export interface DurableCommandFingerprint {
 }
 
 export interface DurableCommandReceiptWrite {
-	readonly projectId: string;
 	readonly commandId: string;
 	readonly commandType: string;
 	readonly projectKey: string;
@@ -73,7 +72,6 @@ export interface DurableCommandReceiptWrite {
 }
 
 export interface DurableCommandOutboxRequest {
-	readonly projectId: string;
 	readonly requestSequence: number;
 	readonly commandId: string;
 	readonly projectKey: string;
@@ -85,10 +83,10 @@ export interface DurableCommandOutboxRequest {
 
 export interface DurableCommandCommitPlan {
 	// The bound repository supplies provenance when turning a plan into writes.
-	readonly receipt: Omit<DurableCommandReceiptWrite, "projectId">;
+	readonly receipt: Omit<DurableCommandReceiptWrite, "projectKey">;
 	readonly outboxRequests: readonly Omit<
 		DurableCommandOutboxRequest,
-		"projectId"
+		"projectKey"
 	>[];
 	readonly readModelRows: readonly DurableCommandTransactionRow[];
 }

@@ -26,6 +26,7 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
+		steering: false,
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],
@@ -77,7 +78,7 @@ function sendTurnCommand(): SendTurnCommand {
 		providerId: "opencode",
 		input: {
 			sessionId: "session-1",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: "hello",
 			history: [],
 			providerState: {},

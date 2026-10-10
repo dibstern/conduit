@@ -107,7 +107,7 @@ test.describe("Question/Answer Flow", () => {
 		let relay: WsMockControl | null = null;
 		const rpc = await mockWsRpc(page, {
 			handlers: {
-				SendMessage: async () => {
+				"input.submit": async () => {
 					await relay?.sendMessages(questionResponseMessages);
 					rpc.sendChunk("SubscribeApprovals", [questionAsked]);
 					return { ok: true };

@@ -164,6 +164,15 @@ const byId = (items: readonly Item[]) =>
  * Drive one store through commands, checking the sidebar against the full
  * computation after each one. Returns what the sidebar showed last.
  */
+/** Undo the migrations after the sidebar's, so the migrator re-runs from it. */
+const undoLaterMigrations = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	yield* sql`DROP TABLE pending_inputs`;
+	yield* sql`DROP INDEX idx_messages_input_id`;
+	yield* sql`ALTER TABLE messages DROP COLUMN input_id`;
+	yield* sql`ALTER TABLE messages DROP COLUMN steered`;
+});
+
 const scenario = (store: Store) => {
 	let clock = Date.UTC(2026, 0, 1);
 	let messages = 0;
@@ -618,6 +627,7 @@ const scenario = (store: Store) => {
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
 				// The tombstone migration rebuilds the table the backfill creates.
+				yield* undoLaterMigrations;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
 				yield* makeEffectSqlMigrator();
 				expect(yield* roots, "backfilled roots").toEqual(kept);
@@ -1043,6 +1053,7 @@ describe("sidebar table on the 10k-session fixture", () => {
 				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
+				yield* undoLaterMigrations;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
 				const started = performance.now();
 				yield* makeEffectSqlMigrator();

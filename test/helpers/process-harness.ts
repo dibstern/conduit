@@ -1873,7 +1873,7 @@ export class ProcessBrowser {
 										type: item.event.type,
 										sessionId,
 									});
-								else
+								else if (item._tag === "transcriptMessage")
 									this.record({
 										...item.message,
 										type: "transcript_message",
@@ -2088,6 +2088,7 @@ export class ProcessBrowser {
 		sessionId: string,
 		prompt: string,
 		timeoutMs = TIMEOUT_MS,
+		delivery: "queue" | "steer" = "queue",
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
 		await this.followSession(sessionId);
 		await this.followFamily(sessionId);
@@ -2101,15 +2102,18 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const result = await this.run(
-			this.rpc.SendMessage({
+			this.rpc.input.submit({
 				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
-				commandId: randomUUID(),
+				inputId: randomUUID(),
+				delivery,
 				text: prompt,
 			}),
 			timeoutMs,
 		);
+		// A queued submit is never refused; only a steer can be.
+		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
 		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
 		// The detail source currently emits projected messages, not StoredEvents.
@@ -2228,6 +2232,19 @@ export class ProcessBrowser {
 				originId: this.originId,
 			}),
 		);
+	}
+
+	/** The tray's Send now, and Resume on the oldest queued input. */
+	async sendNow(sessionId: string, inputId: string): Promise<void> {
+		const result = await this.run(
+			this.rpc.input.sendNow({
+				projectSlug: this.projectSlug,
+				sessionId,
+				originId: this.originId,
+				inputId,
+			}),
+		);
+		if (!result.ok) throw new Error(`send now refused: ${result.reason}`);
 	}
 
 	async reloadSession(sessionId: string, signal?: AbortSignal): Promise<void> {

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ListDaemonSessions,
 	SaveProject,
-	SendMessage,
+	SubmitInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -17,14 +17,14 @@ import {
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const tables = [
-	"events",
 	"command_receipts",
-	"provider_command_sessions",
-	"provider_command_turns",
+	"events",
 	"provider_command_interactions",
-	"provider_command_tombstones",
-	"provider_command_outbox",
 	"provider_command_meta",
+	"provider_command_outbox",
+	"provider_command_sessions",
+	"provider_command_tombstones",
+	"provider_command_turns",
 ] as const;
 
 function provenance(fixture: ProcessHarness, slug: string) {
@@ -36,17 +36,18 @@ function provenance(fixture: ProcessHarness, slug: string) {
 				FROM events GROUP BY type, project_id ORDER BY type, project_id`)
 				.all(),
 			receipts: db
-				.prepare(`SELECT command_type, status, project_id, COUNT(*) AS count
-				FROM command_receipts GROUP BY command_type, status, project_id
-				ORDER BY command_type, status, project_id`)
+				.prepare(`SELECT command_type, status, project_key, COUNT(*) AS count
+				FROM command_receipts GROUP BY command_type, status, project_key
+				ORDER BY command_type, status, project_key`)
 				.all(),
 			tables: tables.map((table) => ({
 				table,
+				column: table === "events" ? "project_id" : "project_key",
 				rows: db
-					.prepare(`SELECT project_id, COUNT(*) AS count FROM ${table}
-					GROUP BY project_id ORDER BY project_id`)
+					.prepare(`SELECT ${table === "events" ? "project_id" : "project_key"} AS project, COUNT(*) AS count FROM ${table}
+					GROUP BY project ORDER BY project`)
 					.all() as Array<{
-					project_id: string | null;
+					project: string | null;
 					count: number;
 				}>,
 			})),
@@ -82,7 +83,7 @@ async function stagePreProvenanceStore(filename: string) {
 	await Effect.runPromise(
 		Effect.scoped(
 			makeEffectSqlMigrator(
-				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 40)),
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 43)),
 			).pipe(Effect.provide(SqliteClient.layer({ filename }))),
 		),
 	);
@@ -111,6 +112,13 @@ async function stagePreProvenanceStore(filename: string) {
 		expect(db.pragma("table_info(events)")).not.toEqual(
 			expect.arrayContaining([expect.objectContaining({ name: "project_id" })]),
 		);
+		// Exercise real legacy folder keys, including metadata PK collisions.
+		for (const table of tables.filter((table) => table !== "events"))
+			db.exec(`UPDATE ${table} SET project_key = 'legacy-folder'`);
+		db.exec(`INSERT INTO provider_command_meta
+			(project_key, last_applied_sequence, schema_version, rebuilt_at)
+			SELECT 'other-legacy-folder', last_applied_sequence + 1, schema_version, rebuilt_at
+			FROM provider_command_meta`);
 	} finally {
 		db.close();
 	}
@@ -186,11 +194,12 @@ describe("Project provenance through the built daemon", () => {
 			const replay = () =>
 				sendRpcRequest(
 					join(fixture.configDir, "relay.sock"),
-					new SendMessage({
+					new SubmitInput({
 						projectSlug: slug,
 						sessionId,
 						originId: `provenance-${slug}`,
-						commandId: commandId ?? "missing-command",
+						inputId: commandId ?? "missing-command",
+						delivery: "queue",
 						text: "stream-parity",
 					}),
 				);
@@ -218,13 +227,15 @@ describe("Project provenance through the built daemon", () => {
 			const manifest = provenance(fixture, slug);
 			for (const table of manifest.tables)
 				for (const row of table.rows)
-					expect(row.project_id, table.table).toBe(slug);
+					expect(row.project, table.table).toBe(slug);
 			expect(manifest.events).toEqual(
 				expect.arrayContaining([
 					{ type: "session.created", project_id: slug, count: 1 },
 					{ type: "session.deleted", project_id: slug, count: 1 },
 					{ type: "permission.asked", project_id: slug, count: 1 },
 					{ type: "permission.resolved", project_id: slug, count: 1 },
+					{ type: "input.admitted", project_id: slug, count: 2 },
+					{ type: "input.sent", project_id: slug, count: 2 },
 				]),
 			);
 			for (const command of outbox(fixture, slug)) {
@@ -311,7 +322,7 @@ describe("Project provenance through the built daemon", () => {
 			const manifest = provenance(fixture, before.slug);
 			for (const table of manifest.tables)
 				for (const row of table.rows)
-					expect(row.project_id, table.table).toBe(before.slug);
+					expect(row.project, table.table).toBe(before.slug);
 			const db = new Database(fixture.projectStorePath(before.slug), {
 				readonly: true,
 			});

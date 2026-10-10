@@ -148,6 +148,7 @@ describe("Persistence Effect", () => {
 					"message_tombstones",
 					"messages",
 					"pending_approvals",
+					"pending_inputs",
 					"projection_failures",
 					"projector_cursors",
 					"provider_command_interactions",
@@ -298,7 +299,10 @@ describe("Persistence Effect", () => {
 				{ migration_id: 38, name: "session_sidebar" },
 				{ migration_id: 39, name: "session_sidebar_tombstones" },
 				{ migration_id: 40, name: "sessions_workspace" },
-				{ migration_id: 41, name: "project_provenance" },
+				{ migration_id: 41, name: "messages_input_id" },
+				{ migration_id: 42, name: "pending_inputs" },
+				{ migration_id: 43, name: "messages_steered" },
+				{ migration_id: 44, name: "project_provenance" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

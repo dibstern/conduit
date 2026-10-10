@@ -4,10 +4,13 @@
 
 A stored event or durable command belongs to the project's stable slug, its
 `projectId`. Folder edits keep that identity. The store binds it at construction,
-so event and command writers inherit it. Opening a per-project store stamps
-legacy event and command rows with its slug without changing ids, order or
-payloads. Event sequences, command receipts and projector cursors carry that
-owner in their in-memory contracts. Reads and projections remain per-store.
+so event and command writers inherit it. Events use `events.project_id`; command
+tables use their existing `project_key` as the project id column. It always holds
+the slug, never a workspace path. Opening a per-project store stamps legacy
+events and rewrites legacy command keys to its slug without changing ids, order
+or payloads. Converging command metadata keeps the highest applied sequence.
+Event sequences, command receipts and projector cursors carry that owner in
+their in-memory contracts. Reads and projections remain per-store.
 
 ## Repository Identity
 

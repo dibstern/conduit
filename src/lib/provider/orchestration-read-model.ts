@@ -42,7 +42,7 @@ export interface CommandReadModelSnapshot {
 }
 
 interface CommandReceiptRow {
-	readonly project_id: string;
+	readonly project_key: string;
 	readonly command_id: string;
 	readonly session_id: string;
 	readonly status: string;
@@ -81,7 +81,7 @@ function toCommandReceiptStatus(status: string): CommandReceiptStatus {
 
 function rowToReceipt(row: CommandReceiptRow): CommandReceiptSnapshot {
 	return {
-		projectId: row.project_id,
+		projectId: row.project_key,
 		commandId: row.command_id,
 		sessionId: row.session_id,
 		status: toCommandReceiptStatus(row.status),
@@ -118,15 +118,15 @@ export class CommandReadModelRepository {
 		commandId: string,
 	): Effect.Effect<CommandReceiptCheck | undefined, SqlError> {
 		return this.sql<{
-			readonly project_id: string;
+			readonly project_key: string;
 			readonly status: string;
 			readonly fingerprint_hash: string | null;
 			readonly fingerprint_version: number | null;
-		}>`SELECT project_id, status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+		}>`SELECT project_key, status, fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${commandId}`.pipe(
 			Effect.map(([row]) =>
 				row
 					? {
-							projectId: row.project_id,
+							projectId: row.project_key,
 							status: toCommandReceiptStatus(row.status),
 							fingerprintHash: row.fingerprint_hash ?? undefined,
 							fingerprintVersion: row.fingerprint_version ?? undefined,
@@ -139,7 +139,7 @@ export class CommandReadModelRepository {
 	bootstrap(): Effect.Effect<CommandReadModelSnapshot, SqlError> {
 		return Effect.all({
 			receiptRows: this.sql<CommandReceiptRow>`
-				SELECT project_id, command_id, session_id, status, result_sequence, error, created_at
+				SELECT project_key, command_id, session_id, status, result_sequence, error, created_at
 				FROM command_receipts
 				ORDER BY command_id`,
 			lastSequence: this.sql<LastSequenceRow>`

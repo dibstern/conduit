@@ -56,7 +56,6 @@ import {
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-import { PendingSendOwnershipTag } from "./pending-send-ownership.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	BackgroundLivenessTag,
@@ -514,11 +513,6 @@ export const deleteSession = (sessionId: string) =>
 			),
 		);
 
-		const ownership = yield* PendingSendOwnershipTag;
-		ownership.deleteSession(sessionId);
-		for (const childSessionId of childSessionIds)
-			ownership.deleteSession(childSessionId);
-
 		// The delete took the whole lineage, so the cache must forget the whole
 		// lineage: an edge naming a session that no longer exists would put a
 		// deleted grandchild back under a live root on the next list.
@@ -902,7 +896,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
-	| PendingSendOwnershipTag
 > = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
@@ -923,7 +916,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const overrides = yield* OverridesStateTag;
-		const ownership = yield* PendingSendOwnershipTag;
 		// Captured here, not read at call time: the auto-settle sweep calls in from
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
@@ -1185,7 +1177,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
 								Effect.provideService(OpenCodeAPITag, api),
-								Effect.provideService(PendingSendOwnershipTag, ownership),
 								Effect.provideService(OrchestrationEngineTag, engine),
 								Effect.provideService(OpenCodeInstancesTag, instanceClients),
 								Effect.provideService(SessionManagerStateTag, stateRef),

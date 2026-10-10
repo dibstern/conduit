@@ -39,6 +39,7 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
+		steering: false,
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],
@@ -75,7 +76,7 @@ function sendTurnCommand(
 		providerId: overrides.providerId ?? "opencode",
 		input: {
 			sessionId: "session-1",
-			turnId: "turn-1",
+			inputId: "turn-1",
 			prompt: overrides.prompt ?? "hello",
 			history: [],
 			providerState: {},
@@ -101,8 +102,7 @@ function makeDurableOptions(fixture: {
 			Effect.map((snapshot) => ({
 				sql: fixture.sql,
 				snapshot,
-				projectId: "test-project",
-				projectKey: "project-1",
+				projectKey: "test-project",
 				now: fixture.now ?? (() => 1000),
 				generateId: fixture.generateId ?? (() => "disp-1"),
 			})),
@@ -138,7 +138,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						...command,
 						input: {
 							...command.input,
-							userMessageId: "current-user",
+							inputId: "current-user",
 							history: [{ role: "assistant", text: "prior transcript" }],
 						},
 					});
@@ -151,7 +151,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					expect(payload).not.toHaveProperty("history");
 					expect(payload).toMatchObject({
 						prompt: "hello",
-						userMessageId: "current-user",
+						inputId: "current-user",
 					});
 					expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
 				}).pipe(

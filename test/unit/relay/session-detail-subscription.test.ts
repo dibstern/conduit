@@ -967,11 +967,10 @@ describe("transcript states carried by the detail feed alone", () => {
 				hwm: null,
 				hasMore: false,
 				status: { _tag: "live" },
-				carriedUsers: new Map(),
+				pending: [],
 			}),
 			[],
-			{ live: true, active: false, turnEpoch: 0 },
-		).messages;
+		);
 
 	it.scoped(
 		"thinking is in progress until thinking.end, which stamps its end",

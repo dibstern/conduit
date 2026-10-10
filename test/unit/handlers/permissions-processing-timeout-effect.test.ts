@@ -5,7 +5,6 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { PendingSendOwnershipLive } from "../../../src/lib/domain/relay/Services/pending-send-ownership.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -33,6 +32,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	NoopProviderRuntimeIngestionLive,
+	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -69,7 +69,6 @@ describe("permission/question processing timeouts through Effect state", () => {
 					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
 					PendingInteractionServiceLive,
-					PendingSendOwnershipLive,
 					Layer.succeed(LoggerTag, createSilentLogger()),
 					Layer.succeed(
 						SessionManagerServiceTag,
@@ -91,7 +90,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				});
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
-			}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
 

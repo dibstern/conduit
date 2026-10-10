@@ -225,7 +225,11 @@ const authenticateUpgrade = (
 		return result.ok;
 	});
 
-const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
+const handleFailure = (
+	error: WebSocketUpgradeError,
+	req: http.IncomingMessage,
+	socket: net.Socket,
+) =>
 	Effect.gen(function* () {
 		const log =
 			error.reason === "invalid_path" || error.reason === "daemon_shutting_down"
@@ -235,6 +239,9 @@ const handleFailure = (error: WebSocketUpgradeError, socket: net.Socket) =>
 			reason: error.reason,
 			slug: error.slug,
 			url: error.url,
+			// A client that never shows the PIN page redials forever; this names it.
+			remoteAddress: req.socket.remoteAddress,
+			userAgent: req.headers["user-agent"],
 		});
 		yield* destroySocket(socket);
 	});
@@ -378,7 +385,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 				yield* Effect.sync(() => rpcHandler.handleUpgrade(req, socket, head));
 			}).pipe(
-				Effect.catchAll((error) => handleFailure(error, socket)),
+				Effect.catchAll((error) => handleFailure(error, req, socket)),
 				Effect.annotateLogs("component", "ws-routing"),
 			);
 

@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>conduit · new session: pick a project and where it starts</title>
+<style>
+:root{
+	color-scheme:dark;
+	--bg:#0d0e11; --surface:#141619; --alt:#1b1e24; --hover:#20242b;
+	--border:#20242b; --border2:#2d323b; --chipline:#3a414c;
+	--text:#eceef2; --text2:#a8afbb; --dim:#79818f; --dimmer:#555c68;
+	--amber:#f4b740; --blue:#5aa9f5; --green:#3fd69a; --red:#f4607a;
+	--indigo:#9b9bff; --pink:#ff9dc2; --brand:#ff2d7b; --brand-f:#ff2d7b;
+	--scrim:rgba(6,7,9,.6); --sh:rgba(0,0,0,.5);
+	--onfill:#0c0d10; --onbrand:#fff;
+	--p-conduit:#b08cff; --p-dotfiles:#ff9a4d; --p-skills:#2fd3c0; --p-renowned:#ff6fb1;
+	--p-jobapps:#5aa9f5; --p-ainotes:#9ad46a; --p-spm:#e7c64a; --p-gone:#4a505b;
+	--ui:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;
+	--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--ui);-webkit-text-size-adjust:100%}
+code{font:500 .9em var(--mono);background:var(--alt);border:1px solid var(--border);border-radius:5px;padding:0 5px}
+svg.i{width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.13em}
+
+/* page chrome */
+.page{max-width:1280px;margin:0 auto;padding:40px 24px 140px}
+.intro h1{font-size:23px;line-height:1.3;margin:0 0 8px;letter-spacing:-.01em}
+.intro h1 b{color:var(--pink)}
+.intro p{color:var(--text2);max-width:880px;margin:6px 0}
+.intro p b{color:var(--text)}
+nav.toc{position:sticky;top:0;z-index:60;background:rgba(13,14,17,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);margin:22px -24px 0;padding:10px 24px;display:flex;flex-wrap:wrap;gap:6px 8px}
+nav.toc a{color:var(--text2);text-decoration:none;padding:3px 10px;border:1px solid var(--border2);border-radius:999px;font-size:12.5px;white-space:nowrap}
+nav.toc a:hover{color:var(--text);border-color:var(--chipline)}
+.reqs{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px 14px;margin:18px 0}
+.reqs div{padding:11px 13px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text2);font-size:13px}
+.reqs b{color:var(--text);display:block;margin-bottom:2px;font-size:13.5px}
+.design{margin:44px 0 56px;padding-top:22px;border-top:1px solid var(--border);scroll-margin-top:62px}
+.dh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:16px}
+.dh h2{margin:0;font-size:19px}
+.dh .tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;padding:2px 8px;border-radius:999px;border:1px solid var(--chipline);color:var(--dim)}
+.design[data-tier=best] .tag{color:var(--green);border-color:rgba(63,214,154,.35)}
+.design[data-tier=middle] .tag{color:var(--amber);border-color:rgba(244,183,64,.35)}
+.design[data-tier=wild] .tag{color:var(--pink);border-color:rgba(255,45,123,.4)}
+.dh .pitch{flex-basis:100%;margin:4px 0 0;color:var(--text2);max-width:920px}
+.row{display:flex;flex-wrap:wrap;justify-content:center;gap:26px 30px;align-items:flex-start}
+dl.spec{display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:7px 16px;margin:24px 0 0;color:var(--text2);font-size:13px}
+@media (max-width:1100px){dl.spec{grid-template-columns:150px 1fr}}
+dl.spec dt{color:var(--dim)} dl.spec dd{margin:0}
+.verdict{margin-top:14px;padding:10px 14px;border-left:3px solid var(--chipline);background:var(--surface);border-radius:0 10px 10px 0;color:var(--text2);font-size:13px;max-width:920px}
+.verdict b{color:var(--text)}
+table.t{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+table.t th,table.t td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text2)}
+table.t th{color:var(--dim);font-weight:500}
+table.t td:first-child{color:var(--text);font-weight:600;white-space:nowrap}
+.yes{color:var(--green)} .meh{color:var(--amber)} .no{color:var(--red)}
+
+/* phone */
+.phone{margin:0;width:380px}
+.phone figcaption,.desk figcaption{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);padding:0 6px 8px;display:flex;justify-content:space-between;gap:8px}
+.screen{height:760px;border:1px solid var(--border2);border-radius:38px;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 0 0 6px #07080a,0 0 0 7px var(--border)}
+.sbar{flex:none;height:42px;padding:14px 28px 0;display:flex;justify-content:space-between;font-size:12px;color:var(--text2);font-weight:600}
+.home{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:124px;height:4px;border-radius:3px;background:#3a3f48;z-index:50}
+
+/* session list (background context) */
+.lh{flex:none;padding:4px 16px 10px}
+.lh .top{display:flex;align-items:center;gap:10px;height:36px}
+.lh .top b{font-size:19px;font-weight:700;letter-spacing:-.01em;flex:1}
+.lh .ib{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--text2)}
+.sfield{height:38px;border-radius:11px;background:var(--surface);border:1px solid var(--border2);display:flex;align-items:center;gap:8px;padding:0 11px;color:var(--dim);font-size:13.5px;margin-top:6px}
+.sfield.on{background:var(--alt);border-color:var(--chipline);color:var(--text)}
+.sfield .caret{width:1.5px;height:16px;background:var(--brand);margin-left:-4px}
+.chip{flex:none;font-size:12.5px;line-height:1;padding:7px 10px;border-radius:999px;border:1px solid var(--border2);color:var(--text2);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:transparent}
+.chip.on{background:var(--alt);border-color:var(--chipline);color:var(--text)}
+.chip .cv{opacity:.55;font-size:9px}
+.lbody{flex:1;min-height:0;overflow:hidden;padding:0 8px}
+.gl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);padding:12px 10px 6px;display:flex;justify-content:space-between}
+.r{display:flex;gap:11px;padding:10px;border-radius:12px;align-items:flex-start}
+.r .tx{min-width:0;flex:1}
+.r .tt{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r .mt{font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center;margin-top:2px;white-space:nowrap}
+.st{font-weight:700;font-size:12px}.st.ap{color:var(--amber)}.st.wk{color:var(--blue)}.st.dn{color:var(--green)}
+.fab{position:absolute;right:14px;bottom:30px;width:48px;height:48px;border-radius:50%;background:var(--brand-f);color:var(--onbrand);display:grid;place-items:center;font-size:22px;box-shadow:0 4px 14px var(--sh);z-index:5}
+
+/* project glyph */
+.g{width:20px;height:20px;flex:none;border-radius:6px;background:var(--pc,#555);color:var(--onfill);font:700 9px/1 var(--ui);display:inline-grid;place-items:center;letter-spacing:.02em}
+.g.sm{width:16px;height:16px;font-size:8px;border-radius:4.5px}
+.g.lg{width:34px;height:34px;font-size:12.5px;border-radius:10px}
+.g.gone{background:transparent;border:1.5px dashed var(--chipline);color:var(--dimmer)}
+.pc-conduit{--pc:var(--p-conduit)}.pc-dotfiles{--pc:var(--p-dotfiles)}.pc-skills{--pc:var(--p-skills)}
+.pc-renowned{--pc:var(--p-renowned)}.pc-jobapps{--pc:var(--p-jobapps)}.pc-ainotes{--pc:var(--p-ainotes)}.pc-spm{--pc:var(--p-spm)}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:21;background:var(--alt);border-top:1px solid var(--border2);border-radius:20px 20px 0 0;padding:8px 0 30px;box-shadow:0 -24px 50px var(--sh);display:flex;flex-direction:column}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--border2);margin:0 auto 8px;flex:none}
+.sh-h{padding:2px 16px 10px;display:flex;align-items:center;gap:10px}
+.sh-h b{font-size:16px;font-weight:650;flex:1}
+.sh-h .x{color:var(--dim);font-size:15px}
+.sec{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);padding:12px 16px 4px;display:flex;justify-content:space-between;align-items:center}
+.sec span:last-child{text-transform:none;letter-spacing:0;font-size:12px}
+.pr{display:flex;align-items:center;gap:12px;min-height:50px;padding:6px 16px;color:var(--text);font-size:14.5px;position:relative}
+.pr .nm{min-width:0;flex:1}
+.pr .nm div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .nm small{display:block;font:12px var(--mono);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.pr .tail{margin-left:auto;color:var(--dim);font-size:12.5px;display:flex;align-items:center;gap:8px;flex:none}
+.pr.sel{background:var(--hover)}
+.pr.sel::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--brand)}
+.pr .ck{color:var(--brand);font-size:15px}
+.pr.gone{color:var(--dim)}
+.pr.gone .nm small{color:var(--dimmer)}
+.pr .rm{font-size:12px;color:var(--red);border:1px solid rgba(244,96,122,.35);border-radius:8px;padding:4px 8px}
+.pr .ico{width:20px;display:grid;place-items:center;color:var(--text2);flex:none;font-size:16px}
+.badge{font:600 10px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:999px;border:1px solid var(--chipline);color:var(--dim)}
+.badge.soon{color:var(--indigo);border-color:rgba(155,155,255,.35)}
+.badge.gone{color:var(--amber);border-color:rgba(244,183,64,.35)}
+.brp{display:inline-flex;align-items:center;gap:5px;font:500 11.5px/1 var(--mono);color:var(--text2);background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:4px 7px;white-space:nowrap}
+.brp.dirty::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--amber);margin-left:2px}
+.hr{border:0;border-top:1px solid var(--border);margin:6px 16px}
+
+/* starts-on card + primary button */
+.starts{margin:10px 16px 0;border:1px solid var(--border2);background:var(--surface);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px}
+.starts .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim)}
+.starts .v{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-top:3px}
+.starts .v .w{color:var(--text2);font-size:13px}
+.starts .chev{margin-left:auto;color:var(--dim)}
+.go{margin:12px 16px 0;height:48px;border-radius:14px;background:var(--brand-f);color:var(--onbrand);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:650;font-size:15px}
+.go small{font-weight:500;opacity:.8}
+
+/* workspace options */
+.opt{display:flex;gap:12px;padding:11px 16px;align-items:flex-start}
+.opt .rd{width:18px;height:18px;border-radius:50%;border:2px solid var(--chipline);flex:none;margin-top:2px}
+.opt.on .rd{border-color:var(--brand);background:radial-gradient(var(--brand) 0 4px,transparent 4.5px)}
+.opt .ot{flex:1;min-width:0}
+.opt .ot div{font-size:14.5px;color:var(--text);display:flex;align-items:center;gap:8px}
+.opt .ot small{display:block;color:var(--dim);font-size:12.5px;margin-top:2px}
+.opt.off .ot div{color:var(--dim)}
+.opt.off .rd{border-style:dashed}
+.note{margin:10px 16px 0;font-size:12px;color:var(--dim);line-height:1.45}
+
+/* app bar + composer */
+.appbar{flex:none;display:flex;align-items:center;gap:10px;padding:4px 14px 10px;border-bottom:1px solid var(--border);font-size:14px}
+.appbar .bk{color:var(--dim);font-size:17px}
+.appbar .ttl{font-weight:650;flex:1}
+.appbar .more{color:var(--dim)}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--dim);font-size:13.5px;padding:24px;text-align:center}
+.empty b{color:var(--text);font-size:16px;font-weight:650}
+.dock{flex:none;padding:6px 10px 10px;background:var(--bg)}
+.ctx{display:flex;align-items:center;gap:6px;padding:0 4px 8px;overflow:hidden}
+.ctx .chip{padding:6px 9px}
+.ctx .sep{color:var(--dimmer)}
+.cmp{border:1px solid var(--border2);background:var(--surface);border-radius:20px}
+.cmp .ph{color:var(--dim);padding:12px 14px 6px;min-height:46px;font-size:14px}
+.cmp .ph .caret{display:inline-block;width:1.5px;height:17px;background:var(--text);vertical-align:-3px;margin-right:2px}
+.foot{display:flex;align-items:center;gap:4px;padding:4px 6px 6px}
+.foot .sp{flex:1}
+.cib{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:var(--text2);flex:none}
+.send{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:#4a2233;color:#b98a9c;flex:none}
+.send.on{background:var(--brand-f);color:#fff}
+.mchip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 9px;border-radius:10px;font-size:12.5px;color:var(--text2);white-space:nowrap}
+.claude{width:14px;height:14px;border-radius:4px;background:rgba(217,119,87,.25);display:inline-grid;place-items:center;color:#d97757;font-size:9px;font-weight:800}
+.kbd{height:226px;background:#1d2026;border-top:1px solid var(--border);display:grid;grid-template-rows:repeat(4,1fr);gap:8px;padding:10px 4px 34px;flex:none}
+.kbd div{display:flex;gap:5px;justify-content:center}
+.kbd i{flex:0 0 31px;border-radius:5px;background:#3a3f48}
+.kbd div:nth-child(2) i:first-child{margin-left:16px}.kbd div:nth-child(2) i:last-child{margin-right:16px}
+.kbd div:last-child i{flex:0 0 44px}.kbd div:last-child i:nth-child(2){flex:1 1 auto}
+
+/* popover / menu */
+.menu{position:absolute;z-index:30;background:var(--alt);border:1px solid var(--border2);border-radius:14px;padding:6px;box-shadow:0 18px 44px rgba(0,0,0,.6)}
+.menu .mh{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);padding:6px 10px 4px}
+.menu .mi{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;font-size:13.5px;color:var(--text2)}
+.menu .mi.on{background:var(--hover);color:var(--text)}
+.menu .mi.off{color:var(--dimmer)}
+.menu .mi .d{margin-left:auto;color:var(--dim);font-size:12px;display:flex;gap:6px;align-items:center}
+.menu hr{border:0;border-top:1px solid var(--border);margin:5px 6px}
+
+/* desktop */
+.desk{margin:0;width:1080px;max-width:100%}
+.win{height:620px;border:1px solid var(--border2);border-radius:14px;overflow:hidden;display:flex;background:var(--bg);position:relative;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.side{width:300px;flex:none;border-right:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column}
+.side .lh{padding:14px 12px 8px}
+.side .lh .top b{font-size:16px}
+.side .r{padding:8px 10px}
+.side .r .tt{font-size:13.5px}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.mbar{height:46px;flex:none;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 18px;font-size:13.5px;color:var(--text2)}
+.mbar b{color:var(--text);font-weight:650}
+.mcenter{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:30px}
+.mdock{width:100%;max-width:720px;margin:0 auto;padding:0 24px 22px}
+.dkbtn{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:var(--text2);border:1px solid var(--border2)}
+.dkbtn.on{background:var(--hover);color:var(--text);border-color:var(--chipline)}
+
+/* palette (design 3) */
+.pal{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:720px;background:var(--alt);border:1px solid var(--border2);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.65);z-index:30;overflow:hidden}
+.pal .pin{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);font-size:15px}
+.pal .pin .pre{color:var(--dim)}
+.pal .pin .tok{color:var(--text)}
+.pal .cols{display:flex;height:330px}
+.pal .lst{width:330px;border-right:1px solid var(--border);padding:6px 0;overflow:hidden}
+.pal .lst .pr{min-height:44px;font-size:14px}
+.pal .prev{flex:1;padding:16px 18px;display:flex;flex-direction:column;gap:12px;font-size:13px;color:var(--text2)}
+.pal .prev h4{margin:0;display:flex;align-items:center;gap:10px;color:var(--text);font-size:16px}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:6px 10px}
+.kv dt{color:var(--dim)} .kv dd{margin:0;color:var(--text2);min-width:0}
+.pal .hint{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--dim)}
+kbd{font:600 11px/1 var(--mono);color:var(--text2);border:1px solid var(--border2);border-bottom-width:2px;border-radius:5px;padding:2px 5px;background:var(--surface)}
+
+/* sentence (design 4) */
+.sent{padding:4px 6px 10px;font-size:15px;color:var(--text2);line-height:1.9}
+.tokn{display:inline-flex;align-items:center;gap:6px;color:var(--text);border-bottom:1.5px dashed var(--chipline);padding:0 2px;line-height:1.4}
+.tokn.act{border-bottom-color:var(--brand);color:var(--pink)}
+
+/* cards (design 5) */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:760px}
+.card{border:1px solid var(--border2);background:var(--surface);border-radius:14px;padding:13px 14px;display:flex;flex-direction:column;gap:9px;min-height:118px}
+.card.sel{border-color:var(--brand);box-shadow:0 0 0 3px rgba(255,45,123,.15)}
+.card .ch{display:flex;align-items:center;gap:10px}
+.card .ch b{font-size:14.5px}
+.card .ch small{display:block;font:11.5px var(--mono);color:var(--dim)}
+.card .cm{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);margin-top:auto;flex-wrap:wrap}
+.card.add{border-style:dashed;align-items:center;justify-content:center;color:var(--text2);background:transparent}
+.card.gone{border-style:dashed;background:transparent;color:var(--dim)}
+.card.gone b{color:var(--dim)}
+.pcards{display:flex;flex-direction:column;gap:10px;padding:4px 14px 14px;overflow:hidden}
+.pcards .card{min-height:0}
+
+/* lanes (design 6) */
+.lanes{margin:8px 16px 0;border:1px solid var(--border2);background:var(--surface);border-radius:14px;padding:12px 12px 6px}
+.lane{display:flex;align-items:center;gap:10px;height:46px;position:relative}
+.lane .rail{width:34px;align-self:stretch;position:relative;flex:none}
+.lane .rail::before{content:"";position:absolute;left:16px;top:0;bottom:0;width:2px;background:var(--chipline)}
+.lane:first-child .rail::before{top:50%}
+.lane .rail .dot{position:absolute;left:10px;top:50%;margin-top:-7px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--chipline)}
+.lane.on .rail .dot{border-color:var(--brand);background:var(--brand)}
+.lane .rail .fork{position:absolute;left:17px;top:-2px;width:16px;height:26px;border-left:0;border-bottom:2px dashed var(--chipline);border-right:2px dashed var(--chipline);border-radius:0 0 10px 0}
+.lane .lt{flex:1;min-width:0}
+.lane .lt div{font-size:14px;color:var(--text);display:flex;gap:8px;align-items:center}
+.lane .lt small{color:var(--dim);font-size:12px}
+.lane.off .lt div{color:var(--dim)}
+.steps{display:flex;gap:6px;padding:0 16px 4px;font-size:12.5px;color:var(--dim);align-items:center}
+.steps b{color:var(--text);font-weight:600}
+.steps .s{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid var(--border2)}
+.steps .s.on{border-color:var(--chipline);background:var(--hover);color:var(--text)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<symbol id="br" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+	<symbol id="fo" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+	<symbol id="fp" viewBox="0 0 24 24"><path d="M12 10v6M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+	<symbol id="wt" viewBox="0 0 24 24"><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v1"/><circle cx="14" cy="15" r="1.6"/><circle cx="20" cy="15" r="1.6"/><path d="M14 16.6V21M20 16.6c0 2-2 2.6-6 3.4"/></symbol>
+	<symbol id="se" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+	<symbol id="ch" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+	<symbol id="ck" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+	<symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+	<symbol id="pl" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+	<symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+	<symbol id="sl" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+	<symbol id="at" viewBox="0 0 24 24"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+	<symbol id="bk" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+</svg>
+
+<div class="page">
+<header class="intro">
+	<h1>conduit · <b>new session</b>: choose the project, see where it starts</h1>
+	<p>The sidebar now lists every project's sessions in one place, so <b>+</b> can no longer assume which project you mean. A new session needs two answers: <b>which project</b>, and <b>where in it</b>. Today the second answer is always the project's own checkout, on <code>main</code>. Later it becomes the place to pick a <b>new worktree</b> (a second checkout on its own branch), an existing one, or a new branch, the way t3code does.</p>
+	<p>Six designs below, ordered from what I'd build first to the most speculative. All use the palette, glyph tiles, sheets and chips from the <code>mobile-first-sidebar</code> page, so they sit next to the shipped sidebar and composer without new visual vocabulary. <b>Design 2 is the t3code-inspired one.</b></p>
+	<nav class="toc">
+		<a href="#rules">Shared rules</a>
+		<a href="#d1">1 · Launch sheet</a>
+		<a href="#d2">2 · Draft session (t3code)</a>
+		<a href="#d3">3 · Palette</a>
+		<a href="#d4">4 · Sentence</a>
+		<a href="#d5">5 · Launchpad</a>
+		<a href="#d6">6 · Lanes</a>
+		<a href="#compare">Compare</a>
+	</nav>
+</header>
+
+<section class="design" id="rules">
+	<div class="dh"><h2>Shared rules (every design)</h2>
+		<p class="pitch">These are decisions, not styling. Whichever layout wins, they hold.</p></div>
+	<div class="reqs">
+		<div><b>Default project is a guess you can see</b>The project the sidebar is scoped to, else the one you used last. It is always shown preselected, never silently applied.</div>
+		<div><b>"Starts on" shows the real branch</b>Read from the checkout when the picker opens. It says <code>main</code> today because that's what your projects have checked out, not because it's hard-coded. A project sitting on a feature branch must say so.</div>
+		<div><b>Uncommitted changes get a dot</b>An amber dot on the branch pill means the session starts in a checkout with uncommitted changes. That matters more once worktrees exist.</div>
+		<div><b>Missing folders don't hide, and don't get picked</b>Projects whose folder is gone sit in a collapsed <i>Unavailable</i> group with a <b>Remove</b> action, never in the main list.</div>
+		<div><b>Removed stays removed</b>Remove drops the project for good. It returns only if you start a session there again via <b>Open a folder…</b>, which is also how new projects get added.</div>
+		<div><b>Future options are visible but quiet</b>Worktree and branch options appear with a <span class="badge soon">soon</span> tag, so the layout doesn't change when they ship.</div>
+	</div>
+</section>
+
+<!-- ───────────────────────────── 1 · Launch sheet ───────────────────────────── -->
+<section class="design" id="d1" data-tier="best">
+	<div class="dh"><h2>1 · Launch sheet</h2><span class="tag">recommended</span>
+		<p class="pitch"><b>+</b> opens a sheet: projects at the top, a <b>Starts on</b> card above one big Start button. The session is created when you press Start, so the transcript always opens in the right project. It uses the same sheet, rows and glyphs as the sidebar's scope picker, so it reads as part of the same app. On desktop the same content is a popover off the <b>+</b> in the sidebar header.</p></div>
+	<div class="row">
+		<figure class="phone"><figcaption><span>Phone · + tapped</span><span>scoped to all projects</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="lh"><div class="top"><b>Sessions</b><span class="ib"><svg class="i"><use href="#sl"/></svg></span></div>
+					<div class="sfield"><span class="chip on">All projects <span class="cv">▼</span></span><svg class="i"><use href="#se"/></svg><span>Search</span></div></div>
+				<div class="lbody">
+					<div class="gl"><span>Needs you</span><span>2</span></div>
+					<div class="r"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt">Fix legacy address race on cold start</div><div class="mt"><span class="st ap">⚠ approve</span>· conduit · 2m</div></div></div>
+					<div class="r"><i class="g sm pc-skills">SK</i><div class="tx"><div class="tt">Tighten the codex-review contract</div><div class="mt"><span class="st wk">● working</span>· skills · now</div></div></div>
+				</div>
+				<div class="fab">+</div>
+				<div class="scrim"></div>
+				<div class="sheet">
+					<div class="grab"></div>
+					<div class="sh-h"><b>New session</b><span class="x"><svg class="i"><use href="#x"/></svg></span></div>
+					<div style="padding:0 16px"><div class="sfield" style="margin:0"><svg class="i"><use href="#se"/></svg><span>Find a project</span></div></div>
+					<div class="sec"><span>Recent</span><span>20 projects</span></div>
+					<div class="pr sel"><i class="g pc-conduit">CO</i><div class="nm"><div>conduit</div><small>~/src/personal/conduit</small></div><span class="tail"><span class="ck"><svg class="i"><use href="#ck"/></svg></span></span></div>
+					<div class="pr"><i class="g pc-skills">SK</i><div class="nm"><div>skills</div><small>~/src/personal/skills</small></div><span class="tail">3 live</span></div>
+					<div class="pr"><i class="g pc-dotfiles">DO</i><div class="nm"><div>dotfiles</div><small>~/dotfiles</small></div><span class="tail">1 live</span></div>
+					<div class="pr"><span class="ico"><svg class="i"><use href="#fp"/></svg></span><div class="nm"><div style="color:var(--text2)">Open a folder…</div></div></div>
+					<div class="pr gone" style="min-height:40px"><span class="ico" style="color:var(--dimmer)">›</span><div class="nm"><div style="font-size:13px">Unavailable · folder missing</div></div><span class="tail">9</span></div>
+					<div class="starts"><div><div class="lbl">Starts on</div><div class="v"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span class="w">current checkout</span></div></div><span class="chev"><svg class="i"><use href="#ch"/></svg></span></div>
+					<div class="go">Start in conduit</div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+
+		<figure class="phone"><figcaption><span>Phone · Starts on tapped</span><span>future options parked</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="lh"><div class="top"><b>Sessions</b></div></div>
+				<div class="scrim"></div>
+				<div class="sheet">
+					<div class="grab"></div>
+					<div class="sh-h"><span class="x"><svg class="i"><use href="#bk"/></svg></span><b>Where it starts</b><i class="g sm pc-conduit">CO</i><span style="font-size:13px;color:var(--text2)">conduit</span></div>
+					<div class="opt on"><span class="rd"></span><div class="ot"><div>Current checkout <span class="brp"><svg class="i"><use href="#br"/></svg>main</span></div><small>Works in ~/src/personal/conduit, alongside anything else running there.</small></div></div>
+					<div class="hr"></div>
+					<div class="opt off"><span class="rd"></span><div class="ot"><div>New worktree <span class="badge soon">soon</span></div><small>A separate checkout on a fresh branch from <code>main</code>. Parallel sessions can't step on each other.</small></div></div>
+					<div class="opt off"><span class="rd"></span><div class="ot"><div>Existing worktree… <span class="badge soon">soon</span></div><small>Pick up where an earlier session left off.</small></div></div>
+					<div class="opt off"><span class="rd"></span><div class="ot"><div>New branch… <span class="badge soon">soon</span></div><small>Switch this checkout to a new branch first.</small></div></div>
+					<p class="note">Today every session starts in the project's own checkout. The other rows stay visible so this sheet won't move when they ship.</p>
+					<div class="go">Done</div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+
+		<figure class="phone"><figcaption><span>Phone · Unavailable expanded</span><span>removal sticks</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="lh"><div class="top"><b>Sessions</b></div></div>
+				<div class="scrim"></div>
+				<div class="sheet" style="top:90px">
+					<div class="grab"></div>
+					<div class="sh-h"><b>New session</b><span class="x"><svg class="i"><use href="#x"/></svg></span></div>
+					<div class="sec"><span>Recent</span></div>
+					<div class="pr sel"><i class="g pc-conduit">CO</i><div class="nm"><div>conduit</div><small>~/src/personal/conduit</small></div><span class="tail"><span class="ck"><svg class="i"><use href="#ck"/></svg></span></span></div>
+					<div class="pr"><i class="g pc-skills">SK</i><div class="nm"><div>skills</div><small>~/src/personal/skills</small></div><span class="tail">3 live</span></div>
+					<div class="sec"><span>Unavailable · folder missing</span><span>Remove all</span></div>
+					<div class="pr gone"><i class="g gone">OP</i><div class="nm"><div>opencode</div><small>~/src/personal/opencode-relay/opencode</small></div><span class="tail"><span class="rm">Remove</span></span></div>
+					<div class="pr gone"><i class="g gone">RE</i><div class="nm"><div>rome2rio-explore</div><small>~/src/work/rome2rio-explore</small></div><span class="tail"><span class="rm">Remove</span></span></div>
+					<div class="pr gone"><i class="g gone">GS</i><div class="nm"><div>geospatial-service</div><small>~/src/work/geospatial-service</small></div><span class="tail"><span class="rm">Remove</span></span></div>
+					<div class="pr gone"><i class="g gone">BE</i><div class="nm"><div>beta</div><small>/private/tmp/cdiag/p2/beta</small></div><span class="tail"><span class="rm">Remove</span></span></div>
+					<p class="note">Their sessions stay readable in the list. Removing only forgets the project. Open the folder again later and it comes back.</p>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+	</div>
+
+	<div class="row" style="margin-top:30px">
+		<figure class="desk"><figcaption><span>Desktop · popover from the sidebar's +</span><span>⌘N opens it too</span></figcaption>
+			<div class="win">
+				<div class="side">
+					<div class="lh"><div class="top"><b>Sessions</b><span class="dkbtn on"><svg class="i"><use href="#pl"/></svg></span></div>
+						<div class="sfield"><span class="chip on">All projects <span class="cv">▼</span></span><svg class="i"><use href="#se"/></svg><span>Search</span></div></div>
+					<div class="lbody">
+						<div class="gl"><span>Needs you</span><span>2</span></div>
+						<div class="r"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt">Fix legacy address race</div><div class="mt"><span class="st ap">⚠ approve</span>· conduit</div></div></div>
+						<div class="r"><i class="g sm pc-skills">SK</i><div class="tx"><div class="tt">Tighten the codex-review contract</div><div class="mt"><span class="st wk">● working</span>· skills</div></div></div>
+						<div class="gl"><span>Today</span><span>4</span></div>
+						<div class="r"><i class="g sm pc-dotfiles">DO</i><div class="tx"><div class="tt">zsh startup under 80 ms</div><div class="mt"><span class="st dn">✓ done</span>· dotfiles</div></div></div>
+					</div>
+				</div>
+				<div class="main">
+					<div class="mbar"><b>Fix legacy address race</b><span>· conduit</span></div>
+					<div class="mcenter"></div>
+				</div>
+				<div class="menu" style="left:250px;top:44px;width:360px;padding:8px 0 12px">
+					<div style="padding:2px 12px 8px"><div class="sfield on" style="margin:0"><svg class="i"><use href="#se"/></svg><span>con</span><span class="caret"></span></div></div>
+					<div class="pr sel" style="min-height:44px"><i class="g pc-conduit">CO</i><div class="nm"><div>conduit</div><small>~/src/personal/conduit</small></div><span class="tail"><kbd>↵</kbd></span></div>
+					<div class="pr" style="min-height:44px"><i class="g gone">CO</i><div class="nm"><div style="color:var(--dim)">conduit</div><small>~/src/personal/opencode-relay/conduit</small></div><span class="tail"><span class="badge gone">missing</span></span></div>
+					<div class="pr" style="min-height:40px"><span class="ico"><svg class="i"><use href="#fp"/></svg></span><div class="nm"><div style="color:var(--text2);font-size:13.5px">Open a folder…</div></div></div>
+					<div class="starts"><div><div class="lbl">Starts on</div><div class="v"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span class="w">current checkout</span></div></div><span class="chev"><svg class="i"><use href="#ch"/></svg></span></div>
+					<div class="go" style="height:40px;font-size:14px">Start in conduit <small>↵</small></div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd>+ then Start: <b>2 taps</b>. Keyboard: <kbd>⌘N</kbd> <kbd>↵</kbd>.</dd>
+		<dt>Other project</dt><dd>+, tap it, Start: 3 taps. Type to filter past ~8.</dd>
+		<dt>Worktrees later</dt><dd>Fill in the parked rows. No layout change.</dd>
+		<dt>Build cost</dt><dd>Low. Reuses the sidebar sheet, rows and Modal primitive.</dd>
+	</dl>
+	<div class="verdict"><b>Why first:</b> the explicit Start step is the honest version of "create a session here". The project and branch are on screen at the moment you commit, and nothing exists until you do. <b>Cost:</b> one extra tap compared with design 2 when the guess was already right.</div>
+</section>
+
+<!-- ───────────────────────────── 2 · Draft session ───────────────────────────── -->
+<section class="design" id="d2" data-tier="best">
+	<div class="dh"><h2>2 · Draft session</h2><span class="tag">t3code-inspired</span>
+		<p class="pitch">How t3code does it. <b>+</b> opens an empty session straight away with the composer focused. Above the composer, a context strip shows <b>project</b> and <b>where it starts</b> as two chips you can change. Nothing is created until you send the first message. That is t3code's BranchToolbar (<i>Current checkout ▾ · main ▾</i>) plus its "New thread in…" picker, in conduit's chips.</p></div>
+	<div class="row">
+		<figure class="phone"><figcaption><span>Phone · + tapped</span><span>typing straight away</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span><span class="more">···</span></div>
+				<div class="empty"><i class="g lg pc-conduit">CO</i><b>conduit</b><span>Nothing is created until you send.</span></div>
+				<div class="dock">
+					<div class="ctx"><span class="chip on"><i class="g sm pc-conduit">CO</i>conduit<span class="cv">▼</span></span><span class="chip"><svg class="i"><use href="#br"/></svg>main<span class="cv">▼</span></span><span style="font-size:12px;color:var(--dim);margin-left:2px">current checkout</span></div>
+					<div class="cmp"><div class="ph"><span class="caret"></span>Ask anything…</div>
+						<div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="mchip"><span class="claude">✱</span>Opus 5</span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+				</div>
+				<div class="kbd"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i></div></div>
+				<div class="home"></div>
+			</div>
+		</figure>
+
+		<figure class="phone"><figcaption><span>Phone · project chip tapped</span><span>keyboard drops</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span></div>
+				<div class="empty"></div>
+				<div class="scrim"></div>
+				<div class="sheet">
+					<div class="grab"></div>
+					<div class="sh-h"><b>Start in…</b></div>
+					<div style="padding:0 16px"><div class="sfield" style="margin:0"><svg class="i"><use href="#se"/></svg><span>Find a project</span></div></div>
+					<div class="sec"><span>Recent</span></div>
+					<div class="pr sel"><i class="g pc-conduit">CO</i><div class="nm"><div>conduit</div></div><span class="tail"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span class="ck"><svg class="i"><use href="#ck"/></svg></span></span></div>
+					<div class="pr"><i class="g pc-skills">SK</i><div class="nm"><div>skills</div></div><span class="tail"><span class="brp dirty"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+					<div class="pr"><i class="g pc-dotfiles">DO</i><div class="nm"><div>dotfiles</div></div><span class="tail"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+					<div class="pr"><i class="g pc-renowned">RN</i><div class="nm"><div>renowned</div></div><span class="tail"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+					<div class="pr"><i class="g pc-jobapps">JA</i><div class="nm"><div>job-apps</div></div><span class="tail"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+					<div class="pr"><span class="ico"><svg class="i"><use href="#fp"/></svg></span><div class="nm"><div style="color:var(--text2)">Open a folder…</div></div></div>
+					<div class="pr gone" style="min-height:40px"><span class="ico" style="color:var(--dimmer)">›</span><div class="nm"><div style="font-size:13px">Unavailable · folder missing</div></div><span class="tail">9</span></div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+
+		<figure class="phone"><figcaption><span>Phone · branch chip tapped</span><span>same menu as t3code</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span></div>
+				<div class="empty"><i class="g lg pc-conduit">CO</i><b>conduit</b></div>
+				<div class="menu" style="left:14px;right:14px;bottom:150px">
+					<div class="mh">Workspace</div>
+					<div class="mi on"><svg class="i"><use href="#fo"/></svg>Current checkout<span class="d"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><svg class="i" style="color:var(--brand)"><use href="#ck"/></svg></span></div>
+					<div class="mi off"><svg class="i"><use href="#wt"/></svg>New worktree<span class="d"><span class="badge soon">soon</span></span></div>
+					<hr>
+					<div class="mh">Branch</div>
+					<div class="mi on"><svg class="i"><use href="#br"/></svg>main<span class="d">checked out</span></div>
+					<div class="mi off"><svg class="i"><use href="#br"/></svg>feat/new-session<span class="d"><span class="badge soon">soon</span></span></div>
+					<div class="mi off"><svg class="i"><use href="#pl"/></svg>New branch…<span class="d"><span class="badge soon">soon</span></span></div>
+				</div>
+				<div class="dock">
+					<div class="ctx"><span class="chip"><i class="g sm pc-conduit">CO</i>conduit<span class="cv">▼</span></span><span class="chip on"><svg class="i"><use href="#br"/></svg>main<span class="cv">▲</span></span></div>
+					<div class="cmp"><div class="ph">Ask anything…</div><div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="mchip"><span class="claude">✱</span>Opus 5</span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+	</div>
+	<div class="row" style="margin-top:30px">
+		<figure class="desk"><figcaption><span>Desktop · draft in the main pane</span><span>strip under the composer, like t3code</span></figcaption>
+			<div class="win">
+				<div class="side">
+					<div class="lh"><div class="top"><b>Sessions</b><span class="dkbtn"><svg class="i"><use href="#pl"/></svg></span></div>
+						<div class="sfield"><span class="chip on">All projects <span class="cv">▼</span></span><svg class="i"><use href="#se"/></svg><span>Search</span></div></div>
+					<div class="lbody">
+						<div class="r" style="background:var(--hover)"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt" style="color:var(--text2);font-style:italic">New session (draft)</div><div class="mt">conduit · main</div></div></div>
+						<div class="gl"><span>Needs you</span><span>2</span></div>
+						<div class="r"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt">Fix legacy address race</div><div class="mt"><span class="st ap">⚠ approve</span>· conduit</div></div></div>
+						<div class="r"><i class="g sm pc-skills">SK</i><div class="tx"><div class="tt">Tighten the codex-review contract</div><div class="mt"><span class="st wk">● working</span>· skills</div></div></div>
+					</div>
+				</div>
+				<div class="main">
+					<div class="mbar"><b>New session</b><span>· not started</span></div>
+					<div class="mcenter"><div style="color:var(--dim);font-size:13.5px;text-align:center"><i class="g lg pc-conduit" style="margin-bottom:10px">CO</i><br><b style="color:var(--text);font-size:16px">What should happen in conduit?</b></div></div>
+					<div class="mdock">
+						<div class="cmp"><div class="ph"><span class="caret"></span>Ask anything…</div>
+							<div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="mchip"><span class="claude">✱</span>Opus 5</span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+						<div class="ctx" style="padding:8px 6px 0"><span class="chip"><i class="g sm pc-conduit">CO</i>conduit<span class="cv">▼</span></span><span class="sep">/</span><span class="chip"><svg class="i"><use href="#fo"/></svg>Current checkout<span class="cv">▼</span></span><span class="chip"><svg class="i"><use href="#br"/></svg>main<span class="cv">▼</span></span><span style="margin-left:auto;font-size:12px;color:var(--dim)"><kbd>⌘P</kbd> project</span></div>
+					</div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd>+ then type: <b>1 tap</b>, and the keyboard is already up.</dd>
+		<dt>Other project</dt><dd>Chip, pick, type: 3 taps. The prompt you'd started is kept.</dd>
+		<dt>Worktrees later</dt><dd>Already shaped for it: this is t3code's toolbar.</dd>
+		<dt>Build cost</dt><dd>Medium. Conduit has no "draft" session today, so it needs a client-only draft that becomes real on first send.</dd>
+	</dl>
+	<div class="verdict"><b>Use it if</b> most new sessions go to the project you're already in. The project choice is the easiest thing to miss here: you can type a whole prompt with the wrong chip showing. <b>Gotcha:</b> a draft has to survive tab switches and reloads, or a half-typed prompt vanishes.</div>
+</section>
+
+<!-- ───────────────────────────── 3 · Palette ───────────────────────────── -->
+<section class="design" id="d3" data-tier="middle">
+	<div class="dh"><h2>3 · Palette with preview</h2><span class="tag">desktop-first</span>
+		<p class="pitch">A ⌘N command palette: type to pick a project, and a right-hand pane previews it. You see the path, the branch, whether there are uncommitted changes, and what you were last doing there, before you commit. <kbd>⇥</kbd> moves to "where it starts". Built for the keyboard. On a phone it becomes a full-screen search, which is design 1 with the sheet stretched.</p></div>
+	<div class="row">
+		<figure class="desk"><figcaption><span>Desktop · ⌘N</span><span>preview answers "is this the right place?"</span></figcaption>
+			<div class="win">
+				<div class="side" style="opacity:.35">
+					<div class="lh"><div class="top"><b>Sessions</b></div><div class="sfield"><span class="chip on">All projects <span class="cv">▼</span></span></div></div>
+					<div class="lbody"><div class="r"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt">Fix legacy address race</div></div></div><div class="r"><i class="g sm pc-skills">SK</i><div class="tx"><div class="tt">Tighten the codex-review contract</div></div></div></div>
+				</div>
+				<div class="main" style="opacity:.35"><div class="mbar"><b>Fix legacy address race</b></div></div>
+				<div class="pal">
+					<div class="pin"><span class="pre">New session in</span><span class="tok">sk</span><span class="caret" style="width:1.5px;height:18px;background:var(--brand);display:inline-block"></span></div>
+					<div class="cols">
+						<div class="lst">
+							<div class="pr sel"><i class="g pc-skills">SK</i><div class="nm"><div>skills</div></div><span class="tail"><span class="brp dirty"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+							<div class="pr"><i class="g pc-spm">SP</i><div class="nm"><div>spm</div></div><span class="tail"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span></span></div>
+							<div class="pr gone"><i class="g gone">RT</i><div class="nm"><div>rome2rio-terraform-infra</div></div><span class="tail"><span class="badge gone">missing</span></span></div>
+							<div class="hr"></div>
+							<div class="pr"><span class="ico"><svg class="i"><use href="#fp"/></svg></span><div class="nm"><div style="color:var(--text2);font-size:13.5px">Open a folder…</div></div><span class="tail"><kbd>⌘O</kbd></span></div>
+						</div>
+						<div class="prev">
+							<h4><i class="g lg pc-skills">SK</i>skills</h4>
+							<dl class="kv">
+								<dt>Folder</dt><dd><code>~/src/personal/skills</code></dd>
+								<dt>Starts on</dt><dd><span class="brp dirty"><svg class="i"><use href="#br"/></svg>main</span> current checkout</dd>
+								<dt>Changes</dt><dd style="color:var(--amber)">4 files uncommitted</dd>
+								<dt>Running</dt><dd>3 sessions · 1 working</dd>
+								<dt>Last</dt><dd>“Tighten the codex-review contract” · 6m</dd>
+							</dl>
+							<div style="margin-top:auto;display:flex;gap:8px;flex-wrap:wrap"><span class="chip on"><svg class="i"><use href="#fo"/></svg>Current checkout</span><span class="chip" style="color:var(--dimmer);border-style:dashed"><svg class="i"><use href="#wt"/></svg>New worktree <span class="badge soon">soon</span></span></div>
+						</div>
+					</div>
+					<div class="hint"><span><kbd>↵</kbd> start</span><span><kbd>⇥</kbd> where it starts</span><span><kbd>⌘↵</kbd> start and keep typing</span><span style="margin-left:auto"><kbd>esc</kbd></span></div>
+				</div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd><kbd>⌘N</kbd> <kbd>↵</kbd>. Matches design 1 on the keyboard.</dd>
+		<dt>Other project</dt><dd>Two letters, <kbd>↵</kbd>. Best of all six with many projects.</dd>
+		<dt>Worktrees later</dt><dd>The preview pane has room for existing worktrees.</dd>
+		<dt>Build cost</dt><dd>Medium-high. The preview needs live git status for each project.</dd>
+	</dl>
+	<div class="verdict"><b>Use it if</b> you mostly start sessions at a desk. It pairs well with 1 or 2 as the keyboard route. On its own it's the weakest on a phone, and that's where conduit is designed first.</div>
+</section>
+
+<!-- ───────────────────────────── 4 · Sentence ───────────────────────────── -->
+<section class="design" id="d4" data-tier="middle">
+	<div class="dh"><h2>4 · Sentence</h2><span class="tag">quietest</span>
+		<p class="pitch">Design 2 with the chrome taken away. Above an empty composer, one line of plain text: <i>New session in <u>conduit</u> on <u>main</u></i>. Each underlined word is a picker. It reads like a fill-in-the-blanks sentence, uses no chip styling, and grows naturally later: <i>…on a <u>new worktree</u> from <u>main</u></i>.</p></div>
+	<div class="row">
+		<figure class="phone"><figcaption><span>Phone · resting</span><span>reads like a sentence</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span></div>
+				<div class="empty"></div>
+				<div class="dock">
+					<div class="sent">New session in <span class="tokn"><i class="g sm pc-conduit">CO</i>conduit</span> on <span class="tokn"><svg class="i"><use href="#br"/></svg>main</span></div>
+					<div class="cmp"><div class="ph"><span class="caret"></span>Ask anything…</div><div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="mchip"><span class="claude">✱</span>Opus 5</span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+				</div>
+				<div class="kbd"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i></div></div>
+				<div class="home"></div>
+			</div>
+		</figure>
+		<figure class="phone"><figcaption><span>Phone · project word tapped</span><span>later: worktree grammar</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span></div>
+				<div class="empty"></div>
+				<div class="menu" style="left:14px;right:60px;bottom:168px">
+					<div style="padding:4px 4px 6px"><div class="sfield" style="margin:0;height:34px"><svg class="i"><use href="#se"/></svg><span>Find a project</span></div></div>
+					<div class="mi on"><i class="g sm pc-conduit">CO</i>conduit<span class="d"><svg class="i" style="color:var(--brand)"><use href="#ck"/></svg></span></div>
+					<div class="mi"><i class="g sm pc-skills">SK</i>skills<span class="d">3 live</span></div>
+					<div class="mi"><i class="g sm pc-dotfiles">DO</i>dotfiles</div>
+					<div class="mi"><i class="g sm pc-ainotes">AI</i>ai-notes</div>
+					<hr><div class="mi"><svg class="i"><use href="#fp"/></svg>Open a folder…</div>
+					<div class="mi off">Unavailable<span class="d">9</span></div>
+				</div>
+				<div class="dock">
+					<div class="sent">New session in <span class="tokn act"><i class="g sm pc-conduit">CO</i>conduit</span> on <span class="tokn"><svg class="i"><use href="#br"/></svg>main</span></div>
+					<div class="cmp"><div class="ph">Ask anything…</div><div class="foot"><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+					<div class="sent" style="margin-top:14px;font-size:12.5px;color:var(--dim);border-top:1px dashed var(--border2);padding-top:10px">Later: New session in <span class="tokn">conduit</span> on a <span class="tokn"><svg class="i"><use href="#wt"/></svg>new worktree</span> from <span class="tokn">main</span></div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd>1 tap, same as design 2.</dd>
+		<dt>Other project</dt><dd>3 taps. The words are smaller targets than chips.</dd>
+		<dt>Worktrees later</dt><dd>The sentence grows with each new option.</dd>
+		<dt>Build cost</dt><dd>Medium, the same draft machinery as design 2.</dd>
+	</dl>
+	<div class="verdict"><b>Use it if</b> you like design 2 but the chip row feels busy above a composer that already has chips. <b>Risk:</b> underlined words are less obviously tappable than chips, especially on a phone.</div>
+</section>
+
+<!-- ───────────────────────────── 5 · Launchpad ───────────────────────────── -->
+<section class="design" id="d5" data-tier="middle">
+	<div class="dh"><h2>5 · Launchpad</h2><span class="tag">uses the empty pane</span>
+		<p class="pitch">On desktop the main pane is often empty or stale when you go to start something. Here + turns it into a grid of project cards. Each card shows its branch, uncommitted changes, and whether anything there needs you. Pick a card and the composer opens inside it. Missing folders appear as dashed cards with a remove action.</p></div>
+	<div class="row">
+		<figure class="desk"><figcaption><span>Desktop · + pressed</span><span>a status board for "where should I work"</span></figcaption>
+			<div class="win">
+				<div class="side">
+					<div class="lh"><div class="top"><b>Sessions</b><span class="dkbtn on"><svg class="i"><use href="#pl"/></svg></span></div>
+						<div class="sfield"><span class="chip on">All projects <span class="cv">▼</span></span><svg class="i"><use href="#se"/></svg><span>Search</span></div></div>
+					<div class="lbody">
+						<div class="gl"><span>Needs you</span><span>2</span></div>
+						<div class="r"><i class="g sm pc-conduit">CO</i><div class="tx"><div class="tt">Fix legacy address race</div><div class="mt"><span class="st ap">⚠ approve</span>· conduit</div></div></div>
+						<div class="r"><i class="g sm pc-skills">SK</i><div class="tx"><div class="tt">Tighten the codex-review contract</div><div class="mt"><span class="st wk">● working</span>· skills</div></div></div>
+					</div>
+				</div>
+				<div class="main">
+					<div class="mbar"><b>New session</b><span>· pick where</span><span style="margin-left:auto"><div class="sfield" style="height:30px;margin:0;width:200px;font-size:12.5px"><svg class="i"><use href="#se"/></svg>Filter projects</div></span></div>
+					<div class="mcenter" style="justify-content:flex-start;padding-top:26px">
+						<div class="cards">
+							<div class="card sel"><div class="ch"><i class="g lg pc-conduit">CO</i><div><b>conduit</b><small>~/src/personal/conduit</small></div></div>
+								<div class="cm"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span class="st ap">⚠ 1</span><span>4 live</span></div></div>
+							<div class="card"><div class="ch"><i class="g lg pc-skills">SK</i><div><b>skills</b><small>~/src/personal/skills</small></div></div>
+								<div class="cm"><span class="brp dirty"><svg class="i"><use href="#br"/></svg>main</span><span class="st wk">● 1</span><span>3 live</span></div></div>
+							<div class="card"><div class="ch"><i class="g lg pc-dotfiles">DO</i><div><b>dotfiles</b><small>~/dotfiles</small></div></div>
+								<div class="cm"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span>1 live</span></div></div>
+							<div class="card"><div class="ch"><i class="g lg pc-renowned">RN</i><div><b>renowned</b><small>~/src/personal/renowned</small></div></div>
+								<div class="cm"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span>idle 3d</span></div></div>
+							<div class="card gone"><div class="ch"><i class="g lg gone">OP</i><div><b>opencode</b><small>folder missing</small></div></div>
+								<div class="cm"><span class="rm" style="font-size:12px;color:var(--red);border:1px solid rgba(244,96,122,.35);border-radius:8px;padding:3px 8px">Remove</span></div></div>
+							<div class="card add"><svg class="i" style="font-size:20px"><use href="#fp"/></svg><span>Open a folder…</span></div>
+						</div>
+					</div>
+					<div class="mdock">
+						<div class="cmp"><div class="ph"><span class="caret"></span>Ask anything in conduit…</div><div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="mchip"><span class="claude">✱</span>Opus 5</span><span class="mchip"><svg class="i"><use href="#br"/></svg>main · current checkout <span class="cv" style="opacity:.5;font-size:9px">▼</span></span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div>
+					</div>
+				</div>
+			</div>
+		</figure>
+		<figure class="phone"><figcaption><span>Phone · same, stacked</span><span>scrolls; composer follows</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="appbar"><span class="bk"><svg class="i"><use href="#bk"/></svg></span><span class="ttl">New session</span><span class="more"><svg class="i"><use href="#se"/></svg></span></div>
+				<div class="pcards" style="flex:1;padding-top:12px">
+					<div class="card sel"><div class="ch"><i class="g lg pc-conduit">CO</i><div><b>conduit</b><small>~/src/personal/conduit</small></div></div><div class="cm"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span class="st ap">⚠ 1</span><span>4 live</span></div></div>
+					<div class="card"><div class="ch"><i class="g lg pc-skills">SK</i><div><b>skills</b><small>~/src/personal/skills</small></div></div><div class="cm"><span class="brp dirty"><svg class="i"><use href="#br"/></svg>main</span><span class="st wk">● 1</span><span>3 live</span></div></div>
+					<div class="card"><div class="ch"><i class="g lg pc-dotfiles">DO</i><div><b>dotfiles</b><small>~/dotfiles</small></div></div><div class="cm"><span class="brp"><svg class="i"><use href="#br"/></svg>main</span><span>1 live</span></div></div>
+				</div>
+				<div class="dock" style="padding-bottom:30px"><div class="cmp"><div class="ph">Ask anything in conduit…</div><div class="foot"><span class="cib"><svg class="i"><use href="#at"/></svg></span><span class="sp"></span><span class="send"><svg class="i"><use href="#up"/></svg></span></div></div></div>
+				<div class="home"></div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd>+ then type: 1 tap if the selected card is right.</dd>
+		<dt>Other project</dt><dd>2 taps. Cards are big targets.</dd>
+		<dt>Worktrees later</dt><dd>Cards can list their worktrees as sub-rows.</dd>
+		<dt>Build cost</dt><dd>Medium-high: live counts and git status for every card.</dd>
+	</dl>
+	<div class="verdict"><b>Use it if</b> you want "new session" to double as a project dashboard. It repeats what the sidebar already shows grouped by status, and on a phone it's just a taller version of design 1's list.</div>
+</section>
+
+<!-- ───────────────────────────── 6 · Lanes ───────────────────────────── -->
+<section class="design" id="d6" data-tier="wild">
+	<div class="dh"><h2>6 · Lanes</h2><span class="tag">future-first</span>
+		<p class="pitch">Plans for the worktree future from day one. After choosing the project, "where it starts" is drawn as a tiny branch diagram. <code>main</code> is the trunk, and each existing worktree is a lane off it with its live session. A dashed "new lane" shows where a new worktree would branch off. Today only the trunk has a dot, and the picture still shows exactly what's happening: you're working directly on main.</p></div>
+	<div class="row">
+		<figure class="phone"><figcaption><span>Phone · today</span><span>only the trunk is live</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="lh"><div class="top"><b>Sessions</b></div></div>
+				<div class="scrim"></div>
+				<div class="sheet">
+					<div class="grab"></div>
+					<div class="sh-h"><b>New session</b><span class="x"><svg class="i"><use href="#x"/></svg></span></div>
+					<div class="steps"><span class="s"><i class="g sm pc-conduit">CO</i>conduit<span class="cv" style="opacity:.5;font-size:9px">▼</span></span><span>›</span><span class="s on"><b>Where</b></span></div>
+					<div class="lanes">
+						<div class="lane on"><span class="rail"><span class="dot"></span></span><div class="lt"><div><span class="brp"><svg class="i"><use href="#br"/></svg>main</span>here</div><small>~/src/personal/conduit · 4 sessions live</small></div><svg class="i" style="color:var(--brand)"><use href="#ck"/></svg></div>
+						<div class="lane off"><span class="rail"><span class="fork"></span></span><div class="lt"><div>New lane <span class="badge soon">soon</span></div><small>its own worktree, branched from main</small></div></div>
+					</div>
+					<p class="note">Sessions that share the trunk share files. Lanes are how they'll stop sharing.</p>
+					<div class="go">Start on main</div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+		<figure class="phone"><figcaption><span>Phone · once worktrees ship</span><span>the same picture, filled in</span></figcaption>
+			<div class="screen">
+				<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+				<div class="lh"><div class="top"><b>Sessions</b></div></div>
+				<div class="scrim"></div>
+				<div class="sheet">
+					<div class="grab"></div>
+					<div class="sh-h"><b>New session</b><span class="x"><svg class="i"><use href="#x"/></svg></span></div>
+					<div class="steps"><span class="s"><i class="g sm pc-conduit">CO</i>conduit<span class="cv" style="opacity:.5;font-size:9px">▼</span></span><span>›</span><span class="s on"><b>Where</b></span></div>
+					<div class="lanes">
+						<div class="lane"><span class="rail"><span class="dot"></span></span><div class="lt"><div><span class="brp"><svg class="i"><use href="#br"/></svg>main</span>here</div><small>4 sessions live</small></div></div>
+						<div class="lane"><span class="rail"><span class="dot" style="left:10px"></span></span><div class="lt"><div><span class="brp dirty"><svg class="i"><use href="#br"/></svg>fix/legacy-address</span></div><small>worktree · “Fix legacy address race” ⚠</small></div></div>
+						<div class="lane"><span class="rail"><span class="dot"></span></span><div class="lt"><div><span class="brp"><svg class="i"><use href="#br"/></svg>feat/new-session</span></div><small>worktree · idle 2h</small></div></div>
+						<div class="lane on"><span class="rail"><span class="fork" style="border-color:var(--brand)"></span><span class="dot" style="left:26px"></span></span><div class="lt"><div>New lane from main</div><small>creates <code>conduit-wt-…</code> on a fresh branch</small></div><svg class="i" style="color:var(--brand)"><use href="#ck"/></svg></div>
+					</div>
+					<div class="go">Start in a new worktree</div>
+				</div>
+				<div class="home"></div>
+			</div>
+		</figure>
+	</div>
+	<dl class="spec">
+		<dt>Fast path</dt><dd>+, then Start: 2 taps, same as design 1.</dd>
+		<dt>Other project</dt><dd>Tap the project step: 4 taps.</dd>
+		<dt>Worktrees later</dt><dd>Built for them. This is the main reason to pick it.</dd>
+		<dt>Build cost</dt><dd>Today: low (one lane). Later: high (worktree discovery and git state).</dd>
+	</dl>
+	<div class="verdict"><b>Use it if</b> parallel worktree sessions are the near-term direction. Today it's a lot of picture for a one-option choice. It could also be design 1's "Starts on" sheet once a second lane exists.</div>
+</section>
+
+<section class="design" id="compare">
+	<div class="dh"><h2>Compare</h2><p class="pitch">My pick: <b>1 on the phone and as the default, with 3's preview pane folded into the desktop popover</b>. Then <b>6's lane picture as the "Starts on" sheet</b> once worktrees exist. 2 is the strong alternative if typing first matters more to you than confirming the project first.</p></div>
+	<table class="t">
+		<tr><th>Design</th><th>Default project</th><th>Other project</th><th>Wrong-project risk</th><th>Worktree-ready</th><th>Build</th></tr>
+		<tr><td>1 Launch sheet</td><td>2 taps</td><td>3 taps</td><td class="yes">Low, confirmed at Start</td><td class="yes">Parked rows</td><td class="yes">Low</td></tr>
+		<tr><td>2 Draft (t3code)</td><td>1 tap</td><td>3 taps</td><td class="meh">Medium, easy to type past</td><td class="yes">Native</td><td class="meh">Medium (drafts)</td></tr>
+		<tr><td>3 Palette</td><td>⌘N ↵</td><td>2 keys ↵</td><td class="yes">Low, preview</td><td class="meh">Room in preview</td><td class="meh">Med-high</td></tr>
+		<tr><td>4 Sentence</td><td>1 tap</td><td>3 taps</td><td class="meh">Medium</td><td class="yes">Grammar grows</td><td class="meh">Medium (drafts)</td></tr>
+		<tr><td>5 Launchpad</td><td>1 tap</td><td>2 taps</td><td class="yes">Low</td><td class="meh">Sub-rows</td><td class="no">Med-high</td></tr>
+		<tr><td>6 Lanes</td><td>2 taps</td><td>4 taps</td><td class="yes">Low</td><td class="yes">Built for it</td><td class="meh">Low now, high later</td></tr>
+	</table>
+</section>
+</div>
+</body>
+</html>

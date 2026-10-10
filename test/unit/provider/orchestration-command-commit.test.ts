@@ -20,7 +20,6 @@ function commitInput(
 		receipt: {
 			commandId: "cmd-1",
 			commandType: "send_turn",
-			projectKey: "project-1",
 			sessionId: "session-1",
 			status: "side_effect_requested",
 			fingerprintHash: "sha256:abc",
@@ -34,7 +33,6 @@ function commitInput(
 			{
 				requestSequence: overrides.requestSequence ?? 1,
 				commandId: "cmd-1",
-				projectKey: "project-1",
 				sessionId: "session-1",
 				providerId: "claude",
 				effectType: "send_turn",
@@ -80,7 +78,7 @@ describe("DurableCommandCommitRepository", () => {
 						yield* sql`SELECT effect_type FROM provider_command_outbox WHERE request_sequence = ${1}`,
 					).toEqual([{ effect_type: "send_turn" }]);
 					expect(
-						yield* sql`SELECT last_applied_sequence FROM provider_command_meta WHERE project_key = ${"project-1"}`,
+						yield* sql`SELECT last_applied_sequence FROM provider_command_meta WHERE project_key = ${"test-project"}`,
 					).toEqual([{ last_applied_sequence: 1 }]);
 				}),
 			),
@@ -99,7 +97,7 @@ describe("DurableCommandCommitRepository", () => {
 						INSERT INTO provider_command_outbox (
 							request_sequence, command_id, project_key, session_id, provider_id,
 							effect_type, payload_json, status, attempt_count, requested_at, updated_at
-						) VALUES (1, 'cmd-1', 'project-1', 'session-1', 'claude',
+						) VALUES (1, 'cmd-1', 'test-project', 'session-1', 'claude',
 							'send_turn', '{}', 'running', 1, 1000, 1000)`;
 
 					const result = yield* Effect.either(
