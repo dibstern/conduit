@@ -982,6 +982,24 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 			}
 
+			// Idle means nothing is in flight, so it settles turns requested before
+			// it. An end that names no message of its turn (a /compact or other
+			// result-only turn, a prompt the provider never answered) would
+			// otherwise leave it open and the inbox busy forever. Later activity in
+			// the same turn reopens it below.
+			if (
+				isEventType(event, "session.status") &&
+				event.data.status === "idle"
+			) {
+				const written = yield* sql<OwnedRow & { id: string }>`
+					UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
+					WHERE session_id = ${event.sessionId}
+					AND state IN ('pending', 'running')
+					AND requested_at < ${event.createdAt}
+					RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
 			// A result may arrive before the provider continues the same turn.
 			if (
 				(isEventType(event, "session.status") &&

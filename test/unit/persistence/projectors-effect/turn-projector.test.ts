@@ -327,7 +327,7 @@ describe("TurnProjector", () => {
 			expect(row?.started_at).toBe(now + 200);
 		});
 
-		it("ignores non-busy status changes", async () => {
+		it("settles, without starting, a turn still pending at idle", async () => {
 			await project(
 				makeStored(
 					"message.created",
@@ -358,7 +358,7 @@ describe("TurnProjector", () => {
 			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
 				"user_m1",
 			]);
-			expect(row?.state).toBe("pending");
+			expect(row?.state).toBe("completed");
 			expect(row?.started_at).toBeNull();
 		});
 	});

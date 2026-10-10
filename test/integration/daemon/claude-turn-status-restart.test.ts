@@ -185,3 +185,67 @@ describe("running Claude turn status across restart", () => {
 		proof["completed"] = persisted(harness, sessionId);
 	}, 30_000);
 });
+
+// Failure cases: the row stays idle until the model streams, so SDK-local work
+// such as /compact runs "blind" (conduit-test-6t7n); a busy reported at the
+// start is never cleared, or lands after the turn's idle; the turn, which no
+// assistant message names, stays open and holds every later input in the
+// queue (conduit-test-jyr9.12).
+describe("Claude turn status before the model streams", () => {
+	let harness: ProcessHarness | undefined;
+	afterEach(async () => {
+		await harness?.dispose();
+		harness = undefined;
+	});
+
+	it("persists busy during SDK-local work, then settles the turn and drains the queue", async () => {
+		harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+		});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Local work");
+		await Effect.runPromise(
+			browser.rpc.SwitchModel({
+				projectSlug: "process-test",
+				sessionId,
+				originId: browser.originId,
+				providerId: "claude",
+				modelId: "claude-sonnet-4",
+			}),
+		);
+		// The fake SDK holds this prompt, then ends it with a bare result.
+		const sent = browser.send(sessionId, "local-work-turn");
+		await vi.waitFor(() => {
+			expect(
+				harness?.marks.some((mark) => mark.kind === "pre-assistant-held"),
+			).toBe(true);
+		}, 15_000);
+		const held = persisted(harness, sessionId);
+		writeFileSync(join(harness.root, "release-local-work"), "release");
+		await sent;
+		await vi.waitFor(() => {
+			if (!harness) throw new Error("Missing harness");
+			expect(persisted(harness, sessionId).session.status).toBe("idle");
+		}, 15_000);
+		const settled = persisted(harness, sessionId);
+		const next = await browser
+			.send(sessionId, "after-local-work", 15_000)
+			.catch((error: unknown) => ({ error: String(error) }));
+		const drained = persisted(harness, sessionId);
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			"test-results/conduit-test-6t7n-jyr9.12-local-work.json",
+			JSON.stringify({ sessionId, held, settled, next, drained }, null, 2),
+		);
+		expect(held.session.status).toBe("busy");
+		expect(settled.turns).toEqual([{ state: "completed" }]);
+		expect("chunks" in next ? next.chunks.join("") : next).toBe(
+			responseChunks("after-local-work").join(""),
+		);
+		expect(drained.turns).toEqual([
+			{ state: "completed" },
+			{ state: "completed" },
+		]);
+	}, 60_000);
+});
