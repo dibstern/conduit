@@ -3,6 +3,7 @@
 // daemon, so a test against it passed while every compaction was dropped.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { opencodeSessionCreatedRuntimeEvent } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
 	type EffectProjectionHarness,
 	makeEffectProjectionHarness,
@@ -67,8 +68,12 @@ describe("session.compaction projection (real ingestion path)", () => {
 			"SELECT id, message_id, type, text, metadata, sort_order FROM message_parts WHERE type = 'compaction' ORDER BY id",
 		);
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		harness = makeEffectProjectionHarness();
+		// A compaction outcome cannot create a session, and none compacts first.
+		await harness.ingest(
+			opencodeSessionCreatedRuntimeEvent(SESSION_ID, "opencode"),
+		);
 	});
 
 	afterEach(async () => {

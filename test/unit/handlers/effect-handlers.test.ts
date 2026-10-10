@@ -3601,6 +3601,10 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, status, created_at, updated_at)
+					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0)`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",
@@ -3613,7 +3617,6 @@ describe("handleMessage", () => {
 				);
 				// The failure is recorded as the turn's error; the relay's failed
 				// `done` idles the composer from there.
-				const sql = yield* SqlClient.SqlClient;
 				const failures = yield* sql<{ code: string; error: string }>`
 					SELECT json_extract(data, '$.code') AS code,
 						json_extract(data, '$.error') AS error

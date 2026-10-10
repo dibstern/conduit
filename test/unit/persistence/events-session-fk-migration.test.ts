@@ -146,7 +146,7 @@ describe("events session foreign-key migration", () => {
 						providerRefs: { providerSessionId: ORPHAN_SESSION_ID },
 						rawSource: { kind: "migration-regression-test" },
 						createdAt: 200,
-						data: { status: "idle" },
+						data: { status: "busy" },
 					};
 					expect(yield* ingestion.ingest(runtimeEvent)).toBe(1);
 

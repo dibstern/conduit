@@ -201,6 +201,13 @@ export class OpenCodeRuntimeEventTranslator {
 		if (event.type === "session.updated") {
 			return this.translateSessionUpdated(event, sessionId);
 		}
+		if (event.type === "session.deleted") {
+			return [
+				opencodeRuntimeEvent("session.deleted", sessionId, event, {
+					sessionId,
+				}),
+			];
+		}
 
 		return null;
 	}

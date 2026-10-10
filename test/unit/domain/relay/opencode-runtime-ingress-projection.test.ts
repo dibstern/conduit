@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	decodeProviderRuntimeEvent,
+	type ProviderRuntimeEvent,
+} from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
 	type EffectOpenCodeRuntimeIngress,
 	makeEffectOpenCodeRuntimeIngress,
@@ -22,6 +25,7 @@ import {
 	SessionEventBusTag,
 } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import type { Message } from "../../../../src/lib/instance/sdk-types.js";
+import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ProjectorCursorEffectTag } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
@@ -30,7 +34,11 @@ import {
 	type EffectProjector,
 	ProjectionError,
 } from "../../../../src/lib/persistence/effect/projectors-effect.js";
-import { createEventId } from "../../../../src/lib/persistence/events.js";
+import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	canonicalEvent,
+	createEventId,
+} from "../../../../src/lib/persistence/events.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-proj-001";
@@ -230,6 +238,280 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		if (dir) rmSync(dir, { recursive: true, force: true });
 		dir = undefined;
 		dbPath = undefined;
+	});
+
+	it("projects upstream deletion as deleted sidebar removals for the whole session subtree", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		const childId = "sess-deleted-child";
+		await ingest(
+			makeSSEEvent("session.created", {
+				info: { id: childId, parentID: SESSION_ID },
+			}),
+			childId,
+		);
+		await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: childId,
+				messageID: "msg-deleted-child",
+				info: { role: "assistant", parts: [] },
+			}),
+			childId,
+		);
+		const before = await currentRuntime().runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+		);
+
+		await ingestOk(
+			makeSSEEvent("session.deleted", { info: { id: SESSION_ID } }),
+		);
+		const after = await currentRuntime().runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ after: before.version }),
+			),
+		);
+		expect(after.rows).toEqual([]);
+		expect(after.removed).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: SESSION_ID, deleted: true }),
+				expect.objectContaining({ id: childId, deleted: true }),
+			]),
+		);
+		expect(
+			(await readStored()).filter((event) => event.type === "session.deleted"),
+		).toHaveLength(1);
+		const children = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT id FROM sessions WHERE id = ${childId}`;
+			}),
+		);
+		expect(children).toEqual([]);
+	});
+
+	it("deletes a live child whose parent announcement arrives after the parent was deleted", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		const childId = "sess-late-parent-child";
+		await ingest(
+			makeSSEEvent("session.created", { info: { id: childId } }),
+			childId,
+		);
+		await ingestOk(
+			makeSSEEvent("message.created", {
+				sessionID: childId,
+				messageID: "msg-late-parent-child",
+				info: { role: "assistant", parts: [] },
+			}),
+			childId,
+		);
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.deleted", SESSION_ID, {
+						sessionId: SESSION_ID,
+					}),
+				]);
+			}),
+		);
+		const before = await currentRuntime().runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+		);
+		await ingest(
+			makeSSEEvent("session.created", {
+				info: { id: childId, parentID: SESSION_ID },
+			}),
+			childId,
+		);
+		const after = await currentRuntime().runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ after: before.version }),
+			),
+		);
+		expect(after.removed).toEqual([
+			expect.objectContaining({ id: childId, deleted: true }),
+		]);
+		const children = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT id FROM sessions WHERE id = ${childId}`;
+			}),
+		);
+		expect(children).toEqual([]);
+	});
+
+	it("does not resurrect a durably deleted session from late events or a fresh ingress", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.deleted", SESSION_ID, {
+						sessionId: SESSION_ID,
+					}),
+				]);
+			}),
+		);
+		const deletedEvents = await readStored();
+		await ingest(
+			makeSSEEvent("session.status", {
+				sessionID: SESSION_ID,
+				status: { type: "idle" },
+			}),
+		);
+		await ingest(
+			makeSSEEvent("message.created", {
+				sessionID: SESSION_ID,
+				messageID: "msg-late-deleted",
+				info: { role: "assistant", parts: [] },
+			}),
+		);
+		await disposeRuntime();
+		await startRuntime();
+		await ingest(
+			makeSSEEvent("session.status", {
+				sessionID: SESSION_ID,
+				status: { type: "busy" },
+			}),
+		);
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest({
+					eventId: createEventId(),
+					type: "session.created",
+					providerId: "opencode",
+					sessionId: SESSION_ID,
+					providerRefs: {},
+					rawSource: { kind: "test.late-creation" },
+					createdAt: Date.now(),
+					data: { title: "Should stay deleted", provider: "opencode" },
+				});
+			}),
+		);
+		const rows = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT id FROM sessions WHERE id = ${SESSION_ID}`;
+			}),
+		);
+		expect(rows).toEqual([]);
+		expect(await readStored()).toEqual(deletedEvents);
+	});
+
+	it.each([
+		["session.status", { sessionID: SESSION_ID, status: { type: "idle" } }],
+		[
+			"session.error",
+			{ sessionID: SESSION_ID, error: { message: "Late error" } },
+		],
+		["session.deleted", { info: { id: SESSION_ID } }],
+	])("does not seed an absent session from terminal %s", async (type, properties) => {
+		await ingest(makeSSEEvent(type, properties));
+		const rows = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT id FROM sessions WHERE id = ${SESSION_ID}`;
+			}),
+		);
+		expect(rows).toEqual([]);
+	});
+
+	it("drops provider ingestion output for deleted sessions without appending or projecting it", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.deleted", SESSION_ID, {
+						sessionId: SESSION_ID,
+					}),
+				]);
+			}),
+		);
+		const before = await readStored();
+		const written = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				return yield* ingestion.ingest({
+					eventId: createEventId(),
+					type: "message.created",
+					providerId: "opencode",
+					sessionId: SESSION_ID,
+					providerRefs: {},
+					rawSource: { kind: "test.late-content" },
+					createdAt: Date.now(),
+					data: { messageId: "msg-direct-late", role: "assistant" },
+				});
+			}),
+		);
+		expect(written).toBe(0);
+		expect(await readStored()).toEqual(before);
+		const list = await currentRuntime().runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+		);
+		expect(list.rows).toEqual([]);
+	});
+
+	it("keeps deletion terminal when creation and child content follow it in one ingestion batch", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		const childId = "sess-batch-deleted-child";
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.created", childId, {
+						sessionId: childId,
+						parentId: SESSION_ID,
+						title: "Child",
+						provider: "opencode",
+					}),
+				]);
+			}),
+		);
+		const events = [
+			{
+				type: "session.deleted",
+				sessionId: SESSION_ID,
+				data: { sessionId: SESSION_ID },
+			},
+			{
+				type: "session.created",
+				sessionId: SESSION_ID,
+				data: { title: "Late creation", provider: "opencode" },
+			},
+			{
+				type: "message.created",
+				sessionId: childId,
+				data: { messageId: "msg-child-after-delete", role: "assistant" },
+			},
+		].map((event) =>
+			decodeProviderRuntimeEvent({
+				...event,
+				eventId: createEventId(),
+				providerId: "opencode",
+				providerRefs: {},
+				rawSource: { kind: "test.delete-batch" },
+				createdAt: Date.now(),
+			}),
+		);
+		const written = await currentRuntime().runPromise(
+			Effect.flatMap(ProviderRuntimeIngestionTag, (ingestion) =>
+				ingestion.ingestBatch(events),
+			),
+		);
+		expect(written).toBe(1);
+		const rows = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT id FROM sessions WHERE id IN (${SESSION_ID}, ${childId})`;
+			}),
+		);
+		expect(rows).toEqual([]);
+		expect(
+			(await readStored(childId)).some(
+				(event) => event.type === "message.created",
+			),
+		).toBe(false);
 	});
 
 	it("message.created SSE event creates event in store AND row in messages table", async () => {
@@ -1609,7 +1891,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 				}>`SELECT history_complete FROM sessions WHERE id = ${SESSION_ID}`;
 			}),
 		);
-		expect(rows[0]?.history_complete).toBe(0);
+		expect(rows).toEqual([]);
 	});
 
 	it("rolls back an import when reconnect lands during projection", async () => {

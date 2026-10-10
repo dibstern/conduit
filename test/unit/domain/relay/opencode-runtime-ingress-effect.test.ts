@@ -80,6 +80,8 @@ function makeFakeIngress(options?: {
 		events: readonly ProviderRuntimeEvent[],
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 }) {
+	// Stand-in for the sessions table: a committed session.created projects it.
+	const projected = new Set<string>();
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
 		ingestBatch: vi.fn(
@@ -88,6 +90,11 @@ function makeFakeIngress(options?: {
 				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
 			) =>
 				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
+					Effect.tap(() => {
+						for (const event of events)
+							if (event.type === "session.created")
+								projected.add(event.sessionId);
+					}),
 					// Stand in for the durable boundary: only a batch that committed
 					// runs afterCommit.
 					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
@@ -97,7 +104,13 @@ function makeFakeIngress(options?: {
 	} satisfies ProviderRuntimeIngestion;
 	const log = makeLogger();
 	const hook = new EffectOpenCodeRuntimeIngress({
-		sql: {} as SqlClient.SqlClient,
+		sql: ((strings: TemplateStringsArray, ...values: unknown[]) =>
+			Effect.succeed(
+				strings.join("?").includes("FROM sessions") &&
+					projected.has(String(values[0]))
+					? [{ id: values[0] }]
+					: [],
+			)) as unknown as SqlClient.SqlClient,
 		projectionRunner: makeProjectionRunner(),
 		ingestion,
 		log,

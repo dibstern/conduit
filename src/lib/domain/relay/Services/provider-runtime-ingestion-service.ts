@@ -1,6 +1,14 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Deferred, Effect, FiberRef, Layer, Ref } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	FiberRef,
+	Layer,
+	Ref,
+	Schema,
+} from "effect";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import {
@@ -15,7 +23,9 @@ import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
-import type { CanonicalEvent } from "../../../persistence/events.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
+import { type CanonicalEvent, EventId } from "../../../persistence/events.js";
+import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import {
 	commitClaudeRunnerOutput,
 	createClaudeRunnerPermissionReplies,
@@ -34,8 +44,33 @@ import type { makeSessionCompactions } from "../../../session/session-compaction
 import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
+import { isRecord } from "../../../utils.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { announceBackgroundWork } from "./session-attention.js";
+
+/** Terminal notifications can update an existing session, but cannot create one. */
+export function canSeedSession(event: ProviderRuntimeEvent): boolean {
+	switch (event.type) {
+		case "session.deleted":
+		case "turn.completed":
+		case "turn.error":
+		case "turn.interrupted":
+		case "message.removed":
+		case "message.part.removed":
+		case "permission.resolved":
+		case "question.resolved":
+			return false;
+		case "session.status":
+			return (
+				isRecord(event.data) &&
+				(event.data["status"] === "busy" || event.data["status"] === "retry")
+			);
+		case "session.compaction":
+			return isRecord(event.data) && event.data["state"] === "started";
+		default:
+			return true;
+	}
+}
 
 export type ProviderRuntimeIngestionError =
 	| EventStoreError
@@ -123,6 +158,12 @@ export const makeProviderRuntimeIngestionLive = (
 						Effect.gen(function* () {
 							if (event.type !== "workspace.changed")
 								return { event, record: undefined };
+							if (
+								yield* isSessionDeleted(event.sessionId).pipe(
+									Effect.provideService(SqlClient.SqlClient, sql),
+								)
+							)
+								return { event, record: undefined };
 							const path =
 								event.data.source === "start"
 									? yield* realWorkspacePath(event.data.path).pipe(
@@ -145,7 +186,10 @@ export const makeProviderRuntimeIngestionLive = (
 								context && !context.consumed ? context : undefined;
 							const currentState = yield* Ref.get(mapperStateRef);
 							let nextState = currentState;
-							const domainEvents: CanonicalEvent[] = [];
+							let domainEvents: CanonicalEvent[] = [];
+							const seedableSessions = new Set(
+								events.filter(canSeedSession).map((event) => event.sessionId),
+							);
 
 							for (const { event } of prepared) {
 								if (context && event.type === "tool.completed") {
@@ -198,53 +242,6 @@ export const makeProviderRuntimeIngestionLive = (
 								nextState = result.state;
 							}
 
-							// A compaction's "started" notice and a provider retry are
-							// transient status (C1) that rides the shell row (see
-							// `compactions` and `retries` below). A compaction's outcome,
-							// completed or failed, persists so the divider or the failure
-							// notice survives a reload.
-							const persistentEvents = domainEvents.filter(
-								(event) =>
-									!(
-										event.type === "session.compaction" &&
-										event.data.state === "started"
-									) &&
-									!(
-										event.type === "session.status" &&
-										event.data.status === "retry"
-									),
-							);
-
-							// Projectors write rows that reference sessions(id), and a
-							// provider can stream events for a session Conduit never created
-							// — Claude subagents arrive mid-turn under their own id. The FK
-							// then rejects the projection, which used to be swallowed, so
-							// subagent messages rendered live and were gone after a reload.
-							// ClaudeEventPersistEffect.persistEvent already guards its own
-							// path with ensureSession; this is the same guard on this one.
-							// session.created is left to the session projector, which owns
-							// the row and upserts it.
-							const createdHere = new Set(
-								persistentEvents
-									.filter((event) => event.type === "session.created")
-									.map((event) => event.sessionId),
-							);
-							const needsSessionRow = new Map<string, string>();
-							for (const event of persistentEvents) {
-								if (createdHere.has(event.sessionId)) continue;
-								if (!needsSessionRow.has(event.sessionId)) {
-									needsSessionRow.set(event.sessionId, event.provider);
-								}
-							}
-							const ensureSessions = Effect.gen(function* () {
-								for (const [sessionId, provider] of needsSessionRow) {
-									const seededAt = Date.now();
-									yield* sql`
-									INSERT OR IGNORE INTO sessions
-									(id, provider, title, status, created_at, updated_at)
-									VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
-								}
-							});
 							let appended = true;
 							const acceptedLimits: string[] = [];
 							let skippedLimits = 0;
@@ -272,39 +269,144 @@ export const makeProviderRuntimeIngestionLive = (
 								publish: ingestOptions.publishToBus ?? true,
 								afterCommit,
 							};
-							yield* commitAndSignal.write(
-								(project) =>
-									Effect.gen(function* () {
-										// Claim inside the append transaction, before event IDs or
-										// projections are written. Replayed and fenced frames are no-ops.
-										if (context && (receipt || context.attachmentId))
-											appended = receipt
-												? yield* commitClaudeRunnerOutput(sql, receipt)
-												: yield* ownsClaudeRunnerAttachment(sql, context);
-										if (!appended) return;
-										yield* ensureSessions;
-										for (const { record } of prepared)
-											yield* record?.(project) ?? Effect.void;
-										let pending: CanonicalEvent[] = [];
-										for (const event of persistentEvents) {
-											if (event.type === "session.usage_limited") {
-												if (pending.length > 0) {
-													yield* project(
-														yield* eventStore.appendBatch(pending),
-													);
-													pending = [];
+							yield* commitAndSignal
+								.write(
+									(project) =>
+										Effect.gen(function* () {
+											// Claim inside the append transaction, before event IDs or
+											// projections are written. Replayed and fenced frames are no-ops.
+											if (context && (receipt || context.attachmentId))
+												appended = receipt
+													? yield* commitClaudeRunnerOutput(sql, receipt)
+													: yield* ownsClaudeRunnerAttachment(sql, context);
+											if (!appended) return;
+											// Check under the same write permit and transaction as local
+											// deletion. Neither seeding nor publication may revive a deletion.
+											const sessionIds = new Set(
+												domainEvents.map((event) => event.sessionId),
+											);
+											for (const { event, record } of prepared)
+												if (record) sessionIds.add(event.sessionId);
+											for (const event of domainEvents)
+												if (
+													event.type === "session.created" &&
+													event.data.parentId
+												)
+													sessionIds.add(event.data.parentId);
+											const deleted = new Set<string>();
+											for (const id of sessionIds)
+												if (yield* isSessionDeleted(id)) deleted.add(id);
+											const ids = JSON.stringify(
+												domainEvents.map((event) => event.sessionId),
+											);
+											const existing = new Set(
+												(yield* sql<{ id: string }>`
+										SELECT id FROM sessions WHERE id IN (SELECT value FROM json_each(${ids}))`).map(
+													(row) => row.id,
+												),
+											);
+											const accepted: CanonicalEvent[] = [];
+											for (let event of domainEvents) {
+												if (deleted.has(event.sessionId)) continue;
+												if (
+													event.type === "session.created" &&
+													event.data.parentId &&
+													deleted.has(event.data.parentId)
+												) {
+													// A child discovered after cascading deletion belongs to that
+													// deletion too. Keep its tombstone for parentless late events.
+													event = {
+														...event,
+														eventId: Schema.decodeSync(EventId)(
+															`evt_parent_deleted_session_${event.sessionId}`,
+														),
+														type: "session.deleted",
+														data: { sessionId: event.sessionId },
+													};
 												}
-												if (yield* continuation.intakeLimit(event, project))
-													acceptedLimits.push(event.sessionId);
-												else skippedLimits++;
-											} else pending.push(event);
-										}
-										if (pending.length > 0)
-											yield* project(yield* eventStore.appendBatch(pending));
-										yield* beforeCommit;
-									}),
-								commitOptions,
-							);
+												if (
+													!existing.has(event.sessionId) &&
+													!seedableSessions.has(event.sessionId) &&
+													event.type !== "session.deleted"
+												)
+													continue;
+												if (event.type === "session.deleted") {
+													deleted.add(event.sessionId);
+													const subtree = yield* sql.unsafe<{ id: string }>(
+														SESSION_SUBTREE_SQL,
+														[event.sessionId],
+													);
+													for (const row of subtree) deleted.add(row.id);
+													for (const previous of accepted)
+														if (
+															previous.type === "session.created" &&
+															previous.data.parentId &&
+															deleted.has(previous.data.parentId)
+														)
+															deleted.add(previous.sessionId);
+												}
+												accepted.push(event);
+											}
+											domainEvents = accepted;
+											// Started compactions and retries ride transient shell status;
+											// their outcomes persist so they survive reloads.
+											const persistentEvents = accepted.filter(
+												(event) =>
+													!(
+														event.type === "session.compaction" &&
+														event.data.state === "started"
+													) &&
+													!(
+														event.type === "session.status" &&
+														event.data.status === "retry"
+													),
+											);
+											// Content for an unseen session needs a row for FK projection.
+											// Explicit creation belongs to the session projector; deletion
+											// and terminal-only notifications never need a seed.
+											const createdHere = new Set(
+												persistentEvents
+													.filter((event) => event.type === "session.created")
+													.map((event) => event.sessionId),
+											);
+											const needsSessionRow = new Map<string, string>();
+											for (const event of persistentEvents) {
+												if (
+													event.type !== "session.deleted" &&
+													!createdHere.has(event.sessionId)
+												)
+													needsSessionRow.set(event.sessionId, event.provider);
+											}
+											for (const [sessionId, provider] of needsSessionRow) {
+												const seededAt = Date.now();
+												yield* sql`INSERT OR IGNORE INTO sessions
+											(id, provider, title, status, created_at, updated_at)
+											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+											}
+											for (const { event, record } of prepared)
+												if (!deleted.has(event.sessionId))
+													yield* record?.(project) ?? Effect.void;
+											let pending: CanonicalEvent[] = [];
+											for (const event of persistentEvents) {
+												if (event.type === "session.usage_limited") {
+													if (pending.length > 0) {
+														yield* project(
+															yield* eventStore.appendBatch(pending),
+														);
+														pending = [];
+													}
+													if (yield* continuation.intakeLimit(event, project))
+														acceptedLimits.push(event.sessionId);
+													else skippedLimits++;
+												} else pending.push(event);
+											}
+											if (pending.length > 0)
+												yield* project(yield* eventStore.appendBatch(pending));
+											yield* beforeCommit;
+										}),
+									commitOptions,
+								)
+								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 							if (!appended) return 0;
 
 							// A compaction in progress and a retry live in memory, not the
