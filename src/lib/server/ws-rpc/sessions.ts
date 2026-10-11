@@ -47,6 +47,7 @@ import {
 } from "../../handlers/session.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
+import { isPickRejection } from "../../provider/turn-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
@@ -396,7 +397,9 @@ export const sessionsHandlers = {
 						? Effect.fail(error)
 						: Effect.fail(
 								new WsRpcError({
-									message: `CreateSession failed: ${formatErrorDetail(error)}`,
+									message: isPickRejection(error)
+										? error.message
+										: `CreateSession failed: ${formatErrorDetail(error)}`,
 								}),
 							),
 			),

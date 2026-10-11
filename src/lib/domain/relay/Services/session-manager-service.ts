@@ -43,6 +43,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
@@ -808,7 +809,8 @@ const makeServiceCreateSession = ({
 
 			const requestedProvider = options?.providerId?.trim();
 			const requestedLocalProvider =
-				requestedProvider === CLAUDE_PROVIDER_ID ||
+				(requestedProvider !== undefined &&
+					harnessForModelProvider(requestedProvider) === "claude") ||
 				requestedProvider === CLAUDE_SDK_PROVIDER_ID;
 			if (requestedProvider && !requestedLocalProvider) {
 				const openCodeResult = yield* createViaOpenCode();
@@ -825,7 +827,7 @@ const makeServiceCreateSession = ({
 			const configuredProvider = yield* getConfiguredLocalSessionProvider();
 			if (
 				configuredProvider == null ||
-				configuredProvider === CLAUDE_PROVIDER_ID
+				harnessForModelProvider(configuredProvider) === "claude"
 			) {
 				const localResult = yield* createViaLocal();
 				if (localResult._tag === "Right") {

@@ -1,5 +1,9 @@
-import { Effect } from "effect";
+import { Effect, Either, Ref } from "effect";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../daemon/config-persistence.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -9,13 +13,25 @@ import {
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
+	selectSessionContextWindow,
 	selectSessionModel,
 	selectSessionVariant,
 } from "../domain/relay/Services/session-model-settings.js";
-import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	clearSession as clearEffectOverrideSession,
+	OverridesStateTag,
+} from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import { savedVariantFor, switchVariantForSession } from "./model.js";
+import {
+	harnessForModelProvider,
+	resolveTurnSettings,
+} from "../provider/turn-settings.js";
+import {
+	loadModelCatalog,
+	savedVariantFor,
+	switchVariantForSession,
+} from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 interface ViewSessionPayload {
@@ -125,6 +141,61 @@ export const createSessionForClient = <E = never>({
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
+		// Validate before creating either a durable row or an upstream session.
+		const picked = model
+			? yield* Effect.gen(function* () {
+					const config = yield* ConfigTag;
+					const defaults = yield* Ref.get(yield* OverridesStateTag);
+					const requestedProvider = providerId?.trim();
+					const instanceHarness =
+						instanceId === undefined
+							? undefined
+							: resolveProviderRoutingDriver(
+									loadDaemonConfig(config.configDir),
+									instanceId,
+								);
+					// Match the creator's existing explicit-instance / provider / default order.
+					const harness =
+						(instanceHarness === undefined
+							? undefined
+							: harnessForModelProvider(instanceHarness)) ??
+						(requestedProvider &&
+						requestedProvider !== "claude-sdk" &&
+						harnessForModelProvider(requestedProvider) === "opencode"
+							? "opencode"
+							: harnessForModelProvider(
+									defaults.defaultModel?.providerID ?? "claude",
+								));
+					const catalog = yield* loadModelCatalog(
+						harness,
+						instanceId ?? harness,
+					);
+					const resolved = resolveTurnSettings(
+						{ harness, model, effort: model.variant ?? "", contextWindow: "" },
+						catalog,
+					);
+					if (Either.isLeft(resolved)) return yield* resolved.left;
+					const inherited = resolveTurnSettings(
+						{
+							...resolved.right,
+							contextWindow:
+								resolved.right.contextWindow || defaults.defaultContextWindow,
+						},
+						catalog,
+					);
+					const settings = Either.isRight(inherited)
+						? inherited.right
+						: resolved.right;
+					return {
+						settings,
+						catalog,
+						contextWindowOverride:
+							resolved.right.contextWindow !== "" || Either.isLeft(inherited)
+								? settings.contextWindow
+								: undefined,
+					};
+				})
+			: undefined;
 
 		const create =
 			instanceId != null || providerId != null
@@ -141,28 +212,32 @@ export const createSessionForClient = <E = never>({
 				return yield* restore(
 					Effect.gen(function* () {
 						if (initializeWorkspace) yield* initializeWorkspace(session.id);
-						if (model) {
+						if (model && picked) {
 							const override = {
-								providerID: model.providerId,
-								modelID: model.modelId,
+								providerID: picked.settings.model.providerId,
+								modelID: picked.settings.model.modelId,
 							};
 							yield* selectSessionModel(session.id, override);
-							// Keep a draft effort only if this model offers it, and save it
-							// as a session pick would be; otherwise inherit the picked
-							// model's saved effort rather than the default's.
-							const { variant: saved, variants } =
-								yield* savedVariantFor(override);
-							const picked = model.variant;
-							if (
-								picked === "" ||
-								(picked !== undefined && variants.includes(picked))
-							) {
-								yield* switchVariantForSession({
-									clientId,
-									sessionId: session.id,
-									variant: picked,
-								});
+							if (picked.contextWindowOverride !== undefined) {
+								yield* selectSessionContextWindow(
+									session.id,
+									picked.contextWindowOverride,
+								);
+							}
+							if (model.variant !== undefined) {
+								yield* switchVariantForSession(
+									{
+										clientId,
+										sessionId: session.id,
+										variant: picked.settings.effort,
+									},
+									picked.catalog,
+								);
 							} else {
+								const { variant: saved } = yield* savedVariantFor(
+									override,
+									picked.catalog,
+								);
 								yield* selectSessionVariant(session.id, saved);
 							}
 						}
