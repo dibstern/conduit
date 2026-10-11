@@ -54,7 +54,7 @@
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
 	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -400,11 +400,13 @@
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
-			// With no session in the route, scope the agent fetch to the
-			// client-persisted harness draft so the agent list matches the
-			// picker's pre-creation selection after a reload.
+			// With no session in the route, scope the agent fetch to the draft
+			// project's bound instance, so the agent list matches the picker.
+			// Unbound, the relay's default scope already matches.
 			const draftInstanceId =
-				routeSessionId == null ? discoveryState.selectedInstanceId : null;
+				routeSessionId == null
+					? projectState.projects.find((p) => p.slug === draftSlug)?.instanceId
+					: undefined;
 			void getAgentsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),

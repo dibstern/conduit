@@ -293,10 +293,11 @@ test("an image attached in an OpenCode draft reaches OpenCode", async ({
 	page,
 	harness,
 }, testInfo) => {
-	await page.addInitScript(() =>
-		localStorage.setItem("conduit-selected-instance", "opencode"),
-	);
-	const picker = await openDraft(page, harness);
+	const picker = await openDraft(page, harness, async (browser, slug) => {
+		await Effect.runPromise(
+			browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
+		);
+	});
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 	const chooser = page.waitForEvent("filechooser");
 	await page.locator("#attach-btn:visible").click();
@@ -318,15 +319,16 @@ test("an image attached in an OpenCode draft reaches OpenCode", async ({
 	]);
 });
 
-test("a draft harness restored from an earlier visit never sends OpenCode a Claude model", async ({
+test("a draft in a project bound to OpenCode never sends OpenCode a Claude model", async ({
 	page,
 	harness,
 }, testInfo) => {
-	// The harness pick persists across visits; the model pick does not.
-	await page.addInitScript(() =>
-		localStorage.setItem("conduit-selected-instance", "opencode"),
-	);
-	const picker = await openDraft(page, harness);
+	// The binding lives on the daemon; the relay default stays a Claude model.
+	const picker = await openDraft(page, harness, async (browser, slug) => {
+		await Effect.runPromise(
+			browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
+		);
+	});
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
 	const evidence = await sendAndCapture(page, harness, picker, testInfo);
@@ -395,10 +397,8 @@ test("an OpenCode session shows OpenCode before conduit reports its harness", as
 	page,
 	harness,
 }, testInfo) => {
-	// The composer aims at Claude, and the session's harness never arrives.
-	await page.addInitScript(() =>
-		localStorage.setItem("conduit-selected-instance", "claude"),
-	);
+	// The composer aims at the default Claude harness, and the session's
+	// harness never arrives.
 	await editRpc(page, (frame) =>
 		frame._tag === "Request" &&
 		frame.tag === "GetAgents" &&
@@ -740,10 +740,12 @@ test.describe("effort", () => {
 	}, testInfo) => {
 		// Opus, the Claude-harness default, saved max. OpenCode runs a model of
 		// its own here, so max is not its effort to run at.
-		await page.addInitScript(() =>
-			localStorage.setItem("conduit-selected-instance", "opencode"),
-		);
-		const picker = await openDraft(page, harness, saveEfforts);
+		const picker = await openDraft(page, harness, async (browser, slug) => {
+			await saveEfforts(browser, slug);
+			await Effect.runPromise(
+				browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
+			);
+		});
 		await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
 		const evidence = await sendAndCapture(page, harness, picker, testInfo);

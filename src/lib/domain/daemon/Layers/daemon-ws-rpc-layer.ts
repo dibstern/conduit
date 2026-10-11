@@ -63,8 +63,7 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
-	replaceRelay,
-	updateProject,
+	setProjectInstance,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
@@ -480,10 +479,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			SetProjectInstance: (request) =>
 				run(
 					Effect.gen(function* () {
-						yield* updateProject(request.slug, {
-							instanceId: request.instanceId,
-						});
-						yield* replaceRelay(request.slug);
+						yield* setProjectInstance(request.slug, request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

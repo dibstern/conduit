@@ -6,7 +6,6 @@ import {
 } from "../../stores/chat.svelte.js";
 import {
 	clearDiscoveryState,
-	discoveryState,
 	handleContextWindowInfo,
 	handleDefaultModelInfo,
 	handleModelInfo,
@@ -181,10 +180,8 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "padded", docs: { story: { inline: false } } },
 	beforeEach: () => {
-		// Reset state for each story. `selectedInstanceId` is normally rehydrated
-		// from localStorage, so it has to be pinned or a stale draft leaks in.
+		// Reset state for each story.
 		clearDiscoveryState();
-		discoveryState.selectedInstanceId = "claude";
 		// An active session locks the harness selection.
 		sessionState.currentId = null;
 	},
@@ -269,7 +266,6 @@ export const SingleContextWindow: Story = {
 			provider: "opencode",
 			variant: "",
 		});
-		discoveryState.selectedInstanceId = "opencode";
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -533,7 +529,6 @@ export const UnconfiguredProvider: Story = {
 				},
 			],
 		});
-		discoveryState.selectedInstanceId = "opencode";
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {

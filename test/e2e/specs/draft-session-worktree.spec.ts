@@ -28,6 +28,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			title: "App",
 			folders: [main, docs],
 			git: { branch: "main" },
+			instanceId: provider,
 		},
 		{
 			slug: "other",
@@ -109,10 +110,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	controls.set(page, rpc);
-	await page.addInitScript(
-		(id) => localStorage.setItem("conduit-selected-instance", id),
-		provider,
-	);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
 	await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 	return rpc;
