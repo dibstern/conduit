@@ -504,6 +504,7 @@ export function makeOpenCodeInstancesStub(
 		events: () => Stream.empty,
 		use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
 	};
 }
