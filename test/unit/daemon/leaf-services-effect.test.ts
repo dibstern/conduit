@@ -1,5 +1,6 @@
 // Tests for Effect-native layer replacements of daemon leaf services.
 
+import { NodeCommandExecutor, NodeFileSystem } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import {
 	Context,
@@ -12,6 +13,7 @@ import {
 	TestClock,
 } from "effect";
 import { expect, vi } from "vitest";
+import { resolveKeepAwakeCommand } from "../../../src/lib/daemon/keep-awake.js";
 import {
 	KeepAwakeLive,
 	KeepAwakeTag,
@@ -504,17 +506,18 @@ describe("Leaf service Layers", () => {
 	});
 
 	describe("KeepAwake", () => {
-		it.scoped("isSupported returns true on macOS/Linux", () =>
+		it.scoped("isSupported follows platform command resolution", () =>
 			Effect.gen(function* () {
-				// Default config uses detectPlatformCommand (macOS or Linux in CI)
-				const layer = KeepAwakeLive();
+				const layer = KeepAwakeLive().pipe(
+					Layer.provide(NodeCommandExecutor.layer),
+					Layer.provide(NodeFileSystem.layer),
+				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
 				const svc = Context.get(ctx, KeepAwakeTag);
 
 				const supported = yield* svc.isSupported();
-				// In test env process.platform is either darwin or linux
-				const expected = ["darwin", "linux"].includes(process.platform);
+				const expected = resolveKeepAwakeCommand() !== null;
 				expect(supported).toBe(expected);
 
 				yield* Scope.close(scope, Exit.void);
@@ -524,7 +527,10 @@ describe("Leaf service Layers", () => {
 		it.scoped("activate/deactivate is idempotent", () =>
 			Effect.gen(function* () {
 				// Use a custom command to ensure isSupported = true regardless of platform
-				const layer = KeepAwakeLive({ command: "sleep", args: ["infinity"] });
+				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
+					Layer.provide(NodeCommandExecutor.layer),
+					Layer.provide(NodeFileSystem.layer),
+				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
 				const svc = Context.get(ctx, KeepAwakeTag);
@@ -547,7 +553,10 @@ describe("Leaf service Layers", () => {
 
 		it.scoped("scope close runs finalizer (deactivate)", () =>
 			Effect.gen(function* () {
-				const layer = KeepAwakeLive({ command: "sleep", args: ["infinity"] });
+				const layer = KeepAwakeLive({ command: "sleep", args: ["86400"] }).pipe(
+					Layer.provide(NodeCommandExecutor.layer),
+					Layer.provide(NodeFileSystem.layer),
+				);
 				const scope = yield* Scope.make();
 				const ctx = yield* Layer.buildWithScope(layer, scope);
 				const svc = Context.get(ctx, KeepAwakeTag);

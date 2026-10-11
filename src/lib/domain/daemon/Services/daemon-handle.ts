@@ -10,6 +10,7 @@ import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
+import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
@@ -83,6 +84,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| DaemonLifecycleContextTag
 	| InstanceManagerStateTag
 	| DaemonStateTag
+	| KeepAwakeTag
 > = Layer.effect(
 	DaemonHandleTag,
 	Effect.gen(function* () {
@@ -95,6 +97,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const lifecycleContext = yield* DaemonLifecycleContextTag;
 		const instanceState = yield* InstanceManagerStateTag;
 		const daemonState = yield* DaemonStateTag;
+		const keepAwake = yield* KeepAwakeTag;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
@@ -194,6 +197,7 @@ export const DaemonHandleLive: Layer.Layer<
 						tailscaleServe: config.tailscaleServe,
 					}),
 					keepAwake: config.keepAwake,
+					keepAwakeCommand: yield* keepAwake.getCommand(),
 					projects: sortedStatusProjects(projects),
 				} satisfies DaemonStatus;
 			}).pipe(Effect.withSpan("daemonHandle.getStatus"));

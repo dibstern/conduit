@@ -111,6 +111,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
+		// Serialize process changes together with their config/persistence updates.
+		const keepAwakeLock = yield* Effect.makeSemaphore(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
@@ -347,12 +349,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const, supported, active };
-					}),
+					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
 			SetKeepAwakeCommand: (request) =>
 				run(
 					Effect.gen(function* () {
 						const state = yield* DaemonStateTag;
+						const keepAwake = yield* KeepAwakeTag;
+						yield* keepAwake.setCommand(request.command, request.args);
 						const updates = {
 							keepAwakeCommand: request.command,
 							keepAwakeArgs: [...request.args],
@@ -364,7 +368,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const };
-					}),
+					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
 			Shutdown: () =>
 				run(
