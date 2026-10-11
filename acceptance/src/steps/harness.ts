@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	exampleValue,
@@ -6,6 +7,13 @@ import {
 	openSessionRoute,
 	requireRpcControl,
 } from "./shared.js";
+
+const heldAccountSwitches = new WeakMap<Page, () => void>();
+
+const harnessLogo = (page: Page, region: string, account: string) =>
+	page
+		.locator(region === "composer" ? "#input-area" : "#model-picker")
+		.locator(`[data-testid="harness-logo"][data-account="${account}"]`);
 
 /** Map a harness/instance display label (e.g. "OpenCode · Local") to the
  *  default instance id of its driver. */
@@ -36,6 +44,119 @@ async function openPickerAgentView(page: Page): Promise<void> {
 }
 
 export const harnessHandlers: StepHandler[] = [
+	{
+		name: "set harness logo tier",
+		match: /^the harness logo is viewed in the (wide|narrow|phone) tier$/,
+		run: async ({ world, match }) => {
+			const tier = match[1];
+			await world.driver.setViewport(
+				world.page,
+				tier === "phone" ? PHONE_VIEWPORT : DESKTOP_VIEWPORT,
+			);
+			if (tier === "narrow") {
+				await world.page.locator("#input-wrapper").evaluate((element) => {
+					element.style.width = "520px";
+				});
+			}
+		},
+	},
+	{
+		name: "choose composer controls for harness logo",
+		match: /^the composer uses (icons|words) controls$/,
+		run: async ({ world, match }) => {
+			await world.page.evaluate(() =>
+				window.dispatchEvent(new CustomEvent("settings:open")),
+			);
+			await world.page.getByTestId("settings-tab-composer").click();
+			await world.page
+				.getByTestId(`settings-composer-controls-${match[1]}`)
+				.click();
+			await world.page.getByTestId("settings-close-btn").click();
+			await expect(world.page.locator("#settings-panel")).toBeHidden();
+		},
+	},
+	{
+		name: "assert harness logo has no badge",
+		match: /^the (composer|picker) harness logo for (\S+) has no badge$/,
+		run: async ({ world, match }) => {
+			const logo = harnessLogo(world.page, match[1] ?? "", match[2] ?? "");
+			await expect(logo).toBeVisible();
+			await expect(logo.getByTestId("harness-logo-badge")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert harness logo badge letter",
+		match:
+			/^the (composer|picker) harness logo for (\S+) shows (\S) on its badge$/,
+		run: async ({ world, match }) => {
+			const badge = harnessLogo(
+				world.page,
+				match[1] ?? "",
+				match[2] ?? "",
+			).getByTestId("harness-logo-badge");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveAttribute("data-account", match[2] ?? "");
+			await expect(badge).toHaveText(match[3] ?? "");
+			await expect(badge).toHaveAttribute("data-state", "idle");
+		},
+	},
+	{
+		name: "assert harness badge matches AccountDot",
+		match:
+			/^the (composer|picker) harness badge for (\S+) matches its AccountDot colour$/,
+		run: async ({ world, match }) => {
+			const account = match[2] ?? "";
+			const dot = world.page
+				.locator(`[data-testid="account-dot"][data-account="${account}"]`)
+				.first();
+			await expect(dot).toBeVisible();
+			const colour = await dot.evaluate(
+				(element) => getComputedStyle(element).backgroundColor,
+			);
+			await expect(
+				harnessLogo(world.page, match[1] ?? "", account).getByTestId(
+					"harness-logo-badge",
+				),
+			).toHaveCSS("background-color", colour);
+		},
+	},
+	{
+		name: "hold account switch reply",
+		match: /^the account switch reply is held$/,
+		run: ({ world }) => {
+			const reply = new Promise<{ ok: true }>((resolve) => {
+				heldAccountSwitches.set(world.page, () => resolve({ ok: true }));
+			});
+			requireRpcControl(world.page).setHandler("ContinueSession", () => reply);
+		},
+	},
+	{
+		name: "release account switch reply",
+		match: /^the account switch reply lands$/,
+		run: ({ world }) => {
+			const release = heldAccountSwitches.get(world.page);
+			if (!release) throw new Error("No account switch reply is held");
+			release();
+			heldAccountSwitches.delete(world.page);
+		},
+	},
+	{
+		name: "assert harness badge switch state",
+		match: /^the (composer|picker) harness badge for (\S+) is (spinning|idle)$/,
+		run: async ({ world, match }) => {
+			const badge = harnessLogo(
+				world.page,
+				match[1] ?? "",
+				match[2] ?? "",
+			).getByTestId("harness-logo-badge");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveAttribute("data-state", match[3] ?? "");
+			if (match[3] === "spinning") {
+				await expect(badge).toHaveText("");
+				await expect(badge).toHaveCSS("animation-duration", "0.8s");
+			}
+		},
+	},
 	{
 		name: "session exists on harness",
 		match: /^a session already exists on the (Claude|OpenCode) harness$/,

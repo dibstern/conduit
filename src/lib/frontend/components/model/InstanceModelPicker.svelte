@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
 	import Icon from "../ui/Icon.svelte";
+	import HarnessLogo from "./HarnessLogo.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
@@ -37,6 +38,7 @@
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { composerAccountId } from "../../stores/usage.svelte.js";
 	import { bindProjectInstance, getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
@@ -91,6 +93,11 @@
 	const selectedDriver = $derived(
 		selectedInstance?.driver ??
 			(selectedId === "claude" ? ("claude" as const) : ("opencode" as const)),
+	);
+	const selectedLogoInstanceId = $derived(
+		sessionState.currentId
+			? composerAccountId(findSession(sessionState.currentId), undefined) ?? selectedId
+			: selectedId,
 	);
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
@@ -415,21 +422,6 @@
 	onDestroy(() => { composerPickerState.request = null; });
 </script>
 
-{#snippet driverIcon(driver: "claude" | "opencode", size: number, badge: boolean)}
-	<span
-		data-driver={driver}
-		class="relative inline-flex flex-none items-center justify-center"
-		style="width:{size}px;height:{size}px"
-	>
-		<Icon name={driver} {size} />
-		{#if badge}
-			<span
-				class="absolute -bottom-[3px] -right-[3px] h-3 min-w-3 rounded-full bg-accent border-[1.5px] border-bg-alt flex items-center justify-center text-white text-[7px] font-bold"
-			>•</span>
-		{/if}
-	</span>
-{/snippet}
-
 {#snippet pickerSurface(sheet: boolean)}
 	<Surface
 		variant={sheet ? "plain" : "raised"}
@@ -478,7 +470,7 @@
 				>
 					<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Harness</span>
 					<span class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold">
-						{@render driverIcon(selectedDriver, 16, selectedInstance?.isCustom ?? false)}
+						<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />
 						<span class="truncate">{selectedLabel}</span>
 					</span>
 					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
@@ -592,7 +584,7 @@
 						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 last:border-b-0"
 						onclick={(e) => handleInstanceSelect(instance, e)}
 					>
-						{@render driverIcon(instance.driver, 16, instance.isCustom)}
+						<HarnessLogo driver={instance.driver} instanceId={instance.id} size={16} surface="surface" />
 						<span class="min-w-0 flex-1 text-left">
 							<span class="block text-[13px] font-semibold">{instance.label}</span>
 							<span class="block text-[11px] text-text-muted">
@@ -755,7 +747,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={togglePicker}
 		>
-			{@render driverIcon(selectedDriver, 13, selectedInstance?.isCustom ?? false)}
+			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="page" />
 			<span class="min-w-0 truncate border-b border-dotted border-border-chip">{displayName}</span>
 		</Button>
 		{#if contextLabel}
@@ -800,10 +792,10 @@
 			onclick={togglePicker}
 		>
 			{#if phone}
-				{@render driverIcon(selectedDriver, 17, selectedInstance?.isCustom ?? false)}
+				<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={17} surface="box" />
 				<span class="model-label text-[10px] font-bold whitespace-nowrap">{shortModelLabel}</span>
 			{:else}
-				{@render driverIcon(selectedDriver, 15, selectedInstance?.isCustom ?? false)}
+				<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} surface="box" />
 				<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
 					{displayName}{#if contextLabel}<span data-testid="picker-selected-context">{` · ${contextLabel}`}</span>{/if}
 				</span>

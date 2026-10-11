@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-accent,border-[1.5px],border-bg-alt,bottom-[3px],flex-none,h-3,min-w-3,right-[3px],text-[7px],text-white": "conduit-test-bn6x.3 replaces the private custom-instance accent dot with HarnessLogo's B1 account letter badge. Its size, offsets, right margin and type now scale with the logo; accountColorClass owns the fill, dark text replaces white, and a 1.5px shadow ring uses the caller's surface token.",
 	"src/lib/frontend/components/ui/AccountDot.svelte :: bg-fill-blue,bg-fill-green,bg-fill-indigo,bg-project-1,bg-project-3,bg-project-4": {
 		"movedTo": "src/lib/frontend/utils/account-color.ts",
 		"requires": "accountColorClass(instanceId)",

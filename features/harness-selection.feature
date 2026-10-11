@@ -46,3 +46,123 @@ Scenario Outline: the model picker matches the approved layout
 Examples:
   | instance | baseline                      | threshold |
   | Claude   | model-picker-rail-claude-dark | 98        |
+
+Scenario Outline: B1 one instance has no badge in the composer or picker
+  Given a session already exists on the <harness> harness
+  And the harness logo is viewed in the <tier> tier
+  And the composer uses <controls> controls
+  Then the composer harness logo for <account> has no badge
+  When I open the model picker
+  Then the picker harness logo for <account> has no badge
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I view Harness choices in the picker
+  Then the picker harness logo for <account> has no badge
+
+Examples:
+  | tier  | harness  | controls | account  | baseline                           | threshold |
+  | wide  | Claude   | icons    | claude   | harness-logo-single-claude-icons   | 98        |
+  | phone | Claude   | icons    | claude   | harness-logo-single-claude-icons   | 98        |
+  | wide  | Claude   | words    | claude   | harness-logo-single-claude-words   | 98        |
+  | phone | Claude   | words    | claude   | harness-logo-single-claude-words   | 98        |
+  | wide  | OpenCode | icons    | opencode | harness-logo-single-opencode-icons | 98        |
+  | phone | OpenCode | icons    | opencode | harness-logo-single-opencode-icons | 98        |
+  | wide  | OpenCode | words    | opencode | harness-logo-single-opencode-words | 98        |
+  | phone | OpenCode | words    | opencode | harness-logo-single-opencode-words | 98        |
+
+Scenario Outline: B1 the implicit default Claude account counts and shows C
+  Given a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are self as personal
+  And the composer uses <controls> controls
+  Then the composer harness logo for claude shows C on its badge
+  When I open the model picker
+  Then the picker harness logo for claude shows C on its badge
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I view Harness choices in the picker
+  Then the picker harness logo for claude shows C on its badge
+  And the picker harness logo for self shows P on its badge
+
+Examples:
+  | tier   | controls | baseline                          | threshold |
+  | wide   | icons    | harness-logo-default-claude-icons | 98        |
+  | narrow | icons    | harness-logo-default-claude-narrow | 98        |
+  | phone  | icons    | harness-logo-default-claude-icons | 98        |
+  | wide   | words    | harness-logo-default-claude-words | 98        |
+  | phone  | words    | harness-logo-default-claude-words | 98        |
+
+Scenario Outline: B1 a resumed account's letter and colour match its AccountDot
+  Given a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as Claude, self as personal, team as Work
+  And the transcript ends with the unanswered message Check the account logo
+  And the composer uses <controls> controls
+  When the session resumes on <account> from claude by user and replies Ready on this account.
+  Then the composer harness logo for <account> shows <letter> on its badge
+  And the composer harness badge for <account> matches its AccountDot colour
+  When I open the model picker
+  Then the picker harness logo for <account> shows <letter> on its badge
+  And the picker harness badge for <account> matches its AccountDot colour
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I view Harness choices in the picker
+  Then the picker harness logo for self shows P on its badge
+  And the picker harness logo for team shows W on its badge
+
+Examples:
+  | tier  | controls | account | letter | baseline                         | threshold |
+  | wide  | icons    | self    | P      | harness-logo-personal-icons      | 98        |
+  | phone | icons    | team    | W      | harness-logo-work-icons          | 98        |
+  | wide  | words    | team    | W      | harness-logo-work-words          | 98        |
+  | phone | words    | self    | P      | harness-logo-personal-words      | 98        |
+
+Scenario Outline: B1 OpenCode badges both its default and named instance when there are two
+  Given a session already exists on the OpenCode harness
+  And the harness logo is viewed in the <tier> tier
+  And a named OpenCode instance Bedrock is already configured
+  And the composer uses <controls> controls
+  Then the composer harness logo for opencode shows O on its badge
+  When I open the model picker
+  Then the picker harness logo for opencode shows O on its badge
+  When I view Harness choices in the picker
+  Then the picker harness logo for opencode shows O on its badge
+  And the picker harness logo for bedrock shows B on its badge
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | controls | baseline                          | threshold |
+  | wide  | icons    | harness-logo-opencode-multi-icons | 98        |
+  | phone | icons    | harness-logo-opencode-multi-icons | 98        |
+  | wide  | words    | harness-logo-opencode-multi-words | 98        |
+  | phone | words    | harness-logo-opencode-multi-words | 98        |
+
+Scenario Outline: B1 switching replaces the letter with a spinner and restores the landed account
+  Given a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as Claude, self as personal
+  And the composer uses <controls> controls
+  And the quota check reads claude 40% used, self 23% used
+  And the handoff carries 2 of 2 messages with the first
+  And the transcript ends with the unanswered message Switch the account
+  And the account switch reply is held
+  When I open the account pill in the session bar
+  And I pick personal in the account picker
+  Then the handoff dialog asks Continue on personal?
+  When I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to self
+  And the composer harness badge for claude is spinning
+  When the account switch reply lands
+  Then the handoff dialog is closed
+  When the session resumes on self from claude by user and replies Switched accounts.
+  Then the composer harness logo for self shows P on its badge
+  And the composer harness badge for self is idle
+  When I open the model picker
+  Then the picker harness logo for self shows P on its badge
+  And the picker harness badge for self is idle
+
+Examples:
+  | tier   | controls |
+  | wide   | icons    |
+  | narrow | icons    |
+  | phone  | icons    |
+  | wide   | words    |
+  | narrow | words    |
+  | phone  | words    |
