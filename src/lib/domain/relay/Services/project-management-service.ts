@@ -8,7 +8,7 @@ import type { FolderIssue } from "../../../project-folders.js";
 import type { ProjectInfo } from "../../../shared-types.js";
 import { ConfigTag } from "./services.js";
 
-type ProjectOperation = "list" | "save" | "remove" | "setInstance";
+type ProjectOperation = "list" | "save" | "remove";
 
 export interface SaveProjectResult {
 	readonly kind?: "existing" | undefined;
@@ -47,13 +47,6 @@ export interface ProjectManagementService {
 	>;
 	remove(
 		slug: string,
-	): Effect.Effect<
-		ReadonlyArray<ProjectInfo>,
-		ProjectManagementServiceError | ProjectManagementNotSupported
-	>;
-	setProjectInstance(
-		slug: string,
-		instanceId: string,
 	): Effect.Effect<
 		ReadonlyArray<ProjectInfo>,
 		ProjectManagementServiceError | ProjectManagementNotSupported
@@ -134,23 +127,6 @@ export const ProjectManagementServiceLive: Layer.Layer<
 						catch: toError("remove"),
 					});
 					return (yield* listConfigProjects()) ?? [];
-				}),
-			setProjectInstance: (slug, instanceId) =>
-				Effect.gen(function* () {
-					const setProjectInstance = config.setProjectInstance;
-					const getProjects = config.getProjects;
-					if (setProjectInstance == null || getProjects == null) {
-						return yield* new ProjectManagementNotSupported({
-							operation: "setInstance",
-							message: "Project instance binding not available",
-						});
-					}
-					yield* Effect.tryPromise({
-						try: () => Promise.resolve(setProjectInstance(slug, instanceId)),
-						catch: toError("setInstance"),
-					});
-					const projects = yield* listConfigProjects();
-					return projects ?? [];
 				}),
 		};
 	}),

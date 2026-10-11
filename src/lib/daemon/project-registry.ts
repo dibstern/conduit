@@ -447,7 +447,7 @@ export class ProjectRegistry {
 
 	updateProject(
 		slug: string,
-		updates: Partial<Pick<StoredProject, "title" | "instanceId">>,
+		updates: Partial<Pick<StoredProject, "title">>,
 	): void {
 		const entry = this.entries.get(slug);
 		if (!entry) {

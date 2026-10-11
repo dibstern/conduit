@@ -146,6 +146,17 @@ async function assertWindows(
 	}
 }
 
+/** Measure cards only after the previous drop's reorder animation ends. */
+async function settleCards(page: Page): Promise<void> {
+	await expect
+		.poll(() =>
+			page
+				.getByRole("list", { name: "Auto-switch account order" })
+				.evaluate((list) => list.getAnimations({ subtree: true }).length),
+		)
+		.toBe(0);
+}
+
 async function tapUsage(page: Page, testId: string): Promise<void> {
 	const target = page.getByTestId(testId);
 	await expect(target).toBeVisible();
@@ -217,17 +228,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 					createdAt: 1,
 				})),
 			});
-			const projects = [
-				{
-					slug: "myapp",
-					title: "myapp",
-					folders: ["/src/myapp"],
-					instanceId: "claude",
-				},
-			];
-			rpc.setDaemonList("SubscribeProjects", { projects });
-			// A draft refetches the list; keep the binding there too.
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			// A Claude default model makes the claude account the draft's account.
+			rpc.setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-5",
+				provider: "claude",
+				variant: "",
+			});
 			seedUsageLimits(world.page, {
 				usageLimits: {
 					autoResume: false,
@@ -268,22 +275,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 				: [personal];
 			rpc.setUsageReadings(readings);
 			rpc.setResponse("QuotaForAccounts", readings);
-		},
-	},
-	{
-		name: "set or clear the project account fallback",
-		match: /^the Usage project account is (\S+)$/,
-		run: ({ world, match }) => {
-			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						...(match[1] === "none" ? {} : { instanceId: match[1] }),
-					},
-				],
-			});
 		},
 	},
 	{
@@ -1143,16 +1134,17 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "drag a whole Usage card through its native pointer handle",
-		match: /^I drag the Usage account (.+) above (.+)$/,
+		match: /^I drag the Usage account (.+) (above|below) (.+)$/,
 		run: async ({ world, match }) => {
 			const list = world.page.getByRole("list", {
 				name: "Auto-switch account order",
 			});
 			const handle = list.getByRole("button", { name: `Reorder ${match[1]}` });
 			const first = list.getByTestId("sortable-row").filter({
-				hasText: match[2] ?? "",
+				hasText: match[3] ?? "",
 			});
 			await handle.scrollIntoViewIfNeeded();
+			await settleCards(world.page);
 			const [from, to] = await Promise.all([
 				handle.boundingBox(),
 				first.boundingBox(),
@@ -1163,10 +1155,60 @@ export const usageSettingsHandlers: StepHandler[] = [
 				from.y + from.height / 2,
 			);
 			await world.page.mouse.down();
-			await world.page.mouse.move(from.x + from.width / 2, to.y + 2, {
-				steps: 12,
-			});
+			// A hand drifts off the narrow handle on the way, toward the card's middle.
+			await world.page.mouse.move(
+				to.x + to.width / 2,
+				match[2] === "above" ? to.y + 2 : to.y + to.height - 2,
+				{ steps: 12 },
+			);
 			await world.page.mouse.up();
+		},
+	},
+	{
+		name: "touch-drag a whole Usage card through its handle",
+		match: /^I touch-drag the Usage account (.+) (above|below) (.+)$/,
+		run: async ({ world, match }) => {
+			const list = world.page.getByRole("list", {
+				name: "Auto-switch account order",
+			});
+			const handle = list.getByRole("button", { name: `Reorder ${match[1]}` });
+			const target = list.getByTestId("sortable-row").filter({
+				hasText: match[3] ?? "",
+			});
+			await handle.scrollIntoViewIfNeeded();
+			await settleCards(world.page);
+			const [from, to] = await Promise.all([
+				handle.boundingBox(),
+				target.boundingBox(),
+			]);
+			if (!from || !to) throw new Error("Missing Usage card drag geometry");
+			const startX = from.x + from.width / 2;
+			const startY = from.y + from.height / 2;
+			const endX = to.x + to.width / 2;
+			const endY = match[2] === "above" ? to.y + 2 : to.y + to.height - 2;
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [{ x: startX, y: startY }],
+				});
+				for (let step = 1; step <= 12; step++)
+					await touch.send("Input.dispatchTouchEvent", {
+						type: "touchMove",
+						touchPoints: [
+							{
+								x: startX + ((endX - startX) * step) / 12,
+								y: startY + ((endY - startY) * step) / 12,
+							},
+						],
+					});
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
 		},
 	},
 	{
@@ -1239,12 +1281,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap a phone usage chip to open Usage",
-		match: /^I tap the phone usage chip (\S+)$/,
-		run: ({ world, match }) =>
-			tapUsage(world.page, `usage-phone-chip-${match[1]}`),
-	},
-	{
 		name: "tap the phone single-account usage row to open Usage",
 		match: /^I tap the phone single-account usage row$/,
 		run: ({ world }) => tapUsage(world.page, "usage-phone-single"),
@@ -1254,29 +1290,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 		match: /^I press the Usage back button$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("settings-back-btn").click();
-		},
-	},
-	{
-		name: "assert the footer's empty space allows the phone list to scroll",
-		match: /^the phone usage footer allows list scrolling around its chips$/,
-		run: async ({ world }) => {
-			const footer = world.page.getByTestId("usage-footer-phone");
-			await expect(footer).toHaveCSS("pointer-events", "none");
-			await expect(world.page.getByTestId("usage-phone-chip-claude")).toHaveCSS(
-				"pointer-events",
-				"auto",
-			);
-			const scroller = world.page.locator("#session-list-scroller");
-			await scroller.evaluate((element) => {
-				element.scrollTop = 0;
-			});
-			const box = await footer.boundingBox();
-			if (!box) throw new Error("Missing phone usage footer");
-			await world.page.mouse.move(box.x + 3, box.y + 3);
-			await world.page.mouse.wheel(0, 300);
-			await expect
-				.poll(() => scroller.evaluate((element) => element.scrollTop))
-				.toBeGreaterThan(0);
 		},
 	},
 ];

@@ -88,6 +88,11 @@ export interface OpenCodeInstances {
 		instanceId: string,
 		directory?: string,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
+	/** Hold a running instance and its stream for this scope; never start it. */
+	readonly useIfRunning: (
+		instanceId: string,
+		directory?: string,
+	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Admin stop, regardless of demand: stops the process and closes its stream. */
 	readonly stop: (instanceId: string) => Effect.Effect<void>;
 }

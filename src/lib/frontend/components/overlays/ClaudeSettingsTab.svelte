@@ -27,10 +27,10 @@
 		discoveryState,
 		getAllModels,
 		getAvailableInstances,
+		getEffectiveInstanceId,
 		getProviderGroups,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -145,16 +145,15 @@
 	);
 
 	const claudeInstanceId = $derived.by(() => {
-		const projectSlug = getCurrentSlug();
-		const project = projectState.projects.find(
-			(candidate) => candidate.slug === projectSlug,
-		);
 		const availableInstances = getAvailableInstances();
-		if (project?.instanceId) {
+		const selectedId = sessionId
+			? findSession(sessionId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId]
+			: getEffectiveInstanceId();
+		if (selectedId) {
 			const assigned =
 				availableInstances.find(
-					(instance) => instance.id === project.instanceId,
-				) ?? getCachedInstanceById(project.instanceId);
+					(instance) => instance.id === selectedId,
+				) ?? getCachedInstanceById(selectedId);
 			if (assigned?.driver === "claude") return assigned.id;
 		}
 		return availableInstances.find((instance) => instance.driver === "claude")
@@ -443,6 +442,7 @@
 {/snippet}
 
 {#snippet attributionEditor()}
+	<p class="text-text-dimmer">What Claude adds to commits and pull requests it creates.</p>
 	<div class="flex flex-col gap-[4px]">
 		<label for="claude-attribution-commit" class="text-text">Commit attribution</label>
 		<TextInput
@@ -569,10 +569,17 @@
 		labelFor="claude-cleanup-period-days"
 		control={cleanupPeriodDaysControl}
 	/>
+</SettingsGroup>
+
+<SettingsGroup
+	id="claude-attribution"
+	title="Attribution"
+	collapsible
+	summary="Commit · PR · Session link"
+	testId="claude-attribution-group"
+>
 	<ClaudeSettingRow
 		key="attribution"
-		label="Attribution"
-		description="What Claude adds to commits and pull requests it creates."
 		provenance={attributionProvenance}
 		onreset={() => resetOverride("attribution")}
 		below={attributionEditor}

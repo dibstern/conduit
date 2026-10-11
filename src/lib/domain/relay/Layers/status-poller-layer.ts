@@ -20,7 +20,12 @@ import {
 } from "../../../persistence/events.js";
 import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
-import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
+import {
+	ConfigTag,
+	LiveTaskListTag,
+	LoggerTag,
+	StatusPollerTag,
+} from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
@@ -78,6 +83,7 @@ export const StatusPollerLive: Layer.Layer<
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
+		const liveTaskList = yield* Effect.serviceOption(LiveTaskListTag);
 		// The corrective event is the poller's only write, and it moves the read
 		// model, so it goes through the seam that projects and announces together.
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
@@ -87,6 +93,9 @@ export const StatusPollerLive: Layer.Layer<
 		);
 		const reconciliationDeps: ReconciliationDeps = {
 			getProjectedSessions: () => readQuery.getSessionsForReconciliation([]),
+			getStrandedChildren: () => readQuery.getStrandedChildren(),
+			liveListOf: (sessionId) =>
+				Option.isSome(liveTaskList) ? liveTaskList.value(sessionId) : undefined,
 			getSessionsAwaitingUser: () =>
 				Effect.all([
 					pendingInteractions.listPendingQuestions(),

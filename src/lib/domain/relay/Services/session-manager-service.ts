@@ -951,7 +951,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				statusPollerOption,
 				backgroundOf,
 				snapshot,
-				projectDir: config.projectDir,
+				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
 			});
 		const establishOpenCodeSession = (
 			session: SessionDetail,
