@@ -23,6 +23,7 @@
 	import ImageLightbox from "../overlays/ImageLightbox.svelte";
 	import QrModal from "../overlays/QrModal.svelte";
 	import SettingsPanel from "../overlays/SettingsPanel.svelte";
+	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import DebugPanel from "../debug/DebugPanel.svelte";
 	import InfoPanels from "../overlays/InfoPanels.svelte";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
@@ -75,7 +76,8 @@
 
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
-	let settingsInitialTab = $state<string | undefined>();
+	let settingsInitialTab = $state<SettingsSection | undefined>();
+	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
 	let debugPanelVisible = $state(false);
 
 	const TERMINAL_MIN_HEIGHT = 100;
@@ -649,10 +651,11 @@
 	// Settings panel event bridge (SessionBar dispatches "settings:open")
 
 	$effect(() => {
-		function onSettingsOpen(e: Event) {
-			const detail = (e as CustomEvent).detail;
+		function onSettingsOpen(e: WindowEventMap["settings:open"]) {
+			const detail = e.detail;
 			// A generic open leaves this undefined: phone then starts on the section list.
-			settingsInitialTab = detail?.tab;
+			settingsInitialTab = detail?.section;
+			settingsInitialAnchor = detail?.anchor;
 			settingsVisible = true;
 		}
 		window.addEventListener("settings:open", onSettingsOpen);
@@ -871,7 +874,7 @@
 <NotificationStack />
 <DeepSearch />
 <QrModal visible={qrVisible} onClose={handleQrClose} />
-<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} onClose={() => (settingsVisible = false)} />
+<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} initialAnchor={settingsInitialAnchor} onClose={() => (settingsVisible = false)} />
 {#if featureFlags.debug}
 	<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
 {/if}

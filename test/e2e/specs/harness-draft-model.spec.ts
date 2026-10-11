@@ -435,7 +435,7 @@ test("opening model settings in a session keeps the session's model", async ({
 
 	holding = true;
 	await openSettingsPanel(page);
-	await page.getByTestId("settings-tab-visibility").click();
+	await page.getByTestId("settings-tab-models").click();
 	const panel = page.locator("#settings-panel");
 	await expect(panel).toContainText("Loading models…");
 	release();

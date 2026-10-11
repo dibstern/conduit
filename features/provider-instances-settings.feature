@@ -5,7 +5,7 @@ Background:
   Given the conduit app is served with the connected mockup
 
 Scenario Outline: adding a named instance makes it selectable in the composer rail
-  When I open settings to the Instances tab
+  When I open settings to the Server section
   And I add a <driver> instance named <name>
   And I open the model picker
   Then the <name> instance is selectable in the rail
@@ -17,19 +17,19 @@ Examples:
 
 Scenario: editing a named instance updates it in the settings list
   Given a named OpenCode instance Staging OC is already configured
-  When I open settings to the Instances tab
+  When I open settings to the Server section
   And I rename the Staging OC instance to Prod OC via edit
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
 Scenario: removing a named instance drops it from the settings list
   Given a named OpenCode instance Staging OC is already configured
-  When I open settings to the Instances tab
+  When I open settings to the Server section
   And I remove the Staging OC instance
   Then the Instances list does not show Staging OC
 
 Scenario Outline: the instance editor matches the approved layout
-  When I open settings to the Instances tab
+  When I open settings to the Server section
   And I start adding a Claude instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent
 
@@ -37,7 +37,7 @@ Examples:
   | baseline                         | threshold |
   | provider-instances-settings-dark | 98        |
 
-Scenario: Usage owns the limit settings beside the Claude and Instances tabs
-  When I open settings to the Instances tab
-  Then the Instances tab has no usage limit settings
-  And the settings tabs place Usage between Claude and Instances
+Scenario: Usage owns the limit settings beside the Claude and Server sections
+  When I open settings to the Server section
+  Then the Server section has no usage limit settings
+  And the settings sections place Usage and Server under This computer

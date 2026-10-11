@@ -101,7 +101,7 @@
 		</MenuRadioGroup>
 
 		<MenuSeparator />
-		<MenuItem onselect={() => openSettings("instances")}>
+		<MenuItem onselect={() => openSettings("server", "instances")}>
 			Manage Instances
 		</MenuItem>
 	</Menu>

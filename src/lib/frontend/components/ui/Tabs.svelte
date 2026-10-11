@@ -52,7 +52,11 @@
 	}: {
 		/** The selected tab's value. */
 		value: T;
-		options: readonly SegmentedOption<T>[];
+		/**
+		 * `groupLabel` prints a small heading above that option, e.g. Settings'
+		 * "This computer". It is decorative: the tabs keep their own names.
+		 */
+		options: readonly (SegmentedOption<T> & { groupLabel?: string })[];
 		variant?: SegmentedVariant;
 		/**
 		 * `vertical` is a section list: ArrowUp/ArrowDown move (Left/Right do
@@ -95,6 +99,9 @@
 		class={[recipe.list, className].filter(Boolean).join(" ")}
 	>
 		{#each options as option (option.value)}
+			{#if option.groupLabel}
+				<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[4px] mb-[5px] px-[8px] text-[10px] font-medium leading-[15px] text-text-dimmer">{option.groupLabel}</div>
+			{/if}
 			<Tabs.Trigger
 				value={option.value}
 				disabled={option.disabled}

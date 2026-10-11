@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type {
 		ClaudeSettingsOverrides,
 		JsonValue,
@@ -8,6 +9,7 @@
 		applyResolvedClaudeSettingsResponse,
 		beginClaudeSettingsResolution,
 		claudeSettingsState,
+		clearClaudeSettingEdits,
 		describeClaudeSettingProvenance,
 		failClaudeSettingsResolution,
 		getClaudeSettingValue,
@@ -48,6 +50,10 @@
 	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
+	onMount(() => {
+		clearClaudeSettingEdits();
+		return clearClaudeSettingEdits;
+	});
 	let reloadInFlight = $state(false);
 	const sessionId = $derived(getCurrentSessionId());
 	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
