@@ -21,13 +21,9 @@ import {
 	decodeOpenCodeCommandListResponse,
 	decodeOpenCodeConfigResponse,
 	decodeOpenCodeCurrentProjectResponse,
-	decodeOpenCodeDiffResponse,
 	decodeOpenCodeFileEntryListResponse,
 	decodeOpenCodeFileReadResponse,
-	decodeOpenCodeFileStatusListResponse,
 	decodeOpenCodeFindFilesResponse,
-	decodeOpenCodeFindSymbolsResponse,
-	decodeOpenCodeFindTextResponse,
 	decodeOpenCodeMessageListResponse,
 	decodeOpenCodeMessageWithPartsResponse,
 	decodeOpenCodePathResponse,
@@ -43,7 +39,6 @@ import {
 	decodeOpenCodeSessionListResponse,
 	decodeOpenCodeSessionResponse,
 	decodeOpenCodeSessionStatusMap,
-	decodeOpenCodeShareResponse,
 	decodeOpenCodeSkillListResponse,
 	decodeOpenCodeUndefinedResponse,
 	decodeOpenCodeVcsResponse,
@@ -401,32 +396,12 @@ class SessionNamespace {
 		);
 	}
 
-	async share(sessionId: string): Promise<{ url: string }> {
-		return this.api.sdk("session.share", decodeOpenCodeShareResponse, () =>
-			this.api._sdk.session.share({ sessionID: sessionId }),
-		);
-	}
-
 	async summarize(
 		sessionId: string,
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
 		await this.api.sdk("session.summarize", decodeOpenCodeBooleanResponse, () =>
 			this.api._sdk.session.summarize({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async diff(
-		sessionId: string,
-		options?: { messageID?: string },
-	): Promise<{
-		readonly diffs: ReadonlyArray<{
-			readonly path: string;
-			readonly diff: string;
-		}>;
-	}> {
-		return this.api.sdk("session.diff", decodeOpenCodeDiffResponse, () =>
-			this.api._sdk.session.diff({ sessionID: sessionId, ...options }),
 		);
 	}
 
@@ -677,31 +652,10 @@ class FileNamespace {
 			...(file.type === "binary" ? { binary: true } : {}),
 		};
 	}
-
-	async status(): Promise<
-		ReadonlyArray<{
-			readonly path: string;
-			readonly added: number;
-			readonly removed: number;
-			readonly status: "added" | "deleted" | "modified";
-		}>
-	> {
-		return this.api.sdk(
-			"file.status",
-			decodeOpenCodeFileStatusListResponse,
-			() => this.api._sdk.file.status(),
-		);
-	}
 }
 
 class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
-
-	async text(pattern: string): Promise<readonly unknown[]> {
-		return this.api.sdk("find.text", decodeOpenCodeFindTextResponse, () =>
-			this.api._sdk.find.text({ pattern }),
-		);
-	}
 
 	async files(
 		query: string,
@@ -714,12 +668,6 @@ class FindNamespace {
 				query,
 				...(dirs === undefined ? {} : { dirs }),
 			}),
-		);
-	}
-
-	async symbols(query: string): Promise<readonly unknown[]> {
-		return this.api.sdk("find.symbols", decodeOpenCodeFindSymbolsResponse, () =>
-			this.api._sdk.find.symbols({ query }),
 		);
 	}
 }

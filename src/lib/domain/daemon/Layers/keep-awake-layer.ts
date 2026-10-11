@@ -1,21 +1,28 @@
-// Pure Effect replacement for the KeepAwake class.
-// Platform detection: macOS -> "caffeinate -di", Linux -> "systemd-inhibit".
-// Idempotent activate/deactivate. Process cleanup via Fiber.interrupt on
-// scope close (addFinalizer).
-//
-// Defines its own Tag that will coexist with the one in services.ts until
-// Consumer migration.
+// Each keep-awake child owns a scope attached to the daemon's layer scope.
 
-import { Context, Effect, Fiber, Layer, Ref } from "effect";
-
-interface KeepAwakeConfig {
-	command?: string;
-	args?: string[];
-}
+import { Command, CommandExecutor } from "@effect/platform";
+import {
+	Context,
+	Effect,
+	Either,
+	ExecutionStrategy,
+	Exit,
+	Layer,
+	Option,
+	Ref,
+	Scope,
+	Stream,
+} from "effect";
+import {
+	type KeepAwakeOptions,
+	resolveKeepAwakeCommand,
+} from "../../../daemon/keep-awake.js";
 
 interface KeepAwakeService {
 	activate: () => Effect.Effect<void>;
 	deactivate: () => Effect.Effect<void>;
+	setCommand: (command: string, args: readonly string[]) => Effect.Effect<void>;
+	getCommand: () => Effect.Effect<string | null>;
 	isActive: () => Effect.Effect<boolean>;
 	isSupported: () => Effect.Effect<boolean>;
 }
@@ -25,72 +32,157 @@ export class KeepAwakeTag extends Context.Tag("KeepAwake")<
 	KeepAwakeService
 >() {}
 
-const detectPlatformCommand = (): {
-	command: string;
-	args: string[];
-} | null => {
-	switch (process.platform) {
-		case "darwin":
-			return { command: "caffeinate", args: ["-di"] };
-		case "linux":
-			return {
-				command: "systemd-inhibit",
-				args: [
-					"--what=idle",
-					"--who=conduit",
-					"--why=Keeping system awake",
-					"sleep",
-					"infinity",
-				],
-			};
-		default:
-			return null;
-	}
-};
-
-export const KeepAwakeLive = (config?: KeepAwakeConfig) =>
+export const KeepAwakeLive = (
+	config?: KeepAwakeOptions & { enabled?: boolean },
+) =>
 	Layer.scoped(
 		KeepAwakeTag,
 		Effect.gen(function* () {
-			const fiberRef = yield* Ref.make<Fiber.RuntimeFiber<void> | null>(null);
-			const activeRef = yield* Ref.make(false);
+			const executor = yield* CommandExecutor.CommandExecutor;
 			const scope = yield* Effect.scope;
+			const lock = yield* Effect.makeSemaphore(1);
+			const enabled = yield* Ref.make(false);
+			const resolved = yield* Ref.make(
+				Option.fromNullable(resolveKeepAwakeCommand(config)),
+			);
+			const current = yield* Ref.make<
+				Option.Option<{
+					scope: Scope.CloseableScope;
+					process: CommandExecutor.Process;
+				}>
+			>(Option.none());
 
-			const resolved = config?.command
-				? { command: config.command, args: config.args ?? [] }
-				: detectPlatformCommand();
-
-			const activate = Effect.gen(function* () {
-				if (!resolved) return;
-				const alreadyActive = yield* Ref.get(activeRef);
-				if (alreadyActive) return;
-
-				// Fork a long-running fiber to represent the keep-awake process.
-				// In production this would spawn the platform command via
-				// @effect/platform CommandExecutor; here we use Effect.never
-				// (blocks forever, cleanly interruptible).
-				// We use forkIn with the layer's captured scope so activate()
-				// has no Scope requirement in its own type signature.
-				const fiber = yield* Effect.never.pipe(Effect.forkIn(scope));
-				yield* Ref.set(fiberRef, fiber);
-				yield* Ref.set(activeRef, true);
+			const isActive = Ref.get(current).pipe(
+				Effect.flatMap(
+					Option.match({
+						onNone: () => Effect.succeed(false),
+						onSome: (child) => child.process.isRunning,
+					}),
+				),
+				Effect.catchAll(() => Effect.succeed(false)),
+			);
+			const stop = Effect.gen(function* () {
+				const child = yield* Ref.getAndSet(current, Option.none());
+				if (Option.isSome(child))
+					yield* Scope.close(child.value.scope, Exit.void);
+			});
+			const start = Effect.gen(function* () {
+				const command = yield* Ref.get(resolved);
+				if (Option.isNone(command)) {
+					yield* Effect.logWarning("No keep-awake command available");
+					return;
+				}
+				const { command: executable, args } = command.value;
+				const commandLine = [executable, ...args].join(" ");
+				const childScope = yield* Scope.fork(
+					scope,
+					ExecutionStrategy.sequential,
+				);
+				const result = yield* executor
+					.start(
+						Command.make(executable, ...args).pipe(
+							Command.stdin(Stream.empty),
+							Command.stdout("inherit"),
+							Command.stderr("inherit"),
+						),
+					)
+					.pipe(Scope.extend(childScope), Effect.either);
+				if (Either.isLeft(result)) {
+					yield* Scope.close(childScope, Exit.void);
+					yield* Effect.logWarning(
+						`Could not start keep-awake command: ${commandLine}`,
+						result.left,
+					);
+					return;
+				}
+				const child = result.right;
+				// Kill the group even if its leader exited or ignores SIGTERM.
+				// This finalizer runs before the executor's own release waits for exit.
+				yield* Scope.addFinalizer(
+					childScope,
+					child.kill("SIGKILL").pipe(Effect.ignore),
+				);
+				yield* Ref.set(
+					current,
+					Option.some({ scope: childScope, process: child }),
+				);
+				// Observe from the layer scope so cleanup can close the child scope
+				// without trying to interrupt the observer itself.
+				yield* child.exitCode.pipe(
+					Effect.exit,
+					Effect.flatMap((exit) => {
+						if (Exit.isInterrupted(exit)) return Effect.void;
+						return lock.withPermits(1)(
+							Effect.gen(function* () {
+								const active = yield* Ref.get(current);
+								// Intentional stop/replacement cleared this child before killing it.
+								if (Option.isNone(active) || active.value.process !== child)
+									return;
+								if (Exit.isSuccess(exit)) {
+									yield* Effect.logWarning(
+										`Keep-awake command exited unexpectedly: ${commandLine} (exit ${exit.value})`,
+									);
+								} else {
+									yield* Effect.logWarning(
+										`Keep-awake command exited unexpectedly: ${commandLine}`,
+										exit.cause,
+									);
+								}
+								yield* stop;
+							}).pipe(Effect.uninterruptible),
+						);
+					}),
+					Effect.interruptible,
+					Effect.forkIn(scope),
+				);
 			});
 
-			const deactivate = Effect.gen(function* () {
-				const fiber = yield* Ref.get(fiberRef);
-				if (fiber) yield* Fiber.interrupt(fiber);
-				yield* Ref.set(fiberRef, null);
-				yield* Ref.set(activeRef, false);
-			});
+			// Finish resource acquisition/registration even if an RPC is interrupted.
+			const activate = lock.withPermits(1)(
+				Effect.gen(function* () {
+					yield* Ref.set(enabled, true);
+					if (yield* isActive) return;
+					yield* stop;
+					yield* start;
+				}).pipe(Effect.uninterruptible),
+			);
+			const deactivate = lock.withPermits(1)(
+				Effect.gen(function* () {
+					yield* Ref.set(enabled, false);
+					yield* stop;
+				}).pipe(Effect.uninterruptible),
+			);
 
-			// Finalizer ensures cleanup when scope closes
 			yield* Effect.addFinalizer(() => deactivate);
+			if (config?.enabled) yield* activate;
 
 			return {
 				activate: () => activate,
 				deactivate: () => deactivate,
-				isActive: () => Ref.get(activeRef),
-				isSupported: () => Effect.succeed(resolved !== null),
-			};
+				setCommand: (command, args) =>
+					lock.withPermits(1)(
+						Effect.gen(function* () {
+							yield* Ref.set(
+								resolved,
+								Option.fromNullable(
+									resolveKeepAwakeCommand({ command, args: [...args] }),
+								),
+							);
+							yield* stop;
+							if (yield* Ref.get(enabled)) yield* start;
+						}).pipe(Effect.uninterruptible),
+					),
+				getCommand: () =>
+					Ref.get(resolved).pipe(
+						Effect.map(
+							Option.match({
+								onNone: () => null,
+								onSome: ({ command, args }) => [command, ...args].join(" "),
+							}),
+						),
+					),
+				isActive: () => isActive,
+				isSupported: () => Ref.get(resolved).pipe(Effect.map(Option.isSome)),
+			} satisfies KeepAwakeService;
 		}),
 	);

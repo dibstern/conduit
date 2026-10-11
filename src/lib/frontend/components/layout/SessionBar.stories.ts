@@ -122,7 +122,7 @@ const meta = {
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = true;
+		sessionViewState.barOpen = true;
 		sessionViewState.filesOpen = false;
 		sessionViewState.filesEverOpened = false;
 		sessionSkillsState.sessionId = null;
@@ -595,7 +595,7 @@ export const AutoSettledCollapsed: Story = {
 		});
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = false;
+		sessionViewState.barOpen = false;
 	},
 };
 
@@ -732,7 +732,7 @@ export const OverflowMenuOpen: Story = {
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = false;
+		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -787,7 +787,7 @@ export const Collapsed: Story = {
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = false;
+		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -831,7 +831,7 @@ export const ExpandedByChevron: Story = {
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = false;
+		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -1226,7 +1226,7 @@ export const CollapsedWithBanners: Story = {
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
-		sessionViewState.forcedOpen = false;
+		sessionViewState.barOpen = false;
 		return showIslandBanners();
 	},
 	play: async ({ canvasElement }) => {

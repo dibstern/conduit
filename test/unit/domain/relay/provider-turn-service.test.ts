@@ -916,7 +916,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{
@@ -969,7 +968,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 			});
 			const engine = makeEngine({ providerId: "deleted-instance" });
@@ -1008,7 +1006,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 			});
 			const engine = makeEngine({ providerId: "claude" });

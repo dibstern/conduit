@@ -8,13 +8,7 @@ import {
 import { type CommandContext, handleServe } from "./cli-command-handlers.js";
 
 export async function handleDefault(ctx: CommandContext): Promise<void> {
-	const { args, stderr, exit, checkDaemon } = ctx;
-
-	if (args.skipPerms && !args.pin) {
-		stderr.write("--dangerously-skip-permissions requires --pin\n");
-		exit(1);
-		return;
-	}
+	const { checkDaemon } = ctx;
 
 	// No server yet: serve in the foreground with cwd registered, like `npx vite`.
 	if (!(await checkDaemon().catch(() => false))) {

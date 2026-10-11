@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
+import { requireRelayControl } from "./shared.js";
 
 const transcriptMessageTops = new WeakMap<Page, number>();
 const rememberedSessionViews = new WeakMap<Page, string[]>();
@@ -14,11 +15,27 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "scroll transcript up",
-		match: /^I scroll the transcript up by ([0-9]+) pixels$/,
+		name: "message from another device",
+		match: /^another device sends the message (.+)$/,
 		run: async ({ world, match }) => {
+			const text = match[1] ?? "";
+			requireRelayControl(world.page).sendMessage({
+				type: "user_message",
+				sessionId: "sess-mockup-001",
+				messageId: `other-device-${Date.now()}`,
+				text,
+				createdAt: Date.now(),
+			});
+			await world.page.locator("#messages").getByText(text).waitFor();
+		},
+	},
+	{
+		name: "scroll transcript by wheel",
+		match: /^I scroll the transcript (up|down) by ([0-9]+) pixels$/,
+		run: async ({ world, match }) => {
+			const sign = match[1] === "up" ? -1 : 1;
 			await world.page.locator("#messages").hover();
-			await world.page.mouse.wheel(0, -Number(match[1]));
+			await world.page.mouse.wheel(0, sign * Number(match[2]));
 		},
 	},
 	{

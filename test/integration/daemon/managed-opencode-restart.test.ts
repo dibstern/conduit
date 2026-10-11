@@ -381,7 +381,7 @@ describe("managed OpenCode survives server replacement", () => {
 		const saved = loadDaemonConfig(join(harness.root, "config"));
 		expect(saved?.pinHash).toBe(pinHash);
 		expect(saved?.debug).toBe(true);
-		expect(saved?.dangerouslySkipPermissions).toBe(true);
+		expect(saved).not.toHaveProperty("dangerouslySkipPermissions");
 		expect(saved?.autoSettleAfterDays).toBe(17);
 		await firstUse();
 		expect(recorded().pid).toBeGreaterThan(0);

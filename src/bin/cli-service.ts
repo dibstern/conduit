@@ -374,7 +374,6 @@ export async function runServiceCommand(
 			tls: true,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		}),
 		...options.configOverrides,

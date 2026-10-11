@@ -19,7 +19,6 @@ describe("DaemonState", () => {
 			expect(state.projects).toEqual([]);
 			expect(state.instances).toEqual([]);
 			expect(state.tls).toBe(false);
-			expect(state.dangerouslySkipPermissions).toBe(false);
 		}).pipe(Effect.provide(makeDaemonStateLive())),
 	);
 

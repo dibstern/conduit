@@ -264,7 +264,6 @@ describe("serve handler", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		});
 
