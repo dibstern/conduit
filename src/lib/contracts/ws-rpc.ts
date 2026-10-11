@@ -299,6 +299,10 @@ export const HistoryMessageSchema = Schema.Struct({
 
 export const SessionDetailItemSchema = Schema.Union(
 	Schema.Struct({
+		_tag: Schema.Literal("rewind"),
+		messageId: Schema.NullOr(Schema.String),
+	}),
+	Schema.Struct({
 		_tag: Schema.Literal("transcriptMessage"),
 		message: HistoryMessageSchema,
 	}),
@@ -2134,6 +2138,24 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 	},
 ) {}
 
+export const UndoRewindResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	sessionId: NonEmptyString,
+});
+export type UndoRewindResponse = typeof UndoRewindResponseSchema.Type;
+
+export class UndoRewind extends Schema.TaggedRequest<UndoRewind>()(
+	"UndoRewind",
+	{
+		failure: WsRpcError,
+		success: UndoRewindResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+		},
+	},
+) {}
+
 /** The composer's only send. The inbox hands it off when the session is idle
  *  and queues it otherwise, or with delivery "steer" hands it into the running
  *  turn; a refused steer admits nothing. A retry with the same input id is a
@@ -2369,6 +2391,7 @@ export const WsRpcRequest = Schema.Union(
 	RejectQuestion,
 	LoadMoreHistory,
 	RewindSession,
+	UndoRewind,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,
@@ -2800,6 +2823,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RejectQuestion),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
+	Rpc.fromTaggedRequest(UndoRewind),
 	Rpc.fromTaggedRequest(SubmitInput),
 	Rpc.fromTaggedRequest(CancelInput),
 	Rpc.fromTaggedRequest(SendInputNow),

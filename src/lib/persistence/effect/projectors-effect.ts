@@ -190,6 +190,16 @@ const stampMessage = (
 			}
 			stamped.push(...owners(rows));
 		}
+		// Reconciliation can move the cut across otherwise unchanged messages.
+		// Re-query every sibling in live transcript deltas when that cut moves.
+		if (messageIds.length > 0) {
+			const rows = yield* sql<OwnedRow>`UPDATE messages SET version = ${version}
+				WHERE session_id IN (
+					SELECT id FROM sessions WHERE pending_rewind_message_id IN ${sql.in(messageIds)}
+				)
+				RETURNING session_id`;
+			stamped.push(...owners(rows));
+		}
 		// A message row that vanished under its own event went with the session
 		// that owned it, and the session projector reports that removal by name.
 		// Nothing to add here: the missing id is a message id, and the advance
@@ -314,6 +324,8 @@ export const makeSessionProjector = (): EffectProjector => ({
 export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
 	handles: [
+		"session.rewound",
+		"session.rewind_undone",
 		"message.created",
 		"message.removed",
 		"message.part.removed",
@@ -374,6 +386,14 @@ export const makeMessageProjector = (): EffectProjector => ({
 					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
 					WHERE id = ${messageId} RETURNING id`,
 				);
+			}
+			if (
+				isEventType(event, "session.rewound") ||
+				isEventType(event, "session.rewind_undone")
+			) {
+				const rows = yield* sql<{ id: string }>`
+					SELECT id FROM messages WHERE session_id = ${event.sessionId}`;
+				return ids(rows);
 			}
 			// A turn that ends without thinking.end must not leave thinking open.
 			const closeThinking = (messageId: string) =>

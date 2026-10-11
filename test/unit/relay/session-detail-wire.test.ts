@@ -453,6 +453,7 @@ describe("session detail wire", () => {
 					{
 						message: { text: "Hello world", parts: [{ text: "Hello world" }] },
 					},
+					{ _tag: "rewind", messageId: null },
 				]);
 				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
 				expect(issued).toEqual([undefined, undefined]);

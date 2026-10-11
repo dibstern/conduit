@@ -630,6 +630,10 @@ const prepareEngineTurnInput = (
 					}),
 				),
 			);
+		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			return;
+		}
 		const folders = yield* resolveSessionFolders(
 			{
 				id: resolvedInput.sessionId,

@@ -74,6 +74,8 @@ export const SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION =
 	"0047_sessions_claude_worktree_state.sql";
 export const SESSIONS_WORKSPACE_HINT_MIGRATION =
 	"0048_sessions_workspace_hint.sql";
+export const SESSIONS_PENDING_REWIND_MIGRATION =
+	"0049_sessions_pending_rewind.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

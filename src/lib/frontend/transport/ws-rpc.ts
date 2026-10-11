@@ -128,6 +128,8 @@ export {
 	type SwitchVariantResponse,
 	SyncInputDraft,
 	type TodoItem,
+	UndoRewind,
+	type UndoRewindResponse,
 	UnsnoozeSession,
 	ViewSession,
 	type ViewSessionResponse,

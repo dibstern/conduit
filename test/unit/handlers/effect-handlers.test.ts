@@ -2997,15 +2997,22 @@ describe("rewindSessionToMessage", () => {
 		const log = mockLogger();
 		const client = makeHandlerOpenCodeAPI({
 			session: {
-				messages: vi.fn(async () => [makeMessage({ id: "msg-1" })]),
 				revert: vi.fn(async () => {}),
 			},
 		});
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(LoggerTag, log),
-		);
+		const layer = makeTestHandlerLayer({
+			api: client,
+			log,
+			seedEvents: [
+				canonicalEvent("session.created", "session-1", {
+					sessionId: "session-1", title: "Rewind", provider: "opencode",
+				}, { provider: "opencode" }),
+				canonicalEvent("message.created", "session-1", {
+					sessionId: "session-1", messageId: "msg-1", role: "user",
+				}, { provider: "opencode" }),
+			],
+		});
 
 		return rewindSessionToMessage({
 			clientId: "client-1",

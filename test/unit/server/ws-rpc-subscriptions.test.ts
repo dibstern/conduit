@@ -373,6 +373,9 @@ describe("subscription RPC handlers", () => {
 												}),
 											},
 								),
+								...(member === "SubscribeSessionDetail"
+									? [{ _tag: "rewind", messageId: null }]
+									: []),
 							],
 						});
 						expect(yield* Queue.take(envelopes)).toEqual({
@@ -425,6 +428,13 @@ describe("subscription RPC handlers", () => {
 						expect(yield* Queue.take(wire)).toMatchObject({
 							_tag: "snapshot",
 							sequence: cursor,
+							rows: [
+								{
+									_tag: "transcriptMessage",
+									message: { id: "message-1", text: "Hello" },
+								},
+								{ _tag: "rewind", messageId: null },
+							],
 						});
 						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
 						expect(yield* Queue.take(wire)).toMatchObject({

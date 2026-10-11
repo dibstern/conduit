@@ -42,7 +42,7 @@ const CLAUDE_PRODUCED_TYPES = [
  */
 const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"message.snapshot", // OpenCode REST reconciliation only
-	"message.removed", // OpenCode SSE rewind/removal only
+	"message.removed", // OpenCode SSE or relay-owned rewind commits; not SDK translation
 	"message.part.removed", // OpenCode SSE part removal only
 	"file.attached", // OpenCode REST/SSE file part transport; Claude attachments use a different provider path
 	"tool.input_updated", // Historical event — no longer emitted after tool input buffering changed (buffered tool.started replaces it)
@@ -50,6 +50,9 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.renamed", // Title changes handled by auto-rename in prompt.ts
 	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
 	"session.forked", // Fork lineage is recorded by the relay, not the Claude event translator
+	"session.rewound", // Relay-owned pending transcript cut, with no Claude SDK mutation
+	"session.rewind_undone", // Relay-owned restoration of a pending cut
+	"session.rewind_committed", // Relay-owned send admission commits the cut
 	"session.provider_changed", // Provider switching is a relay-level concept
 	"session.provider_cleanup_failed", // Relay-owned cleanup diagnostic
 	"session.handoff_delivered", // Server-owned handoff completion receipt; adapters do not emit it

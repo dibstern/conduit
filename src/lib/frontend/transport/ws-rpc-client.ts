@@ -65,6 +65,7 @@ import type {
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
+	UndoRewindResponse,
 	ViewSessionResponse,
 } from "./ws-rpc.js";
 
@@ -494,6 +495,11 @@ export interface RewindSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly messageId: string;
+}
+
+export interface UndoRewindRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
 }
 
 export interface SendMessageRpcInput {
@@ -1082,6 +1088,9 @@ const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 const callRewindSession = (input: RewindSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RewindSession(input));
 
+const callUndoRewind = (input: UndoRewindRpcInput) =>
+	callControl(input.projectSlug, (client) => client.UndoRewind(input));
+
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.input.submit({
@@ -1640,6 +1649,12 @@ export async function rewindSessionRpc(
 	input: RewindSessionRpcInput,
 ): Promise<RewindSessionResponse> {
 	return await runTransportEffect(callRewindSession(input));
+}
+
+export async function undoRewindRpc(
+	input: UndoRewindRpcInput,
+): Promise<UndoRewindResponse> {
+	return await runTransportEffect(callUndoRewind(input));
 }
 
 export async function sendMessageRpc(

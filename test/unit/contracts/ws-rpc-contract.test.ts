@@ -596,6 +596,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 						messageId: request.messageId,
 					}),
+				UndoRewind: (request) =>
+					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
 				"input.submit": (request) =>
 					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
 				"input.cancel": () => Effect.succeed({ ok: true as const }),

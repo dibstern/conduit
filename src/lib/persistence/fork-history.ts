@@ -26,8 +26,23 @@ const messageIdOf = (event: StoredEvent | CanonicalEvent) =>
 
 export function copyForkHistory(
 	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
-	input: { readonly newSessionId: string; readonly upToMessageId?: string },
+	input: {
+		readonly newSessionId: string;
+		readonly upToMessageId?: string;
+		readonly retainedMessageIds?: ReadonlySet<string>;
+	},
 ): { events: CanonicalEvent[]; forkMessageId?: string } | undefined {
+	const removedMessageIds = new Set(
+		parentEvents.flatMap((event) =>
+			event.type === "message.removed" ? [event.data.messageId] : [],
+		),
+	);
+	if (
+		input.upToMessageId !== undefined &&
+		(removedMessageIds.has(input.upToMessageId) ||
+			input.retainedMessageIds?.has(input.upToMessageId) === false)
+	)
+		return undefined;
 	let end = parentEvents.length - 1;
 	// A prompt queued mid-turn is created before the target turn ends, so the
 	// cut is by message, not only by position: keep messages created no later
@@ -64,7 +79,12 @@ export function copyForkHistory(
 	for (const event of parentEvents.slice(0, end + 1)) {
 		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
 		const messageId = messageIdOf(event);
-		if (messageId !== undefined && keptMessageIds?.has(messageId) === false)
+		if (
+			messageId !== undefined &&
+			(removedMessageIds.has(messageId) ||
+				input.retainedMessageIds?.has(messageId) === false ||
+				keptMessageIds?.has(messageId) === false)
+		)
 			continue;
 		const data: Record<string, unknown> = { ...event.data };
 		for (const field of ["messageId", "partId", "callId", "turnId"] as const) {

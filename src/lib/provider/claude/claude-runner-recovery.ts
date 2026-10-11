@@ -123,6 +123,9 @@ export const recoverClaudeRunnerCommands = (
 											input.continuation?.cutOffMessageId ?? input.inputId,
 										continuation: input.continuation !== undefined,
 										nativeResumeFallback: input.nativeResumeFallback,
+										rewind: input.rewind,
+										sessionForkSdk: deps.sessionForkSdk,
+										workspaceRoot: input.workspaceRoot,
 										modelContextWindow:
 											input.contextWindow === "1m" ? 1000000 : undefined,
 									},
@@ -151,7 +154,8 @@ export const recoverClaudeRunnerCommands = (
 													configDir: prepared.configDir,
 													resumeSessionId: prepared.resumeSessionId,
 													startFreshNativeSession:
-														prepared.resumeSessionId === undefined,
+														prepared.resumeSessionId === undefined ||
+														input.rewind !== undefined,
 													nativeResumeFallback,
 													nativeThread: prepared.nativeThread,
 													...(prepared.handoff

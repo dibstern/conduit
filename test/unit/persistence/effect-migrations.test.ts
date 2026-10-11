@@ -83,6 +83,7 @@ const expectedNames = [
 	"messages_completed_at",
 	"sessions_claude_worktree_state",
 	"sessions_workspace_hint",
+	"sessions_pending_rewind",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -155,6 +156,7 @@ describe("Effect migration lineage", () => {
 					...Array.from({ length: 45 }, (_, index) => index + 1),
 					48,
 					49,
+					50,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -233,8 +235,30 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
 	);
 
-	it("registers the contiguous production chain from 1 through 49", () => {
-		expect(migrationEntries).toHaveLength(49);
+	it.effect(
+		"accepts a pending rewind point during baseline schema validation",
+		() =>
+			Effect.gen(function* () {
+				// An existing pending point must be recognized during adoption, and
+				// rewind must not add separate visibility or version columns.
+				yield* makeEffectSqlMigrator(prefix(24));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`ALTER TABLE sessions ADD COLUMN pending_rewind_message_id TEXT`;
+				yield* effectMigrationEntries["0001_create_event_store_tables"];
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter(
+						(column) => column.name === "pending_rewind_message_id",
+					),
+				).toHaveLength(1);
+				yield* effectMigrationEntries["0001_create_event_store_tables"];
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it("registers the contiguous production chain from 1 through 50", () => {
+		expect(migrationEntries).toHaveLength(50);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -243,7 +267,7 @@ describe("Effect migration lineage", () => {
 	});
 
 	it.effect(
-		"upgrades a database with messages migrations 1 through 47 to 49",
+		"upgrades a database with messages migrations 1 through 47 to 50",
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(prefix(47));
@@ -264,6 +288,7 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
 				]);
 				const after = yield* sql<{ migration_id: number; name: string }>`
 					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
@@ -308,6 +333,7 @@ describe("Effect migration lineage", () => {
 					VALUES ('kept-hint', 'claude', 'Preserved', 'idle', 1, 1)`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -357,6 +383,7 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -704,10 +731,18 @@ describe("Effect migration lineage", () => {
 						"claude_worktree_state",
 						"workspace_hint",
 						"workspace_hint_sequence",
+						"pending_rewind_message_id",
 					]),
 				);
 				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
 					expect(columns.map((row) => row.name)).not.toContain(retired);
+				expect(columns.map((row) => row.name)).not.toContain("rewind_version");
+				const messageColumns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(messages)`;
+				expect(messageColumns.map((row) => row.name)).not.toContain(
+					"rewind_hidden",
+				);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
@@ -928,6 +963,7 @@ describe("Effect migration lineage", () => {
 				[47, "messages_completed_at"],
 				[48, "sessions_claude_worktree_state"],
 				[49, "sessions_workspace_hint"],
+				[50, "sessions_pending_rewind"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1014,6 +1050,7 @@ describe("Effect migration lineage", () => {
 					[47, "messages_completed_at"],
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
 				]);
 				const rows = yield* sql<{
 					id: string;

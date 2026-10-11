@@ -169,6 +169,45 @@ export function resolveForkUpToUuid(
 	return messages[end]?.uuid;
 }
 
+/** Rewind excludes its target, including cuts inside an assistant turn. */
+export function resolveRewindUpToUuid(
+	messages: readonly SessionMessage[],
+	messageId: string,
+	targetMessageId?: string,
+): string | null | undefined {
+	const matches = (entry: SessionMessage, id: string): boolean => {
+		const message = entry.message;
+		return (
+			entry.uuid === id ||
+			(message !== null &&
+				typeof message === "object" &&
+				"id" in message &&
+				message.id === id)
+		);
+	};
+	if (targetMessageId === undefined)
+		return (
+			resolveForkUpToUuid(messages, messageId) ??
+			messages.find((entry) => matches(entry, messageId))?.uuid
+		);
+	const targetIndex = messages.findIndex((entry) =>
+		matches(entry, targetMessageId),
+	);
+	if (
+		targetIndex < 0 ||
+		!messages.slice(0, targetIndex).some((entry) => matches(entry, messageId))
+	)
+		return undefined;
+	const target = messages[targetIndex];
+	// Imported SDK entries retain the native chain link. File-order adjacency
+	// can refer to an abandoned branch after an earlier in-place rewind.
+	if (target && "parentUuid" in target) {
+		if (typeof target.parentUuid === "string") return target.parentUuid;
+		if (target.parentUuid === null) return undefined;
+	}
+	return messages[targetIndex - 1]?.uuid ?? null;
+}
+
 export async function forkClaudeTranscript(
 	input: {
 		readonly parentSdkId: string;

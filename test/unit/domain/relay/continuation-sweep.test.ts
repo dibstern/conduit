@@ -18,6 +18,8 @@
 // queued turns overtake the scheduled resume or each other; Edit/Remove bypass
 // the hold, a busy session cannot schedule its queued input, a cancellation
 // reschedules itself, or releasing the hold overrides a later Stop.
+// A pending rewind refuses a future schedule or quota-reset inbox admission;
+// permitting either to schedule must never permit an immediate continuation.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -258,6 +260,7 @@ const resetInboxFixture = Effect.gen(function* () {
 		store,
 		read,
 		sql,
+		turns,
 		dispatches,
 		next: Queue.take(sent),
 		sweep: continuation
@@ -317,6 +320,81 @@ const withResetInbox = <A, E, R>(
 			),
 		),
 	);
+
+for (const admission of ["user", "quota-reset"] as const) {
+	effectIt.scoped(
+		`pending rewind allows ${admission} scheduling and blocks continuation dispatch`,
+		() =>
+			withResetInbox(
+				() =>
+					usageReading("claude", {
+						status: "limited",
+						windows: [
+							{
+								kind: "five_hour",
+								utilization: 100,
+								resetsAt: new Date(10_000).toISOString(),
+							},
+						],
+					}),
+				(fixture) =>
+					Effect.gen(function* () {
+						yield* TestClock.setTime(1_000);
+						yield* fixture.commit([
+							canonicalEvent("message.created", "s1", {
+								sessionId: "s1",
+								messageId: "cut",
+								role: "user",
+							}),
+							canonicalEvent("session.rewound", "s1", { messageId: "cut" }),
+						]);
+						const scheduled = yield* (
+							admission === "user"
+								? fixture.continuation
+										.requestContinuation("s1", {
+											instanceId: "claude",
+											expectedInstanceId: "claude",
+											reason: "user",
+											at: 10,
+										})
+										.pipe(
+											Effect.provideService(
+												ProviderTurnServiceTag,
+												fixture.turns,
+											),
+										)
+								: fixture.submit("q1")
+						).pipe(Effect.either);
+						expect(scheduled).toMatchObject({ _tag: "Right" });
+						expect(
+							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
+								?.scheduledAt,
+						).toBe(10);
+						expect(
+							(yield* fixture.read.getSession("s1"))?.pending_rewind_message_id,
+						).toBe("cut");
+						expect(fixture.dispatches).toEqual([]);
+						const before = yield* fixture.store.readAllBySession("s1");
+						const immediate = yield* fixture.continuation
+							.requestContinuation("s1", {
+								instanceId: "claude",
+								expectedInstanceId: "claude",
+								reason: "user",
+							})
+							.pipe(
+								Effect.provideService(ProviderTurnServiceTag, fixture.turns),
+								Effect.either,
+							);
+						expect(immediate).toMatchObject({
+							_tag: "Left",
+							left: { _tag: "SessionBusy" },
+						});
+						expect(yield* fixture.store.readAllBySession("s1")).toEqual(before);
+						expect(fixture.dispatches).toEqual([]);
+					}),
+			),
+	);
+}
 
 for (const schedule of [
 	"none",

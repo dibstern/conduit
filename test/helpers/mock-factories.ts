@@ -1135,6 +1135,10 @@ export const PassThroughSessionInbox = Layer.effect(
 		const turns = yield* ProviderTurnServiceTag;
 		const overrides = yield* OverridesStateTag;
 		return {
+			withSession: <A, E, R>(
+				_sessionId: string,
+				effect: Effect.Effect<A, E, R>,
+			) => effect,
 			submit: ({ inputId, request, ...input }) =>
 				turns
 					.sendTurn({

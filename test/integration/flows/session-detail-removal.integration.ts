@@ -61,7 +61,7 @@ describe("session detail removal over WebSocket", () => {
 											sessionId,
 											resumeFromSequence: cursor.value,
 										}),
-										2,
+										3,
 									),
 								);
 							}).pipe(
@@ -80,6 +80,11 @@ describe("session detail removal over WebSocket", () => {
 						{
 							_tag: "remove",
 							id: "rewound-message",
+							sequence: removal.version,
+						},
+						{
+							_tag: "upsert",
+							item: { _tag: "rewind", messageId: null },
 							sequence: removal.version,
 						},
 						{ _tag: "synchronized" },

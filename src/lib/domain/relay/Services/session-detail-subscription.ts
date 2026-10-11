@@ -137,6 +137,22 @@ export const subscribeSessionDetail = (options: {
 							// The inbox state moves with the session row. A base read always
 							// carries it; a window carries it when the row moved inside it.
 							const inbox = yield* readQuery.readInboxState(options.sessionId);
+							const session = yield* readQuery.getSession(options.sessionId);
+							const rewindRows =
+								session &&
+								(range === undefined ||
+									(session.version > (range.after ?? 0) &&
+										session.version <= through))
+									? [
+											{
+												item: {
+													_tag: "rewind" as const,
+													messageId: session.pending_rewind_message_id ?? null,
+												} satisfies SessionDetailItem,
+												version: session.version,
+											},
+										]
+									: [];
 							const inboxRows =
 								inbox &&
 								(range === undefined ||
@@ -181,6 +197,7 @@ export const subscribeSessionDetail = (options: {
 									})),
 									...inputs,
 									...inboxRows,
+									...rewindRows,
 								],
 								version: result.version,
 								...(range === undefined

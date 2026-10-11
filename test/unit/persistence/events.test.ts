@@ -48,6 +48,9 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("session.unsnoozed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.deleted");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.forked");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.rewound");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.rewind_undone");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.rewind_committed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.status");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.compaction");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_changed");

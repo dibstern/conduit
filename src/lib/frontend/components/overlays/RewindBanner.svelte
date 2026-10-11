@@ -1,42 +1,45 @@
 <!--
-  RewindBanner — Rewind mode banner + confirmation dialog.
-  Shows a top banner when rewind mode is active, and a confirmation modal
-  when a message UUID is selected. Supports three rewind modes: both,
-  conversation only, files only.
+  Rewind selection and confirmation, or the pending rewind notice at the composer.
 -->
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import Radio from "../ui/Radio.svelte";
-  import Dialog from "../ui/Dialog.svelte";
+	import Dialog from "../ui/Dialog.svelte";
 	import {
 		uiState,
 		exitRewindMode,
 		selectRewindMessage,
 		showToast,
 	} from "../../stores/ui.svelte.js";
-	import {
-		chatState,
-		clearMessages,
-		getOrCreateSessionSlot,
-		setMessages,
-		seedRegistryFromMessages,
-	} from "../../stores/chat.svelte.js";
+	import { chatState, currentChat } from "../../stores/chat.svelte.js";
+	import { getSessionInstanceId } from "../../stores/discovery.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { rewindSessionRpc } from "../../transport/ws-rpc-client.js";
+	import {
+		rewindSessionRpc,
+		undoRewindRpc,
+	} from "../../transport/ws-rpc-client.js";
 	import Surface from "../ui/Surface.svelte";
 
 	let {
+		pendingOnly = false,
 		onRewind,
 	}: {
+		pendingOnly?: boolean;
 		onRewind?: (uuid: string, mode: string) => void;
 	} = $props();
 
-	let selectedMode: string = $state("both");
+	let undoing = $state(false);
 
-	const showBanner = $derived(uiState.rewindActive);
+	const pendingMessageId = $derived(
+		currentChat().transcript?.pendingRewindMessageId ?? null,
+	);
+	const isClaude = $derived(
+		!pendingOnly && sessionState.currentId !== null &&
+		getSessionInstanceId(sessionState.currentId) === "claude",
+	);
+	const showBanner = $derived(!pendingOnly && uiState.rewindActive);
 	const showModal = $derived(
-		uiState.rewindActive && uiState.rewindSelectedUuid !== null,
+		showBanner && uiState.rewindSelectedUuid !== null,
 	);
 
 	function handleExit(): void {
@@ -45,7 +48,6 @@
 
 	function handleCancel(): void {
 		selectRewindMessage(null);
-		selectedMode = "both";
 	}
 
 	function handleConfirm(): void {
@@ -53,12 +55,14 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!uuid || !sessionId || !projectSlug) return;
-		const mode = selectedMode;
+		const mode = isClaude ? "conversation" : "both";
 		const message = chatState.messages.find((message) => message.uuid === uuid);
 		if (!message || !("messageId" in message) || !message.messageId) {
 			exitRewindMode();
-			selectedMode = "both";
-			showToast("This message cannot be rewound to yet. Its provider ID is not available.", { variant: "warn" });
+			showToast(
+				"This message cannot be rewound to yet. Its provider ID is not available.",
+				{ variant: "warn" },
+			);
 			return;
 		}
 
@@ -75,27 +79,29 @@
 				) {
 					return;
 				}
-				const targetIndex = chatState.messages.findIndex(
-					(message) => message.uuid === uuid,
-				);
-				if (targetIndex < 0) {
-					showToast("The transcript changed while rewinding. It has been kept; reload the session to sync with the provider.", { variant: "warn" });
-					return;
-				}
-				const retained = chatState.messages.slice(0, targetIndex);
-				clearMessages();
-				const { activity, messages } = getOrCreateSessionSlot(result.sessionId);
-				setMessages(messages, retained);
-				seedRegistryFromMessages(activity, messages, retained);
-				showToast(`Rewound ${mode === "both" ? "conversation & files" : mode}`);
 				onRewind?.(uuid, mode);
 			})
 			.catch(() => {
-				showToast("Could not rewind the conversation. The transcript has been kept.", { variant: "warn" });
+				if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
+					showToast("Could not rewind the conversation.", { variant: "warn" });
 			});
 
 		exitRewindMode();
-		selectedMode = "both";
+	}
+
+	async function handleUndo(): Promise<void> {
+		const sessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
+		undoing = true;
+		try {
+			await undoRewindRpc({ projectSlug, sessionId });
+		} catch {
+			if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
+				showToast("Could not undo the rewind.", { variant: "warn" });
+		} finally {
+			undoing = false;
+		}
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
@@ -126,7 +132,26 @@
 	</div>
 {/if}
 
-<Dialog open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
+{#if pendingOnly && pendingMessageId}
+	<div
+		class="rewind-pending flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-accent-bg px-4 py-2.5 text-sm text-accent"
+		data-testid="rewind-pending"
+	>
+		<span role="status">Rewound. Sending your next message makes it permanent.</span>
+		<Button
+			variant="ghost-accent"
+			size="sm"
+			loading={undoing}
+			onclick={handleUndo}
+			data-testid="undo-rewind"
+		>
+			Undo
+		</Button>
+	</div>
+{/if}
+
+{#if !pendingOnly}
+	<Dialog open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
 		<Surface
 			variant="raised"
 			radius="lg"
@@ -138,45 +163,12 @@
 				Rewind to this point?
 			</h3>
 
-			<!-- Radio options -->
-			<div class="flex flex-col gap-2.5 mb-5">
-				<label
-					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
-				>
-					<Radio
-						name="rewind-mode"
-						value="both"
-						checked={selectedMode === "both"}
-						onchange={() => (selectedMode = "both")}
-					/>
-					<span>Both</span>
-					<span class="text-xs text-text-muted"
-						>(conversation + files)</span
-					>
-				</label>
-				<label
-					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
-				>
-					<Radio
-						name="rewind-mode"
-						value="conversation"
-						checked={selectedMode === "conversation"}
-						onchange={() => (selectedMode = "conversation")}
-					/>
-					<span>Conversation only</span>
-				</label>
-				<label
-					class="flex items-center gap-2.5 text-sm text-text cursor-pointer"
-				>
-					<Radio
-						name="rewind-mode"
-						value="files"
-						checked={selectedMode === "files"}
-						onchange={() => (selectedMode = "files")}
-					/>
-					<span>Files only</span>
-				</label>
-			</div>
+			<p class="mb-3 text-sm text-text-secondary">
+				This message and everything after it will be removed. You can undo until you send your next message.
+			</p>
+			<p class="mb-5 text-sm text-text-secondary">
+				{isClaude ? "Files are not restored." : "Files are restored to this point."}
+			</p>
 
 			<!-- Action buttons -->
 			<div class="flex gap-2 justify-end">
@@ -199,4 +191,5 @@
 				</Button>
 			</div>
 		</Surface>
-</Dialog>
+	</Dialog>
+{/if}

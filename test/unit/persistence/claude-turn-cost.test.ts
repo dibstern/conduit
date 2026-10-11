@@ -494,6 +494,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[47, "messages_completed_at"],
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),

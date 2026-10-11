@@ -243,6 +243,9 @@ export function applyTranscriptEnvelope(
 				pending: envelope.rows
 					.flatMap((item) => (item._tag === "pendingInput" ? [item.input] : []))
 					.sort(pendingOrder),
+				pendingRewindMessageId:
+					envelope.rows.find((item) => item._tag === "rewind")?.messageId ??
+					null,
 				paused: inbox?.paused ?? false,
 				steer: inbox?.steer,
 				hwm: envelope.sequence,
@@ -265,6 +268,12 @@ export function applyTranscriptEnvelope(
 			}
 			if (envelope.item._tag === "inbox")
 				return { ...entry, hwm, ...envelope.item.inbox };
+			if (envelope.item._tag === "rewind")
+				return {
+					...entry,
+					hwm,
+					pendingRewindMessageId: envelope.item.messageId,
+				};
 			if (envelope.item._tag !== "transcriptMessage") return { ...entry, hwm };
 			const row = toHistoryMessage(envelope.item.message);
 			const held = entry.rows.some((old) => old.id === row.id);
@@ -501,7 +510,14 @@ function transcriptView(): (
 										sessionId,
 										...(slot.messages.transcript?.hwm == null
 											? {}
-											: { resumeFromSequence: slot.messages.transcript.hwm }),
+											: // A version can have several deltas; reconnect may have
+												// interrupted delivery after only the first one.
+												{
+													resumeFromSequence: Math.max(
+														0,
+														slot.messages.transcript.hwm - 1,
+													),
+												}),
 									}),
 								),
 								(status) => {

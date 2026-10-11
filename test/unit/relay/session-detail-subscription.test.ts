@@ -201,6 +201,27 @@ const readModelVersion = Effect.gen(function* () {
 	return rows[0]?.value ?? 0;
 });
 
+// These tests count and order transcript messages. Ignore only the rewind
+// metadata row so it cannot consume a message pull or the reconnect boundary;
+// the pending-state tests cover its delivery, and the wire tests retain it.
+const subscribeMessages = (
+	options: Parameters<typeof subscribeSessionDetail>[0],
+) =>
+	subscribeSessionDetail(options).pipe(
+		Stream.filter(
+			(envelope) =>
+				envelope._tag !== "upsert" || envelope.item._tag !== "rewind",
+		),
+		Stream.map((envelope) =>
+			envelope._tag === "snapshot"
+				? {
+						...envelope,
+						rows: envelope.rows.filter((row) => row._tag !== "rewind"),
+					}
+				: envelope,
+		),
+	);
+
 // Drain the subscription into a queue so the test pulls envelopes one at a time.
 // The opening envelopes prove the advance subscription is already acquired — the
 // orchestrator acquires it before reading the base — so a commit landing after
@@ -211,9 +232,8 @@ const openDetail = (options: {
 }) =>
 	Effect.gen(function* () {
 		const q = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
-		const fiber = yield* Stream.runForEach(
-			subscribeSessionDetail(options),
-			(env) => Queue.offer(q, env),
+		const fiber = yield* Stream.runForEach(subscribeMessages(options), (env) =>
+			Queue.offer(q, env),
 		).pipe(Effect.forkScoped);
 		return { q, fiber };
 	});
@@ -602,7 +622,7 @@ describe("subscribeSessionDetail", () => {
 					const output = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 					const client = resumeStream((resumeFromSequence) => {
 						requests.push(resumeFromSequence);
-						const source = subscribeSessionDetail({
+						const source = subscribeMessages({
 							sessionId: SID,
 							...(resumeFromSequence === undefined
 								? {}
@@ -759,7 +779,7 @@ describe("subscribeSessionDetail", () => {
 			const scope = yield* Scope.make();
 			const q = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 			const fiber = yield* Stream.runForEach(
-				subscribeSessionDetail({ sessionId: SID }),
+				subscribeMessages({ sessionId: SID }),
 				(env) => Queue.offer(q, env),
 			).pipe(Effect.forkIn(scope));
 

@@ -18,7 +18,17 @@ import type {
 } from "../../persistence/read-model-types.js";
 import { toolOutputText } from "../../persistence/session-history-adapter.js";
 import { isClaudeResumeFailure } from "../event-sink-errors.js";
-import type { ProviderNativeSession, TurnResult } from "../types.js";
+import type {
+	ProviderNativeSession,
+	SendTurnInput,
+	TurnResult,
+} from "../types.js";
+import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
+import {
+	type ClaudeSessionForkSdk,
+	defaultClaudeSessionForkSdk,
+	resolveRewindUpToUuid,
+} from "./claude-session-fork.js";
 import { THREAD_READ_QUALIFIED_NAME } from "./types.js";
 
 export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
@@ -38,6 +48,9 @@ interface PrepareTurnOptions {
 	readonly userMessageId?: string | undefined;
 	readonly continuation?: boolean | undefined;
 	readonly nativeResumeFallback?: boolean | undefined;
+	readonly rewind?: SendTurnInput["rewind"];
+	readonly sessionForkSdk?: ClaudeSessionForkSdk | undefined;
+	readonly workspaceRoot?: string | undefined;
 }
 
 export interface PreparedTurn {
@@ -150,6 +163,8 @@ function planTurn(input: {
 			nativeThread?.configDir,
 		prompt: `${note}${userText}`,
 	};
+	if (options.rewind?.resumeSessionAt === null)
+		return { ...base, prompt: userText };
 	// No recorded agent means a thread from before agents were recorded: resume it.
 	const matchingReceipt =
 		nativeThread &&
@@ -348,9 +363,73 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 		};
 		return (sessionId: string, instanceId: string, userText?: string) =>
 			Effect.gen(function* () {
-				const nativeThread = options.nativeResumeFallback
+				const session = yield* read.getSession(sessionId);
+				const recordedThread = options.nativeResumeFallback
 					? undefined
 					: yield* state.nativeThread(sessionId, instanceId);
+				const newerRewinds =
+					options.rewind !== undefined || options.nativeResumeFallback
+						? []
+						: yield* sql<{ sequence: number }>`SELECT sequence FROM events
+							WHERE session_id = ${sessionId} AND type = 'session.rewind_committed'
+								AND sequence > ${recordedThread?.deliveredThrough ?? 0}
+							LIMIT 1`;
+				let needsCanonicalHandoff = false;
+				const rewindPoint = options.rewind?.resumeSessionAt;
+				if (rewindPoint !== undefined && rewindPoint !== null) {
+					const liveSession =
+						options.liveSession?.instanceId === instanceId
+							? options.liveSession
+							: undefined;
+					const nativeId =
+						recordedThread?.resumeSessionId ?? liveSession?.resumeSessionId;
+					const workspaceRoot = options.workspaceRoot;
+					if (nativeId === undefined || workspaceRoot === undefined) {
+						needsCanonicalHandoff = true;
+					} else {
+						const testModule = yield* loadClaudeSdkTestModule.pipe(
+							Effect.catchAll(() => Effect.succeed(undefined)),
+						);
+						const sdk =
+							testModule?.claudeSdk.fork ??
+							options.sessionForkSdk ??
+							defaultClaudeSessionForkSdk;
+						const configDir =
+							options.configDir ??
+							recordedThread?.configDir ??
+							liveSession?.configDir;
+						const transcript = yield* Effect.tryPromise(() =>
+							sdk.readTranscript(nativeId, {
+								dir: workspaceRoot,
+								...(configDir !== undefined ? { configDir } : {}),
+							}),
+						).pipe(Effect.catchAll(() => Effect.succeed([])));
+						needsCanonicalHandoff =
+							resolveRewindUpToUuid(
+								transcript,
+								rewindPoint,
+								options.rewind?.targetMessageId,
+							) === undefined;
+					}
+				}
+				// A failed cut delivery, or another account's older receipt, cannot
+				// resume the discarded chain. Rebuild from Conduit's kept transcript.
+				// Forks also remap user ids: when the native cut cannot be identified,
+				// SQLite's kept messages are the authoritative fresh-session handoff.
+				const invalidated = newerRewinds.length > 0 || needsCanonicalHandoff;
+				const nativeThread = invalidated ? undefined : recordedThread;
+				const turnOptions = invalidated
+					? {
+							...budgetOptions,
+							configDir:
+								options.configDir ??
+								recordedThread?.configDir ??
+								(options.liveSession?.instanceId === instanceId
+									? options.liveSession.configDir
+									: undefined),
+							liveSession: undefined,
+						}
+					: budgetOptions;
 				const providerState = nativeThread
 					? yield* state.getState(sessionId)
 					: {};
@@ -363,7 +442,6 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
 								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
-				const session = yield* read.getSession(sessionId);
 				const input = {
 					projectId: state.projectId,
 					sessionId,
@@ -378,7 +456,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 									session.limit_recovery,
 								),
 					userText: userText ?? "",
-					options: budgetOptions,
+					options: turnOptions,
 				};
 				let plan = planTurn(input);
 				if ("_tag" in plan && plan._tag === "ReadHistory") {
@@ -428,7 +506,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 							? {
 									userText: historicalMessageText(cutOffMessage),
 									options: {
-										...budgetOptions,
+										...turnOptions,
 										userMessageId: cutOffMessage.id,
 									},
 								}
@@ -474,6 +552,7 @@ export const sendPreparedClaudeTurn = <
 		);
 		const failure = result._tag === "Left" ? result.left : result.right?.error;
 		if (
+			input.options.rewind !== undefined ||
 			!prepared.resumeSessionId ||
 			!prepared.handoff ||
 			(result._tag === "Right" && !result.right?.nativeResumeRejected) ||

@@ -8,6 +8,10 @@ import {
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	applyTranscriptEnvelope,
+	deriveTranscriptMessages,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 
 interface RewindSessionInput {
@@ -29,10 +33,13 @@ const emptyComponent = vi.hoisted(
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
+	DRAFT_PROJECT_PARAM: "project",
 	getCurrentSlug: () => "project-a",
+	getCurrentSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rewindSessionRpc: (input: RewindSessionInput) => rewindSessionRpcSpy(input),
+	undoRewindRpc: vi.fn(),
 }));
 
 describe("RewindBanner", () => {
@@ -43,6 +50,7 @@ describe("RewindBanner", () => {
 		uiState.rewindActive = true;
 		uiState.toasts = [];
 		uiState.rewindSelectedUuid = "message-1";
+		getOrCreateSessionMessages("session-1").transcript = null;
 		getOrCreateSessionMessages("session-1").messages = [
 			{
 				type: "user",
@@ -59,6 +67,76 @@ describe("RewindBanner", () => {
 		sessionState.currentId = null;
 		uiState.rewindActive = false;
 		uiState.rewindSelectedUuid = null;
+	});
+
+	it("explains permanent removal and the undo deadline for an event-seeded rewind target", () => {
+		const slot = getOrCreateSessionMessages("session-1");
+		slot.transcript = applyTranscriptEnvelope(
+			{
+				project: "project-a",
+				rows: [],
+				pending: [],
+				hwm: null,
+				hasMore: false,
+				status: { _tag: "live" },
+			},
+			{
+				_tag: "snapshot",
+				sequence: 1,
+				rows: [
+					{
+						_tag: "transcriptMessage",
+						message: {
+							id: "provider-1",
+							role: "user",
+							parts: [{ id: "part-1", type: "text", text: "Remove this" }],
+						},
+					},
+				],
+			},
+		);
+		slot.messages = deriveTranscriptMessages(slot.transcript, []);
+		uiState.rewindSelectedUuid = slot.messages[0]?.uuid ?? null;
+		const { getByText } = render(RewindBanner);
+
+		expect(
+			getByText(
+				"This message and everything after it will be removed. You can undo until you send your next message.",
+			),
+		).toBeTruthy();
+		expect(getByText("Files are restored to this point.")).toBeTruthy();
+	});
+
+	it("explains that the next send makes an event-delivered pending rewind permanent", async () => {
+		const slot = getOrCreateSessionMessages("session-1");
+		slot.transcript = applyTranscriptEnvelope(
+			{
+				project: "project-a",
+				rows: [],
+				pending: [],
+				hwm: null,
+				hasMore: false,
+				status: { _tag: "live" },
+			},
+			{ _tag: "snapshot", sequence: 1, rows: [] },
+		);
+		const { getByRole, queryByRole } = render(RewindBanner, {
+			pendingOnly: true,
+		});
+		expect(queryByRole("status")).toBeNull();
+
+		slot.transcript = applyTranscriptEnvelope(slot.transcript, {
+			_tag: "upsert",
+			sequence: 2,
+			item: { _tag: "rewind", messageId: "provider-1" },
+		});
+
+		await waitFor(() =>
+			expect(getByRole("status").textContent).toBe(
+				"Rewound. Sending your next message makes it permanent.",
+			),
+		);
+		expect(getByRole("button", { name: "Undo" })).toBeTruthy();
 	});
 
 	it("confirms rewind through RPC for the active session", async () => {
@@ -88,17 +166,19 @@ describe("RewindBanner", () => {
 				finalized: true,
 			},
 		];
-		const { getByRole } = render(RewindBanner);
+		const onRewind = vi.fn();
+		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		expect(rewindSessionRpcSpy).toHaveBeenCalledWith({
 			projectSlug: "project-a",
 			sessionId: "session-1",
 			messageId: "provider-assistant-1",
 		});
-		await waitFor(() => expect(chatState.messages).toEqual([]));
-		expect(uiState.toasts.map((toast) => toast.title)).toEqual([
-			"Rewound conversation & files",
-		]);
+		await waitFor(() =>
+			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
+		);
+		expect(chatState.messages).toHaveLength(1);
+		expect(uiState.toasts).toEqual([]);
 	});
 
 	it("keeps the transcript and reports a message that has no provider id yet", async () => {
@@ -146,7 +226,8 @@ describe("RewindBanner", () => {
 					resolveReply = resolve;
 				}),
 		);
-		const { getByRole } = render(RewindBanner);
+		const onRewind = vi.fn();
+		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		getOrCreateSessionMessages("session-1").messages = [
 			{
@@ -158,13 +239,9 @@ describe("RewindBanner", () => {
 		];
 		resolveReply({ ok: true, sessionId: "session-1", messageId: "provider-1" });
 		await waitFor(() =>
-			expect(uiState.toasts).toEqual([
-				expect.objectContaining({
-					variant: "warn",
-					title: expect.stringContaining("changed"),
-				}),
-			]),
+			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
 		);
+		expect(uiState.toasts).toEqual([]);
 		expect(chatState.messages).toEqual([
 			{
 				type: "user",
@@ -176,7 +253,7 @@ describe("RewindBanner", () => {
 		expect(uiState.rewindActive).toBe(false);
 	});
 
-	it("clears from the target and confirms only when the RPC succeeds", async () => {
+	it("leaves transcript changes to the subscription and confirms only when the RPC succeeds", async () => {
 		let resolveReply!: (reply: {
 			ok: true;
 			sessionId: string;
@@ -198,18 +275,20 @@ describe("RewindBanner", () => {
 			},
 			{ type: "user", uuid: "after", text: "Remove this too" },
 		];
-		const { getByRole } = render(RewindBanner);
+		const onRewind = vi.fn();
+		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		expect(chatState.messages).toHaveLength(3);
 		expect(uiState.toasts).toEqual([]);
 		resolveReply({ ok: true, sessionId: "session-1", messageId: "provider-1" });
 		await waitFor(() =>
-			expect(chatState.messages.map((message) => message.uuid)).toEqual([
-				"before",
-			]),
+			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
 		);
-		expect(uiState.toasts.map((toast) => toast.title)).toEqual([
-			"Rewound conversation & files",
+		expect(chatState.messages.map((message) => message.uuid)).toEqual([
+			"before",
+			"message-1",
+			"after",
 		]);
+		expect(uiState.toasts).toEqual([]);
 	});
 });
