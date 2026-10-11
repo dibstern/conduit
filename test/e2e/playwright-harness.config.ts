@@ -6,6 +6,7 @@ export default defineConfig({
 		"harness-*.spec.ts",
 		"usage-footer-meter.spec.ts",
 		"settings-server-status.spec.ts",
+		"settings-server-logs.spec.ts",
 		"settings-pin.spec.ts",
 	],
 	fullyParallel: true,

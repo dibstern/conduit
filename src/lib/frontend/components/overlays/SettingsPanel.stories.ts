@@ -461,6 +461,9 @@ export const Server: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: /^Log level\b/ }),
+		).toHaveValue("info");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
 			canvas.getByTestId("server-security-settings"),
