@@ -13,15 +13,11 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
@@ -201,7 +197,13 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 						{
 							id: "openai",
 							name: "OpenAI",
-							models: { "gpt-4": { id: "gpt-4", name: "GPT-4" } },
+							models: {
+								"gpt-4": {
+									id: "gpt-4",
+									name: "GPT-4",
+									limit: { context: 128000, output: 4096 },
+								},
+							},
 						},
 					],
 					default: { openai: "gpt-4" },
@@ -293,33 +295,32 @@ async function createTestHarness(): Promise<TestHarness> {
 		Effect.scoped(
 			Effect.gen(function* () {
 				yield* (yield* OpenCodeInstancesTag).use("opencode");
-				const manager = yield* SessionManagerServiceTag;
-				const commit = yield* makeCommitAndSignal;
-				for (const session of Object.values(mock.sessions)) {
-					yield* manager.establishOpenCodeSession(
-						session,
-						defaultInstanceIdForDriver("opencode"),
-					);
-					yield* commit(
-						sessionPickEvents(session.id, {
-							harness: "opencode",
-							model: { providerId: "openai", modelId: "gpt-4" },
-							effort: "",
-							contextWindow: "",
-						}),
-					);
-				}
 			}),
-		).pipe(
-			Effect.provide(
-				makePersistenceEffectLayer(
-					join(persistenceDir, "events.db"),
-					"test-project",
-				),
-			),
 		),
 	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
+	for (const session of Object.values(mock.sessions))
+		mock.injectSSE({ type: "session.created", properties: { info: session } });
+	const db = new Database(join(persistenceDir, "events.db"), {
+		readonly: true,
+	});
+	try {
+		await vi.waitFor(
+			() => {
+				for (const session of Object.values(mock.sessions))
+					expect(
+						db
+							.prepare<[string], { model_id: string; model_provider: string }>(
+								"SELECT model_id, model_provider FROM sessions WHERE id = ?",
+							)
+							.get(session.id),
+					).toEqual({ model_id: "gpt-4", model_provider: "openai" });
+			},
+			{ timeout: 5_000 },
+		);
+	} finally {
+		db.close();
+	}
 
 	return {
 		relay,

@@ -11,6 +11,8 @@ import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resol
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
 	ConfigTag,
+	type LoggerTag,
+	type OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
@@ -26,7 +28,11 @@ import {
 	setDefaultPermissionMode,
 	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
-import { backfillSessionPicks } from "../domain/relay/Services/session-pick.js";
+import {
+	backfillSessionPicks,
+	loadServerSessionPick,
+} from "../domain/relay/Services/session-pick.js";
+import { SessionSetupTag } from "../domain/relay/Services/session-setup.js";
 import {
 	PollerPubSubTag,
 	PollerStateTag,
@@ -181,6 +187,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
 		const instances = yield* OpenCodeInstancesTag;
+		const pickContext = yield* Effect.context<
+			ConfigTag | LoggerTag | OrchestrationEngineTag
+		>();
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			(sessionId, instanceId, signal) =>
@@ -198,6 +207,27 @@ function acquireStartupServices(inputs: StartupInputs) {
 				}).pipe(Effect.scoped),
 			(sessionId, messageId) =>
 				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
+			(instanceId, parentId) =>
+				Effect.gen(function* () {
+					const parent = parentId
+						? yield* readQueryEffect.getSession(parentId)
+						: undefined;
+					return yield* loadServerSessionPick("opencode", instanceId, parent, {
+						startIfStopped: false,
+					});
+				}).pipe(
+					Effect.provide(pickContext),
+					Effect.catchAll((cause) =>
+						Effect.sync(() => {
+							log.warn("Could not resolve native OpenCode session pick", {
+								instanceId,
+								parentId,
+								cause: formatErrorDetail(cause),
+							});
+							return undefined;
+						}),
+					),
+				),
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
@@ -381,6 +411,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
+					yield* (yield* SessionSetupTag).recover;
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(

@@ -10,7 +10,11 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -33,7 +37,11 @@ import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
-import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
+import {
+	SessionWorktreeInspectionSchema,
+	WorkspaceMoveError,
+	WorktreeInfoSchema,
+} from "./session-workspace.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
@@ -166,6 +174,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	setupScript: Schema.optional(Schema.String),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -605,6 +614,7 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
+	readonly setupScript?: string | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -663,6 +673,8 @@ export const GetStatusResponseSchema = Schema.Struct({
 	clientCount: Schema.Number,
 	pinEnabled: Schema.Boolean,
 	tlsEnabled: Schema.Boolean,
+	tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+	tailscaleServeAvailable: Schema.optional(Schema.Boolean),
 	tailscaleServe: Schema.optional(
 		Schema.Union(
 			Schema.Struct({ url: Schema.String }),
@@ -904,6 +916,15 @@ export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeComman
 	},
 ) {}
 
+export class SetTailscaleServe extends Schema.TaggedRequest<SetTailscaleServe>()(
+	"SetTailscaleServe",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: { enabled: Schema.Boolean },
+	},
+) {}
+
 export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
 	payload: {},
 	failure: WsRpcError,
@@ -986,6 +1007,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
+			setupScript: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -1370,6 +1392,18 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
+	"ListBranches",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			current: Schema.optional(Schema.String),
+			branches: Schema.Array(Schema.String),
+		}),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
 export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
@@ -1394,6 +1428,31 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
+		},
+	},
+) {}
+
+export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSessionWorktrees>()(
+	"InspectSessionWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
+			removeWorktrees: Schema.Boolean,
+		}),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
+	"RenameSessionBranch",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			branchName: Schema.String,
 		},
 	},
 ) {}
@@ -1826,6 +1885,8 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
+			// Local base for the primary folder; requires newWorktree.
+			worktreeBase: Schema.optional(NonEmptyString),
 			// The composer's displayed pick. The handler requires a real model.
 			model: Schema.optional(
 				Schema.Struct({
@@ -1884,11 +1945,15 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	"DeleteSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: Schema.Struct({
+			ok: Schema.Literal(true),
+			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
+		}),
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
+			removeWorktrees: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}
@@ -2144,6 +2209,7 @@ export const WsRpcRequest = Schema.Union(
 	SetPin,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
+	SetTailscaleServe,
 	Shutdown,
 	SetAgent,
 	RestartWithConfig,
@@ -2168,7 +2234,10 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListBranches,
 	ListWorktrees,
+	InspectSessionWorktrees,
+	RenameSessionBranch,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
 	ContinueSessionInMainFolder,
@@ -2559,6 +2628,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
 	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(SetTailscaleServe),
 	Rpc.fromTaggedRequest(Shutdown),
 	Rpc.fromTaggedRequest(SetAgent),
 	Rpc.fromTaggedRequest(RestartWithConfig),
@@ -2583,7 +2653,10 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(InspectSessionWorktrees),
+	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(RecreateSessionWorktree),
 	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),

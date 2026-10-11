@@ -83,6 +83,11 @@ import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
+import {
+	applyTailscaleServe,
+	isTailscaleServeAvailable,
+	type TailscaleCliTag,
+} from "./tailscale-serve-layer.js";
 
 export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
 	DaemonWsRpcHandlersTag,
@@ -107,6 +112,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| DaemonHandleTag
 			| DaemonStateTag
 			| KeepAwakeTag
+			| TailscaleCliTag
 		>();
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
@@ -115,6 +121,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const usage = yield* Usage;
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
+		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
@@ -180,6 +187,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonHandleTag
 				| DaemonStateTag
 				| KeepAwakeTag
+				| TailscaleCliTag
 			>,
 		) =>
 			effect.pipe(
@@ -283,8 +291,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const { ok: _ok, ...status } = yield* handle.getStatus();
+						const config = yield* Ref.get(yield* DaemonConfigRefTag);
+						const tailscaleServeAvailable = yield* isTailscaleServeAvailable;
 						return {
 							...status,
+							tailscaleServeEnabled: config.tailscaleServeEnabled ?? false,
+							tailscaleServeAvailable,
 							// Each browser follows one status feed, even with no project.
 							// Counting feeds excludes CLI IPC and the second browser socket.
 							clientCount: Array.from(listSubscribers).filter(
@@ -362,6 +374,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						yield* requestConfigSave;
 						return { ok: true as const, supported, active };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
+				),
+			SetTailscaleServe: (request) =>
+				run(
+					Effect.gen(function* () {
+						yield* applyTailscaleServe(request.enabled);
+						yield* requestConfigSave;
+						return { ok: true as const };
+					}).pipe(Effect.uninterruptible, tailscaleServeLock.withPermits(1)),
 				),
 			SetKeepAwakeCommand: (request) =>
 				run(
@@ -463,6 +483,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
+						...(request.setupScript !== undefined && {
+							setupScript: request.setupScript,
+						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")

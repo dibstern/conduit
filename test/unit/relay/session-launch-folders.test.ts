@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -26,6 +32,8 @@ it.each([
 		const attached = join(root, "late");
 		for (const directory of [primary, secondary, worktree, attached])
 			mkdirSync(directory);
+		// A present checkout has a worktree `.git` file; turns refuse missing ones.
+		writeFileSync(join(worktree, ".git"), "gitdir: elsewhere\n");
 		const result = await Effect.runPromise(
 			resolveSessionFolders({
 				id: "worktree",

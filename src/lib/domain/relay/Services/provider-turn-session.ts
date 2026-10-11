@@ -253,5 +253,6 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
 				formatErrorDetail(interruptResult.left),
 			);
+			yield* Effect.fail(interruptResult.left);
 		}
 	});

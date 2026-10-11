@@ -2,6 +2,7 @@ import type { Page, WebSocketRoute } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../src/lib/contracts/worktree.js";
@@ -707,9 +708,11 @@ async function handleMessage(
 							})
 						: raw.tag === "ViewSession"
 							? () => ({ ok: true })
-							: raw.tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined);
+							: raw.tag === "InspectSessionWorktrees"
+								? () => ({ worktrees: [], removeWorktrees: false })
+								: raw.tag === "input.submit"
+									? ({ sessionId }) => ({ ok: true, sessionId })
+									: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
@@ -735,6 +738,7 @@ async function handleMessage(
 			if (
 				error instanceof WsRpcError ||
 				error instanceof WorkspaceMoveError ||
+				error instanceof WorktreeBranchRenameError ||
 				error instanceof WorktreeCreationError ||
 				error instanceof WorktreeRecoveryError
 			) {
@@ -752,15 +756,22 @@ async function handleMessage(
 											path: error.path,
 											reason: error.reason,
 										}
-									: error instanceof WorktreeCreationError ||
-											error instanceof WorktreeRecoveryError
+									: error instanceof WorktreeBranchRenameError
 										? {
 												_tag: error._tag,
-												path: error.path,
+												folder: error.folder,
 												reason: error.reason,
 												message: error.message,
 											}
-										: { _tag: "WsRpcError", message: error.message },
+										: error instanceof WorktreeCreationError ||
+												error instanceof WorktreeRecoveryError
+											? {
+													_tag: error._tag,
+													path: error.path,
+													reason: error.reason,
+													message: error.message,
+												}
+											: { _tag: "WsRpcError", message: error.message },
 						},
 					},
 				});

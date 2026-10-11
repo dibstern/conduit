@@ -41,13 +41,11 @@ export const resolveSessionCreationInstance = (options?: {
 		const config = yield* ConfigTag;
 		const defaults = yield* Ref.get(yield* OverridesStateTag);
 		const requested = options?.providerId?.trim();
-		const harness = options?.sessionId
-			? "claude"
-			: harnessForModelProvider(
-					requested === "claude-sdk"
-						? "claude"
-						: requested || defaults.defaultModel?.providerID || "claude",
-				);
+		const harness = harnessForModelProvider(
+			requested === "claude-sdk"
+				? "claude"
+				: requested || defaults.defaultModel?.providerID || "claude",
+		);
 		const instanceId =
 			options?.instanceId ?? defaultInstanceIdForDriver(harness);
 		const driver = resolveProviderRoutingDriver(
@@ -104,12 +102,11 @@ export const loadServerSessionPick = (
 	harness: Harness,
 	instanceId: string = harness,
 	source?: SessionRow,
+	options: { readonly startIfStopped?: boolean } = { startIfStopped: true },
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const catalog = yield* loadModelCatalog(harness, instanceId, {
-			startIfStopped: true,
-		});
+		const catalog = yield* loadModelCatalog(harness, instanceId, options);
 		const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		const cached =
 			models._tag === "Some"
@@ -161,7 +158,7 @@ export const sessionPickEvents = (sessionId: string, pick: TurnSettings) => [
 	),
 ];
 
-/** Backfill only missing picks, then let every restart read the session row. */
+/** Fill only NULL pick fields, then let every restart read the session row. */
 export const backfillSessionPicks = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -171,7 +168,8 @@ export const backfillSessionPicks = () =>
 		const commit = yield* makeCommitAndSignal;
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const missing = yield* sql<{ id: string }>`
-		SELECT id FROM sessions WHERE model_id IS NULL OR trim(model_id) = ''`;
+		SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
+			OR variant IS NULL OR context_window IS NULL`;
 		let filled = 0;
 		for (const { id } of missing) {
 			const row = yield* read.getSession(id);
@@ -215,43 +213,65 @@ export const backfillSessionPicks = () =>
 				turn?.requested_model ||
 				turn?.actual_model ||
 				turn?.expected_model;
+			const separator = historicalModel?.indexOf("/") ?? -1;
+			const modelId =
+				row.model_id ??
+				(turn?.model_id ||
+					(driver === "opencode" && separator > 0
+						? historicalModel?.slice(separator + 1)
+						: historicalModel));
 			let pick: TurnPick | undefined;
-			if (historicalModel) {
-				const separator = historicalModel.indexOf("/");
+			if (turn && modelId?.trim()) {
 				const providerId =
-					turn?.model_provider ||
-					(driver === "claude"
-						? "claude"
-						: separator > 0
-							? historicalModel.slice(0, separator)
-							: row.model_provider);
+					row.model_provider ??
+					(turn.model_provider ||
+						(driver === "claude"
+							? "claude"
+							: separator > 0
+								? historicalModel?.slice(0, separator)
+								: undefined));
 				if (providerId)
 					pick = {
 						harness: driver,
 						model: {
 							providerId,
-							modelId:
-								turn?.model_id ||
-								(driver === "opencode" && separator > 0
-									? historicalModel.slice(separator + 1)
-									: historicalModel),
+							modelId,
 						},
-						effort: turn?.variant ?? "",
-						contextWindow: turn?.context_window ?? "",
+						effort: row.variant ?? turn.variant ?? "",
+						contextWindow: row.context_window ?? turn.context_window ?? "",
 					};
-			} else {
+			} else if (!turn) {
 				const resolved = yield* Effect.either(
-					loadServerSessionPick(driver, row.provider),
+					loadServerSessionPick(driver, row.provider, row, {
+						startIfStopped: false,
+					}),
 				);
 				if (Either.isLeft(resolved)) continue;
 				pick = resolved.right;
 			}
 			if (!pick) continue;
-			const events = sessionPickEvents(id, pick);
+			const selectedPick = pick;
 			filled += yield* commit.write((project) =>
 				Effect.gen(function* () {
 					const current = yield* read.getSession(id);
-					if (!current || current.model_id?.trim()) return 0;
+					if (!current) return 0;
+					const events = sessionPickEvents(id, {
+						...selectedPick,
+						model: {
+							modelId: current.model_id ?? selectedPick.model.modelId,
+							providerId:
+								current.model_provider ?? selectedPick.model.providerId,
+						},
+						effort: current.variant ?? selectedPick.effort,
+						contextWindow: current.context_window ?? selectedPick.contextWindow,
+					}).filter((event) =>
+						event.type === "session.model_changed"
+							? current.model_id === null || current.model_provider === null
+							: event.type === "session.variant_changed"
+								? current.variant === null
+								: current.context_window === null,
+					);
+					if (events.length === 0) return 0;
 					yield* project(yield* store.appendBatch(events));
 					return 1;
 				}),

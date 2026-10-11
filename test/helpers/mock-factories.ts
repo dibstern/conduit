@@ -13,9 +13,11 @@
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Layer, Stream } from "effect";
-import { vi } from "vitest";
+import { afterAll, vi } from "vitest";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -280,12 +282,16 @@ function createMockPtyManager(): HandlerDeps["ptyManager"] {
 /** Turns refuse a missing main folder, so mock projects use a real directory. */
 export const MOCK_PROJECT_DIR = tmpdir();
 
+const mockConfigRoot = mkdtempSync(join(tmpdir(), "conduit-test-config-"));
+afterAll(() => rmSync(mockConfigRoot, { recursive: true, force: true }));
+
 function createMockConfig(): HandlerDeps["config"] {
 	return {
 		httpServer: {} as HandlerDeps["config"]["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
+		configDir: mkdtempSync(join(mockConfigRoot, "config-")),
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
 		publishGlobalSetting: () => Effect.void,
 	} satisfies HandlerDeps["config"];
@@ -761,6 +767,8 @@ export function makeMockConfig(
 		slug: "test-project",
 		publishGlobalSetting: () => Effect.void,
 		...overrides,
+		configDir:
+			overrides?.configDir ?? mkdtempSync(join(mockConfigRoot, "config-")),
 	} as unknown as ProjectRelayConfig;
 }
 

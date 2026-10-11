@@ -714,11 +714,6 @@ const makeServiceCreateSession = ({
 				(yield* loadServerSessionPick(harness, instanceId, source));
 			if (pick.harness !== harness)
 				return yield* new ModelNotInCatalog({ harness, ...pick.model });
-			if (harness === "opencode" && options?.sessionId)
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: "Reserved workspace sessions require Claude",
-				});
 			const session = yield* Effect.scoped(
 				Effect.gen(function* () {
 					if (harness === "claude")
@@ -729,9 +724,12 @@ const makeServiceCreateSession = ({
 							pick,
 						);
 					const instanceApi = yield* instanceClients.use(instanceId);
-					return yield* createOpenCodeSession(title, instanceId, pick).pipe(
-						Effect.provideService(OpenCodeAPITag, instanceApi),
-					);
+					return yield* createOpenCodeSession(
+						title,
+						instanceId,
+						pick,
+						options?.sessionId,
+					).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
 				}),
 			).pipe(
 				Effect.provideService(ReadQueryEffectTag, readQuery),

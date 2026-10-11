@@ -77,6 +77,9 @@ type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
 	| "session.workspace_changed"
+	| "session.setup_started"
+	| "session.setup_output"
+	| "session.setup_finished"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -154,6 +157,9 @@ export const openCodeUpstreamAdapter = (
 			case "session.unsnoozed":
 			case "session.provider_changed":
 			case "session.workspace_changed":
+			case "session.setup_started":
+			case "session.setup_output":
+			case "session.setup_finished":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
@@ -291,7 +297,8 @@ export const normalizeSessionTitle = (title?: string): string => {
  * Create a session on an OpenCode server and record it locally.
  *
  * The one mutation that cannot be expressed as a command on its own: OpenCode
- * chooses the session id, and a command needs that id before it can be built.
+ * chooses the session id unless a worktree launch reserves it, and a command
+ * needs that id before it can be built.
  * So the direct `api.session.create` call lives here, next to the sync adapter,
  * and applying `session.created` is folded into the same function rather than
  * left to the caller.
@@ -304,39 +311,51 @@ export const createOpenCodeSession = (
 	title: string | undefined,
 	provider: string,
 	pick?: TurnSettings,
+	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const settings =
 			pick ?? (yield* loadServerSessionPick("opencode", provider));
 
-		// No retry: create is not idempotent — retrying could produce duplicates.
-		const session = yield* Effect.tryPromise(() =>
-			api.session.create(title ? { title } : undefined),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionCommandError({
-						operation: "session.created.upstream",
-						cause,
-					}),
-			),
-		);
+		const create = Effect.gen(function* () {
+			// No retry: create is not idempotent — retrying could produce duplicates.
+			const session = yield* Effect.tryPromise(() =>
+				api.session.create({
+					...(title ? { title } : {}),
+					...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
+				}),
+			).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionCommandError({
+							operation: "session.created.upstream",
+							cause,
+						}),
+				),
+			);
 
-		yield* applySessionCommand(
-			{
-				type: "session.created",
-				data: {
-					sessionId: session.id,
-					title: normalizeSessionTitle(session.title),
-					provider,
-					providerSessionId: session.id,
+			yield* applySessionCommand(
+				{
+					type: "session.created",
+					data: {
+						sessionId: session.id,
+						title: normalizeSessionTitle(session.title),
+						provider,
+						providerSessionId: session.id,
+					},
 				},
-			},
-			{ pick: settings },
-		);
+				{ pick: settings },
+			);
 
-		return session;
+			return session;
+		});
+		const creationGate = yield* Effect.serviceOption(
+			OpenCodeSessionCreationGateTag,
+		);
+		return yield* creationGate._tag === "Some"
+			? creationGate.value.withPermits(1)(create)
+			: create;
 	}).pipe(
 		Effect.annotateLogs("operation", "createOpenCodeSession"),
 		Effect.withSpan("session.createOpenCodeSession"),

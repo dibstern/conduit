@@ -60,6 +60,9 @@ const CLAUDE_NOT_APPLICABLE_TYPES = [
 	"session.resume_cancelled",
 	"session.model_changed", // Relay-owned model settings, appended by the relay's session settings module
 	"session.workspace_changed", // Conduit-originated, recorded by Session Workspace through the session-command seam
+	"session.setup_started", // Daemon setup lifecycle, recorded through the session-command seam.
+	"session.setup_output", // Same; merged setup output never comes from a provider.
+	"session.setup_finished", // Same; includes failures, timeout and interrupted-setup recovery.
 	"session.workspace_hint_changed", // Relay-owned write-path inference; never emitted by the provider translator.
 	"session.variant_changed", // Same
 	"session.context_window_changed", // Same

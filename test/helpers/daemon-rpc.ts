@@ -4,6 +4,7 @@ import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daem
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { OpenCodeInstancesLive } from "../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { PortScannerTag } from "../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
+import { TailscaleCliTag } from "../../src/lib/domain/daemon/Layers/tailscale-serve-layer.js";
 import {
 	ConfigPersistenceNoopLive,
 	type ConfigPersistenceTag,
@@ -46,6 +47,7 @@ export const makeDaemonRpcTestLayer = (
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
+		tailscaleCli?: Layer.Layer<TailscaleCliTag>;
 		persistence?: Layer.Layer<
 			ConfigPersistenceTag,
 			never,
@@ -58,6 +60,10 @@ export const makeDaemonRpcTestLayer = (
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,
 		BrowserRpcConnectionsLive,
+		options.tailscaleCli ??
+			Layer.succeed(TailscaleCliTag, {
+				exec: () => Effect.succeed('{"BackendState":"Stopped"}'),
+			}),
 		Layer.succeed(RpcCaller, { kind: "cli" }),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive({

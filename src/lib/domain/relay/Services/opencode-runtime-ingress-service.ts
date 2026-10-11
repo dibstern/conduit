@@ -21,10 +21,12 @@ import {
 	OpenCodeRuntimeEventTranslator,
 	opencodeSessionCreatedRuntimeEvent,
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
+import type { TurnSettings } from "../../../provider/turn-settings.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
 import {
 	canSeedSession,
 	type ProviderRuntimeIngestion,
+	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
 import { ConfigTag, SessionRetriesTag } from "./services.js";
@@ -102,6 +104,10 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 	readonly retryingOf?: (sessionId: string) => string | undefined;
 	/** The default OpenCode binding aliases this relay's selected instance. */
 	readonly selectedInstanceId?: string;
+	readonly resolveSessionPick?: (
+		providerInstanceId: string,
+		parentId?: string,
+	) => Effect.Effect<TurnSettings | undefined>;
 }
 
 const BACKFILL_TIMEOUT = "15 seconds";
@@ -147,6 +153,9 @@ export class EffectOpenCodeRuntimeIngress
 		| undefined;
 	private readonly log: OpenCodeRuntimeIngressLog;
 	private readonly selectedInstanceId: string;
+	private readonly resolveSessionPick:
+		| EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"]
+		| undefined;
 	private stopped = false;
 	private readonly fetchSessionMessages:
 		| EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"]
@@ -200,6 +209,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.ingestion = opts.ingestion;
 		this.retryingOf = opts.retryingOf;
 		this.log = opts.log;
+		this.resolveSessionPick = opts.resolveSessionPick;
 		this.selectedInstanceId =
 			opts.selectedInstanceId ?? defaultInstanceIdForDriver("opencode");
 		this.sessionCreationGate =
@@ -215,6 +225,29 @@ export class EffectOpenCodeRuntimeIngress
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
 	): Effect.Effect<A, E> {
 		return effect.pipe(Effect.provideService(SqlClient.SqlClient, this.sql));
+	}
+
+	private ingestBatch(
+		events: readonly ProviderRuntimeEvent[],
+		options?: Parameters<ProviderRuntimeIngestion["ingestBatch"]>[1],
+	): Effect.Effect<number, ProviderRuntimeIngestionError> {
+		return Effect.gen(this, function* () {
+			const picks = new Map<string, TurnSettings>();
+			for (const event of events) {
+				if (event.type !== "session.created" || !this.resolveSessionPick)
+					continue;
+				const data = event.data as { provider: string; parentId?: string };
+				const pick = yield* this.resolveSessionPick(
+					data.provider,
+					data.parentId,
+				);
+				if (pick) picks.set(event.sessionId, pick);
+			}
+			return yield* this.ingestion.ingestBatch(events, {
+				...options,
+				sessionPicks: picks,
+			});
+		});
 	}
 
 	private sessionGate(sessionId: string): Effect.Semaphore {
@@ -509,43 +542,41 @@ export class EffectOpenCodeRuntimeIngress
 				});
 			}
 			let complete = false;
-			yield* this.ingestion
-				.ingestBatch(events, {
-					publishToRelay: false,
-					beforeCommit: this.withSql(
-						Effect.gen(this, function* () {
-							const sql = yield* SqlClient.SqlClient;
-							const rows = yield* sql<StoredMessage>`
+			yield* this.ingestBatch(events, {
+				publishToRelay: false,
+				beforeCommit: this.withSql(
+					Effect.gen(this, function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const rows = yield* sql<StoredMessage>`
 						SELECT id, rest_digest, rest_event_id FROM messages
 						WHERE session_id = ${sessionId} ORDER BY created_at ASC, id ASC`;
-							complete =
-								(yield* this.hasProjectedSession(sessionId)) &&
-								rest.every(isSettled) &&
-								rows.length === rest.length &&
-								rows.every(
-									(row, index) =>
-										row.id === rest[index]?.id &&
-										row.rest_digest !== null &&
-										digests.get(row.id) === row.rest_digest,
-								);
-							// This flag caches the REST reconciliation proof. Rebuilding the
-							// read model from events resets it to 0 until the next sighting.
-							yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0} WHERE id = ${sessionId}`;
-							if (
-								this.stopped ||
-								this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
-								generation !==
-									(this.reconnectGenerations.get(providerInstanceId) ?? 0) ||
-								historyRevision !== (this.historyRevisions.get(sessionId) ?? 0)
-							) {
-								return yield* Effect.die(
-									new Error("stale OpenCode REST backfill"),
-								);
-							}
-						}),
-					),
-				})
-				.pipe(Effect.withMaxOpsBeforeYield(Number.MAX_SAFE_INTEGER));
+						complete =
+							(yield* this.hasProjectedSession(sessionId)) &&
+							rest.every(isSettled) &&
+							rows.length === rest.length &&
+							rows.every(
+								(row, index) =>
+									row.id === rest[index]?.id &&
+									row.rest_digest !== null &&
+									digests.get(row.id) === row.rest_digest,
+							);
+						// This flag caches the REST reconciliation proof. Rebuilding the
+						// read model from events resets it to 0 until the next sighting.
+						yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0} WHERE id = ${sessionId}`;
+						if (
+							this.stopped ||
+							this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
+							generation !==
+								(this.reconnectGenerations.get(providerInstanceId) ?? 0) ||
+							historyRevision !== (this.historyRevisions.get(sessionId) ?? 0)
+						) {
+							return yield* Effect.die(
+								new Error("stale OpenCode REST backfill"),
+							);
+						}
+					}),
+				),
+			}).pipe(Effect.withMaxOpsBeforeYield(Number.MAX_SAFE_INTEGER));
 			if (
 				!this.stopped &&
 				this.sessionInstanceIds.get(sessionId) === providerInstanceId &&
@@ -663,7 +694,7 @@ export class EffectOpenCodeRuntimeIngress
 				cachedParentId &&
 				(yield* this.withSql(isSessionDeleted(cachedParentId)))
 			) {
-				yield* this.ingestion.ingestBatch(
+				yield* this.ingestBatch(
 					[
 						opencodeSessionCreatedRuntimeEvent(
 							sessionId,
@@ -708,7 +739,7 @@ export class EffectOpenCodeRuntimeIngress
 								(yield* this.withSql(isSessionDeleted(parentId))))
 								? parentId
 								: undefined;
-						yield* this.ingestion.ingestBatch(
+						yield* this.ingestBatch(
 							[
 								opencodeSessionCreatedRuntimeEvent(
 									sessionId,
@@ -779,7 +810,7 @@ export class EffectOpenCodeRuntimeIngress
 			// everything after COMMIT (bus publish, relay publish) can die or be
 			// interrupted while the batch stays durable, and a retry then would
 			// translate the same event onto a store that already holds it.
-			const written = yield* this.ingestion.ingestBatch(runtimeEvents, {
+			const written = yield* this.ingestBatch(runtimeEvents, {
 				publishToRelay: false,
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
@@ -882,7 +913,7 @@ export class EffectOpenCodeRuntimeIngress
 									this.retryingOf?.(sessionId) === undefined)
 							)
 								return;
-							yield* this.ingestion.ingestBatch(
+							yield* this.ingestBatch(
 								[
 									{
 										eventId: createEventId(),
@@ -1084,6 +1115,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 	log: OpenCodeRuntimeIngressLog,
 	fetchSessionMessages?: EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"],
 	inputIdForUserEcho?: EffectOpenCodeRuntimeIngressOptions["inputIdForUserEcho"],
+	resolveSessionPick?: EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"],
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
@@ -1108,6 +1140,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 				: {}),
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
+			...(resolveSessionPick ? { resolveSessionPick } : {}),
 			...(retries._tag === "Some" ? { retryingOf: retries.value } : {}),
 			...(config._tag === "Some" && config.value.openCodeInstanceId
 				? { selectedInstanceId: config.value.openCodeInstanceId }

@@ -325,29 +325,32 @@ export const sessionHandlers: {
 		},
 	],
 
-	"session.workspace_changed": (event) => [
-		{
-			sql: `UPDATE sessions SET workspace = ?,
+	"session.workspace_changed": (event) =>
+		event.data.cause === "branch-rename"
+			? []
+			: [
+					{
+						sql: `UPDATE sessions SET workspace = ?,
 				workspace_hint = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint END,
 				workspace_hint_sequence = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint_sequence END
 				WHERE id = ?`,
-			params: [
-				// Keep fallback and origin metadata on the existing browser session row.
-				Object.keys(event.data.worktrees).length === 0 &&
-				event.data.cause !== "missing" &&
-				event.data.origin === "existing"
-					? null
-					: JSON.stringify({
-							cause: event.data.cause,
-							worktrees: event.data.worktrees,
-							origin: event.data.origin,
-						}),
-				event.data.path ?? null,
-				event.data.path ?? null,
-				event.data.sessionId,
-			],
-		},
-	],
+						params: [
+							// Keep fallback and origin metadata on the existing browser session row.
+							Object.keys(event.data.worktrees).length === 0 &&
+							event.data.cause !== "missing" &&
+							event.data.origin === "existing"
+								? null
+								: JSON.stringify({
+										cause: event.data.cause,
+										worktrees: event.data.worktrees,
+										origin: event.data.origin,
+									}),
+							event.data.path ?? null,
+							event.data.path ?? null,
+							event.data.sessionId,
+						],
+					},
+				],
 	"session.workspace_hint_changed": (event) => {
 		const sequence = event.data.path === null ? null : event.sequence;
 		return [

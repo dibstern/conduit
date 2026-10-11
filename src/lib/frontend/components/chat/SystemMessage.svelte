@@ -8,7 +8,25 @@
 
 	let { message }: { message: SystemMessage } = $props();
 
-	const isError = $derived(message.variant === "error");
+	const isError = $derived(message.variant === "error" || message.setup?.status === "failed" || message.setup?.status === "timed_out");
+	const setupTitle = $derived.by(() => {
+		switch (message.setup?.status) {
+			case "running": return "Setup script running";
+			case "succeeded": return "Setup script succeeded";
+			case "failed": return `Setup script failed${message.setup.exitCode !== undefined ? ` (exit code ${message.setup.exitCode})` : ""}`;
+			case "timed_out": return "Setup script timed out";
+			case "skipped": return "Setup script skipped";
+			default: return "Setup script";
+		}
+	});
+	const setupIcon = $derived(message.setup ? {
+		running: "loader-circle",
+		succeeded: "circle-check",
+		failed: "circle-alert",
+		timed_out: "timer",
+		skipped: "triangle-alert",
+	}[message.setup.status] : "info");
+	const setupTone = $derived(isError ? "text-error" : message.setup?.status === "succeeded" ? "text-success" : message.setup?.status === "skipped" ? "text-warning" : "text-text-muted");
 	const hasDetails = $derived(
 		!!(message.statusCode || (message.details && Object.keys(message.details).length > 0)),
 	);
@@ -31,62 +49,77 @@
 	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 
-<div class="max-w-[760px] mx-auto my-2 px-5">
+<div class="max-w-[760px] mx-auto my-2 px-5" data-testid={message.setup ? "session-setup-block" : undefined} data-setup-status={message.setup?.status} data-setup-source={message.setup?.source} role={message.setup ? "status" : undefined} aria-label={message.setup ? setupTitle : undefined}>
 	<Surface
 		variant="plain"
 		padding="sm"
 		class="flex flex-col gap-1 text-base {containerClasses} {hoverClasses}"
 	>
-		<div class="flex items-start gap-2">
-			<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">
-				{#if isError}
-					<Icon name="circle-alert" size={12} />
-				{:else}
-					<Icon name="info" size={12} />
-				{/if}
-			</span>
-			<div class="flex-1 min-w-0">
-				<span>
-					{#if message.errorCode}
-						<span class="font-mono text-xs opacity-70 mr-1.5">{message.errorCode}</span>
+		{#if message.setup}
+			<div class="flex items-center gap-2 text-sm {setupTone}">
+				<span aria-hidden="true"><Icon name={setupIcon} size={14} class={message.setup.status === "running" ? "animate-spin motion-reduce:animate-none" : ""} /></span>
+				<strong class="font-medium">{setupTitle}</strong>
+			</div>
+			{#if message.setup.message}
+				<p class="text-sm text-text-secondary break-words">{message.setup.message}</p>
+			{/if}
+			{#if message.setupOutput}
+				<Surface variant="inset" padding="sm" class="mt-1 max-h-64 overflow-auto">
+					<pre class="whitespace-pre-wrap break-words font-mono text-xs text-text-secondary">{message.setupOutput}</pre>
+				</Surface>
+			{/if}
+		{:else}
+			<div class="flex items-start gap-2">
+				<span class="shrink-0 mt-0.5 [&_.lucide]:w-3 [&_.lucide]:h-3">
+					{#if isError}
+						<Icon name="circle-alert" size={12} />
+					{:else}
+						<Icon name="info" size={12} />
 					{/if}
-					{message.text}
 				</span>
-				{#if hasDetails}
-					<Button
-						variant="ghost"
-						size="content"
-						layout="flow"
-						tone="inherit"
-						hoverFill="none"
-						class="ml-2 text-xs opacity-60 hover:opacity-100 underline"
-						aria-expanded={showDetails}
-						aria-controls={detailsId}
-						onclick={() => showDetails = !showDetails}
-					>
-						{showDetails ? "Hide details" : "Show details"}
-					</Button>
-				{/if}
+				<div class="flex-1 min-w-0">
+					<span>
+						{#if message.errorCode}
+							<span class="font-mono text-xs opacity-70 mr-1.5">{message.errorCode}</span>
+						{/if}
+						{message.text}
+					</span>
+					{#if hasDetails}
+						<Button
+							variant="ghost"
+							size="content"
+							layout="flow"
+							tone="inherit"
+							hoverFill="none"
+							class="ml-2 text-xs opacity-60 hover:opacity-100 underline"
+							aria-expanded={showDetails}
+							aria-controls={detailsId}
+							onclick={() => showDetails = !showDetails}
+						>
+							{showDetails ? "Hide details" : "Show details"}
+						</Button>
+					{/if}
+				</div>
 			</div>
-		</div>
 
-		{#if showDetails && hasDetails}
-			<div
-				id={detailsId}
-				class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto"
-			>
-				{#if message.statusCode}
-					<div><span class="opacity-60">status:</span> {message.statusCode}</div>
-				{/if}
-				{#if message.details}
-					{#each Object.entries(message.details) as [key, value]}
-						<div class="break-all">
-							<span class="opacity-60">{key}:</span>
-							{typeof value === "string" ? value : JSON.stringify(value)}
-						</div>
-					{/each}
-				{/if}
-			</div>
+			{#if showDetails && hasDetails}
+				<div
+					id={detailsId}
+					class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto"
+				>
+					{#if message.statusCode}
+						<div><span class="opacity-60">status:</span> {message.statusCode}</div>
+					{/if}
+					{#if message.details}
+						{#each Object.entries(message.details) as [key, value]}
+							<div class="break-all">
+								<span class="opacity-60">{key}:</span>
+								{typeof value === "string" ? value : JSON.stringify(value)}
+							</div>
+						{/each}
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</Surface>
 </div>

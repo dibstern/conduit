@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, realpath, rm } from "node:fs/promises";
@@ -11,10 +11,13 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
-import { Cause, Effect, Either, Layer } from "effect";
+import { Cause, Effect, Either, Layer, Stream } from "effect";
+import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -23,6 +26,8 @@ import {
 	type WorktreeFolder,
 	type WorktreeService,
 	WorktreeServiceTag,
+	type WorktreeSetupResult,
+	type WorktreeSetupUpdate,
 } from "../Services/worktree-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -107,33 +112,155 @@ export const makeWorktreeLive = (
 	options: {
 		readonly gitExecutable?: string;
 		readonly gitTimeoutMs?: number;
+		readonly setupTimeoutMs?: number;
 	} = {},
 ) =>
 	Layer.effect(
 		WorktreeServiceTag,
 		Effect.sync(() => {
-			const git = (folder: string, args: readonly string[]) =>
+			const runSetup: WorktreeService["runSetup"] = (cwd, script, env) =>
+				Stream.asyncPush<WorktreeSetupUpdate>((emit) =>
+					Effect.acquireRelease(
+						Effect.sync(() => {
+							const timeoutMs = options.setupTimeoutMs ?? 10 * 60_000;
+							const limit = 64 * 1024;
+							let child: ChildProcess | undefined;
+							let timeout: ReturnType<typeof setTimeout> | undefined;
+							let finished = false;
+							let groupStopped = false;
+							let capturedBytes = 0;
+							let truncated = false;
+							const decoder = new StringDecoder("utf8");
+							const output = (text: string) => {
+								if (text && !finished)
+									emit.single({ _tag: "output", output: text });
+							};
+							const collect = (chunk: Buffer) => {
+								if (truncated || finished) return;
+								const remaining = limit - capturedBytes;
+								const accepted = chunk.subarray(0, remaining);
+								capturedBytes += accepted.length;
+								output(decoder.write(accepted));
+								if (chunk.length > remaining) {
+									truncated = true;
+									output("\n[Setup output truncated after 64 KiB]\n");
+								}
+							};
+							const killGroup = () => {
+								if (groupStopped || !child?.pid) return;
+								groupStopped = true;
+								try {
+									if (process.platform === "win32") child.kill("SIGKILL");
+									else process.kill(-child.pid, "SIGKILL");
+								} catch {
+									// The owned group may already be gone.
+								}
+							};
+							const finish = (result: WorktreeSetupResult) => {
+								if (finished) return;
+								clearTimeout(timeout);
+								killGroup();
+								if (!truncated) output(decoder.end());
+								finished = true;
+								emit.single(result);
+								emit.end();
+							};
+							const failedToStart = (cause: unknown) =>
+								finish({
+									_tag: "finished",
+									status: "failed",
+									message: `Could not start setup script: ${cause instanceof Error ? cause.message : String(cause)}`,
+								});
+							timeout = setTimeout(
+								() =>
+									finish({
+										_tag: "finished",
+										status: "timed_out",
+										message: `Setup script timed out after ${timeoutMs}ms.`,
+									}),
+								timeoutMs,
+							);
+							timeout.unref();
+							try {
+								// Pipe EOF also owns cleanup after abrupt daemon death. Save
+								// stdin before background shells substitute /dev/null; only
+								// the watchdog keeps it while exec preserves the PID/group.
+								const spawned = spawn(
+									"/bin/sh",
+									[
+										"-c",
+										`exec 2>&1
+setup_group=$$
+exec 3<&0
+(
+  while IFS= read -r setup_line; do :; done
+  kill -KILL -- "-$setup_group"
+) <&3 3<&- >/dev/null 2>&1 &
+exec 3<&- </dev/null
+if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else exec /bin/sh -c "$2"; fi`,
+										"conduit-setup",
+										env["SHELL"]?.trim() ?? "",
+										script,
+									],
+									{
+										cwd,
+										env,
+										stdio: ["pipe", "pipe", "ignore"],
+										detached: process.platform !== "win32",
+									},
+								);
+								child = spawned;
+								spawned.stdout.on("data", collect);
+								spawned.once("error", failedToStart);
+								spawned.once("exit", killGroup);
+								spawned.once("close", (code, signal) => {
+									finish({
+										_tag: "finished",
+										status: code === 0 ? "succeeded" : "failed",
+										...(code !== null
+											? { exitCode: code }
+											: {
+													message: `Setup script terminated by ${signal ?? "an unknown signal"}.`,
+												}),
+									});
+								});
+							} catch (cause) {
+								failedToStart(cause);
+							}
+							return () => {
+								clearTimeout(timeout);
+								finished = true;
+								killGroup();
+								child?.stdin?.destroy();
+								child?.stdout?.destroy();
+							};
+						}),
+						(cleanup) => Effect.sync(cleanup),
+					),
+				);
+			const git = (folder: string, args: readonly string[], input?: string) =>
 				Effect.tryPromise({
 					try: async (signal) => {
 						const env: NodeJS.ProcessEnv = { ...process.env };
 						for (const name of Object.keys(env))
 							if (name.startsWith("GIT_")) delete env[name];
 						env["GIT_TERMINAL_PROMPT"] = "0";
+						env["GIT_OPTIONAL_LOCKS"] = "0";
 						env["LC_ALL"] = "C";
-						return (
-							await execFileAsync(
-								options.gitExecutable ?? "git",
-								["-c", "core.hooksPath=/dev/null", ...args],
-								{
-									cwd: folder,
-									env,
-									encoding: "utf8",
-									timeout: options.gitTimeoutMs ?? 30_000,
-									maxBuffer: 1_048_576,
-									signal,
-								},
-							)
-						).stdout.trim();
+						const result = execFileAsync(
+							options.gitExecutable ?? "git",
+							["-c", "core.hooksPath=/dev/null", ...args],
+							{
+								cwd: folder,
+								env,
+								encoding: "utf8",
+								timeout: options.gitTimeoutMs ?? 30_000,
+								maxBuffer: 1_048_576,
+								signal,
+							},
+						);
+						if (input !== undefined) result.child.stdin?.end(input);
+						return (await result).stdout.trim();
 					},
 					catch: (cause) => {
 						const detail =
@@ -185,7 +312,212 @@ export const makeWorktreeLive = (
 						throw cause;
 					}
 				});
-			const readRecovery = (folder: WorktreeFolder, directory?: string) =>
+			const renameBranch: WorktreeService["renameBranch"] = (
+				ownership,
+				newName,
+			) =>
+				Effect.gen(function* () {
+					const checkouts = [
+						...new Map(ownership.map((owned) => [owned.path, owned])).values(),
+					];
+					const failure = (
+						owned: SessionWorktreeOwnership,
+						reason: WorktreeBranchRenameError["reason"],
+						message: string,
+					) =>
+						new WorktreeBranchRenameError({
+							folder: owned.folder,
+							reason,
+							message,
+						});
+					const runGit = (
+						owned: SessionWorktreeOwnership,
+						args: readonly string[],
+					) =>
+						git(owned.path, args).pipe(
+							Effect.mapError((error) =>
+								failure(owned, "git-failed", error.message),
+							),
+						);
+					for (const owned of checkouts) {
+						const folder = yield* Effect.try({
+							try: () => ({
+								path: owned.folder,
+								projectSlug: decodeURIComponent(
+									basename(dirname(dirname(owned.path))),
+								),
+								sessionId: decodeURIComponent(basename(dirname(owned.path))),
+							}),
+							catch: (cause) =>
+								failure(
+									owned,
+									"not-owned",
+									`Invalid owned worktree path: ${String(cause)}`,
+								),
+						});
+						const checkout = yield* readOwned(folder, owned).pipe(
+							Effect.mapError((error) =>
+								failure(
+									owned,
+									error.reason === "not-owned" ? "not-owned" : "git-failed",
+									error.message,
+								),
+							),
+						);
+						if (checkout.missing)
+							return yield* failure(
+								owned,
+								"worktree-missing",
+								`Worktree missing: ${owned.path}`,
+							);
+						const validated = yield* runGit(owned, [
+							"check-ref-format",
+							"--branch",
+							newName,
+						]).pipe(
+							Effect.mapError((error) =>
+								/not a valid branch name|usage: git check-ref-format/.test(
+									error.message,
+								)
+									? failure(
+											owned,
+											"invalid-name",
+											`Invalid branch name: ${newName}`,
+										)
+									: error,
+							),
+						);
+						// Git expands @{-1}; a user-supplied branch name must be literal.
+						if (validated !== newName)
+							return yield* failure(
+								owned,
+								"invalid-name",
+								`Invalid branch name: ${newName}`,
+							);
+						const branches = new Set(
+							(yield* runGit(owned, [
+								"for-each-ref",
+								"--format=%(refname)",
+								"refs/heads",
+							]))
+								.split("\n")
+								.map((ref) => ref.replace(/^refs\/heads\//, "")),
+						);
+						branches.delete(owned.branchName);
+						if (
+							newName !== owned.branchName &&
+							branchConflicts(branches, newName)
+						)
+							return yield* failure(
+								owned,
+								"already-exists",
+								`Branch already exists or conflicts with an existing branch: ${newName}`,
+							);
+						const head = yield* runGit(owned, [
+							"symbolic-ref",
+							"--quiet",
+							"HEAD",
+						]).pipe(
+							Effect.catchAll((error) =>
+								/Git symbolic-ref failed:/.test(error.message)
+									? failure(
+											owned,
+											"head-mismatch",
+											`HEAD is not on the owned branch ${owned.branchName}`,
+										)
+									: Effect.fail(error),
+							),
+						);
+						if (head !== `refs/heads/${owned.branchName}`)
+							return yield* failure(
+								owned,
+								"head-mismatch",
+								`HEAD is not on the owned branch ${owned.branchName}`,
+							);
+					}
+					const attempted: SessionWorktreeOwnership[] = [];
+					return yield* Effect.gen(function* () {
+						for (const owned of checkouts) {
+							if (owned.branchName === newName) continue;
+							attempted.push(owned);
+							yield* runGit(owned, ["branch", "-m", owned.branchName, newName]);
+						}
+					}).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								const errors: string[] = [];
+								for (const owned of attempted.reverse()) {
+									const rollback = yield* Effect.either(
+										Effect.gen(function* () {
+											// A timed-out Git command may have completed its rename.
+											const head = yield* runGit(owned, [
+												"symbolic-ref",
+												"--quiet",
+												"HEAD",
+											]);
+											// Git moves the ref before updating worktree HEADs. A HEAD.lock
+											// failure can leave HEAD on the old, now absent branch.
+											const refs = new Set(
+												(yield* runGit(owned, [
+													"for-each-ref",
+													"--format=%(refname)",
+													`refs/heads/${owned.branchName}`,
+													`refs/heads/${newName}`,
+												])).split("\n"),
+											);
+											const oldExists = refs.has(
+												`refs/heads/${owned.branchName}`,
+											);
+											const newExists = refs.has(`refs/heads/${newName}`);
+											if (
+												head === `refs/heads/${owned.branchName}` &&
+												oldExists &&
+												!newExists
+											)
+												return;
+											if (
+												oldExists ||
+												!newExists ||
+												(head !== `refs/heads/${newName}` &&
+													head !== `refs/heads/${owned.branchName}`)
+											)
+												return yield* failure(
+													owned,
+													"head-mismatch",
+													"Branch refs or HEAD changed during branch rename rollback",
+												);
+											yield* runGit(owned, [
+												"branch",
+												"-m",
+												newName,
+												owned.branchName,
+											]);
+										}),
+									);
+									if (Either.isLeft(rollback))
+										errors.push(`${owned.folder}: ${rollback.left.message}`);
+								}
+								if (errors.length > 0) {
+									const original = Cause.failureOption(cause);
+									return yield* new WorktreeBranchRenameError({
+										folder:
+											original._tag === "Some"
+												? original.value.folder
+												: (attempted[0]?.folder ?? ""),
+										reason: "git-failed",
+										message: `${original._tag === "Some" ? original.value.message : Cause.pretty(cause)}. Branch rollback failed: ${errors.join("; ")}`,
+									});
+								}
+								return yield* Effect.failCause(cause);
+							}).pipe(Effect.uninterruptible),
+						),
+					);
+				});
+			const readRecovery = (
+				folder: WorktreeFolder,
+				directory?: string,
+				workspaceFolders: readonly string[] = [folder.path],
+			) =>
 				Effect.gen(function* () {
 					const source = yield* filesystem(folder.path, async () =>
 						realPathWithMissingChildren(folder.path),
@@ -227,10 +559,13 @@ export const makeWorktreeLive = (
 					// rather than inventing a checkout under the fork's id.
 					const expected = yield* Effect.try({
 						try: () =>
-							ownedWorktreePath(configDir, {
-								...folder,
-								sessionId: decodeURIComponent(basename(dirname(path))),
-							}),
+							workspaceFolders.map((ownerFolder) =>
+								ownedWorktreePath(configDir, {
+									...folder,
+									path: ownerFolder,
+									sessionId: decodeURIComponent(basename(dirname(path))),
+								}),
+							),
 						catch: (cause) =>
 							new WorktreeRecoveryError({
 								path: mapped,
@@ -238,7 +573,7 @@ export const makeWorktreeLive = (
 								message: `Invalid owned worktree path: ${String(cause)}`,
 							}),
 					});
-					if (path !== expected || mapped !== join(path, subfolder))
+					if (!expected.includes(path) || mapped !== join(path, subfolder))
 						return yield* new WorktreeRecoveryError({
 							path: mapped,
 							reason: "not-owned",
@@ -314,8 +649,9 @@ export const makeWorktreeLive = (
 			const inspectMissing: WorktreeService["inspectMissing"] = (
 				folder,
 				directory,
+				workspaceFolders,
 			) =>
-				readRecovery(folder, directory).pipe(
+				readRecovery(folder, directory, workspaceFolders).pipe(
 					Effect.map((state): WorkspaceMissing | undefined =>
 						state.usable
 							? undefined
@@ -327,10 +663,16 @@ export const makeWorktreeLive = (
 								},
 					),
 				);
-			const recreate: WorktreeService["recreate"] = (folder, directory) =>
+			const recreate: WorktreeService["recreate"] = (
+				folder,
+				directory,
+				workspaceFolders,
+			) =>
 				Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
-						const state = yield* restore(readRecovery(folder, directory));
+						const state = yield* restore(
+							readRecovery(folder, directory, workspaceFolders),
+						);
 						if (yield* pathStat(state.path))
 							return yield* new WorktreeRecoveryError({
 								path: state.path,
@@ -383,6 +725,297 @@ export const makeWorktreeLive = (
 						);
 					}),
 				).pipe(Effect.mapError(recoveryError));
+			const recreateAll: WorktreeService["recreateAll"] = (folders) =>
+				Effect.uninterruptibleMask((restore) => {
+					const recreated: { folder: string; path: string }[] = [];
+					const workspaceFolders = folders.map(({ folder }) => folder.path);
+					return Effect.forEach(
+						folders,
+						({ folder, directory }) =>
+							Effect.gen(function* () {
+								const state = yield* restore(
+									readRecovery(folder, directory, workspaceFolders),
+								);
+								if (state.usable) return;
+								yield* restore(recreate(folder, directory, workspaceFolders));
+								recreated.push({ folder: folder.path, path: state.path });
+							}).pipe(
+								Effect.mapError(
+									(error) =>
+										new WorktreeRecoveryError({
+											path: error.path,
+											reason: error.reason,
+											message: `Folder "${folder.path}": ${error.message}`,
+										}),
+								),
+							),
+						{ discard: true },
+					).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								// Retain prunable registrations and branch refs, just as single
+								// checkout recovery does on failure, so another attempt can retry.
+								const cleanup = yield* Effect.either(
+									Effect.validateAll(
+										[...recreated].reverse(),
+										({ folder, path }) =>
+											filesystem(path, () =>
+												rm(path, { recursive: true, force: true }),
+											).pipe(
+												Effect.mapError(
+													(error) => `Folder "${folder}": ${error.message}`,
+												),
+											),
+									),
+								);
+								if (Either.isLeft(cleanup)) {
+									const failure = Cause.failureOption(cause);
+									return yield* new WorktreeRecoveryError({
+										path:
+											failure._tag === "Some"
+												? failure.value.path
+												: (recreated[0]?.path ?? ""),
+										reason: "git-failed",
+										message: `${failure._tag === "Some" ? failure.value.message : Cause.pretty(cause)}. Worktree rollback failed: ${cleanup.left.join("; ")}`,
+									});
+								}
+								return yield* Effect.failCause(cause);
+							}),
+						),
+					);
+				});
+			const creationBase = (source: string, branch: string) =>
+				git(source, [
+					"reflog",
+					"show",
+					"--format=%H%x00%gs",
+					`refs/heads/${branch}`,
+				]).pipe(
+					Effect.map((log) => {
+						const [head, message] = (log.split("\n").at(-1) ?? "").split("\0");
+						return message?.startsWith("conduit: created session worktree ")
+							? head
+							: undefined;
+					}),
+					Effect.orElseSucceed(() => undefined),
+				);
+			const legacyOwnership: WorktreeService["legacyOwnership"] = (
+				folder,
+				directory,
+			) =>
+				Effect.gen(function* () {
+					const state = yield* readRecovery(folder, directory);
+					// A fork's inherited path belongs to its parent, even though its origin is Conduit.
+					if (
+						state.path !== ownedWorktreePath(configDir, folder) ||
+						!state.branch
+					)
+						return undefined;
+					const head = yield* creationBase(state.source, state.branch);
+					return head
+						? {
+								folder: folder.path,
+								path: state.path,
+								branchName: state.branch,
+								head,
+							}
+						: undefined;
+				}).pipe(Effect.mapError(recoveryError));
+			const readOwned = (
+				folder: WorktreeFolder,
+				owned: SessionWorktreeOwnership,
+			) =>
+				Effect.gen(function* () {
+					const expected = yield* filesystem(owned.path, async () =>
+						ownedWorktreePath(configDir, folder),
+					);
+					if (
+						folder.path !== owned.folder ||
+						resolve(owned.path) !== expected ||
+						(yield* filesystem(owned.path, async () =>
+							realPathWithMissingChildren(owned.path),
+						)) !== expected
+					)
+						return yield* new WorktreeRecoveryError({
+							path: owned.path,
+							reason: "not-owned",
+							message:
+								"The recorded checkout is not this session's Conduit-created worktree.",
+						});
+					let source = owned.folder;
+					while (!(yield* pathStat(source))?.isDirectory()) {
+						const parent = dirname(source);
+						if (parent === source)
+							return yield* new WorktreeRecoveryError({
+								path: owned.path,
+								reason: "git-failed",
+								message: "Could not locate the original worktree repository.",
+							});
+						source = parent;
+					}
+					const root = yield* git(source, ["rev-parse", "--show-toplevel"]);
+					const stat = yield* pathStat(owned.path);
+					if (!stat) return { source: root, missing: true };
+					const registered = (yield* git(root, [
+						"worktree",
+						"list",
+						"--porcelain",
+						"-z",
+					]))
+						.split("\0\0")
+						.some((entry) =>
+							entry.split("\0").includes(`worktree ${owned.path}`),
+						);
+					if (
+						!registered ||
+						!stat.isDirectory() ||
+						stat.isSymbolicLink() ||
+						!(yield* pathStat(join(owned.path, ".git")))?.isFile() ||
+						(yield* git(owned.path, ["rev-parse", "--show-toplevel"])) !==
+							owned.path ||
+						(yield* git(owned.path, [
+							"rev-parse",
+							"--path-format=absolute",
+							"--git-common-dir",
+						])) !==
+							(yield* git(root, [
+								"rev-parse",
+								"--path-format=absolute",
+								"--git-common-dir",
+							]))
+					)
+						return yield* new WorktreeRecoveryError({
+							path: owned.path,
+							reason: "not-owned",
+							message:
+								"The owned path is no longer the registered checkout of its original repository.",
+						});
+					return { source: root, missing: false };
+				}).pipe(Effect.mapError(recoveryError));
+			const defaultBranch = (source: string) =>
+				Effect.gen(function* () {
+					const remote = yield* git(source, [
+						"symbolic-ref",
+						"-q",
+						"refs/remotes/origin/HEAD",
+					]).pipe(Effect.orElseSucceed(() => undefined));
+					for (const ref of [
+						...(remote ? [remote] : []),
+						"refs/heads/main",
+						"refs/heads/master",
+					]) {
+						const head = yield* git(source, [
+							"rev-parse",
+							"--verify",
+							`${ref}^{commit}`,
+						]).pipe(Effect.orElseSucceed(() => undefined));
+						if (head) return { ref, head };
+					}
+					return undefined;
+				});
+			const isMerged = (source: string, head: string, base: string) =>
+				git(source, ["merge-base", "--is-ancestor", head, base]).pipe(
+					Effect.as(true),
+					Effect.orElseSucceed(() => false),
+				);
+			const inspectRemoval: WorktreeService["inspectRemoval"] = (
+				folder,
+				owned,
+			) =>
+				Effect.gen(function* () {
+					const state = yield* readOwned(folder, owned);
+					if (state.missing) return [];
+					const reasons: string[] = [];
+					if (
+						yield* git(owned.path, [
+							"status",
+							"--porcelain",
+							"--untracked-files=all",
+						])
+					)
+						reasons.push("Uncommitted changes");
+					const upstream = yield* git(owned.path, [
+						"rev-parse",
+						"--verify",
+						"@{upstream}^{commit}",
+					]).pipe(Effect.orElseSucceed(() => undefined));
+					const ahead = yield* git(owned.path, [
+						"rev-list",
+						"--count",
+						`${upstream ?? owned.head}..HEAD`,
+					]);
+					if (Number(ahead) > 0) reasons.push("Unpushed commits");
+					const main = yield* defaultBranch(state.source);
+					if (!main) reasons.push("Unknown default branch");
+					else if (!(yield* isMerged(owned.path, "HEAD", main.head)))
+						reasons.push("Commits not merged into the default branch");
+					return reasons;
+				}).pipe(Effect.mapError(recoveryError));
+			const remove: WorktreeService["remove"] = (folder, owned, inUse) =>
+				Effect.gen(function* () {
+					const state = yield* readOwned(folder, owned);
+					if (state.missing) return;
+					// Git also rechecks dirtiness while removing, so a write racing this read is protected.
+					if (
+						yield* git(owned.path, [
+							"status",
+							"--porcelain",
+							"--untracked-files=all",
+						])
+					)
+						return yield* new WorktreeRecoveryError({
+							path: owned.path,
+							reason: "git-failed",
+							message: "Worktree kept because it has uncommitted changes.",
+						});
+					if (!(yield* git(owned.path, ["branch", "--show-current"]))) {
+						const main = yield* defaultBranch(state.source);
+						if (!main || !(yield* isMerged(owned.path, "HEAD", main.head)))
+							return yield* new WorktreeRecoveryError({
+								path: owned.path,
+								reason: "git-failed",
+								message:
+									"Worktree kept because detached commits are not known to be merged into the default branch.",
+							});
+					}
+					if (inUse && (yield* inUse))
+						return yield* new WorktreeRecoveryError({
+							path: owned.path,
+							reason: "branch-in-use",
+							message: "Worktree kept because another session uses it.",
+						});
+					yield* git(state.source, ["worktree", "remove", "--", owned.path]);
+					// Never infer ref ownership from whichever user branch happens to be checked out.
+					if (
+						(yield* creationBase(state.source, owned.branchName)) !== owned.head
+					)
+						return;
+					const tip = yield* git(state.source, [
+						"rev-parse",
+						"--verify",
+						`refs/heads/${owned.branchName}^{commit}`,
+					]).pipe(Effect.orElseSucceed(() => undefined));
+					const main = yield* defaultBranch(state.source);
+					if (!tip || !main || !(yield* isMerged(state.source, tip, main.head)))
+						return;
+					const listed = yield* git(state.source, [
+						"worktree",
+						"list",
+						"--porcelain",
+						"-z",
+					]);
+					if (
+						listed.split("\0").includes(`branch refs/heads/${owned.branchName}`)
+					)
+						return;
+					// Both tips are compared in one ref transaction. Concurrent commits or a moved default
+					// branch keep the owned branch instead of deleting work checked after the merge proof.
+					yield* git(
+						state.source,
+						["update-ref", "--stdin"],
+						`start\nverify ${main.ref} ${main.head}\ndelete refs/heads/${owned.branchName} ${tip}\nprepare\ncommit\n`,
+					);
+				}).pipe(Effect.mapError(recoveryError));
 			const rollback: WorktreeService["rollback"] = (created) =>
 				Effect.validateAll([...created.ownership].reverse(), (owned) =>
 					Effect.gen(function* () {
@@ -436,6 +1069,7 @@ export const makeWorktreeLive = (
 						const discovered = yield* restore(
 							Effect.forEach(folders, (folder) =>
 								Effect.gen(function* () {
+									const baseBranch = baseBranches?.[folder.path];
 									const source = yield* filesystem(folder.path, () =>
 										realpath(folder.path),
 									);
@@ -448,7 +1082,16 @@ export const makeWorktreeLive = (
 											() => Effect.succeed("false"),
 										),
 									);
-									if (insideWorkTree !== "true") return undefined;
+									if (insideWorkTree !== "true") {
+										if (baseBranch !== undefined)
+											return yield* new WorktreeCreationError({
+												path: folder.path,
+												reason: "unsupported-project",
+												message:
+													"A worktree base requires a Git project folder.",
+											});
+										return undefined;
+									}
 									const rootPath = yield* git(source, [
 										"rev-parse",
 										"--show-toplevel",
@@ -468,7 +1111,7 @@ export const makeWorktreeLive = (
 										"branch",
 										"--show-current",
 									]);
-									if (!currentBranch)
+									if (!currentBranch && baseBranch === undefined)
 										return yield* new WorktreeCreationError({
 											path: folder.path,
 											reason: "detached-head",
@@ -476,11 +1119,30 @@ export const makeWorktreeLive = (
 												"The project folder has detached HEAD. Check out a branch before creating a worktree.",
 										});
 									// Snapshot the committed base. Staged, unstaged and untracked edits stay in source.
-									const head = yield* git(source, [
-										"rev-parse",
-										"--verify",
-										`${baseBranches?.[folder.path] ?? "HEAD"}^{commit}`,
-									]);
+									const head = yield* baseBranch === undefined
+										? git(source, ["rev-parse", "--verify", "HEAD^{commit}"])
+										: git(source, [
+												"show-ref",
+												"--verify",
+												"--hash",
+												`refs/heads/${baseBranch}`,
+											]).pipe(
+												Effect.flatMap((ref) =>
+													git(source, [
+														"rev-parse",
+														"--verify",
+														`${ref}^{commit}`,
+													]),
+												),
+												Effect.mapError(
+													() =>
+														new WorktreeCreationError({
+															path: folder.path,
+															reason: "invalid-branch",
+															message: `Local base branch does not exist or is invalid: ${baseBranch}`,
+														}),
+												),
+											);
 									if (requestedBranch !== undefined) {
 										const valid = yield* git(source, [
 											"check-ref-format",
@@ -719,10 +1381,16 @@ export const makeWorktreeLive = (
 					);
 				});
 			return {
+				renameBranch,
+				runSetup,
 				create,
 				rollback,
 				inspectMissing,
 				recreate,
+				recreateAll,
+				legacyOwnership,
+				inspectRemoval,
+				remove,
 			} satisfies WorktreeService;
 		}),
 	);

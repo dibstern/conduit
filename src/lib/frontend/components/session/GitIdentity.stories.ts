@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
@@ -279,6 +280,70 @@ export const WorktreeMenu: Story = {
 	},
 };
 
+export const RenameBranch: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/conduit/worktrees/workspace/rename-session/app",
+		git: { branch: "conduit/session-rename", worktree: "app", dirty: false },
+		onrenamebranch: fn(async (_branchName: string) => {}),
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await expect(
+			within(canvasElement.ownerDocument.body).getByRole("menuitem", {
+				name: /^Rename branch$/,
+			}),
+		).toBeVisible();
+	},
+};
+
+export const RenameBranchError: Story = {
+	...RenameBranch,
+	tags: ["viewport-capture"],
+	args: {
+		...RenameBranch.args,
+		onrenamebranch: fn(async (_branchName: string) => {
+			throw new WorktreeBranchRenameError({
+				folder: "/src/api",
+				reason: "already-exists",
+				message: "Branch feature/taken already exists",
+			});
+		}),
+	},
+	play: async ({ canvasElement, args }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await userEvent.click(
+			body.getByRole("menuitem", { name: "Rename branch" }),
+		);
+		const dialog = body.getByRole("dialog", { name: "Rename branch" });
+		const input = within(dialog).getByRole("textbox", { name: "Branch name" });
+		await expect(input).toHaveValue("conduit/session-rename");
+		await userEvent.clear(input);
+		await userEvent.type(input, "feature/taken");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: /^Rename$/ }),
+		);
+		await expect(args["onrenamebranch"]).toHaveBeenCalledWith("feature/taken");
+		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
+			"/src/api: Branch feature/taken already exists",
+		);
+		await expect(input).toHaveValue("feature/taken");
+	},
+};
+
+export const RenameBranchErrorPhone: Story = {
+	...RenameBranchError,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
 export const WorkspaceMismatch: Story = {
 	tags: ["viewport-capture"],
 	args: {
@@ -392,6 +457,67 @@ export const WorktreeMissingPhone: Story = {
 		await expect(
 			canvas.getByTestId("session-bar-identity"),
 		).toHaveAccessibleName(/worktree missing/);
+	},
+};
+
+export const WorktreeMissingExtraFolder: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-worktree",
+		workspaceCause: "launch",
+		git: {
+			branch: "conduit/multi-folder-session",
+			worktree: "conduit-worktree",
+			dirty: true,
+			folders: [
+				{
+					root: "/src/conduit",
+					label: "conduit",
+					branch: "conduit/multi-folder-session",
+					worktree: "conduit-worktree",
+					dirty: true,
+				},
+				{ root: "/src/library", label: "library", missing: true },
+			],
+		},
+		workspaceMissing: {
+			path: "/src/library-worktree",
+			branch: "conduit/multi-folder-session",
+			canRecreate: true,
+			folders: [
+				{
+					folder: "/src/library",
+					path: "/src/library-worktree",
+					branch: "conduit/multi-folder-session",
+					canRecreate: true,
+				},
+			],
+		},
+		onrecreate: fn(async () => {}),
+		oncontinue: fn(async () => {}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveTextContent(
+			"worktree missing: library",
+		);
+		await userEvent.click(canvas.getByTestId("session-bar-identity"));
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("library");
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("/src/library-worktree");
+		await expect(
+			body.getByRole("menuitem", { name: "Recreate worktree" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).toHaveTextContent("Worktree missing");
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).not.toHaveTextContent("clean");
 	},
 };
 

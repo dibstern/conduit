@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import {
 	composerPreferences,
@@ -13,7 +13,11 @@ import {
 	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
-import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
+import {
+	applyDetectProxyResponse,
+	applyInstanceListResponse,
+	getCachedInstances,
+} from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { serverStatus } from "../../stores/server-status.svelte.js";
 import {
@@ -38,6 +42,9 @@ function resetState() {
 			sessionCount: 0,
 			pinEnabled: false,
 			tlsEnabled: false,
+			tailscaleServeEnabled: true,
+			tailscaleServeAvailable: true,
+			tailscaleServe: { url: "https://conduit.example.ts.net" },
 			keepAwake: false,
 			keepAwakeCommand: "caffeinate -di",
 			logLevel: "info",
@@ -256,6 +263,15 @@ function populateVisibility() {
 					},
 				],
 			},
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [
+					{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+					{ id: "gpt-5", name: "GPT-5", provider: "openai" },
+				],
+			},
 		],
 	});
 	handleHarnessDefaults({
@@ -303,6 +319,24 @@ function populateVisibility() {
 export const Models: Story = {
 	args: { initialTab: "models" },
 	beforeEach: populateVisibility,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("settings-models-summary")).toHaveTextContent(
+			"4 of 5 shown",
+		);
+		for (const testId of [
+			"settings-models-group-claude",
+			"settings-models-group-anthropic",
+			"settings-models-group-openai",
+			"settings-agents-group",
+		])
+			await expect(
+				within(body.getByTestId(testId)).getByRole("button", {
+					expanded: false,
+				}),
+			).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
+	},
 };
 
 export const ModelsInvalidDefault: Story = {
@@ -332,6 +366,49 @@ export const ModelsInvalidDefault: Story = {
 				},
 			},
 		});
+	},
+};
+
+export const ModelsFiltered: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"4",
+		);
+		for (const provider of ["anthropic", "openai"])
+			await expect(
+				within(body.getByTestId(`settings-models-group-${provider}`)).getByRole(
+					"button",
+					{ expanded: true },
+				),
+			).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle claude sonnet 4" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle gpt-4.1" }),
+		).toBeVisible();
+		await expect(
+			body.queryByTestId("settings-agents-group"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const ModelsNoMatch: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"no-such-model",
+		);
+		await expect(
+			body.getByText("No models match ‘no-such-model’.", { exact: true }),
+		).toBeVisible();
+		await expect(body.getByRole("button", { name: "Clear" })).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
 	},
 };
 
@@ -389,8 +466,37 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwake: true };
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: /^Log level\b/ }),
+		).toHaveValue("info");
+		// The fixture has no PIN, so this frame is also the PIN-off state.
+		await expect(
+			canvas.getByTestId("server-access-settings"),
+		).toHaveTextContent("https://conduit.example.ts.net");
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle Tailscale Serve" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			within(canvas.getByTestId("server-startup-settings")).getByRole("button"),
+		).toHaveAttribute("aria-expanded", "false");
+		await expect(
+			canvas.getByTestId("server-security-settings"),
+		).toHaveTextContent(
+			"Off · anyone who can reach this address can open conduit",
+		);
+		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeChecked();
+		await expect(
+			canvas.getByTestId("server-power-command-value"),
+		).toHaveTextContent("caffeinate -di");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -410,6 +516,113 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+		canvas
+			.getByTestId("server-startup-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ServerStartupExpanded: Story = {
+	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const startup = canvas.getByTestId("server-startup-settings");
+		const disclosure = within(startup).getByRole("button");
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		disclosure.blur();
+		await expect(canvas.getByTestId("server-startup-port")).toHaveTextContent(
+			"2633",
+		);
+		await expect(canvas.getByTestId("server-startup-host")).toHaveTextContent(
+			"0.0.0.0",
+		);
+		await expect(canvas.getByTestId("server-startup-https")).toHaveTextContent(
+			"Off",
+		);
+		await expect(canvas.getByTestId("server-startup-login")).toHaveTextContent(
+			"Installed",
+		);
+		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
+		startup.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerCommandEdit: Story = {
+	...Server,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-power-edit"));
+		await expect(canvas.getByTestId("server-power-command")).toHaveFocus();
+		await expect(canvas.getByTestId("server-power-command")).toHaveValue(
+			"caffeinate",
+		);
+		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
+		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
+		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerNotAvailable: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwakeCommand: null };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeDisabled();
+		await expect(canvas.getByTestId("server-power-settings")).toHaveTextContent(
+			"Not available on this computer",
+		);
+		await expect(
+			canvas.queryByTestId("server-power-edit"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PinOn: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, pinEnabled: true };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const security = canvas.getByTestId("server-security-settings");
+		await expect(security).toHaveTextContent(
+			"On · asked once on each new device",
+		);
+		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
+		security.scrollIntoView({ block: "nearest" });
+	},
+};
+
+export const ChangePin: Story = {
+	...PinOn,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-pin-change-btn"));
+		await expect(canvas.getByTestId("server-pin-current")).toHaveFocus();
+		await expect(
+			canvas.getByLabelText("New PIN", { exact: true }),
+		).toBeVisible();
+		await expect(canvas.getByLabelText("Confirm new PIN")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
+			"Every browser, including this one, will ask for the new PIN.",
+		);
+		canvas.getByTestId("server-security-settings").scrollIntoView({
+			block: "end",
+		});
 	},
 };
 
@@ -422,15 +635,18 @@ export const Server: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const row = canvas.getByRole("button", {
-			name: /Quick Start — Direct API Key/,
-		});
+		const guides = within(
+			within(canvasElement).getByTestId("opencode-setup-guides"),
+		);
+		await userEvent.click(guides.getByRole("button", { name: /Setup guides/ }));
+		const row = guides.getByRole("button", { name: /^Direct key/ });
 
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByText("opencode serve --port 4098")).toBeVisible();
+		await expect(
+			guides.getByText(/opencode config set provider anthropic/),
+		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
@@ -452,7 +668,9 @@ export const InstanceExpanded: Story = {
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Stop" })).toBeVisible();
+		await expect(canvas.getByTestId("edit-instance-btn")).toBeVisible();
+		await expect(canvas.getByText("Started by", { exact: true })).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
@@ -478,6 +696,89 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(
 			account.queryByTestId("rename-instance-btn"),
 		).not.toBeInTheDocument();
+	},
+};
+
+export const DefaultClaudeAccountEdit: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const account = within(canvas.getByTestId("instance-row-claude"));
+		await userEvent.click(
+			account.getByRole("button", { name: /Personal Claude/ }),
+		);
+		await expect(
+			account.queryByTestId("remove-instance-btn"),
+		).not.toBeInTheDocument();
+		await expect(account.getByText("Applies after restart")).toBeVisible();
+		await userEvent.click(account.getByTestId("edit-instance-btn"));
+		await expect(canvas.getByTestId("instance-form-name")).toHaveValue(
+			"Personal Claude",
+		);
+		await expect(canvas.getByTestId("instance-form-configdir")).toHaveValue(
+			"~/.claude",
+		);
+		await expect(
+			within(canvas.getByTestId("instance-form")).getByText(
+				/Folder changes apply after restart/,
+			),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("radiogroup", { name: "Type" }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const InstancesEmpty: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		populateInstances();
+		applyInstanceListResponse({
+			instances: getCachedInstances().filter(
+				(instance) => instance.driver === "claude",
+			),
+		});
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("opencode-empty-state")).toHaveTextContent(
+			"opencode serve --port 4098",
+		);
+		const guides = canvas.getByTestId("opencode-setup-guides");
+		applyDetectProxyResponse({ found: true, port: 8317 });
+		await waitFor(() =>
+			expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom"),
+		);
+		await expect(within(guides).getByRole("button")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+	},
+};
+
+export const InstanceAddOpenCode: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("add-instance-btn"));
+		await userEvent.click(canvas.getByTestId("instance-form-driver-opencode"));
+		await userEvent.type(
+			canvas.getByTestId("instance-form-name"),
+			"Staging OC",
+		);
+		await userEvent.type(canvas.getByTestId("instance-form-port"), "4098");
+		await expect(canvas.getByTestId("instance-form-managed")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+		await expect(
+			canvas.queryByTestId("instance-form-env"),
+		).not.toBeInTheDocument();
+		await expect(canvas.getByTestId("instance-form-save")).toHaveTextContent(
+			"Add instance",
+		);
 	},
 };
 
@@ -522,8 +823,8 @@ export const InstancesHover: Story = {
 };
 
 /**
- * Hover on an EXPANDED instance row, where Start / Stop / Edit / Rename /
- * Remove live. Those five buttons are the densest cluster of hover colours in
+ * Hover on an EXPANDED instance row, where Stop, Edit and Remove live.
+ * Those buttons are the densest cluster of hover colours in
  * the panel, and the component swap needs `!` overrides to hold them.
  *
  * The hover state is applied by hand instead of through `parameters.pseudo`,
@@ -557,7 +858,7 @@ export const InstanceExpandedHover: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: /Local OpenCode/ }),
 		);
-		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		await expect(canvas.getByTestId("edit-instance-btn")).toBeVisible();
 		canvasElement.ownerDocument.body.classList.add("pseudo-hover-all");
 	},
 };

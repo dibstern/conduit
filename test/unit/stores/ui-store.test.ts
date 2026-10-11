@@ -180,6 +180,17 @@ describe("toggleSidebar", () => {
 });
 
 describe("showToast", () => {
+	it("returns the actionable toast ID so its owner can dismiss it on navigation", () => {
+		const id = showToast("Turn stopped. 1 task still running", {
+			duration: 6000,
+			action: { label: "Stop them", run: vi.fn() },
+		});
+		expect(id).toBe(uiState.toasts[0]?.id);
+		vi.advanceTimersByTime(5999);
+		expect(uiState.toasts).toHaveLength(1);
+		vi.advanceTimersByTime(1);
+		expect(uiState.toasts).toHaveLength(0);
+	});
 	it("adds a toast with default options", () => {
 		showToast("Hello");
 		expect(uiState.toasts).toHaveLength(1);

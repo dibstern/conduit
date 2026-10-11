@@ -116,8 +116,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 		Effect.provide(
 			WsRpcGroup.toLayer({
 				...daemonOnlyHandlers,
+				ListBranches: () => Effect.succeed({ branches: [] }),
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
+				InspectSessionWorktrees: () =>
+					Effect.succeed({ worktrees: [], removeWorktrees: true }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				RenameSessionBranch: () => Effect.succeed({ ok: true as const }),
 				RecreateSessionWorktree: () =>
 					Effect.succeed({ directory: "/worktree" }),
 				ContinueSessionInMainFolder: () =>
