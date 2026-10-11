@@ -1060,6 +1060,50 @@ describe("SessionProjector", () => {
 		});
 	});
 
+	// Runners built before the translator stamped `outcome` still report a
+	// terminal task status; without settling on it the child stays busy forever.
+	it.each([
+		"completed",
+		"failed",
+		"stopped",
+		"killed",
+	])("tool.running settles a busy child on a terminal task status %s without an outcome", async (taskStatus) => {
+		await project(
+			makeStored(
+				"session.created",
+				"child",
+				{ sessionId: "child", title: "Child", provider: "claude" },
+				1,
+			),
+		);
+		await project(
+			makeStored(
+				"session.status",
+				"child",
+				{ sessionId: "child", status: "busy" },
+				2,
+			),
+		);
+		await project(
+			makeStored(
+				"tool.running",
+				"s1",
+				{
+					messageId: "m1",
+					partId: "tool1",
+					metadata: { childSessionId: "child", status: taskStatus },
+				},
+				3,
+			),
+		);
+
+		const row = await queryOne<SessionRow>(
+			"SELECT * FROM sessions WHERE id = ?",
+			["child"],
+		);
+		expect(row?.status).toBe("idle");
+	});
+
 	it("ignores event types it does not handle", async () => {
 		// Pre-insert a session so we can verify it's untouched
 		const created = makeStored(
