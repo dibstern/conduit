@@ -58,6 +58,74 @@ it("reads busy and retry from shell rows and accepts idle immediately", () => {
 	}
 });
 
+// A background agent remains busy in its own view, while its idle parent
+// monitors it. Foreground siblings and the parent's own turn must still win.
+it("does not propagate a live background agent's busy status into its monitoring parent", () => {
+	const backgroundTasks = [
+		{
+			id: "task",
+			type: "local_agent",
+			description: "Audit auth",
+			firstSeenAt: 100,
+			childSessionId: "agent",
+		},
+	];
+	for (const [status, siblingStatus, busy] of [
+		["idle", "idle", false],
+		["idle", "busy", true],
+		["busy", "idle", true],
+		["retry", "idle", true],
+	] as const) {
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [
+				{
+					id: "root",
+					title: "Root",
+					status,
+					backgroundWork: "monitoring",
+					backgroundTasks,
+				},
+				{ id: "agent", title: "Agent", status: "busy", parentID: "root" },
+				{
+					id: "sibling",
+					title: "Sibling",
+					status: siblingStatus,
+					parentID: "root",
+				},
+			],
+		});
+		expect(isSessionBusy("agent")).toBe(true);
+		expect(isSessionBusy("root")).toBe(busy);
+	}
+	// Foreground work can pass through an owned agent on its way to the root.
+	applySessionChange({
+		_tag: "snapshot",
+		rows: [
+			{
+				id: "root",
+				title: "Root",
+				status: "idle",
+				backgroundWork: "monitoring",
+				backgroundTasks,
+			},
+			{ id: "agent", title: "Agent", status: "busy", parentID: "root" },
+			{
+				id: "foreground",
+				title: "Foreground",
+				status: "busy",
+				parentID: "agent",
+			},
+		],
+	});
+	expect(isSessionBusy("root")).toBe(true);
+	applySessionChange({
+		_tag: "upsert",
+		item: { id: "root", title: "Root", status: "idle" },
+	});
+	expect(isSessionBusy("root")).toBe(true);
+});
+
 it("keeps every ancestor busy until its last busy descendant stops or is removed", () => {
 	applySessionChange({
 		_tag: "snapshot",

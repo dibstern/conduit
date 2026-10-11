@@ -13,13 +13,14 @@
  * pending approvals, tool tracking, etc.) are defined here.
  */
 
-import type { Effect } from "effect";
+import type { Effect, Fiber } from "effect";
 import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers/claude-agent-sdk.js";
 import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
+import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 import type { EffectPromptQueueClosed } from "./effect-prompt-queue.js";
 
@@ -76,7 +77,6 @@ import type {
 	Query as SDKQuery,
 	SDKMessage as SDKStreamMessage,
 	SDKUserMessage,
-	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 // active_goal is declared by the SDK separately from its iterator's union.
@@ -171,16 +171,20 @@ export interface ClaudeSubagentTaskContext {
 	readonly parentMessageId?: string;
 	readonly description?: string;
 	readonly subagentType?: string;
+	/** The task that started this one, for a task started inside an agent. */
+	readonly parentTaskId?: string;
+	/** Epoch ms when conduit first saw task_started: a running task's clock. */
+	readonly startedAt?: number;
+	readonly pausedAt?: number | null;
+	readonly pausedMs?: number;
 }
 
 export interface ClaudeSubagentLivePoller {
 	readonly sdkSubagentId: string;
 	readonly childSessionId: string;
 	readonly parentClaudeSessionId: string;
-	readonly parentToolUseId: string;
-	readonly cursor: ClaudeSubagentTranscriptCursor;
-	sessionReady: boolean;
 	active: boolean;
+	fiber?: Fiber.RuntimeFiber<void, never>;
 }
 
 /**
@@ -207,7 +211,12 @@ export interface ClaudeSessionContext {
 	readonly inFlightTools: Map<number, ToolInFlight>;
 	readonly subagentTasks?: Map<string, ClaudeSubagentTaskContext>;
 	readonly subagentPollers?: Map<string, ClaudeSubagentLivePoller>;
-	readonly pendingSubagentMessages?: Map<string, SessionMessage[]>;
+	messageOwnership?: ClaudeMessageOwnership;
+	/** Serializes ownership decisions and their delivery across SDK and feed inputs. */
+	messageOwnershipPermit?: Effect.Semaphore;
+	/** Shared by stream routing and transcript reads, retained across parent results. */
+	subagentTranscripts?: Map<string, ClaudeSubagentTranscriptCursor>;
+	failedSubagentSessions?: Set<string>;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;

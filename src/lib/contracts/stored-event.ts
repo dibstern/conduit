@@ -240,6 +240,11 @@ export interface TurnCompletedPayload {
 	/** Names the turn when no assistant message of its own answered it. */
 	readonly userMessageId?: string;
 	readonly cost?: number;
+	/** Claude's session running total; cost is its delta at persistence time. */
+	readonly providerCostTotalUsd?: number;
+	readonly providerSessionId?: string;
+	/** Input and cache tokens in the final main request, excluding output. */
+	readonly contextTokens?: number;
 	readonly tokens?: {
 		readonly input?: number;
 		readonly output?: number;
@@ -925,6 +930,9 @@ const TurnCompletedPayloadSchema = Schema.Struct({
 	messageId: Schema.String,
 	userMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	cost: Schema.optionalWith(Schema.Number, { exact: true }),
+	providerCostTotalUsd: Schema.optionalWith(Schema.Number, { exact: true }),
+	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optionalWith(TokensSchema, { exact: true }),
 	duration: Schema.optionalWith(Schema.Number, { exact: true }),
 });

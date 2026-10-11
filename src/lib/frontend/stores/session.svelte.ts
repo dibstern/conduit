@@ -2,6 +2,7 @@
 // the other. The two halves never write each other.
 
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
+import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
 	resetSessionSubscription,
@@ -98,6 +99,27 @@ export function parentOf(id: string): string | null {
 		(clientSession.announcedParent?.sessionId === id
 			? clientSession.announcedParent.parentId
 			: null)
+	);
+}
+
+/**
+ * The live background tasks of id's Claude runtime. Only SDK subagent Child
+ * Sessions share their parent's runtime; forks and Side Threads own theirs.
+ */
+export function rootBackgroundTasks(id: string): readonly BackgroundTask[] {
+	const seen = new Set([id]);
+	let root = id;
+	for (
+		let up = parentOf(root);
+		root.startsWith("claude-subagent-") && up && !seen.has(up);
+		up = parentOf(root)
+	) {
+		seen.add(up);
+		root = up;
+	}
+	return (
+		(serverSessions.get(root) ?? familySessions.find((row) => row.id === root))
+			?.backgroundTasks ?? []
 	);
 }
 

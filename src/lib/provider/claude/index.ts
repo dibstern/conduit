@@ -33,15 +33,10 @@ export {
 	ClaudeProviderRuntimeTag,
 	makeClaudeProviderRuntime,
 } from "./claude-provider-runtime.js";
-export type {
-	ClaudeSubagentSdk,
-	MaterializeClaudeSubagentsInput,
-	MaterializedClaudeSubagent,
-} from "./claude-subagent-materializer.js";
+export type { ClaudeSubagentSdk } from "./claude-subagent-materializer.js";
 export {
 	claudeSubagentSessionId,
 	defaultClaudeSubagentSdk,
-	makeClaudeSubagentMaterializer,
 } from "./claude-subagent-materializer.js";
 export type { ClaudeTranslationServiceDeps } from "./claude-translation-service.js";
 export {

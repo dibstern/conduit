@@ -415,7 +415,7 @@ it("ensureClaudeSubagentSession announces the subagent session it creates", asyn
 	});
 });
 
-it("persistClaudeSubagent announces the subagent session it writes messages to", async () => {
+it("Claude transcript persistence announces the child session it writes messages to", async () => {
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
 		await Effect.runPromise(
@@ -448,24 +448,18 @@ it("persistClaudeSubagent announces the subagent session it writes messages to",
 					const before = yield* versionOf("batch-child");
 
 					const announced = yield* announcedDuring(
-						persist.persistClaudeSubagent({
-							childSessionId: "batch-child",
-							parentSessionId: "batch-parent",
-							providerSessionId: "sdk-batch",
-							title: "Batch Agent",
-							events: [
-								canonicalEvent(
-									"message.created",
-									"batch-child",
-									{
-										sessionId: "batch-child",
-										messageId: "batch-m1",
-										role: "assistant",
-									},
-									{ provider: "claude" },
-								),
-							],
-						}),
+						persist.persistEvents([
+							canonicalEvent(
+								"message.created",
+								"batch-child",
+								{
+									sessionId: "batch-child",
+									messageId: "batch-m1",
+									role: "assistant",
+								},
+								{ provider: "claude" },
+							),
+						]),
 					);
 
 					expect(yield* versionOf("batch-child")).toBeGreaterThan(before ?? 0);

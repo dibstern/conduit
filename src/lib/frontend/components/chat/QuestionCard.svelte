@@ -30,6 +30,7 @@
 		 *  (e.g. from the terminal). The answer may not be deliverable. */
 		synthetic?: boolean | undefined;
 	} = $props();
+	const instanceId = $props.id();
 
 	let resolved = $state<"submitted" | "submitting" | "skipped" | null>(null);
 
@@ -221,7 +222,7 @@
 		{/if}
 
 		{#each request.questions as q, qIdx}
-			{@const inputName = `question-${request.toolId}-${qIdx}`}
+			{@const inputName = `question-${instanceId}-${request.toolId}-${qIdx}`}
 			<div class="question-section mb-3 last:mb-2" data-q-idx={qIdx}>
 				<div
 					class="question-header text-xs font-semibold mb-0.5 text-accent font-mono"

@@ -264,6 +264,12 @@ export const BackgroundTaskSchema = Schema.Struct({
 	description: Schema.String,
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
+	/** An agent's Child Session. */
+	childSessionId: Schema.optional(Schema.String),
+	/** The task that started this one, for a task started inside an agent. */
+	parentTaskId: Schema.optional(Schema.String),
+	/** Ancestors beyond the live list, nearest first; supplied by task ownership. */
+	ancestorTaskIds: Schema.optional(Schema.Array(Schema.String)),
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
@@ -502,6 +508,10 @@ export interface HistoryMessage {
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
 	cost?: number;
+	/** Canonical turn cost from the persisted turn projection, when available. */
+	turnCost?: number;
+	/** Context occupancy reported separately from cumulative result usage. */
+	contextTokens?: number;
 	/** Token usage — present on assistant messages from REST API. */
 	tokens?: {
 		input?: number;
@@ -648,6 +658,7 @@ export type Approval = typeof ApprovalSchema.Type;
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
 	usage: UsageInfoSchema,
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	cost: Schema.Number,
 	duration: Schema.Number,
 	sessionId: Schema.String,

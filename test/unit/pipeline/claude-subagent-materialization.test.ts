@@ -42,7 +42,6 @@ import { messageRowsToHistory } from "../../../src/lib/persistence/session-histo
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
-	makeClaudeSubagentMaterializer,
 } from "../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Query,
@@ -211,10 +210,6 @@ describe("Claude subagent materialization pipeline", () => {
 							sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
 						]),
 					};
-					const materializeSubagents = makeClaudeSubagentMaterializer({
-						sdk,
-						persist,
-					});
 					const relaySink = createRelayEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
@@ -308,7 +303,8 @@ describe("Claude subagent materialization pipeline", () => {
 					const instance = makeTestClaudeProviderInstance({
 						workspaceRoot: dir,
 						queryFactory: () => createMockQuery(queryMessages),
-						materializeSubagents,
+						subagentSdk: sdk,
+						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,
 					});
 					yield* instance.sendTurnEffect(
 						makeBaseSendTurnInput({
@@ -524,10 +520,6 @@ describe("Claude subagent materialization pipeline", () => {
 							return transcript;
 						}),
 					};
-					const materializeSubagents = makeClaudeSubagentMaterializer({
-						sdk,
-						persist,
-					});
 					const relaySink = createRelayEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
@@ -663,7 +655,7 @@ describe("Claude subagent materialization pipeline", () => {
 						workspaceRoot: dir,
 						queryFactory: () => query,
 						subagentSdk: sdk,
-						materializeSubagents,
+						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,
 					});
 					const turnFiber = yield* Effect.fork(
 						instance.sendTurnEffect(

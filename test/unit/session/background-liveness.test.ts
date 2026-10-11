@@ -2,6 +2,31 @@ import { describe, expect, it, vi } from "vitest";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 
 describe("makeSessionBackgroundLiveness", () => {
+	it("publishes newly learned ancestry without changing a live task's age", () => {
+		const onChange = vi.fn();
+		const liveness = makeSessionBackgroundLiveness(onChange, () => 100);
+		const task = {
+			id: "nested",
+			type: "local_bash",
+			description: "Watch",
+			parentTaskId: "middle",
+			ancestorTaskIds: ["middle"],
+		};
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [task] });
+		const known = { ...task, ancestorTaskIds: ["middle", "agentA"] };
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [known] });
+		expect(liveness.backgroundOf("one")?.tasks).toEqual([
+			{ ...known, firstSeenAt: 100 },
+		]);
+		expect(onChange).toHaveBeenCalledTimes(2);
+		liveness.record({
+			sessionId: "one",
+			kind: "snapshot",
+			tasks: [{ ...known }],
+		});
+		expect(onChange).toHaveBeenCalledTimes(2);
+	});
+
 	it("notifies when task ids are added or removed even if work stays working", () => {
 		const onChange = vi.fn();
 		const liveness = makeSessionBackgroundLiveness(onChange);
@@ -37,7 +62,7 @@ describe("makeSessionBackgroundLiveness", () => {
 		now = 100;
 		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [b, a] });
 		expect(liveness.backgroundOf("one")).toEqual({
-			work: "working",
+			work: "monitoring",
 			tasks: [
 				{ ...a, firstSeenAt: 0 },
 				{ ...b, firstSeenAt: 100 },
@@ -87,14 +112,14 @@ describe("makeSessionBackgroundLiveness", () => {
 		liveness.record({
 			sessionId: "one",
 			kind: "snapshot",
-			tasks: [{ ...task, type: "local_agent", description: "Watch tests" }],
+			tasks: [{ ...task, type: "local_workflow", description: "Watch tests" }],
 		});
 		expect(liveness.backgroundOf("one")).toEqual({
 			work: "working",
 			tasks: [
 				{
 					id: "a",
-					type: "local_agent",
+					type: "local_workflow",
 					description: "Watch tests",
 					firstSeenAt: 100,
 				},
@@ -126,7 +151,7 @@ describe("makeSessionBackgroundLiveness", () => {
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
-	it("reports monitoring only while every live task is a watch loop", () => {
+	it("reports monitoring only while every live task runs on its own", () => {
 		const onChange = vi.fn();
 		const liveness = makeSessionBackgroundLiveness(onChange);
 		const kindAfter = (types: string[]) => {
@@ -143,10 +168,11 @@ describe("makeSessionBackgroundLiveness", () => {
 		};
 
 		expect(kindAfter(["local_bash", "monitor_mcp"])).toBe("monitoring");
-		expect(kindAfter(["local_bash", "local_agent"])).toBe("working");
+		expect(kindAfter(["local_bash", "local_agent"])).toBe("monitoring");
+		expect(kindAfter(["local_agent", "local_workflow"])).toBe("working");
 		expect(kindAfter(["monitor_ws"])).toBe("monitoring");
 		expect(kindAfter([])).toBeUndefined();
-		expect(onChange).toHaveBeenCalledTimes(4);
+		expect(onChange).toHaveBeenCalledTimes(5);
 	});
 
 	it("clears live work when the SDK session ends", () => {

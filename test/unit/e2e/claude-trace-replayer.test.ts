@@ -25,23 +25,39 @@
 //    after its tool_use and before its first tool_result, keep other
 //    sessions' turns playing, and let the held turn finish only after
 //    release().
-//
+// 9. Transcript read drift: an agent's transcript read must return exactly
+//    what the capture read at that point of the trace (the latest recorded
+//    read at or before the messages played so far), never a later state and
+//    never a stale one, and list only agents read by then. Live, the poller
+//    reads while the stream flows; a replay that serves the final transcript
+//    up front hides every "steps stopped arriving" bug.
+// 10. Read id drift: read messages carry the replay's session id and the same
+//    fresh uuids as their streamed copies, or dedupe sees every agent step
+//    twice. Ids only in transcripts are fresh too.
+// 11. Unknown session: transcript reads for a session never played reject.
+// 12. Restart drift: a new query resuming the session (a restarted Claude
+//    process) plays the next planned turn under the same session id.
+// 13. Hold order: with holdAfterResult and holdBefore both set, each
+//    release() opens exactly one hold, in the order the replay reaches
+//    them. The result hold holds once, not at every later result. holdBefore
+//    stops before exactly that message, and held() resolves only while the
+//    replay waits at an unreleased hold, or a spec reads a moving state.
 //
 // A trace may record several inputs (command_uuid, user_message_uuid(s)): each
 // sent prompt answers the next recorded input in plan order, and the replay
 // holds before each later input's command_lifecycle queued frame until conduit
 // pushes that prompt. That adds four modes:
 //
-// 6. Unmatched prompt: a prompt arrives that no recorded input matches (more
+// 14. Unmatched prompt: a prompt arrives that no recorded input matches (more
 //    prompts than the plan's traces record inputs). It throws into the SDK
 //    stream AND makes assertComplete() throw. Mode 2 is its one-input case.
-// 7. Unsent input: a recorded input is never sent: the query closes while the
+// 15. Unsent input: a recorded input is never sent: the query closes while the
 //    replay holds for it, or the test ends with it unconsumed. assertComplete()
 //    names the trace and the input. Mode 3 is its one-input case.
-// 8. Ids mapped out of order: a frame references a later recorded input before
+// 16. Ids mapped out of order: a frame references a later recorded input before
 //    that input's queued frame, i.e. before the prompt it maps to could have
 //    been sent. The trace fails at creation, naming the line.
-// 9. Unrecorded interrupt: interrupt() arrives during a trace that records
+// 17. Unrecorded interrupt: interrupt() arrives during a trace that records
 //    several inputs or an interrupt, and the trace has no further interrupt to
 //    answer it with. interrupt() rejects AND assertComplete() throws. A
 //    one-input trace with no recorded interrupt keeps the synthesized stop
@@ -622,6 +638,7 @@ describe("createClaudeTraceReplayer", () => {
 		expect(next).toHaveLength(traceLineCount("pong-thinking-text-turn"));
 		replayer.assertComplete();
 	});
+
 	it("holds a later input's queued frame until its prompt and maps recorded ids to sent ones", async () => {
 		const lines = traceJson(TWO_INPUTS);
 		const [recordedA = "", recordedB = ""] = recordedInputs(lines);
@@ -663,7 +680,7 @@ describe("createClaudeTraceReplayer", () => {
 		replayer.assertComplete();
 	});
 
-	// Failure 6.
+	// Failure 14.
 	it("fails the stream and assertComplete on a prompt no recorded input matches", async () => {
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
@@ -682,7 +699,7 @@ describe("createClaudeTraceReplayer", () => {
 		expect(() => replayer.assertComplete()).toThrow(unmatched);
 	});
 
-	// Failure 7.
+	// Failure 15.
 	it("fails assertComplete when a recorded input is never sent", async () => {
 		const lines = traceJson(TWO_INPUTS);
 		const [, recordedB = ""] = recordedInputs(lines);
@@ -706,7 +723,7 @@ describe("createClaudeTraceReplayer", () => {
 		);
 	});
 
-	// Failure 8.
+	// Failure 16.
 	it("throws at creation when a frame names a later input before its queued frame", () => {
 		const lines = traceJson(TWO_INPUTS);
 		const [, recordedB = ""] = recordedInputs(lines);
@@ -721,7 +738,7 @@ describe("createClaudeTraceReplayer", () => {
 		);
 	});
 
-	// Failure 9.
+	// Failure 17.
 	it("rejects an interrupt the trace does not record, and fails assertComplete", async () => {
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
@@ -825,5 +842,204 @@ describe("createClaudeTraceReplayer", () => {
 		await expect(query.interrupt()).rejects.toThrow(
 			/records no further interrupt/,
 		);
+	});
+	// Failure 9.
+	it("serves each agent's transcript as it was read at that point of the trace", async () => {
+		const name = "concurrent-background-work-turn";
+		const recorded = JSON.parse(
+			readFileSync(join(TRACES_DIR, `${name}.subagent-reads.json`), "utf8"),
+		) as { afterMessage: number; agentId: string; messages: unknown[] }[];
+		const agents = [...new Set(recorded.map((read) => read.agentId))];
+		const replayer = createClaudeTraceReplayer({ turns: [name] });
+		const prompts = promptQueue();
+		const iterator = replayer.sdk
+			.query({ prompt: prompts.iterable })
+			[Symbol.asyncIterator]();
+		prompts.push("launch");
+		const options = { dir: "/workspace" };
+		const lengths: string[] = [];
+		const expected: string[] = [];
+		for (let played = 1; played <= traceLineCount(name); played++) {
+			const next = await iterator.next();
+			if (next.done) throw new Error("trace ended early");
+			const sessionId = next.value.session_id ?? "";
+			const listed = await replayer.sdk.subagentSdk.listSubagents(
+				sessionId,
+				options,
+			);
+			for (const agentId of agents) {
+				const served = await replayer.sdk.subagentSdk.getSubagentMessages(
+					sessionId,
+					agentId,
+					options,
+				);
+				const reached = recorded.filter(
+					(read) => read.agentId === agentId && read.afterMessage <= played,
+				);
+				lengths.push(`${played}:${agentId}:${served.length}`);
+				expected.push(
+					`${played}:${agentId}:${reached.at(-1)?.messages.length ?? 0}`,
+				);
+				expect(listed.includes(agentId)).toBe(reached.length > 0);
+			}
+		}
+		expect(lengths).toEqual(expected);
+		prompts.close();
+	});
+
+	// Failure 10.
+	it("gives transcript reads the same fresh ids as the replayed stream", async () => {
+		const name = "concurrent-background-work-turn";
+		const replayer = createClaudeTraceReplayer({ turns: [name] });
+		const prompts = promptQueue();
+		const iterator = replayer.sdk
+			.query({ prompt: prompts.iterable })
+			[Symbol.asyncIterator]();
+		prompts.push("launch");
+		const played: SDKMessage[] = [];
+		for (let index = 0; index < traceLineCount(name); index++) {
+			const next = await iterator.next();
+			if (next.done) break;
+			played.push(next.value);
+		}
+		const sessionId = played[0]?.session_id ?? "";
+		const options = { dir: "/workspace" };
+		const reads = (
+			await Promise.all(
+				(
+					await replayer.sdk.subagentSdk.listSubagents(sessionId, options)
+				).map((agentId) =>
+					replayer.sdk.subagentSdk.getSubagentMessages(
+						sessionId,
+						agentId,
+						options,
+					),
+				),
+			)
+		).flat();
+		const streamed = new Set<string | undefined>(
+			played.map((message) => message.uuid),
+		);
+		const captured = readFileSync(join(TRACES_DIR, `${name}.jsonl`), "utf8");
+
+		expect(reads.length).toBeGreaterThan(0);
+		expect(reads.every((message) => message.session_id === sessionId)).toBe(
+			true,
+		);
+		// Most agent steps arrive both streamed and read; dedupe needs one id.
+		expect(
+			reads.filter((message) => streamed.has(message.uuid)).length,
+		).toBeGreaterThan(reads.length / 2);
+		expect(reads.some((message) => captured.includes(message.uuid))).toBe(
+			false,
+		);
+		prompts.close();
+	});
+
+	// Failure 11.
+	it("rejects transcript reads of an unknown session", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: ["concurrent-background-work-turn"],
+		});
+		const options = { dir: "/workspace" };
+		await expect(
+			replayer.sdk.subagentSdk.listSubagents("unknown", options),
+		).rejects.toThrow("unknown session");
+		await expect(
+			replayer.sdk.subagentSdk.getSubagentMessages("unknown", "a", options),
+		).rejects.toThrow("unknown session");
+	});
+
+	// Failure 12.
+	it("plays the next planned turn in a restarted process that resumes the session", async () => {
+		const replayer = createClaudeTraceReplayer({
+			turns: [
+				"pong-thinking-text-turn",
+				"concurrent-background-work-after-restart-turn",
+			],
+		});
+		const before = promptQueue();
+		const first = replayer.sdk.query({ prompt: before.iterable });
+		before.push("first");
+		const firstTurn = await readTurn(first[Symbol.asyncIterator]());
+		first.close();
+		const sessionId = firstTurn[0]?.session_id ?? "";
+
+		const after = promptQueue();
+		const second = replayer.sdk.query({
+			prompt: after.iterable,
+			options: { resume: sessionId },
+		});
+		after.push("after restart");
+		const secondTurn = await readTurn(
+			second[Symbol.asyncIterator](),
+			"concurrent-background-work-after-restart-turn",
+		);
+		after.close();
+
+		expect(secondTurn).toHaveLength(
+			traceLineCount("concurrent-background-work-after-restart-turn"),
+		);
+		expect(
+			secondTurn.some(
+				(message) => message.type === "system" && message.subtype === "init",
+			),
+		).toBe(true);
+		expect(
+			new Set(secondTurn.flatMap((message) => message.session_id ?? [])),
+		).toEqual(new Set([sessionId]));
+		replayer.assertComplete();
+	});
+	// Failure 13.
+	it("opens one hold per release(), in the order the replay reaches them", async () => {
+		const name = "concurrent-background-work-turn";
+		const replayer = createClaudeTraceReplayer({
+			turns: [name],
+			holdAfterResult: true,
+			holdBefore: { turn: 1, message: 113 },
+		});
+		const prompts = promptQueue();
+		const iterator = replayer.sdk
+			.query({ prompt: prompts.iterable })
+			[Symbol.asyncIterator]();
+		prompts.push("launch");
+		const tick = () =>
+			new Promise<"waiting">((resolve) => setTimeout(resolve, 50, "waiting"));
+		const played: SDKMessage[] = [];
+		let pending = iterator.next();
+		// Plays until the replay stalls.
+		const playUntilStall = async () => {
+			while (true) {
+				const next = await Promise.race([pending, tick()]);
+				if (next === "waiting") return;
+				if (next.done) throw new Error("replay ended");
+				played.push(next.value);
+				pending = iterator.next();
+			}
+		};
+		const holding = async () =>
+			(await Promise.race([replayer.held().then(() => "held"), tick()])) ===
+			"held";
+
+		await playUntilStall();
+		expect(played.at(-1)?.type).toBe("result");
+		const firstResult = played.length;
+		expect(await holding()).toBe(true);
+
+		replayer.release();
+		await playUntilStall();
+		expect(played).toHaveLength(112);
+		expect(firstResult).toBeLessThan(112);
+		expect(await holding()).toBe(true);
+
+		// Played out, it waits for the next prompt: a stall, but not a hold.
+		replayer.release();
+		await playUntilStall();
+		expect(played).toHaveLength(traceLineCount(name));
+		expect(
+			played.filter((message) => message.type === "result").length,
+		).toBeGreaterThan(2);
+		expect(await holding()).toBe(false);
+		prompts.close();
 	});
 });

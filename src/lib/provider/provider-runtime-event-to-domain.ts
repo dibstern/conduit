@@ -337,6 +337,11 @@ export function translateProviderRuntimeEventToDomain(
 
 		case "turn.completed": {
 			const cost = numberFieldValue(data["cost"]);
+			const providerCostTotalUsd = numberFieldValue(
+				data["providerCostTotalUsd"],
+			);
+			const providerSessionId = stringField(data["providerSessionId"]);
+			const contextTokens = numberFieldValue(data["contextTokens"]);
 			const tokens = tokensValue(data["tokens"]);
 			const duration =
 				numberFieldValue(data["duration"]) ??
@@ -346,6 +351,9 @@ export function translateProviderRuntimeEventToDomain(
 				messageId: messageIdFromDataOrState(event, data, state),
 				...(userMessageId ? { userMessageId } : {}),
 				...(cost != null ? { cost } : {}),
+				...(providerCostTotalUsd != null ? { providerCostTotalUsd } : {}),
+				...(providerSessionId != null ? { providerSessionId } : {}),
+				...(contextTokens != null ? { contextTokens } : {}),
 				...(tokens != null ? { tokens } : {}),
 				...(duration != null ? { duration } : {}),
 			} satisfies TurnCompletedPayload;

@@ -96,7 +96,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						(message) =>
 							message.type === "system" && message.subtype === "init",
 					);
-					expect(init).toMatchObject({ permissionMode: "plan" });
+					expect(init).toMatchObject({ permissionMode: "default" });
 					const models = trace.flatMap((message) =>
 						message.type === "assistant" ? [message.message.model] : [],
 					);

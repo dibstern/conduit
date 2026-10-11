@@ -1220,7 +1220,7 @@ describe("subscribeShell", () => {
 						if (delta._tag !== "upsert") throw new Error("expected upsert");
 						return delta.item.attention;
 					});
-				expect(yield* attentionAfter(["local_agent"])).toBe("working");
+				expect(yield* attentionAfter(["local_workflow"])).toBe("working");
 				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);

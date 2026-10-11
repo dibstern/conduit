@@ -1,0 +1,5054 @@
+[
+	{
+		"afterMessage": 52,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 67,
+		"agentId": "ab4839874dc3ac775",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "8611e440-108b-4c5a-9a98-840dfef2dea2",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Run `sleep 20; echo b-done` in the foreground, then reply with only: B done."
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:46.298Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 79,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 81,
+		"agentId": "ab4839874dc3ac775",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "8611e440-108b-4c5a-9a98-840dfef2dea2",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Run `sleep 20; echo b-done` in the foreground, then reply with only: B done."
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:46.298Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "2780dfcb-39c3-4d9c-83c4-0e372d0b4337",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVir6iZ7zhgpjBazojC",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01Sb7L5YvXiAnxpSHdAM5fWS",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 20; echo b-done",
+								"description": "Wait 20 seconds then print b-done"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 10749,
+						"cache_read_input_tokens": 5645,
+						"output_tokens": 91,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 10749
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 91,
+								"cache_read_input_tokens": 5645,
+								"cache_creation_input_tokens": 10749,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 10749,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.863Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 84,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 89,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 89,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 95,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 96,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 99,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "ca2466f6-ea15-4039-850d-c9785074bf00",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"name": "Read",
+							"input": {
+								"file_path": "/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"output_tokens": 320,
+						"output_tokens_details": { "thinking_tokens": 197 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 348
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 320,
+								"cache_read_input_tokens": 21746,
+								"cache_creation_input_tokens": 348,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 348,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.522Z"
+			},
+			{
+				"type": "user",
+				"uuid": "1b94be2c-3183-4dd5-87fe-84e080b2ea33",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"type": "tool_result",
+							"content": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.532Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 100,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "ca2466f6-ea15-4039-850d-c9785074bf00",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"name": "Read",
+							"input": {
+								"file_path": "/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"output_tokens": 320,
+						"output_tokens_details": { "thinking_tokens": 197 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 348
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 320,
+								"cache_read_input_tokens": 21746,
+								"cache_creation_input_tokens": 348,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 348,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.522Z"
+			},
+			{
+				"type": "user",
+				"uuid": "1b94be2c-3183-4dd5-87fe-84e080b2ea33",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"type": "tool_result",
+							"content": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.532Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f32aa36c-bd64-4928-a7ca-57b1239a6f8d",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "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"
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 379,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:59.733Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 103,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "ca2466f6-ea15-4039-850d-c9785074bf00",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"name": "Read",
+							"input": {
+								"file_path": "/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"output_tokens": 320,
+						"output_tokens_details": { "thinking_tokens": 197 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 348
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 320,
+								"cache_read_input_tokens": 21746,
+								"cache_creation_input_tokens": 348,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 348,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.522Z"
+			},
+			{
+				"type": "user",
+				"uuid": "1b94be2c-3183-4dd5-87fe-84e080b2ea33",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"type": "tool_result",
+							"content": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.532Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f32aa36c-bd64-4928-a7ca-57b1239a6f8d",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSiwwKEAgSGAI4AUIIdGhpbmtpbmcSDDF/yldIVcQlcBDHfxoMUwdESb1E2/ZR3KKNIjC9z2OYVxuoLGlUTSOrXLgpXE1QVLGwOK6KXVG8QDAc8OQXnLjPxcD3qgNvSho97VcqqAtGqwE18U02Femf8/XJMznr8NPJhSbO1kf5n2VVz7acMZD0NcXl3mvRO3/TUPdvUqb1NJqxNbzau/v4M9KIJDS7Pdc3SBwL8nRWrQkqtqfAS5fDv4CHbtRuvySTWDucy46lxrc4nIHVNmyuqyOrjhfY2efUr3lEU7Q/AamHQhUq6LtKX8pq4huJCVDV0fkjLLzeGB+jH8BRPsqrw5IG/3RZCguEK0HJkwGVA4c6faZeBdcNLKlVtUr2H30eXxAjD5KaCxzXOUZZsuzTpw+vfbhyh1SZ0cvUvI3jnpaX3BtVnA3hQGBLQNA9AU52oKIuc+QgzDo6jf6nCGIz6mp+NxaN1+4/A/jF0p2wdwMVQ9Pz6ahapEycMun9chS3qd7FAJTwmRmAPuUe5u28AwKpIOyeX4jpVo4WfiBdBETnvqLSM3ofhkWos9fZVODhCpA40mjuWQ0mhXNzIU8Zs8o3bUXTzSZwalIGFuw+08ewntRb8L6h6G59paNdyP0avfCer3ZWNt6nuAbxyCwC0OFeR0q7PVlU/cEZ+Xy9+q3/D42QQv4WmWrTJJfwao4m4XWFIXuxDfPiOO0u60z7dbhL4egFLLbicMbIvHEOuB0dDe4pDjqFj7UoZ03cWaAhRsOfpwYYIfJzNEpnghHJ0o2h5HsIAuuHtORdHUCzO1uswyBLMt8IV1VfvHln5F0AG98hHDUg2bp1JIUV4SzW2jfECmjrZRwxpfmNCbGv9WGXAuP6072YcJwtFebLTMoidAAL0j+wDEdgbDP6IWin7+J9x5ZaB2XAbmw3dpGbW5dYhjq6KEcUBHcGb4hpmIfF9CwFu7st+C/PdhbP37KPnAetjuLHc9i+BLpW9E9TAJQGv5kSiXF+n2qUehWs9ECZ5BrPhTcDEj2k4vauZXXkH9a49hDwDfjcr1G+mKXUfOmDyoFoVAJofIPOfg2je7TrE7IOAYbZ2780rjv4PYH47s0kdbNgxtWeFa4RUMXP5CH+vVEpb3QVOBVCLj2zVuMwpTVQ4/qDjHBRy+GWfTe4yeT3t3+aopG/WtB95TUGuZw2RNoRgU28K491/qFb9H+ugZtoabEWrC1c7zIA9ImPdTMHRTRujtMh6vc2zNnV5ga/XLqxW2o6KuhCu9axwBGujyiCC0gd/2Zi+RMKkac2eYgo6UfegvvEZX0ic+dgtF8y8avuiAd0SGRI/cFTw88b0jFEFl09x1FEfKDQETHkZHYFFO6oLuzGMOfKDXhQ8anTZdxIrwPwQzf40UKCRBYMaDR2NCCKG19Fo+7hN6FBxxOPQQikg6LRZ1kbqknFPfyrIueMbQ6h7YLw4NqW5/e5SDdxxOfuYgO79+mtNqeT8M4Ui2dy6TTEO/O40lhz9e2h6Q/T2M0cEY5NxqiTignrOdqYkLP9aW7Eafffqf2QqrzgRn/HTD49Oyza2V4NpGUxXZXp2iD8mTYpFrsCmfTRWzVwbSsAwQWzxMsn9pOT1JCFV3xSuPBpNZG6IPtJhfVKpAncWUywY1wPmQi3MR/2HNh7Ht6l2Wk2Obt0B+5l+koVJpMJCk+ePO8Urx/AKvd9S8d0EPkbtTBG9e68wORFRnmzU8GJjk8TYp4/W2LM/w3+nU16Ms8TJs/R7O6w7PaKam8zhIcGiIWwqAFVTm+wsdi5wcu/bVgxx6BOj89ekromMpZXabXpFPwwIF3MOQx8xeZVFvVxdPEi1pLqhKaO76E/r7yTt5SlW76uWY0e/J9u8uJM2D+l/SAp0VwCmj3DyKXK0ithQdjfTPMtibB4nmNEEMoIP/3+uyv7TFoBsKxAFLD/INwu9FwNWNEQGai5jtRCujKDQGJa6XfWl/HoxGwTT6ax4jUiXqQiIaUilToCYIX9jipKqPnQ/ANcf/3KMkjIhiRyXiRRhQv8nSLa/jgme4zbkGDMURFw1hgB"
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 379,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:59.733Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f0922f34-d249-4817-b57a-0f2a423bba3f",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01DTgUQR71WGKesmEMMov8VF",
+							"name": "Bash",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; cat /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output",
+								"description": "Wait until the background task prints its marker",
+								"timeout": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"output_tokens": 572,
+						"output_tokens_details": { "thinking_tokens": 285 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 379
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 572,
+								"cache_read_input_tokens": 22094,
+								"cache_creation_input_tokens": 379,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 379,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:01.483Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 110,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "ca2466f6-ea15-4039-850d-c9785074bf00",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"name": "Read",
+							"input": {
+								"file_path": "/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"output_tokens": 320,
+						"output_tokens_details": { "thinking_tokens": 197 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 348
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 320,
+								"cache_read_input_tokens": 21746,
+								"cache_creation_input_tokens": 348,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 348,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.522Z"
+			},
+			{
+				"type": "user",
+				"uuid": "1b94be2c-3183-4dd5-87fe-84e080b2ea33",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"type": "tool_result",
+							"content": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.532Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f32aa36c-bd64-4928-a7ca-57b1239a6f8d",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSiwwKEAgSGAI4AUIIdGhpbmtpbmcSDDF/yldIVcQlcBDHfxoMUwdESb1E2/ZR3KKNIjC9z2OYVxuoLGlUTSOrXLgpXE1QVLGwOK6KXVG8QDAc8OQXnLjPxcD3qgNvSho97VcqqAtGqwE18U02Femf8/XJMznr8NPJhSbO1kf5n2VVz7acMZD0NcXl3mvRO3/TUPdvUqb1NJqxNbzau/v4M9KIJDS7Pdc3SBwL8nRWrQkqtqfAS5fDv4CHbtRuvySTWDucy46lxrc4nIHVNmyuqyOrjhfY2efUr3lEU7Q/AamHQhUq6LtKX8pq4huJCVDV0fkjLLzeGB+jH8BRPsqrw5IG/3RZCguEK0HJkwGVA4c6faZeBdcNLKlVtUr2H30eXxAjD5KaCxzXOUZZsuzTpw+vfbhyh1SZ0cvUvI3jnpaX3BtVnA3hQGBLQNA9AU52oKIuc+QgzDo6jf6nCGIz6mp+NxaN1+4/A/jF0p2wdwMVQ9Pz6ahapEycMun9chS3qd7FAJTwmRmAPuUe5u28AwKpIOyeX4jpVo4WfiBdBETnvqLSM3ofhkWos9fZVODhCpA40mjuWQ0mhXNzIU8Zs8o3bUXTzSZwalIGFuw+08ewntRb8L6h6G59paNdyP0avfCer3ZWNt6nuAbxyCwC0OFeR0q7PVlU/cEZ+Xy9+q3/D42QQv4WmWrTJJfwao4m4XWFIXuxDfPiOO0u60z7dbhL4egFLLbicMbIvHEOuB0dDe4pDjqFj7UoZ03cWaAhRsOfpwYYIfJzNEpnghHJ0o2h5HsIAuuHtORdHUCzO1uswyBLMt8IV1VfvHln5F0AG98hHDUg2bp1JIUV4SzW2jfECmjrZRwxpfmNCbGv9WGXAuP6072YcJwtFebLTMoidAAL0j+wDEdgbDP6IWin7+J9x5ZaB2XAbmw3dpGbW5dYhjq6KEcUBHcGb4hpmIfF9CwFu7st+C/PdhbP37KPnAetjuLHc9i+BLpW9E9TAJQGv5kSiXF+n2qUehWs9ECZ5BrPhTcDEj2k4vauZXXkH9a49hDwDfjcr1G+mKXUfOmDyoFoVAJofIPOfg2je7TrE7IOAYbZ2780rjv4PYH47s0kdbNgxtWeFa4RUMXP5CH+vVEpb3QVOBVCLj2zVuMwpTVQ4/qDjHBRy+GWfTe4yeT3t3+aopG/WtB95TUGuZw2RNoRgU28K491/qFb9H+ugZtoabEWrC1c7zIA9ImPdTMHRTRujtMh6vc2zNnV5ga/XLqxW2o6KuhCu9axwBGujyiCC0gd/2Zi+RMKkac2eYgo6UfegvvEZX0ic+dgtF8y8avuiAd0SGRI/cFTw88b0jFEFl09x1FEfKDQETHkZHYFFO6oLuzGMOfKDXhQ8anTZdxIrwPwQzf40UKCRBYMaDR2NCCKG19Fo+7hN6FBxxOPQQikg6LRZ1kbqknFPfyrIueMbQ6h7YLw4NqW5/e5SDdxxOfuYgO79+mtNqeT8M4Ui2dy6TTEO/O40lhz9e2h6Q/T2M0cEY5NxqiTignrOdqYkLP9aW7Eafffqf2QqrzgRn/HTD49Oyza2V4NpGUxXZXp2iD8mTYpFrsCmfTRWzVwbSsAwQWzxMsn9pOT1JCFV3xSuPBpNZG6IPtJhfVKpAncWUywY1wPmQi3MR/2HNh7Ht6l2Wk2Obt0B+5l+koVJpMJCk+ePO8Urx/AKvd9S8d0EPkbtTBG9e68wORFRnmzU8GJjk8TYp4/W2LM/w3+nU16Ms8TJs/R7O6w7PaKam8zhIcGiIWwqAFVTm+wsdi5wcu/bVgxx6BOj89ekromMpZXabXpFPwwIF3MOQx8xeZVFvVxdPEi1pLqhKaO76E/r7yTt5SlW76uWY0e/J9u8uJM2D+l/SAp0VwCmj3DyKXK0ithQdjfTPMtibB4nmNEEMoIP/3+uyv7TFoBsKxAFLD/INwu9FwNWNEQGai5jtRCujKDQGJa6XfWl/HoxGwTT6ax4jUiXqQiIaUilToCYIX9jipKqPnQ/ANcf/3KMkjIhiRyXiRRhQv8nSLa/jgme4zbkGDMURFw1hgB"
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 379,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:59.733Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f0922f34-d249-4817-b57a-0f2a423bba3f",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01DTgUQR71WGKesmEMMov8VF",
+							"name": "Bash",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; cat /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output",
+								"description": "Wait until the background task prints its marker",
+								"timeout": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"output_tokens": 572,
+						"output_tokens_details": { "thinking_tokens": 285 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 379
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 572,
+								"cache_read_input_tokens": 22094,
+								"cache_creation_input_tokens": 379,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 379,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:01.483Z"
+			},
+			{
+				"type": "user",
+				"uuid": "8a0086a8-f755-4573-a58f-d3ffcbc6db8b",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01DTgUQR71WGKesmEMMov8VF",
+							"type": "tool_result",
+							"content": "nested-shell-done\n\n[exited with code 0]",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:02.809Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 116,
+		"agentId": "ab898d312e2e126b5",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "6e9df5b7-8f2a-4554-b162-4db1561126c0",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Start this Bash command in the background (run_in_background: true): sleep 15; echo nested-shell-done. Then run `echo a-working` in the foreground. Then wait for the background command to finish and reply with only: A done."
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:45.463Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4537c766-9523-423f-9059-ed423f8e57bd",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVinVR3WknPJvtWEB8F",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 15; echo nested-shell-done",
+								"description": "Sleep 15 seconds then print a marker",
+								"run_in_background": true
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 16435,
+						"cache_read_input_tokens": 0,
+						"output_tokens": 121,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 16435
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 121,
+								"cache_read_input_tokens": 0,
+								"cache_creation_input_tokens": 16435,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 16435,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.354Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ff9be8df-b093-4ecf-9e49-583e751a7211",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_012sQbH5FcjhYqyWS6bnMUHo",
+							"type": "tool_result",
+							"content": "Command running in background with ID: b1oikywh4. Output is being written to: /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.360Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "0f8494dd-fd8a-4611-9bbf-b446b89cf07c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVivaM1hAySkA4nxveG",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"name": "Bash",
+							"input": {
+								"command": "echo a-working",
+								"description": "Print a working marker"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 2031,
+						"cache_read_input_tokens": 16435,
+						"output_tokens": 77,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 2031
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 77,
+								"cache_read_input_tokens": 16435,
+								"cache_creation_input_tokens": 2031,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 2031,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.532Z"
+			},
+			{
+				"type": "user",
+				"uuid": "b5185ecc-3fde-4ca5-8ff7-b1fcefbb9492",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01NxGrnWrf5nvyX9Ea8ZdSWG",
+							"type": "tool_result",
+							"content": "a-working",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:48.546Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "01f01b22-16ae-4978-bf9c-469cba602b14",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQShAYKEAgSGAI4AUIIdGhpbmtpbmcSDGPczcPC0EJYFDFlGBoMMlxKZTOMkBeN6NYCIjDlYHPBq6U4TOhYt7on6EaVYOVS76lwixlMR/NgsCXsvxRtk6NmWXQkjDScZZIh/3EqoQXkcXYzL/QccP6SIsFOYuoqQvqxIjC9SQgyJUX+7TmI4+DKEgGKxXcSYM1Zz9ire6dfeaw7GKZ3enYGXUItHWjrjm8984qIA8URn2VGn5kiVEYZB8XIED1xTOGIRd2hNWT06ztlw//a+9sjALtH1/8wvl0XcENMLXTK0kPQ253pHzASULsoroGjaXHrOWPBZGv9rcdCVHZ9To/Dj2HUS1iXPPScwwE58GmisZgCgpvHZqCrek7S8B/iksEXIiuusaOE9xiCNCQnnKIqZWWChEE43N84gXL8j+3zZ8rtGsFkQG68e2f8dySOB9yHgK2jmt23WhsQHHch3dvden2dw0RbvHNTbt4Pv8QHhPY4T+j7pl/8ZU294Lozjnw94HbpKJrys9t0eztLoBxsi8qOs4Kbl11uHgaYr6cdy+9G3z2voU0iNR6q42k8e3lutWgIdHKODr98asVf1YFI4gnBm7sQbqPUmbQFRBSzfyLq/ftyBdRtTRpBDHl7rAC0hkoMuF/Vqa+4XPV3xBRCZidQBOEiJL5BGKSh7g8zNQ3QIHibGRnvPZiCqzhvh/57hSvvyrD5ELfg8eOGquN3xUpYDRRxRLRqbK9FBxRoT5qLIXt5Ldf5VDD9AzndJ5karRW9/lnWH3Jx0JMlR9eSHIq8bo6tmQAVAd0u8hsGGYweRMX/H6k8hfpI85p9H7OYAPfx0SadeQFsUkVgPBEgM9QrCaRrK0wjbEFbkg8AumpRQM1G7l5Mny757uLS2yiIVfZoAC0io0L4RNgq+pyI272s8QyuacIl6iOcbZEwoT9lXf8fKnYahyBdwbVrQDvdY0Z5nqoSp5Wxb+C4jGME3BLeq3MbLno6bRaBFccb0YT04IT0SYaAXTyZ8RQgpCT95IfJEhvGGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 109,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 8,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.012Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "6870f8cd-8ead-4458-b015-aa62f4a14e6a",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj1ewRWaiwUSv8JdQj",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"name": "ToolSearch",
+							"input": { "query": "select:Monitor", "max_results": 1 },
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 109,
+						"cache_read_input_tokens": 18466,
+						"output_tokens": 132,
+						"output_tokens_details": { "thinking_tokens": 53 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 109
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 132,
+								"cache_read_input_tokens": 18466,
+								"cache_creation_input_tokens": 109,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 109,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.197Z"
+			},
+			{
+				"type": "user",
+				"uuid": "ce440afb-897f-46ab-9afb-9eeb48afae71",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"type": "tool_result",
+							"tool_use_id": "toolu_01FWRYWsFJmvjPSEZ5HtVHA2",
+							"content": [{ "type": "tool_reference", "tool_name": "Monitor" }]
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:50.199Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9451838-5246-48d3-97a5-e98bb305fe83",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVj8not1J6q1vfSxJ3Q",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"name": "Monitor",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; echo background-finished",
+								"description": "wait for nested-shell-done in background task output",
+								"timeout_ms": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 3171,
+						"cache_read_input_tokens": 18575,
+						"output_tokens": 221,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 3171
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 221,
+								"cache_read_input_tokens": 18575,
+								"cache_creation_input_tokens": 3171,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 3171,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.375Z"
+			},
+			{
+				"type": "user",
+				"uuid": "fdcbb1ca-5346-46f7-9994-788f17817672",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01SZbHfa5rA1Ad32n4TCCjpQ",
+							"type": "tool_result",
+							"content": "Monitor started (task bpdadyngc, expires in 1m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event. Keep working — do not poll or sleep. Events may arrive while you are waiting for the user — an event is not their reply."
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:52.383Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "a9fc2c3e-6e41-439c-b3fd-83f930910fd7",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "CAQSuwoKEAgSGAI4AUIIdGhpbmtpbmcSDOh5OhBnPLxPlHpW7xoMEQXayhheRE5Hkq+9IjD+QfgXbK6jRkHhqvydA0ZN1tqVsxGWLUNYzG7DPXkdy04VTRyfIRWrmY245H8bZ+wq2AkzAPBjQ2Mp7taNkdGN3MhUleG+2/vxFgBAwL5iM0rW632M0nkQsuWHwft7e/MxItfo9ALMtmft5X0Nv5SwjkSAo+jSRDLACvhFzX2V4ZI0wzON0Gt1RlqTCPncUY1StiWN28GGHRMa8A3+3nfEeV9BBN+YUMUrI3mEITn7Oi7e2YOuYDXOXIM9Hia5SUBfQ2Z6QEBsvsfCSJEl6xS/vcc0Yl4dF4TQ5USEY4tiilKYSCi56NBqpOgm957wm3ti5757EHu+izt756pn4P/UMIeXveuHkQqkvbChJQ8NHe251+NACJ0ndRJi+Ds53aiovtH5jlx6BYkKJN7T+B9VeMGcYvwAYZVUrkFLmIPCU5xCD3uSXPtfzRVGVWynG0FlAQ+AWqAkUkHM68IQ3+U0LvP3a+NSgGaBpN8R09xKVIlbbuKM2Ru72bskJLkli+4jFAQA5crj/eyoq3Ywuuo74aRTuqcgNOWmo82KYVLOD/aI2tMH9sUGbVX9WAXr45Ofm2JqOfgrmaEiilyq78x9d591u9X/hH/M/YdkkcB1fDwfbRqj2yitYxPeXMv7q5a9QchgGvrGrhkGIgzH0KRv1MqrS89Q0FzPLk7mzhd6oUYIB9zHeN+9uGin/k379pEbp6PrdiaKKyOYrCiTDzawjGLpE8fvxEvXKBkBixFARFw4RvC9TqRDU8CYp5yYUC2zq2q7OSsHAgfcDwKPfT2Q8ZAuUyR7BUJ2TslwMXlByfHimBvzQMIE/ntJGqK8QBfIQSoYYOzRCjS2gfxeEXNLjGGDCaM5483N6jeJ9w1EunlPnEQ3WubePu0iF8aHEXDLqmAepW1E7LfWZkljbgcKYVNyHm00ObQ8oneudRRoyp6lrSRhPo2O3X+c1JoWLi+THy84/5/FDlp64AXEpKzuhv9PIb6R4EpdNpPEj6eQ4t+7e7nyxrcA/BtIUAf28mNNU+bk1w1Ab2Fm04obCcRa72HPRIVdj3TNlNpbQRVG2eUUKMX3DdRvITsqYjAj1uEIiOYH0fGKTCrLSXRrSRbL7yF4UjgUxe1csRB0nIPvUdwYSESqHZhdWSibw5zKkCvbP+Pq1BBPzipxcNp0aaUsf8RKyt0wQaopxYEsNoouQF373zX2NymxmaDukJ8SHGxDziqNVoy9setS8lwoHZ7LovjZUxyJBbgHgXZCEXsq7Z6JwNWQeZNdL5qNd8B6MB5me1Up4WtVuWL8yhyB9e0ziYIctOFQj4ikBXx+mF5ztkhKWPdTM2i+7myKfdADNImhy2b2YJjATJzykRzfqYfwM+bNhqBpyPYFs43v2fSzmOXlxLaDgnnPwnfdBKeE35JiTy3yI+aOurtL3GR2NiHJOe48r7oL2mxDJ6dTSyJGM/43NPoykQ+iQeZD84ng+bGe4dtxE4rW0HHtsAEGFclNLqQwGbtn7ac1Rw2SqqgW4pdzcgF2v2g1D7WzQHa20UM0Q7WY3WZVYHqZWyeQbqI8E3MGzbCKTjEmy6/n49nx88OsXjhxm/adT8+Fv7/apC/f1j+j44cKZQ/iLnZtA7Bh+U3sgTJtH+VDYaqYKYxXx8qoFbCEM74eqDPhNasbD2gU8ohndTXERXQXfca9zaPAmvPuMlS8Uv6FHYTQiyDkl+N/MdSsnEfoELfZGAE="
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 348,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:55.865Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "ca2466f6-ea15-4039-850d-c9785074bf00",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjJBrBmyBph2CGtXTy",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"name": "Read",
+							"input": {
+								"file_path": "/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 348,
+						"cache_read_input_tokens": 21746,
+						"output_tokens": 320,
+						"output_tokens_details": { "thinking_tokens": 197 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 348
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 320,
+								"cache_read_input_tokens": 21746,
+								"cache_creation_input_tokens": 348,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 348,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.522Z"
+			},
+			{
+				"type": "user",
+				"uuid": "1b94be2c-3183-4dd5-87fe-84e080b2ea33",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01M6Z7Yv55rkaNEU48FFhXgk",
+							"type": "tool_result",
+							"content": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:56.532Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f32aa36c-bd64-4928-a7ca-57b1239a6f8d",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "thinking",
+							"thinking": "",
+							"signature": "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"
+						}
+					],
+					"container": null,
+					"stop_reason": null,
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 379,
+							"ephemeral_1h_input_tokens": 0
+						},
+						"output_tokens": 7,
+						"service_tier": "standard",
+						"inference_geo": "global"
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:59.733Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "f0922f34-d249-4817-b57a-0f2a423bba3f",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVjbqkLTNDKTFpSgSqN",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01DTgUQR71WGKesmEMMov8VF",
+							"name": "Bash",
+							"input": {
+								"command": "until grep -q nested-shell-done /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output 2>/dev/null; do sleep 0.5; done; cat /private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output",
+								"description": "Wait until the background task prints its marker",
+								"timeout": 60000
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 379,
+						"cache_read_input_tokens": 22094,
+						"output_tokens": 572,
+						"output_tokens_details": { "thinking_tokens": 285 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 379
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 572,
+								"cache_read_input_tokens": 22094,
+								"cache_creation_input_tokens": 379,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 379,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:01.483Z"
+			},
+			{
+				"type": "user",
+				"uuid": "8a0086a8-f755-4573-a58f-d3ffcbc6db8b",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01DTgUQR71WGKesmEMMov8VF",
+							"type": "tool_result",
+							"content": "nested-shell-done\n\n[exited with code 0]",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:02.809Z"
+			},
+			{
+				"type": "user",
+				"uuid": "8644fda2-b0d7-497c-9c38-606be3149d3c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "<task-notification>\n<task-id>b1oikywh4</task-id>\n<tool-use-id>toolu_012sQbH5FcjhYqyWS6bnMUHo</tool-use-id>\n<output-file>/private/tmp/claude-501/-private-tmp-conduit-process-ytBA0b-process-test/ecb50e44-f167-45a3-9aa4-573f828424c1/tasks/b1oikywh4.output</output-file>\n<status>completed</status>\n<summary>Background command \"Sleep 15 seconds then print a marker\" completed (exit code 0)</summary>\n</task-notification>"
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"isQueuedCommand": true,
+				"timestamp": "2026-10-09T23:02:02.445Z",
+				"origin": { "kind": "task-notification", "producer": "session-task" }
+			},
+			{
+				"type": "assistant",
+				"uuid": "118ccaef-03ed-405d-8641-5b0f9acecb9c",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVk4f3aR1pvh8hVrDLJ",
+					"type": "message",
+					"role": "assistant",
+					"content": [{ "type": "text", "text": "A done." }],
+					"container": null,
+					"stop_reason": "end_turn",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 978,
+						"cache_read_input_tokens": 22473,
+						"output_tokens": 5,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 978
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 5,
+								"cache_read_input_tokens": 22473,
+								"cache_creation_input_tokens": 978,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 978,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_01U3biseGLup5XHSnDHKQqtC",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:03.620Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 126,
+		"agentId": "ab4839874dc3ac775",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "8611e440-108b-4c5a-9a98-840dfef2dea2",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Run `sleep 20; echo b-done` in the foreground, then reply with only: B done."
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:46.298Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "2780dfcb-39c3-4d9c-83c4-0e372d0b4337",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVir6iZ7zhgpjBazojC",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01Sb7L5YvXiAnxpSHdAM5fWS",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 20; echo b-done",
+								"description": "Wait 20 seconds then print b-done"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 10749,
+						"cache_read_input_tokens": 5645,
+						"output_tokens": 91,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 10749
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 91,
+								"cache_read_input_tokens": 5645,
+								"cache_creation_input_tokens": 10749,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 10749,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.863Z"
+			},
+			{
+				"type": "user",
+				"uuid": "a8b1a67f-6b8a-453c-a5dc-b05128bec79f",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01Sb7L5YvXiAnxpSHdAM5fWS",
+							"type": "tool_result",
+							"content": "b-done",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:08.053Z"
+			}
+		]
+	},
+	{
+		"afterMessage": 132,
+		"agentId": "ab4839874dc3ac775",
+		"messages": [
+			{
+				"type": "user",
+				"uuid": "8611e440-108b-4c5a-9a98-840dfef2dea2",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": "Run `sleep 20; echo b-done` in the foreground, then reply with only: B done."
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:46.298Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "2780dfcb-39c3-4d9c-83c4-0e372d0b4337",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVir6iZ7zhgpjBazojC",
+					"type": "message",
+					"role": "assistant",
+					"content": [
+						{
+							"type": "tool_use",
+							"id": "toolu_01Sb7L5YvXiAnxpSHdAM5fWS",
+							"name": "Bash",
+							"input": {
+								"command": "sleep 20; echo b-done",
+								"description": "Wait 20 seconds then print b-done"
+							},
+							"caller": { "type": "direct" }
+						}
+					],
+					"container": null,
+					"stop_reason": "tool_use",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 10749,
+						"cache_read_input_tokens": 5645,
+						"output_tokens": 91,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 10749
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 91,
+								"cache_read_input_tokens": 5645,
+								"cache_creation_input_tokens": 10749,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 10749,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:01:47.863Z"
+			},
+			{
+				"type": "user",
+				"uuid": "a8b1a67f-6b8a-453c-a5dc-b05128bec79f",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"role": "user",
+					"content": [
+						{
+							"tool_use_id": "toolu_01Sb7L5YvXiAnxpSHdAM5fWS",
+							"type": "tool_result",
+							"content": "b-done",
+							"is_error": false
+						}
+					]
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:08.053Z"
+			},
+			{
+				"type": "assistant",
+				"uuid": "4f8aa775-e00d-4990-93e8-6677c7dbc79d",
+				"session_id": "ecb50e44-f167-45a3-9aa4-573f828424c1",
+				"message": {
+					"model": "claude-opus-5-5",
+					"id": "msg_011CfsVkT5fW2QjbUXnGCaHz",
+					"type": "message",
+					"role": "assistant",
+					"content": [{ "type": "text", "text": "B done." }],
+					"container": null,
+					"stop_reason": "end_turn",
+					"stop_sequence": null,
+					"stop_details": null,
+					"usage": {
+						"input_tokens": 2,
+						"cache_creation_input_tokens": 1880,
+						"cache_read_input_tokens": 16394,
+						"output_tokens": 5,
+						"output_tokens_details": { "thinking_tokens": 0 },
+						"server_tool_use": {
+							"web_search_requests": 0,
+							"web_fetch_requests": 0
+						},
+						"service_tier": "standard",
+						"cache_creation": {
+							"ephemeral_1h_input_tokens": 0,
+							"ephemeral_5m_input_tokens": 1880
+						},
+						"inference_geo": "global",
+						"iterations": [
+							{
+								"input_tokens": 2,
+								"output_tokens": 5,
+								"cache_read_input_tokens": 16394,
+								"cache_creation_input_tokens": 1880,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 1880,
+									"ephemeral_1h_input_tokens": 0
+								},
+								"type": "message"
+							}
+						],
+						"speed": "standard",
+						"fallback_credit": null
+					},
+					"input_transformations": [],
+					"diagnostics": null,
+					"context_management": null
+				},
+				"parent_tool_use_id": "toolu_015MfEiScHotw8NQSpASo57C",
+				"parent_agent_id": null,
+				"timestamp": "2026-10-09T23:02:08.788Z"
+			}
+		]
+	}
+]
