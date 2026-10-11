@@ -5,6 +5,7 @@
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
 	import HarnessLogo from "./HarnessLogo.svelte";
+	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
@@ -121,6 +122,8 @@
 			: getDraftProject() ?? getCurrentSlug() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
+	let presentedRequest = $state<number | undefined>();
+	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
 	type AccountCard = { value: string; label: string; locked: boolean } & (
 		| { kind: "usage"; availability: AccountAvailability }
 		| { kind: "status"; status: InstanceStatus }
@@ -387,10 +390,16 @@
 	}
 
 	function handleAccountSelect(id: string) {
-		// Open Claude account handoffs belong to bn6x.6; OpenCode stays fixed.
-		if (locked) return;
 		const card = accountCards.find((card) => card.value === id);
 		if (!card || card.locked) return;
+		if (locked) {
+			if (selectedDriver === "claude" && sessionState.currentId) {
+				closePicker();
+				void accounts.beginSwitch(sessionState.currentId, id, selectedLogoInstanceId);
+				presentedRequest = accounts.handoff.kind === "previewing" ? accounts.handoff.requestId : undefined;
+			}
+			return;
+		}
 		const instance = instances.find((instance) => instance.id === id)
 			?? (selectedDriver === "claude" && id === "claude"
 				? { id, driver: "claude" as const, label: card.label, isCustom: false }
@@ -608,6 +617,9 @@
 								{/if}
 							{/snippet}
 						</OptionRow>
+						{#if locked && selectedDriver === "claude"}
+							<div data-testid="picker-account-note" class="mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
+						{/if}
 					</section>
 				{/if}
 				<Button
@@ -927,6 +939,23 @@
 		{/if}
 	{/if}
 </div>
+
+{#if handoff}
+	<HandoffDialog
+		open
+		onclose={() => accounts.cancel()}
+		to={handoff.to}
+		summary={handoff.summary}
+		confirm={{
+			from: handoff.from,
+			fromQuota: accounts.fromQuota(handoff),
+			quota: accounts.quotaOf(handoff.to),
+			cutOff: handoff.limit?.cutOffMessageId !== undefined,
+			busy: accounts.switching,
+			onconfirm: () => void accounts.confirm(),
+		}}
+	/>
+{/if}
 
 <style>
 	.picker-account-card {

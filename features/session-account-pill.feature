@@ -1,4 +1,4 @@
-Feature: A Claude session's account pill switches the session, not the project
+Feature: A Claude session's account pill names its account in the session bar
 
 Scenario Outline: a Claude session's bar names the account it runs on
   Given the conduit app is served with the connected mockup
@@ -16,38 +16,6 @@ Examples:
   | viewport | height | size |
   | desktop  | 22     | 10   |
   | phone    | 20     | 9    |
-
-Scenario Outline: switching from the pill moves the session and leaves the project's binding alone
-  Given the conduit app is served with the connected mockup
-  And the viewport is a <viewport>
-  And a session already exists on the Claude harness
-  And the Claude accounts are claude as work2claude, self as personal, team as team-max
-  And the project is bound to claude
-  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
-  And the quota check reads claude 40% used, self 23% used, team limited until 2026-01-01T14:30:00Z
-  And the handoff carries 47 of 112 messages with the first
-  When I open the account pill in the session bar
-  Then the account picker opens <placement>
-  And the account picker row for work2claude reads 60% left and cannot be picked
-  And the account picker row for personal reads 77% left and can be picked
-  And the account picker row for team-max reads limited · 14:30 and cannot be picked
-  And the account picker pre-selects personal
-  When I pick personal in the account picker
-  Then the PreviewContinuation RPC previews the current session on self
-  And the handoff dialog asks Continue on personal?
-  And the swap card hands work2claude at 60% left to personal at 77% left
-  When I press Switch and continue
-  Then the ContinueSession RPC switches the current session from claude to self
-  And the SetProjectInstance RPC was not sent
-  And the handoff dialog is closed
-  When the session resumes on self from claude by user and replies All provider tests pass now.
-  Then the session bar account pill reads personal
-  And the session bar account pill shows self with a teal dot
-
-Examples:
-  | viewport | placement         |
-  | desktop  | below the pill    |
-  | phone    | as a bottom sheet |
 
 Scenario: a Claude session with one account has no pill and no project badge
   Given the conduit app is served with the connected mockup
@@ -104,10 +72,11 @@ Scenario Outline: account picker opened from the pill matches frame D
   And the project is bound to claude
   And the quota check reads claude 40% used, self 23% used, team limited until 2026-01-01T14:30:00Z
   When I open the account pill in the session bar
-  Then the account picker pre-selects personal
+  Then the account picker opens <placement>
+  And the account picker pre-selects personal
   And the screen region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | baseline                            | threshold |
-  | desktop  | session-account-pill-picker-desktop | 98        |
-  | phone    | session-account-pill-picker-phone   | 98        |
+  | viewport | placement         | baseline                           | threshold |
+  | desktop  | below the pill    | session-account-pill-picker-desktop | 98       |
+  | phone    | as a bottom sheet | session-account-pill-picker-phone   | 98       |

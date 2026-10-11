@@ -46,7 +46,11 @@ export const harnessHandlers: StepHandler[] = [
 		match: /^I start a new session$/,
 		run: async ({ world }) => {
 			// Phones show the session list until a session or draft is open.
-			await world.page.locator("#new-session-btn:visible").click();
+			const newSession = world.page.locator("#new-session-btn:visible");
+			if (!(await newSession.isVisible())) {
+				await world.page.getByTestId("session-bar-back").click();
+			}
+			await newSession.click();
 			await world.page
 				.locator("#input-wrapper")
 				.waitFor({ state: "visible", timeout: 5_000 });
@@ -161,7 +165,8 @@ export const harnessHandlers: StepHandler[] = [
 			await expect(badge).toHaveAttribute("data-state", match[3] ?? "");
 			if (match[3] === "spinning") {
 				await expect(badge).toHaveText("");
-				await expect(badge).toHaveCSS("animation-duration", "0.8s");
+				// Name, not duration: an earlier visual step freezes durations to 0s.
+				await expect(badge).not.toHaveCSS("animation-name", "none");
 			}
 		},
 	},

@@ -10,6 +10,7 @@ Scenario Outline: C1 draft Claude accounts form a grid and bind the project on t
   And the composer picker has the Claude catalog
   When I view Account choices in the picker
   Then the Account section has 2 equal-width cards and the caption 5-hour use
+  And the picker has no account handoff note
   And the picker root sections and rows are harness, account, model, context, effort, agent
   And the picker card claude is named personal and shows its AccountDot
   And the claude Account card shows 62% usage
@@ -94,12 +95,16 @@ Examples:
   | wide  | composer-picker-account-c3 | 98        |
   | phone | composer-picker-account-c3 | 98        |
 
-Scenario Outline: C2 open Claude cards show quotas while account switching remains inert
+Scenario Outline: C2 open Claude cards lock current and limited accounts and switch to unknown usage
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
   And the Claude accounts are claude as personal, self as work, client as client
-  And the quota check reads claude 62% used, self limited until 2026-01-01T14:30:00Z, client unknown
+  And the project is bound to self
+  And the quota check reads claude 62% used, self limited until 2026-01-01T14:30:00Z, client <reading>
+  And the handoff carries 2 of 2 messages with the first
+  And the transcript ends with the unanswered message Switch to the client account
+  And the account switch reply is held
   And the composer picker has the Claude catalog
   When I view Account choices in the picker
   Then the claude Account card is selected and in view
@@ -107,17 +112,117 @@ Scenario Outline: C2 open Claude cards show quotas while account switching remai
   And the claude Account card shows 62% usage
   And the self Account card is limited until 2026-01-01T14:30:00Z
   And the client Account card shows unknown usage
+  And the picker account handoff note is a muted footer under the cards
   And the model-picker region visually matches <baseline> at <threshold> percent
   When I try to pick the claude Account card
   Then the card tap sends no binding or handoff RPC
+  When I try to pick the self Account card
+  Then the card tap sends no binding or handoff RPC
   When I select the client Account card
-  Then the claude Account card is selected and in view
-  And the card tap sends no binding or handoff RPC
+  Then the PreviewContinuation RPC previews the current session on client
+  And the model picker is closed before the handoff dialog
+  And the handoff dialog asks Continue on client?
+  When I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to client
+  And the composer harness badge for claude is spinning
+  And the SetProjectInstance RPC was not sent
+  When the account switch reply lands
+  Then the handoff dialog is closed
+  When the session resumes on client from claude by user and replies Switched to client.
+  Then the composer harness logo for client shows C on its badge
+  When I view Account choices in the picker
+  Then the client Account card is selected and in view
+  And the client Account card is disabled
+  And the composer harness badge for client matches its AccountDot colour
+  And the picker harness badge for client matches its AccountDot colour
 
 Examples:
-  | tier  | baseline                        | threshold |
-  | wide  | composer-picker-account-c2-open | 98        |
-  | phone | composer-picker-account-c2-open | 98        |
+  | tier  | reading     | baseline                       | threshold |
+  | wide  | unknown     | composer-picker-account-c2-open | 98       |
+  | phone | unavailable | composer-picker-account-c2-open | 98       |
+
+Scenario Outline: C2 switching from an Account card preserves the project binding and reads fresh quotas
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the project is bound to team
+  And the composer picker has the Claude catalog
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  And the quota check reads claude 62% used, self 90% used, team 15% used
+  And the handoff carries 47 of 112 messages with the first
+  And the account switch reply is held
+  When I view Account choices in the picker
+  Then the claude Account card shows 62% usage
+  And the self Account card shows 90% usage
+  When I close the model picker
+  And the quota check reads claude 40% used, self 23% used, team limited until 2026-01-01T14:30:00Z
+  And I view Account choices in the picker
+  Then the claude Account card shows 40% usage
+  And the claude Account card is disabled
+  And the self Account card shows 23% usage
+  And the team Account card is limited until 2026-01-01T14:30:00Z
+  And the picker has refreshed account quotas 2 times
+  When I select the self Account card
+  Then the PreviewContinuation RPC previews the current session on self
+  And the model picker is closed before the handoff dialog
+  And the handoff dialog asks Continue on personal?
+  And the handoff dialog carries <messages>
+  And the swap card hands work2claude at 60% left to personal at 77% left
+  When I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to self
+  And the composer harness badge for claude is spinning
+  And the SetProjectInstance RPC was not sent
+  When the account switch reply lands
+  Then the handoff dialog is closed
+  When the session resumes on self from claude by user and replies All provider tests pass now.
+  Then the composer harness logo for self shows P on its badge
+  When I view Account choices in the picker
+  Then the self Account card is selected and in view
+  And the composer harness badge for self matches its AccountDot colour
+
+Examples:
+  | tier  | messages                                            |
+  | wide  | Last 46 messages and your first one, word for word    |
+  | phone | Last 46 messages and your first one                  |
+
+Scenario Outline: C3 cancelling an Account card handoff preserves the session, draft and project binding
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as personal, self as work, client as client, research as research, ops as ops
+  And the project is bound to ops
+  And the quota check reads claude 62% used, self 90% used, client 15% used, research unknown, ops 40% used
+  And the composer picker has the Claude catalog
+  And the handoff carries 2 of 2 messages with the first
+  When I type Keep this draft into the composer
+  And I view Account choices in the picker
+  Then the Account section has 5 scroll-snap cards and the caption 5-hour use
+  And the claude Account card is selected and in view
+  And the claude Account card is disabled
+  And the Account row has a right-edge fade
+  And the picker account handoff note is a muted footer under the cards
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I scroll the Account row to the end
+  Then the Account row has no right-edge fade
+  When I select the research Account card
+  Then the PreviewContinuation RPC previews the current session on research
+  And the model picker is closed before the handoff dialog
+  And the handoff dialog asks Continue on research?
+  When I cancel the account handoff
+  Then the handoff dialog is closed
+  And no account switch RPC was sent
+  And the SetProjectInstance RPC was not sent
+  And the composer harness logo for claude shows P on its badge
+  And the composer still contains Keep this draft
+  When I view Account choices in the picker
+  Then the claude Account card is selected and in view
+  And the claude Account card is disabled
+
+Examples:
+  | tier  | baseline                       | threshold |
+  | wide  | composer-picker-account-c3-open | 98        |
+  | phone | composer-picker-account-c3-open | 98        |
 
 Scenario Outline: C5 draft OpenCode instances show status cards and bind immediately
   Given the conduit app is served with the connected mockup
@@ -156,6 +261,7 @@ Scenario Outline: C5 OpenCode instance cards are locked in an open session
   And the opencode Instance card is selected and in view
   And the bedrock Instance card shows <status> status
   And the Instance cards are locked and announce Harness is fixed for this session
+  And the picker has no account handoff note
   And the model-picker region visually matches <baseline> at <threshold> percent
   When I try to pick the bedrock Instance card
   Then the opencode Instance card is selected and in view

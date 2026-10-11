@@ -108,6 +108,86 @@ export const composerAccountsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert picker closed before the account handoff",
+		match: /^the model picker is closed before the handoff dialog$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+			const dialog = world.page.getByTestId("handoff-dialog");
+			await expect(dialog).toHaveCount(1);
+			await expect(dialog).toBeVisible();
+			const start = beforeCardTap.get(world.page);
+			if (start === undefined) throw new Error("No card tap was recorded");
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.slice(start)
+					.filter((request) =>
+						["PreviewContinuation", "ContinueSession"].includes(request.tag),
+					)
+					.map((request) => request.tag),
+			).toEqual(["PreviewContinuation"]);
+		},
+	},
+	{
+		name: "cancel picker account handoff",
+		match: /^I cancel the account handoff$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("handoff-cancel").click();
+		},
+	},
+	{
+		name: "assert cancellation sends no account switch",
+		match: /^no account switch RPC was sent$/,
+		run: ({ world }) => {
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "ContinueSession"),
+			).toEqual([]);
+		},
+	},
+	{
+		name: "assert account handoff note styling",
+		match:
+			/^the picker account handoff note is a muted footer under the cards$/,
+		run: async ({ world }) => {
+			const section = world.page.getByTestId("picker-account-section");
+			const note = section.getByTestId("picker-account-note");
+			await expect(note).toHaveText(
+				"You'll see what carries over before anything changes.",
+			);
+			await expect(note).toHaveCSS("font-size", "10.5px");
+			await expect(note).toHaveCSS("border-top-width", "1px");
+			await expect(note).toHaveCSS("margin-top", "8px");
+			await expect(note).toHaveCSS("padding", "6px 0px 0px");
+			await expect(note).toHaveCSS(
+				"color",
+				await world.page
+					.getByTestId("picker-row-model")
+					.locator("span")
+					.first()
+					.evaluate((element) => getComputedStyle(element).color),
+			);
+			const cards = await section
+				.getByTestId("picker-account-options")
+				.boundingBox();
+			const box = await note.boundingBox();
+			if (!cards || !box)
+				throw new Error("No account cards or handoff note box");
+			expect(Math.abs(box.x - cards.x)).toBeLessThanOrEqual(1);
+			expect(box.y).toBeGreaterThanOrEqual(cards.y + cards.height);
+		},
+	},
+	{
+		name: "assert account handoff note hidden",
+		match: /^the picker has no account handoff note$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-account-note")).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
 		name: "assert card selection and visibility",
 		match:
 			/^the (\S+) (Account|Instance) card is (selected and in view|outside the visible row)$/,

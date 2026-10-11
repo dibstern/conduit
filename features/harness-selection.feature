@@ -161,9 +161,11 @@ Scenario Outline: B1 switching replaces the letter with a spinner and restores t
   And the handoff carries 2 of 2 messages with the first
   And the transcript ends with the unanswered message Switch the account
   And the account switch reply is held
-  When I open the account pill in the session bar
-  And I pick personal in the account picker
-  Then the handoff dialog asks Continue on personal?
+  When I view Account choices in the picker
+  And I select the self Account card
+  Then the PreviewContinuation RPC previews the current session on self
+  And the model picker is closed before the handoff dialog
+  And the handoff dialog asks Continue on personal?
   When I press Switch and continue
   Then the ContinueSession RPC switches the current session from claude to self
   And the composer harness badge for claude is spinning
@@ -175,6 +177,8 @@ Scenario Outline: B1 switching replaces the letter with a spinner and restores t
   When I open the model picker
   Then the picker harness logo for self shows P on its badge
   And the picker harness badge for self is idle
+  And the composer harness badge for self matches its AccountDot colour
+  And the picker harness badge for self matches its AccountDot colour
 
 Examples:
   | tier   | controls |
