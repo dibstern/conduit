@@ -326,7 +326,10 @@ export const sessionHandlers: {
 				workspace_hint_sequence = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint_sequence END
 				WHERE id = ?`,
 			params: [
-				Object.keys(event.data.worktrees).length === 0
+				// Keep fallback and origin metadata on the existing browser session row.
+				Object.keys(event.data.worktrees).length === 0 &&
+				event.data.cause !== "missing" &&
+				event.data.origin === "existing"
 					? null
 					: JSON.stringify({
 							cause: event.data.cause,

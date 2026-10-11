@@ -7,7 +7,9 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
+import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -356,12 +358,30 @@ export const handlePermissionResponse = (
 		}
 	});
 
+const resolveOpenCodeQuestionTarget = (sessionId: string) =>
+	Effect.gen(function* () {
+		const defaultClient = yield* OpenCodeAPITag;
+		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+		if (engine._tag === "None" || instances._tag === "None") {
+			return { client: defaultClient, directory: undefined };
+		}
+		const instanceId =
+			yield* engine.value.getProviderForSessionEffect(sessionId);
+		const client = yield* instances.value.use(
+			instanceId ?? defaultInstanceIdForDriver("opencode"),
+		);
+		const session = yield* Effect.tryPromise(() =>
+			client.session.get(sessionId),
+		);
+		return { client, directory: session.directory };
+	});
+
 export const handleAskUserResponse = (
 	clientId: string,
 	payload: AskUserResponsePayload,
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
@@ -447,8 +467,12 @@ export const handleAskUserResponse = (
 		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
+		const { client, directory } =
+			yield* resolveOpenCodeQuestionTarget(sessionId);
 		const replyResult = yield* Effect.either(
-			Effect.tryPromise(() => client.question.reply(toolId, formatted)),
+			Effect.tryPromise(() =>
+				client.question.reply(toolId, formatted, directory),
+			),
 		);
 		if (replyResult._tag === "Right") {
 			yield* announceQuestionResolved(sessionId, toolId, answers);
@@ -463,7 +487,7 @@ export const handleAskUserResponse = (
 		const fallbackResult = yield* Effect.either(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
-					client.question.list(),
+					client.question.list(directory),
 				);
 				const question =
 					pendingQuestions.find(
@@ -478,7 +502,7 @@ export const handleAskUserResponse = (
 						`client=${clientId} session=${sessionId} API fallback: ${toolId} → ${queId}`,
 					);
 					yield* Effect.tryPromise(() =>
-						client.question.reply(queId, formatted),
+						client.question.reply(queId, formatted, directory),
 					);
 					yield* announceQuestionResolved(sessionId, queId, answers);
 					return true;
@@ -503,14 +527,13 @@ export const handleAskUserResponse = (
 			message:
 				"This question was asked in a terminal session and can't be answered from the browser. Answer it in the terminal, or send a follow-up message to continue.",
 		});
-	});
+	}).pipe(Effect.scoped);
 
 export const handleQuestionReject = (
 	clientId: string,
 	payload: QuestionRejectPayload,
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 
@@ -586,8 +609,10 @@ export const handleQuestionReject = (
 		}
 
 		// OpenCode REST API path with fallback (preserving recovery logic)
+		const { client, directory } =
+			yield* resolveOpenCodeQuestionTarget(sessionId);
 		const rejectResult = yield* Effect.either(
-			Effect.tryPromise(() => client.question.reject(toolId)),
+			Effect.tryPromise(() => client.question.reject(toolId, directory)),
 		);
 		if (rejectResult._tag === "Right") {
 			yield* announceQuestionResolved(sessionId, toolId, {});
@@ -602,16 +627,23 @@ export const handleQuestionReject = (
 		const fallbackResult = yield* Effect.either(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
-					client.question.list(),
+					client.question.list(directory),
 				);
-				if (pendingQuestions.length > 0) {
-					const question = pendingQuestions[0];
-					if (question === undefined) return;
+				const question =
+					pendingQuestions.find(
+						(question) => question["sessionID"] === sessionId,
+					) ??
+					pendingQuestions.find(
+						(question) => question["sessionID"] === undefined,
+					);
+				if (question) {
 					const queId = question.id;
 					log.info(
 						`client=${clientId} session=${sessionId} reject fallback: ${toolId} → ${queId}`,
 					);
-					yield* Effect.tryPromise(() => client.question.reject(queId));
+					yield* Effect.tryPromise(() =>
+						client.question.reject(queId, directory),
+					);
 					yield* announceQuestionResolved(sessionId, queId, {});
 					return true;
 				}
@@ -632,4 +664,4 @@ export const handleQuestionReject = (
 			message:
 				"This question was asked in a terminal session and can't be skipped from the browser. Answer it in the terminal, or send a follow-up message to continue.",
 		});
-	});
+	}).pipe(Effect.scoped);

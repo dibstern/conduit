@@ -343,8 +343,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 				fork_point_message_id: "message-1",
 			});
 			expect(
-				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked'`,
-			).toEqual([{ type: "session.created" }]);
+				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked' ORDER BY sequence`,
+			).toEqual([
+				{ type: "session.created" },
+				{ type: "session.workspace_changed" },
+			]);
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
@@ -646,13 +649,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 				});
 				expect(api.session.fork).not.toHaveBeenCalled();
 				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
-					dir: "/project",
 					configDir: claudeConfigDir,
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
 				});
 				expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
-					dir: "/project",
 					configDir: claudeConfigDir,
 				});
 				expect(readTranscript).toHaveBeenCalledTimes(1);
@@ -711,7 +712,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					originId: "browser-tab-a",
 				});
 				expect(forkSession).toHaveBeenLastCalledWith("sdk-parent", {
-					dir: "/project",
 					configDir: claudeConfigDir,
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
@@ -860,9 +860,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reply).toHaveBeenCalledWith("que-1", [
-				["PostgreSQL"],
-			]);
+			expect(api.question.reply).toHaveBeenCalledWith(
+				"que-1",
+				[["PostgreSQL"]],
+				undefined,
+			);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -888,7 +890,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reject).toHaveBeenCalledWith("que-1");
+			expect(api.question.reject).toHaveBeenCalledWith("que-1", undefined);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

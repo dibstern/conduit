@@ -49,6 +49,7 @@ import {
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
+import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
@@ -57,6 +58,11 @@ export const OPENCODE_PROVIDER_ID = "opencode";
 /** Recheck saved folders at launch, shared by sends and speculative warming. */
 export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
+	{
+		fallbackMissingWorktree = false,
+	}: {
+		readonly fallbackMissingWorktree?: boolean;
+	} = {},
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -81,19 +87,35 @@ export const resolveSessionFolders = (
 						}),
 					)
 				: session.workspace;
-		const state =
+		let state =
 			savedWorkspace == null
 				? null
 				: yield* Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
 						savedWorkspace,
 					);
-		const workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
-		if (!existsSync(workspaceRoot))
-			return yield* Effect.fail(
-				new RelayError(`Main project folder does not exist: ${workspaceRoot}`, {
-					code: "FILE_NOT_FOUND",
-				}),
+		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		if (!existsSync(workspaceRoot)) {
+			const fallback =
+				fallbackMissingWorktree &&
+				workspace._tag === "Some" &&
+				state?.origin === "existing" &&
+				workspaceRoot !== config.projectDir;
+			if (!fallback || !existsSync(config.projectDir))
+				return yield* Effect.fail(
+					new RelayError(
+						`Main project folder does not exist: ${fallback ? config.projectDir : workspaceRoot}`,
+						{
+							code: "FILE_NOT_FOUND",
+						},
+					),
+				);
+			workspaceRoot = yield* workspace.value.move(
+				session.id,
+				config.projectDir,
+				"missing",
 			);
+			state = null;
+		}
 		const extraFolders: string[] = [];
 		const launchFolders = state
 			? [config.projectDir, ...(config.extraFolders ?? [])]
@@ -476,10 +498,18 @@ const prepareEngineTurnInput = (
 					}),
 				),
 			);
-		const folders = yield* resolveSessionFolders({
-			id: resolvedInput.sessionId,
-			workspace: sessionRow?.workspace ?? null,
-		});
+		const folders = yield* resolveSessionFolders(
+			{
+				id: resolvedInput.sessionId,
+				workspace: sessionRow?.workspace ?? null,
+			},
+			{ fallbackMissingWorktree: !resolvedInput.steer },
+		);
+		if (driver === "opencode") {
+			const stream = yield* Effect.serviceOption(SSEStreamTag);
+			if (stream._tag === "Some")
+				yield* stream.value.includeDirectory(folders.workspaceRoot);
+		}
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;

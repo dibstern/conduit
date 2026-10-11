@@ -282,6 +282,17 @@ class SessionNamespace {
 		);
 	}
 
+	/** Align native execution cwd without copying files or changing session history. */
+	async move(id: string, directory: string): Promise<void> {
+		await this.api.sdk("session.move", decodeOpenCodeUndefinedResponse, () =>
+			this.api._sdk.experimental.controlPlane.moveSession({
+				sessionID: id,
+				destination: { directory },
+				moveChanges: false,
+			}),
+		);
+	}
+
 	async statuses(directory?: string): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
 			"session.statuses",
@@ -354,6 +365,9 @@ class SessionNamespace {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
+				...(options.directory !== undefined
+					? { directory: options.directory }
+					: {}),
 				parts: [
 					{ type: "text", text: options.text },
 					// Images arrive as data URLs, which name their own mime type.
@@ -491,7 +505,11 @@ class QuestionNamespace {
 		return [...questions];
 	}
 
-	async reply(id: string, answers: string[][]): Promise<void> {
+	async reply(
+		id: string,
+		answers: string[][],
+		directory?: string,
+	): Promise<void> {
 		try {
 			decodeOpenCodeQuestionReplyBody({ answers });
 		} catch (err) {
@@ -512,19 +530,26 @@ class QuestionNamespace {
 			decodeOpenCodeQuestionActionResponse,
 			() =>
 				this.api._sdk.question.reply(
-					{ requestID: id, answers },
+					{
+						requestID: id,
+						answers,
+						...(directory === undefined ? {} : { directory }),
+					},
 					{ headers: { "x-opencode-directory": null } },
 				),
 		);
 	}
 
-	async reject(id: string): Promise<void> {
+	async reject(id: string, directory?: string): Promise<void> {
 		await this.api.sdk(
 			"question.reject",
 			decodeOpenCodeQuestionActionResponse,
 			() =>
 				this.api._sdk.question.reject(
-					{ requestID: id },
+					{
+						requestID: id,
+						...(directory === undefined ? {} : { directory }),
+					},
 					{ headers: { "x-opencode-directory": null } },
 				),
 		);

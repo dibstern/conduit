@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Schema } from "effect";
-	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+	import { type WorkspaceMoveCause, WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -11,9 +11,10 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
+	let { directory, git, workspaceCause, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
 		directory: string;
 		git: SessionGit | undefined;
+		workspaceCause?: WorkspaceMoveCause | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
@@ -70,6 +71,8 @@
 	const project = $derived(directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory);
 	const hintFolder = $derived(workspaceHint?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspaceHint);
 	const hintLabel = $derived(`working in ${hintFolder}?`);
+	const movedBack = $derived(workspaceCause === "missing");
+	const movedBackLabel = "moved back: worktree removed";
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
 	const upstream = $derived(`↑${git?.ahead ?? 0} ↓${git?.behind ?? 0}`);
@@ -91,7 +94,7 @@
 			showMerged ? "6ch" : null,
 		].filter((width) => width !== null);
 		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length);
-		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
+		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${sessionViewState.compact && movedBack ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
 	});
 
 	async function copy(text: string) {
@@ -109,7 +112,7 @@
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
 		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
 			style={`min-width: ${minimumWidth}`}
-			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}`} data-testid="session-bar-identity">
+			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}${sessionViewState.compact && movedBack ? `, ${movedBackLabel}` : ""}`} data-testid="session-bar-identity">
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -134,6 +137,9 @@
 			{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{#if sessionViewState.compact && workspaceHint}
 				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={hintLabel} title={hintLabel} data-testid="workspace-hint"><Icon name="circle-alert" size={12} /></span>
+			{/if}
+			{#if sessionViewState.compact && movedBack}
+				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={movedBackLabel} title={movedBackLabel} data-testid="workspace-moved-back"><Icon name="circle-alert" size={12} /></span>
 			{/if}
 		</Button></span>
 	{/snippet}
@@ -191,6 +197,13 @@
 		{/if}
 	{/if}
 </Menu>
+
+{#if !sessionViewState.compact && movedBack}
+	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-moved-back">
+		<Icon name="circle-alert" size={12} />
+		<span class="max-w-[180px] truncate">{movedBackLabel}</span>
+	</span>
+{/if}
 
 {#if !sessionViewState.compact && workspaceHint}
 	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-hint" title={workspaceHint}>

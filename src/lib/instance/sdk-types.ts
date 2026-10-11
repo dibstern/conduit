@@ -125,6 +125,7 @@ export type ToolStatus = _ToolState["status"];
 
 export interface PromptOptions {
 	text: string;
+	directory?: string;
 	system?: string;
 	images?: string[];
 	agent?: string;

@@ -65,9 +65,10 @@ export interface OpenCodeInstances {
 	 * Passive, scoped subscription: no process, no connection. Receives events
 	 * for `directories` from every instance stream that `use` has opened. It
 	 * never keeps a stream open; the instance's demand does.
+	 * A directory callback keeps that same subscription current as workspaces change.
 	 */
 	readonly events: (
-		directories: readonly string[],
+		directories: readonly string[] | (() => readonly string[]),
 		instanceId?: string,
 	) => Stream.Stream<OpenCodeInstanceEvent>;
 	/**
