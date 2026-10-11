@@ -6,6 +6,7 @@ import {
 	type ProviderInstanceId,
 } from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
+import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { ProviderAgentInfo } from "../../../provider/types.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { LoggerTag, OrchestrationEngineTag } from "./services.js";
@@ -198,7 +199,11 @@ export const AgentServiceLive: Layer.Layer<
 							activeProviderId == null
 								? yield* provideOverrides(getDefaultModel())
 								: undefined;
-						preferredProviderId = activeProviderId ?? defaultModel?.providerID;
+						preferredProviderId =
+							activeProviderId ??
+							(defaultModel
+								? harnessForModelProvider(defaultModel.providerID)
+								: undefined);
 					}
 
 					const listClaudeAgents = () =>
