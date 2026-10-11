@@ -1221,40 +1221,73 @@ export function makeEffectSqlMigrator(
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const registry = yield* makeEffectMigrationLoader(entries);
-		const expectedNames = new Map(registry.map(([id, name]) => [id, name]));
-		const knownNames = new Set(registry.map(([, name]) => name));
-		const ledger = yield* sql<{ name: string }>`
+		return yield* sql.withTransaction(
+			Effect.gen(function* () {
+				const caughtUp: Array<readonly [number, string]> = [];
+				const expectedNames = new Map(registry.map(([id, name]) => [id, name]));
+				const knownNames = new Set(registry.map(([, name]) => name));
+				const ledger = yield* sql<{ name: string }>`
 			SELECT name FROM sqlite_master
 			WHERE type = 'table' AND name = ${EFFECT_SQL_MIGRATIONS_TABLE}`;
-		if (ledger.length > 0) {
-			const recorded = yield* sql<{
-				migration_id: number;
-				name: string;
-			}>`
+				if (ledger.length > 0) {
+					const recorded = yield* sql<{
+						migration_id: number;
+						name: string;
+					}>`
 				SELECT migration_id, name FROM effect_sql_migrations
 				ORDER BY migration_id`;
-			const firstMismatch = recorded.findIndex(
-				(row) => expectedNames.get(row.migration_id) !== row.name,
-			);
-			const mismatch = recorded[firstMismatch];
-			if (mismatch !== undefined) {
-				const suffix = recorded.slice(firstMismatch);
-				const unknown = suffix.find((row) => !knownNames.has(row.name));
-				if (unknown) {
-					return yield* Effect.fail(
-						migrationRegistryError(
-							`Unknown recorded migration ${unknown.name} at Effect id ${unknown.migration_id}; refusing to migrate`,
-						),
+					const firstMismatch = recorded.findIndex(
+						(row) => expectedNames.get(row.migration_id) !== row.name,
 					);
-				}
-				// Known names recorded at divergent ids are replayed in registry order.
-				yield* sql`DELETE FROM effect_sql_migrations
+					const mismatch = recorded[firstMismatch];
+					if (mismatch !== undefined) {
+						const suffix = recorded.slice(firstMismatch);
+						const unknown = suffix.find((row) => !knownNames.has(row.name));
+						if (unknown) {
+							return yield* Effect.fail(
+								migrationRegistryError(
+									`Unknown recorded migration ${unknown.name} at Effect id ${unknown.migration_id}; refusing to migrate`,
+								),
+							);
+						}
+						// Known names recorded at divergent ids are replayed in registry order.
+						yield* sql`DELETE FROM effect_sql_migrations
 					WHERE migration_id >= ${mismatch.migration_id}`;
-			}
-		}
-		return yield* Migrator.make({})({
-			loader: Effect.succeed(registry),
-			table: EFFECT_SQL_MIGRATIONS_TABLE,
-		});
+					}
+					const retained = mismatch
+						? recorded.slice(0, firstMismatch)
+						: recorded;
+					const latestId = retained.at(-1)?.migration_id ?? 0;
+					const recordedIds = new Set(retained.map((row) => row.migration_id));
+					// The upstream migrator only runs IDs above the recorded maximum.
+					// Fill registered gaps without replaying or rewriting later migrations.
+					for (const [key, migration] of Object.entries(entries).sort(
+						([left], [right]) =>
+							Number.parseInt(left, 10) - Number.parseInt(right, 10),
+					)) {
+						const id = Number.parseInt(key, 10);
+						if (id > latestId || recordedIds.has(id)) continue;
+						const name = key.slice(key.indexOf("_") + 1);
+						yield* migration.pipe(
+							Effect.mapError(
+								(cause) =>
+									new Migrator.MigrationError({
+										cause,
+										reason: "failed",
+										message: `Migration "${id}_${name}" failed`,
+									}),
+							),
+						);
+						yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})`;
+						caughtUp.push([id, name]);
+					}
+				}
+				const appended = yield* Migrator.make({})({
+					loader: Effect.succeed(registry),
+					table: EFFECT_SQL_MIGRATIONS_TABLE,
+				});
+				return [...caughtUp, ...appended];
+			}),
+		);
 	});
 }
