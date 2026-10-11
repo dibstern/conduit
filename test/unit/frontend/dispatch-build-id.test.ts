@@ -74,7 +74,7 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 describe("build ID dispatch", () => {
-	let server: typeof import("../../../src/lib/frontend/stores/server-status.js");
+	let server: typeof import("../../../src/lib/frontend/stores/server-status.svelte.js");
 	let current: ServerStatus;
 	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/session.svelte.js")["setAttachedProject"];
 
@@ -129,7 +129,9 @@ describe("build ID dispatch", () => {
 		({ setAttachedProject } = await import(
 			"../../../src/lib/frontend/stores/session.svelte.js"
 		));
-		server = await import("../../../src/lib/frontend/stores/server-status.js");
+		server = await import(
+			"../../../src/lib/frontend/stores/server-status.svelte.js"
+		);
 	}
 
 	afterEach(() => {
@@ -183,13 +185,13 @@ describe("build ID dispatch", () => {
 		});
 	});
 
-	it("removes the banner and disables its stale action when restart is unavailable", async () => {
+	it("removes the banner but allows restart without an available update", async () => {
 		serverUpdate(true);
 		const run = restartAction();
 		serverUpdate(false);
 		await run();
 		expect(mocks.removeBanner).toHaveBeenCalledWith("server-update");
-		expect(mocks.restartWithConfig).not.toHaveBeenCalled();
+		expect(mocks.restartWithConfig).toHaveBeenCalledExactlyOnceWith({});
 	});
 
 	it("restarts through the RPC with no config and removes the banner on success", async () => {
@@ -200,7 +202,7 @@ describe("build ID dispatch", () => {
 		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");
 	});
 
-	it("ignores repeated restart clicks during and after an accepted request", async () => {
+	it("ignores repeated restart clicks until reconnect, then allows another restart", async () => {
 		let finishRestart!: () => void;
 		const pending = new Promise<{ readonly ok: true }>((resolve) => {
 			finishRestart = () => resolve({ ok: true });
@@ -226,6 +228,9 @@ describe("build ID dispatch", () => {
 		serverUpdate(true);
 		await run();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);
+		handshake("A");
+		await server.restartServer();
+		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(2);
 	});
 
 	it("restores the restart action after an error so it can be retried", async () => {

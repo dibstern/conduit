@@ -628,6 +628,9 @@ export const GetInstanceStatusResponseSchema = Schema.Struct({
 
 export const GetStatusResponseSchema = Schema.Struct({
 	uptime: Schema.Number,
+	version: Schema.String,
+	logLevel: RpcLogLevelSchema,
+	supervised: Schema.Boolean,
 	port: Schema.Number,
 	host: Schema.String,
 	tailscaleIP: Schema.optional(Schema.String),
