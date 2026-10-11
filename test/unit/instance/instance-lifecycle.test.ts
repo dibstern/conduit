@@ -63,7 +63,6 @@ describe("instance lifecycle integration", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: "/src/app",
