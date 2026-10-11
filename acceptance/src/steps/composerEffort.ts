@@ -58,11 +58,9 @@ export const composerEffortHandlers: StepHandler[] = [
 	},
 	{
 		name: "hold effort meter",
-		match: /^I hold the effort (meter|word)$/,
-		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word" ? "composer-word-effort" : "variant-badge",
-			);
+		match: /^I hold the effort meter$/,
+		run: async ({ world }) => {
+			const button = world.page.getByTestId("variant-badge");
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await holdUntilVisible(
 				button,

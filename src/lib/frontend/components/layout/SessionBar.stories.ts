@@ -121,6 +121,7 @@ const meta = {
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
+		sessionViewState.composerWidth = 760;
 		sessionViewState.atBottom = true;
 		sessionViewState.forcedOpen = true;
 		sessionViewState.filesOpen = false;

@@ -84,6 +84,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the row query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/session/GitIdentity.stories.ts",
+		snippetPattern: /Missing checkout (wrapper|labels)/,
+		reason:
+			"storybook play() guards that narrow the checkout queries, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/ComposerStatusHeader.stories.ts",
 		snippetPattern: /Checking spinner is missing/,
 		reason:

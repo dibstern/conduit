@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import Badge from "../ui/Badge.svelte";
+	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
@@ -125,7 +126,21 @@
 	data-testid="permission-mode-dropdown"
 >
 	{#snippet trigger({ props })}
-		{#if phone || variant === "words"}
+		{#if variant === "words"}
+			<Button
+				{...props}
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				class="shrink-0 text-[11.5px] font-normal font-brand"
+				style={`color: ${currentPresentation.tone}`}
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-testid="composer-word-approvals"
+				title="Approvals ({currentLabel})"
+			><span class="border-b border-dotted border-border-chip">{currentPresentation.microLabel.toLowerCase()}</span></Button>
+		{:else if phone}
 			<!-- Keep Bits' trigger attributes; its activation handlers would open
 			     the menu before the tap/hold control can decide the action. -->
 			<MicroLabelButton
@@ -133,19 +148,19 @@
 				onpointerdown={undefined}
 				onpointerup={undefined}
 				onkeydown={undefined}
-				variant={variant === "words" ? "words" : "micro"}
-				label={variant === "words" ? currentPresentation.microLabel.toLowerCase() : currentPresentation.microLabel}
+				variant="micro"
+				label={currentPresentation.microLabel}
 				accessibleName="Approvals {currentLabel}. Activate to cycle; hold or Shift+F10 opens options"
 				tone={currentPresentation.tone}
-				tinted={variant === "icons" && isElevated}
+				tinted={isElevated}
 				pending={approvals.pending}
 				pulseKey={currentMode}
 				onTap={approvals.cycle}
 				onHold={() => { open = true; }}
-				data-testid={variant === "words" ? "composer-word-approvals" : "permission-mode-badge"}
+				data-testid="permission-mode-badge"
 				title="Approvals ({currentLabel})"
 			>
-				{#if variant === "icons"}{@render shield(currentMode, 15, false)}{/if}
+				{@render shield(currentMode, 15, false)}
 			</MicroLabelButton>
 		{:else}
 			<MicroLabelButton

@@ -63,12 +63,17 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
-	await expect(page.getByTestId("workspace-hint")).toContainText(
+	const identity = page.getByTestId("session-bar-identity");
+	await expect(identity.getByTestId("workspace-hint")).toHaveAttribute(
+		"aria-label",
 		"working in conduit-hint?",
 	);
-	await expect(page.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-desktop");
-	await page.getByTestId("workspace-hint-move").click();
+	await identity.click();
+	const menu = page.getByTestId("session-bar-checkout");
+	await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	await menu.getByTestId("workspace-hint-move").click();
 	await expect
 		.poll(() =>
 			rpc
@@ -102,14 +107,16 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
 	const changedPath = "/workspace/conduit-other";
-	await expect(page.getByTestId("workspace-hint")).toContainText(
-		"working in conduit-hint?",
-	);
+	const identity = page.getByTestId("session-bar-identity");
+	const hint = identity.getByTestId("workspace-hint");
+	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	rpc.upsertShellRow({ ...session, workspaceHint: changedPath });
-	await expect(page.getByTestId("workspace-hint")).toContainText(
-		"working in conduit-other?",
-	);
-	await page.getByTestId("workspace-hint-dismiss").click();
+	await expect(hint).toHaveAttribute("aria-label", "working in conduit-other?");
+	await identity.click();
+	await page
+		.getByTestId("session-bar-checkout")
+		.getByTestId("workspace-hint-dismiss")
+		.click();
 	await expect
 		.poll(() =>
 			rpc
@@ -131,7 +138,8 @@ test("phone hint is an accessible icon with both actions in the pill menu", asyn
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
-	const hint = page.getByTestId("workspace-hint");
+	const identity = page.getByTestId("session-bar-identity");
+	const hint = identity.getByTestId("workspace-hint");
 	await expect(hint).toBeVisible();
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	await expect(hint).toHaveText("");
@@ -139,11 +147,11 @@ test("phone hint is an accessible icon with both actions in the pill menu", asyn
 	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
 	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-phone");
-	const identity = page.getByTestId("session-bar-identity");
 	await identity.click();
-	await expect(page.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	const menu = page.getByTestId("session-bar-checkout");
+	await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
 	await capture(page, testInfo, "workspace-hint-phone-menu");
-	await page.getByTestId("workspace-hint-move").click();
+	await menu.getByTestId("workspace-hint-move").click();
 	await expect
 		.poll(() =>
 			rpc
@@ -153,7 +161,7 @@ test("phone hint is an accessible icon with both actions in the pill menu", asyn
 		)
 		.toMatchObject([{ projectSlug, sessionId: session.id, path: hintPath }]);
 	await identity.click();
-	await page.getByTestId("workspace-hint-dismiss").click();
+	await menu.getByTestId("workspace-hint-dismiss").click();
 	await expect
 		.poll(() =>
 			rpc

@@ -22,8 +22,8 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 	);
 	await expect(button).not.toHaveAttribute("aria-busy", "true");
 	if (
-		(page.viewportSize()?.width ?? 1440) < 768 ||
-		(await button.getAttribute("data-testid")) === "composer-word-approvals"
+		(page.viewportSize()?.width ?? 1440) < 768 &&
+		(await button.getAttribute("data-testid")) !== "composer-word-approvals"
 	) {
 		await button.press("Shift+F10");
 	} else {
@@ -252,13 +252,9 @@ export const composerHandlers: StepHandler[] = [
 	},
 	{
 		name: "hold approvals shield",
-		match: /^I hold the approvals (shield|word)$/,
-		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word"
-					? "composer-word-approvals"
-					: "permission-mode-badge",
-			);
+		match: /^I hold the approvals shield$/,
+		run: async ({ world }) => {
+			const button = world.page.getByTestId("permission-mode-badge");
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await holdUntilVisible(
 				button,

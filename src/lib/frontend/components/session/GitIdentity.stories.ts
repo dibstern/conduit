@@ -11,6 +11,7 @@ const meta = {
 	args: { directory: "/src/conduit", git: undefined },
 	beforeEach: () => {
 		sessionViewState.compact = false;
+		sessionViewState.composerWidth = 760;
 	},
 } satisfies Meta<typeof GitIdentity>;
 
@@ -172,24 +173,6 @@ export const WorkspaceHint: Story = {
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("workspace-hint")).toHaveTextContent(
-			"working in conduit-hint?",
-		);
-		await userEvent.click(canvas.getByTestId("workspace-hint-move"));
-		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
-		await userEvent.click(canvas.getByTestId("workspace-hint-dismiss"));
-		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
-	},
-};
-
-export const WorkspaceHintPhone: Story = {
-	...WorkspaceHint,
-	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-	},
-	play: async ({ canvasElement, args }) => {
-		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
 		const hint = canvas.getByTestId("workspace-hint");
 		await expect(hint).toHaveAttribute(
@@ -211,6 +194,110 @@ export const WorkspaceHintPhone: Story = {
 		await userEvent.click(identity);
 		await userEvent.click(body.getByTestId("workspace-hint-dismiss"));
 		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
+export const WorkspaceHintPhone: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const Word: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		git: { branch: "account-chip", worktree: "account-chip" },
+	},
+	play: async ({ canvasElement, args }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		await expect(checkout).toHaveAttribute(
+			"title",
+			`${args["directory"]?.split("/").pop()} / ${args["git"]?.branch}`,
+		);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent(args["directory"] ?? "");
+	},
+};
+
+export const WordNarrow: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		directory: "/src/conduit-worktrees",
+		git: {
+			branch: "feature/session-account-chip-redesign",
+			worktree: "account-chip",
+		},
+	},
+	beforeEach: () => {
+		sessionViewState.composerWidth = 480;
+	},
+	play: async ({ canvasElement }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		const container = checkout.parentElement;
+		if (!container) throw new Error("Missing checkout wrapper");
+		container.style.width = "240px";
+		const project = checkout.querySelector('[data-part="project"]');
+		const branch = checkout.querySelector('[data-part="branch"]');
+		if (!project || !branch) throw new Error("Missing checkout labels");
+		expect(project.scrollWidth).toBeGreaterThan(project.clientWidth);
+		expect(project.getBoundingClientRect().width).toBeCloseTo(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+			0,
+		);
+		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent("feature/session-account-chip-redesign");
+	},
+};
+
+export const WordPhone: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const WordAttention: Story = {
+	args: {
+		presentation: "word",
+		git: {
+			branch: "account-chip",
+			worktree: "account-chip",
+			dirty: true,
+			ahead: 2,
+			behind: 1,
+			operation: "rebase",
+		},
+	},
+};
+
+export const WordWorkspaceHint: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	args: { ...WorkspaceHint.args, presentation: "word" },
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("workspace-hint")).toHaveAttribute(
+			"aria-label",
+			"working in conduit-hint?",
+		);
+		await expect(
+			canvas.queryByTestId("workspace-hint-move"),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByTestId("composer-checkout"));
+		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
 	},
 };
 

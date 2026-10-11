@@ -1,10 +1,12 @@
 <script lang="ts">
 	import EffortMeter from "../ui/EffortMeter.svelte";
+	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
 	import { effort } from "../../stores/composer-settings.svelte.js";
+	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
 	let { onOpen, variant = "icons" }: {
@@ -51,7 +53,25 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if variants.length > 0}
+{#if variants.length > 0 && variant === "words"}
+		<Button
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="none"
+			class="shrink-0 text-[11.5px] font-normal font-brand"
+			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			loading={effort.pending}
+			aria-haspopup="dialog"
+			aria-expanded={composerPickerState.request !== null}
+			aria-controls={composerPickerState.request ? "model-picker" : undefined}
+			data-testid="composer-word-effort"
+			onclick={(event) => {
+				openPicker("effort");
+				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+			}}
+		><span class="border-b border-dotted border-border-chip">{currentVariant ? microLabel.toLowerCase() : microLabel}</span></Button>
+{:else if variants.length > 0}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
@@ -62,7 +82,7 @@
 		data-testid="variant-dropdown"
 	>
 		{#snippet trigger({ props })}
-			{#if phone || variant === "words"}
+			{#if phone}
 				<!-- Keep Bits' trigger attributes and ref; MicroLabelButton owns tap,
 				     hold and keyboard activation instead of Bits' eager menu handlers. -->
 				<MicroLabelButton
@@ -70,18 +90,18 @@
 					onpointerdown={undefined}
 					onpointerup={undefined}
 					onkeydown={undefined}
-					variant={variant === "words" ? "words" : "micro"}
-					label={variant === "words" && currentVariant ? microLabel.toLowerCase() : microLabel}
-					tone={variant === "words" ? "var(--color-text-muted)" : "var(--color-text-secondary)"}
+					variant="micro"
+					label={microLabel}
+					tone="var(--color-text-secondary)"
 					accessibleName="Effort {levelName}. Tap or Ctrl+T to cycle; hold or Shift+F10 for options"
 					pending={effort.pending}
 					pulseKey={currentVariant}
 					onTap={() => effort.cycle()}
 					onHold={openMenu}
-					data-testid={variant === "words" ? "composer-word-effort" : "variant-badge"}
+					data-testid="variant-badge"
 					title="Effort {levelName}. Ctrl+T to cycle"
 				>
-					{#if variant === "icons"}<EffortMeter levels={variants.length} {filled} />{/if}
+					<EffortMeter levels={variants.length} {filled} />
 				</MicroLabelButton>
 			{:else}
 				<MicroLabelButton

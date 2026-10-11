@@ -122,6 +122,8 @@
 			: getDraftProject() ?? getCurrentSlug() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
+	const switchingTo = $derived(selectedDriver === "claude" && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
+	const wordAccountName = $derived(accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedDriver === "claude" ? "Claude" : instances.find((instance) => instance.id === selectedLogoInstanceId)?.label ?? selectedLabel));
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
 	type AccountCard = { value: string; label: string; locked: boolean } & (
@@ -151,6 +153,7 @@
 			status: instance.status ?? "healthy",
 		}));
 	});
+	const hasAccountWord = $derived(sessionViewState.composerTier === "wide" && (selectedDriver === "claude" ? accounts.accounts.length >= 2 : driverInstances.length >= 2));
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
 	const filteredGroups = $derived.by(() => {
@@ -195,6 +198,7 @@
 			contextOptions.find((option) => option.isDefault) ?? contextOptions[0] ?? null,
 	);
 	const contextLabel = $derived(selectedContext?.label ?? modelContextLabel(activeModel));
+	const showContextWord = $derived(!!contextLabel && (!phone || (selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
 	const contextSegments = $derived(contextOptions.map((option) => ({
@@ -475,7 +479,10 @@
 			}
 			const panel = document.getElementById("model-picker");
 			const selectedTab = panel?.querySelector<HTMLElement>('[data-testid="picker-harness-options"] [aria-checked="true"]');
-			const selectedCard = panel?.querySelector<HTMLElement>('[data-testid="picker-account-options"] [aria-checked="true"]');
+			// An open session's current card is disabled. Focus its section instead: focusing
+			// another card would select it (bits-ui selection follows focus) and start a switch.
+			const selectedCard = panel?.querySelector<HTMLElement>('[data-testid="picker-account-options"] [aria-checked="true"]:not(:disabled)')
+				?? panel?.querySelector<HTMLElement>('[data-testid="picker-account-section"]');
 			const row = (section === "harness" ? selectedTab : section === "account" ? selectedCard : panel?.querySelector<HTMLElement>(
 				`[data-testid="picker-row-${section}"]`,
 			)) ?? selectedTab ?? selectedCard ?? panel?.querySelector<HTMLElement>('[data-testid="picker-row-model"]');
@@ -563,7 +570,7 @@
 					</section>
 				{/if}
 				{#if accountCards.length > 1}
-					<section data-testid="picker-account-section" aria-label={selectedDriver === "claude" ? "Account" : "Instance"} class="pb-[4px]">
+					<section data-testid="picker-account-section" tabindex="-1" aria-label={selectedDriver === "claude" ? "Account" : "Instance"} class="pb-[4px] outline-none">
 						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
 							<span>{selectedDriver === "claude" ? "Account" : "Instance"}</span>
 							<span data-testid="picker-account-section-caption">{selectedDriver === "claude" ? "5-hour use" : "status"}</span>
@@ -843,7 +850,7 @@
 
 <div
 	id="model-display"
-	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-px' : ''}"
+	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : ''}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
 	{#if variant === "words"}
@@ -853,20 +860,50 @@
 			size="content"
 			tone="muted"
 			hoverFill="none"
-			data-testid="composer-word-model"
-			data-instance-id={selectedId}
-			class="min-w-0 gap-[5px] rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand max-w-[200px] max-sm:max-w-[130px] overflow-hidden"
-			title="Switch model"
-			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
+			data-testid="composer-word-harness"
+			class="shrink-0 mr-[6px]"
+			ariaLabel={`Account: ${wordAccountName}. Open account options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
 			aria-controls={pickerOpen ? "model-picker" : undefined}
-			onclick={togglePicker}
+			onclick={(event) => togglePicker(event, "account")}
 		>
-			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="page" />
-			<span class="min-w-0 truncate border-b border-dotted border-border-chip">{displayName}</span>
+			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={12} surface="page" />
 		</Button>
-		{#if contextLabel}
+		{#if hasAccountWord}
+			<Button
+				variant="ghost"
+				size="content"
+				tone="muted"
+				hoverFill="none"
+				data-testid="composer-word-account"
+				class="shrink-0 text-[11.5px] font-normal font-brand"
+				ariaLabel={`Account: ${wordAccountName}. Open account options`}
+				aria-haspopup="dialog"
+				aria-expanded={pickerOpen}
+				aria-controls={pickerOpen ? "model-picker" : undefined}
+				onclick={(event) => togglePicker(event, "account")}
+			><span class="border-b border-dotted border-border-chip">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
+			<span aria-hidden="true" class="text-border-chip">·</span>
+		{/if}
+		<Button
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="none"
+			data-testid="composer-word-model"
+			data-instance-id={selectedId}
+			class="shrink-0 text-[11.5px] font-normal font-brand"
+			title="Switch model"
+			ariaLabel={`Model: ${displayName}. Open model options`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={(event) => togglePicker(event, "model")}
+		>
+			<span class="border-b border-dotted border-border-chip">{phone ? shortModelLabel : displayName}</span>
+		</Button>
+		{#if showContextWord}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 			<Button
 				variant="ghost"
@@ -874,12 +911,12 @@
 				tone="muted"
 				hoverFill="none"
 				data-testid="composer-word-context"
-				class="shrink-0 rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand"
+				class="shrink-0 text-[11.5px] font-normal font-brand"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
-				onclick={(e) => togglePicker(e, "context")}
+				onclick={(event) => togglePicker(event, "model")}
 			>
 				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
 			</Button>
@@ -921,6 +958,22 @@
 	{/if}
 
 	<ModelVariant bind:this={variantRef} onOpen={closePicker} {variant} />
+	{#if variant === "words" && selectedDriver === "opencode"}
+		<span aria-hidden="true" class="text-border-chip">·</span>
+		<Button
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="none"
+			data-testid="composer-word-agent"
+			class="shrink-0 text-[11.5px] font-normal font-brand"
+			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={(event) => togglePicker(event, "agent")}
+		><span class="border-b border-dotted border-border-chip">{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
+	{/if}
 
 	{#if pickerOpen}
 		{#if phone}

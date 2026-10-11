@@ -11,9 +11,10 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
+	let { directory, git, presentation, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
 		directory: string;
 		git: SessionGit | undefined;
+		presentation?: "word" | "control" | "row" | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
@@ -25,6 +26,8 @@
 	let currentDirectory = $state<string | undefined>();
 	let moving = $state(false);
 	let dismissing = $state(false);
+	const word = $derived(presentation === "word");
+	const phone = $derived(sessionViewState.composerTier === "phone");
 
 	async function openWorktrees() {
 		showWorktrees = true;
@@ -78,20 +81,20 @@
 		revert: "reverting", bisect: "bisecting",
 	}[git.operation] : undefined);
 	// Phones show one status word: an in-progress operation outranks merged.
-	const showMerged = $derived(git?.merged === true && !(sessionViewState.compact && operation));
+	const showMerged = $derived(git?.merged === true && !(phone && operation));
 	const upstreamMark = $derived([git?.ahead ? `↑${git.ahead}` : "", git?.behind ? `↓${git.behind}` : ""].filter(Boolean).join(" "));
-	// Each label keeps 4 letters plus the ellipsis (5ch), or its whole name when shorter.
-	// The 1px of slack stops sub-pixel rounding from dropping the fourth letter.
-	const projectFloor = $derived(Math.min(project.length, 5));
+	const warningLabel = $derived(workspaceMismatch ? `Workspace mismatch: Claude is working in ${workspaceMismatch.actualPath}` : workspaceHint ? hintLabel : undefined);
+	const projectFloor = $derived(Math.min(project.length, word ? 4.5 : 5));
+	const branchFloor = $derived(Math.min(checkout?.length ?? 0, word ? 6.5 : 5));
 	// Floor = labels + slash, icon, padding, divider and fixed marks. It wins over the nominal cap for long operation labels.
 	const minimumWidth = $derived.by(() => {
 		const marks = [
-			!sessionViewState.compact && upstreamMark ? `${upstreamMark.length}ch` : null,
+			!phone && upstreamMark ? `${upstreamMark.length}ch` : null,
 			operation ? `${operation.length}ch` : null,
 			showMerged ? "6ch" : null,
 		].filter((width) => width !== null);
 		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length);
-		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
+		return `calc(${projectFloor + (checkout ? 1 + branchFloor : 0)}ch + 12px + ${word ? 0 : 18}px + ${gaps}px${warningLabel ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
 	});
 
 	async function copy(text: string) {
@@ -103,13 +106,13 @@
 	}
 </script>
 
-<Menu presentation={sessionViewState.compact ? "sheet" : "popover"} align="end" ariaLabel="Checkout" class={sessionViewState.compact ? undefined : "w-[280px]"} data-testid="session-bar-checkout" onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+<Menu presentation={phone ? "sheet" : "popover"} side={word ? "top" : undefined} align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid={presentation ? "composer-checkout-menu" : "session-bar-checkout"} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 	{#snippet trigger({ props })}
 		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
-		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
-		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
+		<!-- The wrapper and button share a font size so the ch floors agree. -->
+		<span class="git-pill {word ? 'git-word text-[11.5px]' : phone ? 'git-pill-phone text-[10px]' : 'text-[10px]'} inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size={word ? "content" : "segment"} {...(word ? { tone: "muted" as const, hoverFill: "none" as const } : {})} touchTarget align="start" class={word ? "max-w-full gap-[5px] font-normal font-brand" : "max-w-full"}
 			style={`min-width: ${minimumWidth}`}
-			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}`} data-testid="session-bar-identity">
+			title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid={presentation ? "composer-checkout" : "session-bar-identity"}>
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -119,21 +122,21 @@
 				{/if}
 				<!-- On the icon, not after the branch: the icon never truncates, and a trailing dot sat against the account pill's dot. -->
 				{#if git?.dirty}
-					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] ring-bg-surface" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
+					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {word ? 'ring-input-bg' : 'ring-bg-surface'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
 				{/if}
 			</span>
 			<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
 			{#if checkout}
 				<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>
-				<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text' : 'text-text-muted'}" title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+				<span data-part="branch" class="min-w-0 truncate {git?.branch ? word ? 'text-text-secondary' : 'text-text' : 'text-text-muted'}" style:min-width={word ? `${branchFloor}ch` : undefined} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 			{/if}
-			{#if !sessionViewState.compact && upstreamMark}
-				<span class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
+			{#if !phone && upstreamMark}
+				<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
 			{/if}
 			{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
 			{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
-			{#if sessionViewState.compact && workspaceHint}
-				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={hintLabel} title={hintLabel} data-testid="workspace-hint"><Icon name="circle-alert" size={12} /></span>
+			{#if warningLabel}
+				<span data-part="warning" class="inline-flex shrink-0 text-warning" role="img" aria-label={warningLabel} title={warningLabel} data-testid={workspaceMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
 			{/if}
 		</Button></span>
 	{/snippet}
@@ -158,7 +161,7 @@
 		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
 		{#if onmove}<MenuItem disabled={moving} onselect={() => void move(directory)}>Retry move</MenuItem>{/if}
 	{/if}
-	{#if sessionViewState.compact && workspaceHint}
+	{#if workspaceHint}
 		<MenuSeparator />
 		<p class="px-[8px] py-[6px] text-[10px] text-warning">{hintLabel}<span class="mt-[4px] block break-all text-text-muted">{workspaceHint}</span></p>
 		{#if onmove}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-move" onselect={() => workspaceHint && void move(workspaceHint)}>Move</MenuItem>{/if}
@@ -192,19 +195,11 @@
 	{/if}
 </Menu>
 
-{#if !sessionViewState.compact && workspaceHint}
-	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-hint" title={workspaceHint}>
-		<Icon name="circle-alert" size={12} />
-		<span class="max-w-[180px] truncate">{hintLabel}</span>
-	</span>
-	{#if onmove}<Button variant="ghost" size="segment" disabled={moving || dismissing} data-testid="workspace-hint-move" onclick={() => workspaceHint && void move(workspaceHint)}>Move</Button>{/if}
-	{#if ondismiss}<Button variant="ghost" size="segment" disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onclick={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</Button>{/if}
-{/if}
-
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
 	.git-pill { max-width: 240px; flex-shrink: 1; }
 	.git-pill-phone { max-width: 150px; }
+	.git-pill.git-word { max-width: 100%; }
 	.commit-icon { display: flex; align-items: center; width: 12px; }
 	.commit-icon::before, .commit-icon::after { content: ""; flex: 1; border-top: 1px solid currentColor; }
 </style>

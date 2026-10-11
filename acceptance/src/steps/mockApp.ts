@@ -1,7 +1,10 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
-import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import type {
+	HistoryMessage,
+	SessionGit,
+} from "../../../src/lib/shared-types.js";
 import {
 	claudeInstanceAgents,
 	dualDriverProviders,
@@ -28,6 +31,7 @@ import {
 	requireRpcControl,
 	rpcControls,
 	serveModelCatalog,
+	setSessionRowStatus,
 } from "./shared.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
@@ -131,6 +135,104 @@ export const mockAppHandlers: StepHandler[] = [
 			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
 				instances: next,
 			});
+		},
+	},
+	{
+		name: "seed the composer checkout through project and session subscriptions",
+		match:
+			/^the composer checkout is (.+) \/ (.+) as (worktree|branch|detached|folder)$/,
+		run: ({ world, match }) => {
+			const project = match[1] ?? "";
+			const branch = match[2] ?? "";
+			const kind = match[3];
+			const git: SessionGit | undefined =
+				kind === "folder"
+					? undefined
+					: kind === "detached"
+						? { head: branch }
+						: {
+								branch,
+								...(kind === "worktree" ? { worktree: project } : {}),
+							};
+			const projects = [
+				{
+					slug: "myapp",
+					title: project,
+					folders: [`/workspace/${project}`],
+					...(git ? { git } : {}),
+				},
+			];
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Checkout requires an open session");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				workspace: null,
+				git,
+			});
+		},
+	},
+	{
+		name: "report uncommitted, upstream and operation state on the session shell",
+		match:
+			/^the checkout has uncommitted changes, (\d+) ahead, (\d+) behind and a rebase in progress$/,
+		run: ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Checkout requires an open session");
+			const rpc = requireRpcControl(world.page);
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			) as { git?: SessionGit } | undefined;
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				git: {
+					...row?.git,
+					dirty: true,
+					ahead: Number(match[1]),
+					behind: Number(match[2]),
+					operation: "rebase",
+				},
+			});
+		},
+	},
+	{
+		name: "report a workspace warning through the session shell",
+		match: /^the session has a workspace (hint|mismatch) at (.+)$/,
+		run: ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Workspace warning requires a session");
+			const path = match[2] ?? "";
+			const rpc = requireRpcControl(world.page);
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				...(match[1] === "hint"
+					? { workspaceHint: path }
+					: { workspaceMismatch: { actualPath: path } }),
+			});
+			rpc.setHandler("MoveSessionWorkspace", ({ path: target }) => ({
+				projectSlug: "myapp",
+				directory: target,
+			}));
+			rpc.setResponse("DismissWorkspaceHint", { ok: true });
+		},
+	},
+	{
+		name: "bind the words session to a named OpenCode instance",
+		match: /^the words session uses the OpenCode instance (.+)$/,
+		run: async ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Instance binding requires a session");
+			const instanceId = instanceSlug(match[1] ?? "");
+			requireRpcControl(world.page).setResponse("GetAgents", {
+				projectSlug: "myapp",
+				instanceId,
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: openCodeInstanceAgents,
+				activeAgentId: "build",
+			});
+			await openSessionRoute(world.page, sessionId);
+			await expect(
+				world.page.locator("#input-area").getByTestId("harness-logo"),
+			).toHaveAttribute("data-account", instanceId);
 		},
 	},
 	{

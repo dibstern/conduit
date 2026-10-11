@@ -29,6 +29,7 @@
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import UsageWarningStrip from "./UsageWarningStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
+	import GitIdentity from "../session/GitIdentity.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
@@ -48,6 +49,7 @@
 		getChosenModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
+		getSessionInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -62,6 +64,7 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
@@ -71,7 +74,8 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
@@ -170,8 +174,14 @@
 		return () => requestSessionPreWarm(null, null);
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
+	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
+	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
-	const accountId = $derived(composerAccountId(currentSession, projectState.projects.find((project) => project.slug === composerProjectSlug)));
+	const accountId = $derived(composerAccountId(currentSession, composerProject));
+	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
+	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
+	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
@@ -1392,15 +1402,35 @@
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
-				class="flex h-[24px] items-center gap-px px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
+				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<InstanceModelPicker variant="words" />
-				<span aria-hidden="true" class="text-border-chip">·</span>
-				<PermissionModeSelector variant="words" />
-				<span class="flex-1"></span>
-				{#if currentChat().contextPercent > 0}
-					<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 px-[5px] py-[2px]">{Math.round(currentChat().contextPercent)}%</span>
-				{/if}
+				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
+					<InstanceModelPicker variant="words" />
+					{#if composerDriver !== "opencode"}
+						<span aria-hidden="true" class="text-border-chip">·</span>
+						<PermissionModeSelector variant="words" />
+					{/if}
+				</div>
+				<div data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+					{#if currentSession}
+						{@const session = currentSession}
+						{#if composerDirectory}
+							<GitIdentity
+								presentation="word"
+								directory={composerDirectory}
+								git={composerGit}
+								workspaceMismatch={session.workspaceMismatch}
+								workspaceHint={session.workspaceHint}
+								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+							/>
+						{/if}
+						{#if currentChat().contextPercent > 0}
+							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 pl-[4px]">{Math.round(currentChat().contextPercent)}%</span>
+						{/if}
+					{/if}
+				</div>
 			</div>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}

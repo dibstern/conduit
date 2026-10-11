@@ -61,7 +61,8 @@ export const composerWordsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert composer Words controls",
-		match: /^the composer words row shows (.+), (\w+), (\w+) and (\w+)$/,
+		match:
+			/^the composer words row shows (.+), (\w+|no window), (\w+) and (\w+)$/,
 		run: async ({ world, match }) => {
 			const row = world.page
 				.locator("#input-area")
@@ -74,12 +75,345 @@ export const composerWordsHandlers: StepHandler[] = [
 				["composer-word-approvals", match[4]],
 			] as const) {
 				const control = row.getByTestId(id);
+				if (label === "no window") {
+					await expect(control).toHaveCount(0);
+					continue;
+				}
 				await expect(control).toHaveText(label ?? "");
+				await expect(control).toHaveJSProperty("tagName", "BUTTON");
 				await expect(control).not.toHaveAttribute("aria-busy", "true");
-				await expect(control.locator("svg")).toHaveCount(
-					id === "composer-word-model" ? 1 : 0,
-				);
+				await expect(control.locator("svg")).toHaveCount(0);
 			}
+		},
+	},
+	{
+		name: "assert wide-only account word",
+		match: /^the composer account word is (.+)$/,
+		run: async ({ world, match }) => {
+			const word = world.page.getByTestId("composer-word-account");
+			if (match[1] === "absent") await expect(word).toHaveCount(0);
+			else {
+				await expect(word).toHaveText(match[1] ?? "");
+				await expect(word).toHaveJSProperty("tagName", "BUTTON");
+			}
+		},
+	},
+	{
+		name: "assert words groups and rightmost context usage",
+		match:
+			/^the words row keeps what on the left and checkout then (\d+)% on the right$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("composer-words-row");
+			const left = row.getByTestId("composer-words-left");
+			const right = row.getByTestId("composer-words-right");
+			await expect(left).toHaveCSS("flex-shrink", "0");
+			await expect(right).toHaveCSS("flex-shrink", "1");
+			await expect(row).toHaveCSS("height", "24px");
+			await expect(
+				left.getByTestId("composer-word-harness").getByTestId("harness-logo"),
+			).toHaveCSS("width", "12px");
+			const order = await left.evaluate((element) =>
+				Array.from(
+					element.querySelectorAll('[data-testid^="composer-word-"]'),
+				).map((control) => control.getAttribute("data-testid")),
+			);
+			const expected = ["composer-word-harness"];
+			if (await left.getByTestId("composer-word-account").count())
+				expected.push("composer-word-account");
+			expected.push("composer-word-model");
+			if (await left.getByTestId("composer-word-context").count())
+				expected.push("composer-word-context");
+			expected.push("composer-word-effort", "composer-word-approvals");
+			expect(order).toEqual(expected);
+			await expect(right.getByTestId("composer-checkout")).toBeVisible();
+			const usage = right.getByTestId("composer-word-context-usage");
+			await expect(usage).toHaveText(`${match[1]}%`);
+			const fits = await row.evaluate((element) => {
+				const leftGroup = element.querySelector(
+					'[data-testid="composer-words-left"]',
+				);
+				const checkout = element.querySelector(
+					'[data-testid="composer-checkout"]',
+				);
+				const percent = element.querySelector(
+					'[data-testid="composer-word-context-usage"]',
+				);
+				if (!leftGroup || !checkout || !percent) return false;
+				const leftBox = leftGroup.getBoundingClientRect();
+				const checkoutBox = checkout.getBoundingClientRect();
+				const usageBox = percent.getBoundingClientRect();
+				const rowBox = element.getBoundingClientRect();
+				return (
+					leftBox.right <= checkoutBox.left &&
+					checkoutBox.right <= usageBox.left &&
+					usageBox.right <= rowBox.right
+				);
+			});
+			expect(fits).toBe(true);
+		},
+	},
+	{
+		name: "assert checkout identity and icon kind in the composer",
+		match:
+			/^the composer checkout shows (.+) \/ (.+) with a (worktree|branch|commit|folder) icon$/,
+		run: async ({ world, match }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(checkout.locator('[data-part="project"]')).toHaveText(
+				match[1] ?? "",
+			);
+			const branch = checkout.locator('[data-part="branch"]');
+			if (match[3] === "folder") await expect(branch).toHaveCount(0);
+			else await expect(branch).toHaveText(match[2] ?? "");
+			await expect(
+				checkout.locator(`[data-icon="${match[3]}"] svg`),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the checkout project yields room before the branch",
+		match: /^the composer checkout truncates the project before the branch$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(() =>
+					world.page.getByTestId("composer-checkout").evaluate((element) => {
+						const project = element.querySelector<HTMLElement>(
+							'[data-part="project"]',
+						);
+						const branch = element.querySelector<HTMLElement>(
+							'[data-part="branch"]',
+						);
+						if (!project || !branch) return false;
+						const projectStyle = getComputedStyle(project);
+						const branchStyle = getComputedStyle(branch);
+						const projectWidth = project.getBoundingClientRect().width;
+						const branchWidth = branch.getBoundingClientRect().width;
+						const projectFloor = Number.parseFloat(projectStyle.minWidth);
+						const branchFloor = Number.parseFloat(branchStyle.minWidth);
+						return (
+							project.scrollWidth > project.clientWidth &&
+							Number(projectStyle.flexShrink) >
+								Number(branchStyle.flexShrink) &&
+							projectWidth >= projectFloor - 1 &&
+							branchWidth >= branchFloor - 1 &&
+							(branch.scrollWidth <= branch.clientWidth ||
+								projectWidth <= projectFloor + 1)
+						);
+					}),
+				)
+				.toBe(true);
+		},
+	},
+	{
+		name: "open composer checkout menu",
+		match: /^I open the composer checkout menu$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("composer-checkout").click();
+			await expect(
+				world.page.getByTestId("composer-checkout-menu"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert checkout menu retains full names",
+		match: /^the composer checkout menu shows (.+) and (.+) in full$/,
+		run: async ({ world, match }) => {
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu).toContainText(`/workspace/${match[1]}`);
+			await expect(menu).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert git attention marks at each composer tier",
+		match:
+			/^the composer checkout shows uncommitted, rebasing and (visible|hidden) upstream counts$/,
+		run: async ({ world, match }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			const dirty = checkout.locator('[data-part="dirty"]');
+			await expect(dirty).toBeVisible();
+			await expect(dirty).toHaveCSS("width", "6px");
+			await expect(dirty).toHaveCSS("height", "6px");
+			await expect(dirty).toContainText("Uncommitted changes");
+			await expect(checkout.locator('[data-part="operation"]')).toHaveText(
+				"rebasing",
+			);
+			const upstream = checkout.locator('[data-part="upstream"]');
+			if (match[1] === "visible") await expect(upstream).toHaveText("↑2 ↓1");
+			else await expect(upstream).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert upstream and changes remain in checkout details on phones",
+		match:
+			/^the composer checkout menu shows uncommitted changes and upstream 2 ahead and 1 behind$/,
+		run: async ({ world }) => {
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu).toContainText("uncommitted");
+			await expect(menu).toContainText("↑2 ↓1");
+		},
+	},
+	{
+		name: "assert workspace warning is an icon and actions stay in the menu",
+		match:
+			/^the composer checkout has a workspace (hint|mismatch) icon without inline actions$/,
+		run: async ({ world, match }) => {
+			const warning = world.page
+				.getByTestId("composer-checkout")
+				.getByTestId(
+					match[1] === "hint"
+						? "workspace-hint"
+						: "workspace-mismatch-indicator",
+				);
+			await expect(warning).toBeVisible();
+			await expect(warning).toHaveText("");
+			await expect(warning).toHaveAttribute("aria-label", /.+/);
+			await expect(warning.locator("svg")).toBeVisible();
+			await expect(world.page.getByTestId("workspace-hint-move")).toHaveCount(
+				0,
+			);
+			await expect(
+				world.page.getByTestId("workspace-hint-dismiss"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert composer checkout menu workspace hint and actions",
+		match: /^the composer checkout menu offers Move and Dismiss for (.+)$/,
+		run: async ({ world, match }) => {
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu).toContainText(match[1] ?? "");
+			await expect(menu.getByTestId("workspace-hint-move")).toBeVisible();
+			await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
+		},
+	},
+	{
+		name: "assert composer checkout menu workspace mismatch and retry",
+		match: /^the composer checkout menu reports (.+) and offers Retry move$/,
+		run: async ({ world, match }) => {
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu.getByTestId("workspace-mismatch")).toContainText(
+				match[1] ?? "",
+			);
+			await expect(
+				menu.getByRole("menuitem", { name: "Retry move", exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "select composer checkout workspace action",
+		match: /^I choose (Move|Dismiss|Retry move) in the composer checkout menu$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("composer-checkout-menu")
+				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert checkout workspace action targets the current session and path",
+		match: /^the checkout (Move|Dismiss|Retry move) RPC targets (.+)$/,
+		run: async ({ world, match }) => {
+			const tag =
+				match[1] === "Dismiss"
+					? "DismissWorkspaceHint"
+					: "MoveSessionWorkspace";
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === tag,
+			);
+			expect(request.payload).toMatchObject({
+				projectSlug: "myapp",
+				sessionId: new URL(world.page.url()).pathname.split("/")[2],
+				path: match[2],
+			});
+		},
+	},
+	{
+		name: "tap a composer word",
+		match: /^I tap the (badge|account|model|window|effort|agent) word$/,
+		run: async ({ world, match }) => {
+			const word =
+				match[1] === "badge"
+					? "harness"
+					: match[1] === "window"
+						? "context"
+						: match[1];
+			await world.page.getByTestId(`composer-word-${word}`).click();
+		},
+	},
+	{
+		name: "assert a word opens its picker section",
+		match: /^the word opens the picker at (Account|Model|Effort|Agent)$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			if (match[1] === "Model") {
+				await expect(picker.getByTestId("model-picker-list")).toBeVisible();
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
+			} else if (match[1] === "Agent") {
+				await expect(picker.getByTestId("picker-agent-build")).toBeVisible();
+			} else if (match[1] === "Account") {
+				await expect
+					.poll(() =>
+						picker
+							.getByTestId("picker-account-section")
+							.evaluate((section) => section.contains(document.activeElement)),
+					)
+					.toBe(true);
+			} else {
+				await expect(picker.getByTestId("picker-row-effort")).toBeFocused();
+			}
+		},
+	},
+	{
+		name: "assert words use OpenCode agent instead of approvals",
+		match: /^the composer agent word is (.+) and replaces approvals$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("composer-word-agent")).toHaveText(
+				match[1] ?? "",
+			);
+			await expect(
+				world.page.getByTestId("composer-word-approvals"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert a draft has an empty words right group and keeps its context",
+		match:
+			/^the words draft has an empty right group and keeps context (above|below) the composer$/,
+		run: async ({ world, match }) => {
+			const area = world.page.locator("#input-area");
+			await expect(area.getByTestId("composer-checkout")).toHaveCount(0);
+			const right = area.getByTestId("composer-words-right");
+			await expect(right).toHaveText("");
+			await expect(right.locator("button")).toHaveCount(0);
+			const context = world.page.getByTestId("new-session-context");
+			await expect(context).toBeVisible();
+			await expect(context.getByTestId("draft-project-chip")).toContainText(
+				"myapp",
+			);
+			const [contextBox, borderBox] = await Promise.all([
+				context.boundingBox(),
+				area.locator("#input-row").boundingBox(),
+			]);
+			if (!contextBox || !borderBox)
+				throw new Error("Draft context or composer has no bounds");
+			if (match[1] === "above")
+				expect(contextBox.y + contextBox.height).toBeLessThanOrEqual(
+					borderBox.y,
+				);
+			else
+				expect(contextBox.y).toBeGreaterThanOrEqual(
+					borderBox.y + borderBox.height,
+				);
+		},
+	},
+	{
+		name: "assert zero context stays absent from the words row",
+		match: /^the words row context usage is absent$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("composer-word-context-usage"),
+			).toHaveCount(0);
 		},
 	},
 	{
