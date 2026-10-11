@@ -187,7 +187,11 @@ export const makeWorktreeLive = (
 						throw cause;
 					}
 				});
-			const readRecovery = (folder: WorktreeFolder, directory?: string) =>
+			const readRecovery = (
+				folder: WorktreeFolder,
+				directory?: string,
+				workspaceFolders: readonly string[] = [folder.path],
+			) =>
 				Effect.gen(function* () {
 					const source = yield* filesystem(folder.path, async () =>
 						realPathWithMissingChildren(folder.path),
@@ -229,10 +233,13 @@ export const makeWorktreeLive = (
 					// rather than inventing a checkout under the fork's id.
 					const expected = yield* Effect.try({
 						try: () =>
-							ownedWorktreePath(configDir, {
-								...folder,
-								sessionId: decodeURIComponent(basename(dirname(path))),
-							}),
+							workspaceFolders.map((ownerFolder) =>
+								ownedWorktreePath(configDir, {
+									...folder,
+									path: ownerFolder,
+									sessionId: decodeURIComponent(basename(dirname(path))),
+								}),
+							),
 						catch: (cause) =>
 							new WorktreeRecoveryError({
 								path: mapped,
@@ -240,7 +247,7 @@ export const makeWorktreeLive = (
 								message: `Invalid owned worktree path: ${String(cause)}`,
 							}),
 					});
-					if (path !== expected || mapped !== join(path, subfolder))
+					if (!expected.includes(path) || mapped !== join(path, subfolder))
 						return yield* new WorktreeRecoveryError({
 							path: mapped,
 							reason: "not-owned",
@@ -316,8 +323,9 @@ export const makeWorktreeLive = (
 			const inspectMissing: WorktreeService["inspectMissing"] = (
 				folder,
 				directory,
+				workspaceFolders,
 			) =>
-				readRecovery(folder, directory).pipe(
+				readRecovery(folder, directory, workspaceFolders).pipe(
 					Effect.map((state): WorkspaceMissing | undefined =>
 						state.usable
 							? undefined
@@ -329,10 +337,16 @@ export const makeWorktreeLive = (
 								},
 					),
 				);
-			const recreate: WorktreeService["recreate"] = (folder, directory) =>
+			const recreate: WorktreeService["recreate"] = (
+				folder,
+				directory,
+				workspaceFolders,
+			) =>
 				Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
-						const state = yield* restore(readRecovery(folder, directory));
+						const state = yield* restore(
+							readRecovery(folder, directory, workspaceFolders),
+						);
 						if (yield* pathStat(state.path))
 							return yield* new WorktreeRecoveryError({
 								path: state.path,
@@ -385,6 +399,65 @@ export const makeWorktreeLive = (
 						);
 					}),
 				).pipe(Effect.mapError(recoveryError));
+			const recreateAll: WorktreeService["recreateAll"] = (folders) =>
+				Effect.uninterruptibleMask((restore) => {
+					const recreated: { folder: string; path: string }[] = [];
+					const workspaceFolders = folders.map(({ folder }) => folder.path);
+					return Effect.forEach(
+						folders,
+						({ folder, directory }) =>
+							Effect.gen(function* () {
+								const state = yield* restore(
+									readRecovery(folder, directory, workspaceFolders),
+								);
+								if (state.usable) return;
+								yield* restore(recreate(folder, directory, workspaceFolders));
+								recreated.push({ folder: folder.path, path: state.path });
+							}).pipe(
+								Effect.mapError(
+									(error) =>
+										new WorktreeRecoveryError({
+											path: error.path,
+											reason: error.reason,
+											message: `Folder "${folder.path}": ${error.message}`,
+										}),
+								),
+							),
+						{ discard: true },
+					).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								// Retain prunable registrations and branch refs, just as single
+								// checkout recovery does on failure, so another attempt can retry.
+								const cleanup = yield* Effect.either(
+									Effect.validateAll(
+										[...recreated].reverse(),
+										({ folder, path }) =>
+											filesystem(path, () =>
+												rm(path, { recursive: true, force: true }),
+											).pipe(
+												Effect.mapError(
+													(error) => `Folder "${folder}": ${error.message}`,
+												),
+											),
+									),
+								);
+								if (Either.isLeft(cleanup)) {
+									const failure = Cause.failureOption(cause);
+									return yield* new WorktreeRecoveryError({
+										path:
+											failure._tag === "Some"
+												? failure.value.path
+												: (recreated[0]?.path ?? ""),
+										reason: "git-failed",
+										message: `${failure._tag === "Some" ? failure.value.message : Cause.pretty(cause)}. Worktree rollback failed: ${cleanup.left.join("; ")}`,
+									});
+								}
+								return yield* Effect.failCause(cause);
+							}),
+						),
+					);
+				});
 			const creationBase = (source: string, branch: string) =>
 				git(source, [
 					"reflog",
@@ -986,6 +1059,7 @@ export const makeWorktreeLive = (
 				rollback,
 				inspectMissing,
 				recreate,
+				recreateAll,
 				legacyOwnership,
 				inspectRemoval,
 				remove,

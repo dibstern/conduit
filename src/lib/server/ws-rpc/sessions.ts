@@ -144,29 +144,26 @@ export const sessionsHandlers = {
 									Schema.parseJson(SessionWorkspaceSchema),
 								)(row.workspace);
 					const directory = effectiveWorkingDirectory(config.projectDir, state);
-					const folder =
-						state?.origin === "conduit"
-							? Object.entries(state.worktrees).find(
-									([, path]) => path === directory,
-								)?.[0]
-							: undefined;
-					if (!folder)
+					const folders =
+						state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
+					if (folders.length === 0)
 						return yield* new WorktreeRecoveryError({
 							path: directory,
 							reason: "not-owned",
 							message:
 								"Could not recreate worktree: the session has no Conduit-owned worktree.",
 						});
-					return {
-						directory: yield* worktrees.recreate(
-							{
-								path: folder,
+					yield* worktrees.recreateAll(
+						folders.map(([path, directory]) => ({
+							folder: {
+								path,
 								projectSlug: config.slug,
 								sessionId: request.sessionId,
 							},
 							directory,
-						),
-					};
+						})),
+					);
+					return { directory };
 				}),
 			);
 			const git = yield* Effect.serviceOption(SessionGitServiceTag);

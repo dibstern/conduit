@@ -38,6 +38,10 @@
  * - A recorded path points outside the owned location: refuse recovery.
  * - The main checkout's project subfolder disappears while its isolated copy
  *   remains: keep that checkout usable and recover through the main Git root.
+ * - Multi-folder list inspection calls Git for present checkouts, or skips a
+ *   missing extra checkout. Inspect only the absent or unusable folders.
+ * - The first missing folder can recover but a later branch is deleted:
+ *   aggregate availability must refuse partial recreation.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -65,6 +69,7 @@ import {
 	type WorktreeFolder,
 	WorktreeServiceTag,
 } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
+import { inspectSessionWorktree } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 
 describe("daemon Worktree service", () => {
 	let fixture: string;
@@ -694,6 +699,80 @@ finish();
 				service.inspectMissing(folder, directory),
 			).pipe(Effect.provide(makeWorktreeLive(configDir))),
 		);
+
+	it("inspects every mapped folder while skipping Git for each present checkout", async () => {
+		const extra = secondGitFolder();
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* WorktreeServiceTag;
+				const created = yield* service.create([folder, extra]);
+				const inspect = () =>
+					inspectSessionWorktree(
+						{
+							id: folder.sessionId,
+							workspace: {
+								origin: "conduit",
+								cause: "launch",
+								worktrees: created.worktrees,
+							},
+						},
+						{ projectDir: folder.path, slug: folder.projectSlug },
+					);
+				const calls = vi.spyOn(service, "inspectMissing");
+				expect(yield* inspect()).toBeUndefined();
+				expect(calls).not.toHaveBeenCalled();
+				const path = created.worktrees[extra.path] ?? "";
+				rmSync(path, { recursive: true });
+				expect(yield* inspect()).toMatchObject({
+					path,
+					canRecreate: true,
+					folders: [{ folder: extra.path, path }],
+				});
+				expect(calls).toHaveBeenCalledTimes(1);
+				expect(calls).toHaveBeenCalledWith(extra, path, [
+					folder.path,
+					extra.path,
+				]);
+			}).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+	});
+
+	it("reports both missing folders and a deleted extra branch blocks the whole recovery", async () => {
+		const extra = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [folder, extra]),
+		);
+		for (const path of Object.values(created.worktrees))
+			rmSync(path, { recursive: true });
+		git(
+			"-C",
+			extra.path,
+			"update-ref",
+			"-d",
+			`refs/heads/${created.branchName}`,
+		);
+		const state = await Effect.runPromise(
+			inspectSessionWorktree(
+				{
+					id: folder.sessionId,
+					workspace: {
+						origin: "conduit",
+						cause: "launch",
+						worktrees: created.worktrees,
+					},
+				},
+				{ projectDir: folder.path, slug: folder.projectSlug },
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(state?.folders?.map(({ folder }) => folder)).toEqual([
+			folder.path,
+			extra.path,
+		]);
+		expect(state).toMatchObject({
+			canRecreate: false,
+			reason: "branch-missing",
+		});
+	});
 
 	it("recreates a missing checkout from the registered renamed branch without changing its ref", async () => {
 		const created = await Effect.runPromise(createEffect());

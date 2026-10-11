@@ -17,7 +17,7 @@ export class WorktreeCreationError extends Schema.TaggedError<WorktreeCreationEr
 ) {}
 
 /** Filesystem availability is derived, never recorded as a workspace move. */
-export const WorkspaceMissingSchema = Schema.Struct({
+const WorktreeMissingFields = {
 	path: Schema.String,
 	branch: Schema.optional(Schema.String),
 	canRecreate: Schema.Boolean,
@@ -28,6 +28,18 @@ export const WorkspaceMissingSchema = Schema.Struct({
 			"branch-in-use",
 			"git-failed",
 			"not-owned",
+		),
+	),
+};
+export const WorkspaceMissingSchema = Schema.Struct({
+	...WorktreeMissingFields,
+	/** Missing checkouts by Project Folder; absent for legacy single-folder state. */
+	folders: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				folder: Schema.String,
+				...WorktreeMissingFields,
+			}),
 		),
 	),
 });

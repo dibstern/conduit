@@ -6,6 +6,9 @@ Failure modes:
 - Recreate is offered after the branch has been deleted.
 - A recovered shell row leaves the missing state from an older family row visible.
 - Typed recreate and continue failures lose their specific toast message.
+- Multi-folder notices omit the missing folder names, including on phones.
+- A missing extra folder is labelled clean, or the healthy primary loses its status.
+- One deleted folder branch still offers a partial Recreate action.
 */
 import type { Page, TestInfo } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
@@ -32,9 +35,14 @@ async function openMissingSession(
 		branch,
 		canRecreate: true,
 	},
+	extraWorktrees: Readonly<Record<string, string>> = {},
 ) {
 	const projects = [
-		{ slug: projectSlug, title: "Workspace project", folders: [main] },
+		{
+			slug: projectSlug,
+			title: "Workspace project",
+			folders: [main, ...Object.keys(extraWorktrees)],
+		},
 	];
 	const session = {
 		id: "missing-session",
@@ -45,7 +53,7 @@ async function openMissingSession(
 		workspace: {
 			cause: "launch",
 			origin: "conduit",
-			worktrees: { [main]: worktree },
+			worktrees: { [main]: worktree, ...extraWorktrees },
 		},
 		workspaceMissing,
 	};
@@ -73,6 +81,114 @@ async function openMissingSession(
 	});
 	await page.goto(`${relayBaseUrl}/s/${session.id}`);
 	return { rpc, session };
+}
+
+for (const viewport of [
+	{ width: 1440, height: 900 },
+	{ width: 390, height: 844 },
+]) {
+	for (const missing of ["extra", "primary", "both"] as const) {
+		test(`multi-folder ${missing} missing at ${viewport.width}px names folders and recreates`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			await page.setViewportSize(viewport);
+			const extra = "/workspace/library";
+			const extraPath = "/workspace/worktrees/missing-session/library";
+			const entries = [
+				{ folder: main, path: worktree, branch, canRecreate: true },
+				{ folder: extra, path: extraPath, branch, canRecreate: true },
+			].filter(
+				({ folder }) =>
+					missing === "both" ||
+					(missing === "primary" ? folder === main : folder === extra),
+			);
+			const first = entries[0];
+			if (!first) throw new Error("No missing folder in fixture");
+			const { rpc, session } = await openMissingSession(
+				page,
+				harness.relayBaseUrl,
+				{
+					path: first.path,
+					branch,
+					canRecreate: true,
+					folders: entries,
+				},
+				{ [extra]: extraPath },
+			);
+			rpc.upsertShellRow({
+				...session,
+				git: {
+					...(missing === "extra"
+						? { branch, worktree: "0", dirty: true }
+						: {}),
+					folders: [main, extra].map((root) => ({
+						root,
+						label: root === main ? "main" : "library",
+						...(entries.some(({ folder }) => folder === root)
+							? { missing: true }
+							: { branch, worktree: "0", dirty: true }),
+					})),
+				},
+			});
+			const names = entries.map(({ folder }) =>
+				folder === main ? "main" : "library",
+			);
+			const label = `worktree missing: ${names.join(", ")}`;
+			const identity = page.getByTestId("session-bar-identity");
+			const notice = page.getByTestId("workspace-missing");
+			await expect(notice).toBeVisible();
+			if (viewport.width === 390) {
+				await expect(notice).toHaveAttribute("aria-label", label);
+				await expect(identity).toHaveAccessibleName(new RegExp(label));
+			} else await expect(notice).toHaveText(label);
+			await capture(page, testInfo, "multi-folder-missing");
+			await identity.click();
+			const menu = page.getByRole("menu", { name: "Checkout" });
+			for (const { folder, path } of entries) {
+				await expect(
+					menu
+						.getByTestId("workspace-missing-folder")
+						.filter({ hasText: path }),
+				).toContainText(folder === main ? "main" : "library");
+				const folderStatus = menu.locator(`[data-folder-root="${folder}"]`);
+				await expect(folderStatus).toContainText("Worktree missing");
+				await expect(folderStatus).not.toContainText("clean");
+			}
+			await capture(page, testInfo, "multi-folder-missing-menu");
+			await menu.getByRole("menuitem", { name: "Recreate worktree" }).click();
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "RecreateSessionWorktree")
+						.map(({ payload }) => payload),
+				)
+				.toEqual([
+					{
+						_tag: "RecreateSessionWorktree",
+						projectSlug,
+						sessionId: session.id,
+					},
+				]);
+			rpc.upsertShellRow({
+				...session,
+				workspaceMissing: undefined,
+				git: { branch, worktree: "0" },
+			});
+			await expect(notice).toHaveCount(0);
+			await capture(page, testInfo, "multi-folder-recovered");
+			await testInfo.attach("multi-folder-recovery-request", {
+				body: JSON.stringify({
+					missingFolders: entries,
+					requests: rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "RecreateSessionWorktree"),
+				}),
+				contentType: "application/json",
+			});
+		});
+	}
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {

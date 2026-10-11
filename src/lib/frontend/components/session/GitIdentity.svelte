@@ -3,6 +3,7 @@
 	import { type WorkspaceMoveCause, WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { type WorkspaceMissing, WorktreeRecoveryError } from "../../../contracts/worktree.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
+	import { labelProjectFolders } from "../../../project-folders.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Button from "../ui/Button.svelte";
@@ -90,7 +91,9 @@
 	const hintLabel = $derived(`working in ${hintFolder}?`);
 	const movedBack = $derived(workspaceCause === "missing");
 	const movedBackLabel = "moved back: worktree removed";
-	const missingLabel = "worktree missing";
+	const missingFolders = $derived(workspaceMissing?.folders ?? []);
+	const missingFolderLabels = $derived(labelProjectFolders(missingFolders.map(({ folder }) => folder)));
+	const missingLabel = $derived(missingFolders.length ? `worktree missing: ${missingFolderLabels.map(({ label }) => label).join(", ")}` : "worktree missing");
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
 	const upstream = $derived(`↑${git?.ahead ?? 0} ↓${git?.behind ?? 0}`);
@@ -169,7 +172,9 @@
 			{#each folders as folder (folder.root)}
 				<section class="px-[8px] py-[6px] text-[10px]" aria-label={folder.label} data-testid="session-folder-git" data-folder-root={folder.root}>
 					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}{#if folder.shared}<span class="ml-2 font-normal text-text-muted">shared</span>{/if}</p>
-					{#if folder.branch || folder.head || folder.dirty !== undefined}
+					{#if folder.missing}
+						<p class="text-warning">Worktree missing</p>
+					{:else if folder.branch || folder.head || folder.dirty !== undefined}
 						<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px]">
 							<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{folder.branch || `Detached at ${folder.head ?? "unknown"}`}</dd>
 							{#if folder.ahead !== undefined || folder.behind !== undefined}
@@ -199,7 +204,16 @@
 	</MenuGroup>
 	{#if workspaceMissing}
 		<MenuSeparator />
-		<p class="px-[8px] py-[6px] text-[10px] text-warning">The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}</p>
+		{#if missingFolders.length}
+			<div class="px-[8px] py-[6px] text-[10px] text-warning">
+				<p>Missing worktrees:</p>
+				{#each missingFolders as folder, index (folder.folder)}
+					<p class="mt-[4px] break-all" data-testid="workspace-missing-folder">{missingFolderLabels[index]?.label ?? folder.folder}<span class="block text-text-muted">{folder.path}</span>{#if folder.reason === "branch-missing"}<span class="block">Its branch no longer exists.</span>{/if}</p>
+				{/each}
+			</div>
+		{:else}
+			<p class="px-[8px] py-[6px] text-[10px] text-warning">The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}</p>
+		{/if}
 		{#if workspaceMissing.canRecreate && onrecreate}<MenuItem disabled={moving || dismissing} data-testid="workspace-recreate" onselect={() => void recover("recreate")}>Recreate worktree</MenuItem>{/if}
 		{#if oncontinue}<MenuItem disabled={moving || dismissing} data-testid="workspace-continue-main" onselect={() => void recover("continue")}>Continue in main folder</MenuItem>{/if}
 	{/if}

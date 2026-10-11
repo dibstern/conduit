@@ -281,6 +281,8 @@ export const SessionFolderGitSchema = Schema.Struct({
 	label: Schema.String,
 	/** Derived from conduit workspace origin and an absent worktree mapping. */
 	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** An unavailable recorded checkout has no healthy Git status fields. */
+	missing: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;

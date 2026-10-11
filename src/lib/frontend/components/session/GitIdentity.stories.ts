@@ -395,6 +395,67 @@ export const WorktreeMissingPhone: Story = {
 	},
 };
 
+export const WorktreeMissingExtraFolder: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-worktree",
+		workspaceCause: "launch",
+		git: {
+			branch: "conduit/multi-folder-session",
+			worktree: "conduit-worktree",
+			dirty: true,
+			folders: [
+				{
+					root: "/src/conduit",
+					label: "conduit",
+					branch: "conduit/multi-folder-session",
+					worktree: "conduit-worktree",
+					dirty: true,
+				},
+				{ root: "/src/library", label: "library", missing: true },
+			],
+		},
+		workspaceMissing: {
+			path: "/src/library-worktree",
+			branch: "conduit/multi-folder-session",
+			canRecreate: true,
+			folders: [
+				{
+					folder: "/src/library",
+					path: "/src/library-worktree",
+					branch: "conduit/multi-folder-session",
+					canRecreate: true,
+				},
+			],
+		},
+		onrecreate: fn(async () => {}),
+		oncontinue: fn(async () => {}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveTextContent(
+			"worktree missing: library",
+		);
+		await userEvent.click(canvas.getByTestId("session-bar-identity"));
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("library");
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("/src/library-worktree");
+		await expect(
+			body.getByRole("menuitem", { name: "Recreate worktree" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).toHaveTextContent("Worktree missing");
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).not.toHaveTextContent("clean");
+	},
+};
+
 export const WorkspaceHint: Story = {
 	tags: ["viewport-capture"],
 	args: {

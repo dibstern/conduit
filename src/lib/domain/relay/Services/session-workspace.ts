@@ -8,6 +8,7 @@ import type {
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
 import type { WorkspaceMissing } from "../../../contracts/worktree.js";
+import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
@@ -87,64 +88,108 @@ export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<
 /** Enrich canonical workspace state with current filesystem/Git availability. */
 export const inspectSessionWorktree = (
 	session: Pick<SessionInfo, "id" | "workspace">,
-	project: { readonly projectDir: string; readonly slug: string },
+	project: {
+		readonly projectDir: string;
+		readonly slug: string;
+		readonly extraFolders?: readonly string[];
+	},
 ): Effect.Effect<WorkspaceMissing | undefined> =>
 	Effect.gen(function* () {
 		if (session.workspace?.origin !== "conduit") return undefined;
-		const directory = effectiveWorkingDirectory(
-			project.projectDir,
-			session.workspace,
-		);
-		const folder = Object.entries(session.workspace.worktrees).find(
-			([, path]) => path === directory,
-		)?.[0];
-		if (!folder) return undefined;
-		// List reads inspect every session, so a present checkout (a real directory
-		// with a worktree's `.git` file) skips Git; anything else is inspected.
-		const present =
-			lstatSync(directory, { throwIfNoEntry: false })?.isDirectory() &&
-			lstatSync(join(directory, ".git"), { throwIfNoEntry: false })?.isFile();
-		if (present) return undefined;
+		const entries = Object.entries(session.workspace.worktrees);
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
-		if (service._tag === "None")
-			return {
-				path: directory,
-				canRecreate: false,
-				reason: "git-failed" as const,
-			};
-		return yield* service.value
-			.inspectMissing(
-				{
-					path: folder,
-					projectSlug: project.slug,
-					sessionId: session.id,
-				},
-				directory,
-			)
-			.pipe(
-				Effect.catchAll((error) =>
-					Effect.succeed({
-						path: directory,
-						canRecreate: false,
-						reason:
-							error.reason === "not-owned"
-								? ("not-owned" as const)
-								: ("git-failed" as const),
-					}),
-				),
-			);
+		const missing = (yield* Effect.forEach(entries, ([folder, directory]) =>
+			Effect.gen(function* () {
+				// List reads inspect every session. A real checkout with a `.git`
+				// file needs no Git call; symlinks and unusable paths are inspected.
+				const present = yield* Effect.try(
+					() =>
+						lstatSync(directory, { throwIfNoEntry: false })?.isDirectory() &&
+						lstatSync(join(directory, ".git"), {
+							throwIfNoEntry: false,
+						})?.isFile(),
+				).pipe(Effect.orElseSucceed(() => false));
+				if (present) return [];
+				const state: WorkspaceMissing | undefined =
+					service._tag === "None"
+						? { path: directory, canRecreate: false, reason: "git-failed" }
+						: yield* service.value
+								.inspectMissing(
+									{
+										path: folder,
+										projectSlug: project.slug,
+										sessionId: session.id,
+									},
+									directory,
+									entries.map(([folder]) => folder),
+								)
+								.pipe(
+									Effect.catchAll((error) =>
+										Effect.succeed({
+											path: directory,
+											canRecreate: false,
+											reason:
+												error.reason === "not-owned"
+													? ("not-owned" as const)
+													: ("git-failed" as const),
+										}),
+									),
+								);
+				return state ? [{ folder, ...state }] : [];
+			}),
+		)).flat();
+		const first = missing[0];
+		if (!first) return undefined;
+		const { folder: _folder, ...state } = first;
+		const reason = missing.find((entry) => !entry.canRecreate)?.reason;
+		return {
+			...state,
+			canRecreate: missing.every((entry) => entry.canRecreate),
+			...(reason ? { reason } : {}),
+			...(entries.length > 1 || project.extraFolders?.length
+				? { folders: missing }
+				: {}),
+		};
 	});
 
 export const withSessionWorktreeStatus = (
 	session: SessionInfo,
-	project: { readonly projectDir: string; readonly slug: string },
+	project: {
+		readonly projectDir: string;
+		readonly slug: string;
+		readonly extraFolders?: readonly string[];
+	},
 ) =>
 	inspectSessionWorktree(session, project).pipe(
-		Effect.map(
-			(workspaceMissing): SessionInfo => ({
+		Effect.map((workspaceMissing): SessionInfo => {
+			if (!workspaceMissing) return { ...session, workspaceMissing };
+			if (!workspaceMissing.folders)
+				return { ...session, workspaceMissing, git: undefined };
+			const roots = [
+				...new Set([
+					project.projectDir,
+					...(project.extraFolders ?? []),
+					...Object.keys(session.workspace?.worktrees ?? {}),
+				]),
+			];
+			const folders = labelProjectFolders(roots).flatMap(({ root, label }) => {
+				if (workspaceMissing.folders?.some(({ folder }) => folder === root))
+					return [{ root, label, missing: true }];
+				const status = session.git?.folders?.find(
+					(folder) => folder.root === root,
+				);
+				return status ? [status] : [];
+			});
+			const { folders: _folders, ...primary } = session.git ?? {};
+			const primaryMissing = workspaceMissing.folders.some(
+				({ path }) =>
+					path ===
+					effectiveWorkingDirectory(project.projectDir, session.workspace),
+			);
+			return {
 				...session,
 				workspaceMissing,
-				...(workspaceMissing ? { git: undefined } : {}),
-			}),
-		),
+				git: { ...(!primaryMissing ? primary : {}), folders },
+			};
+		}),
 	);

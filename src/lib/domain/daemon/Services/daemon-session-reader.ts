@@ -139,6 +139,7 @@ const readProjectSessions = (
 				{
 					projectDir: projectDirectory,
 					slug: projectSlug,
+					extraFolders: project.folders.slice(1),
 				},
 			).pipe(
 				Effect.map(
