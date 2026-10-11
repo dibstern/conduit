@@ -10,6 +10,7 @@ import {
 } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
@@ -106,6 +107,23 @@ export const sessionsHandlers = {
 				removeWorktrees: plan.removeWorktrees,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
+	RenameSessionBranch: (request) =>
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			yield* workspace.renameBranch(request.sessionId, request.branchName);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some") yield* git.value.refresh();
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchAll(
+				(
+					error,
+				): Effect.Effect<never, WorktreeBranchRenameError | WsRpcError> =>
+					error instanceof WorktreeBranchRenameError
+						? Effect.fail(error)
+						: mapRpcFailure("RenameSessionBranch")(error),
+			),
+		),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -728,6 +746,7 @@ export const sessionsHandlers = {
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
+	| "RenameSessionBranch"
 	| "ListWorktrees"
 	| "InspectSessionWorktrees"
 	| "ListBranches"

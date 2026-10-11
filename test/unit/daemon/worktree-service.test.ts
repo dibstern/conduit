@@ -38,6 +38,10 @@
  * - A recorded path points outside the owned location: refuse recovery.
  * - The main checkout's project subfolder disappears while its isolated copy
  *   remains: keep that checkout usable and recover through the main Git root.
+ * - Branch rename preflight checks every repository before writing any ref.
+ * - Same-name renames are no-ops; shared checkouts are renamed once.
+ * - A failed or interrupted rename restores earlier refs, including a Git
+ *   command that updated the ref before reporting failure.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -138,6 +142,108 @@ describe("daemon Worktree service", () => {
 		expect(repositoryState()).toEqual(before);
 		expect(existsSync(ownedWorktreePath(configDir, folder))).toBe(false);
 	};
+
+	it.each([
+		"invalid",
+		"taken",
+		"missing",
+		"head",
+	] as const)("branch rename rejects %s before changing either repository", async (failure) => {
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [folder, second]),
+		);
+		const secondPath = created.worktrees[second.path];
+		if (!secondPath) throw new Error("Missing second worktree");
+		if (failure === "taken") git("-C", second.path, "branch", "renamed");
+		if (failure === "missing") rmSync(secondPath, { recursive: true });
+		if (failure === "head") git("-C", secondPath, "switch", "--detach");
+		const before = [repositoryState(), repositoryState(second.path)];
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(
+					created.ownership,
+					failure === "invalid" ? "bad name" : "renamed",
+				),
+			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+		);
+		if (Either.isRight(result)) throw new Error("Expected rename to fail");
+		expect(result.left).toMatchObject({
+			folder: failure === "invalid" ? repository : second.path,
+			reason: {
+				invalid: "invalid-name",
+				taken: "already-exists",
+				missing: "worktree-missing",
+				head: "head-mismatch",
+			}[failure],
+		});
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+	});
+
+	it("renames a shared checkout once and treats the current name as a no-op", async () => {
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [
+				folder,
+				{ ...folder, path: join(repository, "app") },
+			]),
+		);
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(created.ownership, "renamed"),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		const ownership = created.ownership.map((owned) => ({
+			...owned,
+			branchName: "renamed",
+		}));
+		const before = repositoryState();
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(ownership, "renamed"),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(repositoryState()).toEqual(before);
+		expect(git("branch", "--list", "owned")).toBe("");
+		expect(git("branch", "--list", "renamed")).toContain("renamed");
+	});
+
+	it("rolls back both refs when the second Git rename writes then fails", async () => {
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [folder, second]),
+		);
+		const secondOwned = created.ownership.find(
+			(owned) => owned.folder === second.path,
+		);
+		if (!secondOwned) throw new Error("Missing second ownership");
+		const marker = join(fixture, "rename-failed");
+		const executable = gitWrapper(`${runRealGit}
+if (args.includes("branch") && args.includes("-m") && args.at(-1) === "renamed" && process.cwd() === ${JSON.stringify(secondOwned.path)} && result.status === 0) {
+  writeFileSync(${JSON.stringify(marker)}, "failed after rename");
+  process.stderr.write("forced second rename failure");
+  process.exit(42);
+}
+process.exit(result.status ?? 1);`);
+		const before = [repositoryState(), repositoryState(second.path)];
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(created.ownership, "renamed"),
+			).pipe(
+				Effect.either,
+				Effect.provide(
+					makeWorktreeLive(configDir, { gitExecutable: executable }),
+				),
+			),
+		);
+		if (Either.isRight(result)) throw new Error("Expected rename to fail");
+		expect(result.left).toMatchObject({
+			folder: second.path,
+			reason: "git-failed",
+		});
+		expect(result.left.message).toContain("forced second rename failure");
+		expect(existsSync(marker)).toBe(true);
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+	});
 
 	beforeEach(() => {
 		fixture = realpathSync(

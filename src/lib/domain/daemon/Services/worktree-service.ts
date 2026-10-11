@@ -2,6 +2,7 @@ import { Context, type Effect } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import type {
 	WorkspaceMissing,
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -20,6 +21,11 @@ export interface CreatedWorktrees {
 }
 
 export interface WorktreeService {
+	/** Validate all owned checkouts before renaming; restore refs on a Git failure. */
+	readonly renameBranch: (
+		ownership: readonly SessionWorktreeOwnership[],
+		newName: string,
+	) => Effect.Effect<void, WorktreeBranchRenameError>;
 	/** Read-only proof for historical launch events that predate ownership metadata. */
 	readonly legacyOwnership: (
 		folder: WorktreeFolder,

@@ -346,6 +346,8 @@ export const SessionInfoSchema = Schema.Struct({
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
 	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
+	/** Explicit Conduit launch ownership permits renaming its branches. */
+	canRenameBranch: Schema.optional(Schema.Boolean),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),

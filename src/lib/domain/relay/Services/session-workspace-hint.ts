@@ -96,8 +96,13 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 				const [move] = yield* sql<{ data: string }>`
 					SELECT data FROM events WHERE session_id = ${end.sessionId}
 					AND type = 'session.workspace_changed' AND sequence < ${boundary}
+					AND json_extract(data, '$.cause') != 'branch-rename'
 					ORDER BY sequence DESC LIMIT 1`;
-				const recorded = move ? decodeMove(move.data) : undefined;
+				const decoded = move ? decodeMove(move.data) : undefined;
+				const recorded =
+					decoded && decoded.cause !== "branch-rename"
+						? { ...decoded, cause: decoded.cause }
+						: undefined;
 				const directory =
 					recorded?.path ??
 					effectiveWorkingDirectory(config.projectDir, recorded);

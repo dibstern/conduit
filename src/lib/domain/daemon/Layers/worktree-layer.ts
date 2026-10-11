@@ -16,6 +16,7 @@ import { Cause, Effect, Either, Layer } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -186,6 +187,207 @@ export const makeWorktreeLive = (
 							return undefined;
 						throw cause;
 					}
+				});
+			const renameBranch: WorktreeService["renameBranch"] = (
+				ownership,
+				newName,
+			) =>
+				Effect.gen(function* () {
+					const checkouts = [
+						...new Map(ownership.map((owned) => [owned.path, owned])).values(),
+					];
+					const failure = (
+						owned: SessionWorktreeOwnership,
+						reason: WorktreeBranchRenameError["reason"],
+						message: string,
+					) =>
+						new WorktreeBranchRenameError({
+							folder: owned.folder,
+							reason,
+							message,
+						});
+					const runGit = (
+						owned: SessionWorktreeOwnership,
+						args: readonly string[],
+					) =>
+						git(owned.path, args).pipe(
+							Effect.mapError((error) =>
+								failure(owned, "git-failed", error.message),
+							),
+						);
+					for (const owned of checkouts) {
+						const folder = yield* Effect.try({
+							try: () => ({
+								path: owned.folder,
+								projectSlug: decodeURIComponent(
+									basename(dirname(dirname(owned.path))),
+								),
+								sessionId: decodeURIComponent(basename(dirname(owned.path))),
+							}),
+							catch: (cause) =>
+								failure(
+									owned,
+									"not-owned",
+									`Invalid owned worktree path: ${String(cause)}`,
+								),
+						});
+						const checkout = yield* readOwned(folder, owned).pipe(
+							Effect.mapError((error) =>
+								failure(
+									owned,
+									error.reason === "not-owned" ? "not-owned" : "git-failed",
+									error.message,
+								),
+							),
+						);
+						if (checkout.missing)
+							return yield* failure(
+								owned,
+								"worktree-missing",
+								`Worktree missing: ${owned.path}`,
+							);
+						const validated = yield* runGit(owned, [
+							"check-ref-format",
+							"--branch",
+							newName,
+						]).pipe(
+							Effect.mapError((error) =>
+								/not a valid branch name|usage: git check-ref-format/.test(
+									error.message,
+								)
+									? failure(
+											owned,
+											"invalid-name",
+											`Invalid branch name: ${newName}`,
+										)
+									: error,
+							),
+						);
+						// Git expands @{-1}; a user-supplied branch name must be literal.
+						if (validated !== newName)
+							return yield* failure(
+								owned,
+								"invalid-name",
+								`Invalid branch name: ${newName}`,
+							);
+						const branches = new Set(
+							(yield* runGit(owned, [
+								"for-each-ref",
+								"--format=%(refname)",
+								"refs/heads",
+							]))
+								.split("\n")
+								.map((ref) => ref.replace(/^refs\/heads\//, "")),
+						);
+						branches.delete(owned.branchName);
+						if (
+							newName !== owned.branchName &&
+							branchConflicts(branches, newName)
+						)
+							return yield* failure(
+								owned,
+								"already-exists",
+								`Branch already exists or conflicts with an existing branch: ${newName}`,
+							);
+						const head = yield* runGit(owned, [
+							"symbolic-ref",
+							"--quiet",
+							"HEAD",
+						]).pipe(
+							Effect.catchAll((error) =>
+								/Git symbolic-ref failed:/.test(error.message)
+									? failure(
+											owned,
+											"head-mismatch",
+											`HEAD is not on the owned branch ${owned.branchName}`,
+										)
+									: Effect.fail(error),
+							),
+						);
+						if (head !== `refs/heads/${owned.branchName}`)
+							return yield* failure(
+								owned,
+								"head-mismatch",
+								`HEAD is not on the owned branch ${owned.branchName}`,
+							);
+					}
+					const attempted: SessionWorktreeOwnership[] = [];
+					return yield* Effect.gen(function* () {
+						for (const owned of checkouts) {
+							if (owned.branchName === newName) continue;
+							attempted.push(owned);
+							yield* runGit(owned, ["branch", "-m", owned.branchName, newName]);
+						}
+					}).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								const errors: string[] = [];
+								for (const owned of attempted.reverse()) {
+									const rollback = yield* Effect.either(
+										Effect.gen(function* () {
+											// A timed-out Git command may have completed its rename.
+											const head = yield* runGit(owned, [
+												"symbolic-ref",
+												"--quiet",
+												"HEAD",
+											]);
+											// Git moves the ref before updating worktree HEADs. A HEAD.lock
+											// failure can leave HEAD on the old, now absent branch.
+											const refs = new Set(
+												(yield* runGit(owned, [
+													"for-each-ref",
+													"--format=%(refname)",
+													`refs/heads/${owned.branchName}`,
+													`refs/heads/${newName}`,
+												])).split("\n"),
+											);
+											const oldExists = refs.has(
+												`refs/heads/${owned.branchName}`,
+											);
+											const newExists = refs.has(`refs/heads/${newName}`);
+											if (
+												head === `refs/heads/${owned.branchName}` &&
+												oldExists &&
+												!newExists
+											)
+												return;
+											if (
+												oldExists ||
+												!newExists ||
+												(head !== `refs/heads/${newName}` &&
+													head !== `refs/heads/${owned.branchName}`)
+											)
+												return yield* failure(
+													owned,
+													"head-mismatch",
+													"Branch refs or HEAD changed during branch rename rollback",
+												);
+											yield* runGit(owned, [
+												"branch",
+												"-m",
+												newName,
+												owned.branchName,
+											]);
+										}),
+									);
+									if (Either.isLeft(rollback))
+										errors.push(`${owned.folder}: ${rollback.left.message}`);
+								}
+								if (errors.length > 0) {
+									const original = Cause.failureOption(cause);
+									return yield* new WorktreeBranchRenameError({
+										folder:
+											original._tag === "Some"
+												? original.value.folder
+												: (attempted[0]?.folder ?? ""),
+										reason: "git-failed",
+										message: `${original._tag === "Some" ? original.value.message : Cause.pretty(cause)}. Branch rollback failed: ${errors.join("; ")}`,
+									});
+								}
+								return yield* Effect.failCause(cause);
+							}).pipe(Effect.uninterruptible),
+						),
+					);
 				});
 			const readRecovery = (folder: WorktreeFolder, directory?: string) =>
 				Effect.gen(function* () {
@@ -982,6 +1184,7 @@ export const makeWorktreeLive = (
 					);
 				});
 			return {
+				renameBranch,
 				create,
 				rollback,
 				inspectMissing,

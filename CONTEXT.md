@@ -51,7 +51,13 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Current branch names
 are read from git, never stored in the workspace. Conduit launch events retain
 the originally created checkout, branch and committed base as deletion
-provenance; forks inherit the workspace without that ownership.
+provenance; forks inherit the workspace without that ownership. A branch rename
+validates every launch-owned checkout, renames their branches together and rolls
+back Git failures. It records updated branch ownership as a
+`session.workspace_changed` event with cause `branch-rename`, leaving workspace
+paths, move cause and pending moves unchanged. Deletion follows that latest
+owned branch name. The git pill offers Rename branch only with launch ownership
+and refreshes git status immediately after a rename.
 
 Deleting a session inspects its launch-created checkouts, including ones left
 behind after a move or folder detach. Uncommitted changes, unpushed commits,
