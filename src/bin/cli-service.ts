@@ -4,6 +4,11 @@ import { createServer } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	type DaemonConfig,
+	loadDaemonConfig,
+	saveDaemonConfig,
+} from "../lib/daemon/config-persistence.js";
 import { getVersion } from "../lib/version.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 import { DEFAULT_CONFIG_DIR, type ParsedArgs } from "./cli-utils.js";
@@ -27,6 +32,9 @@ export interface ServiceOptions {
 	cliEntry: string;
 	port: number;
 	host?: string;
+	configOverrides?: Partial<
+		Pick<DaemonConfig, "port" | "tls" | "tailscaleServe" | "claudeConfigDir">
+	>;
 	environment?: Record<string, string>;
 }
 
@@ -47,6 +55,8 @@ export interface ServiceRunner {
 	mkdir(path: string): Promise<void>;
 	writeFile(path: string, content: string): Promise<void>;
 	removeFile(path: string): Promise<void>;
+	loadConfig: typeof loadDaemonConfig;
+	saveConfig: typeof saveDaemonConfig;
 	checkDaemon(): Promise<boolean>;
 	isPortAvailable(port: number, host: string): Promise<boolean>;
 }
@@ -200,23 +210,16 @@ WantedBy=default.target
 }
 
 export function foregroundArguments(args: ParsedArgs): string[] {
+	// Port, TLS, Serve, and Claude config live in daemon.json. OpenCode's port
+	// only seeds a missing default instance; restored instances win at startup.
 	const flags = [
 		"serve",
-		"--port",
-		String(args.port),
 		"--oc-port",
 		String(args.ocPort),
 		"--log-level",
 		args.logLevel,
 	];
 	if (args.host) flags.push("--host", args.host);
-	if (args.claudeConfigDir)
-		flags.push("--claude-config-dir", args.claudeConfigDir);
-	if (args.noHttps) flags.push("--no-https");
-	if (args.tailscaleServe !== undefined)
-		flags.push(
-			args.tailscaleServe ? "--tailscale-serve" : "--no-tailscale-serve",
-		);
 	if (args.logFormat) flags.push("--log-format", args.logFormat);
 	return flags;
 }
@@ -313,7 +316,7 @@ export async function runServiceCommand(
 	}
 	const state = await serviceState(options, runner);
 	const target = `gui/${uid}/${LABEL}`;
-	const logs = `  Stdout: ${state.stdout}\n  Stderr: ${state.stderr}\n`;
+	const logs = `  Stdout: ${action === "install" ? paths.stdout : state.stdout}\n  Stderr: ${action === "install" ? paths.stderr : state.stderr}\n`;
 	if (action === "status") {
 		return `Conduit service\n  Installed: ${state.installed ? "yes" : "no"}\n  Loaded: ${state.loaded ? "yes" : "no"}\n  Running: ${state.running ? "yes" : "no"}\n  PID: ${state.pid ?? "none"}\n  Unit: ${paths.unitFile}\n${logs}`;
 	}
@@ -339,9 +342,13 @@ export async function runServiceCommand(
 		return `Uninstalled Conduit service. Logs retained.\n${logs}`;
 	}
 	let unit = generateServiceUnit(options);
-	if (state.installed || state.loaded || state.running) {
-		throw new Error(
-			"Conduit service is already installed or loaded. Run conduit service uninstall before reinstalling.",
+	if (state.loaded || state.running) {
+		await checkedExec(
+			runner,
+			platform === "darwin" ? "launchctl" : "systemctl",
+			platform === "darwin"
+				? ["bootout", target]
+				: ["--user", "stop", "conduit"],
 		);
 	}
 	if (await runner.checkDaemon()) {
@@ -349,11 +356,38 @@ export async function runServiceCommand(
 			"A Conduit daemon is already running. Stop it first with conduit --stop, then install the service.",
 		);
 	}
+	// Read after stopping the old service so its shutdown flush is included.
+	const persisted = runner.loadConfig(paths.configDir);
 	if (
-		!(await runner.isPortAvailable(options.port, options.host ?? "0.0.0.0"))
+		persisted === null &&
+		(await runner.exists(join(paths.configDir, "daemon.json")))
 	) {
 		throw new Error(
-			`Port ${options.port} is already in use. Stop the existing server before installing the service.`,
+			"Cannot read daemon.json; refusing to replace stored settings. Repair the config before installing the service.",
+		);
+	}
+	const config: DaemonConfig = {
+		...(persisted ?? {
+			pid: 0,
+			port: options.port,
+			pinHash: null,
+			tls: true,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+		}),
+		...options.configOverrides,
+	};
+	if (
+		options.configOverrides?.tailscaleServe === false &&
+		persisted?.tailscaleServe === true
+	) {
+		config.tailscaleServeCleanupPending = true;
+	}
+	if (!(await runner.isPortAvailable(config.port, options.host ?? "0.0.0.0"))) {
+		throw new Error(
+			`Port ${config.port} is already in use. Stop the existing server before installing the service.`,
 		);
 	}
 	let warning = "";
@@ -396,6 +430,7 @@ export async function runServiceCommand(
 	}
 	await runner.mkdir(dirname(paths.unitFile));
 	await runner.mkdir(paths.configDir);
+	await runner.saveConfig(config, paths.configDir);
 	await runner.writeFile(paths.unitFile, unit);
 	if (platform === "darwin") {
 		await checkedExec(runner, "launchctl", ["enable", target]);
@@ -461,10 +496,12 @@ export function createServiceRunner(
 			await writeFile(path, content, {
 				encoding: "utf8",
 				mode: 0o644,
-				flag: "wx",
+				flag: "w",
 			});
 		},
 		removeFile: (path) => unlink(path),
+		loadConfig: loadDaemonConfig,
+		saveConfig: saveDaemonConfig,
 		checkDaemon,
 		isPortAvailable: (port, host) =>
 			new Promise((fulfil, reject) => {
@@ -482,7 +519,8 @@ export async function handleService(
 	ctx: Pick<
 		CommandContext,
 		"args" | "cwd" | "stdout" | "stderr" | "exit" | "checkDaemon"
-	>,
+	> &
+		Partial<Pick<CommandContext, "options">>,
 	runner: ServiceRunner = createServiceRunner(ctx.checkDaemon),
 ): Promise<void> {
 	const action = ctx.args.serviceAction;
@@ -494,7 +532,7 @@ export async function handleService(
 		return;
 	}
 	try {
-		const configDir = resolve(DEFAULT_CONFIG_DIR);
+		const configDir = resolve(ctx.options?.configDir ?? DEFAULT_CONFIG_DIR);
 		const homeDir = homedir();
 		const user = userInfo();
 		const shell = process.env["SHELL"] || user.shell || "/bin/sh";
@@ -516,6 +554,16 @@ export async function handleService(
 				uid: process.getuid?.() ?? 0,
 				cliEntry: fileURLToPath(new URL("./cli.js", import.meta.url)),
 				port: ctx.args.port,
+				configOverrides: {
+					...(ctx.args.portExplicit ? { port: ctx.args.port } : {}),
+					...(ctx.args.noHttps ? { tls: false } : {}),
+					...(ctx.args.tailscaleServe !== undefined
+						? { tailscaleServe: ctx.args.tailscaleServe }
+						: {}),
+					...(ctx.args.claudeConfigDir !== undefined
+						? { claudeConfigDir: ctx.args.claudeConfigDir }
+						: {}),
+				},
 				...(ctx.args.host ? { host: ctx.args.host } : {}),
 				environment: {
 					HOME: homeDir,

@@ -49,8 +49,20 @@ vi.mock("../../../src/lib/env.js", async (importOriginal) => {
 	};
 });
 
+vi.mock(
+	"../../../src/lib/daemon/config-persistence.js",
+	async (importOriginal) => {
+		const original =
+			await importOriginal<
+				typeof import("../../../src/lib/daemon/config-persistence.js")
+			>();
+		return { ...original, loadDaemonConfig: vi.fn(() => null) };
+	},
+);
+
 // Import AFTER vi.mock (vitest hoists the mock)
 import { run } from "../../../src/bin/cli-core.js";
+import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 
 function createMockIO(cwd = "/test/project") {
 	const output: string[] = [];
@@ -82,10 +94,12 @@ function createMockIO(cwd = "/test/project") {
 describe("serve handler", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.stubEnv("CONDUIT_SERVICE", "0");
 	});
 
 	afterEach(() => {
 		mockEnv.opencodeUrl = undefined;
+		vi.unstubAllEnvs();
 	});
 
 	it.each([
@@ -241,14 +255,24 @@ describe("serve handler", () => {
 		expect(io.exit).toHaveBeenCalledExactlyOnceWith(0);
 	});
 
-	it("uses persisted server port when none specified and enables TLS", async () => {
+	it("lets the daemon resolve the saved port and respects saved TLS", async () => {
 		const io = createMockIO("/test");
+		vi.mocked(loadDaemonConfig).mockReturnValueOnce({
+			pid: 0,
+			port: 3000,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			dangerouslySkipPermissions: false,
+			projects: [],
+		});
 
 		await run(["--foreground"], io);
 
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
 			opencodeUrl: "http://localhost:4096",
-			tlsEnabled: true,
+			tlsEnabled: false,
 			logLevel: "info",
 			logFormat: "pretty",
 		});

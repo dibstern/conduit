@@ -10,6 +10,7 @@ import {
 	SetPin,
 	Shutdown,
 } from "../lib/contracts/ws-rpc.js";
+import { loadDaemonConfig } from "../lib/daemon/config-persistence.js";
 import type { SendRPC } from "../lib/daemon/daemon-rpc-client.js";
 import { ENV } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
@@ -42,6 +43,17 @@ export async function handleServe(
 ): Promise<void> {
 	const { args, options, stdout, stderr, exit, startForegroundDaemonFn } = ctx;
 	const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
+	if (
+		process.env["CONDUIT_SERVICE"] === "1" &&
+		(args.portExplicit ||
+			args.noHttps ||
+			args.tailscaleServe !== undefined ||
+			args.claudeConfigDir !== undefined)
+	) {
+		stderr.write(
+			"Warning: this service's arguments override stored settings; re-run conduit service install to update it.\n",
+		);
+	}
 
 	try {
 		const daemon = await startForegroundDaemonFn({
@@ -52,7 +64,9 @@ export async function handleServe(
 				? { claudeConfigDir: args.claudeConfigDir }
 				: {}),
 			opencodeUrl,
-			tlsEnabled: !args.noHttps,
+			tlsEnabled: args.noHttps
+				? false
+				: (loadDaemonConfig(options?.configDir)?.tls ?? true),
 			...(args.tailscaleServe !== undefined && {
 				tailscaleServe: args.tailscaleServe,
 			}),

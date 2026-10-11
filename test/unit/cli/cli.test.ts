@@ -53,10 +53,10 @@ describe("Tailscale Serve CLI", () => {
 	it.each([
 		"--tailscale-serve",
 		"--no-tailscale-serve",
-	])("forwards %s to the installed service", (flag) => {
+	])("omits persisted %s from the installed service arguments", (flag) => {
 		expect(
 			foregroundArguments(parseArgs(["service", "install", flag])),
-		).toContain(flag);
+		).not.toContain(flag);
 	});
 
 	it("uses the ts.net URL in the project banner and QR", async () => {

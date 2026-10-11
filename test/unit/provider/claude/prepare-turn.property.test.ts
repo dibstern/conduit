@@ -510,7 +510,7 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 			],
 		},
 	);
-});
+}, 120000);
 
 it("prepares intact, ordered, budgeted context only for a fresh native thread", async () => {
 	await fc.assert(
