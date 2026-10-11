@@ -79,3 +79,22 @@ Successful tool declarations also acknowledge a user move to the same path.
 metadata. A user move remains pending until a later startup cwd or successful
 worktree declaration acknowledges its effective working directory. Both states
 survive daemon restarts without additional session columns.
+
+## Workspace Hint
+
+**Workspace Hint** is a suggested effective working directory when the latest
+completed turn writes at least three times in one other worktree and never in
+the recorded workspace. Read-only tools do not count, and writes split across
+worktrees produce no hint. Relative paths use the workspace recorded during
+that turn. The watcher resolves paths through the Session Workspace service
+and never moves the session.
+
+`session.workspace_hint_changed` projects the suggested path onto the session
+row, so the hint survives daemon restarts. Accepting it uses the normal user
+move; a move to that path clears the hint. Dismissal is daemon memory keyed by
+session and hint folder, omitted from every client's session row through the
+normal shell and family subscriptions. A different folder, or a cleared hint,
+resets the dismissal. The hint works for writes back to the main checkout too.
+
+The checkout pill shows the folder suggestion with Move and Dismiss actions on
+desktop. Phones show an accessible icon and put both actions in the pill menu.

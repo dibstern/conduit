@@ -29,6 +29,12 @@ export interface SessionRow {
 	resumes?: string | null;
 	/** JSON SessionWorkspace. NULL uses the project's main folders. */
 	workspace?: string | null;
+	/** Suggested worktree inferred from the latest turn's writes. */
+	workspace_hint?: string | null;
+	/** Sequence that introduced the current hint; NULL without a hint. */
+	workspace_hint_sequence?: number | null;
+	/** Projected Claude native workspace and pending user intent. */
+	claude_worktree_state?: string | null;
 	last_turn_end_version?: number | null;
 	last_turn_end_input_id?: string | null;
 	seen_version?: number | null;

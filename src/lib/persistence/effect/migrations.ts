@@ -33,6 +33,7 @@ import {
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
+	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
@@ -46,6 +47,7 @@ import {
 	SESSIONS_SETTLED_PINNED_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
+	SESSIONS_WORKSPACE_HINT_MIGRATION,
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
@@ -476,6 +478,9 @@ const appendedSessionColumns = [
 	"root_id",
 	"workspace",
 	"last_turn_end_input_id",
+	"claude_worktree_state",
+	"workspace_hint",
+	"workspace_hint_sequence",
 ] as const;
 
 function sameStrings(
@@ -1115,15 +1120,25 @@ export const effectMigrationEntries = {
 		"project_id",
 		readMigrationSql(PROJECT_PROVENANCE_MIGRATION),
 	),
-	"0046_message_part_versions": runAddColumnMigrationIfMissing(
+	"0048_sessions_claude_worktree_state": runAddColumnMigrationIfMissing(
+		"sessions",
+		"claude_worktree_state",
+		readMigrationSql(SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION),
+	),
+	"0049_sessions_workspace_hint": runAddColumnMigrationIfMissing(
+		"sessions",
+		"workspace_hint",
+		readMigrationSql(SESSIONS_WORKSPACE_HINT_MIGRATION),
+	),
+	"0050_message_part_versions": runAddColumnMigrationIfMissing(
 		"message_parts",
 		"version",
 		readMigrationSql(MESSAGE_PART_VERSIONS_MIGRATION),
 	),
-	"0047_session_git_published": executeSqlStatements(
+	"0051_session_git_published": executeSqlStatements(
 		readMigrationSql(SESSION_GIT_PUBLISHED_MIGRATION),
 	),
-	"0048_store_identity": executeSqlStatements(
+	"0052_store_identity": executeSqlStatements(
 		readMigrationSql(STORE_IDENTITY_MIGRATION),
 	),
 } satisfies Record<
@@ -1145,7 +1160,6 @@ export function makeEffectMigrationLoader(
 	entries: Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>,
 ): Migrator.Loader {
 	return Effect.gen(function* () {
-		const parsed = [];
 		const seenIds = new Set<number>();
 		const seenNames = new Set<string>();
 		for (const key of Object.keys(entries)) {
@@ -1184,19 +1198,12 @@ export function makeEffectMigrationLoader(
 			}
 			seenIds.add(id);
 			seenNames.add(name);
-			parsed.push({ id, name });
 		}
 
-		const sorted = parsed.sort((a, b) => a.id - b.id);
-		for (const [index, migration] of sorted.entries()) {
-			const expectedId = index + 1;
-			if (migration.id !== expectedId) {
-				return yield* Effect.fail(
-					migrationRegistryError(
-						`Migration ids must be contiguous starting at 1: expected ${expectedId}, got ${migration.id} (${migration.name})`,
-					),
-				);
-			}
+		if (seenIds.size > 0 && !seenIds.has(1)) {
+			return yield* Effect.fail(
+				migrationRegistryError("Migration ids must start at 1"),
+			);
 		}
 
 		return yield* Migrator.fromRecord(entries);

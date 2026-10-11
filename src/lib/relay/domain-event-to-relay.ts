@@ -173,6 +173,8 @@ export function translateDomainEventToRelay(
 			return silent("delivered as the shell row's goalState");
 		case "session.workspace_changed":
 			return silent("delivered as the shell row's workspace and git");
+		case "session.workspace_hint_changed":
+			return silent("delivered as the shell row's workspaceHint");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; it does, as the session's shell row (ni8.12).

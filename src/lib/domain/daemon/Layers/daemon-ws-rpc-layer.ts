@@ -10,6 +10,7 @@ import {
 } from "effect";
 import { hashPin } from "../../../auth.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
+import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
@@ -28,6 +29,7 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
@@ -39,7 +41,9 @@ import {
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
+	findOpenCodeSession,
 	listDaemonSessions,
+	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
@@ -687,6 +691,57 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					resolveDaemonSession(configDir, request.sessionId).pipe(
 						Effect.map((projectSlug) => ({ projectSlug })),
+					),
+				),
+			OpenCodeUseWorktree: (request) =>
+				Effect.gen(function* () {
+					const instance = yield* getInstance(request.instanceId);
+					if (!instance.managed || instance.driver !== "opencode")
+						return yield* new WsRpcError({
+							message:
+								"Declared worktree moves require a Conduit-managed OpenCode instance",
+						});
+					const target = yield* resolveDaemonOpenCodeSession(
+						configDir,
+						request.instanceId,
+						request.providerSessionId,
+					);
+					if (!target)
+						return yield* new WsRpcError({
+							message:
+								"No Conduit session is bound to this OpenCode session and instance",
+						});
+					const relay = yield* cache.get(target.projectSlug);
+					if (!relay.rpcWsHandler.context)
+						return yield* new WsRpcError({
+							message: "The project relay has no RPC context",
+						});
+					const relayContext = yield* relay.rpcWsHandler.context;
+					return yield* Effect.gen(function* () {
+						const sessionId = yield* findOpenCodeSession(
+							request.instanceId,
+							request.providerSessionId,
+						);
+						if (sessionId !== target.sessionId)
+							return yield* new WsRpcError({
+								message:
+									"The OpenCode session binding changed before the workspace move",
+							});
+						const workspace = yield* SessionWorkspaceTag;
+						return {
+							directory: yield* workspace.move(
+								target.sessionId,
+								request.path,
+								"agent",
+							),
+						};
+					}).pipe(Effect.provide(relayContext));
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof WorkspaceMoveError || error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
 			FindFolders: (request) =>

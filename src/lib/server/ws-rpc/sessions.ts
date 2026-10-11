@@ -21,6 +21,7 @@ import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../../domain/relay/Services/session-manager-service.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listProjectWorktrees,
@@ -90,6 +91,11 @@ export const sessionsHandlers = {
 						? Effect.fail(error)
 						: mapRpcFailure("MoveSessionWorkspace")(error),
 			),
+		),
+	DismissWorkspaceHint: (request) =>
+		dismissWorkspaceHint(request.sessionId, request.path).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("DismissWorkspaceHint")),
 		),
 	GetGoalDetails: (request) =>
 		Effect.gen(function* () {
@@ -528,6 +534,7 @@ export const sessionsHandlers = {
 	| "RenameSession"
 	| "ListWorktrees"
 	| "MoveSessionWorkspace"
+	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
 	| "SetSessionPinned"
 	| "SetSessionAutoSettle"

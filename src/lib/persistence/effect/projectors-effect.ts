@@ -4,6 +4,7 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
+import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type {
 	CanonicalEventType,
@@ -261,7 +262,15 @@ export const makeSessionProjector = (): EffectProjector => ({
 			// session row goes and the cascade takes the rest. Both arms feed the
 			// same list — the stamp pass is what tells a row that moved from one
 			// that is gone.
-			for (const stmt of getSessionStatements(event)) {
+			const [worktree] = CLAUDE_WORKTREE_EVENTS.has(event.type)
+				? yield* sql<{ claude_worktree_state: string | null }>`
+					SELECT claude_worktree_state FROM sessions
+					WHERE id = ${event.sessionId}`
+				: [];
+			for (const stmt of getSessionStatements(
+				event,
+				worktree?.claude_worktree_state,
+			)) {
 				if (isSessionRemoval(stmt)) {
 					const subtree = yield* sql.unsafe<{ id: string }>(
 						SESSION_SUBTREE_SQL,
@@ -1568,7 +1577,6 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
 	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
-	"session.workspace_started", // Startup observation is read from history by Session Workspace.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",

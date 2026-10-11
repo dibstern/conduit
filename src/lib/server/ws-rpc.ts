@@ -57,6 +57,7 @@ export {
 	DetectProxy,
 	type DetectProxyResponse,
 	DismissCutOff,
+	DismissWorkspaceHint,
 	FindFolders,
 	type FindFoldersResponse,
 	ForkSession,

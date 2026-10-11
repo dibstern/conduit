@@ -307,9 +307,11 @@ describe("Persistence Effect", () => {
 				{ migration_id: 43, name: "messages_steered" },
 				{ migration_id: 44, name: "sessions_last_turn_end_input_id" },
 				{ migration_id: 45, name: "project_provenance" },
-				{ migration_id: 46, name: "message_part_versions" },
-				{ migration_id: 47, name: "session_git_published" },
-				{ migration_id: 48, name: "store_identity" },
+				{ migration_id: 48, name: "sessions_claude_worktree_state" },
+				{ migration_id: 49, name: "sessions_workspace_hint" },
+				{ migration_id: 50, name: "message_part_versions" },
+				{ migration_id: 51, name: "session_git_published" },
+				{ migration_id: 52, name: "store_identity" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

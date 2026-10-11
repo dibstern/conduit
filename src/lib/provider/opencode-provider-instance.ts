@@ -85,6 +85,9 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly instanceIdForSession?: (
 		sessionId: string,
 	) => Effect.Effect<string | undefined>;
+	readonly hasWorktreeToolForSession?: (
+		sessionId: string,
+	) => Effect.Effect<boolean>;
 }
 
 export class OpenCodeProviderInstance implements ProviderInstance {
@@ -99,6 +102,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
 	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
+	private readonly hasWorktreeToolForSession: OpenCodeProviderInstanceOptions["hasWorktreeToolForSession"];
 	private readonly pendingTurns = new Map<
 		string,
 		{
@@ -117,6 +121,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
 		this.instanceIdForSession = options.instanceIdForSession;
+		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
 
 	/** The send a new user message echo belongs to: the oldest unechoed one. */
@@ -273,6 +278,17 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				return sendFailedTurnResult(message);
 			}
 			const client = clientResult.right;
+			if (
+				this.hasWorktreeToolForSession &&
+				(yield* this.hasWorktreeToolForSession(sessionId))
+			) {
+				promptOptions.system = [
+					promptOptions.system,
+					"To work in another git worktree, call conduit_use_worktree with its path instead of using cd.",
+				]
+					.filter(Boolean)
+					.join("\n");
+			}
 
 			let pendingTurn = this.pendingTurns.get(sessionId);
 			if (pendingTurn) {

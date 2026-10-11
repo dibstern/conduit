@@ -542,6 +542,21 @@ export async function moveSessionWorkspaceRpc(input: {
 	if (Either.isLeft(result)) throw result.left;
 }
 
+export async function dismissWorkspaceHintRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly path: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.DismissWorkspaceHint(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
 const callCancelSession = (input: CancelSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.CancelSession(input).pipe(Effect.asVoid),

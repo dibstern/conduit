@@ -1,7 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import type { Fragment } from "@effect/sql/Statement";
-import { Context, Data, Effect, Schema } from "effect";
+import { Context, Data, Effect, Option, Schema } from "effect";
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -19,7 +19,12 @@ import type {
 	SessionTodos,
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
+import { SessionWorkspaceHintStateTag } from "../../domain/relay/Services/session-workspace-hint-state.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
+import {
+	claudeWorkspaceMismatch,
+	decodeClaudeWorktreeState,
+} from "../../session/claude-worktree-state.js";
 import {
 	type SessionAttention,
 	type SessionInfo,
@@ -126,6 +131,7 @@ export const sessionRowsToSessionInfoList = (
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
+		readonly hintDismissals?: ReadonlyMap<string, number>;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -225,6 +231,10 @@ export const sessionRowsToSessionInfoList = (
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			messageCount: 0,
+			...(row.workspace_hint == null ||
+			opts.hintDismissals?.get(row.id) === row.workspace_hint_sequence
+				? {}
+				: { workspaceHint: row.workspace_hint }),
 			...(row.workspace == null
 				? {}
 				: {
@@ -232,6 +242,11 @@ export const sessionRowsToSessionInfoList = (
 							Schema.parseJson(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
+			workspaceMismatch: row.claude_worktree_state
+				? claudeWorkspaceMismatch(
+						decodeClaudeWorktreeState(row.claude_worktree_state),
+					)
+				: undefined,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }
@@ -805,6 +820,9 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const hintDismissals = Option.getOrUndefined(
+		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
+	);
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
 	const turnTimingColumns = sql`
@@ -1147,6 +1165,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
+				...(hintDismissals && { hintDismissals }),
 				...(opts?.backgroundOf && {
 					backgroundOf: opts.backgroundOf,
 				}),
@@ -1496,13 +1515,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							session_id: string;
 							version: number;
 							row: string | null;
+							workspace_hint_sequence: number | null;
 							deleted: number;
 						}>`
-							SELECT session_id, version, row,
-								NOT EXISTS (SELECT 1 FROM sessions
-									WHERE sessions.id = session_sidebar.session_id) AS deleted
-							FROM session_sidebar
-							WHERE version > ${floor} AND version <= ${ceiling}
+							SELECT session_sidebar.session_id, session_sidebar.version, row,
+								workspace_hint_sequence, sessions.id IS NULL AS deleted
+							FROM session_sidebar LEFT JOIN sessions
+								ON sessions.id = session_sidebar.session_id
+							WHERE session_sidebar.version > ${floor} AND session_sidebar.version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
 						const removedSince = ranged
@@ -1517,12 +1537,19 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							floor <= version &&
 							floor >= (removedSince ?? floor);
 						return {
-							rows: stored.flatMap(({ row }) => {
+							rows: stored.flatMap(({ row, workspace_hint_sequence }) => {
 								if (row === null) return [];
 								const sidebar = decodeSidebarRow(row);
 								return [
 									{
-										item: sidebarItem(sidebar, range?.backgroundOf),
+										item: {
+											...sidebarItem(sidebar, range?.backgroundOf),
+											workspaceHint:
+												hintDismissals?.get(sidebar.session.id) ===
+												workspace_hint_sequence
+													? undefined
+													: sidebar.session.workspaceHint,
+										},
 										version: sidebar.version,
 									},
 								];
@@ -1591,6 +1618,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
+						...(hintDismissals && { hintDismissals }),
 						...(range?.backgroundOf && {
 							backgroundOf: range.backgroundOf,
 						}),

@@ -63,6 +63,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.created",
 	"session.renamed",
 	"session.workspace_changed",
+	"session.workspace_hint_changed",
 	"session.workspace_started",
 	"session.read",
 	"session.unread",
@@ -205,9 +206,11 @@ export type CanonicalToolInput =
 			replaceAll?: boolean;
 	  }
 	| { tool: "Write"; filePath: string; content: string }
+	| { tool: "Patch"; patch: string; filePaths: readonly string[] }
 	| {
 			tool: "Bash";
 			command: string;
+			workingDirectory?: string;
 			description?: string;
 			timeoutMs?: number;
 	  }
@@ -296,6 +299,8 @@ export interface InputSentPayload {
 	readonly inputId: string;
 	/** Handed into the running turn rather than starting one. */
 	readonly steer?: true;
+	/** The user workspace move whose directive was included in this handoff. */
+	readonly workspaceMoveSequence?: number;
 }
 
 export interface InputCancelledPayload {
@@ -368,6 +373,12 @@ export interface SessionRenamedPayload {
 
 export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
+	/** Effective cwd after applying the mapping, including a reset to main. */
+	readonly path?: string;
+}
+
+export interface SessionWorkspaceHintChangedPayload {
+	readonly path: string | null;
 }
 
 /** The runner's reported startup folder, independent of recorded workspace moves. */
@@ -589,6 +600,7 @@ export interface EventPayloadMap {
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
+	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
 	"session.workspace_started": SessionWorkspaceStartedPayload;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
@@ -800,8 +812,14 @@ const CanonicalToolInputSchema = Schema.Union(
 		content: Schema.String,
 	}),
 	Schema.Struct({
+		tool: Schema.Literal("Patch"),
+		patch: Schema.String,
+		filePaths: Schema.Array(Schema.String),
+	}),
+	Schema.Struct({
 		tool: Schema.Literal("Bash"),
 		command: Schema.String,
+		workingDirectory: Schema.optionalWith(Schema.String, { exact: true }),
 		description: Schema.optionalWith(Schema.String, { exact: true }),
 		timeoutMs: Schema.optionalWith(Schema.Number, { exact: true }),
 	}),
@@ -954,6 +972,7 @@ const InputSentPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
 	steer: Schema.optionalWith(Schema.Literal(true), { exact: true }),
+	workspaceMoveSequence: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 const InputCancelledPayloadSchema = Schema.Struct({
@@ -986,7 +1005,12 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 
 export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
+	path: Schema.optional(Schema.String),
 	...SessionWorkspaceSchema.fields,
+});
+
+export const SessionWorkspaceHintChangedPayloadSchema = Schema.Struct({
+	path: Schema.NullOr(Schema.String),
 });
 
 const SessionWorkspaceStartedPayloadSchema = Schema.Struct({
@@ -1283,6 +1307,10 @@ const SessionWorkspaceChangedEventSchema = eventEnvelope(
 	"session.workspace_changed",
 	SessionWorkspaceChangedPayloadSchema,
 );
+const SessionWorkspaceHintChangedEventSchema = eventEnvelope(
+	"session.workspace_hint_changed",
+	SessionWorkspaceHintChangedPayloadSchema,
+);
 const SessionWorkspaceStartedEventSchema = eventEnvelope(
 	"session.workspace_started",
 	SessionWorkspaceStartedPayloadSchema,
@@ -1434,6 +1462,7 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	SessionWorkspaceChangedEventSchema,
+	SessionWorkspaceHintChangedEventSchema,
 	SessionWorkspaceStartedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
