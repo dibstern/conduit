@@ -540,7 +540,7 @@ export function instancesWith(
 	}));
 }
 
-/** Project list with instanceId bindings — use with multi-instance init */
+/** Project list for the multi-instance fixtures. */
 export const multiInstanceProjectList: MockMessage = {
 	type: "project_list",
 	projects: [
@@ -548,25 +548,22 @@ export const multiInstanceProjectList: MockMessage = {
 			slug: "myapp",
 			title: "myapp",
 			folders: ["/src/myapp"],
-			instanceId: "personal",
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
 			folders: ["/src/mylib"],
-			instanceId: "personal",
 		},
 		{
 			slug: "company-api",
 			title: "company-api",
 			folders: ["/src/company-api"],
-			instanceId: "work",
 		},
 	],
 	current: "myapp",
 };
 
-/** Project list with single instance — projects have no instanceId */
+/** Project list for the single-instance fixtures. */
 export const singleInstanceProjectList: MockMessage = {
 	type: "project_list",
 	projects: [

@@ -1,10 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
-} from "../lib/daemon/config-persistence.js";
+import { loadDaemonConfig } from "../lib/daemon/config-persistence.js";
 import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
 import {
 	findExecutable,
@@ -30,10 +27,7 @@ export async function handleDoctor(options: {
 		for (const project of projects) {
 			await resolver.refresh(project.path);
 			const snapshot = resolver.snapshot(project.path);
-			const configDir = project.instanceId
-				? (resolveClaudeInstanceConfigDir(config, project.instanceId) ??
-					config?.claudeConfigDir)
-				: config?.claudeConfigDir;
+			const configDir = config?.claudeConfigDir;
 			const env = makeClaudeSdkEnv({
 				baseEnv: resolver.get(project.path),
 				...(configDir && { configDir }),

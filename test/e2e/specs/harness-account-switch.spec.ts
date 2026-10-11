@@ -31,6 +31,10 @@ test.use({
 		// The fake SDK writes limit transcripts and gates beside the proof file.
 		restartProof: true,
 		continuationSweepIntervalMs: 1000,
+		// Turns are rejected unless their model is in the provider's catalog.
+		capabilityModels: [
+			{ id: "harness", name: "Harness", providerId: "claude" },
+		],
 		capabilityAgents: [
 			{ id: "default", name: "Default" },
 			{ id: "reviewer", name: "Reviewer" },
@@ -187,7 +191,6 @@ for (const stale of [false, true]) {
 			const { savedSlug: projectSlug } = await Effect.runPromise(
 				browser.rpc.SaveProject({
 					folders: [mkdtempSync(join(harness.root, "return-project-"))],
-					instanceId: account1.id,
 				}),
 			);
 			if (!projectSlug) throw new Error("No return project slug");
@@ -415,7 +418,6 @@ for (const dismiss of [false, true]) {
 			const { savedSlug: slug } = await Effect.runPromise(
 				browser.rpc.SaveProject({
 					folders: [directory],
-					instanceId: account.id,
 				}),
 			);
 			if (!slug) throw new Error("No project slug");
@@ -688,7 +690,7 @@ for (const decision of [
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "retry-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No retry project slug");
 		// Session creation resolves the account from daemon.json, which reaches
@@ -1073,7 +1075,6 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "auto-switch-project-"))],
-				instanceId: source.id,
 			}),
 		);
 		if (!projectSlug) throw new Error("No auto-switch project slug");
@@ -1209,19 +1210,29 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						),
 					)
 					.toBe(0);
-				const handleBox = async (name: string) => {
-					const handle = settings.getByRole("button", {
-						name: `Reorder ${name}`,
-					});
-					await handle.hover();
-					const box = await handle.boundingBox();
-					if (!box) throw new Error(`No drag handle for ${name}`);
-					return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+				// Hovering scrolls the panel, so measure after it. A row swaps once its
+				// centre passes its neighbour's, and a limited card is taller.
+				const handle = (name: string) =>
+					settings.getByRole("button", { name: `Reorder ${name}` });
+				await handle("Account 3").hover();
+				const centreY = async (name: string) => {
+					const box = await handle(name)
+						.locator("xpath=ancestor::li[1]")
+						.boundingBox();
+					if (!box) throw new Error(`No row for ${name}`);
+					return box.y + box.height / 2;
 				};
-				const top = await handleBox("Account 2");
-				const dragged = await handleBox("Account 3");
+				const grip = await handle("Account 3").boundingBox();
+				if (!grip) throw new Error("No drag handle for Account 3");
+				const start = {
+					x: grip.x + grip.width / 2,
+					y: grip.y + grip.height / 2,
+				};
+				const rise =
+					(await centreY("Account 3")) - (await centreY("Account 2")) + 10;
+				await page.mouse.move(start.x, start.y);
 				await page.mouse.down();
-				await page.mouse.move(dragged.x, top.y - 10, { steps: 12 });
+				await page.mouse.move(start.x, start.y - rise, { steps: 12 });
 				await page.mouse.up();
 				await expect(names.nth(0)).toHaveText("Account 3");
 				await expect(names.nth(1)).toHaveText("Account 2");
@@ -1357,6 +1368,10 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						continued: false,
 					});
 				await expect.poll(() => latest()?.status).toBe("idle");
+				const sourceProbes = () =>
+					probes().filter((mark) => mark.configDir === source.configDir);
+				// Auto-switch never probes the limited source account.
+				expect(sourceProbes()).toHaveLength(0);
 				await new AppPage(page).goto(sessionUrl);
 				const strip = page.getByTestId("usage-limit-strip");
 				await expect(strip).toBeVisible();
@@ -1365,9 +1380,8 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				await expect.poll(() => Date.now()).toBeGreaterThan(settled);
 				await expect(strip).toHaveAttribute("data-state", "limited");
 				expect(latest()?.limitRecovery?.scheduledAt).toBeUndefined();
-				expect(
-					probes().some((mark) => mark.configDir === source.configDir),
-				).toBe(false);
+				// Opening the page reads every account once for the usage meter.
+				expect(sourceProbes()).toHaveLength(1);
 				await page.screenshot({ path: join(artifacts, "target-limited.png") });
 			}
 			await expect.poll(() => latest()?.status).toBe("idle");
@@ -1448,7 +1462,7 @@ for (const scenario of [
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "reset-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No reset project slug");
 		// See the Try again setup: wait for daemon.json without sending RPCs.
@@ -1634,23 +1648,25 @@ for (const scenario of [
 				expect(continuations()).toHaveLength(0);
 				expect(probes()).toHaveLength(0);
 			} else if (scenario === "limited") {
-				// The probe's fresh reset is already due, so each later sweep is quick.
-				const freshAt = at - 1;
-				writeFileSync(
-					join(configDir, "conduit-test-resets-at"),
-					String(freshAt),
-				);
+				// A limited reading re-arms only while its reset is still ahead
+				// (a past one is stale), so each re-arm moves the reset further out
+				// before the sweep reaches it; the fourth limited reading cancels.
+				const resetsAtFile = join(configDir, "conduit-test-resets-at");
+				let freshAt = at + 4;
+				writeFileSync(resetsAtFile, String(freshAt));
+				for (const rearms of [1, 2, 3]) {
+					await expect
+						.poll(() => latest()?.limitRecovery, {
+							timeout: 30_000,
+							intervals: [50],
+						})
+						.toEqual({ ...limited, scheduledAt: freshAt, rearms });
+					freshAt += 4;
+					writeFileSync(resetsAtFile, String(freshAt));
+				}
 				await expect
 					.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
 					.toEqual({ ...limited, rearms: 3 });
-				const rearmed = observed
-					.filter((row) => row.session.id === sessionId)
-					.flatMap((row) =>
-						row.session.limitRecovery?.scheduledAt === freshAt
-							? [row.session.limitRecovery.rearms]
-							: [],
-					);
-				expect([...new Set(rearmed)]).toEqual([1, 2, 3]);
 				expect(probes()).toHaveLength(4);
 				expect(continuations()).toHaveLength(0);
 			} else {
@@ -1698,11 +1714,22 @@ for (const scenario of [
 				const history = await Effect.runPromise(
 					browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
 				);
-				expect(
-					history.messages.filter((message) => message.role === "user"),
-				).toEqual(
-					historyBefore.messages.filter((message) => message.role === "user"),
+				// The hidden prompt adds no user message; it reopens the cut-off
+				// turn, so that turn is working again and has no end yet.
+				const userMessages = (messages: typeof history.messages) =>
+					messages
+						.filter((message) => message.role === "user")
+						.map(({ turnTiming, ...message }) => ({
+							...message,
+							turnTiming: turnTiming && { ...turnTiming, endedAt: undefined },
+						}));
+				expect(userMessages(history.messages)).toEqual(
+					userMessages(historyBefore.messages),
 				);
+				expect(
+					history.messages.filter((message) => message.role === "user").at(-1)
+						?.turnTiming,
+				).not.toHaveProperty("endedAt");
 				evidence["continued"] = await snapshot();
 				evidence["historyBeforeReply"] = history;
 				writeFileSync(join(harness.root, "release-continuation"), "release");
@@ -1819,7 +1846,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "auto-resume-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No auto-resume project slug");
 		const usageLimits = { ...defaults, autoResume: scenario !== "off" };
@@ -2042,7 +2069,6 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		const { savedSlug: slug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [directory],
-				instanceId: account.id,
 			}),
 		);
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
@@ -2223,7 +2249,6 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		const { savedSlug: slug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [directory],
-				instanceId: addedInstanceId,
 			}),
 		);
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
@@ -2471,7 +2496,6 @@ for (const behavior of [
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-				instanceId: source.id,
 			}),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
@@ -3115,8 +3139,8 @@ for (const behavior of [
 	});
 }
 
-// Story 16. Failures: the pill shows the project's account instead of the
-// session's, a pick rebinds the project, or the session stays on account 1.
+// Story 16. Failures: the pill shows the wrong account or the session stays
+// on account 1 after switching.
 test("story 16: the session-bar account pill switches the session, not the project", async ({
 	page,
 	harness,
@@ -3142,14 +3166,13 @@ test("story 16: the session-bar account pill switches the session, not the proje
 	const { savedSlug: projectSlug } = await Effect.runPromise(
 		browser.rpc.SaveProject({
 			folders: [mkdtempSync(join(harness.root, "pill-project-"))],
-			instanceId: source.id,
 		}),
 	);
 	if (!projectSlug) throw new Error("No pill project slug");
-	const boundInstance = async () =>
+	const registeredProject = async () =>
 		(await Effect.runPromise(browser.rpc.GetProjects({}))).projects.find(
 			(project) => project.slug === projectSlug,
-		)?.instanceId;
+		);
 	// Project RPCs reset config persistence's debounce. Wait on disk once,
 	// without retrying CreateSession or issuing another project RPC.
 	await expect
@@ -3211,8 +3234,6 @@ test("story 16: the session-bar account pill switches the session, not the proje
 		const pill = bar.getByTestId("session-account-pill");
 		await expect(pill).toHaveText("Account 1");
 		await expect(pill).toHaveAttribute("data-account", source.id);
-		// The project's rebind control is not offered on a Claude session.
-		await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-pill.png") });
 
 		await pill.click();
@@ -3247,12 +3268,12 @@ test("story 16: the session-bar account pill switches the session, not the proje
 			instanceId: target.id,
 			from: source.id,
 		});
-		expect(await boundInstance()).toBe(source.id);
+		expect(await registeredProject()).not.toHaveProperty("instanceId");
 		await expect(pill).toHaveText("Account 2");
 		await expect(pill).toHaveAttribute("data-account", target.id);
 		await page.screenshot({ path: join(artifacts, "04-switched.png") });
 
-		// The next turn runs on account 2 with the handoff; the project stays on 1.
+		// The next turn runs on account 2 with the handoff.
 		await send("Next message on the new account.", "pill-next");
 		await expect
 			.poll(
@@ -3267,9 +3288,9 @@ test("story 16: the session-bar account pill switches the session, not the proje
 				.claudeOptions()
 				.find((call) => call.configDir === target.configDir)?.prompt,
 		).toContain(handoffMarker);
-		expect(await boundInstance()).toBe(source.id);
+		expect(await registeredProject()).not.toHaveProperty("instanceId");
 		evidence["resumes"] = latest()?.resumes;
-		evidence["boundInstance"] = await boundInstance();
+		evidence["project"] = await registeredProject();
 	} finally {
 		evidence["observed"] = observed;
 		evidence["sdkCalls"] = harness.claudeOptions();

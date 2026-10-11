@@ -128,7 +128,6 @@ for (const [viewportName, viewport] of [
 								slug: "e2e-replay",
 								title: "Settings shell",
 								folders: ["/workspace/settings"],
-								instanceId: "personal",
 							},
 						],
 						current: "e2e-replay",

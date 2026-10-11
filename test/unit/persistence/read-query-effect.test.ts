@@ -918,6 +918,77 @@ describe("ReadQueryEffect session families", () => {
 	);
 });
 
+describe("ReadQueryEffect.getStrandedChildren", () => {
+	it.effect(
+		"finds busy task children of idle parents with their task and runtime owner",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				const link = (
+					sessionId: string,
+					child: string,
+					taskId: string | undefined,
+				) =>
+					Effect.gen(function* () {
+						yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+							VALUES (${`m-${child}`}, ${sessionId}, 'assistant', '', 1, 1)`;
+						yield* sql`INSERT INTO message_parts
+							(id, message_id, type, tool_name, sort_order, created_at, updated_at, metadata)
+							VALUES (${`p-${child}`}, ${`m-${child}`}, 'tool', 'Bash', 0, 1, 1,
+								${JSON.stringify({ childSessionId: child, providerTaskId: taskId })})`;
+					});
+				yield* seedSession("root", { status: "idle" });
+				yield* seedSession("turning", { status: "busy" });
+				yield* seedSession("claude-subagent-bg", {
+					status: "busy",
+					parentId: "root",
+				});
+				yield* link("root", "claude-subagent-bg", "t-bg");
+				yield* seedSession("claude-subagent-agent", {
+					status: "idle",
+					parentId: "root",
+				});
+				yield* seedSession("claude-subagent-shell", {
+					status: "busy",
+					parentId: "claude-subagent-agent",
+				});
+				yield* link(
+					"claude-subagent-agent",
+					"claude-subagent-shell",
+					"t-shell",
+				);
+				// Its parent's turn is in flight: a foreground task, never listed.
+				yield* seedSession("claude-subagent-fg", {
+					status: "busy",
+					parentId: "turning",
+				});
+				yield* link("turning", "claude-subagent-fg", "t-fg");
+				yield* seedSession("claude-subagent-untasked", {
+					status: "busy",
+					parentId: "root",
+				});
+				yield* link("root", "claude-subagent-untasked", undefined);
+				yield* seedSession("claude-subagent-done", {
+					status: "idle",
+					parentId: "root",
+				});
+				yield* link("root", "claude-subagent-done", "t-done");
+
+				const readQuery = yield* makeReadQueryEffect;
+				const rows = yield* readQuery.getStrandedChildren();
+				expect([...rows].sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+					{ id: "claude-subagent-bg", task_id: "t-bg", owner_id: "root" },
+					{
+						id: "claude-subagent-shell",
+						task_id: "t-shell",
+						owner_id: "root",
+					},
+				]);
+			}).pipe(Effect.provide(testLayer)),
+	);
+});
+
 describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 	it.effect("counts pending approvals by session and type", () =>
 		Effect.gen(function* () {

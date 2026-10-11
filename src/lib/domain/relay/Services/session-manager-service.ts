@@ -171,6 +171,7 @@ export interface LoadHistoryOptions {
 export interface SetSessionSettledOptions {
 	readonly settled: boolean;
 	readonly automatic?: boolean;
+	readonly mergedHead?: string;
 }
 
 /**
@@ -951,7 +952,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				statusPollerOption,
 				backgroundOf,
 				snapshot,
-				projectDir: config.projectDir,
+				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
+				projectSlug: config.slug,
 			});
 		const establishOpenCodeSession = (
 			session: SessionDetail,

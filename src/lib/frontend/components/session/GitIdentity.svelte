@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Schema } from "effect";
 	import { type WorkspaceMoveCause, WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+	import { type WorkspaceMissing, WorktreeRecoveryError } from "../../../contracts/worktree.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -11,16 +12,21 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, workspaceCause, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
+	let { directory, git: folderGit, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss }: {
 		directory: string;
 		git: SessionGit | undefined;
 		workspaceCause?: WorkspaceMoveCause | undefined;
+		workspaceMissing?: WorkspaceMissing | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
 		onmove?: ((path: string) => Promise<void>) | undefined;
+		onrecreate?: (() => Promise<void>) | undefined;
+		oncontinue?: (() => Promise<void>) | undefined;
 		ondismiss?: ((path: string) => Promise<void>) | undefined;
 	} = $props();
+	const folders = $derived(folderGit?.folders ?? []);
+	const git = $derived(folderGit?.folders && !folderGit.branch && !folderGit.head && folderGit.dirty === undefined ? undefined : folderGit);
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	let currentDirectory = $state<string | undefined>();
@@ -58,6 +64,17 @@
 			moving = false;
 		}
 	}
+	async function recover(action: "recreate" | "continue") {
+		moving = true;
+		try {
+			if (action === "recreate") await onrecreate?.();
+			else await oncontinue?.();
+		} catch (error) {
+			showToast(Schema.is(WorktreeRecoveryError)(error) ? error.message : Schema.is(WorkspaceMoveError)(error) ? moveFailures[error.reason] : action === "recreate" ? "Could not recreate worktree" : "Could not continue in main folder", { variant: "error" });
+		} finally {
+			moving = false;
+		}
+	}
 	async function dismiss(path: string) {
 		dismissing = true;
 		try {
@@ -73,6 +90,7 @@
 	const hintLabel = $derived(`working in ${hintFolder}?`);
 	const movedBack = $derived(workspaceCause === "missing");
 	const movedBackLabel = "moved back: worktree removed";
+	const missingLabel = "worktree missing";
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
 	const upstream = $derived(`↑${git?.ahead ?? 0} ↓${git?.behind ?? 0}`);
@@ -94,7 +112,7 @@
 			showMerged ? "6ch" : null,
 		].filter((width) => width !== null);
 		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length);
-		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${sessionViewState.compact && movedBack ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
+		return `calc(${projectFloor + (checkout ? 1 + Math.min(checkout.length, 5) : 0)}ch + 12px + 16px + 2px + ${gaps}px${sessionViewState.compact && workspaceHint ? " + 17px" : ""}${sessionViewState.compact && movedBack ? " + 17px" : ""}${sessionViewState.compact && workspaceMissing ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
 	});
 
 	async function copy(text: string) {
@@ -112,7 +130,7 @@
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
 		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
 			style={`min-width: ${minimumWidth}`}
-			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}${sessionViewState.compact && movedBack ? `, ${movedBackLabel}` : ""}`} data-testid="session-bar-identity">
+			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}${sessionViewState.compact && movedBack ? `, ${movedBackLabel}` : ""}${sessionViewState.compact && workspaceMissing ? `, ${missingLabel}` : ""}`} data-testid="session-bar-identity">
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -141,9 +159,28 @@
 			{#if sessionViewState.compact && movedBack}
 				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={movedBackLabel} title={movedBackLabel} data-testid="workspace-moved-back"><Icon name="circle-alert" size={12} /></span>
 			{/if}
+			{#if sessionViewState.compact && workspaceMissing}
+				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={missingLabel} title={missingLabel} data-testid="workspace-missing"><Icon name="circle-alert" size={12} /></span>
+			{/if}
 		</Button></span>
 	{/snippet}
 	<MenuGroup label="Checkout">
+		{#if folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0)}
+			{#each folders as folder (folder.root)}
+				<section class="px-[8px] py-[6px] text-[10px]" aria-label={folder.label} data-testid="session-folder-git" data-folder-root={folder.root}>
+					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}{#if folder.shared}<span class="ml-2 font-normal text-text-muted">shared</span>{/if}</p>
+					{#if folder.branch || folder.head || folder.dirty !== undefined}
+						<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px]">
+							<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{folder.branch || `Detached at ${folder.head ?? "unknown"}`}</dd>
+							{#if folder.ahead !== undefined || folder.behind !== undefined}
+								<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">↑{folder.ahead ?? 0} ↓{folder.behind ?? 0}</dd>
+							{/if}
+							<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{folder.dirty ? "uncommitted" : "clean"}</dd>
+						</dl>
+					{/if}
+				</section>
+			{/each}
+		{:else}
 		<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px] px-[8px] py-[6px] text-[10px]">
 			<dt class="text-text-muted">Project</dt><dd class="min-w-0 break-all text-right text-text">{project}</dd>
 			{#if git}
@@ -158,7 +195,14 @@
 				<dt class="text-text-muted">Changes</dt><dd class="text-right {git.dirty ? 'text-warning' : 'text-text'}">{git.dirty ? "uncommitted" : "clean"}</dd>
 			{/if}
 		</dl>
+		{/if}
 	</MenuGroup>
+	{#if workspaceMissing}
+		<MenuSeparator />
+		<p class="px-[8px] py-[6px] text-[10px] text-warning">The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}</p>
+		{#if workspaceMissing.canRecreate && onrecreate}<MenuItem disabled={moving || dismissing} data-testid="workspace-recreate" onselect={() => void recover("recreate")}>Recreate worktree</MenuItem>{/if}
+		{#if oncontinue}<MenuItem disabled={moving || dismissing} data-testid="workspace-continue-main" onselect={() => void recover("continue")}>Continue in main folder</MenuItem>{/if}
+	{/if}
 	{#if workspaceMismatch}
 		<MenuSeparator />
 		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
@@ -197,6 +241,13 @@
 		{/if}
 	{/if}
 </Menu>
+
+{#if !sessionViewState.compact && workspaceMissing}
+	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-missing">
+		<Icon name="circle-alert" size={12} />
+		<span class="max-w-[180px] truncate">{missingLabel}</span>
+	</span>
+{/if}
 
 {#if !sessionViewState.compact && movedBack}
 	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-moved-back">

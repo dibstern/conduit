@@ -136,7 +136,12 @@ export const WithBranch: Story = {
 		session: mockSession,
 		active: false,
 		projectLabel: "Conduit",
-		branch: "main",
+		branch: "feature/workspace",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("Conduit · feature/workspace"),
+		).toBeVisible();
 	},
 };
 

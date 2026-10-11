@@ -49,10 +49,17 @@ export function makeSessionBackgroundLiveness(
 	now: () => number = Date.now,
 ) {
 	const live = new Map<string, BackgroundTask[]>();
+	// When each runtime's current list took effect. A runtime absent here has
+	// sent nothing since the daemon started, which is not the same as empty:
+	// runners replay only non-empty lists after a reconnect.
+	const listSince = new Map<string, number>();
 	return {
 		record(input: BackgroundTaskTransition): void {
 			if (input.kind === "session-ended" || input.tasks.length === 0) {
-				if (live.delete(input.sessionId)) onChange?.(input.sessionId);
+				const emptied = live.delete(input.sessionId);
+				if (emptied || !listSince.has(input.sessionId))
+					listSince.set(input.sessionId, now());
+				if (emptied) onChange?.(input.sessionId);
 				return;
 			}
 			const previous = live.get(input.sessionId) ?? [];
@@ -71,6 +78,7 @@ export function makeSessionBackgroundLiveness(
 					return (
 						before?.type === task.type &&
 						before.description === task.description &&
+						before.detail === task.detail &&
 						before.firstSeenAt === task.firstSeenAt &&
 						before.childSessionId === task.childSessionId &&
 						before.parentTaskId === task.parentTaskId &&
@@ -84,6 +92,7 @@ export function makeSessionBackgroundLiveness(
 			)
 				return;
 			live.set(input.sessionId, tasks);
+			listSince.set(input.sessionId, now());
 			onChange?.(input.sessionId);
 		},
 		backgroundOf(sessionId: string): SessionBackground | undefined {
@@ -92,6 +101,18 @@ export function makeSessionBackgroundLiveness(
 		},
 		hasLiveWork(sessionId: string): boolean {
 			return live.has(sessionId);
+		},
+		/** The runtime's live task ids and since when that list has held;
+		 * undefined until the runtime reports anything. */
+		liveListOf(
+			sessionId: string,
+		):
+			| { readonly taskIds: ReadonlySet<string>; readonly since: number }
+			| undefined {
+			const since = listSince.get(sessionId);
+			if (since === undefined) return undefined;
+			const taskIds = new Set(live.get(sessionId)?.map((task) => task.id));
+			return { taskIds, since };
 		},
 	};
 }

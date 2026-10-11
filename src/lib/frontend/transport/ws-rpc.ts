@@ -97,7 +97,6 @@ export {
 	SetHiddenEntries,
 	type SetHiddenEntriesResponse,
 	SetLogLevel,
-	SetProjectInstance,
 	SetSessionPinned,
 	SetSessionSettled,
 	SnoozeSession,

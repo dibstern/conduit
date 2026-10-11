@@ -10,7 +10,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError } from "./worktree.js";
+import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -173,7 +173,6 @@ export const ProjectInfoSchema = Schema.Struct({
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
 });
 
 export const InstanceStatusSchema = Schema.Literal(
@@ -584,7 +583,6 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
-	readonly instanceId?: string | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -630,6 +628,9 @@ export const GetInstanceStatusResponseSchema = Schema.Struct({
 
 export const GetStatusResponseSchema = Schema.Struct({
 	uptime: Schema.Number,
+	version: Schema.String,
+	logLevel: RpcLogLevelSchema,
+	supervised: Schema.Boolean,
 	port: Schema.Number,
 	host: Schema.String,
 	tailscaleIP: Schema.optional(Schema.String),
@@ -714,6 +715,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
@@ -962,7 +964,6 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
-			instanceId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -975,19 +976,6 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
-		},
-	},
-) {}
-
-export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>()(
-	"SetProjectInstance",
-	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: NonEmptyString,
-			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1367,6 +1355,24 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
+	},
+) {}
+
+export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
+	"RecreateSessionWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+	"ContinueSessionInMainFolder",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -2124,6 +2130,8 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	ListWorktrees,
 	MoveSessionWorkspace,
+	RecreateSessionWorktree,
+	ContinueSessionInMainFolder,
 	DismissWorkspaceHint,
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
@@ -2151,7 +2159,6 @@ export const WsRpcRequest = Schema.Union(
 	GetModels,
 	SaveProject,
 	RemoveProject,
-	SetProjectInstance,
 	StartInstance,
 	StopInstance,
 	RemoveInstance,
@@ -2531,6 +2538,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(RecreateSessionWorktree),
+	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
 	Rpc.fromTaggedRequest(DismissWorkspaceHint),
 	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
@@ -2558,7 +2567,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(SaveProject),
 	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(SetProjectInstance),
 	Rpc.fromTaggedRequest(StartInstance),
 	Rpc.fromTaggedRequest(StopInstance),
 	Rpc.fromTaggedRequest(RemoveInstance),

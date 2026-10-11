@@ -26,6 +26,7 @@ import {
 	type SessionManagerState,
 	SessionManagerStateTag,
 } from "./session-manager-state.js";
+import { withSessionWorktreeStatus } from "./session-workspace.js";
 
 const sessionRowsParentMap = (
 	rows: readonly Pick<SessionRow, "id" | "parent_id">[],
@@ -140,7 +141,8 @@ export const makeSessionListOperations = ({
 	statusPollerOption,
 	backgroundOf,
 	snapshot,
-	projectDir,
+	projectFolders,
+	projectSlug,
 }: {
 	api: OpenCodeAPI;
 	stateRef: Ref.Ref<SessionManagerState>;
@@ -150,7 +152,8 @@ export const makeSessionListOperations = ({
 		| ((sessionId: string) => SessionBackground | undefined)
 		| undefined;
 	snapshot: RelayStatusSnapshotService;
-	projectDir: string;
+	projectFolders: readonly [string, ...string[]];
+	projectSlug: string;
 }) => {
 	const currentStatuses = (
 		explicit?: Record<string, SessionStatus> | undefined,
@@ -177,8 +180,11 @@ export const makeSessionListOperations = ({
 			const sessions = yield* withEffectRead.pipe(
 				Effect.provideService(RelayStatusSnapshotTag, snapshot),
 			);
-			return sessions.map((session) =>
-				withCachedSessionGit(session, projectDir),
+			return yield* Effect.forEach(sessions, (session) =>
+				withSessionWorktreeStatus(
+					withCachedSessionGit(session, projectFolders),
+					{ projectDir: projectFolders[0], slug: projectSlug },
+				),
 			);
 		});
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =

@@ -51,7 +51,6 @@ import {
 	SetDefaultModel,
 	SetDefaultPermissionMode,
 	SetLogLevel,
-	SetProjectInstance,
 	SetSessionPinned,
 	SetSessionSettled,
 	SnoozeSession,
@@ -119,6 +118,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				...daemonOnlyHandlers,
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				RecreateSessionWorktree: () =>
+					Effect.succeed({ directory: "/worktree" }),
+				ContinueSessionInMainFolder: () =>
+					Effect.succeed({ directory: "/main" }),
 				DismissWorkspaceHint: () => Effect.succeed({ ok: true }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
@@ -233,19 +236,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [],
-						current: "demo",
-					}),
-				SetProjectInstance: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						projects: [
-							{
-								slug: request.slug,
-								title: "Demo",
-								folders: ["/tmp/demo"],
-								instanceId: request.instanceId,
-							},
-						],
 						current: "demo",
 					}),
 				StartInstance: (request) =>
@@ -856,7 +846,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			[...WsRpcGroup.requests.keys()].filter((tag) => tag === "SaveProject"),
 		).toHaveLength(1);
-		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(false);
 		expect(WsRpcGroup.requests.has("StartInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("StopInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("RemoveInstance")).toBe(true);
@@ -998,7 +988,6 @@ describe("browser WebSocket RPC contract", () => {
 				const addedProject = yield* client.SaveProject({
 					projectSlug: "demo",
 					folders: ["/tmp/new-project"],
-					instanceId: "inst-1",
 				});
 				expect(addedProject.savedSlug).toBe("new-project");
 				expect(addedProject.projects[0]?.folders[0]).toBe("/tmp/new-project");
@@ -1021,13 +1010,6 @@ describe("browser WebSocket RPC contract", () => {
 					folders: ["/tmp/demo"],
 				});
 				expect(renamedProject.projects[0]?.title).toBe("Renamed Demo");
-
-				const reboundProject = yield* client.SetProjectInstance({
-					projectSlug: "demo",
-					slug: "demo",
-					instanceId: "inst-2",
-				});
-				expect(reboundProject.projects[0]?.instanceId).toBe("inst-2");
 
 				const startedInstance = yield* client.StartInstance({
 					projectSlug: "demo",
@@ -1451,13 +1433,6 @@ describe("browser WebSocket RPC contract", () => {
 				folders: ["/tmp/demo"],
 			})._tag,
 		).toBe("SaveProject");
-		expect(
-			new SetProjectInstance({
-				projectSlug: "demo",
-				slug: "demo",
-				instanceId: "inst-1",
-			})._tag,
-		).toBe("SetProjectInstance");
 		expect(
 			new StartInstance({
 				projectSlug: "demo",

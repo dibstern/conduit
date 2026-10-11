@@ -43,12 +43,7 @@ export interface ProjectManagementDeps {
 		slug: string;
 		title: string;
 		directory: string;
-		instanceId?: string;
 	}>;
-	setProjectInstance: (
-		slug: string,
-		instanceId: string,
-	) => void | Promise<void>;
 }
 
 export interface HandlerDeps {

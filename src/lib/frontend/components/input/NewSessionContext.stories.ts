@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import {
+	clearDraftSelection,
+	selectInstance,
+} from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
@@ -36,11 +40,11 @@ function seed(
 		},
 	];
 	instanceState.providerCapabilities = {};
+	selectInstance("folder-provider");
 	projectState.projects = [
 		{
 			slug: "workspace",
 			title: "Workspace",
-			instanceId: "folder-provider",
 			folders: folders === 1 ? ["/src/app"] : ["/src/app", "/src/docs"],
 			...(driver === "claude" ? { git: { branch: "main" } } : {}),
 		},
@@ -49,6 +53,7 @@ function seed(
 	routerState.search = "?project=workspace";
 	sessionViewState.compact = false;
 	return () => {
+		clearDraftSelection();
 		instanceState.instances = previous.instances;
 		instanceState.providerCapabilities = previous.providerCapabilities;
 		projectState.projects = previous.projects;
@@ -78,6 +83,13 @@ export const SingleFolder: Story = {
 		await userEvent.click(canvas.getByTestId("draft-start-chip"));
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
 			"New worktree Not supported by Folder provider",
+		);
+		const existing = canvas.getByRole("menuitem", {
+			name: /Existing worktree/,
+		});
+		await expect(existing).toHaveAttribute("aria-disabled", "true");
+		await expect(existing).toHaveTextContent(
+			"Not supported by Folder provider",
 		);
 	},
 };
@@ -160,6 +172,42 @@ export const NewWorktreeSelected: Story = {
 	args: { newWorktree: true },
 };
 
+export const MultiFolderNewWorktree: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 2, true, "claude");
+		projectState.projects = [
+			{
+				slug: "workspace",
+				title: "Workspace",
+				folders: ["/src/notes", "/src/app", "/src/api"],
+				git: {
+					folders: [
+						{ root: "/src/app", label: "app", branch: "main" },
+						{ root: "/src/api", label: "api", branch: "main" },
+					],
+				},
+			},
+		];
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^Current folder$/,
+		);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		const choice = canvas.getByRole("menuitem", { name: /^New worktree$/ });
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
+			"from committed HEAD",
+		);
+	},
+};
+
 const existingWorktrees = [
 	{ path: "/src/app", branch: "main", main: true },
 	{ path: "/src/app-draft", branch: "feature/draft", main: false },
@@ -202,19 +250,5 @@ export const ExistingWorktreeSelected: Story = {
 		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
 			"existing worktree",
 		);
-	},
-};
-
-export const ExistingWorktreeUnsupported: Story = {
-	beforeEach: () => seed(false, 1, false),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement.ownerDocument.body);
-		await userEvent.click(canvas.getByTestId("draft-start-chip"));
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveAttribute("aria-disabled", "true");
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveTextContent("Not supported by Folder provider");
 	},
 };

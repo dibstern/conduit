@@ -10,6 +10,7 @@ import type {
 	ProviderSessionCapabilities,
 } from "./contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+import { WorkspaceMissingSchema } from "./contracts/worktree.js";
 
 export type {
 	SessionWorkspace,
@@ -232,6 +233,8 @@ export const BackgroundTaskSchema = Schema.Struct({
 	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */
 	type: Schema.String,
 	description: Schema.String,
+	/** The originating shell command, agent type or workflow name, when known. */
+	detail: Schema.optional(Schema.String),
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
 	/** An agent's Child Session. */
@@ -251,10 +254,14 @@ export interface SessionGit {
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
+	/** Full branch head incorporated into the default branch. */
+	mergedHead?: string;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+	/** Git and shared Effective Folders in Project Folder order. */
+	folders?: readonly SessionFolderGit[];
 }
 
-export const SessionGitSchema = Schema.Struct({
+const GitStatusSchema = Schema.Struct({
 	branch: Schema.optionalWith(Schema.String, { exact: true }),
 	head: Schema.optionalWith(Schema.String, { exact: true }),
 	worktree: Schema.optionalWith(Schema.String, { exact: true }),
@@ -262,10 +269,27 @@ export const SessionGitSchema = Schema.Struct({
 	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
 	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
 		{ exact: true },
 	),
+});
+
+export const SessionFolderGitSchema = Schema.Struct({
+	root: Schema.String,
+	label: Schema.String,
+	/** Derived from conduit workspace origin and an absent worktree mapping. */
+	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	...GitStatusSchema.fields,
+});
+export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
+
+export const SessionGitSchema = Schema.Struct({
+	...GitStatusSchema.fields,
+	folders: Schema.optionalWith(Schema.Array(SessionFolderGitSchema), {
+		exact: true,
+	}),
 });
 
 /** One wire shape for projected sessions and daemon-wide lists. */
@@ -321,6 +345,7 @@ export const SessionInfoSchema = Schema.Struct({
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
+	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),

@@ -7,8 +7,7 @@ import {
 } from "./router.svelte.js";
 
 // The project list and the current slug both come from the server. Writers
-// live in project.svelte.ts: `applyProjectList`, plus `bindProjectInstance`'s
-// optimistic rebind.
+// live in project.svelte.ts: `applyProjectList`.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
