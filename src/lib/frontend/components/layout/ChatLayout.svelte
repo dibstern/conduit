@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
+	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
@@ -544,14 +545,16 @@
 		const route = getCurrentRoute();
 		// A draft attaches the project it will be created in, so models and
 		// commands match it before the first send.
-		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : getCurrentSearchParams().get("p");
+		const scope = getCurrentSearchParams().get("p");
+		const groupScope = getScopeGroupKey(scope) !== null;
+		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : groupScope ? null : scope;
 		const attachedSlug = attachedProjectState.slug;
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
 			// The server picks the project on a cold load (the session's, the hint,
 			// else its default); afterwards only a project-only route switches it.
-			if (!attachedThisMount || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
+			if (!attachedThisMount || (groupScope && attachedSlug === null) || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
 				requestedProject = projectHint ?? null;
 				void attachProjectRpc({
 					originId: getBrowserClientId(),

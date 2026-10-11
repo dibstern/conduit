@@ -1926,6 +1926,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
+			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
 		},

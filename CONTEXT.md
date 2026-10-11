@@ -59,6 +59,16 @@ qualifier decisions for the daemon and frontend. It leaves ordering to the
 daemon. Project and global grouping edits publish a fresh project list so rows
 relabel on every client without a reload.
 
+The session list's **Scope** is one project or one Project Group. Its only state
+is the URL's `p` parameter: a plain slug selects that project, while
+`/group/<group key>` selects every project with that key. Only groups with more
+than one project get a repository choice in the chip's menu; their projects
+remain available for further narrowing. Each selection adds a browser history
+entry. `project:` search tokens select projects only. A missing group key has
+the same empty result as an unknown project slug, without widening the scope.
+Daemon search and paging select projects by the computed groups before reading
+sessions; frontend live rows use those same computed memberships.
+
 ## Session Workspace
 
 **Session Workspace** is where a session runs: Local uses the project's folders;

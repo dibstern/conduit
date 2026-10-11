@@ -370,8 +370,8 @@ export interface DaemonSessionQueryOptions {
 	readonly roots?: boolean;
 	readonly search?: string;
 	readonly cursor?: DaemonSessionCursor;
-	/** Read one project only. Filtering the merged page instead would leave a
-	 *  scoped list with a handful of rows per page, and paging would stall. */
+	/** Read one project slug or an encoded repository group scope. Filter projects
+	 *  before merging their pages, so scoped search and paging remain complete. */
 	readonly scope?: string;
 	/** Skip one project. The browser already holds its own project's roots
 	 *  from the shell feed, so those rows would only be fetched and dropped. */
