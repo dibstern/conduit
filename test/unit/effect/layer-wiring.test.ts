@@ -438,7 +438,6 @@ describe("makeDaemonLive wiring", () => {
 							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,
-							instanceId: "remote-1",
 						},
 						{ silent: true },
 					);
