@@ -5,6 +5,10 @@ import {
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
 import {
+	isKnownDriverKind,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../contracts/provider-instance.js";
+import {
 	SessionWorkspaceSchema,
 	WorkspaceMoveError,
 } from "../../contracts/session-workspace.js";
@@ -34,6 +38,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
@@ -512,11 +517,14 @@ export const sessionsHandlers = {
 					request.providerId ??
 					overrides.defaultModel?.providerID ??
 					"claude";
+				const driver = resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					provider === "claude-sdk" ? "claude" : provider,
+				);
 				if (
-					resolveProviderRoutingDriver(
-						loadDaemonConfig(config.configDir),
-						provider === "claude-sdk" ? "claude" : provider,
-					) !== "claude"
+					!driver ||
+					!isKnownDriverKind(driver) ||
+					!PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree
 				)
 					return yield* new WorkspaceMoveError({
 						path: config.projectDir,
@@ -542,7 +550,7 @@ export const sessionsHandlers = {
 										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
-							return yield* restore(
+							const session = yield* restore(
 								createSessionForClient({
 									...options,
 									sessionId,
@@ -568,6 +576,13 @@ export const sessionsHandlers = {
 										.pipe(Effect.zipRight(Effect.failCause(cause))),
 								),
 							);
+							const setup = yield* Effect.serviceOption(SessionSetupTag);
+							if (setup._tag === "Some")
+								yield* setup.value.start(
+									session.id,
+									created.worktrees[config.projectDir] ?? config.projectDir,
+								);
+							return session;
 						}),
 					),
 				);

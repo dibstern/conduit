@@ -18,6 +18,9 @@ export default defineConfig({
 		"settings-server-status.spec.ts",
 		"settings-server-logs.spec.ts",
 		"settings-pin.spec.ts",
+		"settings-opencode-instances.spec.ts",
+		"settings-default-claude-account.spec.ts",
+		"settings-power.spec.ts",
 		"settings-access.spec.ts",
 		// playwright-live.config.ts: an ephemeral OpenCode instance.
 		"live-smoke.spec.ts",

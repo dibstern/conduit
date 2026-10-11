@@ -1,5 +1,6 @@
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Schema, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { ProjectSetupStateSchema } from "../../contracts/project-setup.js";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -49,6 +50,7 @@ const partTypes: ReadonlySet<string> = new Set([
 	"subtask",
 	"thinking",
 	"error",
+	"setup",
 ]);
 const isPartType = (type: string): type is HistoryMessagePart["type"] =>
 	partTypes.has(type);
@@ -77,6 +79,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 			postTokens,
 			failed,
 			code,
+			setup,
 			...base
 		} = part;
 		const partTime = record(time);
@@ -120,6 +123,7 @@ function toHistoryMessage(source: DetailRow["message"]): HistoryMessage {
 				...(typeof postTokens === "number" ? { postTokens } : {}),
 				...(failed === true ? { failed } : {}),
 				...(typeof code === "string" ? { code } : {}),
+				...(Schema.is(ProjectSetupStateSchema)(setup) ? { setup } : {}),
 			},
 		];
 	});

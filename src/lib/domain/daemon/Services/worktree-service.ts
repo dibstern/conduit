@@ -1,4 +1,4 @@
-import { Context, type Effect } from "effect";
+import { Context, type Effect, type Stream } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import type {
 	WorkspaceMissing,
@@ -20,12 +20,29 @@ export interface CreatedWorktrees {
 	readonly ownership: readonly SessionWorktreeOwnership[];
 }
 
+export interface WorktreeSetupResult {
+	readonly _tag: "finished";
+	readonly status: "succeeded" | "failed" | "timed_out";
+	readonly exitCode?: number;
+	readonly message?: string;
+}
+
+export type WorktreeSetupUpdate =
+	| { readonly _tag: "output"; readonly output: string }
+	| WorktreeSetupResult;
+
 export interface WorktreeService {
 	/** Validate all owned checkouts before renaming; restore refs on a Git failure. */
 	readonly renameBranch: (
 		ownership: readonly SessionWorktreeOwnership[],
 		newName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError>;
+	/** Own the setup process group until completion or stream interruption. */
+	readonly runSetup: (
+		effectiveWorkingDirectory: string,
+		script: string,
+		env: Readonly<Record<string, string | undefined>>,
+	) => Stream.Stream<WorktreeSetupUpdate>;
 	/** Read-only proof for historical launch events that predate ownership metadata. */
 	readonly legacyOwnership: (
 		folder: WorktreeFolder,

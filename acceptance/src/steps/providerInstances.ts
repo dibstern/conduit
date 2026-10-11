@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -321,7 +322,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "start adding a driver instance",
-		match: /^I start adding a (OpenCode|Claude) instance$/,
+		match: /^I start adding an? (OpenCode|Claude) instance$/,
 		run: async ({ world, match }) => {
 			const driverName = (match[1] ?? "").toLowerCase();
 			await world.page.getByTestId("add-instance-btn").click();
@@ -331,6 +332,109 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await world.page
 				.getByTestId(`instance-form-driver-${driverName}`)
 				.click();
+		},
+	},
+	{
+		name: "seed OpenCode empty state with a Claude account and CCS",
+		match: /^no OpenCode servers are configured and CCS is detected$/,
+		run: async ({ world }) => {
+			const list = [
+				{
+					id: "claude",
+					name: "Personal Claude",
+					driver: "claude",
+					configDir: "~/.claude",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			];
+			mockInstances.set(world.page, list);
+			requireRpcControl(world.page).setResponse("DetectProxy", {
+				found: true,
+				port: 8317,
+			});
+			await requireRelayControl(world.page).sendMessages([
+				{ type: "instance_list", instances: list },
+			]);
+		},
+	},
+	{
+		name: "assert OpenCode empty state",
+		match: /^the OpenCode empty state offers the serve command and Scan link$/,
+		run: async ({ world }) => {
+			const empty = world.page.getByTestId("opencode-empty-state");
+			await expect(empty).toContainText("No OpenCode servers yet.");
+			await expect(empty).toContainText("opencode serve --port 4098");
+			await expect(empty.getByTestId("scan-now-link")).toBeVisible();
+			await expect(
+				world.page.getByTestId("claude-accounts-list"),
+			).toContainText("Personal Claude");
+		},
+	},
+	{
+		name: "assert collapsed setup guides with CCS detection",
+		match: /^the OpenCode setup guides are collapsed with the CCS tick$/,
+		run: async ({ world }) => {
+			const guides = world.page.getByTestId("opencode-setup-guides");
+			await expect(guides.getByRole("button").first()).toHaveAttribute(
+				"aria-expanded",
+				"false",
+			);
+			await expect(guides).toContainText("CCS ✓");
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "DetectProxy",
+			);
+			expect(request.payload["projectSlug"]).toBeUndefined();
+		},
+	},
+	{
+		name: "assert managed OpenCode editor fields",
+		match:
+			/^the OpenCode editor offers name and port with environment variables collapsed$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("instance-form-managed"),
+			).toHaveAttribute("aria-checked", "true");
+			await expect(world.page.getByTestId("instance-form-name")).toBeVisible();
+			await expect(world.page.getByTestId("instance-form-port")).toBeVisible();
+			await expect(world.page.getByTestId("instance-form-env")).toHaveCount(0);
+			await expect(world.page.getByTestId("instance-form-url")).toHaveCount(0);
+		},
+	},
+	{
+		name: "expand instance environment variables",
+		match: /^I expand the instance environment variables$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByRole("button", { name: /Environment variables/ })
+				.click();
+		},
+	},
+	{
+		name: "assert instance environment field",
+		match: /^the instance environment field is visible$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("instance-form-env")).toBeVisible();
+		},
+	},
+	{
+		name: "connect to an externally started OpenCode server",
+		match: /^I turn off Conduit starts it$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("instance-form-managed").click();
+		},
+	},
+	{
+		name: "assert external OpenCode editor fields",
+		match: /^the OpenCode editor offers name and URL$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("instance-form-name")).toBeVisible();
+			await expect(world.page.getByTestId("instance-form-url")).toBeVisible();
+			await expect(world.page.getByTestId("instance-form-port")).toHaveCount(0);
+			await expect(world.page.getByTestId("instance-form-env")).toHaveCount(0);
 		},
 	},
 	{
@@ -345,6 +449,12 @@ export const providerInstancesHandlers: StepHandler[] = [
 				.getByTestId("instance-form")
 				.waitFor({ state: "visible", timeout: 5_000 });
 			await page.getByTestId(`instance-form-driver-${driverName}`).click();
+			if (driverName === "opencode") {
+				await page.getByTestId("instance-form-managed").click();
+				await page
+					.getByTestId("instance-form-url")
+					.fill("http://127.0.0.1:4099");
+			}
 			await page.getByTestId("instance-form-name").fill(name);
 			await page.getByTestId("instance-form-save").click();
 			await page
@@ -390,11 +500,15 @@ export const providerInstancesHandlers: StepHandler[] = [
 			const page = world.page;
 			const id = instanceSlug((match[1] ?? "").trim());
 			const to = (match[2] ?? "").trim();
-			await page.getByTestId(`instance-row-${id}`).click();
-			await page.getByTestId("edit-instance-btn").click();
+			const row = page.getByTestId(`instance-row-${id}`);
+			await row.getByRole("button").first().click();
+			await row.getByTestId("edit-instance-btn").click();
 			await page
 				.getByTestId("instance-form")
 				.waitFor({ state: "visible", timeout: 5_000 });
+			await expect(page.getByRole("radiogroup", { name: "Type" })).toHaveCount(
+				0,
+			);
 			await page.getByTestId("instance-form-name").fill(to);
 			await page.getByTestId("instance-form-save").click();
 			await page
@@ -403,13 +517,123 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed the default Claude account",
+		match: /^the default Claude account is named (.+) with folder (.+)$/,
+		run: async ({ world, match }) => {
+			const id = defaultInstanceIdForDriver("claude");
+			const list = [
+				...(mockInstances.get(world.page) ?? []).filter(
+					(instance) => instance["id"] !== id,
+				),
+				{
+					id,
+					name: match[1] ?? "",
+					configDir: match[2] ?? "",
+					driver: "claude",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			];
+			mockInstances.set(world.page, list);
+			await requireRelayControl(world.page).sendMessages([
+				{ type: "instance_list", instances: list },
+			]);
+		},
+	},
+	{
+		name: "open the shared default Claude editor",
+		match: /^I edit the default Claude account$/,
+		run: async ({ world }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await row.getByRole("button").first().click();
+			await row.getByTestId("edit-instance-btn").click();
+			await expect(world.page.getByTestId("instance-form-name")).toBeFocused();
+		},
+	},
+	{
+		name: "assert the default Claude edit fields and restart notice",
+		match: /^the default Claude editor shows name (.+) and folder (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("instance-form-name")).toHaveValue(
+				match[1] ?? "",
+			);
+			await expect(
+				world.page.getByTestId("instance-form-configdir"),
+			).toHaveValue(match[2] ?? "");
+			await expect(world.page.getByTestId("instance-form")).toContainText(
+				"Folder changes apply after restart",
+			);
+			await expect(
+				world.page.getByRole("radiogroup", { name: "Type" }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the default Claude account has no Remove action",
+		match: /^the default Claude account cannot be removed$/,
+		run: async ({ world }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
+			await expect(row).toContainText("The default account can't be removed");
+		},
+	},
+	{
+		name: "save the default Claude account through the shared form",
+		match: /^I save the default Claude account as (.+) with folder (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId("instance-form-name").fill(match[1] ?? "");
+			await world.page
+				.getByTestId("instance-form-configdir")
+				.fill(match[2] === "empty" ? "" : (match[2] ?? ""));
+			await world.page.getByTestId("instance-form-save").click();
+			await expect(world.page.getByTestId("instance-form")).toBeHidden();
+		},
+	},
+	{
+		name: "assert the saved default Claude folder and restart copy",
+		match:
+			/^the default Claude account shows folder (.+) with Applies after restart$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await row.getByRole("button").first().click();
+			await expect(row).toContainText(match[1] ?? "");
+			await expect(row).toContainText("Applies after restart");
+		},
+	},
+	{
+		name: "assert UpdateInstance sends the default account's name and folder",
+		match:
+			/^UpdateInstance saves the default Claude name (.+) and folder (.+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "UpdateInstance",
+			);
+			expect(request.payload).toMatchObject({
+				instanceId: defaultInstanceIdForDriver("claude"),
+				name: match[1] ?? "",
+				configDir: match[2] === "empty" ? "" : (match[2] ?? ""),
+			});
+			expect(request.payload).not.toHaveProperty("projectSlug");
+		},
+	},
+	{
 		name: "remove instance from settings",
 		match: /^I remove the (.+) instance$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const id = instanceSlug((match[1] ?? "").trim());
-			await page.getByTestId(`instance-row-${id}`).click();
-			await page.getByTestId("remove-instance-btn").click();
+			const row = page.getByTestId(`instance-row-${id}`);
+			await row.getByRole("button").first().click();
+			await row.getByTestId("remove-instance-btn").click();
 			await page
 				.locator("#confirm-modal")
 				.waitFor({ state: "visible", timeout: 5_000 });

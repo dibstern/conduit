@@ -174,6 +174,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	setupScript: Schema.optional(Schema.String),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -613,6 +614,7 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
+	readonly setupScript?: string | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -1005,6 +1007,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
+			setupScript: Schema.optional(Schema.String),
 		},
 	},
 ) {}

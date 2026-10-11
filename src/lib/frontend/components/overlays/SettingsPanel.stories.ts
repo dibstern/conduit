@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import {
 	composerPreferences,
@@ -13,7 +13,11 @@ import {
 	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
-import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
+import {
+	applyDetectProxyResponse,
+	applyInstanceListResponse,
+	getCachedInstances,
+} from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { serverStatus } from "../../stores/server-status.svelte.js";
 import {
@@ -462,6 +466,10 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwake: true };
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -483,6 +491,12 @@ export const Server: Story = {
 			"Off · anyone who can reach this address can open conduit",
 		);
 		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeChecked();
+		await expect(
+			canvas.getByTestId("server-power-command-value"),
+		).toHaveTextContent("caffeinate -di");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -534,6 +548,47 @@ export const ServerStartupExpanded: Story = {
 	},
 };
 
+export const PowerCommandEdit: Story = {
+	...Server,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-power-edit"));
+		await expect(canvas.getByTestId("server-power-command")).toHaveFocus();
+		await expect(canvas.getByTestId("server-power-command")).toHaveValue(
+			"caffeinate",
+		);
+		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
+		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
+		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerNotAvailable: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwakeCommand: null };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeDisabled();
+		await expect(canvas.getByTestId("server-power-settings")).toHaveTextContent(
+			"Not available on this computer",
+		);
+		await expect(
+			canvas.queryByTestId("server-power-edit"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
 export const PinOn: Story = {
 	args: { initialTab: "server" },
 	beforeEach: () => {
@@ -580,15 +635,18 @@ export const ChangePin: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const row = canvas.getByRole("button", {
-			name: /Quick Start — Direct API Key/,
-		});
+		const guides = within(
+			within(canvasElement).getByTestId("opencode-setup-guides"),
+		);
+		await userEvent.click(guides.getByRole("button", { name: /Setup guides/ }));
+		const row = guides.getByRole("button", { name: /^Direct key/ });
 
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByText("opencode serve --port 4098")).toBeVisible();
+		await expect(
+			guides.getByText(/opencode config set provider anthropic/),
+		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
@@ -610,7 +668,9 @@ export const InstanceExpanded: Story = {
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Stop" })).toBeVisible();
+		await expect(canvas.getByTestId("edit-instance-btn")).toBeVisible();
+		await expect(canvas.getByText("Started by", { exact: true })).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
@@ -636,6 +696,89 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(
 			account.queryByTestId("rename-instance-btn"),
 		).not.toBeInTheDocument();
+	},
+};
+
+export const DefaultClaudeAccountEdit: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const account = within(canvas.getByTestId("instance-row-claude"));
+		await userEvent.click(
+			account.getByRole("button", { name: /Personal Claude/ }),
+		);
+		await expect(
+			account.queryByTestId("remove-instance-btn"),
+		).not.toBeInTheDocument();
+		await expect(account.getByText("Applies after restart")).toBeVisible();
+		await userEvent.click(account.getByTestId("edit-instance-btn"));
+		await expect(canvas.getByTestId("instance-form-name")).toHaveValue(
+			"Personal Claude",
+		);
+		await expect(canvas.getByTestId("instance-form-configdir")).toHaveValue(
+			"~/.claude",
+		);
+		await expect(
+			within(canvas.getByTestId("instance-form")).getByText(
+				/Folder changes apply after restart/,
+			),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("radiogroup", { name: "Type" }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const InstancesEmpty: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		populateInstances();
+		applyInstanceListResponse({
+			instances: getCachedInstances().filter(
+				(instance) => instance.driver === "claude",
+			),
+		});
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("opencode-empty-state")).toHaveTextContent(
+			"opencode serve --port 4098",
+		);
+		const guides = canvas.getByTestId("opencode-setup-guides");
+		applyDetectProxyResponse({ found: true, port: 8317 });
+		await waitFor(() =>
+			expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom"),
+		);
+		await expect(within(guides).getByRole("button")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+	},
+};
+
+export const InstanceAddOpenCode: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("add-instance-btn"));
+		await userEvent.click(canvas.getByTestId("instance-form-driver-opencode"));
+		await userEvent.type(
+			canvas.getByTestId("instance-form-name"),
+			"Staging OC",
+		);
+		await userEvent.type(canvas.getByTestId("instance-form-port"), "4098");
+		await expect(canvas.getByTestId("instance-form-managed")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+		await expect(
+			canvas.queryByTestId("instance-form-env"),
+		).not.toBeInTheDocument();
+		await expect(canvas.getByTestId("instance-form-save")).toHaveTextContent(
+			"Add instance",
+		);
 	},
 };
 
@@ -680,8 +823,8 @@ export const InstancesHover: Story = {
 };
 
 /**
- * Hover on an EXPANDED instance row, where Start / Stop / Edit / Rename /
- * Remove live. Those five buttons are the densest cluster of hover colours in
+ * Hover on an EXPANDED instance row, where Stop, Edit and Remove live.
+ * Those buttons are the densest cluster of hover colours in
  * the panel, and the component swap needs `!` overrides to hold them.
  *
  * The hover state is applied by hand instead of through `parameters.pseudo`,
@@ -715,7 +858,7 @@ export const InstanceExpandedHover: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: /Local OpenCode/ }),
 		);
-		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
+		await expect(canvas.getByTestId("edit-instance-btn")).toBeVisible();
 		canvasElement.ownerDocument.body.classList.add("pseudo-hover-all");
 	},
 };

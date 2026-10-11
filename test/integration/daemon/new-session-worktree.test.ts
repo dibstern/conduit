@@ -657,7 +657,7 @@ process.exit(result.status ?? 1);
 				new CreateSession({
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
-					providerId: "opencode",
+					providerId: "unsupported-provider",
 					newWorktree: true,
 				}),
 			),

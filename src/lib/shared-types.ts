@@ -5,6 +5,7 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
+import type { ProjectSetupState } from "./contracts/project-setup.js";
 import type {
 	ProviderDriverKind,
 	ProviderSessionCapabilities,
@@ -445,7 +446,9 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking" | "error";
+	type: PartType | "thinking" | "error" | "setup";
+	/** Daemon setup notice, carried by the normal durable transcript. */
+	setup?: ProjectSetupState;
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -543,6 +546,7 @@ export interface ProjectInfo {
 	title: string;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
+	setupScript?: string | undefined;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
