@@ -850,7 +850,7 @@
 
 <div
 	id="model-display"
-	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : ''}"
+	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? '' : 'shrink-0 gap-[2px]'}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
 	{#if variant === "words"}
@@ -924,8 +924,54 @@
 		{#if effort.options.length > 0}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
+	{:else if !phone}
+		<Button
+			bind:element={triggerEl}
+			variant="ghost"
+			size="content"
+			tone="inherit"
+			hoverFill="none"
+			data-testid="composer-harness-trigger"
+			data-instance-id={selectedLogoInstanceId}
+			class="h-[26px] shrink-0 gap-[5px] rounded-[7px] bg-bg-alt px-[6px] text-[11.5px] font-normal font-brand text-text whitespace-nowrap hover:bg-text/7"
+			ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}${switchingTo ? ", switching" : ""}. Open harness options`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={(event) => togglePicker(event, "harness")}
+		>
+			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />
+			{#if sessionViewState.composerTier === "wide"}
+				<span data-testid="composer-harness-label">{driverLabel(selectedDriver)}</span>
+				{#if wordAccountName !== driverLabel(selectedDriver)}
+					<span aria-hidden="true" class="text-text-dimmer">·</span>
+					<span data-testid="composer-harness-account">{wordAccountName}{switchingTo ? "…" : ""}</span>
+				{/if}
+			{/if}
+			<Icon name="chevron-down" size={10} class="text-text-dimmer" />
+		</Button>
+		<span data-testid="composer-control-divider" aria-hidden="true" class="mx-[4px] h-[14px] w-px shrink-0 bg-border"></span>
+		<Button
+			variant="ghost"
+			size="content"
+			tone="inherit"
+			hoverFill="none"
+			data-testid="model-picker-trigger"
+			data-instance-id={selectedId}
+			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
+			title="Switch model"
+			ariaLabel={`Model: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}. Open model options`}
+			aria-haspopup="dialog"
+			aria-expanded={pickerOpen}
+			aria-controls={pickerOpen ? "model-picker" : undefined}
+			onclick={(event) => togglePicker(event, "model")}
+		>
+			<span class="model-label">{displayName}</span>
+			{#if contextLabel}<span aria-hidden="true" class="text-text-dimmer">·</span><span data-testid="picker-selected-context">{contextLabel}</span>{/if}
+			<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={10} /></span>
+		</Button>
 	{:else}
-		<!-- Phone: logo + short tag (O5). Desktop: logo + "Name · ctx" + chevron. -->
+		<!-- Phone keeps its combined logo and short model tag. -->
 		<Button
 			bind:element={triggerEl}
 			variant="ghost"
@@ -934,9 +980,7 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
-			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 {phone
-				? 'gap-[3px] px-[5px] rounded-[10px]'
-				: 'gap-[6px] px-[9px] rounded-[9px] text-[12px] font-semibold max-w-[260px]'} {hasModel ? '' : 'opacity-50'}"
+			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 gap-[3px] px-[5px] rounded-[10px] {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
 			aria-haspopup="dialog"
@@ -944,20 +988,12 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={togglePicker}
 		>
-			{#if phone}
-				<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={17} surface="box" />
-				<span class="model-label text-[10px] font-bold whitespace-nowrap">{shortModelLabel}</span>
-			{:else}
-				<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} surface="box" />
-				<span class="model-label min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-					{displayName}{#if contextLabel}<span data-testid="picker-selected-context">{` · ${contextLabel}`}</span>{/if}
-				</span>
-				<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={11} /></span>
-			{/if}
+			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={17} surface="box" />
+			<span class="model-label text-[10px] font-bold whitespace-nowrap">{shortModelLabel}</span>
 		</Button>
 	{/if}
 
-	<ModelVariant bind:this={variantRef} onOpen={closePicker} {variant} />
+	<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
 	{#if variant === "words" && selectedDriver === "opencode"}
 		<span aria-hidden="true" class="text-border-chip">·</span>
 		<Button

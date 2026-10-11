@@ -4,6 +4,14 @@ import { requireRpcControl, setSessionRowStatus } from "./shared.js";
 
 // Literal values from docs/plans/2026-10-02-composer-final-designs.html.
 const BUTTON = 32;
+// Desktop controls from docs/plans/2026-10-11-composer-harness-account-final-design.html.
+const CONTROL = 26;
+const iconsControls = {
+	harness: "composer-harness-trigger",
+	model: "model-picker-trigger",
+	effort: "variant-badge",
+	mode: "permission-mode-badge",
+} as const;
 const SEND_OFF = { background: "rgb(74, 34, 51)", color: "rgb(185, 138, 156)" };
 
 async function box(locator: Locator) {
@@ -37,6 +45,165 @@ const sessionIdOf = (page: Page): string => {
 };
 
 export const composerFinalDesignHandlers: StepHandler[] = [
+	{
+		name: "tap desktop icons control",
+		match: /^I tap the icons (harness|model|effort|mode) control$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(iconsControls[match[1] as keyof typeof iconsControls])
+				.click();
+		},
+	},
+	{
+		name: "assert icons control regains focus",
+		match: /^the icons (harness|model|effort|mode) control is focused$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(
+					iconsControls[match[1] as keyof typeof iconsControls],
+				),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "assert E1 desktop split footer and control sizing",
+		match: /^the desktop icons footer matches E1 in the (wide|narrow) tier$/,
+		run: async ({ world, match }) => {
+			const layout = world.page.getByTestId("composer-layout");
+			await expect(layout).toHaveAttribute("data-rows", "2");
+			const left = layout.getByTestId("composer-icons-left");
+			const controls = Object.values(iconsControls);
+			const order = await left
+				.locator("button")
+				.evaluateAll((buttons) =>
+					buttons.map((button) => button.getAttribute("data-testid")),
+				);
+			expect(order).toEqual(controls);
+			for (const id of controls) {
+				const control = left.getByTestId(id);
+				await expect(control).toHaveCSS("height", `${CONTROL}px`);
+				await expect(control).toHaveCSS("padding-left", "6px");
+				await expect(control).toHaveCSS("padding-right", "6px");
+				await expect(control).toHaveCSS("border-radius", "7px");
+				await expect(control).toHaveCSS("font-size", "11.5px");
+				await expect(control).toHaveCSS("column-gap", "5px");
+				await expect(control).toHaveCSS("flex-shrink", "0");
+			}
+			const harness = left.getByTestId("composer-harness-trigger");
+			await expect(harness.getByTestId("harness-logo")).toHaveCSS(
+				"width",
+				"13px",
+			);
+			await expect(harness).toHaveAttribute("aria-label", /Claude.*personal/);
+			for (const [id, label] of [
+				["composer-harness-label", "Claude"],
+				["composer-harness-account", "personal"],
+				["composer-effort-label", "High"],
+				["composer-mode-label", "Ask"],
+			] as const) {
+				if (match[1] === "wide")
+					await expect(left.getByTestId(id)).toHaveText(label);
+				else await expect(left.getByTestId(id)).toHaveCount(0);
+			}
+			const divider = left.getByTestId("composer-control-divider");
+			await expect(divider).toHaveCSS("width", "1px");
+			await expect(divider).toHaveCSS("height", "14px");
+			await expect(divider).toHaveCSS("margin-left", "4px");
+			await expect(divider).toHaveCSS("margin-right", "4px");
+			await expect(layout.locator('[data-slot="field"]')).toHaveCSS(
+				"grid-column",
+				"1 / -1",
+			);
+			const input = await box(world.page.locator("#input"));
+			const footer = await box(harness);
+			expect(input.y + input.height).toBeLessThanOrEqual(footer.y);
+		},
+	},
+	{
+		name: "assert quiet checkout yields room before left controls",
+		match: /^the icons checkout is a quiet shrinking control before send$/,
+		run: async ({ world }) => {
+			const layout = world.page.getByTestId("composer-layout");
+			const right = layout.locator('[data-slot="send"]');
+			const checkout = right.getByTestId("composer-checkout");
+			await expect(checkout).toHaveCSS("height", `${CONTROL}px`);
+			await expect(checkout).toHaveCSS("border-radius", "7px");
+			await expect(checkout).toHaveCSS("padding-left", "6px");
+			await expect(checkout).toHaveCSS("padding-right", "6px");
+			await expect(checkout).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+			await expect(checkout.locator('[data-part="chevron"]')).toBeVisible();
+			await expect(checkout.locator("..")).toHaveCSS("flex-shrink", "1");
+			await expect(checkout.locator("..")).toHaveCSS("min-width", "0px");
+			const footer = [
+				world.page.locator("#attach-btn"),
+				...Object.values(iconsControls).map((id) => world.page.getByTestId(id)),
+				checkout,
+				right.locator("#send"),
+			];
+			const boxes = await Promise.all(footer.map(box));
+			for (let i = 1; i < boxes.length; i++) {
+				const previous = boxes[i - 1];
+				const current = boxes[i];
+				if (!previous || !current) throw new Error("Footer control is missing");
+				expect(previous.x + previous.width).toBeLessThanOrEqual(current.x + 1);
+				expect(
+					Math.abs(
+						previous.y + previous.height / 2 - current.y - current.height / 2,
+					),
+				).toBeLessThanOrEqual(1);
+			}
+			const send = boxes.at(-1);
+			const bounds = await box(layout);
+			if (!send) throw new Error("Send is missing");
+			expect(send.x + send.width).toBeLessThanOrEqual(
+				bounds.x + bounds.width + 1,
+			);
+		},
+	},
+	{
+		name: "assert mode warns for every non-default desktop mode",
+		match: /^the icons mode control has hot tint (true|false)$/,
+		run: async ({ world, match }) => {
+			const mode = world.page.getByTestId("permission-mode-badge");
+			const hot = match[1] === "true";
+			if (hot) await expect(mode).toHaveAttribute("data-hot", "true");
+			else await expect(mode).not.toHaveAttribute("data-hot");
+			await expect
+				.poll(() =>
+					mode.evaluate((element, hot) => {
+						const probe = document.createElement("span");
+						probe.style.color = hot
+							? "var(--color-warning)"
+							: "var(--color-text-secondary)";
+						document.body.append(probe);
+						const expected = getComputedStyle(probe).color;
+						probe.remove();
+						return getComputedStyle(element).color === expected;
+					}, hot),
+				)
+				.toBe(true);
+			if (hot)
+				await expect(mode).toHaveCSS("background-color", /(?:\/|,)\s*0\.14\)/);
+			else await expect(mode).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+		},
+	},
+	{
+		name: "assert E3 draft keeps context below split icons footer",
+		match:
+			/^the icons draft has no checkout and keeps context below the composer$/,
+		run: async ({ world }) => {
+			const area = world.page.locator("#input-area");
+			await expect(area.getByTestId("composer-checkout")).toHaveCount(0);
+			const layout = area.getByTestId("composer-layout");
+			await expect(layout).toHaveAttribute("data-rows", "2");
+			await expect(layout.locator('[data-slot="send"] button')).toHaveCount(1);
+			const context = world.page.getByTestId("new-session-context");
+			await expect(context).toBeVisible();
+			const contextBox = await box(context);
+			const border = await box(area.locator("#input-row"));
+			expect(contextBox.y).toBeGreaterThanOrEqual(border.y + border.height);
+		},
+	},
 	{
 		name: "assert composer placeholder text",
 		match: /^the composer placeholder reads (.+)$/,
@@ -97,10 +264,14 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		match: /^the model chip reads (.+) with a chevron$/,
 		run: async ({ world, match }) => {
 			const trigger = world.page.getByTestId("model-picker-trigger");
-			await expect(trigger).toHaveText(match[1] ?? "");
+			const [model, context] = (match[1] ?? "").split(" · ");
+			await expect(trigger.locator(".model-label")).toHaveText(model ?? "");
+			await expect(trigger.getByTestId("picker-selected-context")).toHaveText(
+				context ?? "",
+			);
 			await expect(trigger.getByTestId("model-chip-chevron")).toBeVisible();
 			expect(
-				Math.abs((await box(trigger)).height - BUTTON),
+				Math.abs((await box(trigger)).height - CONTROL),
 			).toBeLessThanOrEqual(0.5);
 		},
 	},
@@ -122,7 +293,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			const chip = world.page.getByTestId("variant-badge");
 			await expect(chip).toHaveText(match[1] ?? "");
 			await expect(chip.getByTestId("effort-meter")).toBeVisible();
-			expect(Math.abs((await box(chip)).height - BUTTON)).toBeLessThanOrEqual(
+			expect(Math.abs((await box(chip)).height - CONTROL)).toBeLessThanOrEqual(
 				0.5,
 			);
 		},

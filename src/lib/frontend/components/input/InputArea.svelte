@@ -1181,7 +1181,7 @@
 					class="-mx-1.5 -mt-1.5 mb-1.5"
 				/>
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout">
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1282,7 +1282,8 @@
 					{#if composerPreferences.controls === "icons"}
 						<div
 							id="input-bottom-right"
-							class="flex items-center gap-1 min-w-0"
+							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
+							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
 						>
 							<!-- Harness instance + model picker -->
 							<InstanceModelPicker />
@@ -1293,6 +1294,19 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
+					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
+						{@const session = currentSession}
+						<GitIdentity
+							presentation="control"
+							directory={composerDirectory}
+							git={composerGit}
+							workspaceMismatch={session.workspaceMismatch}
+							workspaceHint={session.workspaceHint}
+							loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+							onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+							ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+						/>
+					{/if}
 					{#snippet sendAtLabel()}
 						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
 					{/snippet}

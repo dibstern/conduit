@@ -19,7 +19,7 @@ Examples:
 
 Scenario Outline: the composer trigger shows the bound instance icon
   Given a session already exists on the <harness> harness
-  Then the model trigger shows the <harness> instance icon
+  Then the harness trigger shows the <harness> instance icon
 
 Examples:
   | harness  |

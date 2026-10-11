@@ -112,8 +112,12 @@ export async function holdUntilVisible(
 export async function openModelPicker(page: Page): Promise<void> {
 	const picker = page.locator("#model-picker");
 	if ((await picker.count()) === 0) {
+		// One locator, not a count-then-pick: a tier change can swap the triggers mid-step.
 		await page
-			.getByTestId(/^(model-picker-trigger|composer-word-model)$/)
+			.getByTestId(
+				/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
+			)
+			.first()
 			.click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });

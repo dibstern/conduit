@@ -73,6 +73,21 @@ export const composerEffortHandlers: StepHandler[] = [
 		match: /^I set effort to (\w+)$/,
 		run: async ({ world, match }) => {
 			const picker = world.page.getByTestId("model-picker");
+			const control = world.page.getByTestId("variant-badge");
+			if (
+				!(await picker.isVisible()) &&
+				(await control.count()) > 0 &&
+				(await control.getAttribute("aria-haspopup")) === "dialog"
+			) {
+				await control.click();
+				const option = picker.getByTestId(`picker-effort-option-${match[1]}`);
+				await expect(option).toBeEnabled();
+				await option.click();
+				await expect(option).toHaveAttribute("aria-checked", "true");
+				await world.page.keyboard.press("Escape");
+				await expect(picker).toHaveCount(0);
+				return;
+			}
 			if (await picker.isVisible()) {
 				if (match[1] !== "default") {
 					const option = picker.getByTestId(`picker-effort-option-${match[1]}`);

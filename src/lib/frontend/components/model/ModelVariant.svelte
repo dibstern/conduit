@@ -11,7 +11,7 @@
 
 	let { onOpen, variant = "icons" }: {
 		onOpen?: (() => void) | undefined;
-		variant?: "icons" | "words" | undefined;
+		variant?: "icons" | "words" | "control" | undefined;
 	} = $props();
 
 	let open = $state(false);
@@ -71,6 +71,28 @@
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
 		><span class="border-b border-dotted border-border-chip">{currentVariant ? microLabel.toLowerCase() : microLabel}</span></Button>
+{:else if variants.length > 0 && variant === "control"}
+	<Button
+		variant="ghost"
+		size="content"
+		tone="inherit"
+		hoverFill="none"
+		class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7"
+		ariaLabel={`Effort: ${levelName}. Open effort options`}
+		loading={effort.pending}
+		aria-haspopup="dialog"
+		aria-expanded={composerPickerState.request !== null}
+		aria-controls={composerPickerState.request ? "model-picker" : undefined}
+		data-testid="variant-badge"
+		title="Effort {levelName}. Ctrl+T to cycle"
+		onclick={(event) => {
+			openPicker("effort");
+			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+		}}
+	>
+		<EffortMeter levels={variants.length} {filled} />
+		{#if sessionViewState.composerTier === "wide"}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+	</Button>
 {:else if variants.length > 0}
 	<Menu
 		bind:open

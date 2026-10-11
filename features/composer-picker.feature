@@ -1,5 +1,48 @@
 Feature: Composer picker keeps harness, model, context and effort choices together
 
+Scenario Outline: E1 desktop icons open the picker at each control's section and restore focus
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I tap the icons <control> control
+  Then the icons control opens the picker at <section>
+  And the picker is a desktop popover
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I close the model picker
+  Then the icons <control> control is focused
+
+Examples:
+  | tier   | control | section | baseline                         | threshold |
+  | wide   | harness | Harness | composer-icons-picker-e1-harness | 98        |
+  | narrow | harness | Harness | composer-icons-picker-e1-harness | 98        |
+  | wide   | model   | Model   | composer-icons-picker-e1-model   | 98        |
+  | narrow | model   | Model   | composer-icons-picker-e1-model   | 98        |
+  | wide   | effort  | Effort  | composer-icons-picker-e1-effort  | 98        |
+  | narrow | effort  | Effort  | composer-icons-picker-e1-effort  | 98        |
+
+Scenario Outline: E1 desktop icons mode uses the existing approvals menu
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I tap the icons mode control
+  Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
+  And the shared composer picker is closed
+  When I set approvals to auto
+  Then the approvals menu is closed
+  And the icons mode control has hot tint true
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier   | baseline                        | threshold |
+  | wide   | composer-icons-mode-menu-wide   | 98        |
+  | narrow | composer-icons-mode-menu-narrow | 98        |
+
 Scenario Outline: C1 draft Claude accounts form a grid and bind the project on tap
   Given the conduit app is served with the connected mockup
   And the harness logo is viewed in the <tier> tier

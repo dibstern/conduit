@@ -68,6 +68,7 @@
 	const currentPresentation = $derived(presentation[currentMode]);
 	const availableModes = $derived(getRankedApprovalOptions());
 	const isElevated = $derived(approvals.current?.elevated === true);
+	const hot = $derived(currentMode !== discoveryState.defaultPermissionMode);
 
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
@@ -163,23 +164,22 @@
 				{@render shield(currentMode, 15, false)}
 			</MicroLabelButton>
 		{:else}
-			<MicroLabelButton
+			<Button
 				{...props}
-				variant="chip"
-				onpointerdown={undefined}
-				onpointerup={undefined}
-				label={currentLabel}
-				accessibleName="Approvals {currentLabel}. Open options"
-				tone={currentPresentation.tone}
-				pending={approvals.pending}
-				pulseKey={currentMode}
-				onTap={() => { open = true; }}
-				onHold={() => { open = true; }}
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand whitespace-nowrap {hot ? 'text-warning bg-warning/14' : 'text-text-secondary hover:bg-text/7'}"
+				ariaLabel="Approvals {currentLabel}. Open options"
+				loading={approvals.pending}
+				data-hot={hot ? "true" : undefined}
 				data-testid="permission-mode-badge"
 				title="Approvals ({currentLabel})"
 			>
-				{@render shield(currentMode, 15, true, "var(--color-input-bg)")}
-			</MicroLabelButton>
+				{@render shield(currentMode, 12, false)}
+				{#if sessionViewState.composerTier === "wide"}<span data-testid="composer-mode-label">{currentLabel}</span>{/if}
+			</Button>
 		{/if}
 	{/snippet}
 

@@ -176,7 +176,7 @@ export const mockAppHandlers: StepHandler[] = [
 	{
 		name: "report uncommitted, upstream and operation state on the session shell",
 		match:
-			/^the checkout has uncommitted changes, (\d+) ahead, (\d+) behind and a rebase in progress$/,
+			/^the checkout has uncommitted changes, (\d+) ahead, (\d+) behind( and a rebase in progress)?$/,
 		run: ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Checkout requires an open session");
@@ -190,7 +190,7 @@ export const mockAppHandlers: StepHandler[] = [
 					dirty: true,
 					ahead: Number(match[1]),
 					behind: Number(match[2]),
-					operation: "rebase",
+					...(match[3] ? { operation: "rebase" as const } : {}),
 				},
 			});
 		},

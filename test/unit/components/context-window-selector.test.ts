@@ -64,7 +64,7 @@ describe("InstanceModelPicker context window", () => {
 	it("switches context windows through RPC for the active session", async () => {
 		const { getByTestId } = render(InstanceModelPicker);
 
-		await fireEvent.click(getByTestId("model-picker-trigger"));
+		await fireEvent.click(getByTestId("composer-harness-trigger"));
 		await fireEvent.click(getByTestId("picker-context-option-1m"));
 
 		await waitFor(() => {
@@ -76,7 +76,7 @@ describe("InstanceModelPicker context window", () => {
 		});
 		expect(discoveryState.currentContextWindow).toBe("1m");
 		expect(
-			getByTestId("model-picker-trigger").getAttribute("aria-expanded"),
+			getByTestId("composer-harness-trigger").getAttribute("aria-expanded"),
 		).toBe("true");
 	});
 });

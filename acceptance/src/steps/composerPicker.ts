@@ -81,6 +81,33 @@ export async function seedComposerPickerCatalog(
 
 export const composerPickerHandlers: StepHandler[] = [
 	{
+		name: "assert shared composer picker is closed",
+		match: /^the shared composer picker is closed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert desktop icons control opens its picker section",
+		match: /^the icons control opens the picker at (Harness|Model|Effort)$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			if (match[1] === "Model") {
+				await expect(picker.getByTestId("model-picker-list")).toBeVisible();
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
+				await expect(picker.getByTestId("model-picker-search")).toBeFocused();
+			} else {
+				await expect(picker.getByTestId("picker-back")).toHaveCount(0);
+				await expect(
+					match[1] === "Harness"
+						? picker.getByTestId("picker-harness-claude")
+						: picker.getByTestId("picker-row-effort"),
+				).toBeFocused();
+			}
+		},
+	},
+	{
 		name: "seed composer picker catalog",
 		match: /^the composer picker has the (Claude|OpenCode) catalog$/,
 		run: async ({ world, match }) => {

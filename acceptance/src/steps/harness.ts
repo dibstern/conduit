@@ -249,13 +249,13 @@ export const harnessHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert model trigger instance icon",
-		match: /^the model trigger shows the (Claude|OpenCode) instance icon$/,
+		name: "assert composer harness trigger instance icon",
+		match: /^the harness trigger shows the (Claude|OpenCode) instance icon$/,
 		run: async ({ world, match }) => {
 			await world.page.waitForFunction(
 				(expected) => {
 					const trigger = document.querySelector(
-						'[data-testid="model-picker-trigger"]',
+						'[data-testid="composer-harness-trigger"], [data-testid="model-picker-trigger"]',
 					);
 					const icon = trigger?.querySelector("[data-driver]");
 					return (

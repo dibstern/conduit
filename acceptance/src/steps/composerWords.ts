@@ -424,7 +424,7 @@ export const composerWordsHandlers: StepHandler[] = [
 				world.page
 					.locator("#input-area")
 					.getByTestId(
-						/^(model-picker-trigger|variant-badge|permission-mode-badge)$/,
+						/^(composer-harness-trigger|model-picker-trigger|variant-badge|permission-mode-badge)$/,
 					),
 			).toHaveCount(0);
 		},
