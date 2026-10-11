@@ -1,28 +1,25 @@
-Feature: A Claude session's account pill switches the session, not the project
+Feature: A Claude session's account pill switches its account
 
 Scenario Outline: a Claude session's bar names the account it runs on
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude, self as personal
-  And the project is bound to claude
   Then the session bar account pill reads work2claude
   And the session bar account pill shows claude with a blue dot
   And the session bar account pill is <height>px tall with <size>px monospace text
   And the session bar account pill sits right after the segment control
-  And the session bar shows no instance badge
 
 Examples:
   | viewport | height | size |
   | desktop  | 22     | 10   |
   | phone    | 20     | 9    |
 
-Scenario Outline: switching from the pill moves the session and leaves the project's binding alone
+Scenario Outline: switching from the pill moves the session to the picked account
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude, self as personal, team as team-max
-  And the project is bound to claude
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   And the quota check reads claude 40% used, self 23% used, team limited until 2026-01-01T14:30:00Z
   And the handoff carries 47 of 112 messages with the first
@@ -38,7 +35,6 @@ Scenario Outline: switching from the pill moves the session and leaves the proje
   And the swap card hands work2claude at 60% left to personal at 77% left
   When I press Switch and continue
   Then the ContinueSession RPC switches the current session from claude to self
-  And the SetProjectInstance RPC was not sent
   And the handoff dialog is closed
   When the session resumes on self from claude by user and replies All provider tests pass now.
   Then the session bar account pill reads personal
@@ -49,45 +45,35 @@ Examples:
   | desktop  | below the pill    |
   | phone    | as a bottom sheet |
 
-Scenario: a Claude session with one account has no pill and no project badge
+Scenario: a Claude session with one account has no pill
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude
-  And the project is bound to claude
   Then the session bar shows no account pill
-  And the session bar shows no instance badge
 
-Scenario: a Claude session shows no project badge while its provider is still loading
+Scenario: a Claude session waits for its provider before showing the account pill
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And the session's provider lookup is held
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude, self as personal
-  And the project is bound to claude
   Then the session bar shows no account pill
-  And the session bar shows no instance badge
   When the session's provider lookup answers
   Then the session bar account pill reads work2claude
-  And the session bar shows no instance badge
 
-Scenario: an OpenCode session keeps the project's instance badge
+Scenario: an OpenCode session has no Claude account pill
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And a session already exists on the OpenCode harness
   And the Claude accounts are claude as work2claude, self as personal
-  And the project is bound to claude
   Then the session bar shows no account pill
-  And the session bar shows the instance badge reading work2claude
-  When I pick personal from the instance badge
-  Then the SetProjectInstance RPC binds the project to self
 
 Scenario Outline: session bar with the account pill matches frame D
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude, self as personal
-  And the project is bound to claude
   Then the session bar account pill reads work2claude
   And the session-bar region visually matches <baseline> at <threshold> percent
 
@@ -101,7 +87,6 @@ Scenario Outline: account picker opened from the pill matches frame D
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude accounts are claude as work2claude, self as personal, team as team-max
-  And the project is bound to claude
   And the quota check reads claude 40% used, self 23% used, team limited until 2026-01-01T14:30:00Z
   When I open the account pill in the session bar
   Then the account picker pre-selects personal

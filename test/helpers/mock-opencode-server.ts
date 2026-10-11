@@ -899,6 +899,16 @@ export class MockOpenCodeServer {
 			return;
 		}
 
+		// Recordings carry the recording machine's folder, so every replayed
+		// turn asks to move its session into the test workspace.
+		if (
+			method === "POST" &&
+			basePath === "/experimental/control-plane/move-session"
+		) {
+			res.writeHead(204).end();
+			return;
+		}
+
 		if (method === "PATCH" && /^\/session\/[^/]+$/.test(basePath)) {
 			const id = basePath.split("/").pop() ?? "";
 			let title: string | undefined;

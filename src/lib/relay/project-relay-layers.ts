@@ -76,6 +76,7 @@ import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	BackgroundLivenessTag,
 	type ConfigTag,
+	LiveTaskListTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
@@ -620,6 +621,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
+		Layer.sync(LiveTaskListTag, () => backgroundLiveness.liveListOf),
 		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
 		Layer.sync(SessionRetriesTag, () => retries.retryingOf),
 		ptyRuntimeLayer,

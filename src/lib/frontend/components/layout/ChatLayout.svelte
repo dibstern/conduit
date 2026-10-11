@@ -23,6 +23,7 @@
 	import ImageLightbox from "../overlays/ImageLightbox.svelte";
 	import QrModal from "../overlays/QrModal.svelte";
 	import SettingsPanel from "../overlays/SettingsPanel.svelte";
+	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import DebugPanel from "../debug/DebugPanel.svelte";
 	import InfoPanels from "../overlays/InfoPanels.svelte";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
@@ -55,7 +56,7 @@
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -75,7 +76,8 @@
 
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
-	let settingsInitialTab = $state<string | undefined>();
+	let settingsInitialTab = $state<SettingsSection | undefined>();
+	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
 	let debugPanelVisible = $state(false);
 
 	const TERMINAL_MIN_HEIGHT = 100;
@@ -394,12 +396,9 @@
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
-			// With no session in the route, scope the agent fetch to the draft
-			// project's bound instance, so the agent list matches the picker.
-			// Unbound, the relay's default scope already matches.
 			const draftInstanceId =
-				routeSessionId == null
-					? projectState.projects.find((p) => p.slug === draftSlug)?.instanceId
+				routeSessionId == null && discoveryState.hasInstanceChoice
+					? getEffectiveInstanceId()
 					: undefined;
 			void getAgentsRpc({
 				projectSlug: slug,
@@ -407,7 +406,11 @@
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetAgentsResponse(response, routeSessionId ?? undefined);
+					if (
+						generation === attachGeneration &&
+						getCurrentSessionId() === routeSessionId &&
+						(routeSessionId != null || draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined))
+					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({
@@ -415,7 +418,7 @@
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetModelsResponse(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyGetModelsResponse(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({
@@ -569,6 +572,22 @@
 				if (sessionState.currentId !== null) {
 					sessionState.currentId = null;
 					clearTodoState();
+					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
+						const draftInstanceId = discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined;
+						void getAgentsRpc({
+							projectSlug: attachedSlug,
+							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
+						})
+							.then((response) => {
+								if (
+									sessionState.currentId === null &&
+									getCurrentSessionId() === null &&
+									attachedProjectState.slug === attachedSlug &&
+									draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined)
+								) applyGetAgentsResponse(response);
+							})
+							.catch(() => undefined);
+					}
 				}
 				return;
 			}
@@ -649,10 +668,11 @@
 	// Settings panel event bridge (SessionBar dispatches "settings:open")
 
 	$effect(() => {
-		function onSettingsOpen(e: Event) {
-			const detail = (e as CustomEvent).detail;
+		function onSettingsOpen(e: WindowEventMap["settings:open"]) {
+			const detail = e.detail;
 			// A generic open leaves this undefined: phone then starts on the section list.
-			settingsInitialTab = detail?.tab;
+			settingsInitialTab = detail?.section;
+			settingsInitialAnchor = detail?.anchor;
 			settingsVisible = true;
 		}
 		window.addEventListener("settings:open", onSettingsOpen);
@@ -871,7 +891,7 @@
 <NotificationStack />
 <DeepSearch />
 <QrModal visible={qrVisible} onClose={handleQrClose} />
-<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} onClose={() => (settingsVisible = false)} />
+<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} initialAnchor={settingsInitialAnchor} onClose={() => (settingsVisible = false)} />
 {#if featureFlags.debug}
 	<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
 {/if}

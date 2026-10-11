@@ -27,7 +27,7 @@ test("auto-settle toggle and idle window survive reload", async ({
 
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
-	await page.getByTestId("settings-tab-appearance").click();
+	await page.getByTestId("settings-tab-general").click();
 	const select = page.getByTestId("settings-auto-settle-select");
 	await expect(select).toHaveValue("3");
 	await select.selectOption("7");
@@ -35,12 +35,12 @@ test("auto-settle toggle and idle window survive reload", async ({
 	await page.getByTestId("settings-close-btn").click();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
-	await page.getByTestId("settings-tab-appearance").click();
+	await page.getByTestId("settings-tab-general").click();
 	await expect(select).toHaveValue("7");
 	await page.reload();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
-	await page.getByTestId("settings-tab-appearance").click();
+	await page.getByTestId("settings-tab-general").click();
 	await expect(select).toHaveValue("7");
 });
 

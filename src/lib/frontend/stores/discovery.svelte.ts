@@ -26,7 +26,6 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
-import { getDraftProject, projectState } from "./project-state.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
@@ -182,6 +181,7 @@ const serverDiscovery = $state({
 // `if (state.x === mine) state.x = previous` dance was written to dodge.
 
 const choice = $state({
+	instanceId: null as string | null,
 	agentId: null as string | null,
 	modelId: null as string | null,
 	providerId: null as string | null,
@@ -244,17 +244,37 @@ export const discoveryState = {
 	},
 
 	// Server-owned, with this tab's unconfirmed click read first.
+	get hasInstanceChoice(): boolean {
+		return choice.instanceId !== null;
+	},
 	get hasModelChoice(): boolean {
 		return choice.modelId !== null || choice.variant !== null;
 	},
 	get currentModelId(): string {
-		return choice.modelId ?? serverDiscovery.currentModelId;
+		return (
+			choice.modelId ??
+			(sessionState.currentId
+				? serverDiscovery.currentModelId
+				: discoveryState.defaultModelId || serverDiscovery.currentModelId)
+		);
 	},
 	get currentProviderId(): string {
-		return choice.providerId ?? serverDiscovery.currentProviderId;
+		return (
+			choice.providerId ??
+			(sessionState.currentId
+				? serverDiscovery.currentProviderId
+				: discoveryState.defaultProviderId || serverDiscovery.currentProviderId)
+		);
 	},
 	get currentVariant(): string {
-		return choice.variant ?? serverDiscovery.currentVariant;
+		return (
+			choice.variant ??
+			(!sessionState.currentId &&
+			choice.modelId === null &&
+			discoveryState.defaultModelId
+				? serverDiscovery.defaultVariant
+				: serverDiscovery.currentVariant)
+		);
 	},
 	get currentContextWindow(): string {
 		return choice.contextWindow ?? serverDiscovery.currentContextWindow;
@@ -436,21 +456,16 @@ export function getProviderGroupsForInstance(
 	);
 }
 
-/** The instance a new session in `project` (default: the draft's) is created
- *  on: the project's binding when still available, else the instance derived from the current/default
- *  model's provider. The project binding is the only harness choice, so the
- *  header badge and the composer picker cannot disagree. Bound-session
- *  locking is layered on top by the picker (it needs session state). */
-export function getEffectiveInstanceId(
-	project: string | null = getDraftProject(),
-): string {
+/** The draft's available pick, else its model's provider, else the first instance. */
+export function getEffectiveInstanceId(): string {
 	const available = getAvailableInstances();
 	const isAvailable = (id: string) =>
 		available.length === 0 || available.some((i) => i.id === id);
-	const bound = projectState.projects.find(
-		(p) => p.slug === project,
-	)?.instanceId;
-	if (bound != null && isAvailable(bound)) return bound;
+	if (
+		choice.instanceId !== null &&
+		available.some((i) => i.id === choice.instanceId)
+	)
+		return choice.instanceId;
 	const derived = instanceIdForProviderId(
 		discoveryState.currentProviderId || discoveryState.defaultProviderId,
 	);
@@ -474,11 +489,9 @@ export function getSessionInstanceId(sessionId: string): string {
 		: getEffectiveInstanceId();
 }
 
-/** Re-aim the local model selection after a harness pick (pre-creation
- *  only): if the active model falls outside the instance, choose the
- *  instance's default-or-first visible model. The pick itself is a project
- *  rebind, which the caller makes. */
+/** Pick this draft's instance and re-aim its model if it belongs to another harness. */
 export function selectInstance(instanceId: string): void {
+	choice.instanceId = instanceId;
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
 	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
@@ -500,6 +513,17 @@ export function selectInstance(instanceId: string): void {
 		// sent anywhere yet.
 		chooseModel({ modelId: preferred.id, providerId: preferred.provider });
 	}
+}
+
+/** A created or viewed session consumes the draft's harness and model picks. */
+export function clearDraftSelection(): void {
+	choice.instanceId = null;
+	choice.modelId = null;
+	choice.providerId = null;
+	choice.variant = null;
+	delete owner.modelId;
+	delete owner.providerId;
+	delete owner.variant;
 }
 
 /** Format agent label for display. */
@@ -644,8 +668,12 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		handleModelList({
 			providers: [
 				...response.providers,
+				// Keep the cached Claude provider unless the reply carries its own;
+				// a duplicate id crashes every keyed list of providers.
 				...serverDiscovery.providers.filter(
-					(provider) => provider.id === "claude",
+					(provider) =>
+						provider.id === "claude" &&
+						!response.providers.some((next) => next.id === "claude"),
 				),
 			],
 		});
@@ -965,6 +993,15 @@ export function getChosenModel(instanceId: string):
 }
 
 export function chooseVariant(variant: string): UndoChoice {
+	if (!sessionState.currentId && choice.modelId === null) {
+		return undoAll([
+			chooseModel({
+				modelId: discoveryState.currentModelId,
+				providerId: discoveryState.currentProviderId,
+			}),
+			propose("variant", variant),
+		]);
+	}
 	return propose("variant", variant);
 }
 

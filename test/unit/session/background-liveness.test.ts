@@ -190,4 +190,47 @@ describe("makeSessionBackgroundLiveness", () => {
 		expect(liveness.backgroundOf("one")).toBeUndefined();
 		expect(onChange.mock.calls).toEqual([["one"], ["one"]]);
 	});
+	it("reports a runtime's live task ids and since when that list has held", () => {
+		let clock = 100;
+		const liveness = makeSessionBackgroundLiveness(undefined, () => clock);
+		const a = { id: "a", type: "local_bash", description: "Watch" };
+		const b = { id: "b", type: "local_agent", description: "Audit" };
+
+		// Nothing heard since the daemon started: unknown, not empty.
+		expect(liveness.liveListOf("one")).toBeUndefined();
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(),
+			since: 100,
+		});
+
+		clock = 200;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [a, b] });
+		// A replay of the same list must not restart the clock.
+		clock = 300;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [b, a] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(["a", "b"]),
+			since: 200,
+		});
+
+		clock = 400;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [b] });
+		expect(liveness.liveListOf("one")?.since).toBe(400);
+
+		// An ended runtime has no live tasks: known and empty.
+		clock = 500;
+		liveness.record({ sessionId: "one", kind: "session-ended" });
+		liveness.record({ sessionId: "two", kind: "session-ended" });
+		clock = 600;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(),
+			since: 500,
+		});
+		expect(liveness.liveListOf("two")).toEqual({
+			taskIds: new Set(),
+			since: 500,
+		});
+	});
 });

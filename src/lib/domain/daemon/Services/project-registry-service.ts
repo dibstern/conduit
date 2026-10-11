@@ -66,7 +66,6 @@ import {
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
-import { getInstances } from "./instance-manager-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -127,7 +126,6 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	folders: project.folders,
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
-	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
@@ -288,9 +286,6 @@ export const projectInfos = Effect.gen(function* () {
 				repositoryIdentities: project.repositoryIdentities,
 			}),
 			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-			...(project.instanceId !== undefined && {
-				instanceId: project.instanceId,
-			}),
 		})),
 	);
 });
@@ -519,16 +514,13 @@ export const remove = (slug: string) =>
 	);
 
 /**
- * Update project fields (title, instanceId). Publishes InstanceStatusChanged.
+ * Update project fields. Publishes InstanceStatusChanged.
  * Fails with ProjectNotFound if slug not registered.
  */
 export const updateProject = (
 	slug: string,
 	updates: Partial<
-		Pick<
-			StoredProject,
-			"title" | "instanceId" | "folders" | "repositoryIdentities"
-		>
+		Pick<StoredProject, "title" | "folders" | "repositoryIdentities">
 	>,
 ) =>
 	Effect.gen(function* () {
@@ -741,31 +733,10 @@ export const replaceRelay = (slug: string) =>
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
 
-/** The OpenCode instance a project's relay drives: its bound instance when
- *  that is OpenCode, else the first OpenCode instance. */
+/** The first OpenCode instance drives the relay's default sessions. */
 export const openCodeInstanceFor = <I extends { id: string; driver?: string }>(
 	instances: readonly I[],
-	instanceId: string | undefined,
-): I | undefined =>
-	instances.find((i) => i.driver !== "claude" && i.id === instanceId) ??
-	instances.find((i) => i.driver !== "claude");
-
-/** Bind a project's new sessions to an instance. The relay reads the binding
- *  only through openCodeInstanceFor, so a running relay that already drives
- *  the new choice (say, after a rebind between two Claude accounts) is kept
- *  instead of rebuilt, which takes seconds. */
-export const setProjectInstance = (slug: string, instanceId: string) =>
-	Effect.gen(function* () {
-		yield* updateProject(slug, { instanceId });
-		const relay = yield* (yield* RelayCacheTag).peek(slug);
-		const openCode = openCodeInstanceFor(yield* getInstances, instanceId)?.id;
-		if (Option.isSome(relay) && relay.value.openCodeInstanceId === openCode)
-			return;
-		yield* replaceRelay(slug);
-	}).pipe(
-		Effect.annotateLogs("slug", slug),
-		Effect.withSpan("projectRegistry.setProjectInstance"),
-	);
+): I | undefined => instances.find((i) => i.driver !== "claude");
 
 /**
  * Check if a project is currently in Registering state
@@ -1065,9 +1036,6 @@ export const saveProject = (input: SaveProjectInput) =>
 							repositoryIdentities,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
-							...(input.instanceId !== undefined && {
-								instanceId: input.instanceId,
-							}),
 						};
 				if (existing) {
 					yield* updateProject(slug, {

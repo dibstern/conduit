@@ -30,6 +30,7 @@ import {
 	makeProjectRegistryLive,
 	markError,
 	markReady,
+	openCodeInstanceFor,
 	readyEntries,
 	remove,
 	removeAll,
@@ -345,16 +346,6 @@ describe("ProjectRegistry Effect - updateProject", () => {
 		}).pipe(Effect.provide(TestLayer)),
 	);
 
-	it.scoped("updates instanceId", () =>
-		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* updateProject("alpha", { instanceId: "inst-2" });
-
-			const project = yield* getProject("alpha");
-			expect(project.instanceId).toBe("inst-2");
-		}).pipe(Effect.provide(TestLayer)),
-	);
-
 	it.scoped("publishes InstanceStatusChanged", () =>
 		Effect.gen(function* () {
 			yield* addWithoutRelay(makeProject("alpha"));
@@ -392,6 +383,22 @@ describe("ProjectRegistry Effect - updateProject", () => {
 			expect(val.project.title).toBe("Updated");
 		}).pipe(Effect.provide(TestLayer)),
 	);
+});
+
+describe("openCodeInstanceFor", () => {
+	it("returns the first OpenCode instance after skipping Claude accounts", () => {
+		const instances = [
+			{ id: "claude", driver: "claude" },
+			{ id: "first", driver: "opencode" },
+			{ id: "second", driver: "opencode" },
+		];
+		expect(openCodeInstanceFor(instances)).toBe(instances[1]);
+		expect(openCodeInstanceFor([{ id: "legacy" }])).toEqual({ id: "legacy" });
+		expect(
+			openCodeInstanceFor([{ id: "claude", driver: "claude" }]),
+		).toBeUndefined();
+		expect(openCodeInstanceFor([])).toBeUndefined();
+	});
 });
 
 describe("ProjectRegistry Effect - touchLastUsed", () => {

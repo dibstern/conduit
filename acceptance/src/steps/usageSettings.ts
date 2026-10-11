@@ -63,7 +63,7 @@ export function snapshot(page: Page): readonly UsageReading[] {
 async function openUsage(page: Page): Promise<void> {
 	await page.evaluate(() =>
 		window.dispatchEvent(
-			new CustomEvent("settings:open", { detail: { tab: "usage" } }),
+			new CustomEvent("settings:open", { detail: { section: "usage" } }),
 		),
 	);
 	await expect(page.getByTestId("usage-settings")).toBeVisible();
@@ -217,17 +217,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 					createdAt: 1,
 				})),
 			});
-			const projects = [
-				{
-					slug: "myapp",
-					title: "myapp",
-					folders: ["/src/myapp"],
-					instanceId: "claude",
-				},
-			];
-			rpc.setDaemonList("SubscribeProjects", { projects });
-			// A draft refetches the list; keep the binding there too.
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			// A Claude default model makes the claude account the draft's account.
+			rpc.setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-5",
+				provider: "claude",
+				variant: "",
+			});
 			seedUsageLimits(world.page, {
 				usageLimits: {
 					autoResume: false,
@@ -268,22 +264,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 				: [personal];
 			rpc.setUsageReadings(readings);
 			rpc.setResponse("QuotaForAccounts", readings);
-		},
-	},
-	{
-		name: "set or clear the project account fallback",
-		match: /^the Usage project account is (\S+)$/,
-		run: ({ world, match }) => {
-			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						...(match[1] === "none" ? {} : { instanceId: match[1] }),
-					},
-				],
-			});
 		},
 	},
 	{
@@ -664,8 +644,8 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open Usage using the existing specific-tab settings event",
-		match: /^I open settings to the Usage tab$/,
+		name: "open Usage using the specific-section settings event",
+		match: /^I open settings to the Usage section$/,
 		run: ({ world }) => openUsage(world.page),
 	},
 	{
@@ -689,28 +669,40 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert Usage follows Claude and precedes Instances",
-		match: /^the settings tabs place Usage between Claude and Instances$/,
+		name: "assert the five settings sections and computer grouping",
+		match: /^the settings sections place Usage and Server under This computer$/,
 		run: async ({ world }) => {
-			const tabs = world.page.locator('[data-testid^="settings-tab-"]');
+			const panel = world.page.locator("#settings-panel");
+			const tabs = panel.locator('[data-testid^="settings-tab-"]');
 			const ids = await tabs.evaluateAll((elements) =>
 				elements.map((element) => element.getAttribute("data-testid")),
 			);
-			const claude = ids.indexOf("settings-tab-claude");
-			expect(claude).toBeGreaterThanOrEqual(0);
-			expect(ids.slice(claude, claude + 3)).toEqual([
+			expect(ids).toEqual([
+				"settings-tab-general",
+				"settings-tab-models",
 				"settings-tab-claude",
 				"settings-tab-usage",
-				"settings-tab-instances",
+				"settings-tab-server",
 			]);
-			await expect(world.page.getByTestId("settings-tab-usage")).toHaveText(
-				"Usage",
-			);
+			const label = panel.getByText("This computer", { exact: true });
+			await expect(label).toBeVisible();
+			const positions = await Promise.all([
+				panel.getByTestId("settings-tab-claude").boundingBox(),
+				label.boundingBox(),
+				panel.getByTestId("settings-tab-usage").boundingBox(),
+				panel.getByTestId("settings-tab-server").boundingBox(),
+			]);
+			const [claude, group, usage, server] = positions;
+			if (!claude || !group || !usage || !server)
+				throw new Error("Missing settings section grouping");
+			expect(claude.y + claude.height).toBeLessThanOrEqual(group.y);
+			expect(group.y + group.height).toBeLessThanOrEqual(usage.y);
+			expect(usage.y + usage.height).toBeLessThanOrEqual(server.y);
 		},
 	},
 	{
-		name: "assert Instances no longer contains limit settings",
-		match: /^the Instances tab has no usage limit settings$/,
+		name: "assert Server does not contain limit settings",
+		match: /^the Server section has no usage limit settings$/,
 		run: async ({ world }) => {
 			await expect(world.page.locator("#instances-settings")).toBeVisible();
 			await expect(world.page.locator("#usage-limit-settings")).toHaveCount(0);
@@ -1075,7 +1067,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "reload the app so Usage reads the persisted setting again",
-		match: /^I reload the app and open the Usage tab$/,
+		match: /^I reload the app and open the Usage section$/,
 		run: async ({ world }) => {
 			await world.page.reload();
 			await expect(world.page.locator("#connect-overlay")).toBeHidden();

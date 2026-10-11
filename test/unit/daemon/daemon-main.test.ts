@@ -62,7 +62,6 @@ function makeTestLayer() {
 		Layer.succeed(InstanceMgmtTag, makeMockInstanceMgmt()),
 		Layer.succeed(ProjectMgmtTag, {
 			getProjects: vi.fn().mockReturnValue([]),
-			setProjectInstance: vi.fn(),
 		}),
 		Layer.succeed(RelayCacheTag, {
 			get: () => Effect.die("not implemented in test"),
