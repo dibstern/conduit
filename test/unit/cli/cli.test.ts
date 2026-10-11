@@ -1035,7 +1035,7 @@ describe("--help shows usage information", () => {
 		await run(["--help"], cli);
 
 		expect(cli.state.output).toContain("--no-https");
-		expect(cli.state.output).toContain("--dangerously-skip-permissions");
+		expect(cli.state.output).not.toContain("--dangerously-skip-permissions");
 	});
 });
 
@@ -1075,20 +1075,20 @@ describe("T12: parseArgs — --no-https, --dangerously-skip-permissions", () => 
 	});
 });
 
-describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () => {
-	it("errors when --dangerously-skip-permissions used without --pin", async () => {
+describe("T13: --dangerously-skip-permissions is deprecated", () => {
+	it("warns and continues without --pin", async () => {
 		const cli = createMockCLI();
 
 		await run(["--dangerously-skip-permissions"], cli);
 
-		expect(cli.state.errors).toContain(
-			"--dangerously-skip-permissions requires --pin",
+		expect(cli.state.errors).toBe(
+			"Warning: --dangerously-skip-permissions is deprecated and has no effect.\n",
 		);
-		expect(cli.state.exitCode).toBe(1);
+		expect(cli.state.output).toContain("URL:");
+		expect(cli.state.exitCode).toBeNull();
 	});
 
 	it("does not error when --dangerously-skip-permissions used with --pin", async () => {
-		// With --pin, the command becomes "pin" and skipPerms validation is skipped
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
@@ -1097,6 +1097,9 @@ describe("T13: --dangerously-skip-permissions requires --pin (Ticket 8.15)", () 
 		});
 
 		await run(["--dangerously-skip-permissions", "--pin", "1234"], cli);
+		expect(cli.state.errors).toBe(
+			"Warning: --dangerously-skip-permissions is deprecated and has no effect.\n",
+		);
 
 		// --pin handler runs (PIN is valid, daemon is running) → "PIN updated"
 		expect(cli.state.output).toContain("PIN updated");
@@ -1485,8 +1488,11 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 		"-h",
 	];
 
-	// Older installed services can still pass this hidden alias.
-	const INTERNAL_FLAGS = new Set(["--foreground"]);
+	// Older scripts and installed services can still pass these hidden flags.
+	const INTERNAL_FLAGS = new Set([
+		"--foreground",
+		"--dangerously-skip-permissions",
+	]);
 
 	// Short aliases are documented inline with their long form
 	// (e.g. "-p, --port") so we check the long form covers them.

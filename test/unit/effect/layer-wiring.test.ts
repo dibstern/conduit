@@ -492,7 +492,6 @@ describe("makeDaemonLive wiring", () => {
 							tls: false,
 							debug: false,
 							keepAwake: false,
-							dangerouslySkipPermissions: false,
 							projects: [
 								{
 									path: "/tmp/persisted-alpha",

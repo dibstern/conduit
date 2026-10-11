@@ -1,4 +1,4 @@
-// One RPC client pair per project, carried over exactly two WebSockets:
+// One RPC client pair for the whole app, carried over exactly two WebSockets:
 //
 //   control — unary calls plus low-rate subscriptions (the shell)
 //   stream  — hot streams: session detail and the project's PTYs (ni8.11)
@@ -273,11 +273,12 @@ export class WsRpcClients extends Context.Tag("WsRpcClients")<
 	WsRpcClients,
 	{
 		/**
-		 * The socket pair for `projectSlug`, opened on first use and reused
-		 * afterwards. A different slug replaces the pair, so the browser never
-		 * holds more than one pair — the app talks to one project at a time.
-		 * Replacing it closes the old sockets, which fails anything still in
-		 * flight on them; nothing in the frontend addresses two slugs at once.
+		 * The app's one socket pair, opened on first use and kept for the
+		 * runtime's lifetime, with subscriptions bound to `projectSlug`. The
+		 * server routes by payload, not by connection, so every project shares
+		 * the pair. A project switch must not reopen it: closing the pair fails
+		 * every in-flight call and flips `connected`, which re-runs the effects
+		 * that issued those calls (the switch-projects ping-pong).
 		 *
 		 * Opening cannot fail in a way a caller could act on, so there is no
 		 * error channel: `WsRpcConnect` is typed `never` because the WebSocket
@@ -292,76 +293,53 @@ export class WsRpcClients extends Context.Tag("WsRpcClients")<
 	}
 >() {}
 
-interface OpenPair {
-	readonly projectSlug: string;
-	readonly sockets: WsRpcSockets;
-	readonly close: Effect.Effect<void>;
-}
+type SocketPair = Pick<WsRpcSockets, "control" | "stream">;
 
 const make = (connect: WsRpcConnect) =>
 	Effect.gen(function* () {
 		// The layer's scope — i.e. the app-lifetime runtime. Disposing the runtime
-		// closes every pair opened below.
+		// closes the pair opened below.
 		const appScope = yield* Effect.scope;
-		const current = yield* Ref.make<OpenPair | undefined>(undefined);
+		const current = yield* Ref.make<SocketPair | undefined>(undefined);
 		// Serialises get-or-open, so two concurrent callers cannot race four
-		// sockets open for one project.
+		// sockets open.
 		const lock = yield* Effect.makeSemaphore(1);
 
-		const open = (
-			projectSlug: string,
-			scope: Scope.CloseableScope,
-		): Effect.Effect<OpenPair> =>
-			Effect.gen(function* () {
-				const url = makeWsRpcUrl();
-				const [control, stream] = yield* Effect.all([
-					connect({ url, trafficClass: "control" }),
-					connect({ url, trafficClass: "stream" }),
-				]).pipe(Scope.extend(scope));
-				return {
-					projectSlug,
-					sockets: {
-						control,
-						stream,
-						subscriptions: makeSubscriptions(projectSlug, { control, stream }),
-					},
-					close: Scope.close(scope, Exit.void),
-				};
-			});
+		const pair = lock.withPermits(1)(
+			Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const existing = yield* Ref.get(current);
+					if (existing) return existing;
+					// Only acquisition is interruptible; a failed or interrupted open
+					// closes its own scope, so a half-open pair is never published.
+					const scope = yield* Scope.fork(
+						appScope,
+						ExecutionStrategy.sequential,
+					);
+					const url = makeWsRpcUrl();
+					const [control, stream] = yield* restore(
+						Effect.all([
+							connect({ url, trafficClass: "control" }),
+							connect({ url, trafficClass: "stream" }),
+						]).pipe(Scope.extend(scope)),
+					).pipe(
+						Effect.onExit((exit) =>
+							Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void,
+						),
+					);
+					const next = { control, stream };
+					yield* Ref.set(current, next);
+					return next;
+				}),
+			),
+		);
 
 		return {
 			forProject: (projectSlug: string) =>
-				lock.withPermits(1)(
-					Effect.uninterruptibleMask((restore) =>
-						Effect.gen(function* () {
-							const existing = yield* Ref.get(current);
-							if (existing?.projectSlug === projectSlug) {
-								return existing.sockets;
-							}
-							// Drop the cache before anything can fail. A closed or half-open
-							// pair must never stay reachable, and an empty cache costs only a
-							// reopen on the next call.
-							yield* Ref.set(current, undefined);
-							if (existing) {
-								yield* existing.close;
-							}
-							// Closing and publication must finish even if the caller cancels.
-							// Only acquisition is interruptible; its entire handoff is covered
-							// by cleanup, including a successful connect interrupted on return.
-							const scope = yield* Scope.fork(
-								appScope,
-								ExecutionStrategy.sequential,
-							);
-							const next = yield* restore(open(projectSlug, scope)).pipe(
-								Effect.onExit((exit) =>
-									Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void,
-								),
-							);
-							yield* Ref.set(current, next);
-							return next.sockets;
-						}),
-					),
-				),
+				Effect.map(pair, (sockets) => ({
+					...sockets,
+					subscriptions: makeSubscriptions(projectSlug, sockets),
+				})),
 		};
 	});
 

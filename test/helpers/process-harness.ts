@@ -316,7 +316,6 @@ export class ProcessHarness {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: foregroundCli
 					? [
 							{

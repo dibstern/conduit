@@ -389,7 +389,6 @@ describe("SessionManager Effect", () => {
 					tls: false,
 					debug: false,
 					keepAwake: false,
-					dangerouslySkipPermissions: false,
 					projects: [],
 					instances: [
 						{
