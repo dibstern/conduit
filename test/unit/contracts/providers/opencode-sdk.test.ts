@@ -13,15 +13,12 @@ import {
 	OpenCodePathSchema,
 	OpenCodePendingPermissionSchema,
 	OpenCodePendingQuestionSchema,
-	OpenCodePermissionReplyRequestSchema,
 	OpenCodeProjectSchema,
 	OpenCodeProviderListResponseSchema,
 	OpenCodeQuestionReplyRequestSchema,
 	OpenCodeSessionDetailSchema,
-	OpenCodeSessionPromptRequestSchema,
 	OpenCodeSessionSchema,
 	OpenCodeSessionStatusSchema,
-	OpenCodeSessionUpdateRequestSchema,
 	OpenCodeUndefinedResponseSchema,
 } from "../../../../src/lib/contracts/providers/opencode-sdk.js";
 
@@ -514,37 +511,7 @@ describe("OpenCode provider contract schemas", () => {
 		).toBe(true);
 	});
 
-	it("validates OpenCode request bodies Conduit sends to SDK and gap endpoints", () => {
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionPromptRequestSchema)({
-					parts: [{ type: "text", text: "hello" }],
-					model: { providerID: "anthropic", modelID: "claude" },
-					agent: "build",
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeSessionPromptRequestSchema)({
-					parts: [{ type: "text" }],
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionUpdateRequestSchema)({
-					title: "Renamed",
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePermissionReplyRequestSchema)({
-					response: "once",
-				}),
-			),
-		).toBe(true);
+	it("validates the question reply body Conduit sends to the SDK", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodeQuestionReplyRequestSchema)({

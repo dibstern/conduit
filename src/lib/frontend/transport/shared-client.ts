@@ -30,7 +30,10 @@ import {
 	Scope,
 } from "effect";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
-import { trackControlSocket } from "./connection-status.svelte.js";
+import {
+	markControlSocketOpen,
+	trackControlSocket,
+} from "./connection-status.svelte.js";
 import { makeResumeLedger, type ResumeLedger, resumeStream } from "./resume.js";
 import { decodeSessionDetail } from "./session-detail-wire.js";
 import { WsRpcGroup } from "./ws-rpc.js";
@@ -222,18 +225,45 @@ const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
 	Schedule.union(Schedule.spaced("1 second")),
 );
 
+// After a drop the protocol refuses every request until its own `onOpen` clears
+// the stored error, which runs after the raw "open" event. Reporting connected
+// from that hook, not the raw event, means a caller that reacts to `connected`
+// (ChatLayout loading the file tree) is never refused.
+const controlSocket = (url: string) =>
+	Layer.effect(
+		Socket.Socket,
+		Effect.map(
+			Socket.makeWebSocket(url),
+			(socket): Socket.Socket => ({
+				...socket,
+				runRaw: (handler, options) =>
+					socket.runRaw(handler, {
+						onOpen: Effect.zipRight(
+							options?.onOpen ?? Effect.void,
+							Effect.sync(markControlSocketOpen),
+						),
+					}),
+			}),
+		),
+	).pipe(
+		Layer.provide(
+			Layer.succeed(Socket.WebSocketConstructor, (url, protocols) => {
+				const socket = new globalThis.WebSocket(url, protocols);
+				trackControlSocket(socket);
+				return socket;
+			}),
+		),
+	);
+
 const connectWebSocket: WsRpcConnect = ({ url, trafficClass }) =>
 	Layer.build(
 		RpcClient.layerProtocolSocket({ retrySchedule: reconnectSchedule }).pipe(
-			Layer.provide(Socket.layerWebSocket(url)),
 			Layer.provide(
 				trafficClass === "control"
-					? Layer.succeed(Socket.WebSocketConstructor, (url, protocols) => {
-							const socket = new globalThis.WebSocket(url, protocols);
-							trackControlSocket(socket);
-							return socket;
-						})
-					: Socket.layerWebSocketConstructorGlobal,
+					? controlSocket(url)
+					: Socket.layerWebSocket(url).pipe(
+							Layer.provide(Socket.layerWebSocketConstructorGlobal),
+						),
 			),
 			Layer.provide(RpcSerialization.layerJson),
 		),

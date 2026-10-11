@@ -284,12 +284,10 @@ export function isSessionErrorEvent(
 // Verified against a live opencode 1.17.18 server (wire capture): the real
 // `permission.replied` event is { sessionID, requestID, reply }, where
 // `requestID` matches the asked event's `properties.id` and `reply` is one of
-// "once" | "always" | "reject". NOTE: the npm @opencode-ai/sdk@1.17.18
-// generated types disagree with the server binary here — they declare
-// { sessionID, permissionID, response } (those are the reply *request* body
-// field names, not the event). Follow the wire, not the SDK types. Older code
-// read `properties.id` / `properties.permissionID`, so the guard was always
-// false against a real server and pending permissions were never cleared.
+// "once" | "always" | "reject". The v2 SDK's EventPermissionReplied type
+// agrees. Older code read `properties.id` / `properties.permissionID`, so the
+// guard was always false against a real server and pending permissions were
+// never cleared.
 export interface PermissionRepliedEvent extends SSEEventBase {
 	type: "permission.replied";
 	properties: {

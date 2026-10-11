@@ -18,6 +18,7 @@ export const fileTreeState = $state({
 	/** Project, session and effective folder that own these caches. */
 	scope: null as string | null,
 	entries: [] as string[],
+	roots: [] as NonNullable<GetFileTreeResponse["roots"]>,
 	loading: false,
 	loaded: false,
 	/** File browser position shared by the sidebar and phone session view. */
@@ -28,6 +29,11 @@ export const fileTreeState = $state({
 	browserExpandedPaths: new Set<string>(),
 	browserScrollTop: 0,
 });
+
+/** Relative paths belong to a folder; legacy single-folder keys stay unchanged. */
+export function fileBrowserKey(path: string, root?: string): string {
+	return root === undefined ? path : JSON.stringify([root, path]);
+}
 
 /**
  * Extract @ query from input text at cursor position.
@@ -105,6 +111,7 @@ export function filterFiles(entries: string[], query: string): string[] {
 
 export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
 	fileTreeState.entries = [...response.entries];
+	fileTreeState.roots = response.roots ?? [];
 	fileTreeState.loaded = true;
 	fileTreeState.loading = false;
 }
@@ -117,6 +124,7 @@ export function requestFileTree(): void {
 export function clearFileTreeState(): void {
 	fileTreeState.scope = null;
 	fileTreeState.entries = [];
+	fileTreeState.roots = [];
 	fileTreeState.loading = false;
 	fileTreeState.loaded = false;
 	fileTreeState.browserPath = ".";

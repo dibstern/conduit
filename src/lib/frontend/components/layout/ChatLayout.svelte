@@ -462,9 +462,10 @@
 		const slug = attachedProjectState.slug;
 		const sessionId = getCurrentSessionId();
 		const session = sessionId ? findSession(sessionId) : undefined;
-		const primary = projectState.projects.find((project) => project.slug === slug)?.folders[0] ?? "";
+		const folders = projectState.projects.find((project) => project.slug === slug)?.folders ?? [];
+		const primary = folders[0] ?? "";
 		const directory = effectiveWorkingDirectory(primary, session?.workspace);
-		return JSON.stringify([slug, sessionId, directory]);
+		return JSON.stringify([slug, sessionId, directory, folders, session?.workspace]);
 	});
 	$effect(() => {
 		const scope = fileScope;
@@ -812,7 +813,7 @@
 							</div>
 						{/if}
 						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
-							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+							<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
 						</div>
 					{/if}
 				</div>

@@ -49,6 +49,10 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProcessingTimeoutHooks,
+	type OverridesStateTag,
+} from "../../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
 import {
@@ -417,6 +421,7 @@ export class ClaudeProviderRuntime {
 		const sql = yield* SqlClient.SqlClient;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const pending = yield* PendingInteractionServiceTag;
+		const timeoutRuntime = yield* Effect.runtime<OverridesStateTag>();
 		// An in-process runner's turns ended with the relay that ran them, so
 		// every running command is unclaimed. Runner processes may outlive it.
 		let claimed = new Set<string>();
@@ -427,6 +432,7 @@ export class ClaudeProviderRuntime {
 					sql,
 					ingestion,
 					pending,
+					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
 					onRegistered: (id) => {
 						const ready = this.recoveredRequests.get(id);
 						return ready ? Deferred.succeed(ready, undefined) : Effect.void;

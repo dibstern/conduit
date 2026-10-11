@@ -76,6 +76,7 @@ export const uiState = $state({
 	// File preview
 	fileViewerOpen: false,
 	fileViewerPath: null as string | null,
+	fileViewerRoot: null as string | null,
 });
 
 // Components should wrap in $derived() for reactive caching.
@@ -285,14 +286,16 @@ export function closeLightbox(): void {
 	uiState.lightboxSrc = null;
 }
 
-export function openFileViewer(path: string): void {
+export function openFileViewer(path: string, root?: string): void {
 	uiState.fileViewerOpen = true;
 	uiState.fileViewerPath = path;
+	uiState.fileViewerRoot = root ?? null;
 }
 
 export function closeFileViewer(): void {
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
+	uiState.fileViewerRoot = null;
 }
 
 export function updateContextPercent(percent: number): void {
@@ -314,6 +317,7 @@ export function resetProjectUI(): void {
 	uiState.contextPercent = 0;
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
+	uiState.fileViewerRoot = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
 	uiState.opencodeConnections = {};

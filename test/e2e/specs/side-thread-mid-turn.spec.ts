@@ -60,7 +60,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 			turns: [
 				"pong-thinking-text-turn",
 				"extra-folder-read-turn",
-				"side-thread-plan-turn",
+				"side-thread-ask-turn",
 			],
 			holdTurnBeforeToolResult: 2,
 		},
@@ -130,7 +130,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 		expect(replayer.sentPermissionModes).toEqual([
 			"default",
 			"default",
-			"plan",
+			"default",
 		]);
 
 		// History ends at turn one; the Side Thread is idle with no tool call.

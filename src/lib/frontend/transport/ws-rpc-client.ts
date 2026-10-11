@@ -152,6 +152,7 @@ export interface CreatePtyRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 }
 
 export interface ResizePtyRpcInput {
@@ -254,12 +255,14 @@ export interface GetFileTreeRpcInput {
 export interface GetFileListRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path?: string;
 }
 
 export interface GetFileContentRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path: string;
 }
 

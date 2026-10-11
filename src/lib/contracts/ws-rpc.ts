@@ -801,16 +801,28 @@ export const FindFoldersResponseSchema = Schema.Struct({
 export const GetFileTreeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	entries: Schema.Array(Schema.String),
+	/** Present only for projects with several folders, primary first. */
+	roots: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				/** Stable Project Folder identity, independent of its mapped worktree. */
+				root: NonEmptyString,
+				label: NonEmptyString,
+			}),
+		),
+	),
 });
 
 export const GetFileListResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	entries: Schema.Array(FileEntrySchema),
 });
 
 export const GetFileContentResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	content: Schema.String,
 	binary: Schema.optional(Schema.Boolean),
@@ -1233,6 +1245,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
 		sessionId: Schema.optional(NonEmptyString),
+		root: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -1750,6 +1763,7 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
 	},
@@ -1763,6 +1777,7 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
 	},
