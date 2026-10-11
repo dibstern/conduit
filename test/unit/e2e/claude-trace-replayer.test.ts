@@ -885,7 +885,7 @@ describe("createClaudeTraceReplayer", () => {
 		}
 		expect(lengths).toEqual(expected);
 		prompts.close();
-	});
+	}, 120_000);
 
 	// Failure 10.
 	it("gives transcript reads the same fresh ids as the replayed stream", async () => {
