@@ -747,12 +747,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			FindFolders: (request) =>
 				Effect.gen(function* () {
 					const projects = yield* allProjects;
-					return yield* findFolders(request.query, {
-						recent: getRecent(loadRecentProjects(configDir)).map(
-							(project) => project.directory,
-						),
-						projectFolders: projects.flatMap((project) => project.folders),
-					});
+					return yield* findFolders(
+						request.query,
+						{
+							recent: getRecent(loadRecentProjects(configDir)).map(
+								(project) => project.directory,
+							),
+							projectFolders: projects.flatMap((project) => project.folders),
+						},
+						configDir,
+					);
 				}).pipe(
 					Effect.provide(context),
 					Effect.mapError((error) =>

@@ -110,11 +110,13 @@ export const createSessionForClient = <E = never>({
 	providerId,
 	model,
 	initializeWorkspace,
+	sessionId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly sessionId?: string;
 	readonly model?: {
 		readonly modelId: string;
 		readonly providerId: string;
@@ -127,10 +129,11 @@ export const createSessionForClient = <E = never>({
 		const log = yield* LoggerTag;
 
 		const create =
-			instanceId != null || providerId != null
+			instanceId != null || providerId != null || sessionId != null
 				? sessionManagerService.createSession(title, {
 						...(instanceId != null ? { instanceId } : {}),
 						...(providerId != null ? { providerId } : {}),
+						...(sessionId != null ? { sessionId } : {}),
 					})
 				: sessionManagerService.createSession(title);
 		return yield* Effect.uninterruptibleMask((restore) =>

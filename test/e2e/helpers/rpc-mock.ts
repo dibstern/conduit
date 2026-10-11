@@ -1,6 +1,7 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
 	type ProjectSetting,
@@ -709,7 +710,11 @@ async function handleMessage(
 			if (raw.tag === "input.submit")
 				control.onSendMessage?.(raw.payload ?? {});
 		} catch (error) {
-			if (error instanceof WsRpcError || error instanceof WorkspaceMoveError) {
+			if (
+				error instanceof WsRpcError ||
+				error instanceof WorkspaceMoveError ||
+				error instanceof WorktreeCreationError
+			) {
 				sendJson(ws, {
 					_tag: "Exit",
 					requestId: raw.id,
@@ -724,7 +729,14 @@ async function handleMessage(
 											path: error.path,
 											reason: error.reason,
 										}
-									: { _tag: "WsRpcError", message: error.message },
+									: error instanceof WorktreeCreationError
+										? {
+												_tag: "WorktreeCreationError",
+												path: error.path,
+												reason: error.reason,
+												message: error.message,
+											}
+										: { _tag: "WsRpcError", message: error.message },
 						},
 					},
 				});

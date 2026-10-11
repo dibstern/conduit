@@ -41,20 +41,31 @@ discovery is best-effort and never rejects a project save or daemon startup.
 
 ## Session Workspace
 
-**Session Workspace** is a session's recorded mapping from project folders to
-existing git worktrees, with the move's cause and the worktrees' origin. Only the
+**Session Workspace** is where a session runs: Local uses the project's folders;
+New worktree uses session-owned git worktrees on one generated branch. Its
+recorded mapping from Project Folders to worktrees includes the move's cause and
+origin, `existing` or `conduit`. Only the
 Session Workspace service writes it, as a `session.workspace_changed` canonical
 event through the session-command seam. An empty map projects to NULL, meaning
 the project's main folders. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Conduit's Worktree daemon service creates a checkout under
+`<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
+then the Session Workspace service records its launch move. It starts from the
+folder's committed HEAD on its current branch. Uncommitted changes stay in the
+original checkout. Creation or launch failure rolls back the checkout and its
+new branch. These worktrees cannot become projects or Project Folders.
+
 Moves require the session provider's `supportsWorktree` capability. OpenCode
 moves are refused before recording an event; Claude supports moves.
 
-**Effective Working Directory** is the primary project folder's mapped worktree,
+**Effective Working Directory** is the primary Project Folder's worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
+**Effective Folders** are each Project Folder's session worktree when mapped,
+otherwise the Project Folder itself. A worktree is session state, not a project.
 The file tree lists every Effective Folder, each Project Folder mapped through
 the workspace, as a labelled root, primary first. Single-folder projects keep
 their existing tree without an extra root row. File list and content requests

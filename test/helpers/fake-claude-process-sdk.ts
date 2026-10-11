@@ -881,6 +881,18 @@ function query(params: {
 				} as unknown as SDKMessage;
 				continue;
 			}
+			const workspaceFile = join(
+				params.options?.cwd ?? process.cwd(),
+				"session-only.txt",
+			);
+			if (prompt.includes("workspace-isolation-write"))
+				writeFileSync(
+					workspaceFile,
+					prompt.slice(prompt.indexOf("workspace-isolation-write")),
+				);
+			const chunks = prompt.includes("workspace-isolation-read")
+				? [existsSync(workspaceFile) ? "present" : "absent"]
+				: responseChunks(prompt);
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",
@@ -891,7 +903,7 @@ function query(params: {
 				index: 0,
 				content_block: { type: "text", text: "" },
 			});
-			for (const [index, text] of responseChunks(prompt).entries()) {
+			for (const [index, text] of chunks.entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
 					turnHeld = true;
@@ -1197,7 +1209,7 @@ function query(params: {
 					message: {
 						id: messageId,
 						role: "assistant",
-						content: [{ type: "text", text: responseChunks(prompt).join("") }],
+						content: [{ type: "text", text: chunks.join("") }],
 					},
 					parent_tool_use_id: null,
 					parent_agent_id: null,
@@ -1212,7 +1224,7 @@ function query(params: {
 				message: {
 					id: messageId,
 					role: "assistant",
-					content: [{ type: "text", text: responseChunks(prompt).join("") }],
+					content: [{ type: "text", text: chunks.join("") }],
 				},
 			} as unknown as SDKMessage;
 			if (request === "terminal-replay-interrupt") {
@@ -1229,7 +1241,7 @@ function query(params: {
 				duration_ms: 0,
 				duration_api_ms: 0,
 				num_turns: 1,
-				result: responseChunks(prompt).join(""),
+				result: chunks.join(""),
 				stop_reason: "end_turn",
 				total_cost_usd: 0,
 				usage: {

@@ -1,5 +1,6 @@
 import { Context, type Effect } from "effect";
 import type {
+	SessionWorkspace as RecordedWorkspace,
 	WorkspaceMoveCause,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
@@ -20,12 +21,14 @@ export interface SessionWorkspace {
 		sessionId: string,
 		path: string,
 		cause: WorkspaceMoveCause,
+		origin?: RecordedWorkspace["origin"],
 	) => Effect.Effect<string, WorkspaceMoveError | SessionCommandError>;
 	/** Resolve and warm a target before acquiring a project commit permit. */
 	readonly resolve: (
 		sessionId: string,
 		path: string,
 		cause: WorkspaceMoveCause,
+		origin?: RecordedWorkspace["origin"],
 	) => Effect.Effect<
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError
@@ -56,6 +59,7 @@ export interface ResolvedWorkspaceTarget {
 	readonly projectFolder: string;
 	readonly reset: boolean;
 	readonly provider: string;
+	readonly origin?: RecordedWorkspace["origin"];
 }
 
 export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<
