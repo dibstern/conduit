@@ -201,9 +201,12 @@ export const taskDrillInHandlers: StepHandler[] = [
 				nodes.map((node) => ({
 					kind: node.querySelector("[data-testid='background-task-kind']")
 						?.textContent,
-					opens: node.querySelector("button") !== null,
+					opens:
+						node.querySelector("[data-testid='background-task-open']") !== null,
 					label:
-						node.querySelector("button")?.getAttribute("aria-label") ?? null,
+						node
+							.querySelector("[data-testid='background-task-open']")
+							?.getAttribute("aria-label") ?? null,
 					description: node.querySelector(
 						"[data-testid='background-task-description']",
 					)?.textContent,

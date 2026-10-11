@@ -32,6 +32,7 @@ vi.mock(
 import {
 	openTask,
 	returnFromTask,
+	taskStopIds,
 	tasksPanel,
 } from "../../../src/lib/frontend/components/session/background-tasks.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -47,6 +48,51 @@ beforeEach(() => {
 		{ id: "agent", type: "local_agent", description: "Agent", firstSeenAt: 0 },
 	];
 	vi.clearAllMocks();
+});
+
+describe("Background task stop selection", () => {
+	const task = (id: string, parentTaskId?: string): BackgroundTask => ({
+		id,
+		type: "local_bash",
+		description: id,
+		firstSeenAt: 0,
+		...(parentTaskId ? { parentTaskId } : {}),
+	});
+	const tasks = [
+		task("other"),
+		task("nested", "agent"),
+		task("agent"),
+		task("deep", "nested"),
+	];
+
+	it("stops one shell and an agent's descendants before their parent", () => {
+		expect(taskStopIds(tasks, "other")).toEqual(["other"]);
+		expect(taskStopIds(tasks, "agent")).toEqual(["deep", "nested", "agent"]);
+		expect(taskStopIds(tasks, "finished")).toEqual([]);
+	});
+
+	it("stops every live id once, even with missing ancestors or cycles", () => {
+		expect(taskStopIds(tasks).sort()).toEqual([
+			"agent",
+			"deep",
+			"nested",
+			"other",
+		]);
+		expect(taskStopIds([])).toEqual([]);
+		expect(taskStopIds([task("a", "b"), task("b", "a")]).sort()).toEqual([
+			"a",
+			"b",
+		]);
+		expect(
+			taskStopIds(
+				[
+					task("agent"),
+					{ ...task("child", "gone"), ancestorTaskIds: ["gone", "agent"] },
+				],
+				"agent",
+			),
+		).toEqual(["child", "agent"]);
+	});
 });
 afterEach(() => {
 	sessionState.currentId = null;

@@ -6,6 +6,7 @@ import {
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
+import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	PendingInteractionServiceTag,
@@ -182,10 +183,7 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		const providerId =
 			(yield* orchestrationEngine.getProviderForSessionEffect(
 				input.sessionId,
-			)) ??
-			(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-				? CLAUDE_PROVIDER_ID
-				: OPENCODE_PROVIDER_ID);
+			)) ?? harnessForModelProvider(input.model?.providerID ?? "");
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
 		if (driver === undefined) return input.sessionId;

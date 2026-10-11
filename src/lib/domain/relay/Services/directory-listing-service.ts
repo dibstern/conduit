@@ -7,7 +7,10 @@ import {
 	type FindFoldersResponse,
 	ProjectSaveRejected,
 } from "../../../contracts/ws-rpc.js";
+import { getConfigDir } from "../../../daemon/config-persistence.js";
 import { isPermissionDenied } from "../../../project-folders.js";
+import { isConduitWorktreePath } from "../../daemon/Layers/worktree-layer.js";
+import { ConfigTag } from "./services.js";
 
 /** Path autocomplete lists every child folder; this only bounds huge folders like node_modules. The list scrolls. */
 const MAX_PATH_MATCHES = 500;
@@ -199,6 +202,7 @@ const suggestFolders = (
 export const findFolders = (
 	query: string,
 	sources: FolderSuggestionSources = { recent: [], projectFolders: [] },
+	configDir?: string,
 ): Effect.Effect<
 	FindFoldersResponse,
 	DirectoryListingServiceError | ProjectSaveRejected
@@ -216,6 +220,17 @@ export const findFolders = (
 			);
 		}
 		const path = resolve(expandHome(query));
+		if (
+			configDir !== undefined &&
+			(yield* Effect.try({
+				try: () => isConduitWorktreePath(configDir, path),
+				catch: (cause) =>
+					new DirectoryListingServiceError({ operation: "stat", path, cause }),
+			}))
+		)
+			return yield* new ProjectSaveRejected({
+				issues: [{ kind: "conduit-worktree", path }],
+			});
 		const requested = yield* statPath(path);
 		if (Option.isSome(requested) && !requested.value.isDirectory()) {
 			return yield* Effect.fail(
@@ -271,19 +286,42 @@ export const findFolders = (
 		} as const;
 		return { entries: [typed, ...children.flat()] };
 	}).pipe(
+		Effect.flatMap((result) =>
+			Effect.filter(result.entries, (entry) =>
+				configDir === undefined
+					? Effect.succeed(true)
+					: Effect.try(
+							() => !isConduitWorktreePath(configDir, entry.path),
+						).pipe(Effect.orElseSucceed(() => false)),
+			).pipe(Effect.map((entries) => ({ ...result, entries }))),
+		),
 		Effect.map((result) => ({ home: homedir(), ...result })),
 		Effect.mapError((error) =>
-			isPermissionDenied(error.cause)
-				? new ProjectSaveRejected({
-						issues: [
-							{ kind: "permission-denied", path: resolve(expandHome(query)) },
-						],
-					})
-				: error,
+			error instanceof ProjectSaveRejected
+				? error
+				: isPermissionDenied(error.cause)
+					? new ProjectSaveRejected({
+							issues: [
+								{ kind: "permission-denied", path: resolve(expandHome(query)) },
+							],
+						})
+					: error,
 		),
 	);
 
-export const DirectoryListingServiceLive: Layer.Layer<DirectoryListingServiceTag> =
-	Layer.succeed(DirectoryListingServiceTag, {
-		find: findFolders,
-	});
+export const DirectoryListingServiceLive = Layer.effect(
+	DirectoryListingServiceTag,
+	Effect.gen(function* () {
+		const config = yield* Effect.serviceOption(ConfigTag);
+		return {
+			find: (query: string) =>
+				findFolders(
+					query,
+					undefined,
+					Option.isSome(config)
+						? (config.value.configDir ?? getConfigDir())
+						: getConfigDir(),
+				),
+		};
+	}),
+);
