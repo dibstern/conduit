@@ -20,7 +20,7 @@
 		onreset,
 		below,
 		...row
-	}: ComponentProps<typeof SettingsRow> & {
+	}: OptionalLabel<ComponentProps<typeof SettingsRow>> & {
 		key: ClaudeSettingKey | "defaultModel" | "defaultPermissionMode";
 		provenance?: ClaudeSettingProvenance;
 		onreset?: () => void;
@@ -28,8 +28,16 @@
 	} = $props();
 </script>
 
+<script module lang="ts">
+	/** Label is optional inside a group whose title already names the setting.
+	 * Distributes over SettingsRow's prop union so each variant keeps its shape. */
+	type OptionalLabel<P> = P extends unknown
+		? Omit<P, "label"> & { label?: string }
+		: never;
+</script>
+
 <div class="flex flex-col gap-[6px] px-3 py-2" data-testid="claude-setting-{key}">
-	<SettingsRow {...row} class="p-0" />
+	{#if row.label}<SettingsRow {...row} label={row.label} class="p-0" />{/if}
 	{#if below}
 		<div class="flex flex-col gap-[6px]">{@render below()}</div>
 	{/if}

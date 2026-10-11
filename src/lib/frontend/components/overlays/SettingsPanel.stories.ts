@@ -190,6 +190,50 @@ export const Models: Story = {
 
 export const Claude: Story = {
 	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		await expect(
+			canvas.queryByTestId("claude-setting-attribution"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ClaudeAttributionExpanded: Story = {
+	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		// The synthetic click leaves keyboard focus; the frame should show the open group, not a ring.
+		disclosure.blur();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-commit-input"),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-pr-input"),
+		).toBeVisible();
+		await expect(
+			within(canvas.getByTestId("claude-setting-attribution")).getByRole(
+				"switch",
+			),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-provenance"),
+		).toBeVisible();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
 };
 
 export const Usage: Story = {
