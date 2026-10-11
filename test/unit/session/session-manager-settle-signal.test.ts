@@ -3,7 +3,8 @@
 // sidebar's shell subscription; otherwise the row stays live in the browser,
 // and a later manual settle is a server-side no-op that still shows its toast.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -49,9 +50,51 @@ describe("SessionManagerService settle signal", () => {
 		"a settle run outside the relay context still updates the shell",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-settle-signal-"));
+			const projectDir = join(dir, "project");
+			const worktree = join(dir, "worktree");
+			const git = (cwd: string, ...args: string[]) =>
+				execFileSync("git", args, {
+					cwd,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+				}).trim();
+			git(dir, "init", "-b", "main", projectDir);
+			git(projectDir, "config", "user.name", "Settle test");
+			git(projectDir, "config", "user.email", "settle@example.test");
+			git(
+				projectDir,
+				"-c",
+				"core.hooksPath=/dev/null",
+				"commit",
+				"--allow-empty",
+				"-qm",
+				"initial",
+			);
+			git(projectDir, "worktree", "add", "-b", "feature", worktree);
+			writeFileSync(join(worktree, "feature.txt"), "work");
+			git(worktree, "add", "feature.txt");
+			git(
+				worktree,
+				"-c",
+				"core.hooksPath=/dev/null",
+				"commit",
+				"-qm",
+				"feature",
+			);
+			git(
+				projectDir,
+				"-c",
+				"core.hooksPath=/dev/null",
+				"merge",
+				"--no-ff",
+				"-qm",
+				"merge",
+				"feature",
+			);
+			const mergedHead = git(worktree, "rev-parse", "HEAD");
 			const configLayer = Layer.succeed(
 				ConfigTag,
-				makeMockConfig({ configDir: dir, projectDir: dir }),
+				makeMockConfig({ configDir: dir, projectDir }),
 			);
 			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
@@ -105,6 +148,16 @@ describe("SessionManagerService settle signal", () => {
 						),
 					)
 					.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("session.workspace_changed", "ses-idle", {
+							sessionId: "ses-idle",
+							cause: "user",
+							origin: "existing",
+							worktrees: { [projectDir]: worktree },
+						}),
+					),
+				);
 
 				const seen: SessionInfo[] = [];
 				let synchronized = false;
@@ -125,10 +178,24 @@ describe("SessionManagerService settle signal", () => {
 							service.setSessionSettled("ses-idle", {
 								settled: true,
 								automatic: true,
+								mergedHead,
 							}),
 						),
 					),
 				).toBe(true);
+				expect(
+					(yield* store.readAllBySession("ses-idle"))
+						.filter((event) => event.type === "session.settled")
+						.map((event) => event.data),
+				).toEqual([{ sessionId: "ses-idle", automatic: true, mergedHead }]);
+				// Manual settlement must consume the same merge before a wake-up, too.
+				yield* service.setSessionSettled("ses-idle", { settled: false });
+				yield* service.setSessionSettled("ses-idle", { settled: true });
+				expect(
+					(yield* store.readAllBySession("ses-idle"))
+						.filter((event) => event.type === "session.settled")
+						.at(-1)?.data,
+				).toEqual({ sessionId: "ses-idle", automatic: false, mergedHead });
 
 				const deadline = Date.now() + 1_000;
 				const settledUpsert = () =>

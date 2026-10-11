@@ -19,7 +19,7 @@
 	let { onClose, pane = false, paneTitle, paneActions }: { onClose?: () => void; pane?: boolean; paneTitle?: Snippet | undefined; paneActions?: Snippet | undefined } = $props();
 
 	let loading = $state(false);
-	const multipleFolders = $derived(fileTreeState.roots.length > 1);
+	const showRoots = $derived(fileTreeState.roots.length > 1 || fileTreeState.roots.some((folder) => folder.shared));
 	let fileTreeEl: HTMLDivElement | undefined = $state(undefined);
 	// Restore the saved scroll once per mount; tracking browserScrollTop here
 	// would re-run on every scroll event.
@@ -125,7 +125,7 @@
 		fileTreeState.browserCache = new Map();
 		fileTreeState.browserChildren = new Map();
 		fileTreeState.browserExpandedPaths = new Set();
-		if (!multipleFolders) loadDirectory(fileTreeState.browserPath);
+		if (!showRoots) loadDirectory(fileTreeState.browserPath);
 	}
 
 	function closePanel() {
@@ -144,7 +144,7 @@
 
 	// Load root directory on mount
 	$effect(() => {
-		if (!multipleFolders && !fileTreeState.browserCache.has(fileTreeState.browserPath)) {
+		if (!showRoots && !fileTreeState.browserCache.has(fileTreeState.browserPath)) {
 			loadDirectory(fileTreeState.browserPath);
 		}
 	});
@@ -196,7 +196,7 @@
 	</div>{/if}
 
 	<!-- Breadcrumbs -->
-	{#if !multipleFolders}
+	{#if !showRoots}
 	<div class="fb-breadcrumbs flex items-center gap-0.5 px-4 py-1.5 text-xs text-text-muted overflow-x-auto shrink-0">
 		{#each breadcrumbs as crumb, i (crumb.path)}
 			{#if i > 1}
@@ -218,12 +218,13 @@
 
 	<!-- File tree -->
 	<div id="file-tree" class="flex-1 overflow-y-auto px-1" bind:this={fileTreeEl} onscroll={(event) => { fileTreeState.browserScrollTop = event.currentTarget.scrollTop; }}>
-		{#if multipleFolders}
+		{#if showRoots}
 			{#each fileTreeState.roots as folder (folder.root)}
 				<FileTreeNode
 					entry={{ name: folder.label, type: "directory" }}
 					path="."
 					root={folder.root}
+					shared={folder.shared}
 					onFileClick={handleFileClick}
 					onDirClick={handleDirClick}
 					getChildren={getChildrenForPath}

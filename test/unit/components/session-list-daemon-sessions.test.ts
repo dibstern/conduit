@@ -55,6 +55,90 @@ describe("SessionList daemon sessions", () => {
 	afterEach(() => {
 		cleanup();
 		uiState.selectMode = false;
+		uiState.settledShelfOpen = false;
+		uiState.snoozedShelfOpen = false;
+	});
+
+	// Local projects can themselves be linked checkouts; only a session move
+	// away from the project's primary folder earns a row branch label.
+	it("labels both worktree origins while keeping Local rows branch-free", () => {
+		seedRootSessions([]);
+		seedFamilySessions([]);
+		seedDaemonSessions([
+			...(["existing", "conduit"] as const).map((origin) => ({
+				id: origin,
+				title: `${origin} worktree`,
+				projectSlug: "another-project",
+				workspace: {
+					cause: "launch" as const,
+					origin,
+					worktrees: { "/projects/another": `/worktrees/${origin}` },
+				},
+				git: { branch: `feature/${origin}`, worktree: origin },
+			})),
+			{
+				id: "local",
+				title: "Local checkout",
+				projectSlug: "another-project",
+				git: { branch: "main", worktree: "project-is-a-worktree" },
+			},
+			{
+				id: "local-fallback",
+				title: "Returned to Local",
+				projectSlug: "another-project",
+				workspace: { cause: "missing", origin: "existing", worktrees: {} },
+				git: { branch: "main" },
+			},
+		]);
+		const { container } = render(SessionList);
+		for (const origin of ["existing", "conduit"]) {
+			const row = container.querySelector(`[data-session-id="${origin}"]`);
+			expect(
+				row?.querySelector(".session-item-context")?.textContent,
+			).toContain(`Another project · feature/${origin}`);
+		}
+		for (const id of ["local", "local-fallback"]) {
+			const row = container.querySelector(`[data-session-id="${id}"]`);
+			expect(
+				row
+					?.querySelector(".session-item-context > span:last-child")
+					?.textContent?.trim(),
+			).toBe("Another project");
+			expect(row?.getAttribute("aria-label")).not.toContain("main");
+		}
+	});
+
+	it.each([
+		"settled",
+		"snoozed",
+	] as const)("keeps a worktree branch visible in the %s shelf", (shelf) => {
+		seedRootSessions([]);
+		seedFamilySessions([]);
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		seedDaemonSessions([
+			{
+				id: "shelf-worktree",
+				title: "Parked work",
+				projectSlug: "another-project",
+				workspace: {
+					cause: "launch",
+					origin: "existing",
+					worktrees: { "/projects/another": "/worktrees/parked" },
+				},
+				git: { branch: "feature/parked" },
+				...(shelf === "settled"
+					? { settledAt: Date.now() - 1_000 }
+					: {
+							snoozedAt: Date.now() - 1_000,
+							snoozedUntil: Date.now() + 60_000,
+						}),
+			},
+		]);
+		const { container } = render(SessionList);
+		const row = container.querySelector('[data-session-id="shelf-worktree"]');
+		expect(row?.textContent).toContain("feature/parked");
+		expect(row?.getAttribute("aria-label")).toContain("feature/parked");
 	});
 
 	it("renders a foreign row as a session link with a project label", async () => {

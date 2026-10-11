@@ -8,6 +8,8 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 test.use({ recording: "chat-simple" });
 
 const main = "/workspace/app";
+const api = "/workspace/api";
+const shared = "/workspace/docs";
 const isolated = "/conduit/worktrees/e2e-replay/draft-session/app";
 const branch = "conduit/session-draft";
 const controls = new WeakMap<Page, RpcMockControl>();
@@ -17,18 +19,38 @@ async function openDraft(
 	baseUrl: string,
 	options: {
 		provider?: "claude" | "opencode";
-		folders?: number;
+		multiFolder?: boolean;
+		nonGitPrimary?: boolean;
+		git?: boolean;
 		fail?: boolean;
 	} = {},
 ) {
 	const provider = options.provider ?? "claude";
+	const folders = options.multiFolder
+		? options.nonGitPrimary
+			? [shared, main, api]
+			: [main, api, shared]
+		: [main];
+	const roots = folders.map((root) => ({
+		root,
+		label: root.split("/").pop() ?? root,
+	}));
+	const gitRoots =
+		options.git === false ? [] : roots.filter(({ root }) => root !== shared);
+	const projectGit =
+		gitRoots.length > 0
+			? {
+					...(!options.nonGitPrimary ? { branch: "main" } : {}),
+					folders: gitRoots.map((folder) => ({ ...folder, branch: "main" })),
+				}
+			: undefined;
 	const projects = [
 		{
 			slug: "e2e-replay",
 			title: "App",
 			instanceId: provider,
-			folders: options.folders === 2 ? [main, "/workspace/docs"] : [main],
-			git: { branch: "main" },
+			folders,
+			...(projectGit ? { git: projectGit } : {}),
 		},
 	];
 	const instances = {
@@ -50,6 +72,7 @@ async function openDraft(
 		],
 	};
 	let sessions: readonly Record<string, unknown>[] = [];
+	let workspaceCreated = false;
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
@@ -67,6 +90,26 @@ async function openDraft(
 				hasMore: false,
 				nextCursor: null,
 			}),
+			GetFileTree: () => ({
+				projectSlug: "e2e-replay",
+				entries: [],
+				...(folders.length > 1
+					? {
+							roots: roots.map((folder) => ({
+								...folder,
+								...(workspaceCreated && folder.root === shared
+									? { shared: true }
+									: {}),
+							})),
+						}
+					: {}),
+			}),
+			GetFileList: ({ root, path = "." }) => ({
+				projectSlug: "e2e-replay",
+				path,
+				...(root ? { root } : {}),
+				entries: [],
+			}),
 			CreateSession: ({ projectSlug, newWorktree }) => {
 				if (options.fail)
 					throw new WorktreeCreationError({
@@ -74,6 +117,7 @@ async function openDraft(
 						path: main,
 						message: "Could not create worktree: simulated Git failure",
 					});
+				workspaceCreated = newWorktree === true;
 				sessions = [
 					{
 						id: "draft-session",
@@ -84,10 +128,29 @@ async function openDraft(
 							? {
 									cause: "launch",
 									origin: "conduit",
-									worktrees: { [main]: isolated },
+									worktrees: Object.fromEntries(
+										gitRoots.map(({ root, label }) => [
+											root,
+											root === main
+												? isolated
+												: `/conduit/worktrees/e2e-replay/draft-session/${label}`,
+										]),
+									),
 								}
 							: null,
-						git: newWorktree ? { branch, worktree: "app" } : { branch: "main" },
+						git: newWorktree
+							? {
+									...(!options.nonGitPrimary
+										? { branch, worktree: "app" }
+										: {}),
+									folders: roots.map((folder) => ({
+										...folder,
+										...(folder.root === shared
+											? { shared: true }
+											: { branch, worktree: folder.label, dirty: false }),
+									})),
+								}
+							: projectGit,
 					},
 				];
 				rpc.setShellRows(sessions);
@@ -106,7 +169,9 @@ async function openDraft(
 	rpc.setDaemonList("SubscribeInstances", instances);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
-	await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
+	await expect(page.getByTestId("draft-start-chip")).toHaveText(
+		projectGit?.branch ?? "Current folder",
+	);
 	return rpc;
 }
 
@@ -182,6 +247,80 @@ for (const mode of [
 			await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();
 		});
 
+		for (const nonGitPrimary of [false, true]) {
+			test(`multi-folder New worktree is offered with a ${nonGitPrimary ? "non-git" : "git"} primary and labels shared folders`, async ({
+				page,
+				harness,
+			}) => {
+				const rpc = await openDraft(page, harness.relayBaseUrl, {
+					multiFolder: true,
+					nonGitPrimary,
+				});
+				await press(page.getByTestId("draft-start-chip"));
+				const choice = page.getByRole("menuitem", {
+					name: "New worktree",
+					exact: true,
+				});
+				await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+				await press(choice);
+				await expect(page.getByTestId("draft-start-chip")).toHaveText(
+					"New worktree",
+				);
+				await page.locator("#input").fill("Update both repositories");
+				await press(page.locator("#send"));
+				const request = await rpc.waitForRequest(
+					({ tag }) => tag === "CreateSession",
+				);
+				expect(request.payload).toMatchObject({ newWorktree: true });
+				await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+				await expect(page.getByTestId("session-bar-title")).toHaveText(
+					"New workspace",
+				);
+				await press(page.getByTestId("session-bar-identity"));
+				const rows = page.getByTestId("session-folder-git");
+				await expect(rows).toHaveCount(3);
+				for (const root of [main, api]) {
+					await expect(
+						page.locator(
+							`[data-testid="session-folder-git"][data-folder-root="${root}"]`,
+						),
+					).toContainText(branch);
+				}
+				const sharedRow = page.locator(
+					`[data-testid="session-folder-git"][data-folder-root="${shared}"]`,
+				);
+				await expect(
+					sharedRow.getByText("shared", { exact: true }),
+				).toBeVisible();
+				await expect(sharedRow).not.toContainText(
+					/Detached|Branch|Changes|clean/,
+				);
+				await page.keyboard.press("Escape");
+				if (mode.hasTouch) {
+					await press(page.getByTestId("session-bar-island-overflow"));
+					await press(page.getByTestId("overflow-view-files"));
+				} else {
+					await press(page.getByTestId("views-rail-files"));
+				}
+				const fileRoots = page.locator("#file-tree [data-file-root]");
+				await expect(fileRoots).toHaveCount(3);
+				const sharedRoot = page.locator(
+					`#file-tree [data-file-root="${shared}"]`,
+				);
+				await expect(
+					sharedRoot.getByText("shared", { exact: true }),
+				).toBeVisible();
+				await expect(sharedRoot).toContainText("docs");
+				for (const root of [main, api]) {
+					await expect(
+						page
+							.locator(`#file-tree [data-file-root="${root}"]`)
+							.getByText("shared", { exact: true }),
+					).toHaveCount(0);
+				}
+			});
+		}
+
 		test("Current checkout clears New worktree and keeps the Local request", async ({
 			page,
 			harness,
@@ -231,8 +370,8 @@ for (const mode of [
 			).toEqual([]);
 		});
 
-		for (const options of [{ provider: "opencode" as const }, { folders: 2 }]) {
-			test(`New worktree stays disabled for ${options.provider ?? "multiple folders"}`, async ({
+		for (const options of [{ provider: "opencode" as const }, { git: false }]) {
+			test(`New worktree stays disabled for ${options.provider ?? "folders without git"}`, async ({
 				page,
 				harness,
 			}) => {

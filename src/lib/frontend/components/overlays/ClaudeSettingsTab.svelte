@@ -362,6 +362,7 @@
 {/snippet}
 
 {#snippet attributionEditor()}
+	<p class="text-text-dimmer">What Claude adds to commits and pull requests it creates.</p>
 	<div class="flex flex-col gap-[4px]">
 		<label for="claude-attribution-commit" class="text-text">Commit attribution</label>
 		<TextInput
@@ -480,10 +481,17 @@
 		labelFor="claude-cleanup-period-days"
 		control={cleanupPeriodDaysControl}
 	/>
+</SettingsGroup>
+
+<SettingsGroup
+	id="claude-attribution"
+	title="Attribution"
+	collapsible
+	summary="Commit · PR · Session link"
+	testId="claude-attribution-group"
+>
 	<ClaudeSettingRow
 		key="attribution"
-		label="Attribution"
-		description="What Claude adds to commits and pull requests it creates."
 		provenance={attributionProvenance}
 		onreset={() => resetOverride("attribution")}
 		below={attributionEditor}

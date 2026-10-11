@@ -6,6 +6,7 @@ Background:
 Scenario: opening the Claude section shows the available settings
   When I open settings to the Claude section
   Then the Claude settings are shown
+  And the Claude Attribution group is collapsed with summary "Commit · PR · Session link"
 
 Scenario: Models & agents shows the Claude default model and effort
   Given the default model is Claude Sonnet 4 with a thinking level of high
@@ -35,6 +36,7 @@ Scenario: turning hooks off stores the inverted setting truthfully
 
 Scenario: changing the session link preserves inherited attribution
   When I open settings to the Claude section
+  And I expand the Claude Attribution group
   And I turn off the Claude attribution session link
   Then the attribution override keeps the inherited commit text with the session link off
 
@@ -74,6 +76,7 @@ Examples:
 
 Scenario Outline: the Claude section attribution controls match the approved layout
   When I open settings to the Claude section
+  And I expand the Claude Attribution group
   And I scroll the Claude settings to the Attribution row
   Then the settings-panel region visually matches <baseline> at <threshold> percent
 

@@ -14,6 +14,7 @@
 		parentPath = ".",
 		path,
 		root,
+		shared,
 		onFileClick,
 		onDirClick,
 		getChildren,
@@ -23,6 +24,7 @@
 		parentPath?: string | undefined;
 		path?: string | undefined;
 		root?: string | undefined;
+		shared?: boolean | undefined;
 		onFileClick?: ((path: string, root?: string) => void) | undefined;
 		onDirClick?: ((path: string, root?: string) => void) | undefined;
 		getChildren?:
@@ -126,6 +128,7 @@
 			</svg>
 		{/if}
 		<span class="fb-entry-name flex-1 truncate">{entry.name}</span>
+		{#if path === "." && shared}<span class="shrink-0 text-xs text-text-muted">shared</span>{/if}
 		{#if !isDir && entry.size !== undefined}
 			<span class="fb-entry-size text-sm text-text-dimmer shrink-0">
 				{formatFileSize(entry.size)}

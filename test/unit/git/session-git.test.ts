@@ -41,6 +41,7 @@ const commit = (directory: string, name: string) => {
 };
 
 afterEach(() => {
+	vi.unstubAllEnvs();
 	for (const directory of roots.splice(0))
 		rmSync(directory, { recursive: true, force: true });
 });
@@ -167,6 +168,64 @@ describe("readSessionGit", () => {
 			merged: true,
 		});
 	});
+	it.each([
+		["--no-ff", false],
+		["--ff-only", false],
+		["--no-ff", true],
+		["--ff-only", true],
+	])("recognises a clone's first fetched %s merge (precommitted branch: %s)", async (strategy, precommitted) => {
+		// Cloning does not seed the remote default ref's reflog. A first fetch
+		// must still detect the merge, including an unchanged local feature ref.
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const seed = repo();
+		commit(seed, "initial");
+		git(seed, "branch", "-m", "trunk");
+		const remote = root();
+		git(remote, "init", "--bare", "-q");
+		git(seed, "push", "-q", remote, "trunk");
+		git(remote, "symbolic-ref", "HEAD", "refs/heads/trunk");
+		if (precommitted) {
+			git(seed, "checkout", "-qb", "feature");
+			commit(seed, "feature-file");
+			git(seed, "push", "-q", remote, "feature");
+			git(seed, "checkout", "-q", "trunk");
+		}
+		const directory = root();
+		git(directory, "clone", "-q", remote, ".");
+		git(directory, "config", "user.name", "Test User");
+		git(directory, "config", "user.email", "test@example.com");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		git(
+			directory,
+			"checkout",
+			"-qb",
+			"feature",
+			precommitted ? "origin/feature" : "HEAD",
+		);
+		if (!precommitted) commit(directory, "feature-file");
+		const tip = git(directory, "rev-parse", "HEAD");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+		git(seed, "fetch", "-q", directory, "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(seed, "merge", strategy, "-qm", "Merge feature", "FETCH_HEAD");
+		git(seed, "push", "-q", remote, "trunk");
+		git(directory, "fetch", "-q", "origin");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		commit(seed, "later-default-work");
+		git(seed, "push", "-q", remote, "trunk");
+		git(directory, "fetch", "-q", "origin");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:04:00Z");
+		git(directory, "checkout", "-qb", "fresh", "origin/trunk");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+	});
 	it("omits merged when no default ref exists", async () => {
 		const directory = repo();
 		commit(directory, "initial");
@@ -225,12 +284,69 @@ describe("createSessionGitCache", () => {
 // Failure modes: a secondary folder is omitted or uses the main checkout;
 // primary fields are replaced by a secondary status; labels collide; non-git
 // primary folders hide git extras; stale session git survives a failed read.
+// Conduit workspaces must report unmapped folders as shared, including non-git
+// folders, without giving those folders invented git status or storing flags.
 describe("cached folder git", () => {
 	const session: SessionInfo = {
 		id: "session",
 		title: "Folders",
 		status: "idle",
 	};
+
+	it("derives shared non-git and later-attached git folders from a conduit workspace", async () => {
+		const cache = createSessionGitCache(async (directory) =>
+			directory === "/scratch"
+				? undefined
+				: {
+						branch: directory.startsWith("/worktree/")
+							? "feature/together"
+							: "main",
+						dirty: false,
+					},
+		);
+		await Promise.all(
+			["/worktree/app", "/worktree/api", "/scratch", "/late"].map(
+				cache.refresh,
+			),
+		);
+		const workspace = {
+			cause: "launch" as const,
+			origin: "conduit" as const,
+			worktrees: { "/app": "/worktree/app", "/api": "/worktree/api" },
+		};
+		const result = withCachedSessionGit(
+			{ ...session, workspace },
+			["/app", "/api", "/scratch", "/late"],
+			cache,
+		);
+		expect(result.git?.folders).toEqual([
+			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
+			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
+			{ root: "/scratch", label: "scratch", shared: true },
+			{
+				root: "/late",
+				label: "late",
+				branch: "main",
+				dirty: false,
+				shared: true,
+			},
+		]);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(result).git).toEqual(
+			result.git,
+		);
+		expect(result.workspace).toEqual(workspace);
+		expect(
+			withCachedSessionGit(
+				{ ...session, workspace: { ...workspace, origin: "existing" } },
+				["/app", "/api", "/scratch", "/late"],
+				cache,
+			).git?.folders,
+		).toEqual([
+			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
+			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
+			{ root: "/late", label: "late", branch: "main", dirty: false },
+		]);
+	});
 
 	it("keeps primary fields and labels each effective folder, skipping non-git", async () => {
 		const cache = createSessionGitCache(async (directory) => {

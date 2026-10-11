@@ -99,6 +99,7 @@ export interface AgentService {
 	listAgents(
 		activeSessionId: string | undefined,
 		instanceId?: ProviderInstanceId,
+		/** The listed instance's harness: `instanceId`'s, else the session's. */
 		instanceDriver?: ProviderDriverKind,
 	): Effect.Effect<AgentList, Cause.UnknownException>;
 	getActiveAgent(sessionId: string): Effect.Effect<string | undefined>;
@@ -186,11 +187,15 @@ export const AgentServiceLive: Layer.Layer<
 						instanceDriver !== undefined &&
 						!isKnownDriverKind(instanceDriver);
 					let preferredProviderId: ProviderDriverKind | undefined;
-					if (instanceId !== undefined) {
-						preferredProviderId =
-							instanceDriver !== undefined && isKnownDriverKind(instanceDriver)
-								? instanceDriver
-								: resolveBuiltInInstanceDriver(instanceId);
+					// The driver also comes with a session-only request: it is the
+					// harness of the instance that session is bound to.
+					if (
+						instanceDriver !== undefined &&
+						isKnownDriverKind(instanceDriver)
+					) {
+						preferredProviderId = instanceDriver;
+					} else if (instanceId !== undefined) {
+						preferredProviderId = resolveBuiltInInstanceDriver(instanceId);
 					} else {
 						const activeProviderId = activeSessionId
 							? yield* engine.getProviderForSessionEffect(activeSessionId)

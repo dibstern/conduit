@@ -37,7 +37,8 @@
 	const instance = $derived(getAvailableInstances().find((provider) => provider.id === getEffectiveInstanceId()));
 	const providerName = $derived(getInstanceById(instance?.id ?? "")?.name ?? instance?.label ?? "This provider");
 	const supportsWorktree = $derived(instance?.capabilities?.supportsWorktree !== false);
-	const canCreateWorktree = $derived(Boolean(slug && project?.folders.length === 1 && branch && instance?.driver === "claude" && supportsWorktree));
+	const hasGitFolder = $derived(Boolean(project?.git?.folders?.length || branch || project?.git?.head || Object.keys(project?.repositoryIdentities ?? {}).length));
+	const canCreateWorktree = $derived(Boolean(slug && hasGitFolder && instance?.driver === "claude" && supportsWorktree));
 	const checkout = $derived(newWorktree ? "New worktree" : worktree ? worktree.branch ?? "Detached HEAD" : branch ?? "Current folder");
 	const worktreeContext = $derived(`${slug ?? ""}:${instance?.id ?? ""}:${supportsWorktree}`);
 	$effect(() => {

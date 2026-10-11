@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 
 describe("makeSessionBackgroundLiveness", () => {
+	it("publishes late task detail without resetting age or merging removed tasks", () => {
+		let now = 100;
+		const onChange = vi.fn();
+		const liveness = makeSessionBackgroundLiveness(onChange, () => now);
+		const task = { id: "shell", type: "local_bash", description: "Watch" };
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [task] });
+		now = 200;
+		const detailed = { ...task, detail: "pnpm test --watch" };
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [detailed] });
+		expect(liveness.backgroundOf("one")?.tasks).toEqual([
+			{ ...detailed, firstSeenAt: 100 },
+		]);
+		expect(onChange).toHaveBeenCalledTimes(2);
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [detailed] });
+		expect(onChange).toHaveBeenCalledTimes(2);
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.backgroundOf("one")).toBeUndefined();
+	});
+
 	it("publishes newly learned ancestry without changing a live task's age", () => {
 		const onChange = vi.fn();
 		const liveness = makeSessionBackgroundLiveness(onChange, () => 100);

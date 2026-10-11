@@ -12,6 +12,7 @@ const TASKS = [
 		age: 6 * 60,
 		kind: "shell",
 		ageText: "6m",
+		detail: "pnpm dev",
 	},
 	{
 		id: "b2",
@@ -20,6 +21,7 @@ const TASKS = [
 		age: 2 * 60,
 		kind: "shell",
 		ageText: "2m",
+		detail: "pnpm vitest --watch",
 	},
 	{
 		id: "a1",
@@ -29,6 +31,7 @@ const TASKS = [
 		childSessionId: "claude-subagent-explore",
 		kind: "subagent",
 		ageText: "40s",
+		detail: "Explore",
 	},
 	{
 		id: "w1",
@@ -37,6 +40,7 @@ const TASKS = [
 		age: 12,
 		kind: "workflow",
 		ageText: "12s",
+		detail: "review workflow",
 	},
 ] as const;
 
@@ -79,6 +83,7 @@ export type LiveTask = {
 	age: number;
 	parentTaskId?: string;
 	childSessionId?: string;
+	detail?: string;
 };
 
 const sessionIdOf = (url: string): string => {
@@ -122,6 +127,7 @@ export async function setLiveTasks(
 								age,
 								parentTaskId,
 								childSessionId,
+								detail,
 							}) => ({
 								id,
 								type,
@@ -129,6 +135,7 @@ export async function setLiveTasks(
 								firstSeenAt: now - age * 1000,
 								...(parentTaskId ? { parentTaskId } : {}),
 								...(childSessionId ? { childSessionId } : {}),
+								...(detail ? { detail } : {}),
 							}),
 						)
 					: undefined,
@@ -141,10 +148,54 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "seed live background tasks",
 		match: /^the session has ([1-4]) live background tasks?$/,
 		run: async ({ world, match }) => {
-			await setLiveTasks(world.page, TASKS.slice(0, Number(match[1])));
+			await setLiveTasks(
+				world.page,
+				TASKS.slice(0, Number(match[1])).map(
+					({ detail: _detail, ...task }) => task,
+				),
+			);
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
 			).toBeVisible();
+		},
+	},
+	{
+		name: "seed launcher details",
+		match: /^the background task launcher details are available$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, TASKS);
+		},
+	},
+	{
+		name: "assert launcher details",
+		match:
+			/^the background tasks pull-down shows each command or agent under its description$/,
+		run: async ({ world }) => {
+			const items = world.page
+				.getByTestId("background-tasks-panel")
+				.getByTestId("background-task");
+			await expect(items.getByTestId("background-task-detail")).toHaveText(
+				TASKS.map((task) => task.detail),
+			);
+			for (const [i, task] of TASKS.entries())
+				await expect(
+					items.nth(i).getByTestId("background-task-detail"),
+				).toHaveAttribute("title", task.detail);
+		},
+	},
+	{
+		name: "assert kind fallback",
+		match:
+			/^the background tasks pull-down shows only kinds for unjoinable tasks$/,
+		run: async ({ world }) => {
+			const items = world.page
+				.getByTestId("background-tasks-panel")
+				.getByTestId("background-task");
+			await expect(items.getByTestId("background-task-kind")).toHaveText([
+				"shell",
+				"shell",
+			]);
+			await expect(items.getByTestId("background-task-detail")).toHaveCount(0);
 		},
 	},
 	{
