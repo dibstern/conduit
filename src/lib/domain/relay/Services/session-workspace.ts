@@ -9,7 +9,7 @@ import type {
 } from "./session-command.js";
 
 export interface SessionWorkspace {
-	/** Serialize launch-folder reads with draft workspace initialization. */
+	/** Serialize launch-folder reads with draft and fork workspace initialization. */
 	readonly withLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
@@ -21,6 +21,12 @@ export interface SessionWorkspace {
 		path: string,
 		cause: WorkspaceMoveCause,
 	) => Effect.Effect<string, WorkspaceMoveError | SessionCommandError>;
+	/** Copy a parent's recorded mapping and origin into a fork's launch event. */
+	readonly inherit: (
+		sessionId: string,
+		parentSessionId: string,
+		options?: Pick<ApplySessionCommandOptions, "project">,
+	) => Effect.Effect<string, SessionCommandError>;
 	/** Resolve and warm a target before acquiring a project commit permit. */
 	readonly resolve: (
 		sessionId: string,

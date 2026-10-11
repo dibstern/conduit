@@ -244,6 +244,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
+			directory: input.workspaceRoot,
 			...(extraFolders.length > 0
 				? {
 						system: `Additional project folders available for reading and editing:\n${extraFolders.map((folder) => `- ${folder}`).join("\n")}`,
@@ -326,6 +327,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					Effect.tryPromise({
 						try: async () => {
 							const session = await client.session.get(sessionId);
+							// Existing sessions use their stored directory, ignoring prompt cwd.
+							if (
+								session.directory &&
+								session.directory !== input.workspaceRoot
+							)
+								await client.session.move(sessionId, input.workspaceRoot);
 							const current = new Map<
 								string,
 								PermissionRuleset[number]["action"]
@@ -490,8 +497,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					try: async () => {
 						if (decision === "always") {
 							// OpenCode's "always" approvals override rules in other sessions.
+							const session = await client.session.get(sessionId);
 							const request = (
-								await client.permission.list(this.workspaceRoot)
+								await client.permission.list(
+									session.directory || this.workspaceRoot,
+								)
 							).find((pending) => pending.id === requestId);
 							if (request?.always?.length) {
 								await client.session.update(sessionId, {
@@ -531,7 +541,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return this.resolveClientEffect(sessionId).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
-					try: () => client.question.reply(requestId, answerArrays),
+					try: async () => {
+						const session = await client.session.get(sessionId);
+						await client.question.reply(
+							requestId,
+							answerArrays,
+							session.directory || this.workspaceRoot,
+						);
+					},
 					catch: (cause) => cause,
 				}),
 			),

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import Toggle from "../ui/Toggle.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { applyGetAgentsResponse, applyGetModelsResponse, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
@@ -101,33 +102,31 @@
 {/if}
 {#each modelProviders as provider (provider.id)}
 	{@const allHidden = provider.models.every((m) => hiddenModelSet.has(`${provider.id}/${m.id}`))}
-	<section>
-		<div class="flex items-center justify-between gap-[10px] pt-[8px]">
-			<h3 class="text-[12px] font-semibold text-text">{provider.name}</h3>
+	<SettingsGroup title={provider.name}>
+		{#snippet actions()}
 			<TextButton onclick={() => toggleProviderAll(provider.id, !allHidden)}>
 				{allHidden ? "Show all" : "Hide all"}
 			</TextButton>
-		</div>
+		{/snippet}
 		{#each provider.models as model (model.id)}
-			<Toggle
+			<SettingsRow
 				label={model.name || model.id}
 				checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
 				onchange={() => toggleModel(provider.id, model.id)}
 			/>
 		{/each}
-	</section>
+	</SettingsGroup>
 {/each}
 
 <!-- Agents (current provider scope only) -->
 {#if agentScopeId && discoveryState.agents.length > 0}
-	<section>
-		<h3 class="pt-[8px] text-[12px] font-semibold text-text">{discoveryState.agentProviderScope?.name} agents</h3>
+	<SettingsGroup title="{discoveryState.agentProviderScope?.name} agents">
 		{#each discoveryState.agents as agent (agent.id)}
-			<Toggle
+			<SettingsRow
 				label={agent.name || agent.id}
 				checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
 				onchange={() => toggleAgent(agent.id)}
 			/>
 		{/each}
-	</section>
+	</SettingsGroup>
 {/if}

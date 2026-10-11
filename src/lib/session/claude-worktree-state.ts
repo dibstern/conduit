@@ -55,7 +55,7 @@ export function projectClaudeWorktreeState(
 			// Old resets have no path. Keep them decodable without guessing one.
 			const path = event.data.path ?? Object.values(event.data.worktrees)[0];
 			if (path === undefined) return previous;
-			if (event.data.cause === "user") {
+			if (event.data.cause === "user" || event.data.cause === "missing") {
 				pending = {
 					sequence: event.sequence,
 					path,

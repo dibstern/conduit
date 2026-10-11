@@ -1957,7 +1957,7 @@ describe("handleQuestionReject", () => {
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
-				expect(client.question.reject).toHaveBeenCalledWith("que-1");
+				expect(client.question.reject).toHaveBeenCalledWith("que-1", undefined);
 			}),
 		);
 	});
@@ -2116,10 +2116,11 @@ describe("handleAskUserResponse", () => {
 		}).pipe(
 			Effect.provide(PassThroughSessionInbox), Effect.provide(layer),
 			Effect.tap(() => {
-				expect(client.question.reply).toHaveBeenCalledWith("que-1", [
-					["Yes"],
-					["Approve"],
-				]);
+				expect(client.question.reply).toHaveBeenCalledWith(
+					"que-1",
+					[["Yes"], ["Approve"]],
+					undefined,
+				);
 			}),
 		);
 	});

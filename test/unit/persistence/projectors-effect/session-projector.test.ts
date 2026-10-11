@@ -365,7 +365,7 @@ describe("SessionProjector", () => {
 				? (JSON.parse(row.claude_worktree_state) as ClaudeWorktreeState)
 				: null;
 		};
-		const move = (path: string, cause: "user" | "agent" = "user") =>
+		const move = (path: string, cause: "user" | "agent" | "missing" = "user") =>
 			fact("session.workspace_changed", {
 				sessionId: "claude",
 				path,
@@ -390,6 +390,58 @@ describe("SessionProjector", () => {
 					provider: "claude",
 				}),
 			);
+		});
+
+		// A fallback must retain its cause on the row, require a directive only
+		// after EnterWorktree, and settle through the same observations as a user move.
+		it.each([
+			true,
+			false,
+		])("projects a missing move with entered=%s", async (entered) => {
+			await project(tool("/removed", entered));
+			const requested = move("/main", "missing");
+			await project(requested);
+			expect(await state()).toEqual({
+				entered,
+				observed: "/removed",
+				pending: {
+					sequence: requested.sequence,
+					path: "/main",
+					needsDirective: entered,
+					directiveSent: false,
+					turnEnded: false,
+				},
+			});
+			const row = await queryOne<{ workspace: string | null }>(
+				"SELECT workspace FROM sessions WHERE id = 'claude'",
+			);
+			expect(JSON.parse(row?.workspace ?? "null")).toEqual({
+				cause: "missing",
+				origin: "existing",
+				worktrees: {},
+			});
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: requested.sequence,
+				}),
+			);
+			await project(fact("turn.completed", { messageId: "assistant" }));
+			expect((await state())?.pending).toMatchObject({
+				directiveSent: true,
+				turnEnded: true,
+			});
+			await project(tool("/main", false));
+			expect(await state()).toEqual({ entered: false, observed: "/main" });
+			await project(move("/main", "agent"));
+			expect(
+				(
+					await queryOne<{ workspace: string | null }>(
+						"SELECT workspace FROM sessions WHERE id = 'claude'",
+					)
+				)?.workspace,
+			).toBeNull();
 		});
 
 		it("records confirmed tools only and waits for the directive turn to end", async () => {
