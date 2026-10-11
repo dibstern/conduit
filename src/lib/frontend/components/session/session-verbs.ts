@@ -3,7 +3,7 @@ import { getCurrentSlug } from "../../stores/router.svelte.js";
 import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
-import { confirm, showToast } from "../../stores/ui.svelte.js";
+import { showToast } from "../../stores/ui.svelte.js";
 import { WsRpcError } from "../../transport/ws-rpc.js";
 import {
 	deleteSessionRpc,
@@ -21,6 +21,7 @@ import { formatSnoozeTime } from "../../utils/format.js";
 import { toggleSessionRead } from "../../utils/session-read.js";
 import { getSnoozePresets } from "../../utils/snooze.js";
 import { getSessionActionState } from "../../utils/swipe.js";
+import { confirmSessionDeletion } from "./session-deletion.js";
 
 export type SessionVerbHost = {
 	rename(): void;
@@ -260,17 +261,39 @@ async function remove(
 	returnFocus?: () => HTMLElement | null,
 ) {
 	const title = session.title || "New Session";
-	const confirmed = await confirm(
-		`Delete "${title}"? This session and its history will be permanently removed.`,
-		"Delete",
-		returnFocus,
-	);
-	if (!confirmed) return;
 	const input = rpcInput(session);
 	if (!input) return;
-	void deleteSessionRpc(input)
-		.then(() => refreshIfForeign(session))
-		.catch(() => showToast(`Couldn't delete "${title}"`, { variant: "warn" }));
+	let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
+	try {
+		targets = await confirmSessionDeletion(
+			[input],
+			`Delete "${title}"? This session and its history will be permanently removed.`,
+			returnFocus,
+		);
+	} catch {
+		showToast("Couldn't inspect worktrees. The session was kept.", {
+			variant: "warn",
+		});
+		return;
+	}
+	const target = targets?.[0];
+	if (!target) return;
+	let result: Awaited<ReturnType<typeof deleteSessionRpc>>;
+	try {
+		result = await deleteSessionRpc(target);
+	} catch {
+		showToast(`Couldn't delete "${title}"`, { variant: "warn" });
+		return;
+	}
+	void refreshIfForeign(session).catch(() =>
+		showToast("Session deleted. Couldn't refresh the session list.", {
+			variant: "warn",
+		}),
+	);
+	if (result.worktreeWarnings?.length)
+		showToast(`Session deleted. ${result.worktreeWarnings.join("; ")}`, {
+			variant: "warn",
+		});
 }
 
 function fork(session: SessionInfo) {

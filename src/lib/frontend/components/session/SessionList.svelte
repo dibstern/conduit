@@ -28,7 +28,6 @@
 		deleteSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import {
-		confirm,
 		dismissToast,
 		showToast,
 		uiState,
@@ -45,6 +44,7 @@
 	import SessionListRows from "./SessionListRows.svelte";
 	import SessionListBulkBar from "./SessionListBulkBar.svelte";
 	import { runBulkChange, runBulkSnooze } from "./session-list-bulk-actions.js";
+	import { confirmSessionDeletion } from "./session-deletion.js";
 	import { getProjectAccent, getProjectLabel, projectDisplayName } from "./session-list-project.js";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
@@ -419,18 +419,27 @@
 		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
-		const confirmed = await confirm(
-			`Delete ${label}? These sessions and their history will be permanently removed.`,
-			"Delete",
-		);
-		if (confirmed) {
+		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
+		try {
+			targets = await confirmSessionDeletion(
+				selected,
+				`Delete ${label}? These sessions and their history will be permanently removed.`,
+			);
+		} catch {
+			showToast("Couldn't inspect worktrees. The sessions were kept.", { variant: "warn" });
+			bulkPending = false;
+			return;
+		}
+		if (targets) {
 			// Snapshot the rows, then clear selection so the UI responds at once.
 			// The list is cross-project, so each row deletes in its own project.
-			const targets = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id }));
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				targets.map((target) => deleteSessionRpc({ ...target, originId: getBrowserClientId() })),
+				targets.map((target) => deleteSessionRpc(target)),
 			);
+			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value.worktreeWarnings ?? [] : []);
+			if (warnings.length > 0) showToast(`Sessions deleted. ${warnings.join("; ")}`, { variant: "warn" });
 			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {

@@ -11,6 +11,7 @@ export const daemonOnlyHandlers = {
 		daemonRequired("SetPin"),
 	SetKeepAwake: (_request) => daemonRequired("SetKeepAwake"),
 	SetKeepAwakeCommand: (_request) => daemonRequired("SetKeepAwakeCommand"),
+	SetTailscaleServe: (_request) => daemonRequired("SetTailscaleServe"),
 	Shutdown: (_request) => daemonRequired("Shutdown"),
 	SetAgent: (_request) => daemonRequired("SetAgent"),
 	RestartWithConfig: (_request) => daemonRequired("RestartWithConfig"),
@@ -23,6 +24,7 @@ export const daemonOnlyHandlers = {
 	| "SetPin"
 	| "SetKeepAwake"
 	| "SetKeepAwakeCommand"
+	| "SetTailscaleServe"
 	| "Shutdown"
 	| "SetAgent"
 	| "RestartWithConfig"

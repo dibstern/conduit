@@ -833,7 +833,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const http = HttpServerLive.pipe(Layer.provideMerge(httpRequestHandler));
 
 	const tailscale = TailscaleServeLive.pipe(
-		Layer.provide(TailscaleCliLive),
+		Layer.provideMerge(TailscaleCliLive),
 		Layer.provideMerge(http),
 		Layer.provideMerge(withDaemonControl),
 	);

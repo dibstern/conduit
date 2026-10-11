@@ -283,7 +283,7 @@
 		{#if instanceFormMode === "add"}
 			<SettingsRow label="Type" class="p-0">
 				{#snippet control()}
-					<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} />
+					<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} class="whitespace-nowrap" />
 				{/snippet}
 			</SettingsRow>
 		{/if}

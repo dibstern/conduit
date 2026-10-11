@@ -322,7 +322,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "start adding a driver instance",
-		match: /^I start adding a (OpenCode|Claude) instance$/,
+		match: /^I start adding an? (OpenCode|Claude) instance$/,
 		run: async ({ world, match }) => {
 			const driverName = (match[1] ?? "").toLowerCase();
 			await world.page.getByTestId("add-instance-btn").click();

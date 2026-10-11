@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import {
 	composerPreferences,
@@ -42,6 +42,9 @@ function resetState() {
 			sessionCount: 0,
 			pinEnabled: false,
 			tlsEnabled: false,
+			tailscaleServeEnabled: true,
+			tailscaleServeAvailable: true,
+			tailscaleServe: { url: "https://conduit.example.ts.net" },
 			keepAwake: false,
 			keepAwakeCommand: "caffeinate -di",
 			logLevel: "info",
@@ -463,15 +466,37 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwake: true };
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: /^Log level\b/ }),
+		).toHaveValue("info");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
+		await expect(
+			canvas.getByTestId("server-access-settings"),
+		).toHaveTextContent("https://conduit.example.ts.net");
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle Tailscale Serve" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			within(canvas.getByTestId("server-startup-settings")).getByRole("button"),
+		).toHaveAttribute("aria-expanded", "false");
 		await expect(
 			canvas.getByTestId("server-security-settings"),
 		).toHaveTextContent(
 			"Off · anyone who can reach this address can open conduit",
 		);
 		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeChecked();
+		await expect(
+			canvas.getByTestId("server-power-command-value"),
+		).toHaveTextContent("caffeinate -di");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -491,6 +516,76 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+		canvas
+			.getByTestId("server-startup-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ServerStartupExpanded: Story = {
+	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const startup = canvas.getByTestId("server-startup-settings");
+		const disclosure = within(startup).getByRole("button");
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		disclosure.blur();
+		await expect(canvas.getByTestId("server-startup-port")).toHaveTextContent(
+			"2633",
+		);
+		await expect(canvas.getByTestId("server-startup-host")).toHaveTextContent(
+			"0.0.0.0",
+		);
+		await expect(canvas.getByTestId("server-startup-https")).toHaveTextContent(
+			"Off",
+		);
+		await expect(canvas.getByTestId("server-startup-login")).toHaveTextContent(
+			"Installed",
+		);
+		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
+		startup.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerCommandEdit: Story = {
+	...Server,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-power-edit"));
+		await expect(canvas.getByTestId("server-power-command")).toHaveFocus();
+		await expect(canvas.getByTestId("server-power-command")).toHaveValue(
+			"caffeinate",
+		);
+		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
+		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
+		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerNotAvailable: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwakeCommand: null };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeDisabled();
+		await expect(canvas.getByTestId("server-power-settings")).toHaveTextContent(
+			"Not available on this computer",
+		);
+		await expect(
+			canvas.queryByTestId("server-power-edit"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
 	},
 };
 
@@ -540,15 +635,18 @@ export const ChangePin: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const row = canvas.getByRole("button", {
-			name: /Quick Start — Direct API Key/,
-		});
+		const guides = within(
+			within(canvasElement).getByTestId("opencode-setup-guides"),
+		);
+		await userEvent.click(guides.getByRole("button", { name: /Setup guides/ }));
+		const row = guides.getByRole("button", { name: /^Direct key/ });
 
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByText("opencode serve --port 4098")).toBeVisible();
+		await expect(
+			guides.getByText(/opencode config set provider anthropic/),
+		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
 	},
 };
@@ -648,9 +746,10 @@ export const InstancesEmpty: Story = {
 			"opencode serve --port 4098",
 		);
 		const guides = canvas.getByTestId("opencode-setup-guides");
-		await expect(guides).not.toHaveTextContent("detecting...");
 		applyDetectProxyResponse({ found: true, port: 8317 });
-		await expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom");
+		await waitFor(() =>
+			expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom"),
+		);
 		await expect(within(guides).getByRole("button")).toHaveAttribute(
 			"aria-expanded",
 			"false",
