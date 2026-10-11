@@ -3,11 +3,12 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
-import type {
-	GetSessionSkillsResponse,
-	GetSkillContentResponse,
-	GoalDetails,
-	SaveProjectInput,
+import {
+	type GetSessionSkillsResponse,
+	type GetSkillContentResponse,
+	type GoalDetails,
+	RpcLogLevelSchema,
+	type SaveProjectInput,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -493,6 +494,8 @@ export interface SyncInputDraftRpcInput {
 	readonly text: string;
 	readonly originId?: string;
 }
+
+export const LOG_LEVELS = RpcLogLevelSchema.literals;
 
 export interface SetLogLevelRpcInput {
 	readonly projectSlug?: string;

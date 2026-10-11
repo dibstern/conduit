@@ -298,6 +298,9 @@ export const Server: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: /^Log level\b/ }),
+		).toHaveValue("info");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
