@@ -57,7 +57,7 @@
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-	import { dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc } from "../../transport/ws-rpc-client.js";
+	import { continueSessionInMainFolderRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc } from "../../transport/ws-rpc-client.js";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -246,6 +246,12 @@
 	async function moveWorkspace(path: string) {
 		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
 	}
+	async function recreateWorkspace() {
+		if (project && session) await recreateSessionWorktreeRpc({ projectSlug: project.slug, sessionId: session.id });
+	}
+	async function continueInMainFolder() {
+		if (project && session) await continueSessionInMainFolderRpc({ projectSlug: project.slug, sessionId: session.id });
+	}
 	async function dismissWorkspaceHint(path: string) {
 		if (project && session) await dismissWorkspaceHintRpc({ projectSlug: project.slug, sessionId: session.id, path });
 	}
@@ -429,7 +435,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} workspaceCause={session?.workspace?.cause} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
+			{#if directory}<GitIdentity {directory} {git} workspaceCause={session?.workspace?.cause} workspaceMissing={session?.workspaceMissing} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} onrecreate={session ? recreateWorkspace : undefined} oncontinue={session ? continueInMainFolder : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button

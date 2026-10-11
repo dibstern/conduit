@@ -554,6 +554,34 @@ export async function moveSessionWorkspaceRpc(input: {
 	if (Either.isLeft(result)) throw result.left;
 }
 
+export async function recreateSessionWorktreeRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RecreateSessionWorktree(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function continueSessionInMainFolderRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.ContinueSessionInMainFolder(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
 export async function dismissWorkspaceHintRpc(input: {
 	readonly projectSlug: string;
 	readonly sessionId: string;

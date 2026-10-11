@@ -10,6 +10,7 @@ import type {
 	ProviderSessionCapabilities,
 } from "./contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+import { WorkspaceMissingSchema } from "./contracts/worktree.js";
 
 export type {
 	SessionWorkspace,
@@ -340,6 +341,7 @@ export const SessionInfoSchema = Schema.Struct({
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
+	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),

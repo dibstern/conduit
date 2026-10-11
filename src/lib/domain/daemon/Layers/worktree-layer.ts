@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { mkdir, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, realpath, rm } from "node:fs/promises";
 import {
 	basename,
 	dirname,
@@ -13,7 +13,11 @@ import {
 } from "node:path";
 import { promisify } from "node:util";
 import { Cause, Effect, Either, Layer } from "effect";
-import { WorktreeCreationError } from "../../../contracts/worktree.js";
+import {
+	type WorkspaceMissing,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../../contracts/worktree.js";
 import {
 	type CreatedWorktrees,
 	type WorktreeFolder,
@@ -160,6 +164,224 @@ export const makeWorktreeLive = (
 							message: `Could not prepare worktree path ${path}: ${cause instanceof Error ? cause.message : String(cause)}`,
 						}),
 				});
+			const recoveryError = (
+				error: WorktreeCreationError | WorktreeRecoveryError,
+			) =>
+				error instanceof WorktreeRecoveryError
+					? error
+					: new WorktreeRecoveryError({
+							path: error.path,
+							reason: "git-failed",
+							message: error.message,
+						});
+			const pathStat = (path: string) =>
+				filesystem(path, async () => {
+					try {
+						return await lstat(path);
+					} catch (cause) {
+						if (hasCode(cause, "ENOENT") || hasCode(cause, "ENOTDIR"))
+							return undefined;
+						throw cause;
+					}
+				});
+			const readRecovery = (folder: WorktreeFolder, directory?: string) =>
+				Effect.gen(function* () {
+					const source = yield* filesystem(folder.path, async () =>
+						realPathWithMissingChildren(folder.path),
+					);
+					// A project's subfolder may disappear from main while still existing
+					// on the session branch. Read its refs through the nearest ancestor.
+					let ancestor = source;
+					while (!(yield* pathStat(ancestor))?.isDirectory()) {
+						const parent = dirname(ancestor);
+						if (parent === ancestor)
+							return yield* new WorktreeRecoveryError({
+								path: source,
+								reason: "git-failed",
+								message:
+									"Could not locate the main repository for this worktree.",
+							});
+						ancestor = parent;
+					}
+					const root = yield* git(ancestor, ["rev-parse", "--show-toplevel"]);
+					const subfolder = relative(root, source);
+					const owned = yield* Effect.try({
+						try: () => ownedWorktreePath(configDir, folder),
+						catch: (cause) =>
+							new WorktreeRecoveryError({
+								path: directory ?? folder.path,
+								reason: "not-owned",
+								message: `Could not resolve the owned worktree path: ${String(cause)}`,
+							}),
+					});
+					const mapped = resolve(directory ?? join(owned, subfolder));
+					const path = resolve(
+						mapped,
+						...subfolder
+							.split(sep)
+							.filter(Boolean)
+							.map(() => ".."),
+					);
+					// Forks share the parent's mapping. Validate that recorded owner's path
+					// rather than inventing a checkout under the fork's id.
+					const expected = yield* Effect.try({
+						try: () =>
+							ownedWorktreePath(configDir, {
+								...folder,
+								sessionId: decodeURIComponent(basename(dirname(path))),
+							}),
+						catch: (cause) =>
+							new WorktreeRecoveryError({
+								path: mapped,
+								reason: "not-owned",
+								message: `Invalid owned worktree path: ${String(cause)}`,
+							}),
+					});
+					if (path !== expected || mapped !== join(path, subfolder))
+						return yield* new WorktreeRecoveryError({
+							path: mapped,
+							reason: "not-owned",
+							message:
+								"Could not recreate worktree: the recorded folder is not a Conduit-owned worktree.",
+						});
+					const listed = yield* git(root, [
+						"worktree",
+						"list",
+						"--porcelain",
+						"-z",
+					]);
+					const entries = listed.split("\0\0");
+					const entry = entries.find((entry) =>
+						entry.split("\0").includes(`worktree ${path}`),
+					);
+					const targetStat = yield* pathStat(path);
+					const markerStat = yield* pathStat(join(path, ".git"));
+					const directoryStat = yield* pathStat(mapped);
+					const usable = Boolean(
+						entry &&
+							targetStat?.isDirectory() &&
+							!targetStat.isSymbolicLink() &&
+							markerStat?.isFile() &&
+							directoryStat?.isDirectory() &&
+							(yield* filesystem(path, () => realpath(path))) === path &&
+							(yield* git(mapped, ["rev-parse", "--show-toplevel"])) === path,
+					);
+					const branch = entry
+						?.split("\0")
+						.find((field) => field.startsWith("branch refs/heads/"))
+						?.slice(18);
+					const refs =
+						branch && !usable
+							? (yield* git(root, [
+									"for-each-ref",
+									"--format=%(refname)",
+									"refs/heads",
+								])).split("\n")
+							: [];
+					// --force is needed for this path's prunable registration, but must
+					// not bypass Git's protection of another checkout on this branch.
+					const branchInUse =
+						branch && !usable
+							? yield* Effect.exists(entries, (other) => {
+									const fields = other.split("\0");
+									const otherPath = fields
+										.find((field) => field.startsWith("worktree "))
+										?.slice(9);
+									return otherPath &&
+										otherPath !== path &&
+										fields.includes(`branch refs/heads/${branch}`)
+										? pathStat(otherPath).pipe(Effect.map(Boolean))
+										: Effect.succeed(false);
+								})
+							: false;
+					const reason = !branch
+						? ("branch-unknown" as const)
+						: !usable && !refs.includes(`refs/heads/${branch}`)
+							? ("branch-missing" as const)
+							: branchInUse
+								? ("branch-in-use" as const)
+								: undefined;
+					return {
+						source: root,
+						path,
+						directory: mapped,
+						usable,
+						branch,
+						reason,
+					};
+				}).pipe(Effect.mapError(recoveryError));
+			const inspectMissing: WorktreeService["inspectMissing"] = (
+				folder,
+				directory,
+			) =>
+				readRecovery(folder, directory).pipe(
+					Effect.map((state): WorkspaceMissing | undefined =>
+						state.usable
+							? undefined
+							: {
+									path: state.directory,
+									...(state.branch ? { branch: state.branch } : {}),
+									canRecreate: state.reason === undefined,
+									...(state.reason ? { reason: state.reason } : {}),
+								},
+					),
+				);
+			const recreate: WorktreeService["recreate"] = (folder, directory) =>
+				Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						const state = yield* restore(readRecovery(folder, directory));
+						if (yield* pathStat(state.path))
+							return yield* new WorktreeRecoveryError({
+								path: state.path,
+								reason: "target-exists",
+								message: `Could not recreate worktree: the target is already occupied: ${state.path}`,
+							});
+						if (!state.branch || state.reason)
+							return yield* new WorktreeRecoveryError({
+								path: state.directory,
+								reason: state.reason ?? "branch-unknown",
+								message:
+									state.reason === "branch-missing"
+										? `Could not recreate worktree: branch "${state.branch}" no longer exists. Continue in main folder instead.`
+										: state.reason === "branch-in-use"
+											? `Could not recreate worktree: branch "${state.branch}" is checked out in another worktree. Continue in main folder instead.`
+											: "Could not recreate worktree: Git no longer records its branch. Continue in main folder instead.",
+							});
+						yield* filesystem(dirname(state.path), () =>
+							mkdir(dirname(state.path), { recursive: true }),
+						);
+						// Claim only an absent path, including refusing dangling symlinks.
+						yield* Effect.tryPromise({
+							try: () => mkdir(state.path),
+							catch: (cause) =>
+								new WorktreeRecoveryError({
+									path: state.path,
+									reason: hasCode(cause, "EEXIST")
+										? "target-exists"
+										: "git-failed",
+									message: `Could not recreate worktree: ${hasCode(cause, "EEXIST") ? "the target is already occupied" : String(cause)}`,
+								}),
+						});
+						// --force permits reusing this branch's prunable registration. It
+						// neither makes a new branch nor prunes unrelated worktrees.
+						return yield* git(state.source, [
+							"worktree",
+							"add",
+							"--force",
+							"--",
+							state.path,
+							state.branch,
+						]).pipe(
+							Effect.zipRight(restore(Effect.succeed(state.directory))),
+							Effect.catchAllCause((cause) =>
+								// Keep the branch and registration available for another attempt.
+								filesystem(state.path, () =>
+									rm(state.path, { recursive: true, force: true }),
+								).pipe(Effect.zipRight(Effect.failCause(cause))),
+							),
+						);
+					}),
+				).pipe(Effect.mapError(recoveryError));
 			const rollback: WorktreeService["rollback"] = (created) =>
 				Effect.forEach(
 					[...created.ownership].reverse(),
@@ -414,6 +636,11 @@ export const makeWorktreeLive = (
 						}),
 					);
 				});
-			return { create, rollback } satisfies WorktreeService;
+			return {
+				create,
+				rollback,
+				inspectMissing,
+				recreate,
+			} satisfies WorktreeService;
 		}),
 	);

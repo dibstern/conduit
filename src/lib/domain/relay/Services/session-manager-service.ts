@@ -953,6 +953,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				backgroundOf,
 				snapshot,
 				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
+				projectSlug: config.slug,
 			});
 		const establishOpenCodeSession = (
 			session: SessionDetail,
