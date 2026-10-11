@@ -187,6 +187,18 @@ function readTurns(dbPath: string) {
 	);
 }
 
+function readCompactionEvents(dbPath: string) {
+	return readStore(
+		dbPath,
+		Effect.flatMap(
+			SqlClient.SqlClient,
+			(sql) => sql<{ event_id: string; data: string }>`
+		SELECT event_id, data FROM events WHERE session_id = ${SESSION_ID}
+		AND type = 'session.compaction' ORDER BY sequence`,
+		),
+	);
+}
+
 async function historyComplete(dbPath: string): Promise<boolean> {
 	const rows = await readStore(
 		dbPath,
@@ -314,6 +326,219 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			status: { type: "idle" },
 		});
 	}
+
+	it("backfills a successful summary as one completed compaction visible on reopen", async () => {
+		const dbPath = join(
+			mkdtempSync(join(tmpdir(), "conduit-compaction-rest-")),
+			"events.sqlite",
+		);
+		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await mock.start();
+		const request = {
+			...u1,
+			parts: [
+				{
+					id: "prt_compaction_request",
+					type: "compaction",
+					messageID: u1.info.id,
+					sessionID: SESSION_ID,
+					auto: false,
+				},
+			],
+		};
+		const summary = {
+			info: {
+				...assistantInfo(
+					"msg_compaction_summary",
+					T0 + 2_000,
+					T0 + 5_000,
+					u1.info.id,
+				),
+				summary: true,
+			},
+			parts: [textPart("msg_compaction_summary", "Retained conversation")],
+		};
+		mock.setExactResponse("GET", `/session/${SESSION_ID}/message`, 200, [
+			request,
+			summary,
+		]);
+		stack = await startStack(mock, dbPath);
+		mock.emitTestEvent("session.created", {
+			info: { id: SESSION_ID, title: "Compacted while offline" },
+		});
+		await waitFor(() => historyComplete(dbPath), "summary backfill");
+		const client = new TestWsClient(
+			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+		);
+		try {
+			await client.waitForOpen();
+			await client.viewSession(SESSION_ID, "iea-backfill");
+			const page = await client.loadMoreHistory(
+				SESSION_ID,
+				undefined,
+				"iea-backfill",
+			);
+			const notices = page.messages
+				.flatMap((message) => message.parts ?? [])
+				.filter((part) => part.type === "compaction");
+			expect(notices).toHaveLength(1);
+			expect(notices[0]?.text).toBe("Context compacted");
+			expect(
+				page.messages.find((message) => message.id === summary.info.id)
+					?.contextTokens,
+			).toBe(0);
+			const events = await readCompactionEvents(dbPath);
+			expect(events).toHaveLength(1);
+			expect(events[0]?.event_id).toContain(summary.info.id);
+			expect(JSON.parse(events[0]?.data ?? "null")).toMatchObject({
+				state: "completed",
+			});
+		} finally {
+			await client.close();
+		}
+	}, 60_000);
+
+	it("converges live completion, restart redelivery and REST backfill on one summary event", async () => {
+		const dbPath = join(
+			mkdtempSync(join(tmpdir(), "conduit-compaction-restart-")),
+			"events.sqlite",
+		);
+		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await mock.start();
+		mock.setExactResponse("GET", `/session/${SESSION_ID}/message`, 200, [u1]);
+		stack = await startStack(mock, dbPath);
+		mock.emitTestEvent("session.created", {
+			info: { id: SESSION_ID, title: "Summary restart" },
+		});
+		await waitFor(() => historyComplete(dbPath), "initial history");
+		const info = {
+			...assistantInfo(
+				"msg_summary_redelivery",
+				Date.now(),
+				undefined,
+				u1.info.id,
+			),
+			summary: true,
+		};
+		mock.emitTestEvent("message.updated", { info });
+		mock.emitTestEvent("session.next.compaction.started", {
+			sessionID: SESSION_ID,
+			messageID: u1.info.id,
+			timestamp: Date.now(),
+			reason: "manual",
+		});
+		mock.emitTestEvent("session.compacted", { sessionID: SESSION_ID });
+		const completed = {
+			...info,
+			time: { ...info.time, completed: Date.now() },
+		};
+		mock.emitTestEvent("message.updated", { info: completed });
+		await waitFor(
+			async () => (await readCompactionEvents(dbPath)).length === 1,
+			"live compaction",
+		);
+		const first = await readCompactionEvents(dbPath);
+		await restartWithRest(mock, dbPath, [u1, { info: completed, parts: [] }]);
+		const client = new TestWsClient(
+			`ws://127.0.0.1:${stack?.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+		);
+		try {
+			await client.waitForOpen();
+			await client.viewSession(SESSION_ID, "iea-backfill");
+			await waitFor(
+				() => historyComplete(dbPath),
+				"summary reconciliation after restart",
+			);
+			mock.emitTestEvent("message.updated", { info: completed });
+			mock.emitTestEvent("message.updated", { info: completed });
+			mock.emitTestEvent("session.compacted", { sessionID: SESSION_ID });
+			mock.emitTestEvent("session.next.compaction.ended", {
+				sessionID: SESSION_ID,
+				messageID: u1.info.id,
+				timestamp: Date.now(),
+				reason: "manual",
+				text: "Summary",
+				recent: "Recent",
+			});
+			mock.emitTestEvent("session.updated", {
+				info: { id: SESSION_ID, title: "Redelivery processed" },
+			});
+			await client.waitFor("shell", {
+				predicate: (frame) =>
+					frame["_tag"] === "upsert" &&
+					(frame["item"] as { title: string }).title === "Redelivery processed",
+			});
+			expect(await readCompactionEvents(dbPath)).toEqual(first);
+			const page = await client.loadMoreHistory(
+				SESSION_ID,
+				undefined,
+				"iea-backfill",
+			);
+			expect(
+				page.messages
+					.flatMap((message) => message.parts ?? [])
+					.filter((part) => part.type === "compaction"),
+			).toHaveLength(1);
+		} finally {
+			await client.close();
+		}
+	}, 60_000);
+
+	it.each([
+		"MessageAbortedError",
+		"UnknownError",
+	])("does not clear context or backfill a completed notice for an unsuccessful summary (%s)", async (name) => {
+		const dbPath = join(
+			mkdtempSync(join(tmpdir(), "conduit-compaction-error-rest-")),
+			"events.sqlite",
+		);
+		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await mock.start();
+		const summary = {
+			info: {
+				...assistantInfo(
+					"msg_failed_summary",
+					T0 + 2_000,
+					T0 + 5_000,
+					u1.info.id,
+				),
+				summary: true,
+				error: { name, data: { message: "Summary failed" } },
+				tokens: {
+					input: 170_000,
+					output: 0,
+					reasoning: 0,
+					cache: { read: 0, write: 0 },
+				},
+			},
+			parts: [],
+		};
+		mock.setExactResponse("GET", `/session/${SESSION_ID}/message`, 200, [
+			u1,
+			summary,
+		]);
+		stack = await startStack(mock, dbPath);
+		mock.emitTestEvent("session.created", {
+			info: { id: SESSION_ID, title: "Unsuccessful summary" },
+		});
+		await waitFor(
+			() => historyComplete(dbPath),
+			"unsuccessful summary backfill",
+		);
+		const rows = await readStore(
+			dbPath,
+			Effect.flatMap(
+				SqlClient.SqlClient,
+				(sql) =>
+					sql<{
+						context_tokens: number | null;
+						tokens_in: number;
+					}>`SELECT context_tokens, tokens_in FROM messages WHERE id = ${summary.info.id}`,
+			),
+		);
+		expect(rows).toEqual([{ context_tokens: null, tokens_in: 170_000 }]);
+		expect(await readCompactionEvents(dbPath)).toHaveLength(0);
+	});
 
 	it("reconciles new REST history after restart without an SSE event", async () => {
 		const dbPath = join(

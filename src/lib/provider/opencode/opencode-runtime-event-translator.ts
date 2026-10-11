@@ -26,6 +26,7 @@ import {
 import { isRecord } from "../../utils.js";
 import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
+import { completedCompactionEvent } from "./opencode-history-backfill.js";
 
 interface TrackedPart {
 	readonly messageId: string;
@@ -44,6 +45,13 @@ const defaultLog = createLogger("opencode-runtime-event-translator");
  *  produced are durable — a batch that rolled back must translate again. */
 export interface SessionTranslation {
 	droppedRewrite: boolean;
+	status: string | undefined;
+	compaction:
+		| {
+				messageId: string | undefined;
+				state: "started" | "failed";
+		  }
+		| undefined;
 	/** The reconnect generation this copy was forked from. A fork translated
 	 *  before a reconnect may not restore the announcements that reconnect
 	 *  deliberately discarded. */
@@ -99,6 +107,8 @@ export class OpenCodeRuntimeEventTranslator {
 		const committed = this.committed.get(sessionId);
 		return {
 			droppedRewrite: false,
+			status: committed?.status,
+			compaction: committed?.compaction,
 			epoch: this.epoch,
 			parts: new Map(committed?.parts),
 			seenMessages: new Set(committed?.seenMessages),
@@ -107,9 +117,8 @@ export class OpenCodeRuntimeEventTranslator {
 	}
 
 	/** Make a working copy the session's state. A copy forked before a reconnect
-	 *  keeps only its text ledger: the events it emitted are durable, so the
-	 *  ledger must record them, but the announcements the reconnect dropped stay
-	 *  dropped, or the reconnect would be silently undone for that session. */
+	 *  keeps its text and compaction state: emitted outcomes are durable, but
+	 *  the announcements the reconnect dropped must stay dropped. */
 	commitSession(sessionId: string, state: SessionTranslation): void {
 		this.committed.set(
 			sessionId,
@@ -117,6 +126,8 @@ export class OpenCodeRuntimeEventTranslator {
 				? state
 				: {
 						droppedRewrite: false,
+						status: state.status,
+						compaction: state.compaction,
 						epoch: this.epoch,
 						parts: new Map(),
 						seenMessages: new Set(),
@@ -166,10 +177,38 @@ export class OpenCodeRuntimeEventTranslator {
 			return this.translateMessageUpdated(event, sessionId, state);
 		}
 		if (isSessionStatusEvent(event)) {
+			const status = event.properties.status?.type;
+			if (
+				status === "busy" &&
+				state.status !== "busy" &&
+				state.compaction?.state !== "started"
+			) {
+				state.compaction = undefined;
+			}
+			state.status = status;
 			return this.translateSessionStatus(event, sessionId);
 		}
 		if (isSessionErrorEvent(event)) {
-			return this.translateSessionError(event, sessionId);
+			const events = this.translateSessionError(event, sessionId) ?? [];
+			if (state.compaction?.state === "started") {
+				state.compaction = { ...state.compaction, state: "failed" };
+				events.unshift(
+					opencodeRuntimeEvent("session.compaction", sessionId, event, {
+						sessionId,
+						state: "failed",
+						detail: `Compaction failed: ${sessionErrorText(event.properties.error)}`,
+					}),
+				);
+			}
+			return events;
+		}
+		if (
+			event.type === "session.compacted" ||
+			event.type === "session.next.compaction.started" ||
+			event.type === "session.next.compaction.delta" ||
+			event.type === "session.next.compaction.ended"
+		) {
+			return this.translateCompaction(event, sessionId, state);
 		}
 		if (isPermissionAskedEvent(event)) {
 			return this.translatePermissionAsked(event, sessionId);
@@ -213,21 +252,56 @@ export class OpenCodeRuntimeEventTranslator {
 	}
 
 	/** Announce every message and part again, because a reconnected stream may
-	 *  have dropped the events that explain them. The text ledger survives: it
-	 *  records text already appended to the store, and re-emitting text is the
-	 *  one thing the read model cannot absorb twice — "hello" would land as
-	 *  "hellohello". Announcements are idempotent upserts, text is not. */
+	 *  have dropped the events that explain them. Preserve the text and
+	 *  compaction state so reconnect does not lose work in progress.
+	 *  Announcements are idempotent upserts. */
 	resetAnnouncements(): void {
 		this.epoch++;
 		for (const [sessionId, state] of this.committed) {
 			this.committed.set(sessionId, {
 				droppedRewrite: false,
+				status: state.status,
+				compaction: state.compaction,
 				epoch: this.epoch,
 				parts: new Map(),
 				seenMessages: new Set(),
 				emitted: state.emitted,
 			});
 		}
+	}
+
+	private translateCompaction(
+		event: SSEEvent,
+		sessionId: string,
+		state: SessionTranslation,
+		partMessageId?: string,
+	): ProviderRuntimeEvent[] | null {
+		// Lifecycle endings do not prove that the summary succeeded. Only its
+		// completed assistant message produces the durable outcome.
+		if (
+			event.type === "session.compacted" ||
+			event.type === "session.next.compaction.ended"
+		)
+			return null;
+		const messageId =
+			partMessageId ??
+			("messageID" in event.properties
+				? stringField(event.properties.messageID)
+				: undefined);
+		if (
+			!messageId ||
+			(state.compaction?.messageId === messageId &&
+				state.compaction.state === "started")
+		)
+			return null;
+		state.compaction = { messageId, state: "started" };
+		return [
+			opencodeRuntimeEvent("session.compaction", sessionId, event, {
+				sessionId,
+				state: "started",
+				detail: "Compacting conversation…",
+			}),
+		];
 	}
 
 	/** What a refreshed part may still emit, or null when it may emit nothing.
@@ -378,6 +452,9 @@ export class OpenCodeRuntimeEventTranslator {
 				messageId,
 			),
 		);
+		if (rawPart.type === "compaction") {
+			return this.translateCompaction(event, sessionId, state, messageId);
+		}
 
 		if (rawPart.type === "reasoning") {
 			const events: ProviderRuntimeEvent[] = [];
@@ -636,12 +713,24 @@ export class OpenCodeRuntimeEventTranslator {
 			cost?: number;
 			tokens?: typeof tokens;
 			duration?: number;
+			contextTokens?: number;
 		} = { messageId };
+		// A summary's usage describes the discarded context, not its replacement.
+		// Clear the gauge until a normal assistant response measures it again.
+		const compaction = completedCompactionEvent(sessionId, msg, {
+			kind: "opencode.sse",
+			providerMessageType: event.type,
+		});
+		if (compaction) data.contextTokens = 0;
 		if (msg.cost != null) data.cost = msg.cost;
 		if (Object.keys(tokens).length > 0) data.tokens = tokens;
 		if (duration != null) data.duration = duration;
 
 		events.push(opencodeRuntimeEvent("turn.completed", sessionId, event, data));
+		if (compaction) {
+			state.compaction = undefined;
+			events.push(compaction);
+		}
 		return events;
 	}
 

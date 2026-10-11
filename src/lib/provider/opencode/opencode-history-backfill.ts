@@ -1,9 +1,47 @@
 import { createHash } from "node:crypto";
-import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import type {
+	ProviderRuntimeEvent,
+	ProviderRuntimeRawSource,
+} from "../../contracts/providers/provider-runtime-event.js";
 import type { MessageSnapshotPayload } from "../../contracts/stored-event.js";
 import type { Message } from "../../instance/sdk-types.js";
 import { mapToolName } from "../../relay/event-translator.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
+
+/** SSE and REST report the same summary; its identity owns the outcome. */
+export function completedCompactionEvent(
+	sessionId: string,
+	message: {
+		readonly id?: string;
+		readonly role?: string;
+		readonly summary?: unknown;
+		readonly time?: { readonly completed?: number };
+		readonly error?: unknown;
+	},
+	rawSource: ProviderRuntimeRawSource,
+): ProviderRuntimeEvent | undefined {
+	if (
+		!message.id ||
+		message.role !== "assistant" ||
+		message.summary !== true ||
+		typeof message.time?.completed !== "number" ||
+		message.error != null
+	)
+		return undefined;
+	return {
+		eventId: `evt_opencode_compaction_${sessionId}_${message.id}`,
+		type: "session.compaction",
+		providerId: "opencode",
+		sessionId,
+		providerRefs: {
+			providerSessionId: sessionId,
+			providerMessageId: message.id,
+		},
+		rawSource,
+		createdAt: message.time.completed,
+		data: { sessionId, state: "completed", detail: "Context compacted" },
+	};
+}
 
 export function isSettled(message: Message | undefined): boolean {
 	if (!message) return false;
@@ -24,24 +62,28 @@ function stableJson(value: unknown): string {
 }
 
 export function snapshotPayload(message: Message): MessageSnapshotPayload {
-	const parts = (message.parts ?? []).map((part) => {
-		if (part.type !== "tool") return part;
-		const state = part["state"];
-		if (typeof state !== "object" || state === null || Array.isArray(state))
-			return part;
-		const tool =
-			typeof part["tool"] === "string" ? mapToolName(part["tool"]) : "";
-		return {
-			...part,
-			state: {
-				...state,
-				input: normalizeToolInput(
-					tool,
-					"input" in state ? state.input : undefined,
-				),
-			},
-		};
-	});
+	// OpenCode's compaction part requests a summary; only the canonical outcome
+	// is a transcript notice. Keeping this marker would create a second notice.
+	const parts = (message.parts ?? [])
+		.filter((part) => part.type !== "compaction")
+		.map((part) => {
+			if (part.type !== "tool") return part;
+			const state = part["state"];
+			if (typeof state !== "object" || state === null || Array.isArray(state))
+				return part;
+			const tool =
+				typeof part["tool"] === "string" ? mapToolName(part["tool"]) : "";
+			return {
+				...part,
+				state: {
+					...state,
+					input: normalizeToolInput(
+						tool,
+						"input" in state ? state.input : undefined,
+					),
+				},
+			};
+		});
 	const normalized = { ...message, parts };
 	const digest = createHash("sha256")
 		.update(stableJson(normalized))

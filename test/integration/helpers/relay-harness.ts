@@ -10,6 +10,7 @@ import {
 	createRelayStack,
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
@@ -38,8 +39,9 @@ export async function createRelayHarness(
 	options: {
 		/** Config directory holding daemon.json (named provider instances). */
 		readonly configDir?: string;
-		/** Relay default model ("provider/model"); it decides the provider of new sessions. */
-		readonly defaultModel?: string;
+		/** Relay default model ("provider/model"); null leaves the native default in control. */
+		readonly defaultModel?: string | null;
+		readonly claudeSdk?: ProjectRelayConfig["claudeSdk"];
 	} = {},
 ): Promise<RelayHarness> {
 	const recording =
@@ -52,10 +54,14 @@ export async function createRelayHarness(
 	const eventsDbPath = join(dbDir, "events.db");
 	writeFileSync(
 		join(dbDir, "settings.jsonc"),
-		JSON.stringify({
-			defaultModel:
-				options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
-		}),
+		JSON.stringify(
+			options.defaultModel === null
+				? {}
+				: {
+						defaultModel:
+							options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
+					},
+		),
 	);
 
 	const stack = await createRelayStack({
@@ -68,6 +74,7 @@ export async function createRelayHarness(
 		log: createSilentLogger(),
 		persistenceDbPath: eventsDbPath,
 		configDir: options.configDir ?? dbDir,
+		...(options.claudeSdk ? { claudeSdk: options.claudeSdk } : {}),
 	});
 
 	const relayPort = stack.getPort();

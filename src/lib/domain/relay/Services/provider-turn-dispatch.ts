@@ -208,14 +208,6 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 		return yield* resolveSessionFolders(session);
 	});
 
-const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
-	push: () => Effect.void,
-	requestPermission: () => Effect.succeed({ decision: "once" as const }),
-	requestQuestion: () => Effect.succeed({}),
-	resolvePermission: () => Effect.void,
-	resolveQuestion: () => Effect.void,
-};
-
 export class ProviderTurnDispatchFibersTag extends Context.Tag(
 	"ProviderTurnDispatchFibers",
 )<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
@@ -318,7 +310,6 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
-		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,

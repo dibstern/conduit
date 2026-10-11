@@ -464,13 +464,14 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const written = yield* sql<{ id: string }>`
 					INSERT INTO messages
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
-					 tokens_cache_read, tokens_cache_write, context_window,
+					 tokens_cache_read, tokens_cache_write, context_window, context_tokens,
 					 is_streaming, is_backfilled, created_at, updated_at,
 					 rest_digest, rest_event_id, rest_payload, finish, error)
 					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
 					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
 					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
 					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
+					 ${message.role === "assistant" && message.summary === true && message.time?.completed != null && message.error == null ? 0 : null},
 					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
 					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
 					 ${message.finish ?? null},
@@ -481,13 +482,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 					 tokens_cache_read = excluded.tokens_cache_read,
 					 tokens_cache_write = excluded.tokens_cache_write,
 					 context_window = excluded.context_window, is_streaming = 0,
+					 context_tokens = excluded.context_tokens,
 					 completed_at = NULL,
 					 created_at = excluded.created_at, updated_at = excluded.updated_at,
 					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
 					 rest_payload = excluded.rest_payload,
 					 finish = excluded.finish, error = excluded.error
 				RETURNING id`;
-				yield* sql`DELETE FROM message_parts WHERE message_id = ${message.id}`;
+				// A provider snapshot replaces provider parts, while Conduit's own
+				// compaction outcomes must survive reconciliation and reconnects.
+				yield* sql`DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND NOT (type = 'compaction' AND rest_payload IS NULL)`;
 				for (const [index, part] of message.parts.entries()) {
 					const partTime = part["time"];
 					const time =
@@ -874,15 +879,24 @@ export const makeMessageProjector = (): EffectProjector => ({
 						? { postTokens: event.data.postTokens }
 						: {}),
 				});
-				if (latest?.role === "assistant" && latest.is_streaming === 1) {
+				const summaryId =
+					event.provider === "opencode"
+						? event.metadata.providerRefs?.providerMessageId
+						: undefined;
+				const ownerId =
+					summaryId ??
+					(latest?.role === "assistant" && latest.is_streaming === 1
+						? latest.id
+						: undefined);
+				if (ownerId) {
 					yield* sql`
 						INSERT INTO message_parts
 						(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at)
-						VALUES (${partId}, ${latest.id}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
-							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${latest.id}), 0),
+						VALUES (${partId}, ${ownerId}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
+							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${ownerId}), 0),
 							${event.createdAt}, ${event.createdAt})
 						ON CONFLICT (id) DO NOTHING`;
-					return [latest.id];
+					return [ownerId];
 				}
 				const messageId = `compaction-${event.sequence}`;
 				yield* sql`

@@ -144,6 +144,7 @@ export interface MessageSnapshotPayload {
 		readonly sessionID: string;
 		readonly role: string;
 		readonly parentID?: string;
+		readonly summary?: boolean;
 		readonly time?: { readonly created?: number; readonly completed?: number };
 		readonly cost?: number;
 		readonly tokens?: {

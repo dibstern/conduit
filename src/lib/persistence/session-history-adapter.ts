@@ -46,11 +46,20 @@ function snapshotRowToHistory(
 			type: part.type as HistoryMessagePart["type"],
 		};
 	});
+	// The snapshot owns provider parts; canonical outcomes live alongside it.
+	parts.push(
+		...row.parts
+			.filter((part) => part.type === "compaction" && part.rest_payload == null)
+			.map((part) => partRowToHistoryPart(part, false)),
+	);
 	return {
 		...parsed,
 		id: parsed.id,
 		role: parsed.role,
 		parts,
+		...(row.context_tokens != null
+			? { contextTokens: row.context_tokens }
+			: {}),
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 		...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 		...(row.input_id ? { inputId: row.input_id } : {}),
