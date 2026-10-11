@@ -54,7 +54,10 @@ export const subscribeSessionFamily = (options: {
 									rows: list.rows.map((row) => ({
 										...row,
 										item: config
-											? withCachedSessionGit(row.item, config.projectDir)
+											? withCachedSessionGit(row.item, [
+													config.projectDir,
+													...(config.extraFolders ?? []),
+												])
 											: row.item,
 									})),
 								})),

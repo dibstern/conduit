@@ -5,7 +5,7 @@ import type {
 } from "../../../src/lib/contracts/limit-recovery.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { openModelPicker, requireRpcControl } from "./shared.js";
 
 const states = {
 	normal: [41, 22],
@@ -81,14 +81,14 @@ function setAccounts(
 		})),
 	});
 	rpc.setDaemonList("SubscribeProjects", {
-		projects: [
-			{
-				slug: "myapp",
-				title: "myapp",
-				folders: ["/src/myapp"],
-				instanceId: "claude",
-			},
-		],
+		projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
+	});
+	// A Claude default model makes the claude account current outside a session.
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-5",
+		provider: "claude",
+		variant: "",
 	});
 }
 
@@ -346,8 +346,8 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the project's default account colour and tooltip",
-		match: /^the usage footer (\S+) row is the highlighted project default$/,
+		name: "assert the current account's colour and tooltip",
+		match: /^the usage footer (\S+) row is the highlighted current account$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId(`usage-footer-row-${match[1]}`);
 			await expect(
@@ -356,7 +356,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 					.locator('[data-default="true"]'),
 			).toHaveCount(1);
 			await expect(row).toHaveAttribute("data-default", "true");
-			await expect(row).toHaveAttribute("title", "Default for this project");
+			await expect(row).toHaveAttribute("title", "Current account");
 			await expect(row).toHaveCSS(
 				"background-color",
 				await themeColour(world.page, "--color-bg-alt"),
@@ -561,8 +561,29 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// The draft's pick is the only per-tab account choice; it decides the
+		// highlighted account until a session exists.
+		name: "pick an account for a new session draft",
+		match: /^I pick (\S+) for a new session draft$/,
+		run: async ({ world, match }) => {
+			const newSession = world.page.locator("#new-session-btn:visible");
+			if ((await newSession.count()) === 0)
+				await world.page.getByTestId("session-bar-back").click();
+			await newSession.click();
+			await openModelPicker(world.page);
+			await world.page.getByTestId("picker-row-harness").click();
+			await world.page.getByTestId(`picker-instance-${match[1]}`).click();
+			await world.page.keyboard.press("Escape");
+			await expect(
+				world.page.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				),
+			).toHaveAttribute("data-instance-id", match[1] ?? "");
+		},
+	},
+	{
 		// Opening a session from the list attaches its project, which is
-		// what gives the phone list a project default after going back.
+		// what gives the phone list a current account after going back.
 		name: "open a project session from the phone session list",
 		match: /^I open "([^"]+)" from the phone session list$/,
 		run: async ({ world, match }) => {
@@ -593,9 +614,9 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the highlighted project default in the phone dock or sheet",
+		name: "assert the highlighted current account in the phone dock or sheet",
 		match:
-			/^the (phone usage|usage sheet) row (\S+) is the highlighted project default$/,
+			/^the (phone usage|usage sheet) row (\S+) is the highlighted current account$/,
 		run: async ({ world, match }) => {
 			const [scope, prefix] =
 				match[1] === "usage sheet"
@@ -606,7 +627,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				world.page.getByTestId(scope).locator('[data-default="true"]'),
 			).toHaveCount(1);
 			await expect(row).toHaveAttribute("data-default", "true");
-			await expect(row).toHaveAttribute("title", "Default for this project");
+			await expect(row).toHaveAttribute("title", "Current account");
 			await expect(row).toHaveCSS(
 				"background-color",
 				await themeColour(world.page, "--color-bg-alt"),

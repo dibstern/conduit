@@ -118,7 +118,6 @@ export interface StoredProject {
 	>;
 	readonly title: string;
 	readonly lastUsed?: number;
-	readonly instanceId?: string;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 }
 
@@ -189,7 +188,6 @@ export interface ProjectRelayConfig {
 			slug: string;
 			title: string;
 			folders: readonly [string, ...string[]];
-			instanceId?: string;
 		}>
 	>;
 	/** List sessions across every registered project without starting relays. */
@@ -244,11 +242,6 @@ export interface ProjectRelayConfig {
 	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Persist daemon config to disk after instance mutations. */
 	persistConfig?: () => MaybePromise<void>;
-	/** Change a project's instance binding and rebuild relay. */
-	setProjectInstance?: (
-		slug: string,
-		instanceId: string,
-	) => void | Promise<void>;
 	/** Trigger an immediate port scan (optional — daemon mode only). */
 	triggerScan?: () => Promise<{
 		discovered: number[];

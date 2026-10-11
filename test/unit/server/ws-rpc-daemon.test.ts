@@ -47,12 +47,6 @@ describe("daemon RPC handlers", () => {
 					})).projects,
 				).toMatchObject([{ title: "Renamed" }]);
 				expect(
-					(yield* client.SetProjectInstance({
-						slug: added.savedSlug,
-						instanceId: "claude",
-					})).projects,
-				).toMatchObject([{ instanceId: "claude" }]);
-				expect(
 					(yield* client.RemoveProject({ slug: added.savedSlug })).projects,
 				).toEqual([]);
 				expect((yield* client.ListDaemonSessions({})).sessions).toEqual([]);
@@ -226,27 +220,13 @@ describe("daemon RPC handlers", () => {
 					}),
 				);
 				expect(factory).not.toHaveBeenCalled();
-				// The relay uses the binding only to pick its OpenCode instance, so a
-				// rebind to a Claude account keeps the running relay (conduit-test-gah7).
-				expect(
-					(yield* client.SetProjectInstance({
-						slug: "a",
-						instanceId: "claude",
-					})).projects,
-				).toContainEqual(
-					expect.objectContaining({ slug: "a", instanceId: "claude" }),
-				);
-				expect(firstRelay.stop).not.toHaveBeenCalled();
-				expect(factory).not.toHaveBeenCalled();
 				yield* client.AddInstance({
 					name: "Remote",
 					driver: "opencode",
 					url: "http://127.0.0.1:9",
 				});
-				yield* client.SetProjectInstance({ slug: "a", instanceId: "remote" });
-				// A new OpenCode pick replaces the project's engine.
-				expect(firstRelay.stop).toHaveBeenCalledTimes(1);
-				expect(factory).toHaveBeenCalledTimes(1);
+				expect(firstRelay.stop).not.toHaveBeenCalled();
+				expect(factory).not.toHaveBeenCalled();
 				expect((yield* cache.peek("a"))._tag).toBe("Some");
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer(projects, factory)));
 		},

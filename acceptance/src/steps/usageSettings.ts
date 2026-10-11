@@ -228,17 +228,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 					createdAt: 1,
 				})),
 			});
-			const projects = [
-				{
-					slug: "myapp",
-					title: "myapp",
-					folders: ["/src/myapp"],
-					instanceId: "claude",
-				},
-			];
-			rpc.setDaemonList("SubscribeProjects", { projects });
-			// A draft refetches the list; keep the binding there too.
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			// A Claude default model makes the claude account the draft's account.
+			rpc.setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-5",
+				provider: "claude",
+				variant: "",
+			});
 			seedUsageLimits(world.page, {
 				usageLimits: {
 					autoResume: false,
@@ -279,22 +275,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 				: [personal];
 			rpc.setUsageReadings(readings);
 			rpc.setResponse("QuotaForAccounts", readings);
-		},
-	},
-	{
-		name: "set or clear the project account fallback",
-		match: /^the Usage project account is (\S+)$/,
-		run: ({ world, match }) => {
-			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						...(match[1] === "none" ? {} : { instanceId: match[1] }),
-					},
-				],
-			});
 		},
 	},
 	{

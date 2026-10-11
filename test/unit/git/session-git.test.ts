@@ -2,11 +2,17 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createSessionGitCache,
 	readSessionGit,
+	withCachedSessionGit,
 } from "../../../src/lib/git/session-git.js";
+import {
+	type SessionInfo,
+	SessionInfoSchema,
+} from "../../../src/lib/shared-types.js";
 
 const roots: string[] = [];
 const git = (cwd: string, ...args: string[]) =>
@@ -42,6 +48,11 @@ afterEach(() => {
 describe("readSessionGit", () => {
 	it("returns undefined outside a repository", async () => {
 		expect(await readSessionGit(root())).toBeUndefined();
+	});
+	it("skips bare repositories with no working folder", async () => {
+		const directory = root();
+		git(directory, "init", "--bare", "-q");
+		expect(await readSessionGit(directory)).toBeUndefined();
 	});
 	it("reads a named branch and its short head", async () => {
 		const directory = repo();
@@ -208,5 +219,77 @@ describe("createSessionGitCache", () => {
 		expect(await first).toEqual({ branch: "main" });
 		expect(await second).toEqual({ branch: "main" });
 		expect(cache.peek("/project")).toEqual({ branch: "main" });
+	});
+});
+
+// Failure modes: a secondary folder is omitted or uses the main checkout;
+// primary fields are replaced by a secondary status; labels collide; non-git
+// primary folders hide git extras; stale session git survives a failed read.
+describe("cached folder git", () => {
+	const session: SessionInfo = {
+		id: "session",
+		title: "Folders",
+		status: "idle",
+	};
+
+	it("keeps primary fields and labels each effective folder, skipping non-git", async () => {
+		const cache = createSessionGitCache(async (directory) => {
+			if (directory === "/scratch") return undefined;
+			return directory === "/worktree/api"
+				? { head: "abc1234", dirty: true, ahead: 2, behind: 1 }
+				: { branch: "main", dirty: false };
+		});
+		await Promise.all(
+			["/one/app", "/worktree/api", "/scratch"].map(cache.refresh),
+		);
+		const result = withCachedSessionGit(
+			{
+				...session,
+				workspace: {
+					cause: "user",
+					origin: "existing",
+					worktrees: { "/two/app": "/worktree/api" },
+				},
+			},
+			["/one/app", "/two/app", "/scratch"],
+			cache,
+		);
+		// The compatibility fields still describe the Effective Working Directory.
+		expect(result.git).toMatchObject({ head: "abc1234", dirty: true });
+		expect(result.git?.folders).toEqual([
+			{ root: "/one/app", label: "/one/app", branch: "main", dirty: false },
+			{
+				root: "/two/app",
+				label: "/two/app",
+				head: "abc1234",
+				dirty: true,
+				ahead: 2,
+				behind: 1,
+			},
+		]);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(result).git).toEqual(
+			result.git,
+		);
+	});
+
+	it("reports git extras when the primary is non-git and removes obsolete git", async () => {
+		const cache = createSessionGitCache(async (directory) =>
+			directory === "/scratch" ? undefined : { branch: "topic", dirty: false },
+		);
+		await Promise.all(["/scratch", "/api", "/web"].map(cache.refresh));
+		expect(
+			withCachedSessionGit(
+				session,
+				["/scratch", "/api", "/web"],
+				cache,
+			).git?.folders?.map(({ root }) => root),
+		).toEqual(["/api", "/web"]);
+		expect(
+			withCachedSessionGit(
+				{ ...session, git: { branch: "old" } },
+				["/scratch"],
+				cache,
+			),
+		).not.toHaveProperty("git");
 	});
 });

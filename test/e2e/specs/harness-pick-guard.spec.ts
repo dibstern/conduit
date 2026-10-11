@@ -114,13 +114,10 @@ async function openDraft(
 	driver: Driver,
 	prepare?: (browser: ProcessBrowser, slug: string) => Promise<void>,
 ) {
-	await page.addInitScript((instance) => {
-		localStorage.setItem("conduit-selected-instance", instance);
-	}, driver);
 	const directory = mkdtempSync(join(harness.root, "pick-guard-project-"));
 	const browser = await harness.connect();
 	const { savedSlug: slug } = await Effect.runPromise(
-		browser.rpc.SaveProject({ folders: [directory], instanceId: driver }),
+		browser.rpc.SaveProject({ folders: [directory] }),
 	);
 	if (!slug) throw new Error("SaveProject did not return a slug");
 	await Effect.runPromise(

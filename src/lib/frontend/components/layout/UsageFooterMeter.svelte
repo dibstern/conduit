@@ -1,9 +1,8 @@
 <script lang="ts">
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { usageDisplay } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Dialog from "../ui/Dialog.svelte";
@@ -20,9 +19,9 @@
 	const windowLabels = { five_hour: "5h", seven_day: "Week", month: "Month" } as const;
 	type WindowKind = keyof typeof windowLabels;
 	const kinds: readonly WindowKind[] = ["five_hour", "seven_day", "month"];
-	const defaultAccount = $derived(projectState.projects.find((project) => project.slug === getCurrentSlug())?.instanceId);
+	const defaultAccount = $derived(composerAccountId(sessionState.currentId ? findSession(sessionState.currentId) : undefined));
 	const accounts = $derived(orderedUsageAccounts());
-	// The phone docks the default account's row and any account that needs attention; the sheet has the rest.
+	// The phone docks the current account's row and any account that needs attention; the sheet has the rest.
 	const docked = $derived.by(() => {
 		const shown = accounts.filter((reading) => {
 			if (reading.accountId === defaultAccount) return true;
@@ -98,7 +97,7 @@
 			</div>
 			{#each group.rows as reading (reading.accountId)}
 				{@const isDefault = reading.accountId === defaultAccount}
-				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Default for this project" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {isDefault ? 'bg-bg-alt' : ''}">
+				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {isDefault ? 'bg-bg-alt' : ''}">
 					<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{reading.accountId}" />
 					<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{getInstanceById(reading.accountId)?.name ?? reading.accountId}</span>
 					{#each group.columns as kind, index (kind)}

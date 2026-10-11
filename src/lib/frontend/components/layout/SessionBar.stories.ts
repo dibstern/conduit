@@ -173,7 +173,6 @@ export const Default: Story = {
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
-		expect(canvas.queryByTestId("instance-badge")).toBeNull();
 	},
 };
 
@@ -661,8 +660,6 @@ export const NarrowestPhone: Story = {
 	},
 };
 
-// Two instances minimum: the badge is a picker, and a picker with one option is
-// noise.
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
@@ -683,43 +680,6 @@ const mockInstances: OpenCodeInstance[] = [
 		createdAt: 0,
 	},
 ];
-
-/**
- * The instance badge stays in the bar rather than moving into a menu
- * menu: it says where this project's work runs, which is identity, and a status
- * dot that only exists behind a closed menu reports nothing.
- */
-export const WithInstanceBadge: Story = {
-	beforeEach: () => {
-		instanceState.instances = [...mockInstances];
-		// The bar shows the badge only once the open session's provider is known.
-		applyGetAgentsResponse(
-			{
-				projectSlug: "conduit",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
-			},
-			mockSession.id,
-		);
-		projectState.projects = [
-			{
-				slug: "conduit",
-				title: "conduit",
-				folders: ["/src/conduit"],
-				instanceId: "inst-personal",
-			},
-		];
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		const badge = canvas.getByTestId("instance-badge");
-		await expect(badge).toHaveTextContent("Personal");
-		// The back control is still whole with identity, badge and overflow all
-		// competing for a 393px row.
-		const back = canvas.getByRole("button", { name: /Sessions/ });
-		expect(back.scrollWidth).toBe(back.clientWidth);
-	},
-};
 
 /**
  * The collapsed bar keeps its overflow while the expanded bar uses the title
@@ -1010,7 +970,6 @@ export const PhoneLongBranchAccount: Story = {
 				slug: "conduit",
 				title: "conduit",
 				folders: ["/src/conduit"],
-				instanceId: "claude-work",
 				git: { branch: "feature/session-header-overlap-fix", dirty: true },
 			},
 		];

@@ -7,12 +7,12 @@ Background:
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
 
-Scenario Outline: normal accounts dock the project default's row and fold the rest
+Scenario Outline: normal accounts dock the current account's row and fold the rest
   Given the usage footer has several accounts with an unknown Claude reading
   When I tap back to the session list
   Then the session list is open
   And the phone usage rows are claude in that order
-  And the phone usage row claude is the highlighted project default
+  And the phone usage row claude is the highlighted current account
   And the usage footer claude shows five_hour 41% and seven_day 22%
   And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
@@ -29,7 +29,7 @@ Scenario Outline: a warning account docks its own row with both windows
   And I tap back to the session list
   Then the session list is open
   And the phone usage rows are claude, work in that order
-  And the phone usage row claude is the highlighted project default
+  And the phone usage row claude is the highlighted current account
   And the usage footer work shows five_hour 86% and seven_day <week>%
   And the usage footer work <window> meter is warning at <used> percent
   And the phone usage footer folds 4 more accounts
@@ -47,7 +47,7 @@ Scenario Outline: a limited default shows its compact reset time
   And I tap back to the session list
   Then the session list is open
   And the phone usage rows are claude in that order
-  And the phone usage row claude is the highlighted project default
+  And the phone usage row claude is the highlighted current account
   And the usage footer claude shows five_hour 3:13 and seven_day 22%
   And the usage footer claude five_hour meter is danger at 100 percent
   And the phone usage footer folds 5 more accounts
@@ -64,7 +64,7 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   And I tap back to the session list
   And I open the phone usage sheet
   Then the usage sheet groups read CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
-  And the usage sheet row claude is the highlighted project default
+  And the usage sheet row claude is the highlighted current account
   And the usage sheet work shows five_hour 86% and seven_day 48%
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
   And the screen region visually matches <baseline> at <threshold> percent
@@ -103,13 +103,13 @@ Examples:
   | baseline                    | threshold |
   | usage-footer-no-data-phone  | 98        |
 
-Scenario: the docked row follows the project binding and can show dashes
+Scenario: the docked row follows the new session draft's pick and can show dashes
   Given the usage footer has several accounts with an unknown Claude reading
-  When the project is bound to unreadable
+  When I pick unreadable for a new session draft
   And I tap back to the session list
   Then the session list is open
   And the phone usage rows are unreadable in that order
-  And the phone usage row unreadable is the highlighted project default
+  And the phone usage row unreadable is the highlighted current account
   And the usage footer unreadable shows five_hour — and seven_day —
   And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
