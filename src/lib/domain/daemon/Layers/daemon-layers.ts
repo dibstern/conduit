@@ -73,6 +73,7 @@ import {
 } from "../Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
+	InstanceManagerStateTag,
 	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
@@ -85,9 +86,8 @@ import {
 	ProjectRegistryTag,
 	ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
-	replaceRelay as replaceEffectRelay,
 	saveProject,
-	updateProject as updateEffectProject,
+	setProjectInstance as setEffectProjectInstance,
 } from "../Services/project-registry-service.js";
 import {
 	makeRelayCacheService,
@@ -338,6 +338,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| DaemonStateTag
+	| InstanceManagerStateTag
 > =>
 	Layer.scoped(
 		RelayCacheTag,
@@ -349,6 +350,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const daemonState = yield* DaemonStateTag;
+			const instanceState = yield* InstanceManagerStateTag;
 			const runtime = yield* Effect.runtime<never>();
 			let relayCache: RelayCache | undefined;
 
@@ -419,8 +421,11 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						setProjectInstance: (projectSlug: string, instanceId: string) =>
 							runCallback(
 								provideProjectMutationDeps(
-									updateEffectProject(projectSlug, { instanceId }).pipe(
-										Effect.zipRight(replaceEffectRelay(projectSlug)),
+									setEffectProjectInstance(projectSlug, instanceId).pipe(
+										Effect.provideService(
+											InstanceManagerStateTag,
+											instanceState,
+										),
 									),
 								),
 							),
@@ -428,6 +433,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
+						openCodeInstanceId: relay.openCodeInstanceId,
 						syncGlobalSetting: relay.syncGlobalSetting,
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>

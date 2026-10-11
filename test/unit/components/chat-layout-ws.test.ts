@@ -194,7 +194,7 @@ vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	applyGetAgentsResponse: vi.fn(),
 	applyGetCommandsResponse: vi.fn(),
 	applyGetModelsResponse: vi.fn(),
-	discoveryState: { selectedInstanceId: null },
+	getEffectiveInstanceId: () => "opencode",
 }));
 
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
