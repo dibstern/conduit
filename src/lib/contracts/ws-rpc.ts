@@ -642,6 +642,7 @@ export const GetStatusResponseSchema = Schema.Struct({
 		),
 	),
 	keepAwake: Schema.Boolean,
+	keepAwakeCommand: Schema.NullOr(Schema.String),
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,

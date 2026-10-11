@@ -68,9 +68,13 @@ export const makeDaemonRpcTestLayer = (
 			KeepAwakeTag,
 			Effect.gen(function* () {
 				const active = yield* Ref.make(false);
+				const command = yield* Ref.make<string | null>(null);
 				return {
 					activate: () => Ref.set(active, true),
 					deactivate: () => Ref.set(active, false),
+					setCommand: (executable, args) =>
+						Ref.set(command, [executable, ...args].join(" ")),
+					getCommand: () => Ref.get(command),
 					isActive: () => Ref.get(active),
 					isSupported: () => Effect.succeed(true),
 				};
