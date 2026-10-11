@@ -424,6 +424,19 @@ test.describe("phone", () => {
 		harness,
 	}) => {
 		const { row, title } = await setUp(page, relayUrl, harness);
+		// Hold the write at the socket: the dot must not wait for the server.
+		const held: (() => void)[] = [];
+		await page.routeWebSocket(/\/(ws|rpc)(\?|$)/, (ws) => {
+			const server = ws.connectToServer();
+			ws.onMessage((message) => {
+				if (
+					typeof message === "string" &&
+					message.includes("MarkSessionUnread")
+				)
+					held.push(() => server.send(message));
+				else server.send(message);
+			});
+		});
 		await page.setViewportSize({ width: 375, height: 740 });
 		await page.goto(new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
@@ -432,6 +445,12 @@ test.describe("phone", () => {
 		await page.getByTestId("session-swipe-mark-unread").tap();
 		await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 		await expect(page.getByTestId("session-swipe-mark-unread")).toHaveCount(0);
+		await expect.poll(() => held.length).toBe(1);
+		await expect(
+			page.getByRole("status").filter({ hasText: "Marked unread" }),
+		).toHaveCount(0);
+		for (const send of held.splice(0)) send();
+		await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Marked unread" }),
 		).toHaveCount(1);

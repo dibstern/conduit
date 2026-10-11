@@ -1,4 +1,14 @@
-import { Context, Data, Effect, Layer, Option } from "effect";
+import {
+	Context,
+	Data,
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Queue,
+	Schedule,
+} from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
@@ -53,6 +63,8 @@ export interface OpenCodeTerminalService {
 	 *  read it in the same turn it subscribes and miss nothing in between. */
 	snapshot(): PtyRow[];
 	subscribe(listener: (event: PtyEvent) => void): () => void;
+	/** Invalidate discovery; one relay-scoped worker reconciles the provider set. */
+	onOpenCodePtysChanged(instanceId: string): void;
 	sendInput(
 		ptyId: string,
 		data: string,
@@ -224,7 +236,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 	| PtyManagerTag
 	| ConnectPtyUpstreamTag
 	| LocalPtyServiceTag
-> = Layer.effect(
+> = Layer.scoped(
 	OpenCodeTerminalServiceTag,
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
@@ -253,6 +265,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		const connectPtyUpstream = yield* ConnectPtyUpstreamTag;
 		const localPty = yield* LocalPtyServiceTag;
 		const terminalLock = yield* Effect.makeSemaphore(1);
+		const openCodeLock = yield* Effect.makeSemaphore(1);
 		const trackedPtys = () =>
 			ptyManager
 				.listSessions()
@@ -325,13 +338,96 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			}
 			for (const { id } of hosted) {
 				const existing = ptyManager.getSession(id);
-				if (existing && existing.upstream.readyState !== 0) continue;
+				if (existing?.source === "local" && existing.upstream?.readyState !== 0)
+					continue;
 				const session = yield* localPty.attach(id, config.projectDir);
 				registerLocalSession(session, true);
 			}
 		}).pipe(terminalLock.withPermits(1));
 
-		return {
+		const reconcile = Effect.gen(function* () {
+			const client = yield* instances.useIfRunning(openCodeId);
+			if (Option.isNone(client)) return false;
+			yield* restoreLocalSessions;
+			const discovered = yield* Effect.tryPromise({
+				try: () => client.value.pty.list(),
+				catch: (cause) =>
+					new TerminalServiceError({ operation: "list", cause }),
+			});
+			const listedIds = new Set<string>();
+			for (const raw of discovered) {
+				const existing = ptyManager.getSession(String(raw["id"] ?? ""));
+				const result = toPtyInfo(
+					{ ...existing?.info, ...raw },
+					config.projectDir,
+				);
+				if (result._tag === "MissingId") {
+					log.warn(
+						`List returned PTY with no id: ${JSON.stringify(result.raw)}`,
+					);
+					continue;
+				}
+				const pty = result.pty;
+				listedIds.add(pty.id);
+				if (existing?.source === "local") continue;
+				const previous = existing?.info;
+				const previousExited = existing?.exited;
+				const session =
+					existing ??
+					ptyManager.registerSession(pty.id, undefined, "opencode", pty);
+				session.exited = pty.status === "exited";
+				session.exitCode = session.exited ? (session.exitCode ?? 0) : null;
+				session.info = pty;
+				if (
+					!existing ||
+					previousExited !== session.exited ||
+					previous?.title !== pty.title ||
+					previous?.command !== pty.command ||
+					previous?.cwd !== pty.cwd ||
+					previous?.pid !== pty.pid
+				) {
+					ptyManager.publish({ _tag: "upsert", item: pty });
+				}
+			}
+			for (const { id } of ptyManager.listSessions()) {
+				if (
+					ptyManager.getSession(id)?.source === "opencode" &&
+					!listedIds.has(id)
+				) {
+					ptyManager.closeSession(id);
+					ptyManager.publish({ _tag: "remove", id });
+				}
+			}
+			for (const pty of trackedPtys()) {
+				const session = ptyManager.getSession(pty.id);
+				if (
+					session?.source === "opencode" &&
+					pty.status === "running" &&
+					(!session.upstream || session.upstream.readyState === 3)
+				) {
+					yield* connectPtyUpstream(pty.id, -1).pipe(
+						Effect.catchAll((cause) =>
+							Effect.sync(() => {
+								log.warn(
+									`Failed to connect PTY ${pty.id}: ${formatErrorDetail(cause)}`,
+								);
+							}),
+						),
+					);
+				}
+			}
+			return true;
+		}).pipe(openCodeLock.withPermits(1), Effect.scoped);
+
+		const changes = yield* Queue.dropping<void>(1);
+		let completed = yield* Deferred.make<boolean>();
+		yield* Effect.addFinalizer(() =>
+			Deferred.interrupt(completed).pipe(
+				Effect.zipRight(Queue.shutdown(changes)),
+			),
+		);
+
+		const terminal: OpenCodeTerminalService = {
 			create: (clientId: string, cwd = config.projectDir) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
@@ -358,69 +454,10 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				}).pipe(terminalLock.withPermits(1)),
 			list: () =>
 				Effect.gen(function* () {
-					yield* restoreLocalSessions;
-					// Discovery never forces OpenCode: no running instance, no PTYs.
-					const rawPtysResult = yield* Effect.either(
-						instances.ifRunning(openCodeId).pipe(
-							Effect.flatMap(
-								Option.match({
-									onNone: () => Effect.succeed([]),
-									onSome: (client) =>
-										Effect.tryPromise({
-											try: () => client.pty.list(),
-											catch: (cause) =>
-												new TerminalServiceError({ operation: "list", cause }),
-										}),
-								}),
-							),
-							Effect.scoped,
-						),
-					);
-					const ptys: PtyInfo[] = trackedPtys();
-					if (rawPtysResult._tag === "Left") {
-						log.debug(
-							`OpenCode PTY list unavailable: ${formatErrorDetail(rawPtysResult.left.cause)}`,
-						);
-					} else {
-						const rawPtys = rawPtysResult.right;
-						for (const rawPty of rawPtys) {
-							const ptyResult = toPtyInfo(rawPty, config.projectDir);
-							if (ptyResult._tag === "Created") {
-								if (!ptyManager.hasSession(ptyResult.pty.id)) {
-									ptys.push(ptyResult.pty);
-								}
-							} else {
-								log.warn(
-									`List returned PTY with no id: ${JSON.stringify(ptyResult.raw)}`,
-								);
-							}
-						}
-					}
-					for (const pty of ptys) {
-						const ptyId = pty.id;
-						if (!ptyManager.hasSession(ptyId) && pty.status === "running") {
-							const reconnectResult = yield* Effect.either(
-								connectPtyUpstream(ptyId, -1).pipe(
-									Effect.mapError(
-										(cause) =>
-											new TerminalServiceError({
-												operation: "connect",
-												ptyId,
-												cause,
-											}),
-									),
-								),
-							);
-							if (reconnectResult._tag === "Right") {
-								log.info(`Reconnected upstream WS: ${ptyId}`);
-							} else {
-								log.warn(
-									`Failed to reconnect upstream: ${ptyId}: ${formatErrorDetail(reconnectResult.left.cause)}`,
-								);
-							}
-						}
-					}
-					return ptys;
+					const batch = completed;
+					changes.unsafeOffer(undefined);
+					if (!(yield* Deferred.await(batch))) yield* restoreLocalSessions;
+					return trackedPtys();
 				}),
 			snapshot: () =>
 				trackedPtys().map((pty) => ({
@@ -428,11 +465,18 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					scrollback: ptyManager.getScrollback(pty.id),
 				})),
 			subscribe: (listener) => ptyManager.subscribe(listener),
+			onOpenCodePtysChanged: (instanceId) => {
+				if (instanceId === openCodeId) changes.unsafeOffer(undefined);
+			},
 			sendInput: (ptyId: string, data: string) =>
 				Effect.try({
 					try: () => {
 						const session = ptyManager.getSession(ptyId);
-						if (!session || session.upstream.readyState !== 1)
+						if (
+							!session ||
+							session.exited ||
+							session.upstream?.readyState !== 1
+						)
 							throw new PtyHostError({
 								message: `Terminal unavailable: ${ptyId}`,
 							});
@@ -451,27 +495,37 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				),
 			close: (ptyId: string) =>
 				Effect.gen(function* () {
-					const session = ptyManager.getSession(ptyId);
-					let local = session?.source === "local";
-					if (!session || (local && session.upstream.readyState === 0)) {
-						const hosted = yield* localPty.list(config.projectDir);
-						if (hosted.some(({ id }) => id === ptyId)) {
-							local = true;
-							const restored = yield* localPty.attach(ptyId, config.projectDir);
-							restored.upstream.close(1000, "Terminal closed");
+					const local = yield* Effect.gen(function* () {
+						const session = ptyManager.getSession(ptyId);
+						let local = session?.source === "local";
+						if (!session || (local && session.upstream?.readyState === 0)) {
+							const hosted = yield* localPty.list(config.projectDir);
+							if (hosted.some(({ id }) => id === ptyId)) {
+								local = true;
+								const restored = yield* localPty.attach(
+									ptyId,
+									config.projectDir,
+								);
+								restored.upstream.close(1000, "Terminal closed");
+							}
 						}
-					}
-					ptyManager.closeSession(ptyId);
-					if (!local) {
-						yield* callOpenCodePty("delete", ptyId, (pty) => pty.delete(ptyId));
-					}
-					ptyManager.publish({ _tag: "remove", id: ptyId });
-				}).pipe(terminalLock.withPermits(1)),
+						if (local) {
+							ptyManager.closeSession(ptyId);
+							ptyManager.publish({ _tag: "remove", id: ptyId });
+						}
+						return local;
+					}).pipe(terminalLock.withPermits(1));
+					if (local) return;
+					yield* callOpenCodePty("delete", ptyId, (pty) =>
+						pty.delete(ptyId),
+					).pipe(openCodeLock.withPermits(1));
+					yield* terminal.list();
+				}),
 			resize: (clientId: string, ptyId: string, rows: number, cols: number) =>
 				Effect.gen(function* () {
 					const session = ptyManager.getSession(ptyId);
 					if (session?.source === "local") {
-						session.upstream.resize?.(cols, rows);
+						session.upstream?.resize?.(cols, rows);
 						return;
 					}
 					const resizeResult = yield* Effect.either(
@@ -486,5 +540,46 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					}
 				}),
 		};
+		const attempt = Effect.gen(function* () {
+			yield* Queue.takeAll(changes);
+			const next = yield* Deferred.make<boolean>();
+			const batch = completed;
+			completed = next;
+			return yield* reconcile.pipe(
+				Effect.onExit((exit) => {
+					if (Exit.isInterrupted(exit)) return Deferred.interrupt(batch);
+					if (Exit.isFailure(exit))
+						log.debug(
+							`OpenCode PTY reconciliation unavailable: ${formatErrorDetail(exit.cause)}`,
+						);
+					// A failed read returns cached rows to this batch, but remains dirty
+					// inside the worker's retry. A stopped provider pauses retry.
+					return Deferred.succeed(
+						batch,
+						Exit.isSuccess(exit) ? exit.value : true,
+					);
+				}),
+			);
+		});
+		yield* Effect.forkScoped(
+			Queue.take(changes).pipe(
+				Effect.zipRight(
+					// Each retry leases the instance and so renews its idle grace;
+					// unbounded retries would keep a broken instance alive forever.
+					// The next lifecycle signal re-arms discovery.
+					attempt.pipe(
+						Effect.retry(
+							Schedule.exponential("1 second").pipe(
+								Schedule.intersect(Schedule.recurs(5)),
+							),
+						),
+						Effect.ignore,
+					),
+				),
+				Effect.forever,
+			),
+		);
+
+		return terminal;
 	}),
 );

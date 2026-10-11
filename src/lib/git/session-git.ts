@@ -2,8 +2,13 @@ import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import type { SessionWorkspace } from "../contracts/session-workspace.js";
 import { DEFAULT_RECONCILIATION_INTERVAL_MS } from "../domain/relay/Services/session-status-poller.js";
-import { effectiveWorkingDirectory } from "../session/session-workspace.js";
+import { labelProjectFolders } from "../project-folders.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../session/session-workspace.js";
 import type { ProjectInfo, SessionGit, SessionInfo } from "../shared-types.js";
 
 const execFileAsync = promisify(execFile);
@@ -77,10 +82,11 @@ export async function readSessionGit(
 			"rev-parse",
 			"--absolute-git-dir",
 			"--git-common-dir",
+			"--is-inside-work-tree",
 		);
 		if (!dirs) return undefined;
-		const [gitDir, commonDir] = dirs.split("\n");
-		if (!gitDir || !commonDir) return undefined;
+		const [gitDir, commonDir, insideWorkTree] = dirs.split("\n");
+		if (!gitDir || !commonDir || insideWorkTree !== "true") return undefined;
 		const common = isAbsolute(commonDir)
 			? resolve(commonDir)
 			: resolve(directory, commonDir);
@@ -209,20 +215,39 @@ export function createSessionGitCache(
 
 export const daemonSessionGitCache = createSessionGitCache();
 
+const cachedFolderGit = (
+	folders: readonly [string, ...string[]],
+	workspace: SessionWorkspace | null | undefined,
+	cache: ReturnType<typeof createSessionGitCache>,
+): SessionGit | undefined => {
+	const roots = labelProjectFolders(folders);
+	const statuses = effectiveSessionFolders(folders, workspace).flatMap(
+		({ root, directory }, index) => {
+			const git = cache.peek(directory);
+			return git ? [{ ...git, root, label: roots[index]?.label ?? root }] : [];
+		},
+	);
+	const primary = cache.peek(effectiveWorkingDirectory(folders[0], workspace));
+	return primary || statuses.length
+		? { ...primary, folders: statuses }
+		: undefined;
+};
+
 export function withCachedSessionGit(
 	session: SessionInfo,
-	primary: string,
+	folders: readonly [string, ...string[]],
 	cache = daemonSessionGitCache,
 ): SessionInfo {
-	const git = cache.peek(effectiveWorkingDirectory(primary, session.workspace));
-	return git ? { ...session, git } : session;
+	const git = cachedFolderGit(folders, session.workspace, cache);
+	const { git: _previous, ...rest } = session;
+	return git ? { ...rest, git } : rest;
 }
 
 export const withCachedProjectGit = <T extends ProjectInfo>(
 	projects: ReadonlyArray<T>,
 ): Array<T & { readonly missing: boolean }> =>
 	projects.map((project) => {
-		const git = daemonSessionGitCache.peek(project.folders[0]);
+		const git = cachedFolderGit(project.folders, null, daemonSessionGitCache);
 		return {
 			...project,
 			missing: !existsSync(project.folders[0]),

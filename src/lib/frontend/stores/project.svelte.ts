@@ -85,6 +85,9 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.repositoryIdentities != null
+			? { repositoryIdentities: project.repositoryIdentities }
+			: {}),
 		...(project.git != null ? { git: project.git } : {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }

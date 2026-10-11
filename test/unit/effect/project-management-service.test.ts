@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
@@ -76,7 +76,10 @@ describe("ProjectManagementServiceLive", () => {
 				const projects = yield* service.list();
 				expect(
 					projects.find((project) => project.slug === "cached")?.git,
-				).toEqual(git);
+				).toEqual({
+					...git,
+					folders: [{ ...git, root: directory, label: basename(directory) }],
+				});
 				expect(
 					projects.find((project) => project.slug === "uncached"),
 				).not.toHaveProperty("git");

@@ -593,6 +593,7 @@ export const OPEN_CODE_CONSUMED_EVENT_TYPES = [
 	"session.updated",
 	"todo.updated",
 	"pty.created",
+	"pty.updated",
 	"pty.exited",
 	"pty.deleted",
 	"file.edited",
