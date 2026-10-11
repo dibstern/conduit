@@ -3,6 +3,9 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	type GroupingMode,
+	GroupingModeSchema,
+	ProjectGroupSchema,
 	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
@@ -175,6 +178,9 @@ export const ProjectInfoSchema = Schema.Struct({
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
+	groupingMode: Schema.optional(GroupingModeSchema),
+	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
+	group: Schema.optional(ProjectGroupSchema),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -615,6 +621,8 @@ export interface SaveProjectInput {
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
 	readonly setupScript?: string | undefined;
+	/** null clears an override; omission preserves it. */
+	readonly groupingMode?: GroupingMode | null | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -1008,6 +1016,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
 			setupScript: Schema.optional(Schema.String),
+			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
 		},
 	},
 ) {}
@@ -1326,6 +1335,24 @@ export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPer
 			mode: SessionPermissionModeSchema,
 			originId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
+	"SetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: { mode: GroupingModeSchema },
+	},
+) {}
+
+export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroupingMode>()(
+	"GetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: {},
 	},
 ) {}
 
@@ -2228,6 +2255,8 @@ export const WsRpcRequest = Schema.Union(
 	SetDefaultModel,
 	SetHarnessDefault,
 	SetDefaultPermissionMode,
+	SetDefaultGroupingMode,
+	GetDefaultGroupingMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
@@ -2514,6 +2543,9 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultPermissionMode", {
 		mode: SessionPermissionModeSchema,
 	}),
+	Schema.TaggedStruct("defaultGroupingMode", {
+		mode: GroupingModeSchema,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -2545,6 +2577,7 @@ export type GlobalProjectSetting = Extract<
 		readonly _tag:
 			| "defaultModel"
 			| "defaultPermissionMode"
+			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
 	}
@@ -2647,6 +2680,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetDefaultModel),
 	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
+	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
+	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),

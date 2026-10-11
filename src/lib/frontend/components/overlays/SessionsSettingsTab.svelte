@@ -1,18 +1,23 @@
 <script lang="ts">
+	import { untrack } from "svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import Select from "../ui/Select.svelte";
+	import { Schema } from "effect";
+	import { GroupingModeSchema } from "../../../shared-types.js";
+	import { projectState } from "../../stores/project-state.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { getAutoSettleSettingRpc, setAutoSettleSettingRpc } from "../../transport/ws-rpc-client.js";
-	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false });
+	import { getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc } from "../../transport/ws-rpc-client.js";
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, groupingSaving: false });
 
 	$effect(() => {
 		if (!getIsConnected()) return;
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
+		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
 		void getAutoSettleSettingRpc()
 			.then((days) => {
 				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
@@ -20,11 +25,38 @@
 			.catch(() => {
 				if (current) showToast("Couldn't load auto-settle setting", { variant: "error" });
 			});
+		void getDefaultGroupingModeRpc()
+			.then((mode) => {
+				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
+			})
+			.catch(() => {
+				if (current) showToast("Couldn't load grouping setting", { variant: "error" });
+			});
 		return () => { current = false; };
 	});
 </script>
 
 <SettingsGroup id="settings-sessions" title="Sessions">
+	<SettingsRow label="Default repository grouping" labelFor="settings-grouping-mode-select" description="Projects inherit this unless they choose their own mode.">
+		{#snippet control()}
+			<Select id="settings-grouping-mode-select" value={projectState.defaultGroupingMode} disabled={state.groupingSaving} onchange={(event) => {
+				const mode = event.currentTarget.value;
+				if (!Schema.is(GroupingModeSchema)(mode)) return;
+				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
+				state.groupingSaving = true;
+				void setDefaultGroupingModeRpc(mode)
+					.then((saved) => {
+						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
+					})
+					.catch(() => { showToast("Couldn't save grouping setting", { variant: "error" }); })
+					.finally(() => { state.groupingSaving = false; });
+			}}>
+				<option value="repository">By repository</option>
+				<option value="repository+subfolder">By repository and subfolder</option>
+				<option value="off">Off</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
 	<SettingsRow
 		label="Settle idle sessions after"
 		labelFor="settings-auto-settle-select"

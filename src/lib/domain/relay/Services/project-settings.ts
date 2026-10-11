@@ -240,6 +240,10 @@ const globalSettingRows = (
 			_tag: "defaultPermissionMode",
 			mode: defaults.defaultPermissionMode,
 		},
+		defaultGroupingMode: {
+			_tag: "defaultGroupingMode",
+			mode: settings.defaultGroupingMode ?? "repository",
+		},
 		claudeSettings: {
 			_tag: "claudeSettings",
 			overrides: settings.claudeSettings ?? {},

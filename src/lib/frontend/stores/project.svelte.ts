@@ -88,6 +88,13 @@ const toProjectInfoList = (
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
 			: {}),
+		...(project.groupingMode !== undefined
+			? { groupingMode: project.groupingMode }
+			: {}),
+		...(project.effectiveGroupingMode !== undefined
+			? { effectiveGroupingMode: project.effectiveGroupingMode }
+			: {}),
+		...(project.group !== undefined ? { group: project.group } : {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),

@@ -693,6 +693,9 @@ async function handleMessage(
 			control.catalogHandler(raw.tag) ??
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 			(raw.tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
+			(raw.tag === "GetDefaultGroupingMode"
+				? () => ({ mode: "repository" })
+				: undefined) ??
 			(raw.tag === "GetUsageLimitsSetting"
 				? () => ({
 						usageLimits: { autoResume: false, autoSwitch: false, order: [] },

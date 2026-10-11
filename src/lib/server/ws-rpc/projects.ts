@@ -55,6 +55,9 @@ export const projectsHandlers = {
 				...(request.setupScript !== undefined && {
 					setupScript: request.setupScript,
 				}),
+				...(request.groupingMode !== undefined && {
+					groupingMode: request.groupingMode,
+				}),
 			});
 			const current = yield* projectService.currentSlug();
 			return {

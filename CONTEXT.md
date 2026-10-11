@@ -39,6 +39,26 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
+## Project Group
+
+A **Project Group** contains the projects sharing a grouping key under their
+effective grouping mode. The primary Project Folder alone determines the group;
+attaching another folder does not change it. The daemon stores an optional
+`groupingMode` override on each project. Unset overrides inherit the global
+`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+
+`repository` keys on Repository Identity, `repository+subfolder` adds the primary
+folder's path relative to its repository root, and `off` gives the project its
+own group. A primary folder without an identity also stands alone. Repository
+groups use one repository display name; standalone projects use their title.
+Session rows add the project title only when the group has multiple projects,
+even when those titles are identical.
+
+The shared pure `computeProjectGroups` function derives group keys, labels and
+qualifier decisions for the daemon and frontend. It leaves ordering to the
+daemon. Project and global grouping edits publish a fresh project list so rows
+relabel on every client without a reload.
+
 ## Session Workspace
 
 **Session Workspace** is where a session runs: Local uses the project's folders;
