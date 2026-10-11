@@ -69,12 +69,15 @@ export const storedSessionPick = (
 		| undefined,
 	harness: Harness,
 ): TurnPick | undefined =>
-	row?.model_id?.trim() && row.model_provider?.trim()
+	row?.model_id?.trim() &&
+	row.model_provider?.trim() &&
+	row.variant != null &&
+	row.context_window != null
 		? {
 				harness,
 				model: { modelId: row.model_id, providerId: row.model_provider },
-				effort: row.variant ?? "",
-				contextWindow: row.context_window ?? "",
+				effort: row.variant,
+				contextWindow: row.context_window,
 			}
 		: undefined;
 
@@ -221,10 +224,11 @@ export const backfillSessionPicks = () =>
 						? historicalModel?.slice(separator + 1)
 						: historicalModel));
 			let pick: TurnPick | undefined;
-			if (turn && modelId?.trim()) {
+			// Stored models need no discovery; the next turn validates the completed pick.
+			if ((row.model_id != null || turn) && modelId?.trim()) {
 				const providerId =
 					row.model_provider ??
-					(turn.model_provider ||
+					(turn?.model_provider ||
 						(driver === "claude"
 							? "claude"
 							: separator > 0
@@ -237,10 +241,10 @@ export const backfillSessionPicks = () =>
 							providerId,
 							modelId,
 						},
-						effort: row.variant ?? turn.variant ?? "",
-						contextWindow: row.context_window ?? turn.context_window ?? "",
+						effort: row.variant ?? turn?.variant ?? "",
+						contextWindow: row.context_window ?? turn?.context_window ?? "",
 					};
-			} else if (!turn) {
+			} else if (!turn && row.model_id == null) {
 				const resolved = yield* Effect.either(
 					loadServerSessionPick(driver, row.provider, row, {
 						startIfStopped: false,

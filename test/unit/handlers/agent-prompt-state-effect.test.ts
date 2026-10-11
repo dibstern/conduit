@@ -3,8 +3,8 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -63,10 +63,11 @@ describe("agent selection state", () => {
 						orchestrationEngine: engine,
 						seedEvents: [
 							makeSessionCreatedEvent("session-1"),
-							canonicalEvent("session.model_changed", "session-1", {
-								sessionId: "session-1",
-								providerId: "openai",
-								modelId: "gpt-4",
+							...sessionPickEvents("session-1", {
+								harness: "opencode",
+								model: { providerId: "openai", modelId: "gpt-4" },
+								effort: "",
+								contextWindow: "",
 							}),
 						],
 					}),
@@ -118,10 +119,11 @@ describe("agent selection state", () => {
 						orchestrationEngine: engine,
 						seedEvents: [
 							makeSessionCreatedEvent("session-1"),
-							canonicalEvent("session.model_changed", "session-1", {
-								sessionId: "session-1",
-								providerId: "openai",
-								modelId: "gpt-4",
+							...sessionPickEvents("session-1", {
+								harness: "opencode",
+								model: { providerId: "openai", modelId: "gpt-4" },
+								effort: "",
+								contextWindow: "",
 							}),
 						],
 					}),

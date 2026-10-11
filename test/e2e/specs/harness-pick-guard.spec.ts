@@ -322,15 +322,45 @@ async function sendAndCapture(
 		const catalog = claudeModels.find((entry) => entry.id === model);
 		if (!catalog)
 			throw new Error(`Claude received uncatalogued model ${apiModel}`);
+		const url = new URL(page.url());
+		const slug = url.searchParams.get("p");
+		const sessionId = decodeURIComponent(
+			url.pathname.match(/\/s\/([^/]+)/)?.[1] ?? "",
+		);
+		if (!slug || !sessionId)
+			throw new Error("No project/session for Claude receipt");
+		const db = new Database(harness.projectStorePath(slug), { readonly: true });
+		let contextWindow: string | null | undefined;
+		try {
+			contextWindow = db
+				.prepare<[string, string], { context_window: string | null }>(
+					`SELECT json_extract(payload_json, '$.contextWindow') AS context_window
+				 FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'
+				 AND json_extract(payload_json, '$.prompt') = ? ORDER BY request_sequence DESC LIMIT 1`,
+				)
+				.get(sessionId, prompt)?.context_window;
+		} finally {
+			db.close();
+		}
+		if (contextWindow == null)
+			throw new Error("Claude command omitted contextWindow");
+		// The bare SDK id covers both explicit 200k and the catalog default.
+		// Read the dispatched window, and independently verify its SDK encoding.
+		expect(apiModel).toBe(contextWindow === "1m" ? `${model}[1m]` : model);
+		await test.info().attach("claude-turn-context.json", {
+			body: JSON.stringify({ prompt, contextWindow, apiModel }),
+			contentType: "application/json",
+		});
 		return {
 			harness: "claude",
 			provider: "claude",
 			model,
 			effort: enqueue.liveOptions.effort ?? "",
-			contextWindow: /\[1m\]$/i.test(apiModel)
-				? "1m"
-				: (catalog.contextWindowOptions?.find((option) => option.isDefault)
-						?.value ?? ""),
+			contextWindow:
+				contextWindow ||
+				(catalog.contextWindowOptions?.find((option) => option.isDefault)
+					?.value ??
+					""),
 		};
 	}
 	const request = openCode[0];
@@ -744,6 +774,70 @@ async function createStoredPickSession(
 	await expect(draft.picker).toHaveAttribute("data-shown-model", "sonnet");
 	return { ...draft, sessionId };
 }
+
+test("switch-model-keeps-context: sonnet 1m switched to opus still sends 1m", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const caseId = "switch-model-keeps-context";
+	const { browser, slug, sessionId, picker } = await createStoredPickSession(
+		page,
+		harness,
+		caseId,
+		"1m",
+	);
+	const before = readStoredState(harness, slug, sessionId);
+	await Effect.runPromise(
+		browser.rpc.SwitchModel({
+			projectSlug: slug,
+			sessionId,
+			modelId: "opus",
+			providerId: "claude",
+		}),
+	);
+	const after = readStoredState(harness, slug, sessionId);
+	const reported = await Effect.runPromise(
+		browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+	);
+	let sent: Pick | undefined;
+	const prompt = `${caseId}-next`;
+	try {
+		await expect(picker).toHaveAttribute("data-shown-model", "opus");
+		sent = await sendAndCapture(page, harness, "claude", prompt, true);
+	} finally {
+		await writeGuardArtifact(testInfo, {
+			case: caseId,
+			bead: "conduit-test-fmg0.4",
+			before,
+			after,
+			reported,
+			sent,
+			providerReceipts: enqueues(harness, true).filter(
+				(mark) => mark.prompt === prompt,
+			),
+		});
+	}
+	expect(before.pick).toMatchObject({
+		model_id: "sonnet",
+		context_window: "1m",
+	});
+	expect(after.pick).toMatchObject({ model_id: "opus", context_window: "1m" });
+	expect(
+		after.pickEvents.filter(
+			(event) => event.type === "session.context_window_changed",
+		),
+	).toEqual(
+		before.pickEvents.filter(
+			(event) => event.type === "session.context_window_changed",
+		),
+	);
+	expect(reported.contextWindow?.contextWindow).toBe("1m");
+	expect(sent).toMatchObject({ model: "opus", contextWindow: "1m" });
+	expect(
+		enqueues(harness, true).find((mark) => mark.prompt === prompt)?.liveOptions
+			.model,
+	).toBe("opus[1m]");
+});
 
 test("pick-required-create: no model rejects before session creation", async ({
 	page,
@@ -1693,13 +1787,163 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		expect(pidsAfter.filter(isProcessAlive)).toEqual([]);
 		expect(harness.opencodeRequests()).toHaveLength(requestsBefore);
 	});
+
+	test("legacy-stopped-opencode-partial-pick: partial picks complete without discovery on the first restart", async ({
+		harness,
+	}, testInfo) => {
+		test.setTimeout(240_000);
+		const caseId = "legacy-stopped-opencode-partial-pick";
+		const { browser, slug, instanceId } = await startManagedProject(harness);
+		const samples: {
+			sessionId: string;
+			variant: string | null;
+			contextWindow: string | null;
+		}[] = [];
+		for (const empty of ["neither", "effort", "context"] as const) {
+			const { sessionId } = await Effect.runPromise(
+				browser.rpc.CreateSession({
+					projectSlug: slug,
+					originId: `${caseId}-${empty}`,
+					instanceId: ProviderInstanceIdSchema.make(instanceId),
+					model: {
+						providerId: "fake",
+						modelId: "fake-source",
+						variant: "high",
+						contextWindow: "",
+					},
+				}),
+			);
+			samples.push({
+				sessionId,
+				variant: empty === "effort" ? "" : null,
+				contextWindow: empty === "context" ? "" : null,
+			});
+		}
+		await browser.stopInstance(instanceId);
+		await expect
+			.poll(() => harness.ownedOpenCodePids().filter(isProcessAlive))
+			.toEqual([]);
+		const pidsBefore = harness.ownedOpenCodePids();
+		const requestsBefore = harness.opencodeRequests().length;
+		await browser.close();
+		await harness.terminate();
+		const db = new Database(harness.projectStorePath(slug));
+		let executedTurns: number;
+		try {
+			executedTurns =
+				db
+					.prepare<[], { count: number }>(
+						"SELECT count(*) AS count FROM turns WHERE started_at IS NOT NULL",
+					)
+					.get()?.count ?? 0;
+			for (const sample of samples)
+				db.prepare(
+					"UPDATE sessions SET variant = ?, context_window = ? WHERE id = ?",
+				).run(sample.variant, sample.contextWindow, sample.sessionId);
+		} finally {
+			db.close();
+		}
+		const legacy = samples.map((sample) =>
+			readStoredState(harness, slug, sample.sessionId),
+		);
+		const firstSample = samples[0];
+		if (!firstSample) throw new Error("No partial session sample");
+		const restorations: {
+			picks: ReturnType<typeof readStoredState>[];
+			status: Awaited<ReturnType<ProcessBrowser["instanceStatus"]>>;
+			pids: number[];
+			requests: number;
+		}[] = [];
+		try {
+			for (let restart = 0; restart < 2; restart++) {
+				await harness.restart({
+					startupTimeoutMs: 60_000,
+					runnerStartupTimeoutMs: 30_000,
+				});
+				const restartedBrowser = await harness.connect();
+				// Relays start lazily. A store-only read mounts this project without discovery.
+				await Effect.runPromise(
+					restartedBrowser.rpc.LoadMoreHistory({
+						projectSlug: slug,
+						sessionId: firstSample.sessionId,
+					}),
+				);
+				restorations.push({
+					picks: samples.map((sample) =>
+						readStoredState(harness, slug, sample.sessionId),
+					),
+					status: await restartedBrowser.instanceStatus(instanceId),
+					pids: harness.ownedOpenCodePids(),
+					requests: harness.opencodeRequests().length,
+				});
+				await restartedBrowser.close();
+				if (restart === 0) await harness.terminate();
+			}
+		} finally {
+			await writeGuardArtifact(testInfo, {
+				case: caseId,
+				bead: "conduit-test-fmg0.4",
+				samples,
+				executedTurns,
+				legacy,
+				pidsBefore,
+				requestsBefore,
+				relayStartupRequest: {
+					method: "LoadMoreHistory",
+					projectSlug: slug,
+					sessionId: firstSample.sessionId,
+				},
+				restorations,
+				configuredInstances: loadDaemonConfig(
+					harness.configDir,
+				)?.instances?.map(({ id, driver }) => ({ id, driver })),
+			});
+		}
+		expect(executedTurns).toBe(0);
+		for (const restored of restorations) {
+			expect(restored.status.instance.status).toBe("stopped");
+			expect(restored.pids).toEqual(pidsBefore);
+			expect(restored.pids.filter(isProcessAlive)).toEqual([]);
+			expect(restored.requests).toBe(requestsBefore);
+			for (const [index, sample] of samples.entries()) {
+				const completed = restored.picks[index];
+				expect(completed?.pick).toEqual({
+					provider: instanceId,
+					model_id: "fake-source",
+					model_provider: "fake",
+					variant: "",
+					context_window: "",
+				});
+				expect(
+					completed?.pickEvents
+						.slice(legacy[index]?.pickEvents.length)
+						.map((event) => event.type),
+				).toEqual([
+					...(sample.variant === null ? ["session.variant_changed"] : []),
+					...(sample.contextWindow === null
+						? ["session.context_window_changed"]
+						: []),
+				]);
+			}
+		}
+		expect(restorations[1]?.picks).toEqual(restorations[0]?.picks);
+	});
 });
 
-for (const rejection of ["uncatalogued", "missing"] as const) {
-	const caseId =
-		rejection === "uncatalogued"
-			? "reject-turn-no-model-event"
-			: "pick-required-turn";
+for (const rejection of [
+	"uncatalogued",
+	"missing",
+	"effort",
+	"context",
+	"provider",
+] as const) {
+	const caseId = {
+		uncatalogued: "reject-turn-no-model-event",
+		missing: "pick-required-turn",
+		effort: "pick-required-effort",
+		context: "pick-required-context",
+		provider: "pick-required-provider",
+	}[rejection];
 	test(`${caseId}: rejected turn writes no model change or provider prompt`, async ({
 		page,
 		harness,
@@ -1721,10 +1965,22 @@ for (const rejection of ["uncatalogued", "missing"] as const) {
 					? db
 							.prepare("UPDATE sessions SET model_id = ? WHERE id = ?")
 							.run("not-in-catalog", sessionId)
-					: db
-							.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
+					: rejection === "missing"
+						? db
+								.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
 				variant = NULL, context_window = NULL WHERE id = ?`)
-							.run(sessionId);
+								.run(sessionId)
+						: db
+								.prepare(
+									`UPDATE sessions SET ${
+										{
+											effort: "variant",
+											context: "context_window",
+											provider: "model_provider",
+										}[rejection]
+									} = NULL WHERE id = ?`,
+								)
+								.run(sessionId);
 			expect(changed.changes).toBe(1);
 		} finally {
 			db.close();
@@ -1740,6 +1996,9 @@ for (const rejection of ["uncatalogued", "missing"] as const) {
 			}),
 		);
 		let after = readStoredState(harness, slug, sessionId);
+		let receiptsAfter: number | undefined;
+		let repaired: ReturnType<typeof readStoredState> | undefined;
+		let selectedVariant: string | undefined;
 		try {
 			await expect
 				.poll(
@@ -1750,7 +2009,46 @@ for (const rejection of ["uncatalogued", "missing"] as const) {
 					{ timeout: 15_000 },
 				)
 				.toBe(before.turnErrors.length + 1);
+			receiptsAfter = enqueues(harness, true).length;
+			const error = JSON.parse(after.turnErrors.at(-1)?.data ?? "{}") as {
+				code?: string;
+				error?: string;
+			};
+			expect(error.code).toBe(
+				rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
+			);
+			if (rejection === "uncatalogued")
+				expect(error.error).toMatch(/^ModelNotInCatalog:/);
+			else {
+				expect(error.error).toMatch(/pick/i);
+				expect(error.error).not.toMatch(/^PickRequired:/);
+			}
+			expect(after.pickEvents).toEqual(before.pickEvents);
+			expect(receiptsAfter).toBe(receiptsBefore);
+			if (
+				rejection === "effort" ||
+				rejection === "context" ||
+				rejection === "provider"
+			) {
+				const selected = await Effect.runPromise(
+					browser.rpc.SwitchModel({
+						projectSlug: slug,
+						sessionId,
+						modelId: "sonnet",
+						providerId: "claude",
+					}),
+				);
+				selectedVariant = selected.variant;
+				repaired = readStoredState(harness, slug, sessionId);
+				expect(repaired.pick).toMatchObject({
+					model_id: "sonnet",
+					model_provider: "claude",
+					variant: selectedVariant,
+					context_window: rejection === "context" ? "" : "200k",
+				});
+			}
 		} finally {
+			receiptsAfter ??= enqueues(harness, true).length;
 			await writeGuardArtifact(testInfo, {
 				case: caseId,
 				bead: "conduit-test-fmg0.4",
@@ -1760,24 +2058,11 @@ for (const rejection of ["uncatalogued", "missing"] as const) {
 				before,
 				after,
 				receiptsBefore,
-				receiptsAfter: enqueues(harness, true).length,
+				receiptsAfter,
+				repaired,
+				selectedVariant,
 			});
 		}
-		const error = JSON.parse(after.turnErrors.at(-1)?.data ?? "{}") as {
-			code?: string;
-			error?: string;
-		};
-		expect(error.code).toBe(
-			rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
-		);
-		if (rejection === "uncatalogued")
-			expect(error.error).toMatch(/^ModelNotInCatalog:/);
-		else {
-			expect(error.error).toMatch(/pick/i);
-			expect(error.error).not.toMatch(/^PickRequired:/);
-		}
-		expect(after.pickEvents).toEqual(before.pickEvents);
-		expect(enqueues(harness, true).length).toBe(receiptsBefore);
 	});
 }
 

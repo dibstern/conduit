@@ -567,10 +567,16 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		const { variant: validVariant, variants: availableVariants } =
 			yield* savedVariantFor(model, catalog);
 		if (sessionId) {
-			const currentContext =
-				(yield* (yield* ReadQueryEffectTag).getSession(sessionId))
-					?.context_window ?? "";
-			const contextWindow = resolved.right.contextWindow;
+			const currentContext = (yield* (yield* ReadQueryEffectTag).getSession(
+				sessionId,
+			))?.context_window;
+			const contextPick = resolveTurnSettings(
+				{ ...resolved.right, contextWindow: currentContext ?? "" },
+				catalog,
+			);
+			const contextWindow = Either.isRight(contextPick)
+				? contextPick.right.contextWindow
+				: "";
 			yield* selectSessionModel(sessionId, model);
 			if (contextWindow !== currentContext) {
 				yield* selectSessionContextWindow(sessionId, contextWindow);

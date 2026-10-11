@@ -85,6 +85,7 @@ describe("WsRpcServerLayer SwitchModel", () => {
 				);
 				expect(committed.map((event) => event.type)).toEqual([
 					"session.model_changed",
+					"session.context_window_changed",
 					"session.variant_changed",
 				]);
 			}).pipe(

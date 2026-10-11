@@ -6,7 +6,7 @@ import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
@@ -68,10 +68,11 @@ describe("WsRpcServerLayer input.submit", () => {
 							orchestrationEngine: engine,
 							seedEvents: [
 								makeSessionCreatedEvent("session-1", { provider: "claude" }),
-								canonicalEvent("session.model_changed", "session-1", {
-									sessionId: "session-1",
-									providerId: "claude",
-									modelId: "sonnet",
+								...sessionPickEvents("session-1", {
+									harness: "claude",
+									model: { providerId: "claude", modelId: "sonnet" },
+									effort: "",
+									contextWindow: "",
 								}),
 							],
 							claudeEventPersistEffect: {
@@ -132,10 +133,11 @@ describe("WsRpcServerLayer input.submit", () => {
 							orchestrationEngine: engine,
 							seedEvents: [
 								makeSessionCreatedEvent("session-1"),
-								canonicalEvent("session.model_changed", "session-1", {
-									sessionId: "session-1",
-									providerId: "openai",
-									modelId: "gpt-4",
+								...sessionPickEvents("session-1", {
+									harness: "opencode",
+									model: { providerId: "openai", modelId: "gpt-4" },
+									effort: "",
+									contextWindow: "",
 								}),
 							],
 							sessionManagerService: makeMockSessionManagerService({
@@ -191,10 +193,11 @@ describe("WsRpcServerLayer input.submit", () => {
 								orchestrationEngine: engine,
 								seedEvents: [
 									makeSessionCreatedEvent("session-1"),
-									canonicalEvent("session.model_changed", "session-1", {
-										sessionId: "session-1",
-										providerId: "openai",
-										modelId: "gpt-4",
+									...sessionPickEvents("session-1", {
+										harness: "opencode",
+										model: { providerId: "openai", modelId: "gpt-4" },
+										effort: "",
+										contextWindow: "",
 									}),
 								],
 							}),
