@@ -5,7 +5,7 @@
 		type FindFoldersResponse,
 		type SaveProjectResponse,
 	} from "../../transport/ws-rpc.js";
-	import type { FolderIssue } from "../../../project-folders.js";
+	import { type FolderIssue, labelProjectFolders } from "../../../project-folders.js";
 	import {
 		addFolder,
 		check,
@@ -92,6 +92,7 @@
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
 	const original = $derived(createDraft(project));
+	const folderRoots = $derived(labelProjectFolders(draft.folders.map(folderPath)));
 	const unsupportedProviders = $derived((instances ?? getAvailableInstances().map(({ id, label, capabilities }) => ({
 		id, name: getInstanceById(id)?.name ?? label, capabilities,
 	}))).filter((instance) => instance.capabilities?.supportsMultiFolder === false));
@@ -363,10 +364,21 @@
 					<ul aria-label="Project folders" class="flex flex-col gap-[7px]">
 						{#each draft.folders as folder, index (folderPath(folder))}
 							{@const path = folderPath(folder)}
+							{@const label = folderRoots[index]?.label ?? path}
+							{@const repository = project?.repositoryIdentities?.[path]}
+							{@const git = project?.git?.folders?.find(({ root }) => root === path) ?? (path === project?.folders[0] && !project?.git?.folders ? project?.git : undefined)}
 							<li data-testid="project-folder-row" aria-label={`${index === 0 ? "Main" : "Extra"} folder: ${path}`}>
 								<Surface variant="inset" radius="md" class="flex items-center gap-[7px] px-[8px] py-[6px] max-md:min-h-[56px]">
 									<Icon name="folder" size={13} class="shrink-0 text-text-muted" />
-									<div class="min-w-0 flex-1 font-mono text-[11px]">{@render pathLabel(path)}{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}</div>
+									<div class="min-w-0 flex-1 font-mono text-[11px]">
+										{@render pathLabel(path)}
+										{#if repository || git}
+											<span class="block break-all text-[9px] text-text-muted">{repository?.name ?? label} · {git?.branch ?? (git?.head ? `Detached at ${git.head}` : "Branch unavailable")}</span>
+										{:else if project?.folders.includes(path) && project.repositoryIdentities !== undefined}
+											<span class="block text-[9px] text-text-muted">Not a git repository</span>
+										{/if}
+										{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}
+									</div>
 									{#if typeof folder !== "string"}<Badge variant="quiet">new</Badge>{/if}
 									{#if index === 0}<Badge variant="accent-solid" class="font-mono">MAIN</Badge>{:else}<Button variant="secondary" size="sm" ariaLabel={`Make main: ${path}`} class="max-md:min-h-[44px]" disabled={saving} onclick={() => changeFolders(makeMain(draft, path))}>Make main</Button>{/if}
 									<Button variant="ghost" size="sm" iconOnly icon="x" ariaLabel={`Remove folder: ${path}`} touchTarget disabled={saving} onclick={() => changeFolders(removeFolder(draft, path))} />

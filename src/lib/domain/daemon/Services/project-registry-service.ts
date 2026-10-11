@@ -41,7 +41,10 @@ import {
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
-import { withCachedProjectGit } from "../../../git/session-git.js";
+import {
+	daemonSessionGitCache,
+	withCachedProjectGit,
+} from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
 	chooseProjectSlug,
@@ -240,7 +243,16 @@ export const allProjects = Effect.gen(function* () {
 
 export const projectInfos = Effect.gen(function* () {
 	const ref = yield* ProjectRegistryTag;
-	for (const project of yield* allProjects) {
+	const projects = yield* allProjects;
+	// Cold projects need branches too. Share the relay cache and its refresh interval.
+	yield* Effect.forEach(
+		[...new Set(projects.flatMap(({ folders }) => folders))].filter((folder) =>
+			daemonSessionGitCache.isStale(folder),
+		),
+		(folder) => Effect.tryPromise(() => daemonSessionGitCache.refresh(folder)),
+		{ concurrency: 4, discard: true },
+	);
+	for (const project of projects) {
 		if (project.repositoryIdentities !== undefined) continue;
 		const repositoryIdentities = yield* deriveRepositoryIdentities(
 			project.folders,

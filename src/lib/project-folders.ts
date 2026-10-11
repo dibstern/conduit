@@ -1,3 +1,18 @@
+/** Folder names, with the full root only when names collide. */
+export const labelProjectFolders = (folders: readonly string[]) => {
+	const roots = folders.map((root) => ({
+		root,
+		label: root.split(/[/\\]/).filter(Boolean).at(-1) ?? root,
+	}));
+	return roots.map(({ root, label }) => ({
+		root,
+		label:
+			roots.filter((folder) => folder.label === label).length > 1
+				? root
+				: label,
+	}));
+};
+
 export type FolderIssue =
 	| { readonly kind: "empty" }
 	| { readonly kind: "duplicate"; readonly path: string }

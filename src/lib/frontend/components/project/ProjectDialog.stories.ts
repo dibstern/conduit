@@ -113,6 +113,44 @@ export const Empty: Story = {
 	},
 };
 
+export const FolderRepositories: Story = {
+	args: {
+		project: {
+			slug: "conduit",
+			title: "Conduit",
+			folders: [app, docs, notes],
+			repositoryIdentities: {
+				[app]: { key: "example.test/team/conduit", name: "Conduit", root: app },
+				[docs]: {
+					key: "example.test/team/docs",
+					name: "Documentation",
+					root: docs,
+				},
+			},
+			git: {
+				branch: "main",
+				folders: [
+					{ root: app, label: "conduit", branch: "main", dirty: false },
+					{
+						root: docs,
+						label: "conduit-docs",
+						branch: "docs/folders",
+						dirty: true,
+					},
+				],
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const rows = canvasFor(canvasElement).getAllByTestId("project-folder-row");
+		await expect(rows[0]).toHaveTextContent("Conduit");
+		await expect(rows[0]).toHaveTextContent("main");
+		await expect(rows[1]).toHaveTextContent("Documentation");
+		await expect(rows[1]).toHaveTextContent("docs/folders");
+		await expect(rows[2]).toHaveTextContent("Not a git repository");
+	},
+};
+
 export const PathMatchesOpen: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);

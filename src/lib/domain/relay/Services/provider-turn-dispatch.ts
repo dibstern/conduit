@@ -30,7 +30,10 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
@@ -116,11 +119,10 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
-		const worktrees = state?.worktrees;
-		const effectiveFolders = [
-			config.projectDir,
-			...(config.extraFolders ?? []),
-		].map((root) => ({ root, directory: worktrees?.[root] ?? root }));
+		const effectiveFolders = effectiveSessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		);
 		const extraFolders: string[] = [];
 		const launchFolders = state
 			? effectiveFolders
@@ -156,10 +158,10 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 			return {
 				workspaceRoot: config.projectDir,
 				extraFolders,
-				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
-					root,
-					directory: root,
-				})),
+				effectiveFolders: effectiveSessionFolders(
+					[config.projectDir, ...extraFolders],
+					null,
+				),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);

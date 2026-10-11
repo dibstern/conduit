@@ -203,7 +203,10 @@ describe("projectInfos", () => {
 				const projects = yield* projectInfos;
 				expect(
 					projects.find((project) => project.slug === "cached"),
-				).toHaveProperty("git", git);
+				).toHaveProperty("git", {
+					...git,
+					folders: [{ ...git, root: directory, label: basename(directory) }],
+				});
 				expect(
 					projects.find((project) => project.slug === "uncached"),
 				).not.toHaveProperty("git");
