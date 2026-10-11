@@ -1,5 +1,88 @@
 Feature: Live background tasks show in the session header and on the composer
 
+Scenario: Stop uses the Claude session routing while the model selection names OpenCode
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the session has 1 live background task
+  And the composer picker has the OpenCode catalog
+  When I stop the composer turn
+  Then the turn-stopped toast says Turn stopped. 1 task still running
+  And the composer shows 1 task dots
+
+Scenario: A Claude model selection does not change OpenCode cancellation
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the OpenCode harness
+  And the session has 1 live background task
+  And the composer picker has the Claude catalog
+  When I stop the composer turn
+  Then the turn-stopped toast is gone
+
+Scenario Outline: Composer Stop offers to stop the tasks it kept alive
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has <count> live background tasks
+  When I stop the composer turn
+  Then the turn-stopped toast says Turn stopped. <text> still running
+  And the composer shows <count> task dots
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | count | text    | baseline                             | threshold |
+  | phone    | 1     | 1 task  | composer-stop-tasks-toast-1-phone     | 98        |
+  | phone    | 4     | 4 tasks | composer-stop-tasks-toast-4-phone     | 98        |
+  | desktop  | 1     | 1 task  | composer-stop-tasks-toast-1-desktop   | 98        |
+  | desktop  | 4     | 4 tasks | composer-stop-tasks-toast-4-desktop   | 98        |
+
+Scenario: The toast count and stop action follow the live tasks
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the session has 2 live background tasks
+  When I stop the composer turn
+  Then the turn-stopped toast says Turn stopped. 2 tasks still running
+  When the SDK reports the vitest task stopped
+  Then the turn-stopped toast says Turn stopped. 1 task still running
+  When I press Stop them in the turn-stopped toast
+  Then the toast asks to stop b1 without another session cancellation
+  And the composer shows 1 task dots
+  When the session's last background task ends
+  Then the composer shows no task dots
+  And the turn-stopped toast is gone
+
+Scenario: A task finishing before the toast is used removes the offer
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the session has 1 live background task
+  When I stop the composer turn
+  Then the turn-stopped toast says Turn stopped. 1 task still running
+  When the session's last background task ends
+  Then the turn-stopped toast is gone
+
+Scenario Outline: Stop without live Claude tasks shows no task offer
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the <provider> harness
+  When I stop the composer turn
+  Then the turn-stopped toast is gone
+
+Examples:
+  | provider |
+  | Claude   |
+  | OpenCode |
+
+Scenario: OpenCode Stop shows no Claude task offer with live tasks
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the OpenCode harness
+  And the session has 2 live background tasks
+  When I stop the composer turn
+  Then the turn-stopped toast is gone
+
 Scenario Outline: Tasks hang off a goal with an elbow, newest task first
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>

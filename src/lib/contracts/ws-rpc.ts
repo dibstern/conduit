@@ -667,6 +667,8 @@ export const GetStatusResponseSchema = Schema.Struct({
 	clientCount: Schema.Number,
 	pinEnabled: Schema.Boolean,
 	tlsEnabled: Schema.Boolean,
+	tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+	tailscaleServeAvailable: Schema.optional(Schema.Boolean),
 	tailscaleServe: Schema.optional(
 		Schema.Union(
 			Schema.Struct({ url: Schema.String }),
@@ -905,6 +907,15 @@ export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeComman
 				default: () => [],
 			}),
 		},
+	},
+) {}
+
+export class SetTailscaleServe extends Schema.TaggedRequest<SetTailscaleServe>()(
+	"SetTailscaleServe",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: { enabled: Schema.Boolean },
 	},
 ) {}
 
@@ -2179,6 +2190,7 @@ export const WsRpcRequest = Schema.Union(
 	SetPin,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
+	SetTailscaleServe,
 	Shutdown,
 	SetAgent,
 	RestartWithConfig,
@@ -2596,6 +2608,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
 	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(SetTailscaleServe),
 	Rpc.fromTaggedRequest(Shutdown),
 	Rpc.fromTaggedRequest(SetAgent),
 	Rpc.fromTaggedRequest(RestartWithConfig),

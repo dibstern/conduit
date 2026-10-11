@@ -573,6 +573,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "XPC_SERVICE_NAME"

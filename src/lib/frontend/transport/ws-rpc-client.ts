@@ -3,11 +3,12 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
-import type {
-	GetSessionSkillsResponse,
-	GetSkillContentResponse,
-	GoalDetails,
-	SaveProjectInput,
+import {
+	type GetSessionSkillsResponse,
+	type GetSkillContentResponse,
+	type GoalDetails,
+	RpcLogLevelSchema,
+	type SaveProjectInput,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -15,6 +16,7 @@ import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
 export type { GoalDetails } from "../../contracts/ws-rpc.js";
+export { SetPinRejected } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -507,9 +509,15 @@ export interface SyncInputDraftRpcInput {
 	readonly originId?: string;
 }
 
+export const LOG_LEVELS = RpcLogLevelSchema.literals;
+
 export interface SetLogLevelRpcInput {
 	readonly projectSlug?: string;
 	readonly level: RpcLogLevel;
+}
+
+export interface SetTailscaleServeRpcInput {
+	readonly enabled: boolean;
 }
 
 const callControl = <A, E>(
@@ -537,6 +545,17 @@ export const restartServerRpc = () =>
 
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
+export async function setPinRpc(input: {
+	readonly pin: string | null;
+	readonly currentPin?: string;
+}): Promise<{ readonly ok: true }> {
+	const result = await runTransportEffect(
+		Effect.either(callDaemon((client) => client.SetPin(input))),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
 
 export async function listBranchesRpc(projectSlug: string) {
 	return runTransportEffect(
@@ -1036,6 +1055,9 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
+
+const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
+	callDaemon((client) => client.SetTailscaleServe(input).pipe(Effect.asVoid));
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
@@ -1591,4 +1613,10 @@ export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetLogLevel(input));
+}
+
+export async function setTailscaleServeRpc(
+	input: SetTailscaleServeRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetTailscaleServe(input));
 }

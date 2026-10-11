@@ -157,12 +157,12 @@ type ToastShorthandOptions = Pick<ToastCard, "duration" | "variant"> & {
 export function showToast(
 	message: string,
 	options?: ToastShorthandOptions,
-): void;
-export function showToast(card: ToastCard): void;
+): string;
+export function showToast(card: ToastCard): string;
 export function showToast(
 	input: string | ToastCard,
 	options: ToastShorthandOptions = {},
-): void {
+): string {
 	const { action, ...rest } = options;
 	const card: ToastCard =
 		typeof input === "string"
@@ -187,6 +187,7 @@ export function showToast(
 	setTimeout(() => {
 		dismissToast(toast.id);
 	}, toast.duration);
+	return toast.id;
 }
 
 export function dismissToast(id: string): void {

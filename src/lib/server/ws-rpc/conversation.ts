@@ -213,6 +213,7 @@ export const conversationHandlers = {
 	CancelSession: (request) =>
 		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("CancelSession")),
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,

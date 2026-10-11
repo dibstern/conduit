@@ -103,7 +103,11 @@ export interface ProviderTurnService {
 	>;
 	readonly interruptTurn: (
 		input: ProviderTurnServiceInterruptInput,
-	) => Effect.Effect<void, never, OverridesStateTag>;
+	) => Effect.Effect<
+		void,
+		Effect.Effect.Error<ReturnType<typeof interruptTurn>>,
+		OverridesStateTag
+	>;
 }
 
 export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
