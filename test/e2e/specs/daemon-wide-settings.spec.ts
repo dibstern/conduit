@@ -95,7 +95,7 @@ async function openInstances(page: Page): Promise<void> {
 		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("overflow-settings").click();
 	}
-	await page.getByTestId("settings-tab-instances").click();
+	await page.getByTestId("settings-tab-server").click();
 	await expect(page.locator("#instances-settings")).toBeVisible();
 }
 

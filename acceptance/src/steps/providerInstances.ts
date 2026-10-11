@@ -224,21 +224,20 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open settings to instances tab",
-		match: /^I open settings to the Instances tab$/,
+		name: "open settings to server instances",
+		match: /^I open settings to the Server section$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "instances" } }),
+					new CustomEvent("settings:open", {
+						detail: { section: "server", anchor: "instances" },
+					}),
 				),
 			);
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "visible", timeout: 5_000 });
-			// A phone opens straight into the section, with the list hidden.
-			const tab = page.getByTestId("settings-tab-instances");
-			if (await tab.isVisible()) await tab.click();
 			await page
 				.locator("#instances-settings")
 				.waitFor({ state: "visible", timeout: 5_000 });

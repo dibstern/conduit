@@ -2,16 +2,16 @@
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import { saveNotifSettings, type NotifSettings } from "../../utils/notif-settings.js";
+	import { getNotifSettings, saveNotifSettings } from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws-notifications.js";
 	const log = createFrontendLogger("push");
-	let { state = $bindable() }: { state: {
-		notifSettings: NotifSettings;
-		pushBlocked: boolean;
-		browserBlocked: boolean;
-		pushBusy: boolean;
-		pushError: string;
-	}} = $props();
+	let state = $state({
+		notifSettings: getNotifSettings(),
+		pushBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
+		browserBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
+		pushBusy: false,
+		pushError: "",
+	});
 	const pushUnavailable =
 		typeof Notification === "undefined" ||
 		!("serviceWorker" in navigator) ||

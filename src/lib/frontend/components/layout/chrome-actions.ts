@@ -21,10 +21,38 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { createPtyRpc } from "../../transport/ws-rpc-client.js";
 
-/** Open the settings panel, optionally straight to a named tab. */
-export function openSettings(tab?: string): void {
+export type SettingsSection =
+	| "general"
+	| "models"
+	| "claude"
+	| "usage"
+	| "server";
+
+export type SettingsOpenDetail = {
+	section: SettingsSection;
+	anchor?: "instances";
+};
+
+declare global {
+	interface WindowEventMap {
+		"settings:open": CustomEvent<SettingsOpenDetail | null>;
+	}
+}
+
+/** A generic open keeps the phone's section list; a section opens directly. */
+export function openSettings(): void;
+export function openSettings(
+	section: SettingsSection,
+	anchor?: "instances",
+): void;
+export function openSettings(
+	section?: SettingsSection,
+	anchor?: "instances",
+): void {
 	window.dispatchEvent(
-		new CustomEvent("settings:open", tab ? { detail: { tab } } : undefined),
+		new CustomEvent<SettingsOpenDetail | null>("settings:open", {
+			detail: section ? { section, ...(anchor ? { anchor } : {}) } : null,
+		}),
 	);
 }
 
