@@ -10,7 +10,12 @@ import {
 } from "effect";
 import { hashPin } from "../../../auth.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
-import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
+import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+import {
+	ProjectSaveRejected,
+	SetPinRejected,
+	WsRpcError,
+} from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
 	syncRecentProjects,
@@ -22,12 +27,17 @@ import {
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import {
+	BrowserRpcConnectionsTag,
 	type DaemonRpcHandlers,
+	RpcCaller,
+	RpcPinChangeResponse,
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
@@ -39,7 +49,9 @@ import {
 import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
+	findOpenCodeSession,
 	listDaemonSessions,
+	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
@@ -63,8 +75,7 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
-	replaceRelay,
-	updateProject,
+	setProjectInstance,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
@@ -100,6 +111,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
+		// Serialize process changes together with their config/persistence updates.
+		const keepAwakeLock = yield* Effect.makeSemaphore(1);
+		const auth = yield* AuthManagerTag;
+		const browserConnections = yield* BrowserRpcConnectionsTag;
+		const invalidateBrowsers = () => {
+			for (const invalidate of browserConnections) invalidate();
+		};
 		// Every open SubscribeInstances / SubscribeProjects stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
@@ -267,19 +285,50 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					}),
 				),
 			SetPin: (request) =>
-				run(
-					Effect.gen(function* () {
-						const state = yield* DaemonStateTag;
-						const pinHash = request.pin === null ? null : hashPin(request.pin);
-						yield* commitDaemonRuntimeConfig((config) => ({
-							...config,
-							pinHash,
-						}));
-						yield* Ref.update(state, (current) => ({ ...current, pinHash }));
-						yield* requestConfigSave;
-						return { ok: true as const };
-					}),
-				),
+				Effect.gen(function* () {
+					// Read at call time, outside the saved daemon service context.
+					const caller = yield* RpcCaller;
+					const afterResponse =
+						yield* Effect.serviceOption(RpcPinChangeResponse);
+					const currentPinHash = yield* auth.getPinHash();
+					if (caller.kind === "browser" && currentPinHash !== null) {
+						const result = yield* auth.authenticate(
+							request.currentPin ?? "",
+							caller.ip,
+						);
+						if (result.locked) {
+							return yield* new SetPinRejected({
+								reason: "locked_out",
+								...(result.retryAfter !== undefined && {
+									retryAfterSeconds: result.retryAfter,
+								}),
+							});
+						}
+						if (!result.ok)
+							return yield* new SetPinRejected({ reason: "wrong_pin" });
+					}
+					return yield* run(
+						Effect.gen(function* () {
+							const state = yield* DaemonStateTag;
+							const pinHash =
+								request.pin === null ? null : hashPin(request.pin);
+							yield* commitDaemonRuntimeConfig((config) => ({
+								...config,
+								pinHash,
+							}));
+							yield* Ref.update(state, (current) => ({ ...current, pinHash }));
+							if (pinHash !== currentPinHash) {
+								yield* Effect.sync(() => {
+									if (caller.kind === "browser" && Option.isSome(afterResponse))
+										afterResponse.value(invalidateBrowsers);
+									else invalidateBrowsers();
+								});
+							}
+							yield* requestConfigSave;
+							return { ok: true as const };
+						}),
+					).pipe(Effect.uninterruptible);
+				}),
 			SetKeepAwake: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -300,12 +349,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const, supported, active };
-					}),
+					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
 			SetKeepAwakeCommand: (request) =>
 				run(
 					Effect.gen(function* () {
 						const state = yield* DaemonStateTag;
+						const keepAwake = yield* KeepAwakeTag;
+						yield* keepAwake.setCommand(request.command, request.args);
 						const updates = {
 							keepAwakeCommand: request.command,
 							keepAwakeArgs: [...request.args],
@@ -317,7 +368,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const };
-					}),
+					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
 			Shutdown: () =>
 				run(
@@ -353,42 +404,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						return { ok: true as const };
 					}),
 				),
-			RestartWithConfig: (request) =>
+			RestartWithConfig: () =>
 				run(
 					Effect.gen(function* () {
 						const state = yield* DaemonStateTag;
-						const update = request.config;
-						const tls =
-							typeof update?.["tls"] === "boolean" ? update["tls"] : undefined;
-						const updates = {
-							shuttingDown: true,
-							...(typeof update?.["port"] === "number"
-								? { port: update["port"] }
-								: {}),
-							...(typeof update?.["pinHash"] === "string" ||
-							update?.["pinHash"] === null
-								? { pinHash: update["pinHash"] }
-								: {}),
-							...(typeof update?.["keepAwake"] === "boolean"
-								? { keepAwake: update["keepAwake"] }
-								: {}),
-							...(typeof update?.["keepAwakeCommand"] === "string"
-								? { keepAwakeCommand: update["keepAwakeCommand"] }
-								: {}),
-							...(Array.isArray(update?.["keepAwakeArgs"]) &&
-							update["keepAwakeArgs"].every((arg) => typeof arg === "string")
-								? { keepAwakeArgs: [...update["keepAwakeArgs"]] }
-								: {}),
-						};
 						yield* Ref.update(state, (current) => ({
 							...current,
-							...updates,
-							...(tls !== undefined && { tls }),
+							shuttingDown: true,
 						}));
 						yield* commitDaemonRuntimeConfig((config) => ({
 							...config,
-							...updates,
-							...(tls !== undefined && { tlsEnabled: tls }),
+							shuttingDown: true,
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const };
@@ -480,10 +506,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			SetProjectInstance: (request) =>
 				run(
 					Effect.gen(function* () {
-						yield* updateProject(request.slug, {
-							instanceId: request.instanceId,
-						});
-						yield* replaceRelay(request.slug);
+						yield* setProjectInstance(request.slug, request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),
@@ -693,15 +716,70 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.map((projectSlug) => ({ projectSlug })),
 					),
 				),
+			OpenCodeUseWorktree: (request) =>
+				Effect.gen(function* () {
+					const instance = yield* getInstance(request.instanceId);
+					if (!instance.managed || instance.driver !== "opencode")
+						return yield* new WsRpcError({
+							message:
+								"Declared worktree moves require a Conduit-managed OpenCode instance",
+						});
+					const target = yield* resolveDaemonOpenCodeSession(
+						configDir,
+						request.instanceId,
+						request.providerSessionId,
+					);
+					if (!target)
+						return yield* new WsRpcError({
+							message:
+								"No Conduit session is bound to this OpenCode session and instance",
+						});
+					const relay = yield* cache.get(target.projectSlug);
+					if (!relay.rpcWsHandler.context)
+						return yield* new WsRpcError({
+							message: "The project relay has no RPC context",
+						});
+					const relayContext = yield* relay.rpcWsHandler.context;
+					return yield* Effect.gen(function* () {
+						const sessionId = yield* findOpenCodeSession(
+							request.instanceId,
+							request.providerSessionId,
+						);
+						if (sessionId !== target.sessionId)
+							return yield* new WsRpcError({
+								message:
+									"The OpenCode session binding changed before the workspace move",
+							});
+						const workspace = yield* SessionWorkspaceTag;
+						return {
+							directory: yield* workspace.move(
+								target.sessionId,
+								request.path,
+								"agent",
+							),
+						};
+					}).pipe(Effect.provide(relayContext));
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof WorkspaceMoveError || error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
+				),
 			FindFolders: (request) =>
 				Effect.gen(function* () {
 					const projects = yield* allProjects;
-					return yield* findFolders(request.query, {
-						recent: getRecent(loadRecentProjects(configDir)).map(
-							(project) => project.directory,
-						),
-						projectFolders: projects.flatMap((project) => project.folders),
-					});
+					return yield* findFolders(
+						request.query,
+						{
+							recent: getRecent(loadRecentProjects(configDir)).map(
+								(project) => project.directory,
+							),
+							projectFolders: projects.flatMap((project) => project.folders),
+						},
+						configDir,
+					);
 				}).pipe(
 					Effect.provide(context),
 					Effect.mapError((error) =>

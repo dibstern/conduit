@@ -5,10 +5,11 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Either,
 	Fiber,
 	FiberMap,
-	type Ref,
-	Runtime,
+	Ref,
+	type Runtime,
 	Schema,
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -19,42 +20,67 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
+import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import {
 	ReadQueryEffectTag,
 	sessionGoalState,
 } from "../../../persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
-import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
+import {
+	catalogFromProviderList,
+	harnessForModelProvider,
+	resolveTurnSettings,
+	type TurnPick,
+	type TurnSettings,
+} from "../../../provider/turn-settings.js";
+import type {
+	ModelInfo,
+	SendTurnInput,
+	TurnResult,
+} from "../../../provider/types.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
+import { ProjectSettingsTag } from "./project-settings.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
+} from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
+	makeProcessingTimeoutHooks,
 	type OverridesState,
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
-	resetProcessingTimeout,
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
+import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
 
-/** Recheck saved folders at launch, shared by sends and speculative warming. */
+/** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
 export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
+	{
+		fallbackMissingWorktree = false,
+	}: {
+		readonly fallbackMissingWorktree?: boolean;
+	} = {},
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -79,23 +105,44 @@ export const resolveSessionFolders = (
 						}),
 					)
 				: session.workspace;
-		const state =
+		let state =
 			savedWorkspace == null
 				? null
 				: yield* Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
 						savedWorkspace,
 					);
-		const workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
-		if (!existsSync(workspaceRoot))
-			return yield* Effect.fail(
-				new RelayError(`Main project folder does not exist: ${workspaceRoot}`, {
-					code: "FILE_NOT_FOUND",
-				}),
+		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		if (!existsSync(workspaceRoot)) {
+			const fallback =
+				fallbackMissingWorktree &&
+				workspace._tag === "Some" &&
+				state?.origin === "existing" &&
+				workspaceRoot !== config.projectDir;
+			if (!fallback || !existsSync(config.projectDir))
+				return yield* Effect.fail(
+					new RelayError(
+						`Main project folder does not exist: ${fallback ? config.projectDir : workspaceRoot}`,
+						{
+							code: "FILE_NOT_FOUND",
+						},
+					),
+				);
+			workspaceRoot = yield* workspace.value.move(
+				session.id,
+				config.projectDir,
+				"missing",
 			);
+			state = null;
+		}
+		const worktrees = state?.worktrees;
+		const effectiveFolders = [
+			config.projectDir,
+			...(config.extraFolders ?? []),
+		].map((root) => ({ root, directory: worktrees?.[root] ?? root }));
 		const extraFolders: string[] = [];
 		const launchFolders = state
-			? [config.projectDir, ...(config.extraFolders ?? [])]
-					.map((folder) => state.worktrees[folder] ?? folder)
+			? effectiveFolders
+					.map(({ directory }) => directory)
 					.filter((folder) => folder !== workspaceRoot)
 			: (config.extraFolders ?? []);
 		for (const folder of launchFolders) {
@@ -115,7 +162,7 @@ export const resolveSessionFolders = (
 				});
 			}
 		}
-		return { workspaceRoot, extraFolders };
+		return { workspaceRoot, extraFolders, effectiveFolders };
 	});
 
 /** Browser requests identify a session; project-level requests keep the primary folder. */
@@ -123,9 +170,14 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 	Effect.gen(function* () {
 		if (sessionId === undefined) {
 			const config = yield* ConfigTag;
+			const extraFolders = config.extraFolders ?? [];
 			return {
 				workspaceRoot: config.projectDir,
-				extraFolders: config.extraFolders ?? [],
+				extraFolders,
+				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
+					root,
+					directory: root,
+				})),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
@@ -246,21 +298,13 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
-		const runTimeout = Runtime.runFork(runtime);
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
-			clearTimeout: () => {
-				runTimeout(clearProcessingTimeout(sessionId));
-			},
-			resetTimeout: () => {
-				runTimeout(
-					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
-				);
-			},
+			...makeProcessingTimeoutHooks(runtime, sessionId),
 			applyReportedPermissionMode: (mode) =>
 				setPermissionMode(sessionId, mode).pipe(
 					Effect.provideService(OverridesStateTag, overridesRef),
@@ -394,6 +438,7 @@ const resolveClaudeModel = (
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 		let resolvedInput = input;
+		let catalog: readonly ModelInfo[] | undefined;
 		if (isClaudeDriver(driver) && input.model === undefined) {
 			const discovery = yield* Effect.either(
 				orchestrationEngine.dispatchEffect({
@@ -403,6 +448,7 @@ const resolveClaudeModel = (
 			);
 			const models =
 				discovery._tag === "Right" ? (discovery.right.models ?? []) : [];
+			catalog = models;
 			const inferred =
 				models.find((model) => model.id === "default") ?? models[0];
 			if (inferred === undefined) {
@@ -447,7 +493,7 @@ const resolveClaudeModel = (
 			};
 		}
 
-		return resolvedInput;
+		return { resolvedInput, catalog };
 	});
 
 const prepareEngineTurnInput = (
@@ -455,8 +501,87 @@ const prepareEngineTurnInput = (
 	providerId: string,
 	driver: ProviderDriverKind,
 	claudeConfigDir: string | undefined,
+	discoveredCatalog: readonly ModelInfo[] | undefined,
 ) =>
 	Effect.gen(function* () {
+		// OpenCode keeps its own session model, so we only override it on an
+		// explicit pick. The Claude SDK has no such memory: omitting `model`
+		// makes it resolve the config dir's settings.json `model` instead, so a
+		// session inheriting the global default (or one whose per-session pick
+		// was lost to a daemon restart) would silently run a different model
+		// than the one conduit displays. Always send what we display.
+		const sendModel =
+			resolvedInput.model &&
+			(resolvedInput.modelUserSelected ||
+				(isClaudeDriver(driver) &&
+					harnessForModelProvider(resolvedInput.model.providerID) ===
+						"claude"));
+		// An effort belongs to its model. One inherited with the other harness's
+		// default model would run on a model that may not offer it.
+		const sendVariant =
+			resolvedInput.model === undefined ||
+			isClaudeDriver(driver) ===
+				(harnessForModelProvider(resolvedInput.model.providerID) === "claude");
+		let settings: TurnSettings | undefined;
+		// Both gates omit an inherited model from the other harness. In that
+		// case the engine's model is unknown, so there is no model pick to resolve.
+		if (resolvedInput.model && (sendModel || sendVariant)) {
+			let catalog = discoveredCatalog;
+			if (catalog === undefined && isClaudeDriver(driver)) {
+				const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
+				const providerModels =
+					projectSettings._tag === "Some"
+						? (yield* Ref.get(projectSettings.value.live)).providerModels
+						: undefined;
+				if (providerModels !== undefined)
+					catalog = catalogFromProviderList(providerModels.providers);
+			} else if (catalog === undefined) {
+				const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
+				if (models._tag === "Some") {
+					const cached = yield* models.value.cachedProviders();
+					if (cached._tag === "Some")
+						catalog = cached.value.providers.flatMap((provider) =>
+							(provider.models ?? []).map((model) => ({
+								...model,
+								providerId: provider.id || provider.name,
+							})),
+						);
+				}
+			}
+			const pick: TurnPick = {
+				harness: isClaudeDriver(driver) ? "claude" : "opencode",
+				model: {
+					providerId: resolvedInput.model.providerID,
+					modelId: resolvedInput.model.modelID,
+				},
+				effort: resolvedInput.variant ?? "",
+				contextWindow: resolvedInput.contextWindow ?? "",
+			};
+			if (catalog === undefined) {
+				const log = yield* LoggerTag;
+				log.debug(
+					`session=${resolvedInput.sessionId} turn pick sent unvalidated: ${driver} catalog unavailable`,
+				);
+				settings = pick;
+			} else {
+				const resolved = resolveTurnSettings(pick, catalog);
+				if (Either.isLeft(resolved)) {
+					yield* clearProcessingTimeout(resolvedInput.sessionId);
+					const failTurn = yield* makeFailTurn;
+					yield* failTurn(
+						resolvedInput.sessionId,
+						resolved.left.message,
+						"PICK_REJECTED",
+						resolvedInput.continuation ? undefined : resolvedInput.commandId,
+					);
+					return undefined;
+				}
+				settings = resolved.right;
+			}
+		}
+		const variant = settings?.effort ?? resolvedInput.variant;
+		const contextWindow =
+			settings?.contextWindow ?? resolvedInput.contextWindow;
 		const priorHistoryMetadata = isClaudeDriver(driver)
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
@@ -474,10 +599,18 @@ const prepareEngineTurnInput = (
 					}),
 				),
 			);
-		const folders = yield* resolveSessionFolders({
-			id: resolvedInput.sessionId,
-			workspace: sessionRow?.workspace ?? null,
-		});
+		const folders = yield* resolveSessionFolders(
+			{
+				id: resolvedInput.sessionId,
+				workspace: sessionRow?.workspace ?? null,
+			},
+			{ fallbackMissingWorktree: !resolvedInput.steer },
+		);
+		if (driver === "opencode") {
+			const stream = yield* Effect.serviceOption(SSEStreamTag);
+			if (stream._tag === "Some")
+				yield* stream.value.includeDirectory(folders.workspaceRoot);
+		}
 		const isFirstClaudeMessage =
 			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;
@@ -498,35 +631,45 @@ const prepareEngineTurnInput = (
 			resolvedInput.images && resolvedInput.images.length > 0
 				? Array.from(resolvedInput.images)
 				: undefined;
-		// OpenCode keeps its own session model, so we only override it on an
-		// explicit pick. The Claude SDK has no such memory: omitting `model`
-		// makes it resolve the config dir's settings.json `model` instead, so a
-		// session inheriting the global default (or one whose per-session pick
-		// was lost to a daemon restart) would silently run a different model
-		// than the one conduit displays. Always send what we display.
-		const sendModel =
-			resolvedInput.model &&
-			(resolvedInput.modelUserSelected ||
-				(isClaudeDriver(driver) &&
-					resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
+		let workspaceMoveSequence: number | undefined;
+		let workspaceMoveDirective: string | undefined;
+		if (isClaudeDriver(driver) && !resolvedInput.steer) {
+			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			if (workspace._tag === "Some") {
+				const state = yield* workspace.value.claudeWorktreeState(
+					resolvedInput.sessionId,
+				);
+				if (state.directivePending) {
+					const config = yield* ConfigTag;
+					const checkouts = yield* Effect.forEach(
+						[config.projectDir, ...(config.extraFolders ?? [])],
+						(folder) =>
+							realWorkspacePath(folder).pipe(
+								Effect.orElseSucceed(() => folder),
+							),
+					);
+					const directive = checkouts.includes(state.requestedPath)
+						? '[Conduit workspace move] Call ExitWorktree with action "keep" before continuing.'
+						: `[Conduit workspace move] Call EnterWorktree with path ${JSON.stringify(state.requestedPath)} before continuing.`;
+					workspaceMoveSequence = state.userMoveSequence;
+					workspaceMoveDirective = directive;
+				}
+			}
+		}
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
 			prompt: resolvedInput.text,
+			...(workspaceMoveDirective === undefined
+				? {}
+				: { workspaceMoveDirective }),
 			...(resolvedInput.continuation
 				? { continuation: resolvedInput.continuation }
 				: {}),
 			history: [],
 			providerState,
 			instanceId: providerId,
-			...(sendModel && resolvedInput.model
-				? {
-						model: {
-							providerId: resolvedInput.model.providerID,
-							modelId: resolvedInput.model.modelID,
-						},
-					}
-				: {}),
+			...(sendModel && settings ? { model: settings.model } : {}),
 			...folders,
 			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
 			...(isClaudeDriver(driver) && sessionRow
@@ -543,13 +686,11 @@ const prepareEngineTurnInput = (
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
 			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			...(resolvedInput.variant ? { variant: resolvedInput.variant } : {}),
-			...(resolvedInput.contextWindow
-				? { contextWindow: resolvedInput.contextWindow }
-				: {}),
+			...(sendVariant && variant ? { variant } : {}),
+			...(contextWindow ? { contextWindow } : {}),
 		};
 
-		return sendTurnInput;
+		return { sendTurnInput, workspaceMoveSequence };
 	});
 
 const dispatchEngineTurn = (
@@ -557,6 +698,7 @@ const dispatchEngineTurn = (
 	providerId: string,
 	driver: ProviderDriverKind,
 	sendTurnInput: SendTurnInput,
+	workspaceMoveSequence: number | undefined,
 ) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
@@ -608,6 +750,29 @@ const dispatchEngineTurn = (
 				},
 			},
 		};
+		const events = (resolvedInput.events ?? []).map((event) =>
+			event.type === "input.sent" && workspaceMoveSequence !== undefined
+				? { ...event, data: { ...event.data, workspaceMoveSequence } }
+				: event,
+		);
+		// Continuations have no inbox admission, but handing their directive to
+		// Claude still consumes exactly this move, atomically with the outbox.
+		if (
+			workspaceMoveSequence !== undefined &&
+			!events.some((event) => event.type === "input.sent")
+		)
+			events.push(
+				canonicalEvent(
+					"input.sent",
+					resolvedInput.sessionId,
+					{
+						sessionId: resolvedInput.sessionId,
+						inputId: sendTurnInput.inputId,
+						workspaceMoveSequence,
+					},
+					{ provider: "claude" },
+				),
+			);
 		const dispatchProgram = Effect.try({
 			try: () =>
 				orchestrationEngine.dispatchEffect({
@@ -615,7 +780,7 @@ const dispatchEngineTurn = (
 					commandId: resolvedInput.commandId,
 					providerId,
 					input: watchedInput,
-					...(resolvedInput.events ? { events: resolvedInput.events } : {}),
+					...(events.length > 0 ? { events } : {}),
 					onAccepted: Deferred.succeed(accepted, undefined),
 				}),
 			catch: (cause) => cause,
@@ -658,13 +823,15 @@ const sendViaEngine = (
 	claudeConfigDir: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		const resolvedInput = yield* resolveClaudeModel(input, providerId, driver);
-		if (!resolvedInput) return;
-		const sendTurnInput = yield* prepareEngineTurnInput(
+		const resolved = yield* resolveClaudeModel(input, providerId, driver);
+		if (!resolved) return;
+		const { resolvedInput, catalog } = resolved;
+		const prepared = yield* prepareEngineTurnInput(
 			resolvedInput,
 			providerId,
 			driver,
 			claudeConfigDir,
+			catalog,
 		).pipe(
 			Effect.catchIf(
 				(cause) =>
@@ -672,8 +839,14 @@ const sendViaEngine = (
 				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
 			),
 		);
-		if (!sendTurnInput) return;
-		yield* dispatchEngineTurn(resolvedInput, providerId, driver, sendTurnInput);
+		if (!prepared) return;
+		yield* dispatchEngineTurn(
+			resolvedInput,
+			providerId,
+			driver,
+			prepared.sendTurnInput,
+			prepared.workspaceMoveSequence,
+		);
 	});
 
 /** The handoff is where a turn starts working: arm its timeout. The browser's
@@ -707,9 +880,7 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		const engine = yield* OrchestrationEngineTag;
 		const providerId =
 			(yield* engine.getProviderForSessionEffect(input.sessionId)) ??
-			(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-				? CLAUDE_PROVIDER_ID
-				: OPENCODE_PROVIDER_ID);
+			harnessForModelProvider(input.model?.providerID ?? "");
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
 		if (driver === undefined) {

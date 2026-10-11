@@ -2,8 +2,25 @@
 	import Select from "../ui/Select.svelte";
 	import { themeState, setThemeMode, type ThemeMode } from "../../stores/theme.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { setAutoSettleSettingRpc } from "../../transport/ws-rpc-client.js";
-	let { state = $bindable() }: { state: { autoSettleDays: number | null; autoSettleSaving: boolean } } = $props();
+	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getIsConnected } from "../../transport/connection-status.svelte.js";
+	import { getAutoSettleSettingRpc, setAutoSettleSettingRpc } from "../../transport/ws-rpc-client.js";
+	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false });
+
+	$effect(() => {
+		if (!getIsConnected()) return;
+		const route = getCurrentRoute();
+		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
+		let current = true;
+		void getAutoSettleSettingRpc()
+			.then((days) => {
+				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
+			})
+			.catch(() => {
+				if (current) showToast("Couldn't load auto-settle setting", { variant: "error" });
+			});
+		return () => { current = false; };
+	});
 </script>
 
 <div class="py-[8px] border-b border-border-subtle">

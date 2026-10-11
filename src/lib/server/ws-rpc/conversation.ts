@@ -13,6 +13,7 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../../domain/relay/Services/session-overrides-state.js";
+import { stopBackgroundTaskById } from "../../handlers/background-tasks.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,
@@ -47,6 +48,11 @@ const inboxCommand = <E>(
 	);
 
 export const conversationHandlers = {
+	StopBackgroundTask: (request) =>
+		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchAll(mapRpcFailure("StopBackgroundTask")),
+		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
 			const previousMode = yield* getPermissionMode(request.sessionId);
@@ -210,6 +216,7 @@ export const conversationHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "StopBackgroundTask"
 	| "SwitchPermissionMode"
 	| "RespondPermission"
 	| "AnswerQuestion"

@@ -2,6 +2,7 @@ import type { CanonicalToolInput } from "../../persistence/events.js";
 import {
 	optNum,
 	optStr,
+	patchFilePaths,
 	str,
 	toRecord,
 } from "../normalize-tool-input-helpers.js";
@@ -42,11 +43,23 @@ export function normalizeToolInput(
 				content: str(input, "content"),
 			};
 
+		case "apply_patch": {
+			const patch = str(input, "patchText");
+			return { tool: "Patch", patch, filePaths: patchFilePaths(patch) };
+		}
+
 		case "Bash":
 			return {
 				tool: "Bash",
 				command: str(input, "command"),
 				...optStr(input, "description"),
+				...optStr(
+					input,
+					"workingDirectory",
+					"working_directory",
+					"cwd",
+					"workdir",
+				),
 				...optNum(input, "timeoutMs"),
 			};
 

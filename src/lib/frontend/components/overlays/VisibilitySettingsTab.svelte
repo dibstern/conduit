@@ -1,21 +1,15 @@
 <script lang="ts">
-	import Toggle from "../ui/Toggle.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { applyGetAgentsResponse, applyGetModelsResponse, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { getAgentsRpc, getModelsRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
-	let { visible, state = $bindable() }: { visible: boolean; state: { modelsFetchPending: boolean } } = $props();
-	function getRpcProjectSlug(): string | null {
-		const slug = getCurrentSlug();
-		if (!slug) {
-			showToast("No active project connection", { variant: "warn" });
-			return null;
-		}
-		return slug;
-	}
+	let state = $state({ modelsFetchPending: false });
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
 	const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
 	const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
@@ -25,13 +19,17 @@
 
 	// Lazy-load lists when the tab opens with empty discovery state.
 	$effect(() => {
-		if (!visible) return;
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		if (discoveryState.providers.length === 0) {
 			state.modelsFetchPending = true;
-			void getModelsRpc({ projectSlug })
-				.then(applyGetModelsResponse)
+			// Scoped, so the reply describes the open session's model, not the
+			// project default.
+			const sessionId = sessionState.currentId;
+			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+				.then((response) => {
+					if (sessionState.currentId === sessionId) applyGetModelsResponse(response);
+				})
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					state.modelsFetchPending = false;
@@ -51,8 +49,11 @@
 		hiddenModels?: string[];
 		hiddenAgents?: string[];
 	}): Promise<void> {
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) {
+			showToast("No active project connection", { variant: "warn" });
+			return;
+		}
 		const undoHidden = chooseHiddenEntries(update);
 		try {
 			applyHiddenEntriesSet(await setHiddenEntriesRpc({ projectSlug, ...update }));
@@ -100,33 +101,31 @@
 {/if}
 {#each modelProviders as provider (provider.id)}
 	{@const allHidden = provider.models.every((m) => hiddenModelSet.has(`${provider.id}/${m.id}`))}
-	<section>
-		<div class="flex items-center justify-between gap-[10px] pt-[8px]">
-			<h3 class="text-[12px] font-semibold text-text">{provider.name}</h3>
+	<SettingsGroup title={provider.name}>
+		{#snippet actions()}
 			<TextButton onclick={() => toggleProviderAll(provider.id, !allHidden)}>
 				{allHidden ? "Show all" : "Hide all"}
 			</TextButton>
-		</div>
+		{/snippet}
 		{#each provider.models as model (model.id)}
-			<Toggle
+			<SettingsRow
 				label={model.name || model.id}
 				checked={!hiddenModelSet.has(`${provider.id}/${model.id}`)}
 				onchange={() => toggleModel(provider.id, model.id)}
 			/>
 		{/each}
-	</section>
+	</SettingsGroup>
 {/each}
 
 <!-- Agents (current provider scope only) -->
 {#if agentScopeId && discoveryState.agents.length > 0}
-	<section>
-		<h3 class="pt-[8px] text-[12px] font-semibold text-text">{discoveryState.agentProviderScope?.name} agents</h3>
+	<SettingsGroup title="{discoveryState.agentProviderScope?.name} agents">
 		{#each discoveryState.agents as agent (agent.id)}
-			<Toggle
+			<SettingsRow
 				label={agent.name || agent.id}
 				checked={!hiddenAgentSet.has(`${agentScopeId}/${agent.id}`)}
 				onchange={() => toggleAgent(agent.id)}
 			/>
 		{/each}
-	</section>
+	</SettingsGroup>
 {/if}

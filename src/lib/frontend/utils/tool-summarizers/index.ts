@@ -11,6 +11,7 @@ export type {
 import "./read.js";
 import "./edit.js";
 import "./write.js";
+import "./patch.js";
 import "./bash.js";
 import "./grep.js";
 import "./glob.js";

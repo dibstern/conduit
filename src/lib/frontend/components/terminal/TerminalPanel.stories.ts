@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import {
 	beginCreateTab,
 	destroyAll,
@@ -91,6 +92,35 @@ export const SessionWorktreeTerminals: Story = {
 			],
 			"pty-worktree",
 		);
+	},
+};
+
+export const MultiFolderPickerClosed: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		folders: [
+			{ root: "/workspace/web", label: "web" },
+			{ root: "/workspace/api", label: "api" },
+		],
+	},
+	beforeEach: () => {
+		setTabs([{ ptyId: "pty-web", title: "Terminal", cwd: "/workspace/web" }]);
+	},
+};
+
+export const MultiFolderPickerOpen: Story = {
+	...MultiFolderPickerClosed,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "New terminal in folder" }),
+		);
+		await expect(
+			body.getByRole("menu", { name: "New terminal in folder" }),
+		).toBeVisible();
+		await expect(body.getByRole("menuitem", { name: "web" })).toBeVisible();
+		await expect(body.getByRole("menuitem", { name: "api" })).toBeVisible();
 	},
 };
 

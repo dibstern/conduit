@@ -62,10 +62,11 @@ export function translateDomainEventToRelay(
 		}
 
 		case "turn.completed": {
-			const { tokens, cost, duration } = event.data;
+			const { tokens, cost, duration, contextTokens } = event.data;
 			return emit(
 				{
 					type: "result",
+					...(contextTokens !== undefined ? { contextTokens } : {}),
 					usage: {
 						input: tokens?.input ?? 0,
 						output: tokens?.output ?? 0,
@@ -173,6 +174,8 @@ export function translateDomainEventToRelay(
 			return silent("delivered as the shell row's goalState");
 		case "session.workspace_changed":
 			return silent("delivered as the shell row's workspace and git");
+		case "session.workspace_hint_changed":
+			return silent("delivered as the shell row's workspaceHint");
 
 		// The SDK owns the live mode, so a change reported mid-session has to
 		// reach the picker; it does, as the session's shell row (ni8.12).

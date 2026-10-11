@@ -63,7 +63,6 @@ describe("instance lifecycle integration", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: "/src/app",
@@ -89,7 +88,9 @@ describe("instance lifecycle integration", () => {
 		expect(project.instanceId).toBe("personal");
 	});
 
-	it("addProject assigns instanceId from available instances", async () => {
+	// A binding picks the harness for new sessions, so a default one would
+	// override the default model's harness.
+	it("addProject leaves a new project unbound", async () => {
 		const projectDir = join(tmpDir, "lifecycle-test");
 		mkdirSync(projectDir);
 		daemon = await startForegroundDaemon({
@@ -100,6 +101,6 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const project = await daemon.addProject(projectDir);
-		expect(project.instanceId).toBe("opencode");
+		expect(project.instanceId).toBeUndefined();
 	});
 });

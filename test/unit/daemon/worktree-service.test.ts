@@ -1,0 +1,463 @@
+/*
+ * Failure modes, written before the implementation:
+ * - An explicit branch already exists: refuse it and preserve its ref and checkout.
+ * - A branch name is invalid: refuse it without creating a ref or directory.
+ * - The base checkout is dirty: create from committed HEAD and leave its edits there.
+ * - The base has detached HEAD: report it without creating anything.
+ * - The target path already exists, even when empty: preserve it and all existing refs.
+ * - Git is missing or fails: show the operation's error and leave nothing behind.
+ * - Git writes the branch ref then reports failure or times out: use its reflog
+ *   ownership marker to remove this attempt's ref and preserve competing refs.
+ * - Git adds the worktree then reports failure or times out: remove its registration,
+ *   directory and the branch created by this attempt.
+ * - Creation is interrupted or later session initialization fails: roll back ownership.
+ * - Generated branch names collide, including ref ancestor/descendant namespaces:
+ *   choose a valid unused name without changing existing refs.
+ * - Concurrent creators race for the same target: preserve the successful owner's tree.
+ * - Git environment variables point elsewhere: operate only on the requested repository.
+ * - A path beneath the owned root is an outward symlink: reject its original spelling.
+ * - A project folder is a repository subdirectory: map it to that same relative folder.
+ * - The tracer receives zero or several folders: reject before changing any repository.
+ */
+import { execFileSync } from "node:child_process";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Cause, Effect, Either, Exit, Fiber } from "effect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	isConduitWorktreePath,
+	makeWorktreeLive,
+	ownedWorktreePath,
+	worktreesRoot,
+} from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
+import {
+	type WorktreeFolder,
+	WorktreeServiceTag,
+} from "../../../src/lib/domain/daemon/Services/worktree-service.js";
+
+describe("daemon Worktree service", () => {
+	let fixture: string;
+	let repository: string;
+	let configDir: string;
+	let folder: WorktreeFolder;
+	const actualGit = execFileSync("which", ["git"], {
+		encoding: "utf8",
+	}).trim();
+	const git = (...args: string[]) =>
+		execFileSync(actualGit, args, {
+			cwd: repository,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim();
+	const repositoryState = () => ({
+		branches: git(
+			"for-each-ref",
+			"--format=%(refname) %(objectname)",
+			"refs/heads",
+		),
+		worktrees: git("worktree", "list", "--porcelain"),
+	});
+	const createEffect = (
+		branchName?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+		folders: readonly WorktreeFolder[] = [folder],
+	) =>
+		Effect.flatMap(WorktreeServiceTag, (service) =>
+			service.create(folders, undefined, branchName),
+		).pipe(Effect.provide(makeWorktreeLive(configDir, options)));
+	const creationError = async (
+		branchName?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+		folders: readonly WorktreeFolder[] = [folder],
+	) => {
+		const result = await Effect.runPromise(
+			Effect.either(createEffect(branchName, options, folders)),
+		);
+		if (Either.isRight(result)) throw new Error("Expected creation to fail");
+		return result.left;
+	};
+	const gitWrapper = (body: string) => {
+		const path = join(fixture, "git-wrapper");
+		writeFileSync(
+			path,
+			`#!${process.execPath}\nconst { spawnSync } = require("node:child_process");\nconst { writeFileSync } = require("node:fs");\nconst args = process.argv.slice(2);\n${body}\n`,
+		);
+		chmodSync(path, 0o755);
+		return path;
+	};
+	const runRealGit = `const result = spawnSync(${JSON.stringify(actualGit)}, args, { stdio: "inherit" });`;
+	const waitForGitTimeout = (timeoutMarker: string) =>
+		`process.on("SIGTERM", () => { writeFileSync(${JSON.stringify(timeoutMarker)}, "timed out"); process.exit(42); }); setInterval(() => {}, 60_000);`;
+	const assertUnchanged = (before: ReturnType<typeof repositoryState>) => {
+		expect(repositoryState()).toEqual(before);
+		expect(existsSync(ownedWorktreePath(configDir, folder))).toBe(false);
+	};
+
+	beforeEach(() => {
+		fixture = realpathSync(
+			mkdtempSync(join(tmpdir(), "conduit-worktree-service-")),
+		);
+		repository = join(fixture, "source");
+		configDir = join(fixture, "config");
+		mkdirSync(repository);
+		mkdirSync(configDir);
+		git("init", "-q", "--initial-branch=main");
+		git("config", "user.name", "Worktree test");
+		git("config", "user.email", "worktree@example.test");
+		writeFileSync(join(repository, "tracked.txt"), "committed\n");
+		mkdirSync(join(repository, "app"));
+		writeFileSync(join(repository, "app", "app.txt"), "app committed\n");
+		git("add", ".");
+		git("commit", "-qm", "Base");
+		folder = {
+			path: repository,
+			projectSlug: "project",
+			sessionId: "trace-session",
+		};
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(fixture, { recursive: true, force: true });
+	});
+
+	it("creates under the daemon root from the current branch and can roll it back", async () => {
+		const before = repositoryState();
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository];
+		expect(path).toBe(ownedWorktreePath(configDir, folder));
+		expect(
+			path?.startsWith(`${worktreesRoot(configDir)}/project/trace-session/`),
+		).toBe(true);
+		expect(created.branchName).toMatch(/^conduit\/session-trace-sessio/);
+		expect(git("rev-parse", created.branchName)).toBe(git("rev-parse", "HEAD"));
+		expect(readFileSync(join(path ?? "", "tracked.txt"), "utf8")).toBe(
+			"committed\n",
+		);
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.rollback(created),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		assertUnchanged(before);
+	});
+
+	it("preserves an existing explicit branch and its existing checkout", async () => {
+		const existing = join(fixture, "existing");
+		git("worktree", "add", "-qb", "taken", existing);
+		writeFileSync(join(existing, "keep.txt"), "keep\n");
+		const before = repositoryState();
+		const error = await creationError("taken");
+		expect(error.reason).toBe("branch-exists");
+		expect(error.message).toContain("taken");
+		expect(readFileSync(join(existing, "keep.txt"), "utf8")).toBe("keep\n");
+		assertUnchanged(before);
+	});
+
+	it.each([
+		"bad name",
+		"bad..name",
+		"-bad",
+		"@{-1}",
+	])("rejects the invalid branch %s without changing the repository", async (name) => {
+		const before = repositoryState();
+		expect((await creationError(name)).reason).toBe("invalid-branch");
+		assertUnchanged(before);
+	});
+
+	it("starts at committed HEAD when the source has staged, unstaged and untracked edits", async () => {
+		writeFileSync(join(repository, "tracked.txt"), "staged\n");
+		git("add", "tracked.txt");
+		writeFileSync(join(repository, "tracked.txt"), "unstaged\n");
+		writeFileSync(join(repository, "untracked.txt"), "untracked\n");
+		const before = git("status", "--porcelain");
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		expect(readFileSync(join(path, "tracked.txt"), "utf8")).toBe("committed\n");
+		expect(existsSync(join(path, "untracked.txt"))).toBe(false);
+		expect(git("-C", path, "status", "--porcelain")).toBe("");
+		expect(git("status", "--porcelain")).toBe(before);
+		expect(readFileSync(join(repository, "tracked.txt"), "utf8")).toBe(
+			"unstaged\n",
+		);
+	});
+
+	it("rejects a detached HEAD without creating a branch or directory", async () => {
+		git("checkout", "-q", "--detach");
+		const before = repositoryState();
+		const error = await creationError();
+		expect(error.reason).toBe("detached-head");
+		expect(error.message).toContain("detached HEAD");
+		assertUnchanged(before);
+	});
+
+	it.each([
+		false,
+		true,
+	])("preserves a target directory that already exists, empty=%s", async (empty) => {
+		const path = ownedWorktreePath(configDir, folder);
+		mkdirSync(path, { recursive: true });
+		if (!empty) writeFileSync(join(path, "keep.txt"), "keep\n");
+		const before = repositoryState();
+		expect((await creationError()).reason).toBe("target-exists");
+		expect(repositoryState()).toEqual(before);
+		expect(existsSync(path)).toBe(true);
+		if (!empty)
+			expect(readFileSync(join(path, "keep.txt"), "utf8")).toBe("keep\n");
+	});
+
+	it("reports missing git without creating anything", async () => {
+		const before = repositoryState();
+		const error = await creationError(undefined, {
+			gitExecutable: join(fixture, "missing-git"),
+		});
+		expect(error.reason).toBe("git-failed");
+		expect(error.message).toContain("Git executable was not found");
+		assertUnchanged(before);
+	});
+
+	it("reports a failing git command specifically without creating anything", async () => {
+		const before = repositoryState();
+		const executable = gitWrapper(
+			'console.error("forced git failure"); process.exit(42);',
+		);
+		const error = await creationError(undefined, { gitExecutable: executable });
+		expect(error.reason).toBe("git-failed");
+		expect(error.message).toContain("forced git failure");
+		assertUnchanged(before);
+	});
+
+	it.each([
+		"failure",
+		"timeout",
+	])("rolls back a ref written before git reports %s", async (mode) => {
+		const before = repositoryState();
+		const marker = join(fixture, "ref-written");
+		const timeoutMarker = join(fixture, "ref-timeout-observed");
+		const executable = gitWrapper(
+			`${runRealGit}\nif (((args.includes("branch") && args.includes("--")) || args.includes("--create-reflog")) && result.status === 0) { writeFileSync(${JSON.stringify(marker)}, "written"); ${mode === "timeout" ? waitForGitTimeout(timeoutMarker) : 'console.error("forced post-ref failure"); process.exit(42);'} } else process.exit(result.status ?? 1);`,
+		);
+		const error = await creationError(undefined, {
+			gitExecutable: executable,
+			gitTimeoutMs: 5_000,
+		});
+		expect(error.reason).toBe("git-failed");
+		expect(existsSync(marker)).toBe(true);
+		if (mode === "failure")
+			expect(error.message).toContain("forced post-ref failure");
+		else expect(existsSync(timeoutMarker)).toBe(true);
+		assertUnchanged(before);
+	}, 30_000);
+
+	it("rolls back a worktree add that succeeded before reporting failure", async () => {
+		const before = repositoryState();
+		const executable = gitWrapper(
+			`${runRealGit}\nif (args.includes("worktree") && args.includes("add") && result.status === 0) { console.error("forced post-add failure"); process.exit(42); }\nprocess.exit(result.status ?? 1);`,
+		);
+		const error = await creationError(undefined, { gitExecutable: executable });
+		expect(error.reason).toBe("git-failed");
+		expect(error.message).toContain("forced post-add failure");
+		assertUnchanged(before);
+	});
+
+	it("rolls back when a git worktree add times out after creating the checkout", async () => {
+		const before = repositoryState();
+		const marker = join(fixture, "added-before-timeout");
+		const timeoutMarker = join(fixture, "add-timeout-observed");
+		const executable = gitWrapper(
+			`${runRealGit}\nif (args.includes("worktree") && args.includes("add") && result.status === 0) { writeFileSync(${JSON.stringify(marker)}, "added"); ${waitForGitTimeout(timeoutMarker)} } else process.exit(result.status ?? 1);`,
+		);
+		const error = await creationError(undefined, {
+			gitExecutable: executable,
+			gitTimeoutMs: 5_000,
+		});
+		expect(error.reason).toBe("git-failed");
+		expect(existsSync(timeoutMarker)).toBe(true);
+		expect(existsSync(marker)).toBe(true);
+		assertUnchanged(before);
+	}, 30_000);
+
+	it.each([
+		false,
+		true,
+	])("rolls back creation interrupted while git is finishing, delayed startup=%s", async (delayedStartup) => {
+		const before = repositoryState();
+		const marker = join(fixture, "added");
+		const release = join(fixture, "release-git");
+		const executable = gitWrapper(
+			`${delayedStartup ? 'if (args.includes("--show-toplevel")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100);' : ""}\n${runRealGit}\nif (args.includes("worktree") && args.includes("add") && result.status === 0) {
+const { existsSync } = require("node:fs");
+const finish = () => { if (existsSync(${JSON.stringify(release)})) { clearInterval(gate); process.exit(0); } };
+const gate = setInterval(finish, 25);
+writeFileSync(${JSON.stringify(marker)}, "added");
+finish();
+} else process.exit(result.status ?? 1);`,
+		);
+		const fiber = Effect.runFork(
+			createEffect(undefined, { gitExecutable: executable }),
+		);
+		try {
+			await vi.waitFor(() => expect(existsSync(marker)).toBe(true), {
+				timeout: 8_000,
+			});
+			expect((await Effect.runPromise(Fiber.poll(fiber)))._tag).toBe("None");
+		} finally {
+			// Request interruption before allowing Git to return and transfer ownership.
+			await Effect.runPromise(Fiber.interruptFork(fiber));
+			writeFileSync(release, "release");
+			const exit = await Effect.runPromise(Fiber.await(fiber));
+			expect(Exit.isFailure(exit)).toBe(true);
+			if (Exit.isFailure(exit))
+				expect(Cause.isInterrupted(exit.cause)).toBe(true);
+		}
+		assertUnchanged(before);
+	}, 30_000);
+
+	it("suffixes a generated branch without changing the colliding ref", async () => {
+		const name = "conduit/session-trace-sessio";
+		git("branch", name);
+		const head = git("rev-parse", name);
+		const created = await Effect.runPromise(createEffect());
+		expect(created.branchName).toBe(`${name}-2`);
+		expect(git("rev-parse", name)).toBe(head);
+	});
+
+	it.each([
+		{ branches: ["conduit"], expected: "conduit-session-trace-sessio" },
+		{
+			branches: ["conduit/session-trace-sessio/child"],
+			expected: "conduit/session-trace-sessio-2",
+		},
+		{
+			branches: [
+				"conduit/session-trace-sessio",
+				"conduit/session-trace-sessio-2/child",
+			],
+			expected: "conduit/session-trace-sessio-3",
+		},
+		{
+			branches: ["conduit", "conduit-session-trace-sessio/child"],
+			expected: "conduit-session-trace-sessio-2",
+		},
+	])("avoids existing ref namespaces $branches", async ({
+		branches,
+		expected,
+	}) => {
+		for (const branch of branches) git("branch", branch);
+		const before = repositoryState();
+		const created = await Effect.runPromise(createEffect());
+		expect(created.branchName).toBe(expected);
+		for (const branch of branches)
+			expect(git("rev-parse", branch)).toBe(git("rev-parse", "HEAD"));
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.rollback(created),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		assertUnchanged(before);
+	});
+
+	it("preserves a concurrent creator's successful checkout", async () => {
+		const results = await Promise.all([
+			Effect.runPromise(Effect.either(createEffect())),
+			Effect.runPromise(Effect.either(createEffect())),
+		]);
+		const successes = results.filter(Either.isRight);
+		const failures = results.filter(Either.isLeft);
+		expect(successes).toHaveLength(1);
+		expect(failures).toHaveLength(1);
+		const created = successes[0]?.right;
+		expect(created).toBeDefined();
+		expect(existsSync(created?.worktrees[repository] ?? "")).toBe(true);
+		expect(
+			git(
+				"for-each-ref",
+				"--format=%(refname:lstrip=2)",
+				"refs/heads/conduit/",
+			),
+		).toBe(created?.branchName);
+	});
+
+	it("ignores inherited git directory, index and configuration overrides", async () => {
+		vi.stubEnv("GIT_DIR", join(fixture, "wrong-git"));
+		vi.stubEnv("GIT_WORK_TREE", fixture);
+		vi.stubEnv("GIT_INDEX_FILE", join(fixture, "wrong-index"));
+		vi.stubEnv("GIT_CONFIG_COUNT", "1");
+		vi.stubEnv("GIT_CONFIG_KEY_0", "core.bare");
+		vi.stubEnv("GIT_CONFIG_VALUE_0", "true");
+		const created = await Effect.runPromise(createEffect());
+		expect(
+			readFileSync(
+				join(created.worktrees[repository] ?? "", "tracked.txt"),
+				"utf8",
+			),
+		).toBe("committed\n");
+		expect(existsSync(join(fixture, "wrong-index"))).toBe(false);
+	});
+
+	it("maps a repository subdirectory into the new checkout", async () => {
+		folder = { ...folder, path: join(repository, "app") };
+		const created = await Effect.runPromise(createEffect());
+		const root = ownedWorktreePath(configDir, folder);
+		expect(created.worktrees[folder.path]).toBe(join(root, "app"));
+		expect(created.ownership[0]?.path).toBe(root);
+		expect(
+			readFileSync(
+				join(created.worktrees[folder.path] ?? "", "app.txt"),
+				"utf8",
+			),
+		).toBe("app committed\n");
+	});
+
+	it.each([0, 2])("rejects %s folders before doing any work", async (count) => {
+		const before = repositoryState();
+		const folders = Array.from({ length: count }, () => folder);
+		expect((await creationError(undefined, undefined, folders)).reason).toBe(
+			"unsupported-project",
+		);
+		assertUnchanged(before);
+	});
+
+	it("guards the root and descendants, including symlink aliases and absent children", () => {
+		const root = worktreesRoot(configDir);
+		mkdirSync(root);
+		const alias = join(fixture, "worktree-alias");
+		symlinkSync(root, alias);
+		expect(isConduitWorktreePath(configDir, root)).toBe(true);
+		expect(
+			isConduitWorktreePath(configDir, join(root, "not-created", "child")),
+		).toBe(true);
+		expect(isConduitWorktreePath(configDir, alias)).toBe(true);
+		expect(
+			isConduitWorktreePath(configDir, join(alias, "not-created", "child")),
+		).toBe(true);
+		expect(isConduitWorktreePath(configDir, `${root}-elsewhere`)).toBe(false);
+		expect(isConduitWorktreePath(configDir, repository)).toBe(false);
+	});
+
+	it("refuses outward symlinks beneath both root spellings", () => {
+		const root = worktreesRoot(configDir);
+		mkdirSync(root);
+		const outward = join(root, "outward");
+		symlinkSync(repository, outward);
+		expect(isConduitWorktreePath(configDir, outward)).toBe(true);
+		expect(isConduitWorktreePath(configDir, join(outward, "app"))).toBe(true);
+		const alias = join(fixture, "config-alias");
+		symlinkSync(configDir, alias);
+		expect(
+			isConduitWorktreePath(alias, join(alias, "worktrees", "outward")),
+		).toBe(true);
+		expect(isConduitWorktreePath(alias, outward)).toBe(true);
+	});
+});

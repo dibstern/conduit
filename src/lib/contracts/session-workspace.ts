@@ -15,6 +15,22 @@ export const SessionWorkspaceSchema = Schema.Struct({
 });
 export type SessionWorkspace = typeof SessionWorkspaceSchema.Type;
 
+/** Claude's native workspace and the latest unconfirmed user intent. */
+export const ClaudeWorktreeStateSchema = Schema.Struct({
+	entered: Schema.Boolean,
+	observed: Schema.optional(Schema.String),
+	pending: Schema.optional(
+		Schema.Struct({
+			sequence: Schema.Number,
+			path: Schema.String,
+			needsDirective: Schema.Boolean,
+			directiveSent: Schema.Boolean,
+			turnEnded: Schema.Boolean,
+		}),
+	),
+});
+export type ClaudeWorktreeState = typeof ClaudeWorktreeStateSchema.Type;
+
 export const WorktreeInfoSchema = Schema.Struct({
 	path: Schema.String,
 	branch: Schema.optional(Schema.String),

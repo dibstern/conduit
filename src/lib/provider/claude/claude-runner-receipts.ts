@@ -46,10 +46,6 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 		}>`PRAGMA table_info(claude_runner_cursors)`;
 		if (!columns.some(({ name }) => name === "attachment_id"))
 			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN attachment_id TEXT NOT NULL DEFAULT ''`;
-		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_replies (
-			runner_id TEXT NOT NULL, sequence INTEGER NOT NULL, result_json TEXT NOT NULL,
-			PRIMARY KEY (runner_id, sequence)
-		)`;
 		yield* createClaudeRunnerPermissionReplies(sql);
 		const read = (runnerId: string) =>
 			sql<{
@@ -81,31 +77,11 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 				attachmentId: string,
 			) => {
 				const reply = JSON.stringify(result);
-				const commit =
-					sql`UPDATE claude_runner_cursors SET sequence = ${sequence}, result_json = ${reply}
+				return sql`UPDATE claude_runner_cursors SET sequence = ${sequence}, result_json = ${reply}
 			WHERE runner_id = ${runnerId} AND attachment_id = ${attachmentId}
 			AND sequence BETWEEN ${sequence - 1} AND ${sequence}
-			RETURNING sequence`.pipe(Effect.map((rows) => rows.length > 0));
-				// A single statement commits atomically without extra transaction calls.
-				if (result.children === undefined) return commit.pipe(Effect.asVoid);
-				return sql.withTransaction(
-					Effect.gen(function* () {
-						if (!(yield* commit)) return;
-						yield* sql`INSERT OR REPLACE INTO claude_runner_replies (runner_id, sequence, result_json) VALUES (${runnerId}, ${sequence}, ${reply})`;
-					}),
-				);
+				RETURNING sequence`.pipe(Effect.asVoid);
 			},
-			replyAt: (runnerId: string, sequence: number) =>
-				sql<{
-					result_json: string;
-				}>`SELECT result_json FROM claude_runner_replies WHERE runner_id = ${runnerId} AND sequence = ${sequence}`.pipe(
-					Effect.map(
-						(rows) =>
-							JSON.parse(
-								rows[0]?.result_json ?? "{}",
-							) as ClaudeSessionOutputReply,
-					),
-				),
 		};
 	});
 

@@ -227,8 +227,9 @@ describe("Session workspace files and terminals through the built daemon", () =>
 				projectSlug: "process-test",
 				...(sessionId ? { sessionId } : {}),
 			};
-			const tree = await sendRpcRequest(socket, new GetFileTree(scope));
 			const list = await sendRpcRequest(socket, new GetFileList(scope));
+			// The background tree intentionally does not start a stopped file provider.
+			const tree = await sendRpcRequest(socket, new GetFileTree(scope));
 			const content = await sendRpcRequest(
 				socket,
 				new GetFileContent({ ...scope, path: "shared.txt" }),

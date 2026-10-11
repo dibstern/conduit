@@ -12,8 +12,15 @@ import path from "node:path";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	defaultInstanceIdForDriver,
+	ProviderInstanceIdSchema,
+} from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -148,9 +155,10 @@ export interface ReplayHarness {
 const CLAUDE_TRACE_MODEL = "claude-fable-5";
 
 /** Create a relay-owned replay session over the typed WS RPC. */
-async function createSession(
+export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
+	instanceId?: string,
 ): Promise<string> {
 	const { sessionId } = await Effect.runPromise(
 		Effect.scoped(
@@ -164,7 +172,9 @@ async function createSession(
 					// `use`, which opens the event stream replayed turns arrive on.
 					...(providerId === "opencode"
 						? { instanceId: defaultInstanceIdForDriver("opencode") }
-						: {}),
+						: instanceId === undefined
+							? {}
+							: { instanceId: ProviderInstanceIdSchema.make(instanceId) }),
 				});
 			}),
 		).pipe(
@@ -221,6 +231,23 @@ export async function createReplayHarness(
 		},
 		configDir,
 	);
+	const claudeInstanceId = options.claudeReplay?.instanceId;
+	if (claudeInstanceId !== undefined)
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: claudeInstanceId,
+						name: claudeInstanceId,
+						port: 0,
+						managed: false,
+						driver: "claude",
+					},
+				],
+			},
+			configDir,
+		);
 	if (claudeReplayer) {
 		// Capability discovery would otherwise spawn the real Claude CLI.
 		__setProbeOverrideForTesting(async () => ({
@@ -261,6 +288,7 @@ export async function createReplayHarness(
 	const sessionId = await createSession(
 		relayPort,
 		claudeReplayer ? "claude" : "opencode",
+		claudeInstanceId,
 	);
 	if (!claudeReplayer) {
 		const connectedBy = Date.now() + 5_000;

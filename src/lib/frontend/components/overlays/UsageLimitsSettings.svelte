@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
 	import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
-	import Toggle from "../ui/Toggle.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 
 	let { setting, several, onsave }: {
 		setting: UsageLimitsSetting | null;
@@ -11,9 +12,8 @@
 	const phone = new MediaQuery("(max-width: 767px)");
 </script>
 
-<section id="usage-limit-settings" class="mt-[16px] flex flex-col gap-[4px]" aria-labelledby="usage-limit-settings-title">
-	<h3 id="usage-limit-settings-title" class="text-[12.5px] font-semibold text-text">{several ? "When an account reaches its limit" : "When the account reaches its limit"}</h3>
-	<Toggle
+<SettingsGroup id="usage-limit-settings" title={several ? "When an account reaches its limit" : "When the account reaches its limit"}>
+	<SettingsRow
 		label="Auto-resume limited sessions"
 		description={phone.current ? "Same account, at reset." : "Continue the cut-off request on the same account when its limit resets."}
 		checked={setting?.autoResume ?? false}
@@ -23,7 +23,7 @@
 		}}
 	/>
 	{#if several}
-		<Toggle
+		<SettingsRow
 			label={phone.current ? "Auto-switch account" : "Auto-switch account when limited"}
 			ariaLabel="Toggle auto-switch account when limited"
 			description={phone.current ? "First account above with quota." : "Move the session to the first account above that has quota. Runs before auto-resume."}
@@ -34,4 +34,4 @@
 			}}
 		/>
 	{/if}
-</section>
+</SettingsGroup>

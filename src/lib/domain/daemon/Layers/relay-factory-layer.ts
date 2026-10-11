@@ -58,9 +58,11 @@ import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js"
 import {
 	broadcastProjectList,
 	projectInfos as getEffectProjectInfos,
+	openCodeInstanceFor,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { Usage } from "../Services/usage.js";
+import { WorktreeServiceTag } from "../Services/worktree-service.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 
@@ -171,6 +173,7 @@ export const RelayFactoryLive = (
 			const pushManager = yield* PushManagerTag;
 			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
+			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -365,12 +368,10 @@ export const RelayFactoryLive = (
 								Effect.provideService(InstanceManagerStateTag, instanceState),
 							),
 						);
-						const selectedInstance =
-							instances.find(
-								(instance) =>
-									instance.driver !== "claude" &&
-									instance.id === project.instanceId,
-							) ?? instances.find((instance) => instance.driver !== "claude");
+						const selectedInstance = openCodeInstanceFor(
+							instances,
+							project.instanceId,
+						);
 						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -389,6 +390,14 @@ export const RelayFactoryLive = (
 										configRef,
 									).pipe(Context.add(ConfigPersistenceTag, configPersistence)),
 									openCodeInstances,
+									...(Option.isSome(worktreeService)
+										? {
+												worktreeContext: Context.make(
+													WorktreeServiceTag,
+													worktreeService.value,
+												),
+											}
+										: {}),
 									...(usage ? { usage } : {}),
 									...(selectedInstance
 										? { openCodeInstanceId: selectedInstance.id }

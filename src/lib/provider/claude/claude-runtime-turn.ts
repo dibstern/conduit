@@ -264,6 +264,7 @@ export function sdkResultToTurnResult(
 	else if (isInterrupted) status = "interrupted";
 	return {
 		status,
+		// Session running total; canonical event cost is computed during persistence.
 		cost: result.total_cost_usd ?? 0,
 		tokens: {
 			input: result.usage?.input_tokens ?? 0,
@@ -351,7 +352,13 @@ export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
 			});
 		}
 	}
-	content.push({ type: "text" as const, text: input.prompt });
+	content.push({
+		type: "text" as const,
+		text:
+			input.workspaceMoveDirective === undefined
+				? input.prompt
+				: `${input.workspaceMoveDirective}\n${input.prompt}`,
+	});
 	// The input id is the SDK message uuid, so lifecycle frames and results
 	// name the input they belong to.
 	return {

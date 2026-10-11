@@ -289,6 +289,8 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	/** The OpenCode instance this relay drives, fixed when it was built. */
+	openCodeInstanceId: string | undefined;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -662,6 +664,7 @@ export async function createProjectRelay(
 				idleWindowMs,
 				now,
 			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
+		openCodeInstanceId: config.openCodeInstanceId,
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -946,7 +949,13 @@ export async function createRelayStack(
 				const pinHeader = req.headers["x-relay-pin"];
 				const pinOk =
 					typeof pinHeader === "string" &&
-					auth.authenticate(pinHeader, getClientIp(req)).ok;
+					auth.authenticate(
+						pinHeader,
+						getClientIp(
+							req.socket.remoteAddress,
+							req.headers["x-forwarded-for"],
+						),
+					).ok;
 				if (!pinOk) {
 					socket.destroy();
 					return;

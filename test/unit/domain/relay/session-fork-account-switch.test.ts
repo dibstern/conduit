@@ -173,14 +173,12 @@ it.each([
 				expect(readTranscript).toHaveBeenCalledWith(
 					point === "before" ? "source-sdk" : "target-sdk",
 					{
-						dir: "/project",
 						configDir: point === "before" ? "/source" : "/target",
 					},
 				);
 				expect(forkNative).toHaveBeenCalledWith(
 					point === "before" ? "source-sdk" : "target-sdk",
 					{
-						dir: "/project",
 						configDir: point === "before" ? "/source" : "/target",
 						title: "Parent (fork)",
 						upToMessageId: boundary,

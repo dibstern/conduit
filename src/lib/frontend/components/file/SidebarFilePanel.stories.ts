@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
-import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
+import {
+	applyGetFileTreeResponse,
+	clearFileTreeState,
+} from "../../stores/file-tree.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import {
 	applyGetFileListResponse,
@@ -16,6 +19,7 @@ async function showDirectory(
 		type: "file" | "directory";
 		size?: number;
 	}>,
+	root?: string,
 ): Promise<void> {
 	await waitFor(() => {
 		expect(fileBrowserListeners.size).toBeGreaterThan(0);
@@ -24,6 +28,7 @@ async function showDirectory(
 		projectSlug: "storybook",
 		path,
 		entries,
+		...(root ? { root } : {}),
 	});
 }
 
@@ -58,6 +63,44 @@ export const WorktreeFiles: Story = {
 		]);
 		await within(canvasElement).findByText("worktree-only.txt");
 		expect(within(canvasElement).queryByText("main-only.txt")).toBeNull();
+	},
+};
+
+export const LabelledFolders: Story = {
+	play: async ({ canvasElement }) => {
+		applyGetFileTreeResponse({
+			projectSlug: "storybook",
+			entries: [],
+			roots: [
+				{ root: "/workspace/web", label: "web" },
+				{ root: "/workspace/api", label: "api" },
+			],
+		});
+		await showDirectory(
+			".",
+			[
+				{ name: "src", type: "directory" },
+				{ name: "README.md", type: "file" },
+			],
+			"/workspace/web",
+		);
+		await showDirectory(
+			".",
+			[
+				{ name: "server.ts", type: "file" },
+				{ name: "package.json", type: "file" },
+			],
+			"/workspace/api",
+		);
+		const canvas = within(canvasElement);
+		for (const name of ["web", "api"]) {
+			const button = await canvas.findByRole("button", { name });
+			const chevron = button.querySelector<SVGElement>(".fb-chevron");
+			if (chevron) chevron.style.transition = "none";
+			await userEvent.click(button);
+		}
+		await expect(canvas.getByText("README.md")).toBeVisible();
+		await expect(canvas.getByText("server.ts")).toBeVisible();
 	},
 };
 

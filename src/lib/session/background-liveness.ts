@@ -15,13 +15,11 @@ export type BackgroundTaskTransition =
 	| {
 			readonly sessionId: string;
 			readonly kind: "snapshot";
-			readonly tasks: readonly {
-				id: string;
-				type: string;
-				description: string;
-				// Stamped by the runner; absent from runners that predate it.
+			// firstSeenAt is stamped by the runner; absent from runners that
+			// predate it.
+			readonly tasks: readonly (Omit<BackgroundTask, "firstSeenAt"> & {
 				readonly firstSeenAt?: number;
-			}[];
+			})[];
 	  }
 	| {
 			// The SDK process ended: the SDK sends no snapshot at startup, so its
@@ -30,9 +28,15 @@ export type BackgroundTaskTransition =
 			readonly kind: "session-ended";
 	  };
 
-// Watch loops wait for something to happen; anything else is doing work.
-// local_bash covers the Monitor tool too: the SDK does not tell them apart.
-const WATCH_TASK_TYPES = new Set(["local_bash", "monitor_mcp", "monitor_ws"]);
+// Shells, watch loops and background agents run on their own after the turn,
+// so the session reads as monitoring them; anything else (a workflow) is
+// still doing the session's work. local_bash covers the Monitor tool too.
+const WATCH_TASK_TYPES = new Set([
+	"local_bash",
+	"local_agent",
+	"monitor_mcp",
+	"monitor_ws",
+]);
 
 const classify = (tasks: readonly BackgroundTask[]): BackgroundWork => {
 	return tasks.every((task) => WATCH_TASK_TYPES.has(task.type))
@@ -67,7 +71,14 @@ export function makeSessionBackgroundLiveness(
 					return (
 						before?.type === task.type &&
 						before.description === task.description &&
-						before.firstSeenAt === task.firstSeenAt
+						before.firstSeenAt === task.firstSeenAt &&
+						before.childSessionId === task.childSessionId &&
+						before.parentTaskId === task.parentTaskId &&
+						before.ancestorTaskIds?.length === task.ancestorTaskIds?.length &&
+						(task.ancestorTaskIds?.every(
+							(id, i) => id === before.ancestorTaskIds?.[i],
+						) ??
+							true)
 					);
 				})
 			)

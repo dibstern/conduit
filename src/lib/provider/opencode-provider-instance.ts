@@ -85,6 +85,9 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly instanceIdForSession?: (
 		sessionId: string,
 	) => Effect.Effect<string | undefined>;
+	readonly hasWorktreeToolForSession?: (
+		sessionId: string,
+	) => Effect.Effect<boolean>;
 }
 
 export class OpenCodeProviderInstance implements ProviderInstance {
@@ -99,6 +102,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
 	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
+	private readonly hasWorktreeToolForSession: OpenCodeProviderInstanceOptions["hasWorktreeToolForSession"];
 	private readonly pendingTurns = new Map<
 		string,
 		{
@@ -117,6 +121,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
 		this.instanceIdForSession = options.instanceIdForSession;
+		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
 
 	/** The send a new user message echo belongs to: the oldest unechoed one. */
@@ -239,6 +244,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
+			directory: input.workspaceRoot,
 			...(extraFolders.length > 0
 				? {
 						system: `Additional project folders available for reading and editing:\n${extraFolders.map((folder) => `- ${folder}`).join("\n")}`,
@@ -273,6 +279,17 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				return sendFailedTurnResult(message);
 			}
 			const client = clientResult.right;
+			if (
+				this.hasWorktreeToolForSession &&
+				(yield* this.hasWorktreeToolForSession(sessionId))
+			) {
+				promptOptions.system = [
+					promptOptions.system,
+					"To work in another git worktree, call conduit_use_worktree with its path instead of using cd.",
+				]
+					.filter(Boolean)
+					.join("\n");
+			}
 
 			let pendingTurn = this.pendingTurns.get(sessionId);
 			if (pendingTurn) {
@@ -310,6 +327,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					Effect.tryPromise({
 						try: async () => {
 							const session = await client.session.get(sessionId);
+							// Existing sessions use their stored directory, ignoring prompt cwd.
+							if (
+								session.directory &&
+								session.directory !== input.workspaceRoot
+							)
+								await client.session.move(sessionId, input.workspaceRoot);
 							const current = new Map<
 								string,
 								PermissionRuleset[number]["action"]
@@ -474,8 +497,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					try: async () => {
 						if (decision === "always") {
 							// OpenCode's "always" approvals override rules in other sessions.
+							const session = await client.session.get(sessionId);
 							const request = (
-								await client.permission.list(this.workspaceRoot)
+								await client.permission.list(
+									session.directory || this.workspaceRoot,
+								)
 							).find((pending) => pending.id === requestId);
 							if (request?.always?.length) {
 								await client.session.update(sessionId, {
@@ -515,7 +541,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		return this.resolveClientEffect(sessionId).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
-					try: () => client.question.reply(requestId, answerArrays),
+					try: async () => {
+						const session = await client.session.get(sessionId);
+						await client.question.reply(
+							requestId,
+							answerArrays,
+							session.directory || this.workspaceRoot,
+						);
+					},
 					catch: (cause) => cause,
 				}),
 			),

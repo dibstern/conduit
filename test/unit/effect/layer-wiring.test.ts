@@ -56,9 +56,12 @@ import {
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 
 const makeMockOptions = (): DaemonLiveOptions => {
+	// A directory per daemon: a fixed one makes this file collide with itself
+	// when another checkout runs it at the same time.
+	const configDir = mkdtempSync(join(tmpdir(), "conduit-daemon-wiring-"));
 	return {
-		configDir: "/tmp/test-daemon-wiring",
-		socketPath: "/tmp/test-daemon-wiring/relay.sock",
+		configDir,
+		socketPath: join(configDir, "relay.sock"),
 		staticDir: process.cwd(),
 		initialConfig: makeDaemonConfigFromOptions({
 			port: 0,
@@ -489,7 +492,6 @@ describe("makeDaemonLive wiring", () => {
 							tls: false,
 							debug: false,
 							keepAwake: false,
-							dangerouslySkipPermissions: false,
 							projects: [
 								{
 									path: "/tmp/persisted-alpha",

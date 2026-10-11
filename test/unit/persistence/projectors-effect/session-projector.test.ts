@@ -1,11 +1,13 @@
 // test/unit/persistence/projectors-effect/session-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ClaudeWorktreeState } from "../../../../src/lib/contracts/session-workspace.js";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
 } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
 	createEventId,
+	type EventPayloadMap,
 	type MessageCreatedPayload,
 	type SessionCreatedPayload,
 	type SessionPermissionModeChangedPayload,
@@ -17,6 +19,7 @@ import {
 	type TurnErrorPayload,
 } from "../../../../src/lib/persistence/events.js";
 import { SESSION_HANDLED_TYPES } from "../../../../src/lib/persistence/projectors/session-handlers.js";
+import type { SidebarRow } from "../../../../src/lib/persistence/sidebar-row.js";
 import {
 	type EffectProjectionHarness,
 	makeEffectProjectionHarness,
@@ -25,7 +28,7 @@ import {
 function makeStored<T extends StoredEvent["type"]>(
 	type: T,
 	sessionId: string,
-	data: Extract<StoredEvent, { type: T }>["data"],
+	data: EventPayloadMap[T],
 	sequence: number = 1,
 	createdAt: number = Date.now(),
 ): StoredEvent {
@@ -63,6 +66,7 @@ interface SessionRow {
 	version: number;
 	created_at: number;
 	updated_at: number;
+	claude_worktree_state: string | null;
 }
 
 describe("SessionProjector", () => {
@@ -338,6 +342,271 @@ describe("SessionProjector", () => {
 				woken_at: null,
 				woken_reason: null,
 			});
+		});
+	});
+
+	// Failures to cover: failed/legacy tools inventing state, premature mismatch,
+	// superseded sends consuming intent, moves back to an observed folder getting
+	// stuck, and a second NULL-workspace update failing to reach the sidebar.
+	describe("Claude worktree state", () => {
+		let sequence = 0;
+		const fact = <T extends StoredEvent["type"]>(
+			type: T,
+			data: EventPayloadMap[T],
+		) => ({
+			...makeStored<T>(type, "claude", data, ++sequence, now + sequence),
+			provider: "claude" as const,
+		});
+		const state = async (): Promise<ClaudeWorktreeState | null> => {
+			const row = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 'claude'",
+			);
+			return row?.claude_worktree_state
+				? (JSON.parse(row.claude_worktree_state) as ClaudeWorktreeState)
+				: null;
+		};
+		const move = (path: string, cause: "user" | "agent" | "missing" = "user") =>
+			fact("session.workspace_changed", {
+				sessionId: "claude",
+				path,
+				cause,
+				origin: "existing",
+				worktrees: path === "/main" ? {} : { "/main": path },
+			});
+		const tool = (path: string, entered: boolean) =>
+			fact("tool.completed", {
+				messageId: "assistant",
+				partId: `tool-${sequence}`,
+				result: "confirmed",
+				duration: 0,
+				metadata: { workspace: { path, entered } },
+			});
+		beforeEach(async () => {
+			sequence = 0;
+			await project(
+				fact("session.created", {
+					sessionId: "claude",
+					title: "Worktree state",
+					provider: "claude",
+				}),
+			);
+		});
+
+		// A fallback must retain its cause on the row, require a directive only
+		// after EnterWorktree, and settle through the same observations as a user move.
+		it.each([
+			true,
+			false,
+		])("projects a missing move with entered=%s", async (entered) => {
+			await project(tool("/removed", entered));
+			const requested = move("/main", "missing");
+			await project(requested);
+			expect(await state()).toEqual({
+				entered,
+				observed: "/removed",
+				pending: {
+					sequence: requested.sequence,
+					path: "/main",
+					needsDirective: entered,
+					directiveSent: false,
+					turnEnded: false,
+				},
+			});
+			const row = await queryOne<{ workspace: string | null }>(
+				"SELECT workspace FROM sessions WHERE id = 'claude'",
+			);
+			expect(JSON.parse(row?.workspace ?? "null")).toEqual({
+				cause: "missing",
+				origin: "existing",
+				worktrees: {},
+			});
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: requested.sequence,
+				}),
+			);
+			await project(fact("turn.completed", { messageId: "assistant" }));
+			expect((await state())?.pending).toMatchObject({
+				directiveSent: true,
+				turnEnded: true,
+			});
+			await project(tool("/main", false));
+			expect(await state()).toEqual({ entered: false, observed: "/main" });
+			await project(move("/main", "agent"));
+			expect(
+				(
+					await queryOne<{ workspace: string | null }>(
+						"SELECT workspace FROM sessions WHERE id = 'claude'",
+					)
+				)?.workspace,
+			).toBeNull();
+		});
+
+		it("records confirmed tools only and waits for the directive turn to end", async () => {
+			await project(
+				fact("tool.completed", {
+					messageId: "assistant",
+					partId: "legacy",
+					result: "EnterWorktree",
+					duration: 0,
+				}),
+			);
+			expect(await state()).toBeNull();
+			await project(tool("/entered", true));
+			const requested = move("/target");
+			await project(requested);
+			expect(await state()).toEqual({
+				entered: true,
+				observed: "/entered",
+				pending: {
+					sequence: requested.sequence,
+					path: "/target",
+					needsDirective: true,
+					directiveSent: false,
+					turnEnded: false,
+				},
+			});
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: requested.sequence,
+				}),
+			);
+			expect((await state())?.pending).toMatchObject({
+				directiveSent: true,
+				turnEnded: false,
+			});
+			await project(fact("turn.completed", { messageId: "assistant" }));
+			expect((await state())?.pending).toMatchObject({
+				directiveSent: true,
+				turnEnded: true,
+			});
+			await project(tool("/target", true));
+			expect(await state()).toEqual({ entered: true, observed: "/target" });
+		});
+
+		it.each([
+			"turn.error",
+			"turn.interrupted",
+		] as const)("marks an unconfirmed directive ended on %s", async (type) => {
+			await project(tool("/entered", true));
+			const requested = move("/target");
+			await project(requested);
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: requested.sequence,
+				}),
+			);
+			await project(
+				type === "turn.error"
+					? fact(type, { messageId: "assistant", error: "failed" })
+					: fact(type, { messageId: "assistant" }),
+			);
+			expect((await state())?.pending?.turnEnded).toBe(true);
+		});
+
+		it("replaces pending intent and ignores a stamp for the superseded move", async () => {
+			await project(tool("/entered", true));
+			const older = move("/older");
+			await project(older);
+			await project(tool("/main", false));
+			const newer = move("/newer");
+			await project(newer);
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: older.sequence,
+				}),
+			);
+			await project(fact("turn.completed", { messageId: "assistant" }));
+			expect(await state()).toEqual({
+				entered: false,
+				observed: "/main",
+				pending: {
+					sequence: newer.sequence,
+					path: "/newer",
+					needsDirective: false,
+					directiveSent: false,
+					turnEnded: false,
+				},
+			});
+			await project(
+				fact("session.workspace_started", {
+					sessionId: "claude",
+					path: "/newer",
+				}),
+			);
+			expect(await state()).toEqual({ entered: false, observed: "/newer" });
+		});
+
+		it("clears pending when the user selects Claude's observed folder", async () => {
+			await project(tool("/entered", true));
+			await project(move("/elsewhere"));
+			await project(move("/entered"));
+			expect(await state()).toEqual({ entered: true, observed: "/entered" });
+			await project(tool("/main", false));
+			await project(move("/main"));
+			expect(await state()).toEqual({ entered: false, observed: "/main" });
+		});
+
+		it("keeps intent through a wrong agent observation and clears on a matching one", async () => {
+			await project(tool("/entered", true));
+			const requested = move("/target");
+			await project(requested);
+			await project(move("/elsewhere", "agent"));
+			expect(await state()).toMatchObject({
+				observed: "/elsewhere",
+				pending: { path: "/target", sequence: requested.sequence },
+			});
+			await project(move("/target", "agent"));
+			expect(await state()).toEqual({ entered: true, observed: "/target" });
+		});
+
+		it("advances the root's session and sidebar when a NULL workspace mismatch clears", async () => {
+			await project(tool("/entered", true));
+			const requested = move("/main");
+			await project(requested);
+			await project(
+				fact("input.sent", {
+					sessionId: "claude",
+					inputId: "input",
+					workspaceMoveSequence: requested.sequence,
+				}),
+			);
+			await project(fact("turn.completed", { messageId: "assistant" }));
+			const before = await queryOne<SessionRow>(
+				"SELECT * FROM sessions WHERE id = 'claude'",
+			);
+			const sidebarBefore = await queryOne<{ version: number; row: string }>(
+				"SELECT version, row FROM session_sidebar WHERE session_id = 'claude'",
+			);
+			expect(
+				(JSON.parse(sidebarBefore?.row ?? "{}") as SidebarRow).session
+					.workspaceMismatch,
+			).toEqual({ actualPath: "/entered" });
+			await project(tool("/main", false));
+			await project(move("/main", "agent"));
+			const after = await queryOne<SessionRow & { workspace: string | null }>(
+				"SELECT * FROM sessions WHERE id = 'claude'",
+			);
+			const sidebarAfter = await queryOne<{ version: number; row: string }>(
+				"SELECT version, row FROM session_sidebar WHERE session_id = 'claude'",
+			);
+			expect(after?.workspace).toBeNull();
+			expect(after?.version).toBeGreaterThan(before?.version ?? 0);
+			expect(sidebarAfter?.version).toBeGreaterThan(
+				sidebarBefore?.version ?? 0,
+			);
+			expect(
+				(JSON.parse(sidebarAfter?.row ?? "{}") as SidebarRow).session
+					.workspaceMismatch,
+			).toBeUndefined();
 		});
 	});
 
@@ -841,6 +1110,50 @@ describe("SessionProjector", () => {
 			expect(row?.last_message_at).toBe(now + 300);
 			expect(row?.last_turn_error_at).toBeNull();
 		});
+	});
+
+	// Runners built before the translator stamped `outcome` still report a
+	// terminal task status; without settling on it the child stays busy forever.
+	it.each([
+		"completed",
+		"failed",
+		"stopped",
+		"killed",
+	])("tool.running settles a busy child on a terminal task status %s without an outcome", async (taskStatus) => {
+		await project(
+			makeStored(
+				"session.created",
+				"child",
+				{ sessionId: "child", title: "Child", provider: "claude" },
+				1,
+			),
+		);
+		await project(
+			makeStored(
+				"session.status",
+				"child",
+				{ sessionId: "child", status: "busy" },
+				2,
+			),
+		);
+		await project(
+			makeStored(
+				"tool.running",
+				"s1",
+				{
+					messageId: "m1",
+					partId: "tool1",
+					metadata: { childSessionId: "child", status: taskStatus },
+				},
+				3,
+			),
+		);
+
+		const row = await queryOne<SessionRow>(
+			"SELECT * FROM sessions WHERE id = ?",
+			["child"],
+		);
+		expect(row?.status).toBe("idle");
 	});
 
 	it("ignores event types it does not handle", async () => {

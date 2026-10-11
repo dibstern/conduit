@@ -6,8 +6,17 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
-	import { currentChat, isProcessing, consumeScrollRequest } from "../../stores/chat.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import {
+		consumeScrollRequest,
+		createEmptySessionMessages,
+		currentChat,
+		getSessionPhase,
+		isLlmActive,
+		isProcessing,
+		sessionMessages,
+	} from "../../stores/chat.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
@@ -24,15 +33,23 @@
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
 	import {
+		noteScrollGesture,
 		noteSessionChanged,
-		noteUserScroll,
 		publishAtBottom,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { economics, forkMessageIdAtReply, lastResult, segmentTurns, type Turn } from "../../utils/turns.js";
+	import {
+		economics,
+		forkMessageIdAtReply,
+		lastResult,
+		liveLaunchedTasks,
+		segmentTurns,
+		type Turn,
+	} from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import ToolItem from "./ToolItem.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
@@ -51,16 +68,41 @@
 
 	const END_OF_TRANSCRIPT = "end";
 	let messagesEl: HTMLDivElement | undefined = $state();
-	let { topClearance = 0 }: { topClearance?: number } = $props();
-	let sentinelEl: HTMLElement | undefined = $state();
-
-	const scrollCtrl = createScrollController(
-		() => currentChat().loadLifecycle,
-		noteUserScroll,
+	let { topClearance = 0, sessionId }: {
+		topClearance?: number;
+		sessionId?: string;
+	} = $props();
+	const instanceId = $props.id();
+	const primary = $derived(sessionId === undefined);
+	const viewedSessionId = $derived(sessionId ?? sessionState.currentId);
+	const messagesId = $derived(primary ? "messages" : `messages-${instanceId}`);
+	const emptyChat = createEmptySessionMessages();
+	const chat = $derived(
+		primary ? currentChat() : sessionMessages.get(sessionId ?? "") ?? emptyChat,
 	);
+	const processing = $derived(
+		primary ? isProcessing() : isLlmActive(getSessionPhase(viewedSessionId ?? ""), chat.loadLifecycle),
+	);
+	let sentinelEl: HTMLElement | undefined = $state();
+	// Rows, pills and strips share when this view last observed each live task.
+	const taskListedAt = new Map<string, number>();
+	let taskSessionId: string | null | undefined;
+	const liveTasks = $derived.by(() => {
+		const id = viewedSessionId;
+		if (id !== taskSessionId) {
+			taskListedAt.clear();
+			taskSessionId = id;
+		}
+		const tasks = rootBackgroundTasks(id ?? "");
+		for (const task of tasks) taskListedAt.set(task.id, clock.now);
+		return tasks;
+	});
+
+	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
 
 	let handledFollowRequest = sessionViewState.followRequest;
 	$effect(() => {
+		if (!primary) return;
 		const request = sessionViewState.followRequest;
 		if (request === handledFollowRequest) return;
 		handledFollowRequest = request;
@@ -78,19 +120,53 @@
 
 	// Reset scroll state on session switch
 	$effect(() => {
-		const sessionId = sessionState.currentId;
+		const id = viewedSessionId;
 		scrollCtrl.resetForSession();
-		untrack(() => noteSessionChanged(sessionId));
+		if (primary) untrack(() => noteSessionChanged(id));
 	});
 
 	// Publish for chrome outside the transcript (e.g. the session bar) so the app
 	// never grows a second, differently-tuned definition of "at the bottom".
 	// Hydration states count as pinned, otherwise the bar flaps on session open.
 	$effect(() => {
+		if (!primary) return;
 		const state = scrollCtrl.state;
 		publishAtBottom(
 			state === "following" || state === "loading",
 		);
+	});
+
+	// The bar follows the reader's gesture, not scrollTop: the bar's own resize
+	// moves scrollTop (see topClearance below), so reading direction off scroll
+	// events would let each toggle trigger the next.
+	$effect(() => {
+		const scroller = messagesEl;
+		if (!scroller || !primary) return;
+		const note = (delta: number) => {
+			if (scroller.scrollHeight > scroller.clientHeight) noteScrollGesture(delta > 0 ? "down" : "up");
+		};
+		let touchY: number | undefined;
+		const onWheel = (event: WheelEvent) => {
+			if (event.deltaY !== 0) note(event.deltaY);
+		};
+		const onTouchStart = (event: TouchEvent) => {
+			touchY = event.touches[0]?.clientY;
+		};
+		// A small dead zone keeps a tap or a wobbling thumb from toggling the bar.
+		const onTouchMove = (event: TouchEvent) => {
+			const y = event.touches[0]?.clientY;
+			if (touchY === undefined || y === undefined || Math.abs(touchY - y) < 10) return;
+			note(touchY - y);
+			touchY = y;
+		};
+		scroller.addEventListener("wheel", onWheel, { passive: true });
+		scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+		scroller.addEventListener("touchmove", onTouchMove, { passive: true });
+		return () => {
+			scroller.removeEventListener("wheel", onWheel);
+			scroller.removeEventListener("touchstart", onTouchStart);
+			scroller.removeEventListener("touchmove", onTouchMove);
+		};
 	});
 
 	// Container resizes can change the bottom gap without a scroll event.
@@ -118,7 +194,7 @@
 
 	// Scroll to bottom when the transcript becomes ready.
 	$effect(() => {
-		if (currentChat().loadLifecycle === "ready") {
+		if (chat.loadLifecycle === "ready") {
 			scrollCtrl.onNewContent();
 		}
 	});
@@ -126,23 +202,24 @@
 	// Auto-scroll when content changes (messages, permissions).
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
-	// - Only auto-scroll when session is actively producing content
-	//   (processing or streaming) OR when an explicit
-	//   scroll request was made (e.g. error messages set this before
-	//   phaseToIdle kills the isProcessing guard). On inactive sessions,
-	//   background events (another tab's message, permission state) must
-	//   NOT snap to bottom.
-	// NOTE: isProcessing() and consumeScrollRequest() are checked via
+	// - Only auto-scroll when the reader was parked at the very bottom, the
+	//   session is actively producing content (processing or streaming), or an
+	//   explicit scroll request was made (e.g. error messages set this before
+	//   phaseToIdle kills the isProcessing guard). On inactive sessions, a
+	//   reader sitting just above the bottom must NOT be snapped down by
+	//   background events (another tab's message, permission state).
+	// NOTE: processing and consumeScrollRequest() are checked via
 	// untrack() so they act as guards (checked but not tracked). The effect
 	// only re-runs when actual content changes — not on every toggle.
 	$effect(() => {
-		const _len = currentChat().messages.length;
+		const _len = chat.messages.length;
 		// A detail upsert can grow the final bubble without changing the count.
-		const _latest = currentChat().messages.at(-1);
-		const _permLen = permissionsState.pendingPermissions.length;
-		const isActive = untrack(() => isProcessing());
-		const scrollRequested = untrack(() => consumeScrollRequest());
-		if (!awaitingPrepend && (isActive || scrollRequested)) {
+		const _latest = chat.messages.at(-1);
+		const _permLen = primary ? permissionsState.pendingPermissions.length : localPermissions.length;
+		const _questionLen = primary ? 0 : orphanQuestions.length;
+		const isActive = untrack(() => processing);
+		const scrollRequested = untrack(() => primary && consumeScrollRequest());
+		if (!awaitingPrepend && (isActive || scrollRequested || scrollCtrl.isPinned)) {
 			scrollCtrl.onNewContent();
 		}
 	});
@@ -155,7 +232,7 @@
 	// Derived first-message UUID — changes only on prepend or session switch,
 	// NOT on appends or content updates. This prevents the $effect.pre from
 	// firing spuriously when message html/status fields change.
-	const firstMessageUuid = $derived(currentChat().messages[0]?.uuid ?? "");
+	const firstMessageUuid = $derived(chat.messages[0]?.uuid ?? "");
 
 	// Track previous state for prepend detection
 	let prevFirstUuid = "";
@@ -164,9 +241,9 @@
 
 	// Capture scroll state BEFORE DOM update using $effect.pre
 	$effect.pre(() => {
-		const currentSessionId = sessionState.currentId ?? "";
+		const currentSessionId = viewedSessionId ?? "";
 		const currentFirstUuid = firstMessageUuid;
-		const currentCount = currentChat().messages.length;
+		const currentCount = chat.messages.length;
 
 		// Session changed — reset tracking, skip prepend detection
 		if (currentSessionId !== prevSessionId) {
@@ -202,7 +279,7 @@
 	});
 
 	function handleRewindClick(e: MouseEvent) {
-		if (!uiState.rewindActive) return;
+		if (!primary || !uiState.rewindActive) return;
 
 		// Find the closest message element with a data-uuid attribute
 		const target = e.target as HTMLElement;
@@ -216,14 +293,14 @@
 	}
 
 	const scrollButtonText = $derived(
-		isProcessing() ? "↓ New activity" : "↓ Latest",
+		processing ? "↓ New activity" : "↓ Latest",
 	);
 
-	const turns = $derived(segmentTurns(currentChat().messages, isProcessing()));
-	const localPermissions = $derived(getLocalPermissions(sessionState.currentId));
+	const turns = $derived(segmentTurns(chat.messages, processing));
+	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
-		for (const message of currentChat().messages) {
+		for (const message of chat.messages) {
 			if (message.type === "tool") ids.add(message.id);
 		}
 		return ids;
@@ -233,7 +310,9 @@
 	// renders before its family arrives, so a family without the current
 	// session is someone else's.
 	const familyIds = $derived.by(() => {
-		const currentId = sessionState.currentId;
+		// A secondary pane owns only its child's orphan cards, not the family's.
+		if (!primary) return new Set([viewedSessionId]);
+		const currentId = viewedSessionId;
 		const ids = new Set(sessionState.familySessions.map((session) => session.id));
 		return currentId && ids.has(currentId) ? ids : new Set([currentId]);
 	});
@@ -247,9 +326,9 @@
 	);
 
 	// Fork context: detect if current session is a user fork
-	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
-	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? sessionState.currentFork?.forkMessageId);
-	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? sessionState.currentFork?.forkPointTimestamp);
+	const activeSession = $derived(findSession(viewedSessionId ?? ""));
+	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? (primary ? sessionState.currentFork?.forkMessageId : undefined));
+	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? (primary ? sessionState.currentFork?.forkPointTimestamp : undefined));
 	const isFork = $derived(!!forkMessageId || !!forkPointTimestamp);
 	const cutOffMessageId = $derived(activeSession?.limitRecovery?.cutOffMessageId);
 	// The tag leaves when the server clears the cut-off; nothing is hidden locally.
@@ -263,21 +342,22 @@
 	const forkSplit = $derived(
 		isFork
 			? splitAtForkPoint(
-					currentChat().messages,
+					chat.messages,
 					forkMessageId,
 					forkPointTimestamp,
 				)
 			: null,
 	);
-	const parentSession = $derived(
-		sessionState.currentParentId ? findSession(sessionState.currentParentId) : null,
-	);
+	const parentSession = $derived.by(() => {
+		const id = primary ? sessionState.currentParentId : activeSession?.parentID;
+		return id ? findSession(id) : null;
+	});
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
 		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
 	);
 	const currentTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.current, isProcessing()) : [],
+		forkSplit ? segmentTurns(forkSplit.current, processing) : [],
 	);
 	// Each continuation leaves a divider before the first reply-side message
 	// created at or after it, or after the last message until one arrives. An
@@ -300,7 +380,7 @@
 		return dividers;
 	});
 	const goal = $derived(
-		discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "")?.goal : null,
+		!primary || discoveryState.currentProviderId === "claude" ? sessionGoals.get(viewedSessionId ?? "")?.goal : null,
 	);
 	const goalNoticeTurnId = $derived.by(() => {
 		if (!goal) return null;
@@ -313,10 +393,9 @@
 		if (anchor) return anchor.id;
 		// An older goal must not acquire the newest turn as its start. Wait
 		// until paging reaches its prompt, or the transcript's actual beginning.
-		const chat = currentChat();
 		return chat.transcript && chat.transcript.hwm !== null && !chat.historyHasMore ? null : undefined;
 	});
-	const transcript = $derived(currentChat().transcript);
+	const transcript = $derived(chat.transcript);
 	const feed = $derived(transcriptFeed(transcript));
 	const hasRows = $derived((transcript?.rows.length ?? 0) > 0);
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
@@ -334,7 +413,7 @@
 <!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
-	id="messages"
+	id={messagesId}
 	role="region"
 	aria-label="Transcript"
 	tabindex="0"
@@ -343,10 +422,10 @@
 	bind:this={messagesEl}
 >
 	<!-- History sentinel (triggers lazy-loading of older messages) -->
-	<div id="history-sentinel" class="h-1" bind:this={sentinelEl}></div>
+	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
 
 	<!-- Headless loader (no visual output) -->
-	<HistoryLoader {sentinelEl} />
+	<HistoryLoader {sentinelEl} {sessionId} scrollRoot={primary ? undefined : messagesEl} />
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
@@ -371,7 +450,7 @@
 	{/if}
 
 	<!-- Beginning of session marker (was in HistoryView) -->
-	{#if startConfirmed && !currentChat().historyHasMore && !currentChat().historyLoading && !isFork}
+	{#if startConfirmed && !chat.historyHasMore && !chat.historyLoading && !isFork}
 		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
 			<div class="w-8 h-px bg-border mb-2"></div>
 			<span>Beginning of session</span>
@@ -379,7 +458,7 @@
 	{/if}
 
 	<!-- Loading indicator (was in HistoryView) -->
-	{#if currentChat().historyLoading}
+	{#if chat.historyLoading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
 			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
 			<span>Loading history...</span>
@@ -389,7 +468,7 @@
 	<!-- Turn rendering snippet (shared between fork and normal paths) -->
 	{#snippet turnItem(turn: Turn)}
 		{#if turn.user}
-			<div class="msg-container" class:rewind-point={uiState.rewindActive}>
+			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
 				<UserMessage message={turn.user} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
 			</div>
 		{/if}
@@ -402,7 +481,7 @@
 				{@render resumed(segment.activity[0].uuid)}
 			{/if}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
-				<TurnActivity {turn} {segment} {final} />
+				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -415,8 +494,8 @@
 			{/if}
 			{#each segment.reply as reply (reply.uuid)}
 				{@render resumed(reply.uuid)}
-				<div class="msg-container" class:rewind-point={uiState.rewindActive}>
-					<AssistantMessage message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)} />
+				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
+					<AssistantMessage {sessionId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)} />
 				</div>
 			{/each}
 			{#if segment.handBack}
@@ -436,6 +515,7 @@
 				<!-- Same query container as the ledger, so the bill sheds the gauge and
 				     the token counts in the same order rather than overflowing. -->
 				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
+					<RunningPill count={liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt).size} />
 					<TurnEconomics economics={bill} showDuration />
 				</div>
 			</div>
@@ -471,7 +551,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- Inert until synchronized: answering, forking or rewinding against a
 	     transcript that is still catching up would act on stale content. -->
-	<div onclick={uiState.rewindActive ? handleRewindClick : undefined} inert={feed !== "live"}>
+	<div onclick={primary && uiState.rewindActive ? handleRewindClick : undefined} inert={feed !== "live"}>
 	{#if goal && goalNoticeTurnId === null}
 		{@render goalNotice()}
 	{/if}
@@ -518,7 +598,7 @@
 		</div>
 	{/if}
 
-	<!-- Pending permission requests (only for current session) -->
+	<!-- Pending permission requests for the viewed session. -->
 	{#each localPermissions as perm (perm.id)}
 		<div class="max-w-[760px] mx-auto mb-3 px-5">
 			<PermissionCard request={perm} />
@@ -539,7 +619,7 @@
 		layout="flow"
 		tone="inherit"
 		hoverFill="surface"
-		id="scroll-btn"
+		id={primary ? "scroll-btn" : `${messagesId}-scroll-btn`}
 		class="sticky bottom-3 left-1/2 -translate-x-1/2 bg-bg-alt border border-border rounded-full px-4 py-1.5 text-xs text-text-secondary z-5 font-sans {scrollCtrl.isDetached ? '' : 'hidden'}"
 		title="Scroll to bottom"
 		onclick={() => scrollCtrl.requestFollow()}

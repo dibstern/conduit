@@ -16,7 +16,6 @@
 	import {
 		applyDefaultModelSet,
 		applyGetModelsResponse,
-		applyGetAgentsResponse,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -28,19 +27,18 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
+		getSessionInstanceId,
 		formatModelName,
 		type InstanceOption,
-		instanceIdForProviderId,
 		isProviderConfigured,
-		selectInstance,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { bindProjectInstance, getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
-		getAgentsRpc,
 		getModelsRpc,
 		setDefaultModelRpc,
 		switchAgentRpc,
@@ -77,11 +75,9 @@
 	const instances = $derived(getAvailableInstances());
 
 	/** Instance bound to the active session — non-null means locked mode. */
-	const boundInstanceId = $derived.by(() => {
-		if (!sessionState.currentId) return null;
-		const providerId = discoveryState.currentProviderId;
-		return providerId ? instanceIdForProviderId(providerId) : null;
-	});
+	const boundInstanceId = $derived(
+		sessionState.currentId ? getSessionInstanceId(sessionState.currentId) : null,
+	);
 	const locked = $derived(boundInstanceId !== null);
 	const selectedId = $derived(boundInstanceId ?? getEffectiveInstanceId());
 	const selectedInstance = $derived(
@@ -116,13 +112,13 @@
 			? discoveryState.currentModelId
 			: discoveryState.defaultModelId,
 	);
+	const activeProviderId = $derived(
+		sessionState.currentId || draftChosen
+			? discoveryState.currentProviderId
+			: discoveryState.defaultProviderId,
+	);
 	const activeModel = $derived(
-		getActiveModel(
-			activeModelId,
-			sessionState.currentId || draftChosen
-				? discoveryState.currentProviderId
-				: discoveryState.defaultProviderId,
-		),
+		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
 	// A draft model change has no server context-info refresh. Prefer its catalog
@@ -328,15 +324,12 @@
 		if (isInstanceDisabled(instance)) return;
 		view = "root";
 		if (instance.id === selectedId) return;
-		selectInstance(instance.id);
+		// The draft's harness is its project's binding, the same one the header
+		// badge sets, so the two pickers cannot disagree. Binding also re-aims
+		// the draft's model and agents.
+		const draftProject = getDraftProject();
+		if (draftProject) bindProjectInstance(draftProject, instance.id);
 		searchQuery = "";
-		// The agent list follows the selected harness — re-fetch instance-scoped.
-		const projectSlug = getCurrentSlug();
-		if (projectSlug) {
-			void getAgentsRpc({ projectSlug, instanceId: instance.id })
-				.then(applyGetAgentsResponse)
-				.catch(() => undefined);
-		}
 	}
 
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
@@ -721,6 +714,11 @@
 			hoverFill="none"
 			data-testid="composer-word-model"
 			data-instance-id={selectedId}
+			data-shown-harness={selectedDriver}
+			data-shown-provider={activeProviderId ?? ""}
+			data-shown-model={activeModelId ?? ""}
+			data-shown-effort={effort.current ?? ""}
+			data-shown-context-window={selectedContext?.value ?? ""}
 			class="min-w-0 gap-[5px] rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand max-w-[200px] max-sm:max-w-[130px] overflow-hidden"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
@@ -763,6 +761,11 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
+			data-shown-harness={selectedDriver}
+			data-shown-provider={activeProviderId ?? ""}
+			data-shown-model={activeModelId ?? ""}
+			data-shown-effort={effort.current ?? ""}
+			data-shown-context-window={selectedContext?.value ?? ""}
 			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 {phone
 				? 'gap-[3px] px-[5px] rounded-[10px]'
 				: 'gap-[6px] px-[9px] rounded-[9px] text-[12px] font-semibold max-w-[260px]'} {hasModel ? '' : 'opacity-50'}"

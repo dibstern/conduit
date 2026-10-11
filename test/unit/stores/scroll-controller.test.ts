@@ -34,9 +34,9 @@ import { createScrollController } from "../../../src/lib/frontend/stores/scroll-
 describe("ScrollController", () => {
 	let lifecycle: LoadLifecycle;
 
-	function makeController(onUserScroll?: () => void) {
+	function makeController() {
 		lifecycle = "empty";
-		return createScrollController(() => lifecycle, onUserScroll);
+		return createScrollController(() => lifecycle);
 	}
 
 	function createScrollableDiv(): HTMLDivElement {
@@ -62,89 +62,49 @@ describe("ScrollController", () => {
 		div.dispatchEvent(new Event("scroll"));
 	}
 
-	it("onUserScroll fires for a user scroll below the detach threshold", () => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
+	// Content that lands while the session is idle follows only a reader who
+	// was parked at the bottom, so pinned must survive the growth that moved
+	// the bottom away without a scroll event.
+	it("isPinned remembers the last position through content growth", () => {
+		const ctrl = makeController();
 		lifecycle = "ready";
 		const div = createScrollableDiv();
 		ctrl.attach(div);
-		div.scrollTop = 1490;
+		expect(ctrl.isPinned).toBe(true);
+		div.scrollTop = 1480;
 		div.dispatchEvent(new Event("scroll"));
-		expect(onUserScroll).toHaveBeenCalledTimes(1);
+		expect(ctrl.isPinned).toBe(false);
 		expect(ctrl.state).toBe("following");
+		div.scrollTop = 1500;
+		div.dispatchEvent(new Event("scroll"));
+		Object.defineProperty(div, "scrollHeight", { value: 2400 });
+		expect(ctrl.isPinned).toBe(true);
 		ctrl.detach();
 	});
 
 	it.each([
 		"requestFollow",
 		"onNewContent",
-	] as const)("onUserScroll does not fire for a programmatic scroll from %s", (method) => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
+	] as const)("a programmatic scroll from %s pins without reading as a user scroll", (method) => {
+		const ctrl = makeController();
 		lifecycle = "ready";
 		const div = createScrollableDiv();
 		ctrl.attach(div);
+		simulateScrollUp(div);
+		expect(ctrl.isPinned).toBe(false);
+		ctrl.requestFollow();
 		div.scrollTop = 200;
 		ctrl[method]();
 		expect(div.scrollTop).toBe(div.scrollHeight);
 		// This regression test must fail if the programmaticScrollCount guard is removed.
 		div.dispatchEvent(new Event("scroll"));
-		expect(onUserScroll).not.toHaveBeenCalled();
+		expect(ctrl.isPinned).toBe(true);
+		expect(ctrl.state).toBe("following");
 		ctrl.detach();
 	});
 
-	// Found in the real app, not in a test: the session bar arrived collapsed on
-	// load because a coalesced scroll event from a programmatic re-pin was
-	// delivered after the programmatic counter's safety reset had zeroed its
-	// slot, and so read as a user scroll. Every such stray lands at the bottom,
-	// which is what tells it apart from a real scroll.
-	it("onUserScroll does not fire for a scroll that lands at the bottom", () => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
-		lifecycle = "ready";
-		const div = createScrollableDiv();
-		ctrl.attach(div);
-		// No programmatic slot left to consume: this is exactly the event that
-		// escaped the counter.
-		div.scrollTop = div.scrollHeight - div.clientHeight;
-		div.dispatchEvent(new Event("scroll"));
-		expect(onUserScroll).not.toHaveBeenCalled();
-		ctrl.detach();
-	});
-
-	it.each([
-		"empty",
-		"loading",
-	] as const)("onUserScroll does not fire while the transcript is hydrating (%s)", (lc) => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
-		lifecycle = lc;
-		const div = createScrollableDiv();
-		ctrl.attach(div);
-		// Off the bottom, so the distance guard would let this one through. The
-		// controller is force-pinning while the transcript hydrates, so any
-		// position off the bottom is transient and reports nothing.
-		simulateScrollUp(div);
-		expect(onUserScroll).not.toHaveBeenCalled();
-		ctrl.detach();
-	});
-
-	it("onUserScroll does not fire for a non-overflowing container", () => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
-		lifecycle = "ready";
-		const div = createScrollableDiv();
-		Object.defineProperty(div, "scrollHeight", { value: 500 });
-		ctrl.attach(div);
-		div.scrollTop = 0;
-		div.dispatchEvent(new Event("scroll"));
-		expect(onUserScroll).not.toHaveBeenCalled();
-		ctrl.detach();
-	});
-
-	it("onContainerResize re-pins scrollTop when following without counting user intent", () => {
-		const onUserScroll = vi.fn();
-		const ctrl = makeController(onUserScroll);
+	it("onContainerResize re-pins scrollTop when following", () => {
+		const ctrl = makeController();
 		lifecycle = "ready";
 		const div = createScrollableDiv();
 		ctrl.attach(div);
@@ -152,7 +112,6 @@ describe("ScrollController", () => {
 		ctrl.onContainerResize();
 		expect(div.scrollTop).toBe(div.scrollHeight);
 		div.dispatchEvent(new Event("scroll"));
-		expect(onUserScroll).not.toHaveBeenCalled();
 		expect(ctrl.state).toBe("following");
 		ctrl.detach();
 	});

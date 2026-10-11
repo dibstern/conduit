@@ -104,15 +104,25 @@ Bits-ui: no.
 
 No axis for disabled opacity or cursor, fixed by `disabled:opacity-50 disabled:cursor-not-allowed`; focus ring width and colour are fixed by `focus-visible:ring-2 focus-visible:ring-text`.
 
-### Toggle
+### SettingsRow
 
-[Toggle.svelte](../../src/lib/frontend/components/ui/Toggle.svelte) is a labeled toggle switch row; the entire row is one button.
+[SettingsRow.svelte](../../src/lib/frontend/components/ui/SettingsRow.svelte) is one line of a settings card: label and optional description on the left, the control on the right.
 
-Closed string-union props: none. Booleans: `checked=false` drives `aria-checked`, the track's `bg-brand-a` versus `bg-text-dimmer`, its inline checked shadow, and the thumb's `translate-x-4` versus emits nothing. `disabled=false` sets native disability and the row's `disabled:cursor-not-allowed disabled:opacity-50`. `label` is required; there is no discriminated prop union.
+Discriminated prop union on `checked`. Toggle shape (`checked`, `onchange`, optional `disabled` and `ariaLabel`): the entire row is one `role="switch"` button; `checked` drives `aria-checked`, the track's `bg-accent` versus `bg-border`, and the knob's `translate-x-[14px]`; `disabled` dims the row with `disabled:cursor-not-allowed disabled:opacity-50`. Control shape: optional `control` snippet on the right and optional `labelFor`, which makes the label a `<label for>`; with neither the row is text only. `label` is required in both.
 
 Bits-ui: no.
 
-No axis for track size or shape, fixed by `w-9 h-5 rounded-full`; thumb size or shape, fixed by `w-4 h-4 rounded-full`; label scale, fixed by `text-sm`; description scale, fixed by `text-xs`. Row spacing defaults to the inline recipe `gap-3 px-3.5 py-2.5 border-none bg-transparent`. Trap: `class` replaces that entire fallback string when supplied, unlike the additive class contract on Button.
+No axis for track size or shape, fixed by `h-[18px] w-[32px] rounded-full`; knob, fixed by a 14px white circle; label scale, fixed by `text-[12.5px]`; description scale, fixed by `text-[11px]`. The control shape wraps: the label keeps a `flex-[1_1_12rem]` basis so wide controls drop under it on a phone. No border: SettingsGroup draws the hairlines. Trap: `class` replaces the default `px-3 py-2 min-h-10` padding when supplied, unlike the additive class contract on Button.
+
+### SettingsGroup
+
+[SettingsGroup.svelte](../../src/lib/frontend/components/ui/SettingsGroup.svelte) is the bordered settings card that owns the card border and the `divide-y` hairline between direct children.
+
+Booleans: `collapsible=false` switches from a plain group (title, `actions` and one-line `caption` above the card) to a collapsible one whose title is a Disclosure look="section" header inside the card with a one-line `summary`; bindable `open=false` controls it. `actions` always sit beside, never inside, the disclosure button. `id` lands on the section and names it by its title, which gets `<id>-title`. No discriminated prop union: `caption` is ignored when collapsible.
+
+Bits-ui: no.
+
+No axis for card radius, border or surface, fixed by `rounded-[9px] border border-border-subtle bg-bg-surface`; spacing between groups, fixed by `mt-[9px] first:mt-0`.
 
 ### Checkbox
 

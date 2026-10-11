@@ -306,7 +306,6 @@ describe("foreground daemon process harness", () => {
 				config: {
 					workspaceRoot: projectDir,
 					daemonConfigDir: configDir,
-					materializeSubagents: false,
 				},
 			}),
 		);

@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Schema } from "effect";
+import { Context, Data, Effect, Option, Schema } from "effect";
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -17,7 +17,12 @@ import type {
 	SessionTodos,
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
+import { SessionWorkspaceHintStateTag } from "../../domain/relay/Services/session-workspace-hint-state.js";
 import type { SessionBackground } from "../../session/background-liveness.js";
+import {
+	claudeWorkspaceMismatch,
+	decodeClaudeWorktreeState,
+} from "../../session/claude-worktree-state.js";
 import {
 	type SessionAttention,
 	type SessionInfo,
@@ -118,6 +123,7 @@ export const sessionRowsToSessionInfoList = (
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
+		readonly hintDismissals?: ReadonlyMap<string, number>;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -150,10 +156,18 @@ export const sessionRowsToSessionInfoList = (
 	};
 	if (opts.parentMap) {
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
-		for (const id of new Set([
-			...rowStatuses.keys(),
-			...opts.parentMap.keys(),
-		])) {
+		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
+		const backgroundChildren = new Set(
+			[...new Set([...members, ...opts.parentMap.values()])].flatMap(
+				(id) =>
+					opts
+						.backgroundOf?.(id)
+						?.tasks.flatMap((task) =>
+							task.childSessionId ? [task.childSessionId] : [],
+						) ?? [],
+			),
+		);
+		for (const id of members) {
 			let root = id;
 			let activityRoot: string | undefined;
 			const seen = new Set<string>();
@@ -176,8 +190,12 @@ export const sessionRowsToSessionInfoList = (
 			const activity = stateFor(activityRoot ?? root);
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
 			const work = opts.backgroundOf?.(id)?.work;
+			// A live background agent keeps its own busy status; its owner
+			// monitors that work rather than inheriting a foreground turn.
 			activity.processing ||=
-				status === "busy" || status === "retry" || work === "working";
+				(!backgroundChildren.has(id) &&
+					(status === "busy" || status === "retry")) ||
+				work === "working";
 			activity.monitoring ||= work === "monitoring";
 			activity.unread ||= opts.unreadSessionIds?.has(id) === true;
 		}
@@ -217,6 +235,10 @@ export const sessionRowsToSessionInfoList = (
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			messageCount: 0,
+			...(row.workspace_hint == null ||
+			opts.hintDismissals?.get(row.id) === row.workspace_hint_sequence
+				? {}
+				: { workspaceHint: row.workspace_hint }),
 			...(row.workspace == null
 				? {}
 				: {
@@ -224,6 +246,11 @@ export const sessionRowsToSessionInfoList = (
 							Schema.parseJson(SessionWorkspaceSchema),
 						)(row.workspace),
 					}),
+			workspaceMismatch: row.claude_worktree_state
+				? claudeWorkspaceMismatch(
+						decodeClaudeWorktreeState(row.claude_worktree_state),
+					)
+				: undefined,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }
@@ -296,15 +323,33 @@ const decodeSidebarRow = Schema.decodeUnknownSync(
 const sidebarItem = (
 	row: SidebarRow,
 	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
+	busyMembers?: ReadonlySet<string>,
 ): SessionInfo => {
 	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
 	const background = backgroundOf?.(row.session.id);
+	const backgroundChildren = new Set(
+		row.members.flatMap(
+			(id) =>
+				backgroundOf?.(id)?.tasks.flatMap((task) =>
+					task.childSessionId ? [task.childSessionId] : [],
+				) ?? [],
+		),
+	);
+	const { processing: storedProcessing, ...session } = row.session;
+	const processing =
+		backgroundChildren.size > 0 && busyMembers !== undefined
+			? row.members.some(
+					(id) => busyMembers.has(id) && !backgroundChildren.has(id),
+				)
+			: storedProcessing === true;
 	const quiet =
-		row.session.attention === "idle" || row.session.attention === "done-unread";
+		row.session.attention === "idle" ||
+		row.session.attention === "done-unread" ||
+		(row.session.attention === "working" && !processing);
 	return {
-		...row.session,
+		...session,
 		updatedAt: row.lastActivity,
-		...(work.has("working") ? { processing: true } : {}),
+		...(processing || work.has("working") ? { processing: true } : {}),
 		...(background?.work ? { backgroundWork: background.work } : {}),
 		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
 		...deriveSessionSnooze(row.snooze),
@@ -621,6 +666,7 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 >() {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
@@ -700,6 +746,7 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
@@ -711,6 +758,7 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
 						turnTiming: {
@@ -745,9 +793,14 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const hintDismissals = Option.getOrUndefined(
+		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
+	);
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
-	const turnTimingColumns = sql`
+	const turnMetadataColumns = sql`
+		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
+			THEN turns.cost ELSE NULL END AS turn_cost,
 		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
 			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
 		) AS turn_started_at,
@@ -1024,6 +1077,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
+				...(hintDismissals && { hintDismissals }),
 				...(opts?.backgroundOf && {
 					backgroundOf: opts.backgroundOf,
 				}),
@@ -1072,7 +1126,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
 					turns.actual_model AS turn_actual_model,
-					${turnTimingColumns}
+					${turnMetadataColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
 				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1250,7 +1304,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1266,7 +1320,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1280,7 +1334,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1365,22 +1419,57 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							session_id: string;
 							version: number;
 							row: string | null;
+							workspace_hint_sequence: number | null;
 							deleted: number;
 						}>`
-							SELECT session_id, version, row,
-								NOT EXISTS (SELECT 1 FROM sessions
-									WHERE sessions.id = session_sidebar.session_id) AS deleted
-							FROM session_sidebar
-							WHERE version > ${floor} AND version <= ${ceiling}
+							SELECT session_sidebar.session_id, session_sidebar.version, row,
+								workspace_hint_sequence, sessions.id IS NULL AS deleted
+							FROM session_sidebar LEFT JOIN sessions
+								ON sessions.id = session_sidebar.session_id
+							WHERE session_sidebar.version > ${floor} AND session_sidebar.version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
+						const sidebars = stored.flatMap(({ row }) =>
+							row === null ? [] : [decodeSidebarRow(row)],
+						);
+						// Stored rows aggregate busy children without live task ownership.
+						// Read projected statuses once for families with background agents
+						// so a foreground sibling still outranks monitoring.
+						const members = [
+							...new Set(
+								sidebars.flatMap((row) =>
+									row.members.some((id) =>
+										range
+											?.backgroundOf?.(id)
+											?.tasks.some((task) => task.childSessionId),
+									)
+										? row.members
+										: [],
+								),
+							),
+						];
+						const busyMembers =
+							members.length === 0
+								? undefined
+								: new Set(
+										(yield* sql<{ id: string }>`
+								SELECT id FROM sessions WHERE id IN ${sql.in(members)}
+								AND status IN ('busy', 'retry')`).map(({ id }) => id),
+									);
 						return {
-							rows: stored.flatMap(({ row }) => {
+							rows: stored.flatMap(({ row, workspace_hint_sequence }) => {
 								if (row === null) return [];
 								const sidebar = decodeSidebarRow(row);
 								return [
 									{
-										item: sidebarItem(sidebar, range?.backgroundOf),
+										item: {
+											...sidebarItem(sidebar, range?.backgroundOf, busyMembers),
+											workspaceHint:
+												hintDismissals?.get(sidebar.session.id) ===
+												workspace_hint_sequence
+													? undefined
+													: sidebar.session.workspaceHint,
+										},
 										version: sidebar.version,
 									},
 								];
@@ -1438,6 +1527,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
+						...(hintDismissals && { hintDismissals }),
 						...(range?.backgroundOf && {
 							backgroundOf: range.backgroundOf,
 						}),
@@ -1527,7 +1617,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							turns.requested_model AS turn_requested_model,
 							turns.expected_model AS turn_expected_model,
 							turns.actual_model AS turn_actual_model,
-							${turnTimingColumns}
+							${turnMetadataColumns}
 						FROM messages
 						LEFT JOIN turns ON turns.id = messages.turn_id
 						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'

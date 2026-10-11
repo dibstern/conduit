@@ -1,6 +1,6 @@
 // Failure cases are specified before implementation: wrong login shell or
 // foreground flags, pinned node paths, shell/XML/systemd expansion, missing
-// executables, existing services/daemons/listeners, failed service-manager or
+// executables, stale service arguments, existing daemons/listeners, failed service-manager or
 // filesystem operations, stopped/missing services, and removing a unit before
 // its process has stopped. Every effect below uses an in-memory runner.
 
@@ -46,7 +46,7 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 	return {
 		platform,
 		shell: "/bin/zsh",
-		command: ["conduit", "serve", "--port", "7777"],
+		command: ["conduit", "serve"],
 		paths: getServicePaths(platform, homeDir, configDir, cwd),
 		uid: 501,
 		cliEntry,
@@ -63,6 +63,7 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 function fakeRunner(platform: NodeJS.Platform) {
 	const files = new Map<string, string>([[cliEntry, "installed CLI"]]);
 	const events: string[] = [];
+	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = null;
 	const runner = {
 		exec: vi.fn<ServiceRunner["exec"]>(async (command, args) => {
 			events.push(`${command} ${args.join(" ")}`);
@@ -86,6 +87,12 @@ function fakeRunner(platform: NodeJS.Platform) {
 		writeFile: vi.fn<ServiceRunner["writeFile"]>(async (path, content) => {
 			events.push(`write ${path}`);
 			files.set(path, content);
+		}),
+		loadConfig: vi.fn<ServiceRunner["loadConfig"]>(() => storedConfig),
+		saveConfig: vi.fn<ServiceRunner["saveConfig"]>(async (config, dir) => {
+			storedConfig = config;
+			events.push(`save config ${dir}`);
+			files.set(`${dir}/daemon.json`, JSON.stringify(config));
 		}),
 		removeFile: vi.fn<ServiceRunner["removeFile"]>(async (path) => {
 			events.push(`remove ${path}`);
@@ -174,7 +181,7 @@ describe("service unit generation", () => {
 		expect(unit).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
 		expect(unit).toContain("<key>CONDUIT_SERVICE</key><string>1</string>");
 		expect(unit).toMatch(
-			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve --port 7777<\/string>/,
+			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve<\/string>/,
 		);
 		expect(unit).toContain(`<string>${cwd}</string>`);
 		expect(unit).toContain(`<string>${configDir}</string>`);
@@ -189,9 +196,7 @@ describe("service unit generation", () => {
 		expect(config.paths.unitFile).toBe(
 			`${homeDir}/.config/systemd/user/conduit.service`,
 		);
-		expect(unit).toContain(
-			'ExecStart="/bin/zsh" -l -c "exec conduit serve --port 7777"',
-		);
+		expect(unit).toContain('ExecStart="/bin/zsh" -l -c "exec conduit serve"');
 		expect(unit).toContain("Restart=always");
 		expect(unit).toContain("WantedBy=default.target");
 		expect(unit).toContain(`WorkingDirectory=${cwd}`);
@@ -279,7 +284,7 @@ describe("service unit generation", () => {
 		);
 	});
 
-	it("preserves the server flags in the serve command", () => {
+	it("keeps only non-persisted server flags in the serve command", () => {
 		const args = parseArgs([
 			"service",
 			"install",
@@ -292,6 +297,7 @@ describe("service unit generation", () => {
 			"--claude-config-dir",
 			"/profiles/work",
 			"--no-https",
+			"--no-tailscale-serve",
 			"--log-level",
 			"debug",
 			"--log-format",
@@ -299,17 +305,12 @@ describe("service unit generation", () => {
 		]);
 		expect(foregroundArguments(args)).toEqual([
 			"serve",
-			"--port",
-			"7777",
 			"--oc-port",
 			"4999",
 			"--log-level",
 			"debug",
 			"--host",
 			"127.0.0.2",
-			"--claude-config-dir",
-			"/profiles/work",
-			"--no-https",
 			"--log-format",
 			"json",
 		]);
@@ -332,6 +333,7 @@ describe.each([
 			"/bin/zsh -l -c command -v conduit >/dev/null 2>&1",
 			`mkdir ${dirname(config.paths.unitFile)}`,
 			`mkdir ${configDir}`,
+			`save config ${configDir}`,
 			`write ${config.paths.unitFile}`,
 			...(platform === "darwin"
 				? [
@@ -380,23 +382,33 @@ describe.each([
 		expect(runner.writeFile).not.toHaveBeenCalled();
 	});
 
-	it("never overwrites an installed service", async () => {
+	it("replaces an installed service with the current arguments", async () => {
 		const { runner, files, config } = fakeRunner(platform);
-		files.set(config.paths.unitFile, generateServiceUnit(config));
-		await expect(runServiceCommand("install", config, runner)).rejects.toThrow(
-			/already installed.*uninstall/i,
+		files.set(
+			config.paths.unitFile,
+			generateServiceUnit({
+				...config,
+				command: ["conduit", "serve", "--port", "7777"],
+			}),
 		);
-		expect(runner.writeFile).not.toHaveBeenCalled();
-		expect(runner.checkDaemon).not.toHaveBeenCalled();
+		await runServiceCommand("install", config, runner);
+		expect(files.get(config.paths.unitFile)).toBe(generateServiceUnit(config));
+		expect(runner.checkDaemon).toHaveBeenCalledOnce();
 	});
 
-	it("does not start a second instance when a unit was deleted but is still loaded", async () => {
+	it("stops a loaded service before replacing its missing unit", async () => {
 		const { runner, config } = fakeRunner(platform);
 		loaded(runner, platform);
-		await expect(runServiceCommand("install", config, runner)).rejects.toThrow(
-			/already.*uninstall/i,
+		await runServiceCommand("install", config, runner);
+		expect(runner.exec).toHaveBeenCalledWith(
+			platform === "darwin" ? "launchctl" : "systemctl",
+			platform === "darwin"
+				? ["bootout", "gui/501/dev.conduit.server"]
+				: ["--user", "stop", "conduit"],
 		);
-		expect(runner.writeFile).not.toHaveBeenCalled();
+		expect(runner.exec.mock.invocationCallOrder[1]).toBeLessThan(
+			runner.writeFile.mock.invocationCallOrder[0] ?? 0,
+		);
 	});
 
 	it("warns and uses the installed entry when conduit is absent from login PATH", async () => {

@@ -19,6 +19,7 @@ import {
 } from "../../handlers/model.js";
 import { getCommandsForSession } from "../../handlers/settings.js";
 import { getHiddenEntries } from "../../handlers/visibility.js";
+import { isPickRejection } from "../../provider/turn-settings.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 export const modelsHandlers = {
@@ -112,7 +113,9 @@ export const modelsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SwitchContextWindow failed: ${String(error)}`,
+						message: isPickRejection(error)
+							? error.message
+							: `SwitchContextWindow failed: ${String(error)}`,
 					}),
 				),
 			),
@@ -128,7 +131,9 @@ export const modelsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SwitchModel failed: ${String(error)}`,
+						message: isPickRejection(error)
+							? error.message
+							: `SwitchModel failed: ${String(error)}`,
 					}),
 				),
 			),
@@ -158,7 +163,9 @@ export const modelsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SwitchVariant failed: ${String(error)}`,
+						message: isPickRejection(error)
+							? error.message
+							: `SwitchVariant failed: ${String(error)}`,
 					}),
 				),
 			),

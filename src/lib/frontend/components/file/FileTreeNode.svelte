@@ -6,12 +6,14 @@
 	import { formatFileSize } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import FileTreeNode from "./FileTreeNode.svelte";
-	import { fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { fileBrowserKey, fileTreeState } from "../../stores/file-tree.svelte.js";
 
 	let {
 		entry,
 		depth = 0,
 		parentPath = ".",
+		path,
+		root,
 		onFileClick,
 		onDirClick,
 		getChildren,
@@ -19,10 +21,12 @@
 		entry: FileEntry;
 		depth?: number | undefined;
 		parentPath?: string | undefined;
-		onFileClick?: ((path: string) => void) | undefined;
-		onDirClick?: ((path: string) => void) | undefined;
+		path?: string | undefined;
+		root?: string | undefined;
+		onFileClick?: ((path: string, root?: string) => void) | undefined;
+		onDirClick?: ((path: string, root?: string) => void) | undefined;
 		getChildren?:
-			| ((path: string) => FileEntry[] | undefined)
+			| ((path: string, root?: string) => FileEntry[] | undefined)
 			| undefined;
 	} = $props();
 
@@ -30,8 +34,9 @@
 	const isHidden = $derived(entry.name.startsWith(".") && entry.name !== ".github" && entry.name !== ".vscode");
 
 	// Full path of this entry (used for WS requests and child lookups)
-	const fullPath = $derived(parentPath === "." ? entry.name : `${parentPath}/${entry.name}`);
-	const expanded = $derived(fileTreeState.browserExpandedPaths.has(fullPath));
+	const fullPath = $derived(path ?? (parentPath === "." ? entry.name : `${parentPath}/${entry.name}`));
+	const cacheKey = $derived(fileBrowserKey(fullPath, root));
+	const expanded = $derived(fileTreeState.browserExpandedPaths.has(cacheKey));
 
 	// Directories that should be collapsed by default
 	const COLLAPSE_DIRS = ["node_modules", ".git", "dist", "build", "__pycache__", ".next", ".svelte-kit", "coverage"];
@@ -43,18 +48,18 @@
 		if (isDir) {
 			if (shouldCollapse && !expanded) {
 				// First click on collapsed-by-default dir expands
-				fileTreeState.browserExpandedPaths = new Set([...fileTreeState.browserExpandedPaths, fullPath]);
-				onDirClick?.(fullPath);
+				fileTreeState.browserExpandedPaths = new Set([...fileTreeState.browserExpandedPaths, cacheKey]);
+				onDirClick?.(fullPath, root);
 			} else {
 				const nextExpanded = !expanded;
 				const paths = new Set(fileTreeState.browserExpandedPaths);
-				if (expanded) paths.delete(fullPath);
-				else paths.add(fullPath);
+				if (expanded) paths.delete(cacheKey);
+				else paths.add(cacheKey);
 				fileTreeState.browserExpandedPaths = paths;
-				if (nextExpanded) onDirClick?.(fullPath);
+				if (nextExpanded) onDirClick?.(fullPath, root);
 			}
 		} else {
-			onFileClick?.(fullPath);
+			onFileClick?.(fullPath, root);
 		}
 	}
 </script>
@@ -90,6 +95,9 @@
 		style="padding-left: {depth * 16 + 8}px"
 		aria-expanded={isDir ? expanded : undefined}
 		data-path={fullPath}
+		data-root={root}
+		data-file-root={path === "." ? root : undefined}
+		title={path === "." ? entry.name : undefined}
 		onclick={handleClick}
 	>
 		{#if isDir}
@@ -129,13 +137,14 @@
 	</Button>
 
 	{#if isDir && expanded}
-		{@const children = getChildren?.(fullPath)}
+		{@const children = getChildren?.(fullPath, root)}
 		{#if children}
 			{#each children as child (child.name)}
 				<FileTreeNode
 					entry={child}
 					depth={depth + 1}
 					parentPath={fullPath}
+					{root}
 					{onFileClick}
 					{onDirClick}
 					{getChildren}

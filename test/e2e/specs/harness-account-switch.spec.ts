@@ -1140,7 +1140,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		const openUsageLimitSettings = async () => {
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "usage" } }),
+					new CustomEvent("settings:open", { detail: { section: "usage" } }),
 				),
 			);
 			const section = page.locator("#usage-settings");

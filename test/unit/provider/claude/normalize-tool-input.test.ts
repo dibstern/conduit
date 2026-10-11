@@ -65,6 +65,114 @@ describe("Claude normalizeToolInput", () => {
 		});
 	});
 
+	it.each([
+		"workingDirectory",
+		"working_directory",
+		"cwd",
+		"workdir",
+	])("does not discard Bash's explicit %s working directory", (field) => {
+		expect(
+			normalizeToolInput("Bash", {
+				command: "touch changed.ts",
+				[field]: "/src/other-worktree",
+			}),
+		).toEqual({
+			tool: "Bash",
+			command: "touch changed.ts",
+			workingDirectory: "/src/other-worktree",
+		});
+	});
+
+	it.each([
+		42,
+		true,
+		{},
+		[],
+		null,
+		undefined,
+		"",
+	])("does not invent a Bash working directory from invalid input %j", (value) => {
+		expect(normalizeToolInput("Bash", { command: "pwd", cwd: value })).toEqual({
+			tool: "Bash",
+			command: "pwd",
+		});
+	});
+
+	it("does not lose a valid Bash alias behind a non-string canonical field", () => {
+		expect(
+			normalizeToolInput("Bash", {
+				command: "pwd",
+				workingDirectory: {},
+				cwd: "/src/other-worktree",
+			}),
+		).toEqual({
+			tool: "Bash",
+			command: "pwd",
+			workingDirectory: "/src/other-worktree",
+		});
+	});
+
+	it("does not leave ApplyPatch write paths hidden in an Unknown input", () => {
+		const patch = [
+			"*** Begin Patch",
+			"*** Add File: ../other-worktree/added.ts",
+			"+new content",
+			"*** Update File: ../other-worktree/original.ts",
+			"*** Move to: ../other-worktree/renamed.ts",
+			"@@",
+			"-old content",
+			"+new content",
+			"*** Delete File: ../other-worktree/deleted.ts",
+			"*** End Patch",
+		].join("\n");
+		expect(normalizeToolInput("ApplyPatch", { patch })).toEqual({
+			tool: "Patch",
+			patch,
+			filePaths: [
+				"../other-worktree/added.ts",
+				"../other-worktree/original.ts",
+				"../other-worktree/renamed.ts",
+				"../other-worktree/deleted.ts",
+			],
+		});
+	});
+
+	it.each([
+		"--- a/file.ts\n+++ b/file.ts\n@@\n-old\n+new",
+		"*** Update File: /src/file.ts\n@@\n-old\n+new",
+		"*** Begin Patch\n*** Add File: /src/file.ts\n+content",
+	])("does not guess ApplyPatch paths from unrecognized patch text", (patch) => {
+		expect(normalizeToolInput("ApplyPatch", { patch })).toEqual({
+			tool: "Patch",
+			patch,
+			filePaths: [],
+		});
+	});
+
+	it("does not count patch content that resembles a file header", () => {
+		const patch = [
+			"*** Begin Patch",
+			"*** Add File: /src/real.ts",
+			"+*** Add File: /src/not-a-write.ts",
+			"*** End Patch",
+		].join("\n");
+		expect(normalizeToolInput("ApplyPatch", { patch })).toEqual({
+			tool: "Patch",
+			patch,
+			filePaths: ["/src/real.ts"],
+		});
+	});
+
+	it("does not trim or discard ApplyPatch text needed by the tool display", () => {
+		const patch =
+			"\n*** Begin Patch\n*** Add File: /src/file.ts\n+content\n*** End Patch\n";
+		expect(normalizeToolInput("ApplyPatch", { patch })).toEqual({
+			tool: "Patch",
+			patch,
+			filePaths: ["/src/file.ts"],
+		});
+	});
+
 	it("normalizes Grep with Claude SDK field names", () => {
 		const result = normalizeToolInput("Grep", {
 			pattern: "TODO",

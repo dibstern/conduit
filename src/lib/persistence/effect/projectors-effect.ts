@@ -4,6 +4,7 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
+import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type {
 	CanonicalEventType,
@@ -261,7 +262,15 @@ export const makeSessionProjector = (): EffectProjector => ({
 			// session row goes and the cascade takes the rest. Both arms feed the
 			// same list — the stamp pass is what tells a row that moved from one
 			// that is gone.
-			for (const stmt of getSessionStatements(event)) {
+			const [worktree] = CLAUDE_WORKTREE_EVENTS.has(event.type)
+				? yield* sql<{ claude_worktree_state: string | null }>`
+					SELECT claude_worktree_state FROM sessions
+					WHERE id = ${event.sessionId}`
+				: [];
+			for (const stmt of getSessionStatements(
+				event,
+				worktree?.claude_worktree_state,
+			)) {
 				if (isSessionRemoval(stmt)) {
 					const subtree = yield* sql.unsafe<{ id: string }>(
 						SESSION_SUBTREE_SQL,
@@ -349,6 +358,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 					session_id = excluded.session_id, version = excluded.version`;
 				return [];
 			}
+			// A result keyed by its prompt has no answer of its own. Its
+			// messageId can name the previous answer, whose usage and time stay put.
+			if (isEventType(event, "turn.completed") && event.data.userMessageId)
+				return [];
 			if (
 				"messageId" in event.data &&
 				event.type !== "message.part.removed" &&
@@ -407,6 +420,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					 tokens_cache_read = excluded.tokens_cache_read,
 					 tokens_cache_write = excluded.tokens_cache_write,
 					 context_window = excluded.context_window, is_streaming = 0,
+					 completed_at = NULL,
 					 created_at = excluded.created_at, updated_at = excluded.updated_at,
 					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
 					 rest_payload = excluded.rest_payload,
@@ -627,6 +641,9 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 			}
 
+			// A part write advances the message that owns the part: a task update can
+			// name whichever message is streaming when it lands (a background task
+			// finishing after its turn), and that message's refetch misses this part.
 			if (isEventType(event, "tool.running")) {
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
@@ -649,7 +666,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				return ids(
 					yield* sql<{
 						id: string;
-					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = COALESCE((SELECT message_id FROM message_parts WHERE id = ${event.data.partId}), ${event.data.messageId}) RETURNING id`,
 				);
 			}
 
@@ -671,7 +688,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				return ids(
 					yield* sql<{
 						id: string;
-					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
+					}>`UPDATE messages SET updated_at = ${event.createdAt} WHERE id = COALESCE((SELECT message_id FROM message_parts WHERE id = ${event.data.partId}), ${event.data.messageId}) RETURNING id`,
 				);
 			}
 
@@ -704,23 +721,24 @@ export const makeMessageProjector = (): EffectProjector => ({
 			}
 
 			if (isEventType(event, "turn.completed")) {
-				// Cost and tokens are counted differently by the provider, which
-				// reads like a bug and is not: cost is cumulative for the whole
-				// SDK session (two completions in one turn read 38.53 then 39.84),
-				// so the latest value wins. Tokens are per-execution, so a turn
-				// that ran twice sums them.
+				// New Claude completions carry cost deltas, so repeated completions add.
+				// Other providers and historical Claude events retain latest-wins cost.
 				const tokens = event.data.tokens;
 				yield* closeThinking(event.data.messageId);
 				return ids(
 					yield* sql<{ id: string }>`
 					UPDATE messages SET
-					cost = ${event.data.cost ?? null},
+					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+						THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+						ELSE ${event.data.cost ?? null} END,
 					tokens_in = ${tokens?.input ?? null},
 					tokens_out = ${tokens?.output ?? null},
 					tokens_cache_read = ${tokens?.cacheRead ?? null},
 					tokens_cache_write = ${tokens?.cacheWrite ?? null},
+					context_tokens = ${event.data.contextTokens ?? null},
 					context_window = ${tokens?.contextWindow ?? null},
 					is_streaming = 0,
+					completed_at = ${event.createdAt},
 					updated_at = ${event.createdAt}
 					WHERE id = ${event.data.messageId}
 					RETURNING id`,
@@ -860,7 +878,8 @@ export const makeTurnProjector = (): EffectProjector => ({
 			const sql = yield* SqlClient.SqlClient;
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
-				"messageId" in event.data
+				"messageId" in event.data &&
+				!(isEventType(event, "turn.completed") && event.data.userMessageId)
 			) {
 				const rows = yield* sql<{
 					rest_digest: string | null;
@@ -995,10 +1014,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 			}
 
-			// Idle means the provider has nothing in flight, so an open turn
-			// still waiting for its reply never got one (sent from another
-			// client, or ended before replying), and no result will close it.
-			// It settles; a later reply reopens it.
+			// Idle means the provider has nothing in flight, so every turn it
+			// leaves open is over: one waiting for a reply never got it, and one
+			// whose result named no reply this turn owns will see no other close.
+			// The inbox reads an open turn as busy and would queue every later
+			// send. A turn the provider continues reopens on its next reply.
 			if (
 				isEventType(event, "session.status") &&
 				event.data.status === "idle"
@@ -1006,7 +1026,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
 						WHERE session_id = ${event.sessionId}
-						AND state IN ('pending', 'running') AND assistant_message_id IS NULL
+						AND state IN ('pending', 'running')
 						AND requested_at <= ${event.createdAt}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
@@ -1103,25 +1123,30 @@ export const makeTurnProjector = (): EffectProjector => ({
 			// session is nowhere in the statement — `RETURNING session_id` is the
 			// only thing that knows which session row actually moved.
 			if (isEventType(event, "turn.completed")) {
-				// Cost and tokens are counted differently by the provider, which
-				// reads like a bug and is not: cost is cumulative for the whole
-				// SDK session (two completions in one turn read 38.53 then 39.84),
-				// so the latest value wins. Tokens are per-execution, so a turn
-				// that ran twice sums them. A result-only turn (Claude /compact)
-				// has no reply of its own and its messageId names the previous
-				// turn's, so it is keyed by its prompt instead.
+				// New Claude completions add their cost deltas, like per-execution tokens.
+				// Other providers and historical Claude events retain latest-wins cost.
+				// A result-only turn (Claude /compact) has no reply of its own,
+				// so it is keyed by its prompt instead of the previous turn's reply.
 				const tokens = event.data.tokens;
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns
 						SET state = 'completed',
-							cost = COALESCE(${event.data.cost ?? null}, cost),
+							cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+								THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+								ELSE COALESCE(${event.data.cost ?? null}, cost) END,
 							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
 							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
 							completed_at = ${event.createdAt}
 						WHERE ${
 							event.data.userMessageId
 								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
-								: sql`assistant_message_id = ${event.data.messageId}`
+								: // A turn can hold several replies (an input the SDK folds
+									// into it starts a new one), but its row names only the
+									// first, so the reply's own turn link settles it too.
+									sql`session_id = ${event.sessionId}
+									AND (assistant_message_id = ${event.data.messageId}
+										OR id = (SELECT turn_id FROM messages
+											WHERE id = ${event.data.messageId}))`
 						}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
@@ -1548,7 +1573,6 @@ export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
 	"tool.input_updated",
 	"session.provider_cleanup_failed",
 	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
-	"session.workspace_started", // Startup observation is read from history by Session Workspace.
 	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
 	// Kept so historical stores still decode.
 	"session.read",

@@ -21,13 +21,9 @@ import {
 	decodeOpenCodeCommandListResponse,
 	decodeOpenCodeConfigResponse,
 	decodeOpenCodeCurrentProjectResponse,
-	decodeOpenCodeDiffResponse,
 	decodeOpenCodeFileEntryListResponse,
 	decodeOpenCodeFileReadResponse,
-	decodeOpenCodeFileStatusListResponse,
 	decodeOpenCodeFindFilesResponse,
-	decodeOpenCodeFindSymbolsResponse,
-	decodeOpenCodeFindTextResponse,
 	decodeOpenCodeMessageListResponse,
 	decodeOpenCodeMessageWithPartsResponse,
 	decodeOpenCodePathResponse,
@@ -43,7 +39,6 @@ import {
 	decodeOpenCodeSessionListResponse,
 	decodeOpenCodeSessionResponse,
 	decodeOpenCodeSessionStatusMap,
-	decodeOpenCodeShareResponse,
 	decodeOpenCodeSkillListResponse,
 	decodeOpenCodeUndefinedResponse,
 	decodeOpenCodeVcsResponse,
@@ -55,6 +50,7 @@ import type {
 	Agent,
 	Message,
 	PermissionRuleset,
+	PromptOptions,
 	Provider,
 	ProviderListResult,
 	SessionDetail,
@@ -281,6 +277,17 @@ class SessionNamespace {
 		);
 	}
 
+	/** Align native execution cwd without copying files or changing session history. */
+	async move(id: string, directory: string): Promise<void> {
+		await this.api.sdk("session.move", decodeOpenCodeUndefinedResponse, () =>
+			this.api._sdk.experimental.controlPlane.moveSession({
+				sessionID: id,
+				destination: { directory },
+				moveChanges: false,
+			}),
+		);
+	}
+
 	async statuses(directory?: string): Promise<Record<string, SessionStatus>> {
 		return this.api.sdk(
 			"session.statuses",
@@ -349,22 +356,26 @@ class SessionNamespace {
 		return flattenMessage(data);
 	}
 
-	async prompt(
-		sessionId: string,
-		options: {
-			text: string;
-			system?: string;
-			model?: { providerID: string; modelID: string };
-			agent?: string;
-		},
-	): Promise<void> {
+	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
-				parts: [{ type: "text", text: options.text }],
+				...(options.directory !== undefined
+					? { directory: options.directory }
+					: {}),
+				parts: [
+					{ type: "text", text: options.text },
+					// Images arrive as data URLs, which name their own mime type.
+					...(options.images ?? []).map((url) => ({
+						type: "file" as const,
+						mime: /^data:([^;,]+)/.exec(url)?.[1] ?? "image/png",
+						url,
+					})),
+				],
 				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),
 				...(options.agent != null ? { agent: options.agent } : {}),
+				...(options.variant ? { variant: options.variant } : {}),
 			}),
 		);
 	}
@@ -399,32 +410,12 @@ class SessionNamespace {
 		);
 	}
 
-	async share(sessionId: string): Promise<{ url: string }> {
-		return this.api.sdk("session.share", decodeOpenCodeShareResponse, () =>
-			this.api._sdk.session.share({ sessionID: sessionId }),
-		);
-	}
-
 	async summarize(
 		sessionId: string,
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
 		await this.api.sdk("session.summarize", decodeOpenCodeBooleanResponse, () =>
 			this.api._sdk.session.summarize({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async diff(
-		sessionId: string,
-		options?: { messageID?: string },
-	): Promise<{
-		readonly diffs: ReadonlyArray<{
-			readonly path: string;
-			readonly diff: string;
-		}>;
-	}> {
-		return this.api.sdk("session.diff", decodeOpenCodeDiffResponse, () =>
-			this.api._sdk.session.diff({ sessionID: sessionId, ...options }),
 		);
 	}
 
@@ -489,7 +480,11 @@ class QuestionNamespace {
 		return [...questions];
 	}
 
-	async reply(id: string, answers: string[][]): Promise<void> {
+	async reply(
+		id: string,
+		answers: string[][],
+		directory?: string,
+	): Promise<void> {
 		try {
 			decodeOpenCodeQuestionReplyBody({ answers });
 		} catch (err) {
@@ -510,19 +505,26 @@ class QuestionNamespace {
 			decodeOpenCodeQuestionActionResponse,
 			() =>
 				this.api._sdk.question.reply(
-					{ requestID: id, answers },
+					{
+						requestID: id,
+						answers,
+						...(directory === undefined ? {} : { directory }),
+					},
 					{ headers: { "x-opencode-directory": null } },
 				),
 		);
 	}
 
-	async reject(id: string): Promise<void> {
+	async reject(id: string, directory?: string): Promise<void> {
 		await this.api.sdk(
 			"question.reject",
 			decodeOpenCodeQuestionActionResponse,
 			() =>
 				this.api._sdk.question.reject(
-					{ requestID: id },
+					{
+						requestID: id,
+						...(directory === undefined ? {} : { directory }),
+					},
 					{ headers: { "x-opencode-directory": null } },
 				),
 		);
@@ -675,31 +677,10 @@ class FileNamespace {
 			...(file.type === "binary" ? { binary: true } : {}),
 		};
 	}
-
-	async status(): Promise<
-		ReadonlyArray<{
-			readonly path: string;
-			readonly added: number;
-			readonly removed: number;
-			readonly status: "added" | "deleted" | "modified";
-		}>
-	> {
-		return this.api.sdk(
-			"file.status",
-			decodeOpenCodeFileStatusListResponse,
-			() => this.api._sdk.file.status(),
-		);
-	}
 }
 
 class FindNamespace {
 	constructor(private readonly api: OpenCodeAPI) {}
-
-	async text(pattern: string): Promise<readonly unknown[]> {
-		return this.api.sdk("find.text", decodeOpenCodeFindTextResponse, () =>
-			this.api._sdk.find.text({ pattern }),
-		);
-	}
 
 	async files(
 		query: string,
@@ -712,12 +693,6 @@ class FindNamespace {
 				query,
 				...(dirs === undefined ? {} : { dirs }),
 			}),
-		);
-	}
-
-	async symbols(query: string): Promise<readonly unknown[]> {
-		return this.api.sdk("find.symbols", decodeOpenCodeFindSymbolsResponse, () =>
-			this.api._sdk.find.symbols({ query }),
 		);
 	}
 }

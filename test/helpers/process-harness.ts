@@ -223,6 +223,10 @@ export class ProcessHarness {
 			/** Relative paths resolve against the isolated project. */
 			readonly reportedCwd?: string;
 			readonly enterPath?: string;
+			/** Simulate Claude's sticky worktree and map captured declarations to directives. */
+			readonly followWorkspaceDirectives?: boolean;
+			/** Make one captured turn end at a usage limit, without replacing its tools. */
+			readonly usageLimitTurn?: number;
 			/** Pause result delivery until the test writes claude-replay-release. */
 			readonly holdBeforeResult?: boolean;
 			/** Enable relay diagnostics when a replay checks warning logs. */
@@ -311,7 +315,6 @@ export class ProcessHarness {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: foregroundCli
 					? [
 							{
@@ -546,6 +549,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			runnerStartupTimeoutMs?: number;
 			skipBrowserProbe?: boolean;
 			cliArgs?: string[];
+			/** Use service arguments verbatim, without appended port/host/TLS flags. */
+			exactCliArgs?: boolean;
 			buildId?: string;
 			queryInitializationDelayMs?: number;
 			continuationSweepIntervalMs?: number;
@@ -651,7 +656,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				}),
 			);
 		}
-		if (this.foregroundCli && this.port === 0) {
+		if (this.foregroundCli && !options.exactCliArgs && this.port === 0) {
 			this.port = await new Promise<number>((done, fail) => {
 				const server = createServer();
 				server.once("error", fail);
@@ -679,11 +684,15 @@ Object.assign(ClaudeDriver, { create: deps => {
 					? [
 							join(this.dist, "src/bin/cli.js"),
 							...(options.cliArgs ?? ["serve"]),
-							"--port",
-							String(this.port),
-							"--host",
-							"127.0.0.1",
-							"--no-https",
+							...(options.exactCliArgs
+								? []
+								: [
+										"--port",
+										String(this.port),
+										"--host",
+										"127.0.0.1",
+										"--no-https",
+									]),
 						]
 					: [
 							fileURLToPath(
@@ -760,6 +769,16 @@ Object.assign(ClaudeDriver, { create: deps => {
 									this.claudeReplay.delayMs ?? 0,
 								),
 								CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR: this.projectDir,
+								...(this.claudeReplay.followWorkspaceDirectives
+									? { CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES: "1" }
+									: {}),
+								...(this.claudeReplay.usageLimitTurn
+									? {
+											CONDUIT_TEST_CLAUDE_REPLAY_USAGE_LIMIT_TURN: String(
+												this.claudeReplay.usageLimitTurn,
+											),
+										}
+									: {}),
 								...(this.claudeReplay.reportedCwd
 									? {
 											CONDUIT_TEST_CLAUDE_REPLAY_CWD: resolve(
@@ -958,7 +977,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 						try {
 							const status = await this.requestRpc(new GetStatus({}));
 							const instances = await this.requestRpc(new GetInstances({}));
-							if (child.pid && status.port === this.port) {
+							if (
+								child.pid &&
+								(options.exactCliArgs || status.port === this.port)
+							) {
 								ready({
 									pid: child.pid,
 									port: status.port,
@@ -2384,7 +2406,7 @@ export class ProcessBrowser {
 	}
 
 	async restartServer(): Promise<void> {
-		await this.run(this.rpc.RestartWithConfig({ config: {} }));
+		await this.run(this.rpc.RestartWithConfig({}));
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {

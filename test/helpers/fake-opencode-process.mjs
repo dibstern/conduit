@@ -21,6 +21,14 @@ const portArg = args.find((arg) => arg.startsWith("--port="));
 const port = Number(portArg?.split("=")[1] ?? args[args.indexOf("--port") + 1]);
 const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
 const password = process.env.OPENCODE_SERVER_PASSWORD;
+writeFileSync(
+	join(configDir, "fake-opencode-worktree-env.json"),
+	JSON.stringify({
+		OPENCODE_CONFIG_CONTENT: process.env.OPENCODE_CONFIG_CONTENT,
+		CONDUIT_DAEMON_SOCKET: process.env.CONDUIT_DAEMON_SOCKET,
+		CONDUIT_OPENCODE_INSTANCE_ID: process.env.CONDUIT_OPENCODE_INSTANCE_ID,
+	}),
+);
 const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 const groupPid = Number(process.env.CONDUIT_OPENCODE_GROUP_PID ?? process.pid);
 let healthy = true;
@@ -146,6 +154,10 @@ const server = createServer(async (request, response) => {
 			/* Test directory may already be removed. */
 		}
 	}
+	// OpenCode resolves an existing session's stored directory before query cwd.
+	const sessionID = /^\/session\/([^/]+)/.exec(path)?.[1];
+	const stored = sessionID && sessions().find(({ id }) => id === sessionID);
+	if (stored?.directory) directory = stored.directory;
 	let body = "";
 	for await (const chunk of request) body += chunk;
 	if (body)
@@ -269,6 +281,55 @@ const server = createServer(async (request, response) => {
 				),
 			);
 		}
+	} else if (
+		/^\/session\/[^/]+\/fork$/.test(path) &&
+		request.method === "POST"
+	) {
+		const parent = sessions().find(({ id }) => id === path.split("/")[2]);
+		if (!parent) {
+			response.writeHead(404).end("{}");
+			return;
+		}
+		const session = {
+			...parent,
+			id: `ses_${randomUUID()}`,
+			parentID: parent.id,
+			time: { created: Date.now(), updated: Date.now() },
+		};
+		writeFileSync(sessionsFile, JSON.stringify([...sessions(), session]));
+		response.end(JSON.stringify(session));
+		emitTyped(directory, "session.created", { info: session });
+	} else if (
+		path === "/experimental/control-plane/move-session" &&
+		request.method === "POST"
+	) {
+		const input = JSON.parse(body || "{}");
+		const previous = sessions().find(({ id }) => id === input.sessionID);
+		if (!previous) {
+			response.writeHead(404).end("{}");
+			return;
+		}
+		if (
+			input.moveChanges !== false ||
+			typeof input.destination?.directory !== "string"
+		) {
+			response.writeHead(400).end("{}");
+			return;
+		}
+		const moved = {
+			...previous,
+			directory: canonical(input.destination.directory),
+			time: { ...previous.time, updated: Date.now() },
+		};
+		writeFileSync(
+			sessionsFile,
+			JSON.stringify(
+				sessions().map((session) =>
+					session.id === moved.id ? moved : session,
+				),
+			),
+		);
+		response.writeHead(204).end();
 	} else if (request.url === "/global/health") {
 		if (!healthy) {
 			response.writeHead(503).end("{}");
@@ -354,18 +415,26 @@ const server = createServer(async (request, response) => {
 		/^\/question\/[^/]+\/(reply|reject)$/.test(path) &&
 		request.method === "POST"
 	) {
-		// Question replies carry no directory: find the asking one.
 		const [, , requestID, action] = path.split("/");
-		const pending = Object.values(readState().questions)
-			.flat()
-			.find(({ id }) => id === requestID);
-		const owner = answerPrompt("questions", requestID);
-		if (owner)
-			emitTyped(
-				owner,
-				action === "reply" ? "question.replied" : "question.rejected",
-				{ sessionID: pending?.sessionID, requestID },
+		// A root question route uses its requested directory, or process cwd.
+		const owner = directory ?? canonical(process.cwd());
+		const pending = (readState().questions[owner] ?? []).find(
+			({ id }) => id === requestID,
+		);
+		if (!pending) {
+			response.writeHead(404).end("{}");
+			return;
+		}
+		updateState((state) => {
+			state.questions[owner] = state.questions[owner].filter(
+				({ id }) => id !== requestID,
 			);
+		});
+		emitTyped(
+			owner,
+			action === "reply" ? "question.replied" : "question.rejected",
+			{ sessionID: pending.sessionID, requestID },
+		);
 		response.end("true");
 	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
 		const sessionID = path.split("/")[2];
@@ -387,7 +456,7 @@ const server = createServer(async (request, response) => {
 		} else {
 			response.end("[]");
 		}
-	} else if (["/agent", "/command", "/file", "/file/content"].includes(path)) {
+	} else if (["/agent", "/command"].includes(path)) {
 		const discoveryFile = join(configDir, "fake-opencode-discovery.json");
 		const discovery = existsSync(discoveryFile)
 			? JSON.parse(readFileSync(discoveryFile, "utf8"))
@@ -396,15 +465,30 @@ const server = createServer(async (request, response) => {
 			JSON.stringify(
 				path === "/agent"
 					? (discovery.agents ?? [])
-					: path === "/command"
-						? (discovery.commands ?? [])
-						: path === "/file/content"
-							? { type: "text", content: "" }
-							: (discovery.files ?? []),
+					: (discovery.commands ?? []),
 			),
 		);
 	} else if (/^\/session\/[^/]+$/.test(path)) {
 		const session = sessions().find(({ id }) => path === `/session/${id}`);
+		if (request.method === "PATCH" && session) {
+			const input = JSON.parse(body || "{}");
+			const updated = {
+				...session,
+				...(input.title !== undefined && { title: input.title }),
+				...(input.permission !== undefined && { permission: input.permission }),
+				time: { ...session.time, updated: Date.now() },
+			};
+			writeFileSync(
+				sessionsFile,
+				JSON.stringify(
+					sessions().map((value) =>
+						value.id === updated.id ? updated : value,
+					),
+				),
+			);
+			response.end(JSON.stringify(updated));
+			return;
+		}
 		if (request.method === "DELETE") {
 			if ((readState().failedDeletes ?? []).includes(session?.id)) {
 				response
@@ -434,6 +518,14 @@ const server = createServer(async (request, response) => {
 		response.end(JSON.stringify(session ?? {}));
 	} else if (path === "/file" || path === "/file/content") {
 		try {
+			const discoveryFile = join(configDir, "fake-opencode-discovery.json");
+			const discovery = existsSync(discoveryFile)
+				? JSON.parse(readFileSync(discoveryFile, "utf8"))
+				: {};
+			if (path === "/file" && discovery.files !== undefined) {
+				response.end(JSON.stringify(discovery.files));
+				return;
+			}
 			const target = join(
 				directory ?? configDir,
 				url.searchParams.get("path") ?? ".",

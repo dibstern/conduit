@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, type Scope } from "effect";
+import { Context, Effect, Layer, Option, type Scope } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -15,6 +15,7 @@ import {
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -25,10 +26,7 @@ import type { EventStoreEffectTag } from "../persistence/effect/event-store-effe
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
-import {
-	defaultClaudeSubagentSdk,
-	makeClaudeSubagentMaterializer,
-} from "./claude/claude-subagent-materializer.js";
+import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
@@ -63,6 +61,8 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -77,6 +77,8 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -154,6 +156,9 @@ const createOrchestrationComponentsEffect = (
 		// binds session→providerId), so a session-keyed resolver over the
 		// binding read model is correct for sendTurn/interrupt/permission/question.
 		const instances = yield* OpenCodeInstancesTag;
+		const instanceManagement = Option.getOrUndefined(
+			yield* Effect.serviceOption(InstanceManagementServiceTag),
+		);
 		const clientForSession = (sessionId: string) =>
 			sessionBindingReadModel
 				.getProviderForSession(sessionId)
@@ -173,14 +178,29 @@ const createOrchestrationComponentsEffect = (
 			clientForSession,
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
+			hasWorktreeToolForSession: (sessionId) =>
+				sessionBindingReadModel.getProviderForSession(sessionId).pipe(
+					Effect.flatMap((instanceId) =>
+						instanceManagement
+							? instanceManagement.list().pipe(
+									Effect.map((configured) =>
+										configured.some(
+											(instance) =>
+												instance.id ===
+													(instanceId ??
+														defaultInstanceIdForDriver("opencode")) &&
+												instance.managed,
+										),
+									),
+									Effect.orElseSucceed(() => false),
+								)
+							: Effect.succeed(false),
+					),
+				),
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 
 		const persist = yield* ClaudeEventPersistEffectTag;
-		const materializeSubagents = makeClaudeSubagentMaterializer({
-			sdk: defaultClaudeSubagentSdk,
-			persist,
-		});
 		let shellEnv = options.shellEnv;
 		let prepareShellEnv = options.prepareShellEnv;
 		if (!shellEnv) {
@@ -210,7 +230,7 @@ const createOrchestrationComponentsEffect = (
 				: {}),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
-			materializeSubagents,
+			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
 			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
@@ -329,6 +349,9 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeSubagentSdk
+					? { claudeSubagentSdk: options.claudeSubagentSdk }
 					: {}),
 				...(options.claudeRunnerFactory
 					? { claudeRunnerFactory: options.claudeRunnerFactory }

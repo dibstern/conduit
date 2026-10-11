@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
@@ -11,6 +10,7 @@ function seed(
 	supportsMultiFolder: boolean | undefined,
 	folders = 2,
 	supportsWorktree = true,
+	driver: "claude" | "opencode" = "opencode",
 ) {
 	const previous = {
 		instances: instanceState.instances,
@@ -18,14 +18,13 @@ function seed(
 		projects: projectState.projects,
 		path: routerState.path,
 		search: routerState.search,
-		instance: discoveryState.selectedInstanceId,
 		compact: sessionViewState.compact,
 	};
 	instanceState.instances = [
 		{
 			id: "folder-provider",
 			name: "Folder provider",
-			driver: "opencode",
+			driver,
 			port: 0,
 			managed: false,
 			status: "healthy",
@@ -41,12 +40,13 @@ function seed(
 		{
 			slug: "workspace",
 			title: "Workspace",
+			instanceId: "folder-provider",
 			folders: folders === 1 ? ["/src/app"] : ["/src/app", "/src/docs"],
+			...(driver === "claude" ? { git: { branch: "main" } } : {}),
 		},
 	];
 	routerState.path = "/new";
 	routerState.search = "?project=workspace";
-	discoveryState.selectedInstanceId = "folder-provider";
 	sessionViewState.compact = false;
 	return () => {
 		instanceState.instances = previous.instances;
@@ -54,7 +54,6 @@ function seed(
 		projectState.projects = previous.projects;
 		routerState.path = previous.path;
 		routerState.search = previous.search;
-		discoveryState.selectedInstanceId = previous.instance;
 		sessionViewState.compact = previous.compact;
 	};
 }
@@ -131,6 +130,34 @@ export const MultiFolderUnknown: Story = {
 			"New worktree soon",
 		);
 	},
+};
+
+export const NewWorktreeEnabled: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		const choice = canvas.getByRole("menuitem", {
+			name: /^New worktree$/,
+		});
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await userEvent.click(
+			canvas.getByRole("menuitemradio", { name: "Current checkout" }),
+		);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^main$/,
+		);
+	},
+};
+
+export const NewWorktreeSelected: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	args: { newWorktree: true },
 };
 
 const existingWorktrees = [

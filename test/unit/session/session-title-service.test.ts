@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -418,6 +418,53 @@ describe("SessionTitleService", () => {
 				expect(yield* getSessionTitle()).toBe(
 					"Investigate OAuth Callback Loop In Production",
 				);
+			}).pipe(Effect.provide(layer));
+		}).pipe(Effect.ensuring(removeTempDir(dir)));
+	});
+
+	it.effect("applies the title to a session on a named Claude instance", () => {
+		const { dir, filename } = makeTempDbPath("conduit-title-instance-");
+		writeFileSync(
+			join(dir, "daemon.json"),
+			JSON.stringify({
+				pid: 1234,
+				port: 2633,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				projects: [],
+				instances: [
+					{
+						id: "personal-claude",
+						name: "Personal Claude",
+						port: 0,
+						managed: false,
+						driver: "claude",
+					},
+				],
+			}),
+		);
+		return Effect.gen(function* () {
+			const layer = makePersistenceTestLayer({
+				queryFactory: () =>
+					makeQuery([assistantMessage("Fix Header Selector")]),
+				persistenceDbPath: filename,
+				config: makeMockConfig({ projectDir: process.cwd(), configDir: dir }),
+			});
+			yield* Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`
+					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'personal-claude', 'Untitled', 'idle', 1000, 1000)`;
+				const service = yield* SessionTitleServiceTag;
+				yield* service.startForFirstClaudeMessage({
+					sessionId: "session-1",
+					firstMessage: "The instance header selector is broken.",
+				});
+				yield* waitForSessionProjectorToReachLatestRename();
+
+				expect(yield* getSessionTitle()).toBe("Fix Header Selector");
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});

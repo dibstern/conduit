@@ -99,7 +99,6 @@ describe("WsRpcServerLayer GetAgents", () => {
 							tls: false,
 							debug: false,
 							keepAwake: false,
-							dangerouslySkipPermissions: false,
 							projects: [],
 							instances: [
 								{
@@ -189,7 +188,6 @@ describe("WsRpcServerLayer GetAgents", () => {
 							tls: false,
 							debug: false,
 							keepAwake: false,
-							dangerouslySkipPermissions: false,
 							projects: [],
 							instances: [
 								{

@@ -55,6 +55,7 @@ import {
 } from "../../../project-folders.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import type { StoredProject } from "../../../types.js";
+import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
 	requestConfigSave,
@@ -62,6 +63,7 @@ import {
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
+import { getInstances } from "./instance-manager-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -727,6 +729,32 @@ export const replaceRelay = (slug: string) =>
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
 
+/** The OpenCode instance a project's relay drives: its bound instance when
+ *  that is OpenCode, else the first OpenCode instance. */
+export const openCodeInstanceFor = <I extends { id: string; driver?: string }>(
+	instances: readonly I[],
+	instanceId: string | undefined,
+): I | undefined =>
+	instances.find((i) => i.driver !== "claude" && i.id === instanceId) ??
+	instances.find((i) => i.driver !== "claude");
+
+/** Bind a project's new sessions to an instance. The relay reads the binding
+ *  only through openCodeInstanceFor, so a running relay that already drives
+ *  the new choice (say, after a rebind between two Claude accounts) is kept
+ *  instead of rebuilt, which takes seconds. */
+export const setProjectInstance = (slug: string, instanceId: string) =>
+	Effect.gen(function* () {
+		yield* updateProject(slug, { instanceId });
+		const relay = yield* (yield* RelayCacheTag).peek(slug);
+		const openCode = openCodeInstanceFor(yield* getInstances, instanceId)?.id;
+		if (Option.isSome(relay) && relay.value.openCodeInstanceId === openCode)
+			return;
+		yield* replaceRelay(slug);
+	}).pipe(
+		Effect.annotateLogs("slug", slug),
+		Effect.withSpan("projectRegistry.setProjectInstance"),
+	);
+
 /**
  * Check if a project is currently in Registering state
  * (i.e., a relay creation is in-flight).
@@ -807,11 +835,15 @@ export const saveProject = (input: SaveProjectInput) =>
 	Effect.flatMap(ProjectSaveLockTag, (lock) =>
 		lock.withPermits(1)(
 			Effect.gen(function* () {
-				const inputs = input.folders.map((folder) =>
-					typeof folder === "string"
-						? { path: normalizeProjectDirectory(folder), create: undefined }
-						: { ...folder, path: normalizeProjectDirectory(folder.path) },
-				);
+				const { configDir } = yield* Ref.get(yield* DaemonStateTag);
+				const inputs = input.folders.map((folder) => {
+					const path = typeof folder === "string" ? folder : folder.path;
+					return {
+						...(typeof folder === "string" ? {} : folder),
+						path: normalizeProjectDirectory(path),
+						originalPath: path.replace(/^~(?=\/|$)/, homedir()),
+					};
+				});
 				const folders = inputs.map((folder) => folder.path);
 				const projects = yield* allProjects;
 				const existing = projects.find(
@@ -834,6 +866,24 @@ export const saveProject = (input: SaveProjectInput) =>
 					issues.push({ kind: "unknown-project", slug: input.slug });
 				}
 				for (const folder of inputs) {
+					const owned = yield* Effect.try({
+						try: () => isConduitWorktreePath(configDir, folder.originalPath),
+						catch: (cause): FolderIssue => ({
+							kind: isPermissionDenied(cause) ? "permission-denied" : "missing",
+							path: folder.path,
+						}),
+					}).pipe(Effect.either);
+					if (Either.isLeft(owned)) {
+						issues.push(owned.left);
+						continue;
+					}
+					if (owned.right) {
+						issues.push({
+							kind: "conduit-worktree",
+							path: folder.originalPath,
+						});
+						continue;
+					}
 					const disk = yield* Effect.try({
 						try: () => {
 							const disk = folder.create
@@ -878,7 +928,6 @@ export const saveProject = (input: SaveProjectInput) =>
 					return yield* new WsRpcError({
 						message: "SaveProject failed: title is required",
 					});
-				const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 				const mainChanged =
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;

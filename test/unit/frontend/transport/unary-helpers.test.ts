@@ -134,41 +134,36 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 
-it("shares one control transport across unary helpers and opens a new pair for a second project", async () => {
+it("shares one control transport across unary helpers and projects", async () => {
 	await Promise.all([
 		setLogLevelRpc({ projectSlug: "alpha", level: "debug" }),
 		syncInputDraftRpc({ projectSlug: "alpha", sessionId: "s1", text: "draft" }),
 	]);
 	await setLogLevelRpc({ projectSlug: "alpha", level: "info" });
-	// Include legacy attempts in the assertion diagnostic for the red run.
-	expect({
-		legacySockets,
-		controls: transports.filter((t) => t.trafficClass === "control").length,
-	}).toEqual({ legacySockets: [], controls: 1 });
-	expect(transports).toEqual([
-		{
-			url: "ws://localhost:2633/rpc",
-			trafficClass: "control",
-			tags: ["SetLogLevel", "SyncInputDraft", "SetLogLevel"],
-		},
-		{
-			url: "ws://localhost:2633/rpc",
-			trafficClass: "stream",
-			tags: [],
-		},
-	]);
 	await syncInputDraftRpc({
 		projectSlug: "beta",
 		sessionId: "s2",
 		text: "other",
 	});
 	await setLogLevelRpc({ projectSlug: "beta", level: "info" });
-	expect(transports.slice(2)).toEqual([
+	// Include legacy attempts in the assertion diagnostic for the red run.
+	expect({ legacySockets }).toEqual({ legacySockets: [] });
+	expect(transports).toEqual([
 		{
 			url: "ws://localhost:2633/rpc",
 			trafficClass: "control",
-			tags: ["SyncInputDraft", "SetLogLevel"],
+			tags: [
+				"SetLogLevel",
+				"SyncInputDraft",
+				"SetLogLevel",
+				"SyncInputDraft",
+				"SetLogLevel",
+			],
 		},
-		{ url: "ws://localhost:2633/rpc", trafficClass: "stream", tags: [] },
+		{
+			url: "ws://localhost:2633/rpc",
+			trafficClass: "stream",
+			tags: [],
+		},
 	]);
 });

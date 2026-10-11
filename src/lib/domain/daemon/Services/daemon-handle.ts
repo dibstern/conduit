@@ -10,6 +10,7 @@ import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
+import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
@@ -83,6 +84,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| DaemonLifecycleContextTag
 	| InstanceManagerStateTag
 	| DaemonStateTag
+	| KeepAwakeTag
 > = Layer.effect(
 	DaemonHandleTag,
 	Effect.gen(function* () {
@@ -95,32 +97,19 @@ export const DaemonHandleLive: Layer.Layer<
 		const lifecycleContext = yield* DaemonLifecycleContextTag;
 		const instanceState = yield* InstanceManagerStateTag;
 		const daemonState = yield* DaemonStateTag;
+		const keepAwake = yield* KeepAwakeTag;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
 			getOnboardingPort(lifecycleContext.onboardingServer),
 		);
+		// A new project stays unbound unless the caller picks an instance: the
+		// binding chooses the harness for new sessions, so a default here would
+		// override the default model's harness. The relay picks an OpenCode
+		// instance on its own.
 		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {
-				const instances = Array.from(
-					yield* getEffectInstances.pipe(
-						Effect.provideService(InstanceManagerStateTag, instanceState),
-					),
-				);
-				const opencodeInstances = instances.filter(
-					(instance) => (instance.driver ?? "opencode") === "opencode",
-				);
-				const resolvedInstanceId =
-					input.instanceId ??
-					opencodeInstances.find((instance) => instance.status === "healthy")
-						?.id ??
-					opencodeInstances[0]?.id;
-				const result = yield* saveProjectToRegistry({
-					...input,
-					...(resolvedInstanceId !== undefined && {
-						instanceId: resolvedInstanceId,
-					}),
-				}).pipe(
+				const result = yield* saveProjectToRegistry(input).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),
@@ -208,6 +197,7 @@ export const DaemonHandleLive: Layer.Layer<
 						tailscaleServe: config.tailscaleServe,
 					}),
 					keepAwake: config.keepAwake,
+					keepAwakeCommand: yield* keepAwake.getCommand(),
 					projects: sortedStatusProjects(projects),
 				} satisfies DaemonStatus;
 			}).pipe(Effect.withSpan("daemonHandle.getStatus"));

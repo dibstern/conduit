@@ -81,6 +81,7 @@
 	// A preview remounts when the viewport crosses the phone breakpoint.
 	$effect(() => {
 		const path = visible ? uiState.fileViewerPath : null;
+		const root = visible ? uiState.fileViewerRoot : null;
 		const requestId = ++fileContentRequestId;
 		if (!path) return;
 		const slug = getCurrentSlug();
@@ -93,7 +94,7 @@
 		truncated = false;
 		loadError = null;
 		loading = true;
-		void getFileContentRpc({ projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
+		void getFileContentRpc({ projectSlug: slug, path, ...(root !== null ? { root } : {}), ...(sessionId ? { sessionId } : {}) })
 			.then((response) => {
 				if (requestId === fileContentRequestId && fileTreeState.scope === scope) applyGetFileContentResponse(response);
 			})
@@ -158,7 +159,7 @@
 		const unsub = onFileBrowser((reply) => {
 			if (reply.kind !== "content") return;
 			const msg = reply.response;
-			if (!uiState.fileViewerPath || msg.path === uiState.fileViewerPath) {
+			if ((!uiState.fileViewerPath || msg.path === uiState.fileViewerPath) && (msg.root ?? null) === uiState.fileViewerRoot) {
 				const rawContent = msg.content;
 				filePath = msg.path;
 				binary = msg.binary ?? false;

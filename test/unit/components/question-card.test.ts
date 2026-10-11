@@ -1,4 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import QuestionCard from "../../../src/lib/frontend/components/chat/QuestionCard.svelte";
 import type { QuestionRequest } from "../../../src/lib/frontend/types.js";
@@ -54,5 +60,31 @@ describe("QuestionCard", () => {
 		});
 
 		expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+	});
+
+	it("keeps labels and radio selections local when the same question appears in two panes", async () => {
+		const request = questionRequest({ providerId: "claude" });
+		const parent = render(QuestionCard, { props: { request } });
+		const drawer = render(QuestionCard, { props: { request } });
+		const parentRadio =
+			parent.container.querySelector<HTMLInputElement>("input[type=radio]");
+		const drawerRadio =
+			drawer.container.querySelector<HTMLInputElement>("input[type=radio]");
+		const drawerLabel = drawer.container.querySelector("label");
+		if (!parentRadio || !drawerRadio || !drawerLabel)
+			throw new Error("Missing question controls");
+		await fireEvent.click(drawerLabel);
+		expect(drawerRadio.checked).toBe(true);
+		expect(parentRadio.checked).toBe(false);
+		expect(
+			within(drawer.container)
+				.getByRole("button", { name: "Submit" })
+				.hasAttribute("disabled"),
+		).toBe(false);
+		const parentLabel = parent.container.querySelector("label");
+		if (!parentLabel) throw new Error("Missing parent question label");
+		await fireEvent.click(parentLabel);
+		expect(drawerRadio.checked).toBe(true);
+		expect(parentRadio.checked).toBe(true);
 	});
 });
