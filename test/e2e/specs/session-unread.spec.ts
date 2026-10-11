@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Browser, Page, TestInfo, WebSocketRoute } from "@playwright/test";
-import type { ReplayHarness } from "../helpers/e2e-harness.js";
+import { createSession, type ReplayHarness } from "../helpers/e2e-harness.js";
 import {
 	expect,
 	gotoRelay,
@@ -619,13 +619,11 @@ async function restAndClick(A: Page) {
 	});
 }
 
-const OTHER_SESSION = "ses_e2e_other";
-
 /** A switches to another session and comes back without picking this one. */
-async function switchAwayAndBack(ctx: Interaction) {
+async function switchAwayAndBack(ctx: Interaction, otherSession: string) {
 	const { A } = ctx.windows;
 	// The title, not the row centre: that can land on a hover verb (e5b2819b).
-	await row(A, OTHER_SESSION).locator(".session-item-title").click();
+	await row(A, otherSession).locator(".session-item-title").click();
 	await expect(A).not.toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));
 	await A.goBack();
 	await expect(A).toHaveURL(new RegExp(`/s/${ctx.sessionId}$`));
@@ -639,25 +637,33 @@ async function markUnreadHolds(
 ) {
 	const ctx = await openInteraction(provider, fixtures);
 	const { A, B } = ctx.windows;
-	// Somewhere to switch away to: a session's first streamed event seeds its
-	// row, and a user message ends no turn.
-	const now = Date.now();
-	ctx.harness.mock.emitTestEvent("session.created", {
-		info: {
-			id: OTHER_SESSION,
-			title: "Elsewhere",
-			time: { created: now, updated: now },
-		},
-	});
-	ctx.harness.mock.emitTestEvent("message.updated", {
-		info: {
-			id: "msg_e2e_other",
-			sessionID: OTHER_SESSION,
-			role: "user",
-			time: { created: now },
-		},
-	});
-	await expect(row(A, OTHER_SESSION)).toBeVisible();
+	// Somewhere to switch away to, made the way the provider's sessions are.
+	// The relay opens OpenCode's event stream only once OpenCode is used, so
+	// events streamed in a Claude run would reach nobody (conduit-test-e0np).
+	let otherSession = "ses_e2e_other";
+	if (provider === "claude")
+		otherSession = await createSession(ctx.harness.relayPort, "claude");
+	else {
+		// A session's first streamed event seeds its row, and a user message
+		// ends no turn.
+		const now = Date.now();
+		ctx.harness.mock.emitTestEvent("session.created", {
+			info: {
+				id: otherSession,
+				title: "Elsewhere",
+				time: { created: now, updated: now },
+			},
+		});
+		ctx.harness.mock.emitTestEvent("message.updated", {
+			info: {
+				id: "msg_e2e_other",
+				sessionID: otherSession,
+				role: "user",
+				time: { created: now },
+			},
+		});
+	}
+	await expect(row(A, otherSession)).toBeVisible();
 
 	await test.step("marked unread in A with one finished turn, A's pointer and clicks keep it", async () => {
 		await newDot(ctx, "First turn");
@@ -672,7 +678,7 @@ async function markUnreadHolds(
 	});
 
 	await test.step("switching away and back lets a resting pointer clear it", async () => {
-		await switchAwayAndBack(ctx);
+		await switchAwayAndBack(ctx, otherSession);
 		await expectKept(ctx, 1, "switched away and back");
 		await paused(A, async () => {
 			const centre = await transcriptCentre(A);
@@ -693,7 +699,7 @@ async function markUnreadHolds(
 	});
 
 	await test.step("A switching away and back lets a click clear it", async () => {
-		await switchAwayAndBack(ctx);
+		await switchAwayAndBack(ctx, otherSession);
 		await expectKept(ctx, 2, "switched away and back after B's mark");
 		await paused(A, async () => {
 			await transcript(A).click({ position: { x: 24, y: 24 } });
