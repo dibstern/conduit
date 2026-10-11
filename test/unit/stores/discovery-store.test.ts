@@ -240,6 +240,7 @@ describe("applyGetModelsResponse", () => {
 		const applyResponse = () =>
 			applyGetModelsResponse({
 				projectSlug: "project-a",
+				active: { model: "sonnet", provider: "claude" },
 				providers: [
 					{
 						id: "anthropic",

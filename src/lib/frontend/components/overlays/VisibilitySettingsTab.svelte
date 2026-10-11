@@ -5,6 +5,7 @@
 	import { applyGetAgentsResponse, applyGetModelsResponse, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { getAgentsRpc, getModelsRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let { visible, state = $bindable() }: { visible: boolean; state: { modelsFetchPending: boolean } } = $props();
@@ -30,8 +31,13 @@
 		if (!projectSlug) return;
 		if (discoveryState.providers.length === 0) {
 			state.modelsFetchPending = true;
-			void getModelsRpc({ projectSlug })
-				.then(applyGetModelsResponse)
+			// Scoped, so the reply describes the open session's model, not the
+			// project default.
+			const sessionId = sessionState.currentId;
+			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+				.then((response) => {
+					if (sessionState.currentId === sessionId) applyGetModelsResponse(response);
+				})
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					state.modelsFetchPending = false;

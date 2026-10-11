@@ -27,9 +27,9 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
+		getSessionInstanceId,
 		formatModelName,
 		type InstanceOption,
-		instanceIdForProviderId,
 		isProviderConfigured,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
@@ -75,11 +75,9 @@
 	const instances = $derived(getAvailableInstances());
 
 	/** Instance bound to the active session — non-null means locked mode. */
-	const boundInstanceId = $derived.by(() => {
-		if (!sessionState.currentId) return null;
-		const providerId = discoveryState.currentProviderId;
-		return providerId ? instanceIdForProviderId(providerId) : null;
-	});
+	const boundInstanceId = $derived(
+		sessionState.currentId ? getSessionInstanceId(sessionState.currentId) : null,
+	);
 	const locked = $derived(boundInstanceId !== null);
 	const selectedId = $derived(boundInstanceId ?? getEffectiveInstanceId());
 	const selectedInstance = $derived(

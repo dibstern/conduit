@@ -253,7 +253,7 @@
 				iconOnly
 				icon="plus"
 				iconSize={20}
-				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
+				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
 				title="New session"
 				ariaLabel="New session"
 				onclick={handleNewSession}
@@ -276,6 +276,6 @@
 
 <style>
 	.phone-list :global(#session-list-scroller) {
-		padding-bottom: calc(max(55px, var(--phone-usage-height, 0px) + 9px) + 12px + env(safe-area-inset-bottom, 0px));
+		padding-bottom: calc(max(55px + env(safe-area-inset-bottom, 0px), var(--phone-usage-height, 0px)) + 12px);
 	}
 </style>

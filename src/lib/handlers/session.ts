@@ -15,7 +15,7 @@ import {
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
-import { savedVariantFor } from "./model.js";
+import { savedVariantFor, switchVariantForSession } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 interface ViewSessionPayload {
@@ -147,18 +147,24 @@ export const createSessionForClient = <E = never>({
 								modelID: model.modelId,
 							};
 							yield* selectSessionModel(session.id, override);
-							// Keep a draft effort only if this model offers it; otherwise
-							// inherit the picked model's saved effort rather than the default's.
+							// Keep a draft effort only if this model offers it, and save it
+							// as a session pick would be; otherwise inherit the picked
+							// model's saved effort rather than the default's.
 							const { variant: saved, variants } =
 								yield* savedVariantFor(override);
 							const picked = model.variant;
-							yield* selectSessionVariant(
-								session.id,
+							if (
 								picked === "" ||
-									(picked !== undefined && variants.includes(picked))
-									? picked
-									: saved,
-							);
+								(picked !== undefined && variants.includes(picked))
+							) {
+								yield* switchVariantForSession({
+									clientId,
+									sessionId: session.id,
+									variant: picked,
+								});
+							} else {
+								yield* selectSessionVariant(session.id, saved);
+							}
 						}
 						yield* switchClientToSession(clientId, session.id, {
 							skipPollerSeed: true,

@@ -27,7 +27,7 @@ import type {
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
-import { sessionState } from "./session.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
 	{
@@ -458,6 +458,22 @@ export function getEffectiveInstanceId(
 	return available[0]?.id ?? derived;
 }
 
+/** The instance a session's picker is locked to. Only built-in instances'
+ *  catalogues are fetched, so a custom instance shows its driver's. Until
+ *  GetAgents reports the binding, the session's own model names its harness,
+ *  since a model runs only on its own. One left on the default has none, so
+ *  assume the composer's aim, which is where a new session runs. */
+export function getSessionInstanceId(sessionId: string): string {
+	const bound = getAvailableInstances().find(
+		(instance) => instance.id === serverDiscovery.sessionInstanceIds[sessionId],
+	);
+	if (bound) return bound.driver;
+	const provider = findSession(sessionId)?.model?.provider;
+	return provider
+		? instanceIdForProviderId(provider)
+		: getEffectiveInstanceId();
+}
+
 /** Re-aim the local model selection after a harness pick (pre-creation
  *  only): if the active model falls outside the instance, choose the
  *  instance's default-or-first visible model. The pick itself is a project
@@ -652,6 +668,12 @@ export function hydrateModelSettings(
 	if (!sessionState.currentId && discoveryState.hasModelChoice) return;
 	if (response.active) {
 		handleModelInfo(response.active);
+	} else {
+		// The harness picks its own model, so drop the last session's.
+		serverDiscovery.currentModelId = "";
+		serverDiscovery.currentProviderId = "";
+		choice.modelId = null;
+		choice.providerId = null;
 	}
 	if (response.variant) {
 		handleVariantInfo({
@@ -892,6 +914,25 @@ export function chooseModel(model: {
 		propose("modelId", model.modelId),
 		propose("providerId", model.providerId),
 	]);
+}
+
+/** Call right after a draft's model pick. Returns how to apply what that pick
+ *  reads back: the model's efforts and saved effort. Nothing changes once the
+ *  draft has moved on, to a session, another pick or another project. An
+ *  effort picked while the read was in flight stays picked; one picked before
+ *  belonged to the previous model. */
+export function followDraftModelPick(): (msg: {
+	readonly variant?: string;
+	readonly variants?: readonly string[];
+}) => void {
+	const modelClick = owner.modelId;
+	const effortClick = owner.variant;
+	return (msg) => {
+		if (sessionState.currentId || owner.modelId !== modelClick) return;
+		serverDiscovery.currentVariant = msg.variant ?? "";
+		serverDiscovery.availableVariants = [...(msg.variants ?? [])];
+		if (owner.variant === effortClick) choice.variant = null;
+	};
 }
 
 /** This tab's model and effort picks, if `instanceId` lists the model.
