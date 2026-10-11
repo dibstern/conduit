@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { fn } from "storybook/test";
-import Toggle from "./Toggle.svelte";
+import SettingsRow from "./SettingsRow.svelte";
 
 const meta = {
-	title: "UI/Toggle",
-	component: Toggle,
+	title: "UI/SettingsRow",
+	component: SettingsRow,
 	tags: ["autodocs"],
 	parameters: { layout: "padded" },
 	args: {
@@ -17,7 +17,7 @@ const meta = {
 		checked: { control: "boolean" },
 		disabled: { control: "boolean" },
 	},
-} satisfies Meta<typeof Toggle>;
+} satisfies Meta<typeof SettingsRow>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
