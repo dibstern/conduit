@@ -8,12 +8,14 @@ import {
 import {
 	clearDiscoveryState,
 	handleAgentList,
+	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
+import { serverStatus } from "../../stores/server-status.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
@@ -25,6 +27,29 @@ function resetState() {
 	routerState.path = "/";
 	clearDiscoveryState();
 	applyInstanceListResponse({ instances: [] });
+	Object.assign(serverStatus, {
+		status: {
+			uptime: 273_600,
+			version: "0.42.1",
+			port: 2633,
+			host: "0.0.0.0",
+			clientCount: 2,
+			projectCount: 0,
+			sessionCount: 0,
+			pinEnabled: false,
+			tlsEnabled: false,
+			keepAwake: false,
+			keepAwakeCommand: "caffeinate -di",
+			logLevel: "info",
+			supervised: true,
+			projects: [],
+		},
+		loading: false,
+		error: null,
+		restartInFlight: false,
+		restartAccepted: false,
+		shutdownInFlight: false,
+	});
 	applyUsageReadings([]);
 	applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
 	featureFlags.debug = false;
@@ -37,6 +62,28 @@ function resetState() {
 function populateInstances() {
 	applyInstanceListResponse({
 		instances: [
+			{
+				id: "claude",
+				name: "Personal Claude",
+				driver: "claude",
+				configDir: "~/.claude",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000,
+			},
+			{
+				id: "work-claude",
+				name: "Work Claude",
+				driver: "claude",
+				configDir: "~/.config/claude/work",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_860_000,
+			},
 			{
 				id: "instance-local",
 				name: "Local OpenCode",
@@ -97,6 +144,14 @@ export const Composer: Story = {
 	globals: { theme: "dark" },
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body
+				.getAllByRole("heading", { level: 3 })
+				.map((heading) => heading.textContent),
+		).toEqual(["Notifications", "Appearance", "Composer", "Sessions"]);
+		await expect(
+			body.getByRole("button", { name: /^Advanced.*Debug off$/ }),
+		).toHaveAttribute("aria-expanded", "false");
 		// On phone an explicit section opens drilled in, so the list is not shown.
 		const tab = body.queryByTestId("settings-tab-general");
 		if (tab) await expect(tab).toHaveAttribute("aria-selected", "true");
@@ -138,58 +193,264 @@ export const ComposerLight: Story = {
 	globals: { theme: "light" },
 };
 
+export const Advanced: Story = {
+	args: { initialTab: "general" },
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const disclosure = body.getByRole("button", {
+			name: /^Advanced.*Debug off$/,
+		});
+		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		disclosure.scrollIntoView({ block: "nearest" });
+		await userEvent.click(disclosure);
+		const toggle = body.getByRole("switch", {
+			name: "Toggle connection debug panel",
+		});
+		await expect(toggle).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(toggle);
+		await expect(disclosure).toHaveTextContent("Debug on");
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		toggle.scrollIntoView({ block: "nearest" });
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
 export const VisibilityEmpty: Story = {
 	args: { initialTab: "models" },
 };
 
+function populateVisibility() {
+	handleModelList({
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: "opus",
+						name: "Opus",
+						provider: "claude",
+						variants: ["high", "max"],
+						contextWindowOptions: [
+							{ value: "200k", label: "200k" },
+							{ value: "1m", label: "1M" },
+						],
+					},
+				],
+			},
+			{
+				id: "anthropic",
+				name: "Anthropic",
+				configured: true,
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "Claude Sonnet 4",
+						provider: "anthropic",
+					},
+					{
+						id: "claude-haiku-3-5",
+						name: "Claude Haiku 3.5",
+						provider: "anthropic",
+					},
+				],
+			},
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [
+					{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+					{ id: "gpt-5", name: "GPT-5", provider: "openai" },
+				],
+			},
+		],
+	});
+	handleHarnessDefaults({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "opus",
+				effort: "max",
+				contextWindow: "1m",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	handleVisibilityInfo({
+		hiddenModels: ["anthropic/claude-haiku-3-5"],
+		hiddenAgents: ["anthropic/review"],
+	});
+	handleAgentList({
+		providerScope: { id: "anthropic", name: "Anthropic" },
+		agents: [
+			{
+				id: "code",
+				name: "Code",
+				description: "Write and edit code",
+			},
+			{
+				id: "review",
+				name: "Review",
+				description: "Review changes without editing",
+			},
+		],
+	});
+}
+
 export const Models: Story = {
 	args: { initialTab: "models" },
+	beforeEach: populateVisibility,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("settings-models-summary")).toHaveTextContent(
+			"4 of 5 shown",
+		);
+		for (const testId of [
+			"settings-models-group-claude",
+			"settings-models-group-anthropic",
+			"settings-models-group-openai",
+			"settings-agents-group",
+		])
+			await expect(
+				within(body.getByTestId(testId)).getByRole("button", {
+					expanded: false,
+				}),
+			).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
+	},
+};
+
+export const ModelsInvalidDefault: Story = {
+	args: { initialTab: "models" },
 	beforeEach: () => {
-		handleModelList({
-			providers: [
-				{
-					id: "anthropic",
-					name: "Anthropic",
-					configured: true,
-					models: [
-						{
-							id: "claude-sonnet-4",
-							name: "Claude Sonnet 4",
-							provider: "anthropic",
-						},
-						{
-							id: "claude-haiku-3-5",
-							name: "Claude Haiku 3.5",
-							provider: "anthropic",
-						},
-					],
+		populateVisibility();
+		handleHarnessDefaults({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "invalid",
+				pick: {
+					providerId: "claude",
+					modelId: "retired-sonnet",
+					effort: "",
+					contextWindow: "",
 				},
-			],
-		});
-		handleVisibilityInfo({
-			hiddenModels: ["anthropic/claude-haiku-3-5"],
-			hiddenAgents: ["anthropic/review"],
-		});
-		handleAgentList({
-			providerScope: { id: "anthropic", name: "Anthropic" },
-			agents: [
-				{
-					id: "code",
-					name: "Code",
-					description: "Write and edit code",
+				problem:
+					"ModelNotInCatalog: model claude/retired-sonnet is not in the claude catalog",
+			},
+			opencode: {
+				status: "ok",
+				pick: {
+					providerId: "anthropic",
+					modelId: "claude-sonnet-4",
+					effort: "",
+					contextWindow: "",
 				},
-				{
-					id: "review",
-					name: "Review",
-					description: "Review changes without editing",
-				},
-			],
+			},
 		});
+	},
+};
+
+export const ModelsFiltered: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"4",
+		);
+		for (const provider of ["anthropic", "openai"])
+			await expect(
+				within(body.getByTestId(`settings-models-group-${provider}`)).getByRole(
+					"button",
+					{ expanded: true },
+				),
+			).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle claude sonnet 4" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle gpt-4.1" }),
+		).toBeVisible();
+		await expect(
+			body.queryByTestId("settings-agents-group"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const ModelsNoMatch: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"no-such-model",
+		);
+		await expect(
+			body.getByText("No models match ‘no-such-model’.", { exact: true }),
+		).toBeVisible();
+		await expect(body.getByRole("button", { name: "Clear" })).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
 	},
 };
 
 export const Claude: Story = {
 	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		await expect(
+			canvas.queryByTestId("claude-setting-attribution"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ClaudeAttributionExpanded: Story = {
+	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		// The synthetic click leaves keyboard focus; the frame should show the open group, not a ring.
+		disclosure.blur();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-commit-input"),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-pr-input"),
+		).toBeVisible();
+		await expect(
+			within(canvas.getByTestId("claude-setting-attribution")).getByRole(
+				"switch",
+			),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-provenance"),
+		).toBeVisible();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
 };
 
 export const Usage: Story = {
@@ -198,6 +459,72 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		// The fixture has no PIN, so this frame is also the PIN-off state.
+		await expect(
+			canvas.getByTestId("server-security-settings"),
+		).toHaveTextContent(
+			"Off · anyone who can reach this address can open conduit",
+		);
+		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
+			"up 3d 4h",
+		);
+		await expect(canvas.getByTestId("server-status-version")).toHaveTextContent(
+			"0.42.1",
+		);
+		await expect(canvas.getByTestId("server-status-port")).toHaveTextContent(
+			"port 2633",
+		);
+		await expect(
+			canvas.getByTestId("server-status-browsers"),
+		).toHaveTextContent("2 browsers connected");
+		await userEvent.click(canvas.getByTestId("server-shutdown-btn"));
+		await expect(canvas.getByTestId("server-shutdown-cancel")).toHaveFocus();
+		await userEvent.click(canvas.getByTestId("server-shutdown-cancel"));
+		await expect(
+			canvas.queryByTestId("server-shutdown-confirmation"),
+		).not.toBeInTheDocument();
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
+export const PinOn: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, pinEnabled: true };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const security = canvas.getByTestId("server-security-settings");
+		await expect(security).toHaveTextContent(
+			"On · asked once on each new device",
+		);
+		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
+		security.scrollIntoView({ block: "nearest" });
+	},
+};
+
+export const ChangePin: Story = {
+	...PinOn,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-pin-change-btn"));
+		await expect(canvas.getByTestId("server-pin-current")).toHaveFocus();
+		await expect(
+			canvas.getByLabelText("New PIN", { exact: true }),
+		).toBeVisible();
+		await expect(canvas.getByLabelText("Confirm new PIN")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
+			"Every browser, including this one, will ask for the new PIN.",
+		);
+		canvas.getByTestId("server-security-settings").scrollIntoView({
+			block: "end",
+		});
+	},
 };
 
 /**
@@ -241,6 +568,30 @@ export const InstanceExpanded: Story = {
 
 		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
+	},
+};
+
+export const ClaudeAccountExpanded: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const account = within(canvas.getByTestId("instance-row-work-claude"));
+		const row = account.getByRole("button", { name: /Work Claude/ });
+		await expect(row).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(row);
+		await expect(row).toHaveAttribute("aria-expanded", "true");
+		await expect(
+			account.getByText("Config dir", { exact: true }),
+		).toBeVisible();
+		await expect(
+			account.getByText("Sessions you move to it, and auto-switch"),
+		).toBeVisible();
+		await expect(account.getByTestId("edit-instance-btn")).toBeVisible();
+		await expect(account.getByTestId("remove-instance-btn")).toBeVisible();
+		await expect(
+			account.queryByTestId("rename-instance-btn"),
+		).not.toBeInTheDocument();
 	},
 };
 

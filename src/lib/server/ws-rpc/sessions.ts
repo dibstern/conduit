@@ -4,9 +4,15 @@ import {
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
-import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
+import {
+	SessionWorkspaceSchema,
+	WorkspaceMoveError,
+} from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
-import { WorktreeCreationError } from "../../contracts/worktree.js";
+import {
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
@@ -21,6 +27,7 @@ import {
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
+import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
 	createLocalSessionId,
 	SessionManagerServiceTag,
@@ -30,6 +37,7 @@ import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspa
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
+	listLocalBranches,
 	listProjectWorktrees,
 	realWorkspacePath,
 } from "../../git/worktrees.js";
@@ -54,9 +62,14 @@ import {
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection } from "../../provider/turn-settings.js";
+import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	ListBranches: (_request) =>
+		Effect.flatMap(ConfigTag, (config) =>
+			listLocalBranches(config.projectDir),
+		).pipe(Effect.catchAll(mapRpcFailure("ListBranches"))),
 	ListWorktrees: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -97,6 +110,76 @@ export const sessionsHandlers = {
 					error instanceof WorkspaceMoveError
 						? Effect.fail(error)
 						: mapRpcFailure("MoveSessionWorkspace")(error),
+			),
+		),
+	RecreateSessionWorktree: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			const worktrees = yield* WorktreeServiceTag;
+			const read = yield* ReadQueryEffectTag;
+			const result = yield* workspace.withLaunch(
+				Effect.gen(function* () {
+					const row = yield* read.getSession(request.sessionId);
+					const state =
+						row?.workspace == null
+							? null
+							: yield* Schema.decodeUnknown(
+									Schema.parseJson(SessionWorkspaceSchema),
+								)(row.workspace);
+					const directory = effectiveWorkingDirectory(config.projectDir, state);
+					const folder =
+						state?.origin === "conduit"
+							? Object.entries(state.worktrees).find(
+									([, path]) => path === directory,
+								)?.[0]
+							: undefined;
+					if (!folder)
+						return yield* new WorktreeRecoveryError({
+							path: directory,
+							reason: "not-owned",
+							message:
+								"Could not recreate worktree: the session has no Conduit-owned worktree.",
+						});
+					return {
+						directory: yield* worktrees.recreate(
+							{
+								path: folder,
+								projectSlug: config.slug,
+								sessionId: request.sessionId,
+							},
+							directory,
+						),
+					};
+				}),
+			);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some")
+				yield* git.value.refresh({ sessionId: request.sessionId });
+			return result;
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorktreeRecoveryError | WsRpcError> =>
+					error instanceof WorktreeRecoveryError
+						? Effect.fail(error)
+						: mapRpcFailure("RecreateSessionWorktree")(error),
+			),
+		),
+	ContinueSessionInMainFolder: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			return yield* workspace.withLaunch(
+				workspace
+					.move(request.sessionId, config.projectDir, "user")
+					.pipe(Effect.map((directory) => ({ directory }))),
+			);
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
+					error instanceof WorkspaceMoveError
+						? Effect.fail(error)
+						: mapRpcFailure("ContinueSessionInMainFolder")(error),
 			),
 		),
 	DismissWorkspaceHint: (request) =>
@@ -370,6 +453,10 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
+			if (request.worktreeBase !== undefined && !request.newWorktree)
+				return yield* new WsRpcError({
+					message: "worktreeBase requires newWorktree: true.",
+				});
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
 			const options = {
@@ -420,23 +507,22 @@ export const sessionsHandlers = {
 											sessionId,
 										}),
 									),
+									request.worktreeBase === undefined
+										? undefined
+										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
 							return yield* restore(
-								Effect.gen(function* () {
-									const launchPath = created.worktrees[config.projectDir];
-									if (launchPath === undefined)
-										return yield* new WsRpcError({
-											message: "Worktree creation returned no primary folder.",
-										});
-									return yield* createSessionForClient({
-										...options,
-										sessionId,
-										initializeWorkspace: (id: string) =>
-											workspace
-												.move(id, launchPath, "launch", "conduit")
-												.pipe(Effect.asVoid),
-									});
+								createSessionForClient({
+									...options,
+									sessionId,
+									initializeWorkspace: (id: string) =>
+										Effect.forEach(
+											Object.entries(created.worktrees),
+											([folder, path]) =>
+												workspace.move(id, path, "launch", "conduit", folder),
+											{ discard: true },
+										),
 								}),
 							).pipe(
 								Effect.catchAllCause((cause) =>
@@ -618,7 +704,10 @@ export const sessionsHandlers = {
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "ListWorktrees"
+	| "ListBranches"
 	| "MoveSessionWorkspace"
+	| "RecreateSessionWorktree"
+	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
 	| "SetSessionPinned"

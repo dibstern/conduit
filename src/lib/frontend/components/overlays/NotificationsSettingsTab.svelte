@@ -82,10 +82,10 @@
 	}
 </script>
 
-<SettingsGroup>
+<SettingsGroup id="settings-notifications" title="Notifications">
 	<SettingsRow
 		label="Push notifications"
-		description="Receive push notifications even when the tab is closed"
+		description="Alerts this device when a session needs you"
 		checked={state.notifSettings.push}
 		onchange={togglePush}
 		disabled={state.pushBusy || pushUnavailable}

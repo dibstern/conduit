@@ -584,8 +584,7 @@ export function createTranslator(): Translator {
 				);
 			}
 
-			// Terminals stream from the relay's PtyManager through the project's
-			// PTY subscription (conduit-test-ni8.11), not from OpenCode's SSE.
+			// SSE wiring requests PTY discovery; SubscribePtys serves its result.
 			if (eventType.startsWith("pty.")) {
 				return {
 					ok: false,

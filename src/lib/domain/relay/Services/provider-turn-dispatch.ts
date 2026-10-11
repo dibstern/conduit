@@ -14,6 +14,7 @@ import {
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import { MissingWorktreeError } from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
@@ -56,6 +57,7 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
 import {
@@ -69,7 +71,10 @@ import {
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
-import { SessionWorkspaceTag } from "./session-workspace.js";
+import {
+	inspectSessionWorktree,
+	SessionWorkspaceTag,
+} from "./session-workspace.js";
 import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn } from "./turn-failure.js";
 
@@ -115,6 +120,16 @@ export const resolveSessionFolders = (
 						savedWorkspace,
 					);
 		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		if (
+			yield* inspectSessionWorktree(
+				{ id: session.id, workspace: state },
+				config,
+			)
+		)
+			return yield* new MissingWorktreeError({
+				path: workspaceRoot,
+				message: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
+			});
 		if (!existsSync(workspaceRoot)) {
 			const fallback =
 				fallbackMissingWorktree &&
@@ -362,11 +377,10 @@ const handleDispatchFailure = (
 			`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 			formatErrorDetail(sendErr),
 		);
-		const error = RelayError.fromCaught(
-			sendErr,
-			"SEND_FAILED",
-			"Failed to send message",
-		);
+		const missing = sendErr instanceof MissingWorktreeError;
+		const error = missing
+			? { message: sendErr.message, code: "WORKTREE_MISSING" }
+			: RelayError.fromCaught(sendErr, "SEND_FAILED", "Failed to send message");
 		yield* failUnfinishedSend(
 			input,
 			driver,
@@ -374,6 +388,20 @@ const handleDispatchFailure = (
 			error.message,
 			error.code,
 		);
+		if (missing) {
+			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
+			if (
+				ws._tag === "Some" &&
+				ws.value.getClientsForSession(input.sessionId).length > 0
+			)
+				yield* publishAlert({
+					_tag: "alert",
+					kind: "error",
+					alertId: randomUUID(),
+					sessionId: input.sessionId,
+					message: error.message,
+				});
+		}
 	});
 
 const handleDispatchResult = (
@@ -812,9 +840,14 @@ const dispatchEngineTurn = (
 			dispatchProgram,
 			{ onlyIfMissing: true },
 		);
-		yield* Effect.raceFirst(
-			Deferred.await(accepted),
-			Fiber.await(fiber).pipe(Effect.asVoid),
+		// The race interrupts its loser, which an uninterruptible caller (a
+		// continuation) would otherwise wait out for the whole turn. The
+		// dispatch runs in the map, so only the wait is interrupted.
+		yield* Effect.interruptible(
+			Effect.raceFirst(
+				Deferred.await(accepted),
+				Fiber.await(fiber).pipe(Effect.asVoid),
+			),
 		);
 	});
 
@@ -837,7 +870,8 @@ const sendViaEngine = (
 		).pipe(
 			Effect.catchIf(
 				(cause) =>
-					cause instanceof RelayError && cause.code === "FILE_NOT_FOUND",
+					cause instanceof MissingWorktreeError ||
+					(cause instanceof RelayError && cause.code === "FILE_NOT_FOUND"),
 				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
 			),
 		);

@@ -983,6 +983,17 @@ export class ClaudeEventTranslator {
 			kind: "snapshot",
 			tasks: this.backgroundTasks.map((task) => {
 				const known = ctx.subagentTasks?.get(task.id);
+				const tool =
+					known && ctx.messageOwnership?.toolInputFor(known.toolUseId);
+				const input = tool && isRecord(tool.input) ? tool.input : undefined;
+				let detail: unknown;
+				if (tool) {
+					if (task.type === "local_workflow") detail = known?.workflowName;
+					else if (tool.name === "Bash" || tool.name === "Monitor")
+						detail = input?.["command"];
+					else if (tool.name === "Agent" || tool.name === "Task")
+						detail = input?.["subagent_type"];
+				}
 				const ancestorTaskIds: string[] = [];
 				const seen = new Set([task.id]);
 				for (let parent = known?.parentTaskId; parent && !seen.has(parent); ) {
@@ -992,6 +1003,11 @@ export class ClaudeEventTranslator {
 				}
 				return {
 					...task,
+					firstSeenAt: Math.min(
+						task.firstSeenAt,
+						known?.startedAt ?? task.firstSeenAt,
+					),
+					...(typeof detail === "string" && detail.trim() ? { detail } : {}),
 					...(known?.childSessionId
 						? { childSessionId: known.childSessionId }
 						: {}),
@@ -1087,6 +1103,9 @@ export class ClaudeEventTranslator {
 				...(task?.subagentType != null
 					? { subagentType: task.subagentType }
 					: {}),
+				...(task?.workflowName != null
+					? { workflowName: task.workflowName }
+					: {}),
 				...metadata,
 			};
 			if (typeof providerTaskId === "string" && subagentTasks) {
@@ -1099,6 +1118,9 @@ export class ClaudeEventTranslator {
 						: {}),
 					...(typeof mergedMetadata["subagentType"] === "string"
 						? { subagentType: mergedMetadata["subagentType"] }
+						: {}),
+					...(typeof mergedMetadata["workflowName"] === "string"
+						? { workflowName: mergedMetadata["workflowName"] }
 						: {}),
 				});
 			}
@@ -1365,6 +1387,11 @@ export class ClaudeEventTranslator {
 			}
 
 			// tool_use blocks: emit buffered tool.started now with complete input
+			ctx.messageOwnership?.rememberToolInput(
+				tool.itemId,
+				tool.toolName,
+				tool.bufferedInput ?? tool.input,
+			);
 			if (tool.pendingStart) {
 				tool.pendingStart = false;
 				const taskMetadata = this.taskMetadataForToolUseId(ctx, tool.itemId);

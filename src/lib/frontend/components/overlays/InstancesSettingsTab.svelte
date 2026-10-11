@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
+	import type { ServerForm } from "./ServerSettingsTab.svelte";
+	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
+	import AccountDot from "../ui/AccountDot.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
 	import Textarea from "../ui/Textarea.svelte";
@@ -15,16 +18,17 @@
 	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, renameInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
+	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
+	const instanceFormMode = $derived(openForm === "instance-add" ? "add" : openForm?.startsWith("instance-edit:") ? "edit" : null);
+	const editingInstanceId = $derived(instanceFormMode === "edit" ? openForm?.slice("instance-edit:".length) : null);
+	const renamingInstanceId = $derived(openForm?.startsWith("instance-rename:") ? openForm.slice("instance-rename:".length) : null);
 
 	let state = $state({
 		expandedInstanceId: null as string | null,
-		renamingInstanceId: null as string | null,
 		renameValue: "",
 		expandedScenario: null as string | null,
 		copiedKey: null as string | null,
 		copyTimer: null as ReturnType<typeof setTimeout> | null,
-		instanceFormMode: null as "add" | "edit" | null,
-		editingInstanceId: null as string | null,
 		formDriver: "opencode" as "claude" | "opencode",
 		formName: "",
 		formConfigDir: "",
@@ -51,22 +55,26 @@
 		testId: `instance-form-driver-${driver}`,
 	}));
 	const instances = $derived(getCachedInstances());
+	const claudeAccounts = $derived(instances.filter((inst) => instanceDriver(inst) === "claude"));
+	const opencodeInstances = $derived(instances.filter((inst) => instanceDriver(inst) === "opencode"));
 	const scanInFlight = $derived(isScanInFlight());
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
 	const ccsDetected = $derived(proxyResult?.found ?? false);
 	function handleToggleInstance(instanceId: string) {
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
-		if (state.expandedInstanceId !== instanceId) state.renamingInstanceId = null;
+		if (state.expandedInstanceId !== instanceId && openForm === `instance-rename:${instanceId}`) onToggleForm(openForm);
 	}
 	function handleStart(instanceId: string) {
 		void startInstanceRpc({ instanceId })
 			.then(applyInstanceListResponse)
+			.then(refreshServerStatus)
 			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
 	}
 	function handleStop(instanceId: string) {
 		void stopInstanceRpc({ instanceId })
 			.then(applyInstanceListResponse)
+			.then(refreshServerStatus)
 			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
 	}
 	async function handleRemove(instanceId: string, instanceName: string) {
@@ -74,6 +82,7 @@
 		if (confirmed) {
 			void removeInstanceRpc({ instanceId })
 				.then(applyInstanceListResponse)
+				.then(refreshServerStatus)
 				.catch(() =>
 					showToast("Failed to remove instance", { variant: "warn" }),
 				);
@@ -83,8 +92,8 @@
 		return inst.driver === "claude" ? "claude" : "opencode";
 	}
 	function closeInstanceForm() {
-		state.instanceFormMode = null;
-		state.editingInstanceId = null;
+		if (instanceFormMode === "edit") state.expandedInstanceId = null;
+		if (instanceFormMode !== null && openForm) onToggleForm(openForm);
 		state.formDriver = "opencode";
 		state.formName = "";
 		state.formConfigDir = "";
@@ -95,9 +104,10 @@
 		state.formSaving = false;
 	}
 	function openAddInstance(driver: "claude" | "opencode" = "opencode") {
+		if (openForm === "instance-add") { closeInstanceForm(); return; }
 		closeInstanceForm();
-		state.instanceFormMode = "add";
 		state.formDriver = driver;
+		onToggleForm("instance-add");
 	}
 	function openEditInstance(inst: {
 		id: string;
@@ -108,9 +118,7 @@
 		managed?: boolean;
 		env?: Record<string, string>;
 	}) {
-		state.expandedInstanceId = null;
-		state.instanceFormMode = "edit";
-		state.editingInstanceId = inst.id;
+		if (openForm === `instance-edit:${inst.id}`) { closeInstanceForm(); return; }
 		state.formDriver = instanceDriver(inst);
 		state.formName = inst.name;
 		state.formConfigDir = inst.configDir ?? "";
@@ -122,6 +130,7 @@
 					.map(([k, v]) => `${k}=${v}`)
 					.join("\n")
 			: "";
+		onToggleForm(`instance-edit:${inst.id}`);
 	}
 	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
 	function parseEnv(text: string): Record<string, string> | undefined {
@@ -152,9 +161,9 @@
 		const url = state.formUrl.trim() || undefined;
 		state.formSaving = true;
 		const request =
-			state.instanceFormMode === "edit" && state.editingInstanceId
+			instanceFormMode === "edit" && editingInstanceId
 				? updateInstanceRpc({
-						instanceId: state.editingInstanceId,
+						instanceId: editingInstanceId,
 						name,
 						...(isClaude
 							? { ...(configDir !== undefined ? { configDir } : {}) }
@@ -178,15 +187,18 @@
 									...(env !== undefined ? { env } : {}),
 								}),
 					});
+		const submittedForm = openForm;
 		void request
-			.then((response) => {
+			.then(async (response) => {
 				applyInstanceListResponse(response);
-				closeInstanceForm();
+				await refreshServerStatus();
+				state.formSaving = false;
+				if (openForm === submittedForm) closeInstanceForm();
 			})
 			.catch(() => {
 				state.formSaving = false;
 				showToast(
-					`Failed to ${state.instanceFormMode === "edit" ? "update" : "add"} instance`,
+					`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
 					{ variant: "warn" },
 				);
 			});
@@ -195,28 +207,30 @@
 		beginScan();
 		void scanNowRpc()
 			.then(applyScanNowResponse)
+			.then(refreshServerStatus)
 			.catch(() => {
 				clearScanInFlight();
 				showToast("Port scan failed", { variant: "warn" });
 			});
 	}
 	function startRename(instanceId: string, currentName: string) {
-		state.renamingInstanceId = instanceId;
 		state.renameValue = currentName;
+		onToggleForm(`instance-rename:${instanceId}`);
 	}
 	function submitRename() {
-		if (!state.renamingInstanceId) return;
+		if (!renamingInstanceId) return;
 		const trimmed = state.renameValue.trim();
 		if (!trimmed) { showToast("Instance name cannot be empty", { variant: "warn" }); return; }
 		void renameInstanceRpc({
-			instanceId: state.renamingInstanceId,
+			instanceId: renamingInstanceId,
 			name: trimmed,
 		})
 			.then(applyInstanceListResponse)
+			.then(refreshServerStatus)
 			.catch(() => showToast("Failed to rename instance", { variant: "warn" }));
-		state.renamingInstanceId = null;
+		if (openForm) onToggleForm(openForm);
 	}
-	function cancelRename() { state.renamingInstanceId = null; }
+	function cancelRename() { if (renamingInstanceId && openForm) onToggleForm(openForm); }
 	function handleRenameKeydown(e: KeyboardEvent) {
 		if (e.key === "Enter") { e.preventDefault(); submitRename(); }
 		else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
@@ -276,14 +290,14 @@
 	</div>
 </div>
 
-{#if state.instanceFormMode !== null}
-	<div class="border border-border-subtle rounded-[7px] p-[10px] flex flex-col gap-[8px]" data-testid="instance-form">
+{#if instanceFormMode !== null}
+	<div class="border border-border-subtle rounded-[7px] p-[10px] flex flex-col gap-[8px]" data-server-form data-testid="instance-form">
 		<div class="flex items-center justify-between">
 			<span class="font-semibold text-text">
-				{state.instanceFormMode === "edit" ? "Edit instance" : "New instance"}
+				{instanceFormMode === "edit" ? "Edit instance" : "New instance"}
 			</span>
 		</div>
-		{#if state.instanceFormMode === "add"}
+		{#if instanceFormMode === "add"}
 			<SegmentedControl
 				bind:value={state.formDriver}
 				label="Driver"
@@ -355,38 +369,77 @@
 
 {#if instances.length > 0}
 <div id="instance-settings-list" class="flex flex-col gap-[6px]">
-		{#each instances as inst}
-			{@const driver = instanceDriver(inst)}
-			<div class="border border-border-subtle rounded-[7px]" data-testid="instance-row-{inst.id}" data-driver={driver}>
+	{#if claudeAccounts.length > 0}
+		<div class="border border-border-subtle rounded-[7px] overflow-hidden" data-testid="claude-accounts-list">
+			<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-bg-alt px-3 py-2">
+				<h4 class="text-[12px] font-semibold text-text">Claude accounts</h4>
+				<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-xs text-text-muted">
+					<span>Usage and switch order: </span>
+					<Button variant="ghost-accent" hoverFill="none" size="content" class="text-xs hover:underline" data-testid="claude-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
+				</span>
+			</div>
+			{#each claudeAccounts as inst (inst.id)}
+				<div class="border-t border-border-subtle" data-testid="instance-row-{inst.id}" data-driver="claude">
+					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" class="min-h-[44px] focus-visible:-outline-offset-2">
+						<AccountDot instanceId={inst.id} size={7} />
+						<div class="flex-1 min-w-0">
+							<div class="flex items-center gap-2">
+								<span class="font-medium text-text truncate">{inst.name}</span>
+								{#if inst.id === "claude"}<Badge variant="tag" shape="pill" class="shrink-0">default</Badge>{/if}
+							</div>
+							<div class="font-mono text-xs text-text-secondary truncate">{inst.configDir || "env"}</div>
+						</div>
+					</Disclosure>
+					{#if state.expandedInstanceId === inst.id}
+						<div class="flex flex-col gap-2 border-t border-border-subtle bg-bg-alt px-3 py-2">
+							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+								<dt class="text-text-muted">Config dir</dt>
+								<dd class="font-mono text-text break-all">{inst.configDir || "env"}</dd>
+								<dt class="text-text-muted">Used by</dt>
+								<dd class="text-text">{inst.id === "claude" ? "New sessions, unless you pick another account" : "Sessions you move to it, and auto-switch"}</dd>
+							</dl>
+							<div class="flex flex-wrap items-center gap-2">
+								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</Button>
+								{#if inst.id === "claude"}
+									<span class="text-xs text-text-muted">The default account can't be removed</span>
+								{:else}
+									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+	{#if opencodeInstances.length > 0}
+		<h4 class="text-[12px] font-semibold text-text">OpenCode servers</h4>
+		{#each opencodeInstances as inst}
+			<div class="border border-border-subtle rounded-[7px]" data-testid="instance-row-{inst.id}" data-driver="opencode">
 				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} chevron={false} look="row" density="list" class="justify-between">
 					<div class="flex items-center gap-2 min-w-0">
 						<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
-						{#if state.renamingInstanceId === inst.id}
-							<!-- svelte-ignore a11y_autofocus -->
+						{#if renamingInstanceId === inst.id}
 							<!-- The bespoke version hard-coded `border-accent` to say "this
 							     one is live". TextInput already says that on focus, and the
 							     row is autofocused, so the signal survives the migration --
 							     which matters, because an additive `border-accent` here would
 							     silently lose to the base `border-border` (Tailwind emits
 							     border-colour utilities alphabetically). -->
-							<TextInput aria-label="Instance name" size="sm" class="w-36" bind:value={state.renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} autofocus />
+							<TextInput aria-label="Instance name" size="sm" class="w-36" data-server-form bind:value={state.renameValue} onkeydown={handleRenameKeydown} onclick={(e) => e.stopPropagation()} onfocusout={submitRename} />
 						{:else}
 							<span class="font-medium text-text truncate">{inst.name}</span>
 						{/if}
-						<Badge variant="tag" shape="pill">{driver === "claude" ? "Claude" : "OpenCode"}</Badge>
-						{#if driver === "opencode" && !inst.managed}
+						<Badge variant="tag" shape="pill">OpenCode</Badge>
+						{#if !inst.managed}
 							<Badge variant="tag" shape="pill">discovered</Badge>
 						{/if}
 					</div>
-					{#if driver === "claude"}
-						<span class="text-text-secondary shrink-0 ml-2 truncate max-w-[10rem]">{inst.configDir || "env"}</span>
-					{:else}
-						<span class="text-text-secondary shrink-0 ml-2">:{inst.port}</span>
-					{/if}
+					<span class="text-text-secondary shrink-0 ml-2">:{inst.port}</span>
 				</Disclosure>
 				{#if state.expandedInstanceId === inst.id}
 					<div class="flex flex-wrap gap-2 p-[6px] border-t border-border-subtle">
-					{#if driver === "opencode" && inst.managed}
+					{#if inst.managed}
 						<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStart(inst.id)}>Start</Button>
 						<Button variant="secondary" size="content" class="px-3 py-1 text-xs rounded" onclick={() => handleStop(inst.id)}>Stop</Button>
 						{/if}
@@ -400,6 +453,7 @@
 				{/if}
 			</div>
 		{/each}
+	{/if}
 	</div>
 {/if}
 

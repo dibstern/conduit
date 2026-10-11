@@ -1,5 +1,5 @@
-// An OpenCode Side Thread stays in Plan across a daemon restart: the selector
-// still shows Plan and the next prompt still runs OpenCode's plan agent.
+// An OpenCode Side Thread switched to Plan stays there across a daemon restart: the selector
+// still shows Plan and OpenCode still holds the read-only session rules.
 // Spawns its own ephemeral OpenCode, so no live instance or password is needed.
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -21,8 +21,8 @@ import { AppPage } from "../page-objects/app.page.js";
 
 const staticDir = resolve(import.meta.dirname, "../../../dist/frontend");
 
-async function startDaemon(configDir: string, opencodeUrl: string) {
-	const daemon = await startForegroundDaemon({
+function startDaemon(configDir: string, opencodeUrl: string) {
+	return startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
 		configDir,
@@ -31,12 +31,6 @@ async function startDaemon(configDir: string, opencodeUrl: string) {
 		staticDir,
 		logLevel: "error",
 	});
-	await expect
-		.poll(() => daemon.getInstances().some((i) => i.status === "healthy"), {
-			timeout: 15_000,
-		})
-		.toBe(true);
-	return daemon;
 }
 
 async function rpc<A>(
@@ -68,7 +62,7 @@ async function rpc<A>(
 	}
 }
 
-test("a Side Thread keeps Plan and the plan agent after a daemon restart", async ({
+test("a Side Thread keeps Plan and its read-only rules after a daemon restart", async ({
 	page,
 	isMobile,
 }) => {
@@ -93,6 +87,13 @@ test("a Side Thread keeps Plan and the plan agent after a daemon restart", async
 					projectSlug,
 					parentSessionId: parent.sessionId,
 					title: "What is in this project?",
+				});
+				// Side Threads start in Ask; Plan proves a chosen mode is persisted
+				// rather than re-derived from the default.
+				yield* client.SwitchPermissionMode({
+					projectSlug,
+					sessionId: side.sessionId,
+					mode: "plan",
 				});
 				return side.sessionId;
 			}),
@@ -127,13 +128,20 @@ test("a Side Thread keeps Plan and the plan agent after a daemon restart", async
 				.filter((message) => message.info.role === "user")
 				.map((message) => message.info.agent);
 		};
-		await expect.poll(agents, { timeout: 30_000 }).toEqual(["plan"]);
+		// Side Threads keep the chosen agent in Plan; the session rules below
+		// are what make it read-only.
+		await expect.poll(agents, { timeout: 30_000 }).toEqual(["build"]);
 		const session = (await (
 			await fetch(
 				`${opencode.url}/session/${sideId}?directory=${encodeURIComponent(projectDir)}`,
 			)
 		).json()) as { permission?: unknown[] };
+		// OpenCode appends each rule update and the last match wins: the Ask
+		// rules from creation, then the Plan rules that override them.
 		expect(session.permission).toEqual([
+			{ permission: "edit", pattern: "*", action: "ask" },
+			{ permission: "bash", pattern: "*", action: "ask" },
+			{ permission: "task", pattern: "*", action: "allow" },
 			{ permission: "edit", pattern: "*", action: "deny" },
 			{ permission: "bash", pattern: "*", action: "ask" },
 			{ permission: "task", pattern: "*", action: "deny" },

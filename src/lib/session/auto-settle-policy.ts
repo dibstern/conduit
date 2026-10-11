@@ -22,6 +22,8 @@ export interface AutoSettleFacts {
 	readonly unread: boolean;
 	readonly autoSettleDisabledAt: number | null;
 	readonly unsettledAt: number | null;
+	readonly mergedHead?: string | undefined;
+	readonly settledMergedHead?: string | undefined;
 }
 
 export function shouldSettleIdleSession(
@@ -66,9 +68,11 @@ export function shouldSettleIdleSession(
 		turn?.completedAt ?? Number.NEGATIVE_INFINITY,
 	);
 	return (
-		Number.isFinite(lastActivityAt) &&
-		(facts.unsettledAt === null || facts.unsettledAt <= lastActivityAt) &&
-		lastActivityAt < now - idleWindowMs
+		(facts.mergedHead !== undefined &&
+			facts.mergedHead !== facts.settledMergedHead) ||
+		(Number.isFinite(lastActivityAt) &&
+			(facts.unsettledAt === null || facts.unsettledAt <= lastActivityAt) &&
+			lastActivityAt < now - idleWindowMs)
 	);
 }
 

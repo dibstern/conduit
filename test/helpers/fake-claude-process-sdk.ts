@@ -1279,6 +1279,16 @@ function query(params: {
 					workspaceFile,
 					prompt.slice(prompt.indexOf("workspace-isolation-write")),
 				);
+			if (request.startsWith("workspace-multi-folder-write")) {
+				for (const directory of [
+					params.options?.cwd ?? process.cwd(),
+					...(params.options?.additionalDirectories ?? []),
+				]) {
+					const trackedFile = join(directory, "tracked.txt");
+					if (existsSync(trackedFile))
+						writeFileSync(trackedFile, `${request}\n`);
+				}
+			}
 			const chunks = prompt.includes("workspace-isolation-read")
 				? [existsSync(workspaceFile) ? "present" : "absent"]
 				: responseChunks(prompt);

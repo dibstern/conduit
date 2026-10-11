@@ -110,6 +110,9 @@ export function decideClaudeMessageOwnershipEffect(
 					...known,
 					toolUseId,
 					startedAt: Math.min(known?.startedAt ?? receivedAt, receivedAt),
+					...(message.workflow_name
+						? { workflowName: message.workflow_name }
+						: {}),
 				});
 			}
 		}

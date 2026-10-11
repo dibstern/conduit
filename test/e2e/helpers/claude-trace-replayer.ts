@@ -88,6 +88,14 @@ export interface ClaudeReplayPlan {
 	 * message-th line (1-based) until release(), e.g. mid-way through background work.
 	 */
 	readonly holdBefore?: { readonly turn: number; readonly message: number };
+	/** End the SDK stream after its trace, rather than awaiting another prompt. */
+	readonly endAfterTrace?: boolean;
+	/** Delay this agent's transcript reads once the trace reaches this line. */
+	readonly holdSubagentReadAfter?: {
+		readonly turn: number;
+		readonly message: number;
+		readonly agentId: string;
+	};
 	/**
 	 * Hold this played trace (1-based, counted across sessions) before its
 	 * first tool_result until release(), leaving the tool call running.
@@ -332,6 +340,7 @@ export function createClaudeTraceReplayer(
 	let resultHeld = false;
 	const onRelease: (() => void)[] = [];
 	const onHold: (() => void)[] = [];
+	let subagentReadHold: Promise<void> | undefined;
 	const release = () => {
 		releases += 1;
 		for (const wake of onRelease.splice(0)) wake();
@@ -573,6 +582,7 @@ export function createClaudeTraceReplayer(
 						);
 				}
 				playing = undefined;
+				if (plan.endAfterTrace) return;
 			}
 		}
 
@@ -658,9 +668,24 @@ export function createClaudeTraceReplayer(
 				listSubagents: async (parentSessionId) => [
 					...reachedReads(parentSessionId).keys(),
 				],
-				getSubagentMessages: async (parentSessionId, agentId) => [
-					...(reachedReads(parentSessionId).get(agentId) ?? []),
-				],
+				getSubagentMessages: async (parentSessionId, agentId) => {
+					const hold = plan.holdSubagentReadAfter;
+					if (
+						hold?.agentId === agentId &&
+						hold.turn === played &&
+						(playedTurns.get(parentSessionId)?.at(-1)?.played ?? 0) >=
+							hold.message
+					) {
+						subagentReadHold ??= (async () => {
+							const reached = ++holdsReached;
+							for (const notify of onHold.splice(0)) notify();
+							while (releases < reached)
+								await new Promise<void>((resolve) => onRelease.push(resolve));
+						})();
+						await subagentReadHold;
+					}
+					return [...(reachedReads(parentSessionId).get(agentId) ?? [])];
+				},
 			},
 			fork: {
 				readTranscript: async (parentSessionId) => [

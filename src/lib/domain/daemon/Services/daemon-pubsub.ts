@@ -10,7 +10,7 @@ import {
 	type Queue,
 	type Scope,
 } from "effect";
-import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
+import type { GlobalSettingTag } from "../../../contracts/ws-rpc.js";
 
 export type DaemonEvent = Data.TaggedEnum<{
 	StatusChanged: { readonly statuses: Record<string, string> };
@@ -31,7 +31,7 @@ export type DaemonEvent = Data.TaggedEnum<{
 	ProjectsChanged: Record<never, never>;
 	GlobalSettingChanged: {
 		readonly originSlug: string;
-		readonly tag: GlobalProjectSetting["_tag"];
+		readonly tag: GlobalSettingTag;
 	};
 	// SubscribeServerStatus inputs (conduit-test-ni8.16.2): a new build became
 	// (un)available, or the cross-project session lists went stale.

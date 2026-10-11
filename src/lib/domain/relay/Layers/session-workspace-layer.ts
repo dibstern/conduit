@@ -91,8 +91,15 @@ export const SessionWorkspaceLive = Layer.effect(
 		const worktreesFor = (
 			target: ResolvedWorkspaceTarget,
 			previous: RecordedWorkspace | null,
+			cause: RecordedWorkspace["cause"],
 		): Record<string, string> => {
-			if (!target.reset) return { [target.projectFolder]: target.path };
+			if (!target.reset)
+				return {
+					...(target.origin === "conduit" && cause === "launch"
+						? previous?.worktrees
+						: {}),
+					[target.projectFolder]: target.path,
+				};
 			const worktrees =
 				target.projectFolder === config.projectDir
 					? {}
@@ -105,6 +112,7 @@ export const SessionWorkspaceLive = Layer.effect(
 			path,
 			cause,
 			origin = "existing",
+			requestedFolder,
 		) =>
 			Effect.gen(function* () {
 				const { row, workspace: previous } = yield* readWorkspace(sessionId);
@@ -134,9 +142,13 @@ export const SessionWorkspaceLive = Layer.effect(
 						reason: "unsupported-provider",
 					});
 				const normalized = yield* realWorkspacePath(path);
+				const candidates =
+					requestedFolder === undefined
+						? folders
+						: folders.filter((folder) => folder === requestedFolder);
 				let projectFolder: string | undefined;
 				let configured = false;
-				for (const folder of folders) {
+				for (const folder of candidates) {
 					const main = yield* realWorkspacePath(folder).pipe(Effect.option);
 					if (main._tag === "Some" && main.value === normalized) {
 						projectFolder = folder;
@@ -159,7 +171,7 @@ export const SessionWorkspaceLive = Layer.effect(
 							path,
 							reason: "not-a-worktree",
 						});
-					for (const folder of folders) {
+					for (const folder of candidates) {
 						const owner = yield* readWorktrees(folder).pipe(Effect.option);
 						if (
 							owner._tag === "Some" &&
@@ -192,14 +204,17 @@ export const SessionWorkspaceLive = Layer.effect(
 				};
 				const workspace = {
 					cause,
-					worktrees: worktreesFor(target, previous),
+					worktrees: worktreesFor(target, previous, cause),
 					origin,
 				};
 				// Warm outside the permit, using the key read-model consumers use.
 				yield* Effect.tryPromise(() =>
-					daemonSessionGitCache.refresh(
-						effectiveWorkingDirectory(config.projectDir, workspace),
-					),
+					Promise.all([
+						daemonSessionGitCache.refresh(normalized),
+						daemonSessionGitCache.refresh(
+							effectiveWorkingDirectory(config.projectDir, workspace),
+						),
+					]),
 				).pipe(
 					Effect.mapError(
 						(cause) =>
@@ -223,9 +238,10 @@ export const SessionWorkspaceLive = Layer.effect(
 							path: target.path,
 							reason: "unsupported-provider",
 						});
-					const worktrees = worktreesFor(target, previous);
+					const worktrees = worktreesFor(target, previous, cause);
 					if (
 						(!target.reset &&
+							!(target.origin === "conduit" && cause === "launch") &&
 							effectiveWorkingDirectory(config.projectDir, previous) ===
 								target.path) ||
 						isDeepStrictEqual(worktrees, previous?.worktrees ?? {})
@@ -339,8 +355,8 @@ export const SessionWorkspaceLive = Layer.effect(
 			resolve,
 			record,
 			inherit,
-			move: (sessionId, path, cause, origin) =>
-				resolve(sessionId, path, cause, origin).pipe(
+			move: (sessionId, path, cause, origin, projectFolder) =>
+				resolve(sessionId, path, cause, origin, projectFolder).pipe(
 					Effect.flatMap((target) => record(sessionId, target, cause)),
 				),
 			claudeWorktreeState: (sessionId) =>

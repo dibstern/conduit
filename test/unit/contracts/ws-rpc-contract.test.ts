@@ -116,8 +116,13 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 		Effect.provide(
 			WsRpcGroup.toLayer({
 				...daemonOnlyHandlers,
+				ListBranches: () => Effect.succeed({ branches: [] }),
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				RecreateSessionWorktree: () =>
+					Effect.succeed({ directory: "/worktree" }),
+				ContinueSessionInMainFolder: () =>
+					Effect.succeed({ directory: "/main" }),
 				DismissWorkspaceHint: () => Effect.succeed({ ok: true }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
@@ -401,6 +406,20 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						provider: request.provider,
 						variant: "",
 						variants: [],
+					}),
+				SetHarnessDefault: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						harness: request.harness,
+						state: {
+							status: "ok" as const,
+							pick: {
+								providerId: request.providerId,
+								modelId: request.modelId,
+								effort: request.effort ?? "",
+								contextWindow: request.contextWindow,
+							},
+						},
 					}),
 				SetDefaultPermissionMode: (request) =>
 					Effect.succeed({

@@ -51,18 +51,30 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
-then the Session Workspace service records its launch move. It starts from the
-folder's committed HEAD on its current branch. Uncommitted changes stay in the
-original checkout. Creation or launch failure rolls back the checkout and its
-new branch. These worktrees cannot become projects or Project Folders.
+then the Session Workspace service records its launch move. By default it starts
+from the folder's committed HEAD on its current branch. A new worktree draft can
+choose a local base branch for the primary Project Folder; other git folders
+still start from their own current HEAD. Tags, remote refs and revision
+expressions cannot be bases. Invalid bases fail before any checkout, branch or
+session is created, and a base requires New worktree mode. Uncommitted changes
+stay in the original checkout. Creation or launch failure rolls back the checkout
+and its new branch. These worktrees cannot become projects or Project Folders.
+
+A multi-folder worktree session creates a worktree in every git folder on one
+branch name. Folders of one repository share a checkout and must resolve to the
+same starting commit. Non-git folders and folders attached later are used in place and
+reported as shared; detaching a folder keeps its worktree on disk.
 
 Direct user moves require the session provider's `supportsWorktree` capability.
 OpenCode refuses those moves before recording an event; Claude supports moves.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
-otherwise the only mapped worktree, otherwise the primary project folder. The
+otherwise the primary folder for a conduit-created workspace. An existing move
+can use its only mapped worktree instead. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
 **Effective Folders** are each Project Folder's session worktree when mapped,
@@ -101,6 +113,8 @@ At turn start, a missing recorded worktree with origin `existing` moves back to
 the main folder with cause `missing`, using the same pending Claude directive
 rules as a user move; a missing main folder still fails. Forks copy the parent's
 complete worktrees map and origin as a launch move before their first turn.
+Conduit-created worktrees never fall back automatically: a missing checkout is
+reported on read and requires explicit recreation or a user move to the main folder.
 
 ## Workspace Hint
 

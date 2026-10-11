@@ -21,6 +21,7 @@ import type { SessionInfo } from "../../../shared-types.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
 import { BackgroundLivenessTag, ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
+import { withSessionWorktreeStatus } from "./session-workspace.js";
 import type { ShellSubscriptionError } from "./shell-subscription.js";
 
 export const subscribeSessionFamily = (options: {
@@ -49,18 +50,24 @@ export const subscribeSessionFamily = (options: {
 						readQuery
 							.readSessionList({ ...range, familyOf: anchor, backgroundOf })
 							.pipe(
-								Effect.map((list) => ({
-									...list,
-									rows: list.rows.map((row) => ({
-										...row,
-										item: config
-											? withCachedSessionGit(row.item, [
-													config.projectDir,
-													...(config.extraFolders ?? []),
-												])
-											: row.item,
-									})),
-								})),
+								Effect.flatMap((list) =>
+									Effect.forEach(list.rows, (row) =>
+										Effect.gen(function* () {
+											return {
+												...row,
+												item: config
+													? yield* withSessionWorktreeStatus(
+															withCachedSessionGit(row.item, [
+																config.projectDir,
+																...(config.extraFolders ?? []),
+															]),
+															config,
+														)
+													: row.item,
+											};
+										}),
+									).pipe(Effect.map((rows) => ({ ...list, rows }))),
+								),
 								Effect.tap(({ rows }) => {
 									const ids = rows.map(({ item }) => item.id);
 									if (range === undefined) {

@@ -25,7 +25,13 @@
 				<Icon name={taskKind(task).icon} size={14} class="text-tool" />
 				<span class="flex min-w-0 flex-col">
 					<span data-testid="background-task-description" class="truncate">{task.description}</span>
-					<small data-testid="background-task-kind" class="text-[11px] text-text-muted">{taskKind(task).label}</small>
+					<small class="flex min-w-0 items-center gap-1 text-[11px] text-text-muted">
+						<span data-testid="background-task-kind" class="shrink-0">{taskKind(task).label}</span>
+						{#if task.detail}
+							<span aria-hidden="true" class="shrink-0">·</span>
+							<span data-testid="background-task-detail" title={task.detail} class="min-w-0 truncate {task.type === 'local_bash' ? 'font-mono' : ''}">{task.detail}</span>
+						{/if}
+					</small>
 				</span>
 				<span data-testid="background-task-age" class="text-[11px] text-text-muted">{taskAge(task, clock.now)}</span>
 			{/snippet}

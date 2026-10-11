@@ -43,6 +43,7 @@ const terminalLayer = (
 				scrollback: manager.getScrollback(id),
 			})),
 		subscribe: (listener) => manager.subscribe(listener),
+		onOpenCodePtysChanged: () => {},
 		sendInput: () => Effect.void,
 		close: () => Effect.void,
 		resize: () => Effect.void,

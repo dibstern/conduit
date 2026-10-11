@@ -10,7 +10,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError } from "./worktree.js";
+import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -363,6 +363,28 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const HarnessDefaultStateSchema = Schema.Struct({
+	pick: Schema.optional(
+		Schema.Struct({
+			providerId: Schema.String,
+			modelId: Schema.String,
+			effort: Schema.String,
+			contextWindow: Schema.String,
+		}),
+	),
+	status: Schema.Literal("ok", "missing", "invalid", "unverified"),
+	problem: Schema.optional(Schema.String),
+});
+export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
+
+export const SetHarnessDefaultResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	harness: Schema.Literal("claude", "opencode"),
+	state: HarnessDefaultStateSchema,
+});
+export type SetHarnessDefaultResponse =
+	typeof SetHarnessDefaultResponseSchema.Type;
+
 export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	mode: SessionPermissionModeSchema,
@@ -628,6 +650,9 @@ export const GetInstanceStatusResponseSchema = Schema.Struct({
 
 export const GetStatusResponseSchema = Schema.Struct({
 	uptime: Schema.Number,
+	version: Schema.String,
+	logLevel: RpcLogLevelSchema,
+	supervised: Schema.Boolean,
 	port: Schema.Number,
 	host: Schema.String,
 	tailscaleIP: Schema.optional(Schema.String),
@@ -712,6 +737,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
@@ -1250,6 +1276,24 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()(
+	"SetHarnessDefault",
+	{
+		failure: WsRpcError,
+		success: SetHarnessDefaultResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			harness: Schema.Literal("claude", "opencode"),
+			providerId: NonEmptyString,
+			modelId: NonEmptyString,
+			/** Omitted: the effort last saved for this model, if still offered. */
+			effort: Schema.optional(Schema.String),
+			contextWindow: Schema.String,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
 	"SetDefaultPermissionMode",
 	{
@@ -1326,6 +1370,18 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
+	"ListBranches",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			current: Schema.optional(Schema.String),
+			branches: Schema.Array(Schema.String),
+		}),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
 export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
@@ -1351,6 +1407,24 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
+	},
+) {}
+
+export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
+	"RecreateSessionWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+	"ContinueSessionInMainFolder",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1764,6 +1838,8 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
+			// Local base for the primary folder; requires newWorktree.
+			worktreeBase: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -2099,6 +2175,7 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetHarnessDefault,
 	SetDefaultPermissionMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
@@ -2106,8 +2183,11 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListBranches,
 	ListWorktrees,
 	MoveSessionWorkspace,
+	RecreateSessionWorktree,
+	ContinueSessionInMainFolder,
 	DismissWorkspaceHint,
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
@@ -2399,6 +2479,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
 	}),
+	Schema.TaggedStruct("harnessDefaults", {
+		claude: HarnessDefaultStateSchema,
+		opencode: HarnessDefaultStateSchema,
+	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
@@ -2412,6 +2496,8 @@ export type GlobalProjectSetting = Extract<
 			| "claudeSettings";
 	}
 >;
+/** Global writes signal each relay to compute catalog-dependent facts locally. */
+export type GlobalSettingTag = GlobalProjectSetting["_tag"] | "harnessDefaults";
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 
@@ -2505,6 +2591,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
@@ -2512,8 +2599,11 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(RecreateSessionWorktree),
+	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
 	Rpc.fromTaggedRequest(DismissWorkspaceHint),
 	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),

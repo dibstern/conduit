@@ -11,7 +11,7 @@ import {
 import { conduitVisualHandlers } from "../../../acceptance/src/stepHandlers.js";
 
 describe("acceptance pipeline", () => {
-	test("expands backgrounds and resolves every composer feature step to one handler", () => {
+	test("expands backgrounds and resolves composer and General settings steps to one handler", () => {
 		const feature: ApsFeature = {
 			name: "Composer send button reflects input content",
 			background: [
@@ -59,11 +59,41 @@ describe("acceptance pipeline", () => {
 						},
 					],
 				},
+				{
+					name: "General groups and Advanced follow the settings design",
+					examples: [],
+					steps: [
+						{ keyword: "Given", text: "General auto-settle is set to 3 days" },
+						{ keyword: "When", text: "I open settings to the General section" },
+						{
+							keyword: "Then",
+							text: "the General headings are Notifications, Appearance, Composer and Sessions in order",
+						},
+						{
+							keyword: "And",
+							text: "General keeps Theme in Appearance and auto-settle in Sessions",
+						},
+						{ keyword: "And", text: "General has no log level control" },
+						{
+							keyword: "And",
+							text: "the General Advanced group is collapsed with Debug off",
+						},
+						{ keyword: "When", text: "I expand General Advanced" },
+						{
+							keyword: "And",
+							text: "I toggle the General connection debug panel",
+						},
+						{
+							keyword: "Then",
+							text: "the General Advanced group is expanded with Debug on",
+						},
+					],
+				},
 			],
 		};
 		const executions = expandFeature(feature);
 
-		expect(executions).toHaveLength(4);
+		expect(executions).toHaveLength(5);
 		for (const execution of executions) {
 			expect(execution.steps[0]?.text).toBe(
 				"the conduit app is served with the connected mockup",

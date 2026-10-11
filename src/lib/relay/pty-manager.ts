@@ -22,7 +22,8 @@ export interface PtyUpstream {
 }
 
 export interface PtySessionState {
-	upstream: PtyUpstream;
+	/** Discovery and lifecycle events can track a PTY before its socket opens. */
+	upstream: PtyUpstream | undefined;
 	source: "local" | "opencode";
 	scrollback: PtyScrollback;
 	exited: boolean;
@@ -101,10 +102,22 @@ export class PtyManager {
 
 	registerSession(
 		ptyId: string,
-		upstream: PtyUpstream,
+		upstream: PtyUpstream | undefined,
 		source: "local" | "opencode" = "opencode",
 		info?: PtyInfo,
 	): PtySessionState {
+		const existing = this.sessions.get(ptyId);
+		// Provider acquisition may finish after a local shell has claimed this id.
+		if (existing?.source === "local" && source === "opencode") return existing;
+		if (
+			existing &&
+			existing.source === source &&
+			(!existing.upstream || existing.upstream.readyState === 3)
+		) {
+			existing.upstream = upstream;
+			if (info) existing.info = info;
+			return existing;
+		}
 		if (this.sessions.has(ptyId)) {
 			this.closeSession(ptyId);
 		}
@@ -138,7 +151,7 @@ export class PtyManager {
 
 	sendInput(ptyId: string, data: string): void {
 		const session = this.sessions.get(ptyId);
-		if (session?.upstream.readyState === WS_OPEN) {
+		if (session?.upstream?.readyState === WS_OPEN && !session.exited) {
 			session.upstream.send(data);
 		}
 	}
@@ -148,10 +161,10 @@ export class PtyManager {
 		if (!session) return;
 		this.sessions.delete(ptyId);
 		this.log.info(`Closing PTY ${ptyId}`);
-		if (session.upstream.readyState === WS_OPEN) {
+		if (session.upstream?.readyState === WS_OPEN) {
 			session.upstream.close(1000, "Proxy closed");
 		} else {
-			session.upstream.terminate();
+			session.upstream?.terminate();
 		}
 	}
 
@@ -163,7 +176,7 @@ export class PtyManager {
 
 	detachAll(): void {
 		for (const [ptyId, session] of this.sessions) {
-			if (session.upstream.detach) {
+			if (session.upstream?.detach) {
 				session.upstream.detach();
 				this.sessions.delete(ptyId);
 			} else {

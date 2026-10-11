@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { Cause, Effect, Exit, Layer, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { PtyManager } from "../../../relay/pty-manager.js";
@@ -55,7 +55,7 @@ export const makeConnectPtyUpstreamLive = (
 	never,
 	PtyManagerTag | OpenCodeInstancesTag | ConfigTag | LoggerTag
 > =>
-	Layer.effect(
+	Layer.scoped(
 		ConnectPtyUpstreamTag,
 		Effect.gen(function* () {
 			const ptyManager = yield* PtyManagerTag;
@@ -63,34 +63,43 @@ export const makeConnectPtyUpstreamLive = (
 			const config = yield* ConfigTag;
 			const log = yield* LoggerTag;
 			const ptyLog = log.child("pty");
-			// An attached OpenCode PTY holds a `use` scope until its upstream closes.
+			const scope = yield* Effect.scope;
 			return (ptyId: string, cursor?: number) =>
 				Effect.gen(function* () {
-					const attached = yield* Scope.make();
-					const release = Scope.close(attached, Exit.void);
-					const client = yield* instances
-						.use(defaultInstanceIdForDriver("opencode"))
-						.pipe(
-							Scope.extend(attached),
-							Effect.tapError(() => release),
+					const ready = yield* Deferred.make<void, unknown>();
+					const closed = yield* Deferred.make<void>();
+					yield* Effect.gen(function* () {
+						const client = yield* instances.useIfRunning(
+							defaultInstanceIdForDriver("opencode"),
 						);
-					yield* Effect.tryPromise({
-						try: () =>
-							connectPtyUpstream(
-								{
-									ptyManager,
-									client,
-									opencodeUrl: client.getBaseUrl(),
-									projectDir: config.projectDir,
-									log: ptyLog,
-									WebSocketClass,
-									onClose: () => Effect.runFork(release),
-								},
-								ptyId,
-								cursor,
-							),
-						catch: (cause) => cause,
-					}).pipe(Effect.tapError(() => release));
+						if (Option.isNone(client)) return;
+						yield* Effect.tryPromise({
+							try: (signal) =>
+								connectPtyUpstream(
+									{
+										ptyManager,
+										client: client.value,
+										opencodeUrl: client.value.getBaseUrl(),
+										projectDir: config.projectDir,
+										log: ptyLog,
+										WebSocketClass,
+										signal,
+										onClose: () => Deferred.unsafeDone(closed, Exit.void),
+									},
+									ptyId,
+									cursor,
+								),
+							catch: (cause) => cause,
+						});
+						yield* Deferred.succeed(ready, undefined);
+						yield* Deferred.await(closed);
+					}).pipe(
+						Effect.scoped,
+						Effect.onExit((exit) => Deferred.done(ready, exit)),
+						Effect.catchAll(() => Effect.void),
+						Effect.forkIn(scope),
+					);
+					yield* Deferred.await(ready);
 				});
 		}),
 	);
