@@ -40,7 +40,7 @@ function resetState() {
 			tlsEnabled: false,
 			tailscaleServeEnabled: true,
 			tailscaleServeAvailable: true,
-			tailscaleServe: { url: "https://davids-mac-studio.tail662561.ts.net" },
+			tailscaleServe: { url: "https://conduit.example.ts.net" },
 			keepAwake: false,
 			keepAwakeCommand: "caffeinate -di",
 			logLevel: "info",
@@ -259,6 +259,15 @@ function populateVisibility() {
 					},
 				],
 			},
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [
+					{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+					{ id: "gpt-5", name: "GPT-5", provider: "openai" },
+				],
+			},
 		],
 	});
 	handleHarnessDefaults({
@@ -306,6 +315,24 @@ function populateVisibility() {
 export const Models: Story = {
 	args: { initialTab: "models" },
 	beforeEach: populateVisibility,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("settings-models-summary")).toHaveTextContent(
+			"4 of 5 shown",
+		);
+		for (const testId of [
+			"settings-models-group-claude",
+			"settings-models-group-anthropic",
+			"settings-models-group-openai",
+			"settings-agents-group",
+		])
+			await expect(
+				within(body.getByTestId(testId)).getByRole("button", {
+					expanded: false,
+				}),
+			).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
+	},
 };
 
 export const ModelsInvalidDefault: Story = {
@@ -335,6 +362,49 @@ export const ModelsInvalidDefault: Story = {
 				},
 			},
 		});
+	},
+};
+
+export const ModelsFiltered: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"4",
+		);
+		for (const provider of ["anthropic", "openai"])
+			await expect(
+				within(body.getByTestId(`settings-models-group-${provider}`)).getByRole(
+					"button",
+					{ expanded: true },
+				),
+			).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle claude sonnet 4" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("switch", { name: "Toggle gpt-4.1" }),
+		).toBeVisible();
+		await expect(
+			body.queryByTestId("settings-agents-group"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const ModelsNoMatch: Story = {
+	...Models,
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.type(
+			body.getByRole("searchbox", { name: "Filter models and agents" }),
+			"no-such-model",
+		);
+		await expect(
+			body.getByText("No models match ‘no-such-model’.", { exact: true }),
+		).toBeVisible();
+		await expect(body.getByRole("button", { name: "Clear" })).toBeVisible();
+		await expect(body.queryAllByRole("switch")).toHaveLength(0);
 	},
 };
 
@@ -394,10 +464,13 @@ export const Server: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: /^Log level\b/ }),
+		).toHaveValue("info");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
 			canvas.getByTestId("server-access-settings"),
-		).toHaveTextContent("https://davids-mac-studio.tail662561.ts.net");
+		).toHaveTextContent("https://conduit.example.ts.net");
 		await expect(
 			canvas.getByRole("switch", { name: "Toggle Tailscale Serve" }),
 		).toHaveAttribute("aria-checked", "true");
@@ -430,7 +503,7 @@ export const Server: Story = {
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 		canvas
-			.getByTestId("server-access-settings")
+			.getByTestId("server-startup-settings")
 			.scrollIntoView({ block: "end" });
 	},
 };
