@@ -276,7 +276,6 @@ export const sessionHandlers: {
 				{
 					sql: `UPDATE sessions SET title = ?, updated_at = ?
 					 WHERE id = ?
-					   AND provider IN ('claude', 'claude-sdk')
 					   AND NOT EXISTS (
 					     SELECT 1
 					     FROM events prior

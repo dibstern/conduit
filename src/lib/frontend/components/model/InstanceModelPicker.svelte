@@ -16,7 +16,6 @@
 	import {
 		applyDefaultModelSet,
 		applyGetModelsResponse,
-		applyGetAgentsResponse,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -32,15 +31,14 @@
 		formatModelName,
 		type InstanceOption,
 		isProviderConfigured,
-		selectInstance,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { bindProjectInstance, getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
-		getAgentsRpc,
 		getModelsRpc,
 		setDefaultModelRpc,
 		switchAgentRpc,
@@ -326,15 +324,12 @@
 		if (isInstanceDisabled(instance)) return;
 		view = "root";
 		if (instance.id === selectedId) return;
-		selectInstance(instance.id);
+		// The draft's harness is its project's binding, the same one the header
+		// badge sets, so the two pickers cannot disagree. Binding also re-aims
+		// the draft's model and agents.
+		const draftProject = getDraftProject();
+		if (draftProject) bindProjectInstance(draftProject, instance.id);
 		searchQuery = "";
-		// The agent list follows the selected harness — re-fetch instance-scoped.
-		const projectSlug = getCurrentSlug();
-		if (projectSlug) {
-			void getAgentsRpc({ projectSlug, instanceId: instance.id })
-				.then(applyGetAgentsResponse)
-				.catch(() => undefined);
-		}
 	}
 
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {

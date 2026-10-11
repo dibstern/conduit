@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { discoveryState } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
@@ -18,7 +17,6 @@ function seed(
 		projects: projectState.projects,
 		path: routerState.path,
 		search: routerState.search,
-		instance: discoveryState.selectedInstanceId,
 		compact: sessionViewState.compact,
 	};
 	instanceState.instances = [
@@ -41,12 +39,12 @@ function seed(
 		{
 			slug: "workspace",
 			title: "Workspace",
+			instanceId: "folder-provider",
 			folders: folders === 1 ? ["/src/app"] : ["/src/app", "/src/docs"],
 		},
 	];
 	routerState.path = "/new";
 	routerState.search = "?project=workspace";
-	discoveryState.selectedInstanceId = "folder-provider";
 	sessionViewState.compact = false;
 	return () => {
 		instanceState.instances = previous.instances;
@@ -54,7 +52,6 @@ function seed(
 		projectState.projects = previous.projects;
 		routerState.path = previous.path;
 		routerState.search = previous.search;
-		discoveryState.selectedInstanceId = previous.instance;
 		sessionViewState.compact = previous.compact;
 	};
 }

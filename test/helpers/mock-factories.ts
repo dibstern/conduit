@@ -353,6 +353,7 @@ export function createMockProjectRelay(
 		syncGlobalSetting: () => Effect.void,
 		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
+		openCodeInstanceId: "opencode",
 		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),

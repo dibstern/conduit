@@ -29,9 +29,13 @@ const emptyComponent = vi.hoisted(
 );
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "project-a",
-}));
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<object>()),
+		getCurrentSlug: () => "project-a",
+	}),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	switchContextWindowRpc: (input: SwitchContextWindowInput) =>
 		switchContextWindowRpcSpy(input),

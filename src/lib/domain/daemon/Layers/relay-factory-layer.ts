@@ -58,6 +58,7 @@ import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js"
 import {
 	broadcastProjectList,
 	projectInfos as getEffectProjectInfos,
+	openCodeInstanceFor,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { Usage } from "../Services/usage.js";
@@ -365,12 +366,10 @@ export const RelayFactoryLive = (
 								Effect.provideService(InstanceManagerStateTag, instanceState),
 							),
 						);
-						const selectedInstance =
-							instances.find(
-								(instance) =>
-									instance.driver !== "claude" &&
-									instance.id === project.instanceId,
-							) ?? instances.find((instance) => instance.driver !== "claude");
+						const selectedInstance = openCodeInstanceFor(
+							instances,
+							project.instanceId,
+						);
 						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
