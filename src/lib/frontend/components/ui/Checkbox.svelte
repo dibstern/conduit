@@ -9,7 +9,7 @@
   ui/TextInput, which likewise leaves the label and layout to ui/Field or the
   consumer.
 
-  For a labelled on/off row with a switch, use ui/Toggle instead. This is the
+  For a labelled on/off row with a switch, use ui/SettingsRow instead. This is the
   control you reach for when the thing being ticked sits inside a list or form
   the feature already lays out.
 -->

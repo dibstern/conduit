@@ -332,7 +332,10 @@ export const sessionHandlers: {
 				workspace_hint_sequence = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint_sequence END
 				WHERE id = ?`,
 			params: [
-				Object.keys(event.data.worktrees).length === 0
+				// Keep fallback and origin metadata on the existing browser session row.
+				Object.keys(event.data.worktrees).length === 0 &&
+				event.data.cause !== "missing" &&
+				event.data.origin === "existing"
 					? null
 					: JSON.stringify({
 							cause: event.data.cause,
@@ -590,13 +593,17 @@ export const sessionHandlers: {
 
 	// Task outcomes settle background children. Only the first attach to an
 	// open part starts a child; repeated links cannot reopen a settled child.
+	// Runners older than the `outcome` stamp report only the raw task status,
+	// and they outlive daemon upgrades, so a terminal status settles too.
 	"tool.running": (event) => {
 		const child = event.data.metadata?.["childSessionId"];
-		const outcome = event.data.metadata?.["outcome"];
+		const outcome =
+			event.data.metadata?.["outcome"] ?? event.data.metadata?.["status"];
 		if (
 			outcome === "completed" ||
 			outcome === "failed" ||
-			outcome === "stopped"
+			outcome === "stopped" ||
+			outcome === "killed"
 		)
 			return [
 				{

@@ -145,7 +145,6 @@ describe("repository identities through the daemon", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: legacy,

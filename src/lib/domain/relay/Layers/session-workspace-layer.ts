@@ -116,10 +116,15 @@ export const SessionWorkspaceLive = Layer.effect(
 					!driver ||
 					!isKnownDriverKind(driver) ||
 					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
-						// Recording an OpenCode declaration does not promise execution cwd switching.
+						// OpenCode accepts declarations and fallbacks, but not direct user moves.
 						!(
 							driver === "opencode" &&
 							(cause === "agent" ||
+								(cause === "missing" &&
+									path === config.projectDir &&
+									previous?.origin === "existing" &&
+									effectiveWorkingDirectory(config.projectDir, previous) !==
+										config.projectDir) ||
 								// A hint acceptance records work already observed in that folder.
 								(cause === "user" && row.workspace_hint === path))
 						))
@@ -225,13 +230,15 @@ export const SessionWorkspaceLive = Layer.effect(
 								target.path) ||
 						isDeepStrictEqual(worktrees, previous?.worktrees ?? {})
 					) {
-						// A successful declaration can acknowledge a user move to the same path,
+						// A successful declaration can acknowledge a user or missing move,
 						// including a reset whose read-model workspace is NULL.
+						const latestCause =
+							cause === "agent"
+								? (yield* latestMove(sessionId))[0]?.cause
+								: undefined;
 						if (
-							!(
-								cause === "agent" &&
-								(yield* latestMove(sessionId))[0]?.cause === "user"
-							) &&
+							latestCause !== "user" &&
+							latestCause !== "missing" &&
 							!(
 								cause === "user" &&
 								(yield* readClaudeWorktreeState(
@@ -282,6 +289,45 @@ export const SessionWorkspaceLive = Layer.effect(
 				),
 			);
 		};
+		const inherit: SessionWorkspace["inherit"] = (
+			sessionId,
+			parentSessionId,
+			options,
+		) => {
+			const append = (project: CommitAndSignalProject) =>
+				Effect.gen(function* () {
+					const { workspace } = yield* readWorkspace(parentSessionId);
+					const path = effectiveWorkingDirectory(config.projectDir, workspace);
+					yield* applySessionCommand(
+						{
+							type: "session.workspace_changed",
+							data: {
+								sessionId,
+								path,
+								cause: "launch",
+								worktrees: { ...workspace?.worktrees },
+								origin: workspace?.origin ?? "existing",
+							},
+						},
+						{ project, upstreamAdapter: null },
+					).pipe(Effect.provide(services));
+					return path;
+				});
+			return (
+				options?.project
+					? append(options.project)
+					: commitAndSignal.write(append)
+			).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof SessionCommandError
+						? cause
+						: new SessionCommandError({
+								operation: "workspace.inherit",
+								cause,
+							}),
+				),
+			);
+		};
 		return {
 			withLaunch: launches.withPermits(1),
 			get: (sessionId) =>
@@ -292,6 +338,7 @@ export const SessionWorkspaceLive = Layer.effect(
 				),
 			resolve,
 			record,
+			inherit,
 			move: (sessionId, path, cause, origin) =>
 				resolve(sessionId, path, cause, origin).pipe(
 					Effect.flatMap((target) => record(sessionId, target, cause)),

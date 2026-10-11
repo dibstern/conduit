@@ -77,10 +77,13 @@ Steps are matched in `src/stepHandlers.ts`. Alongside the existing
 
 - `the viewport is a phone` sets the current scenario to 393x852. Put it before
   the app setup step to load at phone size.
-- `I scroll the transcript up by <N> pixels` hovers `#messages` and scrolls
-  with the mouse wheel.
+- `I scroll the transcript up by <N> pixels` / `I scroll the transcript down by <N> pixels`
+  hovers `#messages` and scrolls with the mouse wheel, which the phone session bar
+  reads as a scroll gesture.
 - `I scroll the transcript back to the bottom` scrolls that same container
   to its full scroll height.
+- `another device sends the message <text>` delivers a user message to the idle
+  mockup session, as a second browser would.
 - `the jump-to-latest control is visible` / `the jump-to-latest control is not visible`
   waits for the sticky transcript button to show or hide.
 

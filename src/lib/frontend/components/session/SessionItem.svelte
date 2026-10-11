@@ -234,6 +234,20 @@
 	let consumeTouchEnd = false;
 
 	const displayTitle = $derived(session.title || "New Session");
+	// A title that changes while the row is on screen (auto-name or rename)
+	// plays the gleam once. The row's first render must not, or every row would
+	// shine on page load, so the previous title is tracked outside state.
+	let renderedTitle: string | undefined;
+	let gleamingTitle = $state<string>();
+	$effect(() => {
+		if (renderedTitle !== undefined && displayTitle !== renderedTitle) gleamingTitle = displayTitle;
+		renderedTitle = displayTitle;
+	});
+	const gleaming = $derived(gleamingTitle === displayTitle);
+	// How far a clipped title has to travel for its end to show, measured when
+	// the pointer enters because that is when the hover marquee starts.
+	let titleEl = $state<HTMLElement>();
+	let marqueeShift = $state(0);
 	const actions = $derived(getSessionActionState(session, now));
 	const swipeStage = $derived.by(() => {
 		const stage = getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0);
@@ -581,6 +595,7 @@
 	onclick={handleClick}
 	onclickcapture={suppressGestureClick}
 	onpointerdown={startPointer}
+	onpointerenter={() => { marqueeShift = titleEl ? titleEl.scrollWidth - titleEl.clientWidth : 0; }}
 	oncontextmenu={(event) => {
 		if (selectMode || !oncontextmenuProp) return;
 		event.preventDefault();
@@ -653,10 +668,25 @@
 				onend={() => onrenameend?.()}
 			/>
 		{:else}
-			<span
-				class="session-title-inner inline-block group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
-				>{displayTitle}</span
-			>
+			<!-- Keyed so a second rename mid-gleam restarts it on a fresh element.
+			     The outer span clips; the inner one is what the hover marquee
+			     moves, so the clip stays put and reveals the title's end. The
+			     marquee waits for the gleam: both are `animation`, so hovering
+			     would cut the gleam short and replay it on leave. -->
+			{#key displayTitle}
+				{@const marquee = !gleaming && marqueeShift > 0}
+				<span
+					bind:this={titleEl}
+					class="session-title-inner inline-block overflow-hidden text-ellipsis whitespace-nowrap min-w-0 {gleaming ? 'session-title-gleam motion-reduce:animate-none' : ''} {marquee ? 'group-hover:text-clip' : ''}"
+					onanimationend={() => { gleamingTitle = undefined; }}
+					><span
+						class={marquee ? "group-hover:inline-block group-hover:session-title-marquee" : undefined}
+						style:--marquee-shift={marquee ? `${-marqueeShift}px` : undefined}
+						style:--marquee-dur={marquee ? `${Math.max(2, marqueeShift / 38)}s` : undefined}
+						>{displayTitle}</span
+					></span
+				>
+			{/key}
 			{#if sessionAttention(session) === "done-unread"}
 				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
 			{/if}
@@ -779,4 +809,7 @@
 		</div>
 	{/if}
 </a>
+{#if gleaming}
+	<div class="session-row-sheen motion-reduce:hidden" aria-hidden="true"></div>
+{/if}
 </div>

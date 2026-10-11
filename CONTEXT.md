@@ -46,8 +46,9 @@ New worktree uses session-owned git worktrees on one generated branch. Its
 recorded mapping from Project Folders to worktrees includes the move's cause and
 origin, `existing` or `conduit`. Only the
 Session Workspace service writes it, as a `session.workspace_changed` canonical
-event through the session-command seam. An empty map projects to NULL, meaning
-the project's main folders. Existing sessions keep that default. Branch names
+event through the session-command seam. An empty map means the project's main
+folders; its projection keeps fallback and origin metadata when needed, otherwise
+it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
 Conduit's Worktree daemon service creates a checkout under
@@ -57,8 +58,8 @@ folder's committed HEAD on its current branch. Uncommitted changes stay in the
 original checkout. Creation or launch failure rolls back the checkout and its
 new branch. These worktrees cannot become projects or Project Folders.
 
-Moves require the session provider's `supportsWorktree` capability. OpenCode
-moves are refused before recording an event; Claude supports moves.
+Direct user moves require the session provider's `supportsWorktree` capability.
+OpenCode refuses those moves before recording an event; Claude supports moves.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
@@ -95,6 +96,11 @@ Successful tool declarations also acknowledge a user move to the same path.
 metadata. A user move remains pending until a later startup cwd or successful
 worktree declaration acknowledges its effective working directory. Both states
 survive daemon restarts without additional session columns.
+
+At turn start, a missing recorded worktree with origin `existing` moves back to
+the main folder with cause `missing`, using the same pending Claude directive
+rules as a user move; a missing main folder still fails. Forks copy the parent's
+complete worktrees map and origin as a launch move before their first turn.
 
 ## Workspace Hint
 

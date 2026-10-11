@@ -69,6 +69,11 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 	const stdout = options?.stdout ?? process.stdout;
 	const stderr = options?.stderr ?? process.stderr;
 	const exit = options?.exit ?? process.exit;
+	if (args.skipPerms) {
+		stderr.write(
+			"Warning: --dangerously-skip-permissions is deprecated and has no effect.\n",
+		);
+	}
 
 	const rpcSend: SendRPC =
 		options?.sendRPC ??

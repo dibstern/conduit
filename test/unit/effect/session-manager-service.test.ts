@@ -219,7 +219,6 @@ function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
 		tls: false,
 		debug: false,
 		keepAwake: false,
-		dangerouslySkipPermissions: false,
 		projects: [],
 		instances: [
 			{
@@ -966,7 +965,6 @@ describe("SessionManagerService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 			};
 			const relayConfig: ProjectRelayConfig = {

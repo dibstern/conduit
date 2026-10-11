@@ -423,7 +423,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
+			{#if directory}<GitIdentity {directory} {git} workspaceCause={session?.workspace?.cause} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button

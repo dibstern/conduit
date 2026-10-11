@@ -37,7 +37,6 @@ interface DaemonConfigOnDisk {
 	keepAwake: boolean;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
-	dangerouslySkipPermissions: boolean;
 	projects: DaemonProject[];
 	instances: DaemonInstanceConfig[];
 }
@@ -60,7 +59,6 @@ function serializeState(state: DaemonState): DaemonConfigOnDisk {
 		...(state.keepAwakeArgs !== undefined && {
 			keepAwakeArgs: state.keepAwakeArgs,
 		}),
-		dangerouslySkipPermissions: state.dangerouslySkipPermissions,
 		projects: state.projects.map(migrateProjectFolders),
 		instances: state.instances,
 	};
@@ -97,9 +95,6 @@ function deserializeConfig(value: Record<string, unknown>): DaemonState {
 		}),
 		...(Array.isArray(raw["keepAwakeArgs"]) && {
 			keepAwakeArgs: raw["keepAwakeArgs"] as string[],
-		}),
-		...(typeof raw["dangerouslySkipPermissions"] === "boolean" && {
-			dangerouslySkipPermissions: raw["dangerouslySkipPermissions"],
 		}),
 		...(Array.isArray(raw["projects"]) && {
 			projects: (raw["projects"] as PersistedProject[]).map(

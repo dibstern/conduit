@@ -111,6 +111,7 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag, {
 			pinEnabled: false,
 			tlsEnabled: true,
 			keepAwake: false,
+			keepAwakeCommand: null,
 			projects: [
 				{
 					slug: "alpha",

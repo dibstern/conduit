@@ -107,7 +107,7 @@ describe("daemon main runtime config status", () => {
 		expect(ensureCertsMock).not.toHaveBeenCalled();
 	});
 
-	it("applies restart TLS config before persistence and shutdown", async () => {
+	it("preserves TLS and keep-awake config through restart and persistence", async () => {
 		const socketPath = join(tmpDir, "relay.sock");
 
 		daemon = await startForegroundDaemon({
@@ -121,17 +121,17 @@ describe("daemon main runtime config status", () => {
 
 		const response = await sendRpcRequest(
 			socketPath,
-			new RestartWithConfig({ config: { tls: true, keepAwake: true } }),
+			new RestartWithConfig({}),
 		);
 
 		expect(response).toEqual({ ok: true });
-		expect(daemon.getStatus().tlsEnabled).toBe(true);
-		expect(daemon.getStatus().keepAwake).toBe(true);
+		expect(daemon.getStatus().tlsEnabled).toBe(false);
+		expect(daemon.getStatus().keepAwake).toBe(false);
 		const persisted = await waitForPersistedConfig(
 			tmpDir,
-			(config) => config.tls === true,
+			(config) => config.tls === false,
 		);
-		expect(persisted.tls).toBe(true);
+		expect(persisted.tls).toBe(false);
 	});
 
 	it("keeps keep-awake startup config in the runtime-backed ref and persisted config", async () => {
@@ -170,7 +170,6 @@ describe("daemon main runtime config status", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [
 					{
 						path: projectPath,

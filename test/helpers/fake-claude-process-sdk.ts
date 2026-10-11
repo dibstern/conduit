@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
 	readFileSync,
+	realpathSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -376,27 +378,68 @@ let initializationAttempts = 0;
 function readNativeTranscript(
 	sessionId: string,
 	configDir: string | undefined,
+	directory?: string,
 ): SessionMessage[] {
 	if (!configDir)
 		throw new Error("A native transcript requires an account config dir");
-	return readFileSync(
-		join(configDir, `conduit-test-transcript-${sessionId}.ndjson`),
-		"utf8",
-	)
+	const file = join(configDir, `conduit-test-transcript-${sessionId}.ndjson`);
+	if (directory && existsSync(`${file}.directory`)) {
+		const recorded = readFileSync(`${file}.directory`, "utf8");
+		const common = gitCommonDirectory(recorded);
+		if (
+			recorded !== directory &&
+			(!common || gitCommonDirectory(directory) !== common)
+		)
+			throw new Error(`Native session ${sessionId} not found in ${directory}`);
+	}
+	return readFileSync(file, "utf8")
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => JSON.parse(line) as SessionMessage);
 }
 
+function gitCommonDirectory(directory: string): string | undefined {
+	const env = { ...process.env };
+	for (const key of [
+		"GIT_DIR",
+		"GIT_INDEX_FILE",
+		"GIT_WORK_TREE",
+		"GIT_COMMON_DIR",
+	])
+		delete env[key];
+	try {
+		return realpathSync(
+			execFileSync(
+				"git",
+				[
+					"-C",
+					directory,
+					"rev-parse",
+					"--path-format=absolute",
+					"--git-common-dir",
+				],
+				{ env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+			).trim(),
+		);
+	} catch {
+		return undefined;
+	}
+}
+
 function recordNativeMessage(
 	entry: SessionMessage,
 	configDir: string | undefined,
+	directory?: string,
 ): void {
-	if (configDir && existsSync(join(configDir, "conduit-test-record-forks")))
-		appendFileSync(
-			join(configDir, `conduit-test-transcript-${entry.session_id}.ndjson`),
-			`${JSON.stringify(entry)}\n`,
+	if (configDir && existsSync(join(configDir, "conduit-test-record-forks"))) {
+		const file = join(
+			configDir,
+			`conduit-test-transcript-${entry.session_id}.ndjson`,
 		);
+		if (directory && !existsSync(`${file}.directory`))
+			writeFileSync(`${file}.directory`, directory);
+		appendFileSync(file, `${JSON.stringify(entry)}\n`);
+	}
 }
 
 function query(params: {
@@ -578,6 +621,7 @@ function query(params: {
 					parent_agent_id: null,
 				},
 				accountConfigDir,
+				params.options?.cwd,
 			);
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
@@ -1215,6 +1259,7 @@ function query(params: {
 					parent_agent_id: null,
 				},
 				accountConfigDir,
+				params.options?.cwd,
 			);
 			yield {
 				type: "assistant",
@@ -1634,13 +1679,21 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
 	fork: {
 		readTranscript: async (sessionId, options) => {
-			return readNativeTranscript(sessionId, options.configDir);
+			return readNativeTranscript(sessionId, options.configDir, options.dir);
 		},
 		forkSession: async (parentSessionId, options) => {
 			const transcript = readNativeTranscript(
 				parentSessionId,
 				options.configDir,
+				options.dir,
 			);
+			const directoryFile = join(
+				options.configDir ?? "",
+				`conduit-test-transcript-${parentSessionId}.ndjson.directory`,
+			);
+			const directory = existsSync(directoryFile)
+				? readFileSync(directoryFile, "utf8")
+				: undefined;
 			const end =
 				options.upToMessageId === undefined
 					? transcript.length - 1
@@ -1653,6 +1706,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 				recordNativeMessage(
 					{ ...entry, session_id: sessionId },
 					options.configDir,
+					directory,
 				);
 			}
 			mark({

@@ -6,8 +6,6 @@ import {
 	hasInfoWithSessionID,
 	hasPartWithSessionID,
 	hasSessionID,
-	isFileEvent,
-	isInstallationUpdateEvent,
 	isMessageCreatedEvent,
 	isMessageRemovedEvent,
 	isMessageUpdatedEvent,
@@ -551,73 +549,6 @@ describe("isPtyDeletedEvent", () => {
 				properties: { id: "pty1" },
 			}),
 		).toBe(true);
-	});
-});
-
-describe("isFileEvent", () => {
-	it("returns true for file.edited", () => {
-		expect(
-			isFileEvent({
-				type: "file.edited",
-				properties: { file: "/path/to/file.ts" },
-			}),
-		).toBe(true);
-	});
-
-	it("returns true for file.watcher.updated", () => {
-		expect(
-			isFileEvent({
-				type: "file.watcher.updated",
-				properties: { file: "/path/to/file.ts" },
-			}),
-		).toBe(true);
-	});
-
-	it("returns false when file is missing", () => {
-		expect(
-			isFileEvent({
-				type: "file.edited",
-				properties: {},
-			}),
-		).toBe(false);
-	});
-
-	it("returns false for unknown file event type", () => {
-		expect(
-			isFileEvent({
-				type: "file.deleted",
-				properties: { file: "/path/to/file.ts" },
-			}),
-		).toBe(false);
-	});
-});
-
-describe("isInstallationUpdateEvent", () => {
-	it("returns true for valid update event", () => {
-		expect(
-			isInstallationUpdateEvent({
-				type: "installation.update-available",
-				properties: { version: "2.0.0" },
-			}),
-		).toBe(true);
-	});
-
-	it("returns true without version", () => {
-		expect(
-			isInstallationUpdateEvent({
-				type: "installation.update-available",
-				properties: {},
-			}),
-		).toBe(true);
-	});
-
-	it("returns false for wrong type", () => {
-		expect(
-			isInstallationUpdateEvent({
-				type: "installation.updated",
-				properties: { version: "2.0.0" },
-			}),
-		).toBe(false);
 	});
 });
 

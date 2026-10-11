@@ -529,7 +529,13 @@ export function createProjectRelayLayers({
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const sseStreamLayer = SSEStreamLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeInstancesLayer,
+				configLayer,
+				persistenceEffectLayer,
+			),
+		),
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
