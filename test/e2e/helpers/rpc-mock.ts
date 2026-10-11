@@ -1,7 +1,10 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
-import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
+import {
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
 	type GetStatusResponse,
@@ -732,7 +735,8 @@ async function handleMessage(
 			if (
 				error instanceof WsRpcError ||
 				error instanceof WorkspaceMoveError ||
-				error instanceof WorktreeCreationError
+				error instanceof WorktreeCreationError ||
+				error instanceof WorktreeRecoveryError
 			) {
 				sendJson(ws, {
 					_tag: "Exit",
@@ -748,9 +752,10 @@ async function handleMessage(
 											path: error.path,
 											reason: error.reason,
 										}
-									: error instanceof WorktreeCreationError
+									: error instanceof WorktreeCreationError ||
+											error instanceof WorktreeRecoveryError
 										? {
-												_tag: "WorktreeCreationError",
+												_tag: error._tag,
 												path: error.path,
 												reason: error.reason,
 												message: error.message,

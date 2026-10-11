@@ -14,6 +14,7 @@
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
+	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
@@ -151,6 +152,7 @@
 						<NotificationsSettingsTab />
 						<AppearanceSettingsTab />
 						<ComposerSettingsTab />
+						<SessionsSettingsTab />
 						<DebugSettingsTab />
 					{:else if shown === "models"}
 						<VisibilitySettingsTab />

@@ -10,7 +10,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError } from "./worktree.js";
+import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -715,6 +715,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
@@ -1354,6 +1355,24 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
+	},
+) {}
+
+export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
+	"RecreateSessionWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+	"ContinueSessionInMainFolder",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -2111,6 +2130,8 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	ListWorktrees,
 	MoveSessionWorkspace,
+	RecreateSessionWorktree,
+	ContinueSessionInMainFolder,
 	DismissWorkspaceHint,
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
@@ -2517,6 +2538,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(RecreateSessionWorktree),
+	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
 	Rpc.fromTaggedRequest(DismissWorkspaceHint),
 	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),

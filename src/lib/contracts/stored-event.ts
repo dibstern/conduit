@@ -343,6 +343,7 @@ export interface SessionUnreadPayload {
 export interface SessionSettledPayload {
 	readonly sessionId: string;
 	readonly automatic?: boolean;
+	readonly mergedHead?: string;
 }
 
 export interface SessionAutoSettleSetPayload {
@@ -1037,6 +1038,7 @@ const SessionUnreadPayloadSchema = Schema.Struct({
 const SessionSettledPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	automatic: Schema.optional(Schema.Boolean),
+	mergedHead: Schema.optional(Schema.String),
 });
 
 const SessionAutoSettleSetPayloadSchema = Schema.Struct({

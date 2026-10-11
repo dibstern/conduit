@@ -1,5 +1,5 @@
 // Smoke tests for the WS debug observability feature: feature flags, debug
-// panel, Settings debug tab, desktop overflow action, keyboard shortcut, and the
+// panel, Settings Advanced group, desktop overflow action, keyboard shortcut, and the
 // window.__wsDebug() console API.
 // Uses real relay backed by MockOpenCodeServer.
 
@@ -12,7 +12,6 @@ const DEBUG_PANEL = ".debug-panel";
 const DEBUG_BTN = '[data-testid="overflow-debug"]';
 const SETTINGS_BTN = '[data-testid="overflow-settings"]';
 const SETTINGS_PANEL = "#settings-panel";
-const DEBUG_TAB = 'button:has-text("Debug")';
 const DEBUG_TOGGLE =
 	'button[role="switch"][aria-label="Toggle connection debug panel"]';
 const CLEAR_BTN = 'button[title="Clear log"]';
@@ -88,8 +87,8 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 	});
 });
 
-test.describe("Debug Panel — Settings Tab", () => {
-	test("Settings Debug tab toggles the feature", async ({ page, relayUrl }) => {
+test.describe("Debug Panel — Settings Advanced", () => {
+	test("Settings Advanced toggles the feature", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
@@ -98,8 +97,8 @@ test.describe("Debug Panel — Settings Tab", () => {
 		await page.locator(SETTINGS_BTN).click();
 		await expect(page.locator(SETTINGS_PANEL)).toBeVisible();
 
-		// Switch to Debug tab
-		await page.locator(DEBUG_TAB).click();
+		await page.getByTestId("settings-tab-general").click();
+		await page.getByRole("button", { name: /^Advanced.*Debug off$/ }).click();
 
 		// Toggle should be off initially
 		const toggle = page.locator(DEBUG_TOGGLE);
@@ -133,7 +132,8 @@ test.describe("Debug Panel — Settings Tab", () => {
 		await openMoreActions(page);
 		await page.locator(SETTINGS_BTN).click();
 		await expect(page.locator(SETTINGS_PANEL)).toBeVisible();
-		await page.locator(DEBUG_TAB).click();
+		await page.getByTestId("settings-tab-general").click();
+		await page.getByRole("button", { name: /^Advanced.*Debug on$/ }).click();
 
 		await expect(page.locator(DEBUG_TOGGLE)).toHaveAttribute(
 			"aria-checked",

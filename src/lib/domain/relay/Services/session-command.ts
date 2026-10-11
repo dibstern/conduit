@@ -740,8 +740,19 @@ const forkSessionInWorkspace = (
 					yield* workspace.value.inherit(forked.sdkSessionId, parentSessionId, {
 						project,
 					});
+				// The fork has nothing in flight. Copied history can end inside a
+				// turn the parent is still running; the idle closes it, or the
+				// inbox reads the fork as busy and holds every send.
 				const stored = history?.events.length
-					? yield* eventStore.value.appendBatch(history.events)
+					? yield* eventStore.value.appendBatch([
+							...history.events,
+							canonicalEvent(
+								"session.status",
+								forked.sdkSessionId,
+								{ sessionId: forked.sdkSessionId, status: "idle" },
+								{ provider, metadata: { source: "relay" } },
+							),
+						])
 					: created;
 				if (history?.events.length) yield* project(stored);
 				if (parentThread)
