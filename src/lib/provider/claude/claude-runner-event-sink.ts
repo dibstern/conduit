@@ -6,7 +6,10 @@ import type {
 } from "../../contracts/stored-event.js";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { createRelayEventSink } from "../relay-event-sink.js";
+import {
+	createRelayEventSink,
+	type RelayEventSinkDeps,
+} from "../relay-event-sink.js";
 import type { PermissionResponse } from "../types.js";
 
 /** Restore live waiters without appending interactions already in the store. */
@@ -16,11 +19,17 @@ export const makeRecoveredClaudeEventSink = (options: {
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly pending: PendingInteractionService;
 	readonly onRegistered: (requestId: string) => Effect.Effect<unknown>;
+	/** Without these, an answered question's re-armed timeout fails a live turn. */
+	readonly timeoutHooks: Pick<
+		RelayEventSinkDeps,
+		"clearTimeout" | "resetTimeout"
+	>;
 }) => {
 	const { sessionId, sql, ingestion, pending } = options;
 	return createRelayEventSink({
 		sessionId,
 		providerId: "claude",
+		...options.timeoutHooks,
 		ingestion: {
 			ingest: (event) =>
 				Effect.gen(function* () {
