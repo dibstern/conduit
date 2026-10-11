@@ -2545,14 +2545,23 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					ctx.interruptRequested = false;
 				}
 			}
-			// The SDK may list a task before it starts, when its owner is not
-			// yet known: publish the live set again now that it is.
+			// Ownership or launcher input can arrive after the live snapshot,
+			// including through an agent's transcript feed. Final reads still
+			// persist history above, but cannot revive an ended or replaced stream.
 			if (
+				ctx.subagentTasks?.size &&
+				!ctx.stopped &&
+				(yield* isCurrentSession(this.stateRef, ctx)) &&
+				!(yield* isStreamEnded(this.stateRef, ctx.sessionId)) &&
 				decisions.some(
 					(decision) =>
-						decision.kind === "route" &&
-						decision.message.type === "system" &&
-						decision.message.subtype === "task_started",
+						decision.kind === "route-transcript" ||
+						(decision.kind === "route" &&
+							(decision.message.type === "assistant" ||
+								(decision.message.type === "stream_event" &&
+									decision.message.event.type === "content_block_stop") ||
+								(decision.message.type === "system" &&
+									decision.message.subtype === "task_started"))),
 				)
 			)
 				yield* translator.publishBackgroundTasks(ctx);

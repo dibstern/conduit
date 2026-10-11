@@ -92,6 +92,30 @@ export interface ClaudeMessageOwnership {
 	// makes an owner known is followed by the held messages it releases, in
 	// arrival order.
 	decide(input: ClaudeOwnershipInput): readonly ClaudeOwnershipDecision[];
+	/** Launcher input has the issuer's lifetime, including after its call returns. */
+	toolInputFor(
+		toolUseId: string,
+	): { readonly name: string; readonly input: unknown } | undefined;
+	rememberToolInput(toolUseId: string, name: string, input: unknown): void;
+}
+
+// Issuers outlive their calls. Keep the launcher field, rather than retaining
+// every tool's file contents and agent prompts for the whole session.
+function launcherInput(
+	name: string,
+	input: unknown,
+	previous?: { readonly name: string; readonly input: unknown },
+) {
+	const field =
+		name === "Bash" || name === "Monitor"
+			? "command"
+			: name === "Agent" || name === "Task"
+				? "subagent_type"
+				: undefined;
+	const value = field && isRecord(input) ? input[field] : undefined;
+	return field && typeof value === "string" && value.trim()
+		? { name, input: { [field]: value } }
+		: (previous ?? { name, input: {} });
 }
 
 export function createClaudeMessageOwnership(deps: {
@@ -101,7 +125,11 @@ export function createClaudeMessageOwnership(deps: {
 	const parent: ClaudeMessageOwner = { kind: "parent" };
 	const issuers = new Map<
 		string,
-		{ owner: ClaudeMessageOwner; issuingMessageId?: string }
+		{
+			owner: ClaudeMessageOwner;
+			issuingMessageId?: string;
+			toolInput?: { readonly name: string; readonly input: unknown };
+		}
 	>();
 	const agents = new Map<string, ChildOwner>();
 	const tasks = new Map<string, string>();
@@ -117,6 +145,17 @@ export function createClaudeMessageOwnership(deps: {
 	}[] = [];
 
 	return {
+		toolInputFor(toolUseId) {
+			return issuers.get(toolUseId)?.toolInput;
+		},
+		rememberToolInput(toolUseId, name, input) {
+			const issuer = issuers.get(toolUseId);
+			if (issuer)
+				issuers.set(toolUseId, {
+					...issuer,
+					toolInput: launcherInput(name, input, issuer.toolInput),
+				});
+		},
 		decide(input) {
 			const decisions: ClaudeOwnershipDecision[] = [];
 			const finalRead = (taskId: string) => {
@@ -163,13 +202,19 @@ export function createClaudeMessageOwnership(deps: {
 				toolUseId: string,
 				owner: ClaudeMessageOwner,
 				issuingMessageId?: string,
+				toolInput?: { readonly name: string; readonly input: unknown },
 			) => {
 				const issuer = issuers.get(toolUseId);
 				const uuid = issuingMessageId ?? issuer?.issuingMessageId;
-				issuers.set(
-					toolUseId,
-					uuid === undefined ? { owner } : { owner, issuingMessageId: uuid },
-				);
+				const launcher =
+					toolInput &&
+					launcherInput(toolInput.name, toolInput.input, issuer?.toolInput);
+				issuers.set(toolUseId, {
+					...issuer,
+					owner,
+					...(uuid === undefined ? {} : { issuingMessageId: uuid }),
+					...(launcher ? { toolInput: launcher } : {}),
+				});
 				if (issuer === undefined) newlyKnown.add(toolUseId);
 			};
 			const decideMessage = (
@@ -310,7 +355,7 @@ export function createClaudeMessageOwnership(deps: {
 				if (message.type === "assistant") {
 					for (const block of message.message.content) {
 						if (block.type === "tool_use") {
-							registerIssuer(block.id, owner, message.uuid);
+							registerIssuer(block.id, owner, message.uuid, block);
 						}
 					}
 				} else if (
@@ -319,7 +364,12 @@ export function createClaudeMessageOwnership(deps: {
 					message.event.type === "content_block_start" &&
 					message.event.content_block.type === "tool_use"
 				) {
-					registerIssuer(message.event.content_block.id, owner);
+					registerIssuer(
+						message.event.content_block.id,
+						owner,
+						undefined,
+						message.event.content_block,
+					);
 				}
 				return;
 			};
@@ -350,7 +400,14 @@ export function createClaudeMessageOwnership(deps: {
 							block["type"] === "tool_use" &&
 							typeof block["id"] === "string"
 						)
-							registerIssuer(block["id"], owner, message.uuid);
+							registerIssuer(
+								block["id"],
+								owner,
+								message.uuid,
+								typeof block["name"] === "string"
+									? { name: block["name"], input: block["input"] }
+									: undefined,
+							);
 					}
 				}
 			} else {
