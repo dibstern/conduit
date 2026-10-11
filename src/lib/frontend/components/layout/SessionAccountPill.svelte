@@ -11,7 +11,7 @@
 -->
 <script lang="ts">
 	import { discoveryState } from "../../stores/discovery.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
@@ -20,17 +20,18 @@
 	import Button from "../ui/Button.svelte";
 
 	let { session }: { session: Immutable<SessionInfo> } = $props();
+	const projectSlug = $derived(getCurrentSlug());
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug ?? ""));
 
 	const accountId = $derived(session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id]);
 	// A session that never switched is bound to the daemon's default "claude" instance, which is not in the configured list.
-	const account = $derived(accountId === undefined ? undefined : { id: accountId, name: getInstanceById(accountId)?.name ?? "Claude" });
-	const canSwitch = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== account?.id));
+	const account = $derived(accountId === undefined ? undefined : { id: accountId, name: claudeAccounts.nameOf(accountId) });
+	const canSwitch = $derived(claudeAccounts.hasAlternative(account?.id));
 	// An open limit on this account carries its cut-off request into the handoff.
 	const limit = $derived.by(() => {
 		const recovery = session.limitRecovery;
 		return recovery && !recovery.switched && !recovery.continued && recovery.instanceId === account?.id ? recovery : undefined;
 	});
-	const projectSlug = $derived(getCurrentSlug());
 	// Shrinks beside a long branch, keeping 4 letters plus the ellipsis (5ch): dot, gap, padding and border on top, 1px of rounding slack.
 	const minimumWidth = $derived(`calc(${Math.min(account?.name.length ?? 0, 5)}ch + 6px + 5px + ${sessionViewState.compact ? 12 : 16}px + 2px + 1px)`);
 </script>

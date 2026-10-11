@@ -38,7 +38,7 @@
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		conduitCommands,
@@ -64,19 +64,18 @@
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
+	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, quotaForAccountsRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { planUsageWindows, quotaBlocksSwitch, usageForecastTime, type PlanUsageWindow } from "../../utils/continuation.js";
+	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
-	import type { UsageReading } from "../../../contracts/limit-recovery.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -171,26 +170,13 @@
 		return () => requestSessionPreWarm(null, null);
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession, projectState.projects.find((project) => project.slug === composerProjectSlug)));
-	const usageReading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
+	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
-	let sendMenuQuotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
 	let switchingAccount = $state(false);
-	let sendQuotaTicket = 0;
-	const hasOtherClaudeAccount = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== accountId));
-	const sendAccounts = $derived.by(() => {
-		if (!currentSession) return [];
-		return orderedUsageAccounts().flatMap((reading) => {
-			const quota = sendMenuQuotas === undefined ? reading : sendMenuQuotas.get(reading.accountId);
-			const instance = getInstanceById(reading.accountId);
-			if (reading.accountId === accountId || instance?.driver !== "claude" || quota?.harness !== "claude" || quota.status !== "available" || quotaBlocksSwitch(quota)) return [];
-			const fullest = planUsageWindows(quota).reduce<PlanUsageWindow | undefined>(
-				(best, window) => best === undefined || window.utilization > best.utilization || (window.utilization === best.utilization && window.kind === "five_hour") ? window : best,
-				undefined,
-			);
-			return fullest === undefined || fullest.utilization >= 100 ? [] : [{ id: instance.id, name: instance.name, fullest }];
-		});
-	});
+	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
+	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
 	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
 		if (usageReading?.status !== "limited") return undefined;
@@ -216,19 +202,8 @@
 		composerProjectSlug;
 		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
-		sendQuotaTicket++;
-		sendMenuQuotas = undefined;
+		claudeAccounts.invalidateSendQuotas();
 	});
-	async function checkSendQuotas(): Promise<void> {
-		const ticket = ++sendQuotaTicket;
-		sendMenuQuotas = undefined;
-		try {
-			const checked = await quotaForAccountsRpc({ projectSlug: composerProjectSlug, originId: getBrowserClientId() });
-			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map(checked.map((reading) => [reading.accountId, reading]));
-		} catch {
-			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map();
-		}
-	}
 	const pendingSendsAt = $derived.by(() => {
 		const recovery = currentSession?.limitRecovery;
 		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
@@ -1347,8 +1322,8 @@
 						<Menu
 							bind:open={sendMenuOpen}
 							onopenchange={(open) => {
-								if (open) void checkSendQuotas();
-								else sendQuotaTicket++;
+								if (open) void claudeAccounts.refreshQuotas("send");
+								else claudeAccounts.invalidateSendQuotas(false);
 							}}
 							presentation={sessionViewState.compact ? "sheet" : "popover"}
 							side="top"
@@ -1363,7 +1338,7 @@
 							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
 								<span class="flex-1">Send at {sendAtTime}</span>
-								<span class="font-mono text-[10.5px] text-text-dimmer">{accountId ? getInstanceById(accountId)?.name ?? "Claude" : "Claude"}</span>
+								<span class="font-mono text-[10.5px] text-text-dimmer">{claudeAccounts.nameOf(accountId)}</span>
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>

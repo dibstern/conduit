@@ -9,28 +9,12 @@
   same colour in both themes, like a project square.
 -->
 <script module lang="ts">
-	const ACCOUNT_COLOR_CLASSES = [
-		"bg-project-1",
-		"bg-project-3",
-		"bg-fill-green",
-		"bg-fill-blue",
-		"bg-fill-indigo",
-		"bg-project-4",
-	] as const;
-
 	const SIZE_CLASSES = { 6: "size-[6px]", 7: "size-[7px]", 8: "size-[8px]" } as const;
-
-	// FNV-1a: cheap, stable across sessions and browsers, and well spread for
-	// the short random IDs instances get.
-	function accountColorClass(instanceId: string): string {
-		let hash = 0x811c9dc5;
-		for (let index = 0; index < instanceId.length; index++)
-			hash = Math.imul(hash ^ instanceId.charCodeAt(index), 0x01000193);
-		return ACCOUNT_COLOR_CLASSES[(hash >>> 0) % ACCOUNT_COLOR_CLASSES.length] ?? ACCOUNT_COLOR_CLASSES[0];
-	}
 </script>
 
 <script lang="ts">
+	import { accountColorClass } from "../../utils/account-color.js";
+
 	let {
 		instanceId,
 		size = 8,
