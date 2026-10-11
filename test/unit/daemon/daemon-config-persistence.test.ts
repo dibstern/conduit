@@ -161,7 +161,7 @@ describe("daemon-config-persistence", () => {
 	);
 
 	it.effect(
-		"loadConfig migrates a legacy default OpenCode instance id and its project bindings",
+		"loadConfig migrates a legacy default OpenCode instance id and drops project bindings",
 		() =>
 			Effect.gen(function* () {
 				const testFs = makeTestFileSystem();
@@ -202,7 +202,7 @@ describe("daemon-config-persistence", () => {
 
 				expect(state.instances).toHaveLength(1);
 				expect(state.instances[0]?.id).toBe("opencode");
-				expect(state.projects[0]?.instanceId).toBe("opencode");
+				expect(state.projects[0]).not.toHaveProperty("instanceId");
 			}),
 	);
 

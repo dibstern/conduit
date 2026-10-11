@@ -70,7 +70,6 @@ describe("instance lifecycle integration", () => {
 					folders: ["/src/app"],
 					slug: "app",
 					addedAt: Date.now(),
-					instanceId: "personal",
 				},
 			],
 			instances: [
@@ -86,11 +85,9 @@ describe("instance lifecycle integration", () => {
 		expect(loaded.instances).toHaveLength(2);
 		const [project] = loaded.projects;
 		assert.exists(project, "expected the saved personal project");
-		expect(project.instanceId).toBe("personal");
+		expect(project).not.toHaveProperty("instanceId");
 	});
 
-	// A binding picks the harness for new sessions, so a default one would
-	// override the default model's harness.
 	it("addProject leaves a new project unbound", async () => {
 		const projectDir = join(tmpDir, "lifecycle-test");
 		mkdirSync(projectDir);
@@ -102,6 +99,6 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const project = await daemon.addProject(projectDir);
-		expect(project.instanceId).toBeUndefined();
+		expect(project).not.toHaveProperty("instanceId");
 	});
 });

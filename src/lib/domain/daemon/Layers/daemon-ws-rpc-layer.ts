@@ -67,7 +67,6 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
-	setProjectInstance,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
@@ -428,9 +427,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
-						...(request.instanceId !== undefined && {
-							instanceId: request.instanceId,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -473,17 +469,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 									configDir,
 								),
 							).pipe(Effect.ignore);
-						return {
-							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
-							projects: yield* projectList,
-						};
-					}),
-				),
-			SetProjectInstance: (request) =>
-				run(
-					Effect.gen(function* () {
-						yield* setProjectInstance(request.slug, request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

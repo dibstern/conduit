@@ -72,7 +72,9 @@ describe("provider instance resolution", () => {
 			...oldConfig,
 			projects: [
 				{
-					...oldConfig.projects[0],
+					path: "/src/project",
+					slug: "project",
+					addedAt: 1,
 					folders: ["/src/project"],
 				},
 			],

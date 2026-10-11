@@ -1,9 +1,4 @@
-// Tests all multi-instance UI features defined in the multi-instance plan.
-//
-// Groups 1-14: Implemented features (all passing)
-//
-// Uses WS mock — no real OpenCode or relay needed (except Group 14 daemon smoke).
-// Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
+// Instance settings, health updates and reconnect actions with a mocked daemon.
 
 import { expect, test } from "@playwright/test";
 import {
@@ -152,24 +147,6 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 				lost: [],
 				active: [4096, 4098],
 			}),
-			SetProjectInstance: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						instanceId: String(params["instanceId"] ?? "personal"),
-					},
-					{
-						slug: "company-api",
-						title: "company-api",
-						folders: ["/src/company-api"],
-						instanceId: "work",
-					},
-				],
-				current: "myapp",
-			}),
 		},
 	});
 }
@@ -195,80 +172,57 @@ async function openSettingsPanel(page: Page): Promise<void> {
 	await page.getByTestId("overflow-settings").click();
 }
 
-/** The status dot of one instance in the header badge's dropdown. */
+/** The status dot for an instance in Settings. */
 function instanceDot(page: Page, name: string) {
 	return page
-		.locator("[data-testid='instance-selector-dropdown']")
-		.getByRole("menuitemradio", { name })
-		.locator("[data-testid='instance-status-dot']");
+		.locator("#instance-settings-list")
+		.locator("button", { hasText: name })
+		.locator(".w-2.h-2.rounded-full");
 }
 
-// Group 2: Header Instance Badge (IMPLEMENTED)
+async function pickDraftInstance(
+	page: Page,
+	instanceId: string,
+): Promise<void> {
+	const picker = page.locator(
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+	);
+	await picker.click();
+	await page.getByTestId("picker-row-harness").click();
+	await page.getByTestId(`picker-instance-${instanceId}`).click();
+	await page.keyboard.press("Escape");
+	await expect(picker).toHaveAttribute("data-instance-id", instanceId);
+}
 
-test.describe("Header: Instance Badge", () => {
-	test("shows instance badge when multiple instances exist", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-
-		// Badge in header-left with instance name
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toBeVisible();
-		await expect(badge).toContainText("Personal");
+test("a named instance pick is scoped to the draft and resets on reload", async ({
+	page,
+	baseURL,
+}, testInfo) => {
+	const control = await setupMultiInstance(page, baseURL);
+	await page.locator("#new-session-btn:visible").click();
+	await pickDraftInstance(page, "work");
+	const agents = await control.rpc.waitForRequest(
+		(request) =>
+			request.tag === "GetAgents" && request.payload["instanceId"] === "work",
+	);
+	expect(agents.payload).toMatchObject({
+		projectSlug: "myapp",
+		instanceId: "work",
 	});
-
-	test("hides instance badge with single instance", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupSingleInstance(page, baseURL);
-
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toHaveCount(0);
+	await page.screenshot({
+		path: testInfo.outputPath("named-draft-instance.png"),
 	});
-
-	test("badge shows correct instance name and status color", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toContainText("Personal");
-
-		// Status dot inside badge should be green (healthy)
-		const dot = badge.locator("[data-testid='instance-status-dot']");
-		await expect(dot).toHaveClass(/bg-green-500/);
-	});
-
-	test("badge updates on an instance list update", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupMultiInstance(page, baseURL);
-
-		const badge = page.locator("[data-testid='instance-badge']");
-		const dot = badge.locator("[data-testid='instance-status-dot']");
-		await expect(dot).toHaveClass(/bg-green-500/);
-
-		// Send: Personal becomes unhealthy
-		pushInstances(control.rpc, { personal: "unhealthy" });
-		await expect(dot).toHaveClass(/bg-red-500/);
+	await page.reload();
+	await waitForChatReady(page);
+	await expect(
+		page.locator(
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		),
+	).toHaveAttribute("data-instance-id", "personal");
+	await page.screenshot({
+		path: testInfo.outputPath("reloaded-draft-default.png"),
 	});
 });
-
-// Group 3: ConnectOverlay Instance Name (PARTIALLY IMPLEMENTED)
-// The overlay shows `Connecting to ${instanceName}...` only when statusText is
-// empty (initial connection). After disconnect, statusText is "Disconnected" and
-// the generic reconnecting copy is displayed.
-//
-// Current behavior: instanceName resolves from the instance store, but the store
-// is empty during initial connect (the instance list arrives after connecting),
-// so the overlay always shows "Connecting to OpenCode..." on first load.
-//
-// The instance-aware disconnect message (e.g., "OpenCode instance 'work' is not
-// responding") from the design doc is NOT yet implemented.
 
 test.describe("ConnectOverlay: Reconnect Message", () => {
 	test("shows generic reconnecting message when instance store is populated", async ({
@@ -283,7 +237,7 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 		await expect(overlay).toContainText("Reconnecting...");
 	});
 
-	test("shows generic reconnecting message with no instance binding", async ({
+	test("shows generic reconnecting message with a single instance", async ({
 		page,
 		baseURL,
 	}) => {
@@ -302,12 +256,10 @@ test.describe("Instance Store: Reactivity", () => {
 	test("instance list populates UI", async ({ page, baseURL }) => {
 		await setupMultiInstance(page, baseURL);
 
-		// The header badge and its dropdown both read the instance store.
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toBeVisible();
-		await badge.click();
-		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
-		await expect(dropdown.getByRole("menuitemradio")).toHaveCount(2);
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
+		await expect(instanceDot(page, "Personal")).toBeVisible();
+		await expect(instanceDot(page, "Work")).toBeVisible();
 	});
 
 	test("instance list status change updates only that instance", async ({
@@ -315,7 +267,8 @@ test.describe("Instance Store: Reactivity", () => {
 		baseURL,
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await page.locator("[data-testid='instance-badge']").click();
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
 		const personalDot = instanceDot(page, "Personal");
 		const workDot = instanceDot(page, "Work");
 
@@ -327,20 +280,16 @@ test.describe("Instance Store: Reactivity", () => {
 		pushInstances(control.rpc, { work: "healthy" });
 		await expect(workDot).toHaveClass(/bg-green-500/);
 
-		// Personal should STILL be green, in the dropdown and on the badge
 		await expect(personalDot).toHaveClass(/bg-green-500/);
-		await expect(
-			page.locator(
-				"[data-testid='instance-badge'] [data-testid='instance-status-dot']",
-			),
-		).toHaveClass(/bg-green-500/);
 	});
 
 	test("store survives an RPC disconnect", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toBeVisible();
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
+		const instanceList = page.locator("#instance-settings-list");
+		await expect(instanceList).toContainText("Personal");
 
 		// Keep the current list during the RPC disconnect, then replay it to
 		// the replacement subscription after reconnecting.
@@ -348,7 +297,8 @@ test.describe("Instance Store: Reactivity", () => {
 		await expect(page.locator(".connect-overlay")).toBeHidden({
 			timeout: 5_000,
 		});
-		await expect(badge).toContainText("Personal");
+		await expect(instanceList).toContainText("Personal");
+		await expect(instanceList).toContainText("Work");
 	});
 });
 
@@ -357,7 +307,8 @@ test.describe("Instance Store: Reactivity", () => {
 test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
-		await page.locator("[data-testid='instance-badge']").click();
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
 		const workDot = instanceDot(page, "Work");
 
 		// unhealthy (initial) = red
@@ -374,51 +325,6 @@ test.describe("Status Color Mapping", () => {
 		// stopped = zinc/gray
 		pushInstances(control.rpc, { work: "stopped" });
 		await expect(workDot).toHaveClass(/bg-zinc-500/);
-	});
-});
-
-test.describe("Instance Selector Dropdown", () => {
-	test("clicking header badge opens instance selector dropdown", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		const badge = page.locator("[data-testid='instance-badge']");
-		await badge.click();
-		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
-		await expect(dropdown).toBeVisible();
-	});
-
-	test("dropdown lists all instances with health status", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		const badge = page.locator("[data-testid='instance-badge']");
-		await badge.click();
-		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
-		await expect(dropdown).toContainText("Personal");
-		await expect(dropdown).toContainText("Work");
-		const dots = dropdown.locator("[data-testid='instance-status-dot']");
-		await expect(dots).toHaveCount(2);
-	});
-
-	// NOTE: The old "selecting instance switches to its projects" test was deleted.
-	// That behavior was replaced by the Bug B fix: clicking an instance in the
-	// dropdown now rebinds the current project's instance (see Group 12:
-	// "Instance Selector: Rebind Project").
-
-	test("'Manage Instances' link at bottom of dropdown", async ({
-		page,
-		baseURL,
-	}) => {
-		await setupMultiInstance(page, baseURL);
-		const badge = page.locator("[data-testid='instance-badge']");
-		await badge.click();
-		const manageLink = page
-			.locator("[data-testid='instance-selector-dropdown']")
-			.getByText("Manage Instances");
-		await expect(manageLink).toBeVisible();
 	});
 });
 
@@ -613,10 +519,11 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	}) => {
 		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
-		await expect(
-			page.locator("[data-testid='instance-status-dot']"),
-		).toHaveClass(/bg-red-500/);
+		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
+		await page.getByTestId("settings-close-btn").click();
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
@@ -630,10 +537,11 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 	}) => {
 		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
+		await openSettingsPanel(page);
+		await page.locator("#settings-panel").getByText("Instances").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
-		await expect(
-			page.locator("[data-testid='instance-status-dot']"),
-		).toHaveClass(/bg-red-500/);
+		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
+		await page.getByTestId("settings-close-btn").click();
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
@@ -772,63 +680,6 @@ test.describe("Session List: Instance Status Banner", () => {
 
 		// Banner should disappear
 		await expect(banner).not.toBeVisible({ timeout: 5_000 });
-	});
-});
-
-test.describe("Instance Selector: Rebind Project", () => {
-	test("clicking instance in dropdown sends SetProjectInstance RPC and updates badge", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupMultiInstance(page, baseURL);
-
-		// Badge should show "Personal" (myapp's instanceId is "personal")
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).toContainText("Personal");
-
-		// Click badge to open dropdown
-		await badge.click();
-		const dropdown = page.locator("[data-testid='instance-selector-dropdown']");
-		await expect(dropdown).toBeVisible();
-
-		// Click "Work" in the dropdown
-		await dropdown.getByText("Work").click();
-
-		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "SetProjectInstance",
-		);
-		expect(request.payload).toMatchObject({
-			slug: "myapp",
-			instanceId: "work",
-		});
-
-		// The daemon publishes the rebound project list to every subscriber.
-		control.rpc.setDaemonList("SubscribeProjects", {
-			projects: [
-				{
-					slug: "myapp",
-					title: "myapp",
-					folders: ["/src/myapp"],
-					instanceId: "work",
-				},
-				{
-					slug: "mylib",
-					title: "mylib",
-					folders: ["/src/mylib"],
-					instanceId: "personal",
-				},
-				{
-					slug: "company-api",
-					title: "company-api",
-					folders: ["/src/company-api"],
-					instanceId: "work",
-				},
-			],
-			current: "myapp",
-		});
-
-		// Badge should now show "Work"
-		await expect(badge).toContainText("Work", { timeout: 3_000 });
 	});
 });
 

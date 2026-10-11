@@ -310,7 +310,7 @@ describe("CLI and browser daemon RPC parity", () => {
 			const projects = (await sendRpcRequest(socketPath, new GetProjects({})))
 				.projects;
 			expect(projects).toHaveLength(1);
-			expect(projects[0]?.instanceId).toBe("healthy");
+			expect(projects[0]).not.toHaveProperty("instanceId");
 			expect(output).toBe(`Project added: ${projects[0]?.slug}\n`);
 			expect(errors).toBe("");
 			expect(exits).toEqual([]);

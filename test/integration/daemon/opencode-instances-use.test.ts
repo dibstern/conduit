@@ -7,7 +7,6 @@ import {
 	AddInstance,
 	GetInstances,
 	SaveProject,
-	SetProjectInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -79,7 +78,7 @@ describe("OpenCode Instances use", () => {
 		}
 	});
 
-	it("routes each project's events and prompts only through its own instance", async () => {
+	it("routes events and prompts through each session's selected instance", async () => {
 		const fixture = await start("routing");
 		const socket = join(fixture.configDir, "relay.sock");
 		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
@@ -88,7 +87,7 @@ describe("OpenCode Instances use", () => {
 		);
 		if (!instanceA || !instanceB)
 			throw new Error("Expected two OpenCode instances");
-		// Project A keeps the daemon default (the first instance); B selects the other.
+		// Session A uses the first OpenCode instance; session B selects the other.
 		const pidOf = (id: string) => {
 			const pid = loadDaemonConfig(fixture.configDir)?.instances?.find(
 				(instance) => instance.id === id,
@@ -104,12 +103,8 @@ describe("OpenCode Instances use", () => {
 			socket,
 			new SaveProject({ folders: [directoryB] }),
 		);
-		await sendRpcRequest(
-			socket,
-			new SetProjectInstance({ slug: slugB, instanceId: instanceB.id }),
-		);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		// Each first use spawns that project's instance.
+		// Each session's first use spawns its selected instance.
 		const sessionB = await b.createSession("Named B", instanceB.id, "opencode");
 		const pids = {
 			a: pidOf(instanceA.id),
@@ -197,13 +192,6 @@ describe("OpenCode Instances use", () => {
 		);
 		if (!instanceA || !instanceB)
 			throw new Error("Expected two OpenCode instances");
-		await sendRpcRequest(
-			socket,
-			new SetProjectInstance({
-				slug: "process-test",
-				instanceId: instanceA.id,
-			}),
-		);
 		const first = await fixture.connect();
 		const sessionB = await first.createSession(
 			"Persisted on B",
@@ -281,8 +269,8 @@ describe("OpenCode Instances use", () => {
 		expect(
 			loadDaemonConfig(fixture.configDir)?.projects.find(
 				({ slug }) => slug === "process-test",
-			)?.instanceId,
-		).toBe(instanceA.id);
+			),
+		).not.toHaveProperty("instanceId");
 	}, 90_000);
 
 	it("recovers a downtime permission on non-selected B before grace expiry without a browser", async () => {
@@ -298,13 +286,6 @@ describe("OpenCode Instances use", () => {
 		);
 		if (!instanceA || !instanceB)
 			throw new Error("Expected two OpenCode instances");
-		await sendRpcRequest(
-			socket,
-			new SetProjectInstance({
-				slug: "process-test",
-				instanceId: instanceA.id,
-			}),
-		);
 		const first = await fixture.connect();
 		await first.createSession("Selected A", instanceA.id, "opencode");
 		const sessionB = await first.createSession(

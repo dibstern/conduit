@@ -171,7 +171,7 @@
 		return () => requestSessionPreWarm(null, null);
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
-	const accountId = $derived(composerAccountId(currentSession, projectState.projects.find((project) => project.slug === composerProjectSlug)));
+	const accountId = $derived(composerAccountId(currentSession));
 	const usageReading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
 	let sendMenuOpen = $state(false);
 	let sendMenuQuotas = $state<ReadonlyMap<string, UsageReading> | undefined>();

@@ -5,7 +5,6 @@ import {
 	GetInstances,
 	RemoveProject,
 	SaveProject,
-	SetProjectInstance,
 	StartInstance,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -185,7 +184,7 @@ describe("daemon shared OpenCode global stream", () => {
 		).toEqual([expect.objectContaining({ path: "/global/event" })]);
 	}, 90_000);
 
-	it("keeps a project's selected OpenCode instance separate from the daemon default", async () => {
+	it("keeps a session's selected OpenCode instance separate from the daemon default", async () => {
 		const fixture = await start("project-instance", true);
 		const socket = join(fixture.configDir, "relay.sock");
 		const { instances } = await sendRpcRequest(socket, new GetInstances({}));
@@ -200,16 +199,8 @@ describe("daemon shared OpenCode global stream", () => {
 		const sessionA = await a.createSession("Default A", "opencode", "opencode");
 		const directoryB = join(fixture.root, "project-b");
 		const slugB = await addProject(fixture, directoryB);
-		await sendRpcRequest(
-			socket,
-			new SetProjectInstance({ slug: slugB, instanceId: namedId }),
-		);
 		const b = await fixture.connect(undefined, undefined, slugB);
-		const sessionB = await b.createSession(
-			"Selected B",
-			"opencode",
-			"opencode",
-		);
+		const sessionB = await b.createSession("Selected B", namedId, "opencode");
 		await vi.waitFor(() => {
 			expect(
 				fixture

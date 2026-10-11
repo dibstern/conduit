@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import {
+	clearDraftSelection,
+	selectInstance,
+} from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
@@ -35,11 +39,11 @@ function seed(
 		},
 	];
 	instanceState.providerCapabilities = {};
+	selectInstance("folder-provider");
 	projectState.projects = [
 		{
 			slug: "workspace",
 			title: "Workspace",
-			instanceId: "folder-provider",
 			folders: folders === 1 ? ["/src/app"] : ["/src/app", "/src/docs"],
 		},
 	];
@@ -47,6 +51,7 @@ function seed(
 	routerState.search = "?project=workspace";
 	sessionViewState.compact = false;
 	return () => {
+		clearDraftSelection();
 		instanceState.instances = previous.instances;
 		instanceState.providerCapabilities = previous.providerCapabilities;
 		projectState.projects = previous.projects;

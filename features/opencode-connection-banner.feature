@@ -56,8 +56,8 @@ Scenario: An outage without a viewed session shows no warning
   When the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
 
-Scenario: A Claude session using an OpenCode project default shows no warning
-  When I view the Claude session using the OpenCode project default
+Scenario: A Claude session using the OpenCode default model shows no warning
+  When I view the Claude session using the OpenCode default model
   And the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner is not visible
   When the mock relay reports OpenCode failed
@@ -99,8 +99,8 @@ Scenario: Rejected agent discovery still shows the viewed instance's stored warn
   When the mock relay reports OpenCode failed for instance work-oc
   Then the OpenCode connection banner reads OpenCode failed to start
 
-Scenario: Persisted project default uses the relay's connection alias when discovery fails
-  Given the OpenCode session is persisted on instance work-oc as the project default with another instance healthy
+Scenario: The relay's first OpenCode instance uses its connection alias when discovery fails
+  Given the OpenCode session is persisted on instance work-oc as the first OpenCode instance with another instance healthy
   When the mock relay reports OpenCode reconnecting
   And I view the OpenCode session on instance work-oc with rejected agent discovery
   Then the OpenCode connection banner reads Reconnecting to OpenCode…

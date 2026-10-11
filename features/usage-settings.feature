@@ -687,12 +687,11 @@ Examples:
   | desktop | usage-settings-forecast-secondary-limited-desktop | 98 |
   | phone | usage-settings-forecast-secondary-limited-phone | 98 |
 
-Scenario Outline: an unconfigured session account falls back to the project then the fullest account
+Scenario Outline: an unconfigured session account falls back to the fullest account
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the normal state
   And the Claude accounts are work as Work, spare as Spare
   And the usage footer spare seven_day reading is 97% resetting at 2026-01-08T09:00:00Z
-  And the Usage project account is <projectAccount>
   And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
   And the Usage account spare seven_day forecast is under at 98% resetting at 2026-01-08T09:00:00Z
   When I open settings to the Usage tab
@@ -703,8 +702,6 @@ Scenario Outline: an unconfigured session account falls back to the project then
   And the usage-settings-card-<primary> region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | projectAccount | primary | secondary | pace | baseline | threshold |
-  | desktop | work | work | spare | No 5h window open · week ~98% by Thu | usage-settings-forecast-project-fallback-desktop | 98 |
-  | phone | work | work | spare | No 5h window open · week ~98% by Thu | usage-settings-forecast-project-fallback-phone | 98 |
-  | desktop | none | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-desktop | 98 |
-  | phone | none | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-phone | 98 |
+  | viewport | primary | secondary | pace | baseline | threshold |
+  | desktop | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-desktop | 98 |
+  | phone | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-phone | 98 |

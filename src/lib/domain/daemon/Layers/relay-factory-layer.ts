@@ -113,9 +113,6 @@ export interface RelayFactory {
 export interface RelayFactoryProjectControls {
 	readonly saveProject: NonNullable<ProjectRelayConfig["saveProject"]>;
 	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
-	readonly setProjectInstance: NonNullable<
-		ProjectRelayConfig["setProjectInstance"]
-	>;
 }
 
 export class RelayFactoryTag extends Context.Tag("RelayFactory")<
@@ -366,10 +363,7 @@ export const RelayFactoryLive = (
 								Effect.provideService(InstanceManagerStateTag, instanceState),
 							),
 						);
-						const selectedInstance = openCodeInstanceFor(
-							instances,
-							project.instanceId,
-						);
+						const selectedInstance = openCodeInstanceFor(instances);
 						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -441,7 +435,6 @@ export const RelayFactoryLive = (
 									...(projectControls != null && {
 										saveProject: projectControls.saveProject,
 										removeProject: projectControls.removeProject,
-										setProjectInstance: projectControls.setProjectInstance,
 									}),
 								});
 								return creation;

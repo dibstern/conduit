@@ -52,9 +52,6 @@ export const projectsHandlers = {
 				folders: request.folders,
 				...(request.slug !== undefined && { slug: request.slug }),
 				...(title !== undefined && { title }),
-				...(request.instanceId !== undefined && {
-					instanceId: request.instanceId,
-				}),
 			});
 			const current = yield* projectService.currentSlug();
 			return {
@@ -95,33 +92,7 @@ export const projectsHandlers = {
 				),
 			),
 		),
-	SetProjectInstance: (request) =>
-		Effect.gen(function* () {
-			const projectService = yield* ProjectManagementServiceTag;
-			const projects = yield* projectService.setProjectInstance(
-				request.slug,
-				request.instanceId,
-			);
-			const current = yield* projectService.currentSlug();
-			return {
-				projectSlug: request.projectSlug,
-				projects,
-				...(current ? { current } : {}),
-			};
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `SetProjectInstance failed: ${String(error)}`,
-					}),
-				),
-			),
-		),
 } satisfies Pick<
 	WsRpcHandlerMap,
-	| "AttachProject"
-	| "GetProjects"
-	| "SaveProject"
-	| "RemoveProject"
-	| "SetProjectInstance"
+	"AttachProject" | "GetProjects" | "SaveProject" | "RemoveProject"
 >;

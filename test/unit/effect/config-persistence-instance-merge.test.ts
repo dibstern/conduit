@@ -447,7 +447,7 @@ describe("config persistence instance merge", () => {
 });
 
 describe("migrateLegacyInstanceIds", () => {
-	it("rewrites a legacy default OpenCode instance and its project bindings", () => {
+	it("rewrites a legacy default OpenCode instance", () => {
 		const migrated = migrateLegacyInstanceIds({
 			...baseConfig,
 			instances: [
@@ -467,7 +467,6 @@ describe("migrateLegacyInstanceIds", () => {
 					slug: "app",
 					title: "App",
 					addedAt: 1,
-					instanceId: "default",
 				},
 			],
 		});
@@ -482,7 +481,7 @@ describe("migrateLegacyInstanceIds", () => {
 				driver: "opencode",
 			},
 		]);
-		expect(migrated.projects[0]?.instanceId).toBe("opencode");
+		expect(migrated.projects[0]).not.toHaveProperty("instanceId");
 	});
 
 	it("treats a driverless legacy default as OpenCode", () => {
@@ -558,13 +557,12 @@ describe("migrateLegacyInstanceIds", () => {
 					slug: "app",
 					title: "App",
 					addedAt: 1,
-					instanceId: "default",
 				},
 			],
 		});
 
 		const loaded = readConfig();
 		expect(loaded.instances?.[0]?.id).toBe("opencode");
-		expect(loaded.projects[0]?.instanceId).toBe("opencode");
+		expect(loaded.projects[0]).not.toHaveProperty("instanceId");
 	});
 });

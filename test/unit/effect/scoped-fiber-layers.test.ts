@@ -20,6 +20,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	makeProjectRegistryFromDaemonStateLive,
@@ -86,13 +87,25 @@ const makeInstancesLayer = (
 			}),
 		),
 	);
-	return Layer.succeed(OpenCodeInstancesTag, {
-		...stub,
-		ifRunning: (instanceId: string, directory?: string) => {
-			calls.push([instanceId, directory]);
-			return stub.ifRunning(instanceId, directory);
-		},
-	});
+	return Layer.mergeAll(
+		makeInstanceManagerStateLive(
+			undefined,
+			Object.keys(lists).map((id) => ({
+				id,
+				name: id,
+				port: 4096,
+				managed: false,
+				driver: "opencode",
+			})),
+		),
+		Layer.succeed(OpenCodeInstancesTag, {
+			...stub,
+			ifRunning: (instanceId: string, directory?: string) => {
+				calls.push([instanceId, directory]);
+				return stub.ifRunning(instanceId, directory);
+			},
+		}),
+	);
 };
 
 const makeSeededRegistryLayer = (entries: Array<[string, ProjectState]>) =>
@@ -146,7 +159,6 @@ describe("prefetchSessionCounts", () => {
 
 	const readyProject = (
 		slug: string,
-		instanceId: string,
 		folder = directory,
 	): [string, ProjectState] => [
 		slug,
@@ -157,7 +169,6 @@ describe("prefetchSessionCounts", () => {
 				folders: [folder],
 				title: slug,
 				lastUsed: Date.now(),
-				instanceId,
 			},
 		},
 	];
@@ -177,7 +188,7 @@ describe("prefetchSessionCounts", () => {
 							configRefLayer,
 							makeInstancesLayer({ i1: async () => sessions(1) }, calls),
 							makeSeededRegistryLayer([
-								readyProject("missing", "i1", join(directory, "missing")),
+								readyProject("missing", join(directory, "missing")),
 							]),
 						),
 					),
@@ -216,14 +227,14 @@ describe("prefetchSessionCounts", () => {
 							}),
 						),
 						makeInstancesLayer({ i1: async () => sessions(3) }, calls),
-						makeSeededRegistryLayer([readyProject("my-project", "i1")]),
+						makeSeededRegistryLayer([readyProject("my-project")]),
 					),
 				),
 			),
 		);
 	});
 
-	it.scoped("returns 0 when the project's instance is not running", () =>
+	it.scoped("returns 0 when the first OpenCode instance is not running", () =>
 		Effect.gen(function* () {
 			const count = yield* prefetchSessionCounts;
 			expect(count).toBe(0);
@@ -233,7 +244,7 @@ describe("prefetchSessionCounts", () => {
 					Layer.mergeAll(
 						configRefLayer,
 						makeInstancesLayer({}),
-						makeSeededRegistryLayer([readyProject("orphan", "nonexistent")]),
+						makeSeededRegistryLayer([readyProject("orphan")]),
 					),
 				),
 			),
@@ -254,7 +265,7 @@ describe("prefetchSessionCounts", () => {
 					Layer.provideMerge(
 						Layer.mergeAll(
 							makeInstancesLayer({ i1: async () => sessions(3) }),
-							makeSeededRegistryLayer([readyProject("my-project", "i1")]),
+							makeSeededRegistryLayer([readyProject("my-project")]),
 						),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),
 					),
@@ -289,7 +300,6 @@ describe("prefetchSessionCounts", () => {
 											folders: [directory],
 											title: "Seeded Project",
 											addedAt: 1,
-											instanceId: "default",
 										},
 									],
 								}),
@@ -314,12 +324,14 @@ describe("prefetchSessionCounts", () => {
 						Layer.provideMerge(
 							Layer.mergeAll(
 								makeInstancesLayer({
-									i1: async () => sessions(1),
-									i2: () => Promise.reject(new Error("network error")),
+									i1: vi
+										.fn()
+										.mockResolvedValueOnce(sessions(1))
+										.mockRejectedValueOnce(new Error("network error")),
 								}),
 								makeSeededRegistryLayer([
-									readyProject("proj-a", "i1"),
-									readyProject("proj-b", "i2"),
+									readyProject("proj-a"),
+									readyProject("proj-b"),
 								]),
 							),
 							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 2633 })),

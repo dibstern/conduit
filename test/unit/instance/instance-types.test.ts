@@ -53,22 +53,12 @@ describe("Instance types", () => {
 		expect(status).toBe("healthy");
 	});
 
-	it("ProjectInfo has optional instanceId", () => {
-		const project: ProjectInfo = {
-			slug: "myapp",
-			folders: ["/src/myapp"],
-			title: "myapp",
-			instanceId: "personal",
-		};
-		expect(project.instanceId).toBe("personal");
-	});
-
-	it("ProjectInfo works without instanceId (backward compat)", () => {
+	it("ProjectInfo has no instance binding", () => {
 		const project: ProjectInfo = {
 			slug: "myapp",
 			folders: ["/src/myapp"],
 			title: "myapp",
 		};
-		expect(project.instanceId).toBeUndefined();
+		expect(project).not.toHaveProperty("instanceId");
 	});
 });

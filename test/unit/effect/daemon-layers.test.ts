@@ -257,10 +257,9 @@ describe("DaemonHandleTag", () => {
 
 				const added = yield* handle.saveProject({
 					folders: [projectDir],
-					instanceId: "default",
 				});
 				expect(added.project.slug).toBe("new-project");
-				expect(added.project.instanceId).toBe("default");
+				expect(added.project).not.toHaveProperty("instanceId");
 				const projects = yield* handle.getProjects();
 				expect(projects.map((project) => project.slug).sort()).toEqual([
 					"existing",

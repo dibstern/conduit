@@ -451,8 +451,8 @@ describe("DaemonConfig with instances", () => {
 		expect(loaded.instances).toBeUndefined();
 	});
 
-	it("saves config with project instanceId bindings", async () => {
-		const config: DaemonConfig = {
+	it("loads legacy project instance bindings and drops them on the next write", async () => {
+		const config = {
 			pid: 1234,
 			port: 2633,
 			pinHash: null,
@@ -471,12 +471,18 @@ describe("DaemonConfig with instances", () => {
 			],
 			instances: [],
 		};
-		await saveDaemonConfig(config, tempDir);
+		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(config));
 		const loaded = loadDaemonConfig(tempDir);
 		assert.exists(loaded, "expected daemon config");
 		const project = loaded.projects[0];
 		assert.exists(project, "expected project");
-		expect(project.instanceId).toBe("personal");
+		expect(project).toMatchObject({ slug: "myapp", folders: ["/src/myapp"] });
+		expect(project).not.toHaveProperty("instanceId");
+		await saveDaemonConfig(loaded, tempDir);
+		const written = JSON.parse(
+			readFileSync(join(tempDir, "daemon.json"), "utf8"),
+		);
+		expect(written.projects[0]).not.toHaveProperty("instanceId");
 	});
 });
 

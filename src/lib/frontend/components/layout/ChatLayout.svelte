@@ -53,7 +53,7 @@
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -392,12 +392,9 @@
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
-			// With no session in the route, scope the agent fetch to the draft
-			// project's bound instance, so the agent list matches the picker.
-			// Unbound, the relay's default scope already matches.
 			const draftInstanceId =
-				routeSessionId == null
-					? projectState.projects.find((p) => p.slug === draftSlug)?.instanceId
+				routeSessionId == null && discoveryState.hasInstanceChoice
+					? getEffectiveInstanceId()
 					: undefined;
 			void getAgentsRpc({
 				projectSlug: slug,
@@ -405,7 +402,11 @@
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetAgentsResponse(response, routeSessionId ?? undefined);
+					if (
+						generation === attachGeneration &&
+						getCurrentSessionId() === routeSessionId &&
+						(routeSessionId != null || draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined))
+					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({
@@ -413,7 +414,7 @@
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetModelsResponse(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyGetModelsResponse(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({
@@ -556,6 +557,22 @@
 				if (sessionState.currentId !== null) {
 					sessionState.currentId = null;
 					clearTodoState();
+					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
+						const draftInstanceId = discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined;
+						void getAgentsRpc({
+							projectSlug: attachedSlug,
+							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
+						})
+							.then((response) => {
+								if (
+									sessionState.currentId === null &&
+									getCurrentSessionId() === null &&
+									attachedProjectState.slug === attachedSlug &&
+									draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined)
+								) applyGetAgentsResponse(response);
+							})
+							.catch(() => undefined);
+					}
 				}
 				return;
 			}

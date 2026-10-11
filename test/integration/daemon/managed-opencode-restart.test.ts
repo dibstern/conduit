@@ -680,7 +680,6 @@ describe("managed OpenCode survives server replacement", () => {
 			path: projectDir,
 			folders: [projectDir],
 			slug: "prefetch-opencode",
-			instanceId: "managed-test",
 			addedAt: Date.now(),
 		});
 		writeFileSync(join(configDir, "daemon.json"), JSON.stringify(config));

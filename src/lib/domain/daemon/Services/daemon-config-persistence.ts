@@ -3,11 +3,11 @@
 // coalesced saves to avoid write contention under rapid state changes.
 
 import { FileSystem } from "@effect/platform";
-import { Context, Effect, Ref } from "effect";
+import { Context, Effect, Ref, Schema } from "effect";
 import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
 import {
+	DaemonProjectSchema,
 	migrateProjectFolders,
-	type PersistedProject,
 	sanitizeRestartMetadata,
 } from "../../../daemon/config-persistence.js";
 import { isRecord } from "../../../utils.js";
@@ -102,8 +102,12 @@ function deserializeConfig(value: Record<string, unknown>): DaemonState {
 			dangerouslySkipPermissions: raw["dangerouslySkipPermissions"],
 		}),
 		...(Array.isArray(raw["projects"]) && {
-			projects: (raw["projects"] as PersistedProject[]).map(
-				migrateProjectFolders,
+			// Schema strips unknown fields; the assertion accounts for exact optional properties.
+			projects: raw["projects"].map(
+				(project) =>
+					Schema.decodeUnknownSync(DaemonProjectSchema)(
+						project,
+					) as DaemonProject,
 			),
 		}),
 		...(Array.isArray(raw["instances"]) && {
@@ -113,13 +117,8 @@ function deserializeConfig(value: Record<string, unknown>): DaemonState {
 
 	// Normalize a pre-driver-model legacy default OpenCode instance id to the
 	// canonical "opencode" so the seeded instance list matches the composer rail.
-	const migrated = migrateLegacyDefaultOpencodeInstanceId(
-		state.instances,
-		state.projects,
-	);
-	return migrated === null
-		? state
-		: { ...state, instances: migrated.instances, projects: migrated.projects };
+	const migrated = migrateLegacyDefaultOpencodeInstanceId(state.instances);
+	return migrated === null ? state : { ...state, instances: migrated };
 }
 
 /**

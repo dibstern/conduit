@@ -25,10 +25,10 @@
 		discoveryState,
 		getAllModels,
 		getAvailableInstances,
+		getEffectiveInstanceId,
 		getProviderGroups,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -138,16 +138,15 @@
 	);
 
 	const claudeInstanceId = $derived.by(() => {
-		const projectSlug = getCurrentSlug();
-		const project = projectState.projects.find(
-			(candidate) => candidate.slug === projectSlug,
-		);
 		const availableInstances = getAvailableInstances();
-		if (project?.instanceId) {
+		const selectedId = sessionId
+			? findSession(sessionId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId]
+			: getEffectiveInstanceId();
+		if (selectedId) {
 			const assigned =
 				availableInstances.find(
-					(instance) => instance.id === project.instanceId,
-				) ?? getCachedInstanceById(project.instanceId);
+					(instance) => instance.id === selectedId,
+				) ?? getCachedInstanceById(selectedId);
 			if (assigned?.driver === "claude") return assigned.id;
 		}
 		return availableInstances.find((instance) => instance.driver === "claude")

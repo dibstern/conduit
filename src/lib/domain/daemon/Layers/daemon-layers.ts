@@ -73,7 +73,6 @@ import {
 } from "../Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
-	InstanceManagerStateTag,
 	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
@@ -87,7 +86,6 @@ import {
 	ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
 	saveProject,
-	setProjectInstance as setEffectProjectInstance,
 } from "../Services/project-registry-service.js";
 import {
 	makeRelayCacheService,
@@ -338,7 +336,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| DaemonStateTag
-	| InstanceManagerStateTag
 > =>
 	Layer.scoped(
 		RelayCacheTag,
@@ -350,7 +347,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const daemonState = yield* DaemonStateTag;
-			const instanceState = yield* InstanceManagerStateTag;
 			const runtime = yield* Effect.runtime<never>();
 			let relayCache: RelayCache | undefined;
 
@@ -418,22 +414,10 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 									),
 								),
 							),
-						setProjectInstance: (projectSlug: string, instanceId: string) =>
-							runCallback(
-								provideProjectMutationDeps(
-									setEffectProjectInstance(projectSlug, instanceId).pipe(
-										Effect.provideService(
-											InstanceManagerStateTag,
-											instanceState,
-										),
-									),
-								),
-							),
 					};
 					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
-						openCodeInstanceId: relay.openCodeInstanceId,
 						syncGlobalSetting: relay.syncGlobalSetting,
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
