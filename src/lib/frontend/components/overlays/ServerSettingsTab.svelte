@@ -1,5 +1,5 @@
 <script module lang="ts">
-	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove";
+	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove" | "keep-awake-command";
 </script>
 
 <script lang="ts">
@@ -34,7 +34,7 @@
 	<ServerStatusSettings {openForm} onToggleForm={toggleForm} {onClose} />
 	<InstancesSettingsTab {openForm} onToggleForm={toggleForm} {onOpenUsage} />
 	<ServerSecuritySettings {openForm} onToggleForm={toggleForm} />
-	<ServerPowerSettings />
+	<ServerPowerSettings {openForm} onToggleForm={toggleForm} />
 	<ServerAccessSettings />
 	<ServerLogsSettings />
 </div>

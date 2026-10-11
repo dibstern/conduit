@@ -8,6 +8,7 @@ import type {
 	GetSkillContentResponse,
 	GoalDetails,
 	SaveProjectInput,
+	SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -537,6 +538,23 @@ export const restartServerRpc = () =>
 
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
+export async function setKeepAwakeRpc(input: {
+	readonly enabled: boolean;
+}): Promise<SetKeepAwakeResponse> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwake(input)),
+	);
+}
+
+export async function setKeepAwakeCommandRpc(input: {
+	readonly command: string;
+	readonly args?: readonly string[];
+}): Promise<{ readonly ok: true }> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwakeCommand(input)),
+	);
+}
 
 export async function setPinRpc(input: {
 	readonly pin: string | null;

@@ -177,7 +177,12 @@ export const KeepAwakeLive = (
 						Effect.map(
 							Option.match({
 								onNone: () => null,
-								onSome: ({ command, args }) => [command, ...args].join(" "),
+								// Quote parts with spaces so the browser can split the
+								// string back into the same argv.
+								onSome: ({ command, args }) =>
+									[command, ...args]
+										.map((part) => (/\s/.test(part) ? `'${part}'` : part))
+										.join(" "),
 							}),
 						),
 					),

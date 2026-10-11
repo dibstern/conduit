@@ -389,6 +389,10 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwake: true };
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		// The fixture has no PIN, so this frame is also the PIN-off state.
@@ -398,6 +402,12 @@ export const Server: Story = {
 			"Off · anyone who can reach this address can open conduit",
 		);
 		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeChecked();
+		await expect(
+			canvas.getByTestId("server-power-command-value"),
+		).toHaveTextContent("caffeinate -di");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -417,6 +427,47 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
+export const PowerCommandEdit: Story = {
+	...Server,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-power-edit"));
+		await expect(canvas.getByTestId("server-power-command")).toHaveFocus();
+		await expect(canvas.getByTestId("server-power-command")).toHaveValue(
+			"caffeinate",
+		);
+		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
+		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
+		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerNotAvailable: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwakeCommand: null };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeDisabled();
+		await expect(canvas.getByTestId("server-power-settings")).toHaveTextContent(
+			"Not available on this computer",
+		);
+		await expect(
+			canvas.queryByTestId("server-power-edit"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
 	},
 };
 
