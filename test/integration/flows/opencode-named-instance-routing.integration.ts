@@ -92,7 +92,6 @@ describe("Integration: named OpenCode instance routing", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 			instances: [
 				{

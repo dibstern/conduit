@@ -11,7 +11,11 @@ import {
 import { hashPin } from "../../../auth.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-import { ProjectSaveRejected, WsRpcError } from "../../../contracts/ws-rpc.js";
+import {
+	ProjectSaveRejected,
+	SetPinRejected,
+	WsRpcError,
+} from "../../../contracts/ws-rpc.js";
 import {
 	loadRecentProjects,
 	syncRecentProjects,
@@ -23,13 +27,17 @@ import {
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import {
+	BrowserRpcConnectionsTag,
 	type DaemonRpcHandlers,
+	RpcCaller,
+	RpcPinChangeResponse,
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
@@ -105,6 +113,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const usage = yield* Usage;
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
+		const auth = yield* AuthManagerTag;
+		const browserConnections = yield* BrowserRpcConnectionsTag;
+		const invalidateBrowsers = () => {
+			for (const invalidate of browserConnections) invalidate();
+		};
 		// Every open SubscribeInstances / SubscribeProjects stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
@@ -272,19 +285,50 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					}),
 				),
 			SetPin: (request) =>
-				run(
-					Effect.gen(function* () {
-						const state = yield* DaemonStateTag;
-						const pinHash = request.pin === null ? null : hashPin(request.pin);
-						yield* commitDaemonRuntimeConfig((config) => ({
-							...config,
-							pinHash,
-						}));
-						yield* Ref.update(state, (current) => ({ ...current, pinHash }));
-						yield* requestConfigSave;
-						return { ok: true as const };
-					}),
-				),
+				Effect.gen(function* () {
+					// Read at call time, outside the saved daemon service context.
+					const caller = yield* RpcCaller;
+					const afterResponse =
+						yield* Effect.serviceOption(RpcPinChangeResponse);
+					const currentPinHash = yield* auth.getPinHash();
+					if (caller.kind === "browser" && currentPinHash !== null) {
+						const result = yield* auth.authenticate(
+							request.currentPin ?? "",
+							caller.ip,
+						);
+						if (result.locked) {
+							return yield* new SetPinRejected({
+								reason: "locked_out",
+								...(result.retryAfter !== undefined && {
+									retryAfterSeconds: result.retryAfter,
+								}),
+							});
+						}
+						if (!result.ok)
+							return yield* new SetPinRejected({ reason: "wrong_pin" });
+					}
+					return yield* run(
+						Effect.gen(function* () {
+							const state = yield* DaemonStateTag;
+							const pinHash =
+								request.pin === null ? null : hashPin(request.pin);
+							yield* commitDaemonRuntimeConfig((config) => ({
+								...config,
+								pinHash,
+							}));
+							yield* Ref.update(state, (current) => ({ ...current, pinHash }));
+							if (pinHash !== currentPinHash) {
+								yield* Effect.sync(() => {
+									if (caller.kind === "browser" && Option.isSome(afterResponse))
+										afterResponse.value(invalidateBrowsers);
+									else invalidateBrowsers();
+								});
+							}
+							yield* requestConfigSave;
+							return { ok: true as const };
+						}),
+					).pipe(Effect.uninterruptible);
+				}),
 			SetKeepAwake: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -360,42 +404,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						return { ok: true as const };
 					}),
 				),
-			RestartWithConfig: (request) =>
+			RestartWithConfig: () =>
 				run(
 					Effect.gen(function* () {
 						const state = yield* DaemonStateTag;
-						const update = request.config;
-						const tls =
-							typeof update?.["tls"] === "boolean" ? update["tls"] : undefined;
-						const updates = {
-							shuttingDown: true,
-							...(typeof update?.["port"] === "number"
-								? { port: update["port"] }
-								: {}),
-							...(typeof update?.["pinHash"] === "string" ||
-							update?.["pinHash"] === null
-								? { pinHash: update["pinHash"] }
-								: {}),
-							...(typeof update?.["keepAwake"] === "boolean"
-								? { keepAwake: update["keepAwake"] }
-								: {}),
-							...(typeof update?.["keepAwakeCommand"] === "string"
-								? { keepAwakeCommand: update["keepAwakeCommand"] }
-								: {}),
-							...(Array.isArray(update?.["keepAwakeArgs"]) &&
-							update["keepAwakeArgs"].every((arg) => typeof arg === "string")
-								? { keepAwakeArgs: [...update["keepAwakeArgs"]] }
-								: {}),
-						};
 						yield* Ref.update(state, (current) => ({
 							...current,
-							...updates,
-							...(tls !== undefined && { tls }),
+							shuttingDown: true,
 						}));
 						yield* commitDaemonRuntimeConfig((config) => ({
 							...config,
-							...updates,
-							...(tls !== undefined && { tlsEnabled: tls }),
+							shuttingDown: true,
 						}));
 						yield* requestConfigSave;
 						return { ok: true as const };

@@ -78,11 +78,6 @@ async function setupWithProjectManagement(
 				// A real attach takes a round trip or two; an instant answer would
 				// hide anything that races it.
 				await new Promise((resolve) => setTimeout(resolve, 300));
-				rpc.setShellRows(
-					sessions.filter(
-						(session) => session.projectSlug === params["projectSlug"],
-					),
-				);
 				return { projectSlug: String(params["projectSlug"]) };
 			},
 			ListSessions: (params) => ({
@@ -117,6 +112,10 @@ async function setupWithProjectManagement(
 						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
 				};
 			},
+			GetFileTree: (params) => ({
+				projectSlug: String(params["projectSlug"]),
+				entries: ["README.md"],
+			}),
 			// Every query names one existing folder: the one typed.
 			FindFolders: (params) => ({
 				home: "/home/test",
@@ -162,6 +161,21 @@ async function setupWithProjectManagement(
 					current: "myapp",
 				};
 			},
+		},
+		// Each shell subscription carries only its own project's rows, as the
+		// daemon's does; one broadcast stream would leak the next project's rows
+		// into the previous project's still-open feed.
+		streams: {
+			SubscribeShell: (params) => [
+				{
+					_tag: "snapshot",
+					sequence: 1,
+					rows: sessions.filter(
+						(session) => session.projectSlug === params["projectSlug"],
+					),
+				},
+				{ _tag: "synchronized" },
+			],
 		},
 	});
 	rpc.setShellRows(
@@ -578,6 +592,32 @@ test("switching projects while the list pages does not fail the switch", async (
 		await page.waitForTimeout(800);
 	}
 	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
+});
+
+test("switching projects attaches once and loads the new project's file tree", async ({
+	page,
+	baseURL,
+}) => {
+	const control = await setupWithProjectManagement(page, baseURL);
+	await page.getByTestId("session-scope-chip").click();
+	await scopeRow(page, "mylib").click();
+	await control.rpc.waitForRequest(
+		(request) =>
+			request.tag === "GetFileTree" &&
+			request.payload["projectSlug"] === "mylib",
+	);
+	// A switch that reopens the sockets fails the in-flight attach and retries it
+	// on every reconnect, so give a loop time to show.
+	await page.waitForTimeout(1000);
+	const attaches = control.rpc
+		.getRequests()
+		.filter(
+			(request) =>
+				request.tag === "AttachProject" &&
+				request.payload["projectSlug"] === "mylib",
+		);
+	expect(attaches).toHaveLength(1);
+	await expect(page.getByText("Failed to load file tree")).toHaveCount(0);
 });
 
 test.describe("Project Delete", () => {

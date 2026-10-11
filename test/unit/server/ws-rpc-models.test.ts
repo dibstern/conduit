@@ -590,7 +590,6 @@ describe("WsRpcServerLayer GetModels", () => {
 							tls: false,
 							debug: false,
 							keepAwake: false,
-							dangerouslySkipPermissions: false,
 							projects: [],
 							instances: [
 								{
@@ -791,7 +790,6 @@ describe("WsRpcServerLayer GetModels", () => {
 						tls: false,
 						debug: false,
 						keepAwake: false,
-						dangerouslySkipPermissions: false,
 						projects: [],
 						instances: [
 							{

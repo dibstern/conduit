@@ -7,6 +7,7 @@ import { RpcSerialization, RpcServer } from "@effect/rpc";
 import { Context, Effect, Layer, Option } from "effect";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
 import type { WsRpcServerLayer } from "../server/ws-rpc.js";
+import { RpcCaller } from "../server/ws-rpc.js";
 import { isRecord } from "../utils.js";
 import { isDaemonRunning } from "./daemon-utils.js";
 
@@ -78,7 +79,7 @@ export const makeDaemonRpcSocketLayer = <R>(
 		readonly onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse;
 		readonly onClientCountChange?: (count: number) => void;
 	} = {},
-): Layer.Layer<DaemonRpcSocketTag, unknown, R> =>
+): Layer.Layer<DaemonRpcSocketTag, unknown, Exclude<R, RpcCaller>> =>
 	Layer.scoped(
 		DaemonRpcSocketTag,
 		Effect.gen(function* () {
@@ -171,6 +172,7 @@ export const makeDaemonRpcSocketLayer = <R>(
 						: protocol,
 				),
 				Effect.provide(handlerLayer),
+				Effect.provideService(RpcCaller, { kind: "cli" }),
 				Effect.interruptible,
 				Effect.forkScoped,
 			);

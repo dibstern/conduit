@@ -315,7 +315,6 @@ export class ProcessHarness {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: foregroundCli
 					? [
 							{
@@ -2398,7 +2397,7 @@ export class ProcessBrowser {
 	}
 
 	async restartServer(): Promise<void> {
-		await this.run(this.rpc.RestartWithConfig({ config: {} }));
+		await this.run(this.rpc.RestartWithConfig({}));
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {
