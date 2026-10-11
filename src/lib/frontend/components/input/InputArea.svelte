@@ -10,13 +10,15 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
-	import { onDestroy, tick, untrack } from "svelte";
+	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import Dialog from "../ui/Dialog.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
@@ -30,6 +32,7 @@
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import UsageWarningStrip from "./UsageWarningStrip.svelte";
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
+	import GitIdentity from "../session/GitIdentity.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
@@ -40,7 +43,7 @@
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
 	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
 		conduitCommands,
@@ -50,6 +53,7 @@
 		getChosenModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
+		getSessionInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -64,21 +68,23 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
-	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
+	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, quotaForAccountsRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { planUsageWindows, quotaBlocksSwitch, usageForecastTime, type PlanUsageWindow } from "../../utils/continuation.js";
+	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
-	import type { UsageReading } from "../../../contracts/limit-recovery.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -87,6 +93,23 @@
 	const inputAreaId = $props.id();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
+	const composerMoreTitleId = `${inputAreaId}-more-title`;
+	let composerMoreOpen = $state(false);
+	let composerMoreEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	const phoneIcons = $derived(composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone");
+	$effect(() => {
+		const request = composerPickerState.request;
+		if (request && composerMoreOpen) {
+			request.opener = composerMoreEl ?? null;
+			composerMoreOpen = false;
+		}
+	});
+	$effect(() => {
+		sessionState.currentId;
+		sessionViewState.composerTier;
+		composerPreferences.controls;
+		composerMoreOpen = false;
+	});
 
 	let inputText = $state("");
 	let draftWorktree = $state<WorktreeInfo | null>(null);
@@ -177,26 +200,19 @@
 		return () => requestSessionPreWarm(null, null);
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
+	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
+	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
+	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
-	const usageReading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
+	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
+	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
+	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
+	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
-	let sendMenuQuotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
 	let switchingAccount = $state(false);
-	let sendQuotaTicket = 0;
-	const hasOtherClaudeAccount = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== accountId));
-	const sendAccounts = $derived.by(() => {
-		if (!currentSession) return [];
-		return orderedUsageAccounts().flatMap((reading) => {
-			const quota = sendMenuQuotas === undefined ? reading : sendMenuQuotas.get(reading.accountId);
-			const instance = getInstanceById(reading.accountId);
-			if (reading.accountId === accountId || instance?.driver !== "claude" || quota?.harness !== "claude" || quota.status !== "available" || quotaBlocksSwitch(quota)) return [];
-			const fullest = planUsageWindows(quota).reduce<PlanUsageWindow | undefined>(
-				(best, window) => best === undefined || window.utilization > best.utilization || (window.utilization === best.utilization && window.kind === "five_hour") ? window : best,
-				undefined,
-			);
-			return fullest === undefined || fullest.utilization >= 100 ? [] : [{ id: instance.id, name: instance.name, fullest }];
-		});
-	});
+	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
+	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
 	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
 		if (usageReading?.status !== "limited") return undefined;
@@ -222,19 +238,8 @@
 		composerProjectSlug;
 		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
-		sendQuotaTicket++;
-		sendMenuQuotas = undefined;
+		claudeAccounts.invalidateSendQuotas();
 	});
-	async function checkSendQuotas(): Promise<void> {
-		const ticket = ++sendQuotaTicket;
-		sendMenuQuotas = undefined;
-		try {
-			const checked = await quotaForAccountsRpc({ projectSlug: composerProjectSlug, originId: getBrowserClientId() });
-			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map(checked.map((reading) => [reading.accountId, reading]));
-		} catch {
-			if (ticket === sendQuotaTicket) sendMenuQuotas = new Map();
-		}
-	}
 	const pendingSendsAt = $derived.by(() => {
 		const recovery = currentSession?.limitRecovery;
 		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
@@ -530,7 +535,7 @@
 	function isMobile(): boolean {
 		return (
 			/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-			(navigator.maxTouchPoints > 0 && window.innerWidth < 768)
+			(navigator.maxTouchPoints > 0 && sessionViewState.compact)
 		);
 	}
 
@@ -1149,6 +1154,38 @@
 	</div>
 {/if}
 
+{#snippet phoneMore(rows: Snippet, attention = false, checkout?: Snippet, warning?: Snippet)}
+	<Button
+		bind:element={composerMoreEl}
+		variant="ghost" size="content" tone="inherit" hoverFill="none"
+		class="relative h-[26px] shrink-0 rounded-[7px] px-[6px] text-text-secondary hover:bg-text/7"
+		ariaLabel={attention ? "Composer options, workspace needs attention" : "Composer options"}
+		aria-haspopup="dialog"
+		aria-expanded={composerMoreOpen}
+		data-testid="composer-more"
+		onclick={() => { composerMoreOpen = true; }}
+	>
+		<Icon name="ellipsis" size={15} />
+		{#if attention}<span data-testid="composer-more-attention" class="absolute right-[3px] top-[3px] size-[6px] rounded-full bg-warning ring-[1.5px] ring-input-bg" aria-hidden="true"></span>{/if}
+	</Button>
+	{#if composerMoreOpen}
+		<Dialog open onclose={() => { composerMoreOpen = false; }} placement="sheet" labelledBy={composerMoreTitleId} returnFocus={() => composerMoreEl ?? null}>
+			<Surface
+				variant="plain" radius="none"
+				data-testid="composer-more-sheet"
+				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-brand"
+			>
+				<div class="mx-auto mb-[10px] h-[4px] w-[36px] rounded-[2px] bg-border-chip" aria-hidden="true"></div>
+				<h2 id={composerMoreTitleId} class="mb-[2px] text-[11.5px] font-semibold text-text">Composer</h2>
+				{@render rows()}
+				<PermissionModeSelector variant="row" />
+				{@render checkout?.()}
+				{@render warning?.()}
+			</Surface>
+		</Dialog>
+	{/if}
+{/snippet}
+
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. -->
@@ -1157,7 +1194,7 @@
 	{@attach publishComposerClearance}
 	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
-	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
+	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
@@ -1227,7 +1264,8 @@
 			id="input-row"
 			class:goal={goal.border === "solid"}
 			class:paused={goal.border === "dashed"}
-			class="flex flex-col bg-input-bg border border-border rounded-[22px] p-[10px] transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] max-md:p-[9px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
+			class:phone-icons={phoneIcons}
+			class="flex flex-col bg-input-bg border border-border {phoneIcons ? 'min-h-[42px] rounded-[14px] py-[5px] pl-[10px] pr-[6px]' : 'rounded-[22px] p-[10px] max-md:rounded-[20px] max-md:p-[9px]'} transition-[border-color,box-shadow] duration-200 focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
 			{#if working || goal.phase === "checking"}
 				<ComposerStatusHeader
@@ -1240,7 +1278,7 @@
 					class="-mx-[10px] -mt-[10px] mb-1.5 max-md:-mx-[9px] max-md:-mt-[9px]"
 				/>
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout">
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"} style={phoneIcons ? "column-gap: 8px; align-items: center" : undefined}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1256,7 +1294,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(32px, var(--composer-placeholder-height, 0px))">
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${phoneIcons ? 30 : 32}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
 								commandNames={commandNameSet}
@@ -1341,17 +1379,64 @@
 					{#if composerPreferences.controls === "icons"}
 						<div
 							id="input-bottom-right"
-							class="flex items-center gap-1 min-w-0"
+							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
+							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker />
+							<InstanceModelPicker>
+								{#snippet phoneControls(rows)}
+									<PermissionModeSelector />
+									{#if currentSession && composerDirectory}
+										{@const session = currentSession}
+										{#key session.id}
+											<GitIdentity
+												presentation="row"
+												directory={composerDirectory}
+												git={composerGit}
+												workspaceCause={session.workspace?.cause}
+												workspaceMissing={session.workspaceMissing}
+												workspaceMismatch={session.workspaceMismatch}
+												workspaceHint={session.workspaceHint}
+												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+											>
+												{#snippet children(attention, checkout, warning)}
+													{@render phoneMore(rows, attention, checkout, warning)}
+												{/snippet}
+											</GitIdentity>
+										{/key}
+									{:else}
+										{@render phoneMore(rows)}
+									{/if}
+								{/snippet}
+							</InstanceModelPicker>
 
 							<!-- Approvals (permission mode) selector -->
-							<PermissionModeSelector />
+							{#if sessionViewState.composerTier !== "phone"}<PermissionModeSelector />{/if}
 						</div>
 					{/if}
 				{/snippet}
 				{#snippet send()}
+					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
+						{@const session = currentSession}
+						<GitIdentity
+							presentation="control"
+							directory={composerDirectory}
+							git={composerGit}
+							workspaceCause={session.workspace?.cause}
+							workspaceMissing={session.workspaceMissing}
+							workspaceMismatch={session.workspaceMismatch}
+							workspaceHint={session.workspaceHint}
+							loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+							onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+							onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+							oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+							ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+						/>
+					{/if}
 					{#snippet sendAtLabel()}
 						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
 					{/snippet}
@@ -1391,8 +1476,8 @@
 						<Menu
 							bind:open={sendMenuOpen}
 							onopenchange={(open) => {
-								if (open) void checkSendQuotas();
-								else sendQuotaTicket++;
+								if (open) void claudeAccounts.refreshQuotas("send");
+								else claudeAccounts.invalidateSendQuotas(false);
 							}}
 							presentation={sessionViewState.compact ? "sheet" : "popover"}
 							side="top"
@@ -1407,7 +1492,7 @@
 							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
 								<span class="flex-1">Send at {sendAtTime}</span>
-								<span class="font-mono text-[10.5px] text-text-dimmer">{accountId ? getInstanceById(accountId)?.name ?? "Claude" : "Claude"}</span>
+								<span class="font-mono text-[10.5px] text-text-dimmer">{claudeAccounts.nameOf(accountId)}</span>
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
@@ -1428,12 +1513,12 @@
 						disabledStyle="undimmed"
 						{...(sendMode === "at-reset" ? { iconOnly: false as const, children: sendAtLabel } : { iconOnly: true as const })}
 						icon={sendMode === "at-reset" ? "clock" : isGoalCommand ? "target" : "arrow-up"}
-						iconSize={sendMode === "at-reset" ? 13 : 17}
+						iconSize={sendMode === "at-reset" || phoneIcons ? 13 : 17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
 						data-send-mode={sendMode}
 						type="button"
-						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : 'w-[32px] rounded-[10px] ' + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
+						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : (phoneIcons ? 'w-[30px] rounded-[9px] ' : 'w-[32px] rounded-[10px] ') + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : phoneIcons && sendMode !== 'at-reset' ? 'h-[30px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
 						disabled={!canSend}
 						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
@@ -1461,15 +1546,39 @@
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
-				class="flex h-[24px] items-center gap-px px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
+				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<InstanceModelPicker variant="words" />
-				<span aria-hidden="true" class="text-border-chip">·</span>
-				<PermissionModeSelector variant="words" />
-				<span class="flex-1"></span>
-				{#if currentChat().contextPercent > 0}
-					<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 px-[5px] py-[2px]">{Math.round(currentChat().contextPercent)}%</span>
-				{/if}
+				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
+					<InstanceModelPicker variant="words" />
+					{#if composerDriver !== "opencode"}
+						<span aria-hidden="true" class="text-border-chip">·</span>
+						<PermissionModeSelector variant="words" />
+					{/if}
+				</div>
+				<div data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+					{#if currentSession}
+						{@const session = currentSession}
+						{#if composerDirectory}
+							<GitIdentity
+								presentation="word"
+								directory={composerDirectory}
+								git={composerGit}
+								workspaceCause={session.workspace?.cause}
+								workspaceMissing={session.workspaceMissing}
+								workspaceMismatch={session.workspaceMismatch}
+								workspaceHint={session.workspaceHint}
+								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+							/>
+						{/if}
+						{#if currentChat().contextPercent > 0}
+							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 pl-[4px]">{Math.round(currentChat().contextPercent)}%</span>
+						{/if}
+					{/if}
+				</div>
 			</div>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
@@ -1487,6 +1596,20 @@
 </div>
 
 <style>
+	.phone-icons :global(.composer-text-metrics) {
+		font-size: 12.5px;
+		line-height: 20px;
+		padding: 5px 0;
+	}
+	.phone-icons :global(#attach-btn) {
+		width: 15px;
+		height: 30px;
+	}
+	.phone-icons :global(#attach-btn svg) {
+		width: 15px;
+		height: 15px;
+	}
+
 	.composer-task-dot {
 		width: 5px;
 		height: 5px;

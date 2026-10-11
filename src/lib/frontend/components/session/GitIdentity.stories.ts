@@ -8,9 +8,10 @@ const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
 	tags: ["autodocs"],
-	args: { directory: "/src/conduit", git: undefined },
+	args: { directory: "/src/conduit", git: undefined, presentation: "control" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
+		sessionViewState.composerWidth = 760;
 	},
 } satisfies Meta<typeof GitIdentity>;
 
@@ -43,7 +44,7 @@ export const Narrow: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const identity = within(canvasElement).getByTestId("session-bar-identity");
+		const identity = within(canvasElement).getByTestId("composer-checkout");
 		// Size the story's own wrapper: #storybook-root outlives the story, so
 		// styling it would leak the narrow width into the next one.
 		const container = identity.parentElement;
@@ -93,7 +94,7 @@ export const DetailsOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(
 			within(document.body).getByRole("menu", { name: "Checkout" }),
@@ -135,7 +136,7 @@ export const FolderDetailsOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
 			"session-folder-git",
@@ -168,7 +169,7 @@ export const NonGitPrimary: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const identity = within(canvasElement).getByTestId("session-bar-identity");
+		const identity = within(canvasElement).getByTestId("composer-checkout");
 		await expect(
 			identity.querySelector('[data-icon="folder"]'),
 		).toBeInTheDocument();
@@ -219,7 +220,7 @@ export const SharedFolderDetailsOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
 			"session-folder-git",
@@ -263,7 +264,7 @@ export const WorktreeMenu: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await userEvent.click(
 			within(document.body).getByRole("menuitem", {
@@ -291,7 +292,7 @@ export const WorkspaceMismatch: Story = {
 	},
 	play: async ({ canvasElement, args }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
@@ -300,7 +301,7 @@ export const WorkspaceMismatch: Story = {
 		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
 		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-two");
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
 	},
@@ -313,9 +314,14 @@ export const MovedBack: Story = {
 		workspaceCause: "missing",
 	},
 	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByTestId("workspace-moved-back"),
-		).toHaveTextContent("moved back: worktree removed");
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-moved-back")).toHaveAttribute(
+			"aria-label",
+			"moved back: worktree removed",
+		);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/moved back: worktree removed/,
+		);
 	},
 };
 
@@ -334,9 +340,9 @@ export const MovedBackPhone: Story = {
 			"moved back: worktree removed",
 		);
 		await expect(notice).toHaveTextContent(/^$/);
-		await expect(
-			canvas.getByTestId("session-bar-identity"),
-		).toHaveAccessibleName(/moved back: worktree removed/);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/moved back: worktree removed/,
+		);
 	},
 };
 
@@ -354,9 +360,14 @@ export const WorktreeMissing: Story = {
 		oncontinue: fn(async () => {}),
 	},
 	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByTestId("workspace-missing"),
-		).toHaveTextContent("worktree missing");
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveAttribute(
+			"aria-label",
+			"worktree missing",
+		);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/worktree missing/,
+		);
 	},
 };
 
@@ -365,7 +376,7 @@ export const WorktreeMissingOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
@@ -389,9 +400,9 @@ export const WorktreeMissingPhone: Story = {
 			"aria-label",
 			"worktree missing",
 		);
-		await expect(
-			canvas.getByTestId("session-bar-identity"),
-		).toHaveAccessibleName(/worktree missing/);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/worktree missing/,
+		);
 	},
 };
 
@@ -403,24 +414,6 @@ export const WorkspaceHint: Story = {
 		workspaceHint: "/src/conduit-hint",
 		onmove: fn(async (_path: string) => {}),
 		ondismiss: fn(async (_path: string) => {}),
-	},
-	play: async ({ canvasElement, args }) => {
-		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("workspace-hint")).toHaveTextContent(
-			"working in conduit-hint?",
-		);
-		await userEvent.click(canvas.getByTestId("workspace-hint-move"));
-		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
-		await userEvent.click(canvas.getByTestId("workspace-hint-dismiss"));
-		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
-	},
-};
-
-export const WorkspaceHintPhone: Story = {
-	...WorkspaceHint,
-	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
@@ -437,7 +430,7 @@ export const WorkspaceHintPhone: Story = {
 		await expect(
 			canvas.queryByTestId("workspace-hint-dismiss"),
 		).not.toBeInTheDocument();
-		const identity = canvas.getByTestId("session-bar-identity");
+		const identity = canvas.getByTestId("composer-checkout");
 		await userEvent.click(identity);
 		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
 		await userEvent.click(body.getByTestId("workspace-hint-move"));
@@ -448,10 +441,114 @@ export const WorkspaceHintPhone: Story = {
 	},
 };
 
+export const WorkspaceHintPhone: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const Word: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		git: { branch: "account-chip", worktree: "account-chip" },
+	},
+	play: async ({ canvasElement, args }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		await expect(checkout).toHaveAttribute(
+			"title",
+			`${args["directory"]?.split("/").pop()} / ${args["git"]?.branch}`,
+		);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent(args["directory"] ?? "");
+	},
+};
+
+export const WordNarrow: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		directory: "/src/conduit-worktrees",
+		git: {
+			branch: "feature/session-account-chip-redesign",
+			worktree: "account-chip",
+		},
+	},
+	beforeEach: () => {
+		sessionViewState.composerWidth = 480;
+	},
+	play: async ({ canvasElement }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		const container = checkout.parentElement;
+		if (!container) throw new Error("Missing checkout wrapper");
+		container.style.width = "240px";
+		const project = checkout.querySelector('[data-part="project"]');
+		const branch = checkout.querySelector('[data-part="branch"]');
+		if (!project || !branch) throw new Error("Missing checkout labels");
+		expect(project.scrollWidth).toBeGreaterThan(project.clientWidth);
+		expect(project.getBoundingClientRect().width).toBeCloseTo(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+			0,
+		);
+		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent("feature/session-account-chip-redesign");
+	},
+};
+
+export const WordPhone: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const WordAttention: Story = {
+	args: {
+		presentation: "word",
+		git: {
+			branch: "account-chip",
+			worktree: "account-chip",
+			dirty: true,
+			ahead: 2,
+			behind: 1,
+			operation: "rebase",
+		},
+	},
+};
+
+export const WordWorkspaceHint: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	args: { ...WorkspaceHint.args, presentation: "word" },
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("workspace-hint")).toHaveAttribute(
+			"aria-label",
+			"working in conduit-hint?",
+		);
+		await expect(
+			canvas.queryByTestId("workspace-hint-move"),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByTestId("composer-checkout"));
+		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
 async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);
-	const identity = canvas.getByTestId("session-bar-identity");
+	const identity = canvas.getByTestId("composer-checkout");
 	await expect(identity).toHaveAttribute("title", "conduit / main");
 	await userEvent.click(canvas.getByRole("button", { name: "EnterWorktree" }));
 	await waitFor(() =>
@@ -464,7 +561,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-icon="worktree"]'),
 	).toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	let menu = await body.findByRole("menu", { name: "Checkout" });
@@ -490,7 +587,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-part="worktree"]'),
 	).not.toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	menu = await body.findByRole("menu", { name: "Checkout" });
@@ -552,7 +649,7 @@ export const LongNames: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const project = within(canvasElement)
-			.getByTestId("session-bar-identity")
+			.getByTestId("composer-checkout")
 			.querySelector('[data-part="project"]');
 		expect(project).not.toBeNull();
 		if (!project) return;

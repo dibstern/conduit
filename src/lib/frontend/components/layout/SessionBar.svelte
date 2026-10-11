@@ -13,8 +13,6 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The instance badge stays beside the project identity; a Claude session wears
-  its own account pill there instead, which moves the session, not the project.
   The title menu carries session verbs and global actions; the desktop overflow
   carries global actions.
 -->
@@ -54,9 +52,6 @@
 	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
-	import GitIdentity from "../session/GitIdentity.svelte";
-	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-	import { continueSessionInMainFolderRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc } from "../../transport/ws-rpc-client.js";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -70,7 +65,6 @@
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
-	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
@@ -211,34 +205,12 @@
 	});
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
-	// The project list can arrive after the bar; the git pill waits for its directory.
-	const directory = $derived(project ? effectiveWorkingDirectory(project.folders[0], session?.workspace) : undefined);
-	const git = $derived(session?.workspace ? session.git : session?.git ?? project?.git);
 	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
 	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
-	const supportsWorktree = $derived(
-		sessionInstance?.capabilities?.supportsWorktree
-			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsWorktree,
-	);
 	const supportsTaskStop = $derived((
 		sessionInstance?.capabilities?.supportsTaskStop
 			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsTaskStop
 	) === true);
-	async function loadWorktrees() {
-		return project && session ? await listWorktreesRpc(project.slug, session.id) : { worktrees: [] };
-	}
-	async function moveWorkspace(path: string) {
-		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
-	}
-	async function recreateWorkspace() {
-		if (project && session) await recreateSessionWorktreeRpc({ projectSlug: project.slug, sessionId: session.id });
-	}
-	async function continueInMainFolder() {
-		if (project && session) await continueSessionInMainFolderRpc({ projectSlug: project.slug, sessionId: session.id });
-	}
-	async function dismissWorkspaceHint(path: string) {
-		if (project && session) await dismissWorkspaceHintRpc({ projectSlug: project.slug, sessionId: session.id, path });
-	}
 
 	const attentionCount = $derived(
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
@@ -407,9 +379,9 @@
 	</Menu>
 {/snippet}
 
-<!-- One border for the controls; the instance picker stays beside it. -->
+<!-- One border for the session controls. -->
 {#snippet identityBlock()}
-	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
+	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
 		<div class="session-bar-segments inline-flex h-[24px] items-stretch rounded-lg border border-border">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
 			{#if sideThreads.length > 0 && !session?.sideThread}
@@ -419,7 +391,6 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} workspaceCause={session?.workspace?.cause} workspaceMissing={session?.workspaceMissing} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} onrecreate={session ? recreateWorkspace : undefined} oncontinue={session ? continueInMainFolder : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button
@@ -440,9 +411,6 @@
 				</Tooltip>
 			{/if}
 		</div>
-		{#if session && discoveryState.sessionProviderIds[session.id] === "claude"}
-			<SessionAccountPill {session} />
-		{/if}
 	</div>
 {/snippet}
 

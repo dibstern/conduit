@@ -85,7 +85,13 @@
 		const el = dialogEl;
 		if (!el) return;
 		if (open && !el.open) {
+			// An inert dialog gives showModal() nothing to focus. Refocusing the dialog
+			// afterwards is too late: the first control has already had a focus event,
+			// and focus-driven widgets act on it (a bits-ui radio selects its item).
+			// Chromium ignores `autofocus` on the dialog itself, so it cannot do this.
+			el.inert = initialFocus === "dialog";
 			el.showModal();
+			el.inert = false;
 			// showModal() otherwise focuses the first focusable descendant, which
 			// lands a focus ring on whichever control happens to be first — the
 			// close X in SettingsPanel, the copy-URL button in QrModal — making

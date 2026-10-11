@@ -1,6 +1,9 @@
 // Agents, models, providers, and commands.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 
 import type {
 	GetAgentsResponse,
@@ -118,7 +121,7 @@ const providersFromGetModelsResponse = (
 
 export interface InstanceOption {
 	readonly id: string;
-	readonly driver: "claude" | "opencode";
+	readonly driver: ProviderDriverKind;
 	readonly label: string;
 	/** Non-default instance of a driver — disambiguated with an accent badge. */
 	readonly isCustom: boolean;
@@ -420,12 +423,12 @@ export function getAvailableInstances(): InstanceOption[] {
 		}
 	}
 	for (const inst of instanceState.instances) {
-		const driver: "claude" | "opencode" =
-			inst.driver === "claude" ? "claude" : "opencode";
+		const driver = inst.driver ?? "opencode";
 		const existing = byId.get(inst.id);
 		if (existing) {
 			byId.set(inst.id, {
 				...existing,
+				driver,
 				status: inst.status,
 				capabilities:
 					inst.capabilities ?? instanceState.providerCapabilities[driver],

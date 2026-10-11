@@ -446,15 +446,20 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "instance is selectable in the rail",
-		match: /^the (.+) instance is selectable in the rail$/,
+		name: "instance is selectable in the picker",
+		match: /^the (.+) instance is selectable in the picker$/,
 		run: async ({ world, match }) => {
 			const name = (match[1] ?? "").trim();
 			await openModelPicker(world.page);
-			await world.page.getByTestId("picker-row-harness").click();
-			// Harness buttons keep the instance's slug id across picker views.
+			const instance = mockInstances
+				.get(world.page)
+				?.find((candidate) => candidate["id"] === instanceSlug(name));
+			if (!instance) throw new Error(`Mock instance "${name}" is missing`);
+			await world.page
+				.getByTestId(`picker-harness-${instance["driver"]}`)
+				.click();
 			const railButton = world.page.getByTestId(
-				`picker-instance-${instanceSlug(name)}`,
+				`picker-account-${instanceSlug(name)}`,
 			);
 			await railButton.waitFor({ state: "visible", timeout: 5_000 });
 			const disabled = await railButton.getAttribute("aria-disabled");

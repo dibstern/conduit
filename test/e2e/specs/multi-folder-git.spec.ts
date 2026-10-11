@@ -118,7 +118,7 @@ for (const scenario of [
 			responses: new Map(),
 		});
 		await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
-		const pill = page.getByTestId("session-bar-identity");
+		const pill = page.getByTestId("composer-checkout");
 		await expect(pill).toContainText(gitPrimary ? "feature/web" : "notes");
 		await expect(pill.locator("[data-icon]")).toHaveAttribute(
 			"data-icon",

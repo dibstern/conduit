@@ -1,7 +1,10 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
-import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import type {
+	HistoryMessage,
+	SessionGit,
+} from "../../../src/lib/shared-types.js";
 import {
 	claudeInstanceAgents,
 	dualDriverProviders,
@@ -22,9 +25,13 @@ import {
 	instanceSlug,
 	mockInstances,
 	mockSessionSkills,
+	openSessionRoute,
 	rejectedEffortSwitches,
 	relayControls,
+	requireRpcControl,
 	rpcControls,
+	serveModelCatalog,
+	setSessionRowStatus,
 } from "./shared.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
@@ -107,6 +114,214 @@ const skillNavigationMockup = {
 
 export const mockAppHandlers: StepHandler[] = [
 	{
+		name: "publish OpenCode instance status",
+		match:
+			/^the OpenCode instance (\S+) has (healthy|starting|unhealthy|stopped) status$/,
+		run: ({ world, match }) => {
+			const instances = mockInstances.get(world.page) ?? [];
+			if (
+				!instances.some(
+					(instance) =>
+						instance["id"] === match[1] && instance["driver"] === "opencode",
+				)
+			)
+				throw new Error(`Missing OpenCode instance ${match[1]}`);
+			const next = instances.map((instance) =>
+				instance["id"] === match[1]
+					? { ...instance, status: match[2] }
+					: instance,
+			);
+			mockInstances.set(world.page, next);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: next,
+			});
+		},
+	},
+	{
+		name: "seed the composer checkout through project and session subscriptions",
+		match:
+			/^the composer checkout is (.+) \/ (.+) as (worktree|branch|detached|folder)$/,
+		run: ({ world, match }) => {
+			const project = match[1] ?? "";
+			const branch = match[2] ?? "";
+			const kind = match[3];
+			const git: SessionGit | undefined =
+				kind === "folder"
+					? undefined
+					: kind === "detached"
+						? { head: branch }
+						: {
+								branch,
+								...(kind === "worktree" ? { worktree: project } : {}),
+							};
+			const projects = [
+				{
+					slug: "myapp",
+					title: project,
+					folders: [`/workspace/${project}`],
+					...(git ? { git } : {}),
+				},
+			];
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeProjects", { projects });
+			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Checkout requires an open session");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				workspace: null,
+				git,
+			});
+		},
+	},
+	{
+		name: "report uncommitted, upstream and operation state on the session shell",
+		match:
+			/^the checkout has uncommitted changes, (\d+) ahead, (\d+) behind( and a rebase in progress)?$/,
+		run: ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Checkout requires an open session");
+			const rpc = requireRpcControl(world.page);
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			) as { git?: SessionGit } | undefined;
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				git: {
+					...row?.git,
+					dirty: true,
+					ahead: Number(match[1]),
+					behind: Number(match[2]),
+					...(match[3] ? { operation: "rebase" as const } : {}),
+				},
+			});
+		},
+	},
+	{
+		name: "report a workspace warning through the session shell",
+		match: /^the session has a workspace (hint|mismatch) at (.+)$/,
+		run: ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Workspace warning requires a session");
+			const path = match[2] ?? "";
+			const rpc = requireRpcControl(world.page);
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				...(match[1] === "hint"
+					? { workspaceHint: path }
+					: { workspaceMismatch: { actualPath: path } }),
+			});
+			rpc.setHandler("MoveSessionWorkspace", ({ path: target }) => {
+				setSessionRowStatus(world.page, sessionId, "idle", {
+					workspaceHint: undefined,
+					workspaceMismatch: undefined,
+				});
+				return { projectSlug: "myapp", directory: target };
+			});
+			rpc.setHandler("DismissWorkspaceHint", () => {
+				setSessionRowStatus(world.page, sessionId, "idle", {
+					workspaceHint: undefined,
+				});
+				return { ok: true };
+			});
+		},
+	},
+	{
+		name: "bind the words session to a named OpenCode instance",
+		match: /^the words session uses the OpenCode instance (.+)$/,
+		run: async ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Instance binding requires a session");
+			const instanceId = instanceSlug(match[1] ?? "");
+			requireRpcControl(world.page).setResponse("GetAgents", {
+				projectSlug: "myapp",
+				instanceId,
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: openCodeInstanceAgents,
+				activeAgentId: "build",
+			});
+			await openSessionRoute(world.page, sessionId);
+			await expect(
+				world.page.locator("#input-area").getByTestId("harness-logo"),
+			).toHaveAttribute("data-account", instanceId);
+		},
+	},
+	{
+		name: "configure picker Harness choices through mock subscriptions",
+		match: /^the configured Harness choices are (.+)$/,
+		run: async ({ world, match }) => {
+			const available = {
+				Claude: "claude",
+				OpenCode: "opencode",
+				Codex: "codex",
+				Gemini: "gemini",
+				Cursor: "cursor",
+			} as const;
+			const configured = (match[1] ?? "").split(", ").map((label) => {
+				const entry = Object.entries(available).find(
+					([name]) => name === label,
+				);
+				if (!entry) throw new Error(`Unknown mock Harness: ${label}`);
+				return entry;
+			});
+			const instances = configured.map(([name, driver]) => ({
+				id: driver,
+				name,
+				driver,
+				port: driver === "opencode" ? 4096 : 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			}));
+			mockInstances.set(world.page, instances);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances,
+			});
+			const drivers = configured.map(([, driver]) => driver);
+			const claude = drivers.includes("claude");
+			await serveModelCatalog(world.page, {
+				providers: dualDriverProviders.filter((provider) =>
+					drivers.includes(provider.id === "claude" ? "claude" : "opencode"),
+				),
+				active: claude
+					? { model: "claude-sonnet-4-5", provider: "claude" }
+					: { model: "claude-sonnet-4", provider: "anthropic" },
+			});
+		},
+	},
+	{
+		name: "open a session on a named future-driver instance",
+		match: /^a session is bound to the Codex instance (\S+)$/,
+		run: async ({ world, match }) => {
+			const instanceId = match[1] ?? "";
+			const instances = (mockInstances.get(world.page) ?? []).map((instance) =>
+				instance["driver"] === "codex"
+					? { ...instance, id: instanceId, name: "Codex work" }
+					: instance,
+			);
+			mockInstances.set(world.page, instances);
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeInstances", { instances });
+			rpc.setResponse("GetAgents", {
+				projectSlug: "myapp",
+				instanceId,
+				providerScope: { id: "codex", name: "Codex" },
+				agents: [],
+			});
+			const sessionId = "sess-bound-codex";
+			rpc.upsertShellRow({
+				id: sessionId,
+				title: "Codex session",
+				status: "idle",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, sessionId);
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "GetAgents" &&
+					request.payload["sessionId"] === sessionId,
+			);
+		},
+	},
+	{
 		name: "hold the session's provider lookup",
 		match: /^the session's provider lookup is held$/,
 		run: ({ world }) => {
@@ -172,7 +387,13 @@ export const mockAppHandlers: StepHandler[] = [
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					// A real daemon always lists its projects; a draft prefills from them.
 					GetProjects: async () => ({
-						projects: [{ slug: "myapp", title: "myapp", folders: ["/myapp"] }],
+						projects: [
+							{
+								slug: "myapp",
+								title: "myapp",
+								folders: ["/myapp"],
+							},
+						],
 						current: "myapp",
 					}),
 					ViewSession: async () => ({ ok: true }),

@@ -47,7 +47,7 @@ test.describe("InstanceModelPicker", () => {
 		await expect(page.getByTestId("model-picker")).toContainText(
 			"Harness & model",
 		);
-		await expect(page.getByTestId("picker-row-harness")).toBeVisible();
+		await expect(page.getByTestId("picker-harness-section")).toBeVisible();
 		await expect(page.getByTestId("picker-row-model")).toBeVisible();
 		await expect(page.getByTestId("model-picker-search")).toHaveCount(0);
 	});
@@ -122,11 +122,12 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--unlocked-harnesses"), {
 			waitUntil: "domcontentloaded",
 		});
-		await page.getByTestId("picker-instance-opencode").click();
+		await page.getByTestId("picker-harness-opencode").click();
 
 		await expect(page.getByTestId("model-picker")).toBeVisible();
-		await expect(page.getByTestId("picker-row-harness")).toContainText(
-			"OpenCode",
+		await expect(page.getByTestId("picker-harness-opencode")).toHaveAttribute(
+			"aria-checked",
+			"true",
 		);
 		await expect(page.getByTestId("picker-row-model")).toBeVisible();
 		await expect(page.getByTestId("picker-back")).toHaveCount(0);
@@ -146,9 +147,11 @@ test.describe("InstanceModelPicker", () => {
 		await page.goto(storyUrl("model-instancemodelpicker--locked"), {
 			waitUntil: "domcontentloaded",
 		});
-		const other = page.getByTestId("picker-instance-opencode");
+		const other = page.getByTestId("picker-harness-opencode");
 		await expect(other).toHaveAttribute("aria-disabled", "true");
-		await expect(other).toContainText(/fixed for this session/i);
+		await expect(page.getByTestId("picker-harness-caption")).toContainText(
+			/fixed for this session/i,
+		);
 	});
 
 	test("closes picker on Escape", async ({ page }) => {

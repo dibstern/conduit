@@ -32,7 +32,7 @@ Scenario Outline: adding a named instance makes it selectable in the composer ra
   When I open settings to the Server section
   And I add a <driver> instance named <name>
   And I open the model picker
-  Then the <name> instance is selectable in the rail
+  Then the <name> instance is selectable in the picker
 
 Examples:
   | driver   | name        |

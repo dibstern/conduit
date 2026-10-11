@@ -7,6 +7,7 @@
 
 import { expect, test } from "@playwright/test";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import {
 	mockWsRpc,
 	type RpcMockControl,
@@ -319,9 +320,8 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.keyboard.press("Escape");
 	const startChip = page.getByTestId("draft-start-chip");
 	const explanation = page.getByTestId("draft-provider-explanation");
@@ -351,9 +351,8 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		path: testInfo.outputPath("unsupported-provider-start.png"),
 	});
 	await page.keyboard.press("Escape");
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-claude").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-claude").click();
 	await page.keyboard.press("Escape");
 	await expect(startChip).toHaveText("Current folder");
 	await expect(startChip).not.toHaveAttribute("aria-describedby");

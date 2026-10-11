@@ -7,6 +7,7 @@ import {
 	noInstanceInitMessages,
 	singleInstanceInitMessages,
 } from "../fixtures/mockup-state.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
@@ -187,9 +188,9 @@ async function pickDraftInstance(
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId(`picker-instance-${instanceId}`).click();
+	// Every fixture instance shares one harness, so the picker shows only account cards.
+	await openPickerRoot(page, picker);
+	await page.getByTestId(`picker-account-${instanceId}`).click();
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", instanceId);
 }

@@ -1,13 +1,21 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
-	holdUntilVisible,
+	openComposerMoreSheet,
 	refetchModelCatalog,
 	rejectedEffortSwitches,
 	requireRpcControl,
 } from "./shared.js";
+
+async function effortControl(page: Page) {
+	if ((await page.getByTestId("composer-more").count()) > 0) {
+		await openComposerMoreSheet(page);
+		return page.getByTestId("composer-more-effort");
+	}
+	return page.getByTestId(/^(variant-badge|composer-word-effort)$/);
+}
 
 export const composerEffortHandlers: StepHandler[] = [
 	{
@@ -30,17 +38,17 @@ export const composerEffortHandlers: StepHandler[] = [
 			});
 			await refetchModelCatalog(world.page);
 			await expect(
-				world.page.getByTestId(/^(variant-badge|composer-word-effort)$/),
+				world.page.getByTestId(
+					/^(variant-badge|composer-word-effort|composer-more)$/,
+				),
 			).toBeVisible();
 		},
 	},
 	{
-		name: "tap effort meter",
-		match: /^I tap the effort (meter|word)$/,
-		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word" ? "composer-word-effort" : "variant-badge",
-			);
+		name: "tap effort word",
+		match: /^I tap the effort word$/,
+		run: async ({ world }) => {
+			const button = world.page.getByTestId("composer-word-effort");
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await button.click();
 		},
@@ -49,25 +57,9 @@ export const composerEffortHandlers: StepHandler[] = [
 		name: "cycle effort with keyboard",
 		match: /^I cycle effort with Ctrl\+T$/,
 		run: async ({ world }) => {
-			await expect(world.page.getByTestId("variant-badge")).not.toHaveAttribute(
-				"aria-busy",
-				"true",
-			);
-			await world.page.keyboard.press("Control+t");
-		},
-	},
-	{
-		name: "hold effort meter",
-		match: /^I hold the effort (meter|word)$/,
-		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word" ? "composer-word-effort" : "variant-badge",
-			);
+			const button = world.page.getByTestId(/^(variant-badge|composer-more)$/);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await holdUntilVisible(
-				button,
-				world.page.getByTestId("variant-dropdown"),
-			);
+			await world.page.keyboard.press("Control+t");
 		},
 	},
 	{
@@ -75,56 +67,25 @@ export const composerEffortHandlers: StepHandler[] = [
 		match: /^I set effort to (\w+)$/,
 		run: async ({ world, match }) => {
 			const picker = world.page.getByTestId("model-picker");
-			if (await picker.isVisible()) {
-				if (match[1] !== "default") {
-					const option = picker.getByTestId(`picker-effort-option-${match[1]}`);
-					await expect(option).toBeEnabled();
-					await option.click();
-					await expect(option).toHaveAttribute("aria-checked", "true");
-					await expect(picker.getByTestId("picker-row-model")).toBeVisible();
-					return;
-				}
+			const alreadyOpen = await picker.isVisible();
+			if (!alreadyOpen) await (await effortControl(world.page)).click();
+			const option = picker.getByTestId(`picker-effort-option-${match[1]}`);
+			await expect(option).toBeEnabled();
+			await option.click();
+			await expect(option).toHaveAttribute("aria-checked", "true");
+			await expect(picker.getByTestId("picker-row-model")).toBeVisible();
+			if (!alreadyOpen) {
 				await world.page.keyboard.press("Escape");
 				await expect(picker).toHaveCount(0);
 			}
-			const menu = world.page.getByTestId("variant-dropdown");
-			if (!(await menu.isVisible())) {
-				const button = world.page.getByTestId(
-					/^(variant-badge|composer-word-effort)$/,
-				);
-				await expect(button).not.toHaveAttribute("aria-busy", "true");
-				if (
-					(world.page.viewportSize()?.width ?? 1440) < 768 ||
-					(await button.getAttribute("data-testid")) === "composer-word-effort"
-				) {
-					// Hold, as a phone user would. Shift+F10 leaves a keyboard focus
-					// ring on the chip, which then lands in the visual baselines.
-					await holdUntilVisible(button, menu);
-				} else {
-					await button.click();
-					await expect(menu).toBeVisible();
-				}
-			}
-			await world.page.getByTestId(`variant-option-${match[1]}`).click();
-			const trigger = world.page.getByTestId(
-				/^(variant-badge|composer-word-effort)$/,
-			);
-			await expect(trigger).not.toHaveAttribute("aria-busy", "true");
-			// Closing hands focus back to the trigger, which lights the composer
-			// ring. Focus can land after the menu hides, so wait for both or a
-			// baseline taken under load catches the ring unlit.
-			await expect(menu).toBeHidden();
-			await expect(trigger).toBeFocused();
 		},
 	},
 	{
-		name: "assert effort micro label",
-		match: /^the effort (meter|word) shows ([A-Za-z]+)$/,
+		name: "assert effort word label",
+		match: /^the effort word shows ([A-Za-z]+)$/,
 		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word" ? "composer-word-effort" : "variant-badge",
-			);
-			await expect(button).toHaveText(match[2] ?? "");
+			const button = world.page.getByTestId("composer-word-effort");
+			await expect(button).toHaveText(match[1] ?? "");
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 		},
 	},
@@ -132,9 +93,9 @@ export const composerEffortHandlers: StepHandler[] = [
 		name: "assert effort bars and fill",
 		match: /^the effort meter has (\d+) bars with (\d+) filled$/,
 		run: async ({ world, match }) => {
-			const bars = world.page
-				.getByTestId("variant-badge")
-				.locator(".effort-meter > span");
+			const bars = (await effortControl(world.page)).locator(
+				".effort-meter > span",
+			);
 			await expect(bars).toHaveCount(Number(match[1]));
 			await expect
 				.poll(() =>
@@ -151,42 +112,25 @@ export const composerEffortHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert effort menu offers default and every level",
-		match: /^the effort menu lists Default and every offered level$/,
+		name: "assert picker offers every supplied effort level",
+		match: /^the picker lists every offered effort level$/,
 		run: async ({ world }) => {
 			const options = effortOptions.get(world.page);
 			if (!options) throw new Error("Effort options were not initialised");
-			const menu = world.page.getByTestId("variant-dropdown");
-			await expect(menu).toBeVisible();
-			const rows = menu.getByRole("menuitemradio");
-			await expect(rows).toHaveCount(options.length + 1);
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			const rows = picker.locator('[data-testid^="picker-effort-option-"]');
+			await expect(rows).toHaveCount(options.length);
 			const actual = await rows.evaluateAll((items) =>
 				items.map((item) =>
-					item.getAttribute("data-testid")?.replace("variant-option-", ""),
+					item
+						.getAttribute("data-testid")
+						?.replace("picker-effort-option-", ""),
 				),
 			);
-			if (actual.join(", ") !== ["default", ...options].join(", ")) {
-				throw new Error(`Unexpected effort menu order: ${actual.join(", ")}`);
+			if (actual.join(", ") !== options.join(", ")) {
+				throw new Error(`Unexpected picker effort order: ${actual.join(", ")}`);
 			}
-			for (const option of ["default", ...options]) {
-				await expect(
-					world.page
-						.getByTestId(`variant-option-${option}`)
-						.locator(".effort-meter > span"),
-				).toHaveCount(options.length);
-			}
-			await expect(
-				world.page.getByTestId("variant-option-default"),
-			).toContainText("Default");
-		},
-	},
-	{
-		name: "assert effort level description",
-		match: /^the effort option (\w+) describes (.+)$/,
-		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId(`variant-option-${match[1]}`),
-			).toContainText(match[2] ?? "");
 		},
 	},
 	{
