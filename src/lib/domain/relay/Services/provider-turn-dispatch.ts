@@ -54,7 +54,7 @@ import { makeFailTurn } from "./turn-failure.js";
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
 
-/** Recheck saved folders at launch, shared by sends and speculative warming. */
+/** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
 export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
 ) =>
@@ -88,6 +88,10 @@ export const resolveSessionFolders = (
 						savedWorkspace,
 					);
 		const workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		const effectiveFolders = [
+			config.projectDir,
+			...(config.extraFolders ?? []),
+		].map((root) => ({ root, directory: state?.worktrees[root] ?? root }));
 		if (!existsSync(workspaceRoot))
 			return yield* Effect.fail(
 				new RelayError(`Main project folder does not exist: ${workspaceRoot}`, {
@@ -96,8 +100,8 @@ export const resolveSessionFolders = (
 			);
 		const extraFolders: string[] = [];
 		const launchFolders = state
-			? [config.projectDir, ...(config.extraFolders ?? [])]
-					.map((folder) => state.worktrees[folder] ?? folder)
+			? effectiveFolders
+					.map(({ directory }) => directory)
 					.filter((folder) => folder !== workspaceRoot)
 			: (config.extraFolders ?? []);
 		for (const folder of launchFolders) {
@@ -117,7 +121,7 @@ export const resolveSessionFolders = (
 				});
 			}
 		}
-		return { workspaceRoot, extraFolders };
+		return { workspaceRoot, extraFolders, effectiveFolders };
 	});
 
 /** Browser requests identify a session; project-level requests keep the primary folder. */
@@ -125,9 +129,14 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 	Effect.gen(function* () {
 		if (sessionId === undefined) {
 			const config = yield* ConfigTag;
+			const extraFolders = config.extraFolders ?? [];
 			return {
 				workspaceRoot: config.projectDir,
-				extraFolders: config.extraFolders ?? [],
+				extraFolders,
+				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
+					root,
+					directory: root,
+				})),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);

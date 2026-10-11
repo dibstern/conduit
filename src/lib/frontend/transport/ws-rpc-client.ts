@@ -253,12 +253,14 @@ export interface GetFileTreeRpcInput {
 export interface GetFileListRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path?: string;
 }
 
 export interface GetFileContentRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path: string;
 }
 

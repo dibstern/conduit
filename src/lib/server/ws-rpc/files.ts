@@ -1,3 +1,5 @@
+import { realpath } from "node:fs/promises";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
@@ -13,6 +15,49 @@ import {
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { getToolContentValue } from "../../handlers/tool-content.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const containsPath = (directory: string, path: string) => {
+	const within = relative(directory, path);
+	return (
+		within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within)
+	);
+};
+
+const resolveFileDirectory = (request: {
+	readonly sessionId?: string | undefined;
+	readonly root?: string | undefined;
+	readonly path?: string | undefined;
+}) =>
+	Effect.gen(function* () {
+		const { workspaceRoot, effectiveFolders } =
+			yield* resolveSessionRequestFolders(request.sessionId);
+		const directory =
+			request.root === undefined
+				? workspaceRoot
+				: effectiveFolders.find(({ root }) => root === request.root)?.directory;
+		if (directory === undefined) {
+			return yield* Effect.fail(
+				new WsRpcError({ message: `Unknown file root: ${request.root}` }),
+			);
+		}
+		const path = resolve(directory, request.path ?? ".");
+		if (!containsPath(directory, path)) {
+			return yield* Effect.fail(
+				new WsRpcError({ message: "Path is outside the selected folder" }),
+			);
+		}
+		if (request.root !== undefined) {
+			const [realRoot, realPath] = yield* Effect.tryPromise(() =>
+				Promise.all([realpath(directory), realpath(path)]),
+			);
+			if (!containsPath(realRoot, realPath)) {
+				return yield* Effect.fail(
+					new WsRpcError({ message: "Path is outside the selected folder" }),
+				);
+			}
+		}
+		return directory;
+	});
 
 export const filesHandlers = {
 	FindFolders: (request) =>
@@ -30,11 +75,31 @@ export const filesHandlers = {
 		),
 	GetFileTree: (request) =>
 		resolveSessionRequestFolders(request.sessionId).pipe(
-			Effect.flatMap(({ workspaceRoot }) => getFileTreeEntries(workspaceRoot)),
-			Effect.map((entries) => ({
-				projectSlug: request.projectSlug,
-				entries,
-			})),
+			Effect.flatMap(({ workspaceRoot, effectiveFolders }) =>
+				Effect.gen(function* () {
+					const entries = yield* getFileTreeEntries(workspaceRoot);
+					const roots = effectiveFolders.map(({ root }) => ({
+						root,
+						label: basename(root) || root,
+					}));
+					return {
+						projectSlug: request.projectSlug,
+						entries,
+						...(roots.length > 1
+							? {
+									roots: roots.map(({ root, label }) => ({
+										root,
+										label:
+											roots.filter((folder) => folder.label === label).length >
+											1
+												? root
+												: label,
+									})),
+								}
+							: {}),
+					};
+				}),
+			),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -44,12 +109,13 @@ export const filesHandlers = {
 			),
 		),
 	GetFileList: (request) =>
-		resolveSessionRequestFolders(request.sessionId).pipe(
-			Effect.flatMap(({ workspaceRoot }) =>
-				getFileListResponse(request.path ?? ".", workspaceRoot),
+		resolveFileDirectory(request).pipe(
+			Effect.flatMap((directory) =>
+				getFileListResponse(request.path ?? ".", directory),
 			),
 			Effect.map((result) => ({
 				projectSlug: request.projectSlug,
+				...(request.root !== undefined ? { root: request.root } : {}),
 				path: result.path,
 				entries: result.entries,
 			})),
@@ -62,12 +128,13 @@ export const filesHandlers = {
 			),
 		),
 	GetFileContent: (request) =>
-		resolveSessionRequestFolders(request.sessionId).pipe(
-			Effect.flatMap(({ workspaceRoot }) =>
-				getFileContentResponse(request.path, workspaceRoot),
+		resolveFileDirectory(request).pipe(
+			Effect.flatMap((directory) =>
+				getFileContentResponse(request.path, directory),
 			),
 			Effect.map((result) => ({
 				projectSlug: request.projectSlug,
+				...(request.root !== undefined ? { root: request.root } : {}),
 				path: result.path,
 				content: result.content,
 				...(result.binary != null ? { binary: result.binary } : {}),

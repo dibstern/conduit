@@ -14,11 +14,12 @@
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Button from "../ui/Button.svelte";
-	import { fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { fileBrowserKey, fileTreeState } from "../../stores/file-tree.svelte.js";
 
 	let { onClose, pane = false, paneTitle, paneActions }: { onClose?: () => void; pane?: boolean; paneTitle?: Snippet | undefined; paneActions?: Snippet | undefined } = $props();
 
 	let loading = $state(false);
+	const multipleFolders = $derived(fileTreeState.roots.length > 1);
 	let fileTreeEl: HTMLDivElement | undefined = $state(undefined);
 	// Restore the saved scroll once per mount; tracking browserScrollTop here
 	// would re-run on every scroll event.
@@ -67,20 +68,21 @@
 		});
 	}
 
-	function handleFileList(path: string, fileEntries: readonly FileEntry[]) {
+	function handleFileList(path: string, fileEntries: readonly FileEntry[], root?: string) {
+		const key = fileBrowserKey(path, root);
 		const sorted = sortEntries(fileEntries);
-		fileTreeState.browserCache = new Map([...fileTreeState.browserCache, [path, sorted]]);
+		fileTreeState.browserCache = new Map([...fileTreeState.browserCache, [key, sorted]]);
 
-		if (fileTreeState.browserPath === path) {
+		if (root === undefined && fileTreeState.browserPath === path) {
 			fileTreeState.browserEntries = sorted;
 			loading = false;
 		}
 
-		fileTreeState.browserChildren = new Map([...fileTreeState.browserChildren, [path, sorted]]);
+		fileTreeState.browserChildren = new Map([...fileTreeState.browserChildren, [key, sorted]]);
 	}
 
-	function getChildrenForPath(path: string): FileEntry[] | undefined {
-		return fileTreeState.browserChildren.get(path);
+	function getChildrenForPath(path: string, root?: string): FileEntry[] | undefined {
+		return fileTreeState.browserChildren.get(fileBrowserKey(path, root));
 	}
 
 	function navigateTo(path: string) {
@@ -91,25 +93,29 @@
 	// focus back to the row that opened it. Found by path rather than by
 	// activeElement because Safari does not focus buttons on click.
 	let previewedPath: string | undefined;
+	let previewedRoot: string | undefined;
 	$effect(() => {
 		if (uiState.fileViewerOpen || !previewedPath || !fileTreeEl) return;
+		const folder = previewedRoot === undefined ? ":not([data-root])" : `[data-root="${CSS.escape(previewedRoot)}"]`;
 		fileTreeEl
-			.querySelector<HTMLElement>(`[data-path="${CSS.escape(previewedPath)}"]`)
+			.querySelector<HTMLElement>(`[data-path="${CSS.escape(previewedPath)}"]${folder}`)
 			?.focus({ preventScroll: true });
 		previewedPath = undefined;
+		previewedRoot = undefined;
 	});
 
-	function handleFileClick(fullPath: string) {
+	function handleFileClick(fullPath: string, root?: string) {
 		previewedPath = fullPath;
-		openFileViewer(fullPath);
+		previewedRoot = root;
+		openFileViewer(fullPath, root);
 	}
 
-	function handleDirClick(fullPath: string) {
+	function handleDirClick(fullPath: string, root?: string) {
 		const slug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
 		const scope = fileTreeState.scope;
-		if (slug && !fileTreeState.browserChildren.has(fullPath)) {
-			void getFileListRpc({ projectSlug: slug, path: fullPath, ...(sessionId ? { sessionId } : {}) }).then(
+		if (slug && !fileTreeState.browserChildren.has(fileBrowserKey(fullPath, root))) {
+			void getFileListRpc({ projectSlug: slug, path: fullPath, ...(root !== undefined ? { root } : {}), ...(sessionId ? { sessionId } : {}) }).then(
 				(response) => { if (fileTreeState.scope === scope) applyGetFileListResponse(response); },
 			).catch(() => undefined);
 		}
@@ -119,7 +125,7 @@
 		fileTreeState.browserCache = new Map();
 		fileTreeState.browserChildren = new Map();
 		fileTreeState.browserExpandedPaths = new Set();
-		loadDirectory(fileTreeState.browserPath);
+		if (!multipleFolders) loadDirectory(fileTreeState.browserPath);
 	}
 
 	function closePanel() {
@@ -130,7 +136,7 @@
 	$effect(() => {
 		const unsub = onFileBrowser((reply) => {
 			if (reply.kind === "list") {
-				handleFileList(reply.response.path, reply.response.entries);
+				handleFileList(reply.response.path, reply.response.entries, reply.response.root);
 			}
 		});
 		return unsub;
@@ -138,7 +144,7 @@
 
 	// Load root directory on mount
 	$effect(() => {
-		if (!fileTreeState.browserCache.has(fileTreeState.browserPath)) {
+		if (!multipleFolders && !fileTreeState.browserCache.has(fileTreeState.browserPath)) {
 			loadDirectory(fileTreeState.browserPath);
 		}
 	});
@@ -190,6 +196,7 @@
 	</div>{/if}
 
 	<!-- Breadcrumbs -->
+	{#if !multipleFolders}
 	<div class="fb-breadcrumbs flex items-center gap-0.5 px-4 py-1.5 text-xs text-text-muted overflow-x-auto shrink-0">
 		{#each breadcrumbs as crumb, i (crumb.path)}
 			{#if i > 1}
@@ -207,10 +214,22 @@
 			{/if}
 		{/each}
 	</div>
+	{/if}
 
 	<!-- File tree -->
 	<div id="file-tree" class="flex-1 overflow-y-auto px-1" bind:this={fileTreeEl} onscroll={(event) => { fileTreeState.browserScrollTop = event.currentTarget.scrollTop; }}>
-		{#if loading}
+		{#if multipleFolders}
+			{#each fileTreeState.roots as folder (folder.root)}
+				<FileTreeNode
+					entry={{ name: folder.label, type: "directory" }}
+					path="."
+					root={folder.root}
+					onFileClick={handleFileClick}
+					onDirClick={handleDirClick}
+					getChildren={getChildrenForPath}
+				/>
+			{/each}
+		{:else if loading}
 			<div class="flex items-center justify-center py-8 text-text-dimmer text-sm">
 				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 				<span class="ml-2">Loading...</span>
