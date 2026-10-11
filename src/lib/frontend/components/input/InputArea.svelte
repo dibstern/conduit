@@ -90,11 +90,13 @@
 	let inputText = $state("");
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
+	let draftWorktreeBase = $state<string | null>(null);
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${getEffectiveInstanceId()}:${sessionState.currentId ?? ""}`);
 	$effect(() => {
 		draftContext;
 		draftWorktree = null;
 		draftNewWorktree = false;
+		draftWorktreeBase = null;
 	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -764,6 +766,7 @@
 					...(model ? { model } : {}),
 					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 					...(draftNewWorktree ? { newWorktree: true } : {}),
+					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");
@@ -1124,7 +1127,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1189,7 +1192,7 @@
 			id="input-row"
 			class:goal={goal.border === "solid"}
 			class:paused={goal.border === "dashed"}
-			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
+			class="flex flex-col bg-input-bg border border-border rounded-[22px] p-[10px] transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] max-md:p-[9px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
 			{#if working || goal.phase === "checking"}
 				<ComposerStatusHeader
@@ -1199,7 +1202,7 @@
 					{goal}
 					following={sessionViewState.atBottom}
 					onlive={requestTranscriptFollow}
-					class="-mx-1.5 -mt-1.5 mb-1.5"
+					class="-mx-[10px] -mt-[10px] mb-1.5 max-md:-mx-[9px] max-md:-mt-[9px]"
 				/>
 			{/if}
 			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout">
@@ -1443,7 +1446,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
 		{/if}
 	</div>
 </div>

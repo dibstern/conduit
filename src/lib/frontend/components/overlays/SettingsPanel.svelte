@@ -161,7 +161,7 @@
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}
-						<ServerSettingsTab {onClose} />
+						<ServerSettingsTab {onClose} onOpenUsage={() => openSection("usage")} />
 					{/if}
 				</div>
 			{/if}

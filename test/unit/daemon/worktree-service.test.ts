@@ -4,6 +4,9 @@
  * - A branch name is invalid: refuse it without creating a ref or directory.
  * - The base checkout is dirty: create from committed HEAD and leave its edits there.
  * - The base has detached HEAD: report it without creating anything.
+ * - An explicit base is a local branch; tags, remotes and revision expressions
+ *   fail during preflight, before any folder gets a checkout or generated branch.
+ * - An explicit base works from detached HEAD; a non-git folder cannot have a base.
  * - The target path already exists, even when empty: preserve it and all existing refs.
  * - Git is missing or fails: show the operation's error and leave nothing behind.
  * - Git writes the branch ref then reports failure or times out: use its reflog
@@ -102,17 +105,19 @@ describe("daemon Worktree service", () => {
 		branchName?: string,
 		options?: { gitExecutable?: string; gitTimeoutMs?: number },
 		folders: readonly WorktreeFolder[] = [folder],
+		baseBranches?: Readonly<Record<string, string>>,
 	) =>
 		Effect.flatMap(WorktreeServiceTag, (service) =>
-			service.create(folders, undefined, branchName),
+			service.create(folders, baseBranches, branchName),
 		).pipe(Effect.provide(makeWorktreeLive(configDir, options)));
 	const creationError = async (
 		branchName?: string,
 		options?: { gitExecutable?: string; gitTimeoutMs?: number },
 		folders: readonly WorktreeFolder[] = [folder],
+		baseBranches?: Readonly<Record<string, string>>,
 	) => {
 		const result = await Effect.runPromise(
-			Effect.either(createEffect(branchName, options, folders)),
+			Effect.either(createEffect(branchName, options, folders, baseBranches)),
 		);
 		if (Either.isRight(result)) throw new Error("Expected creation to fail");
 		return result.left;
@@ -331,6 +336,71 @@ process.exit(result.status ?? 1);`,
 				service.rollback(created),
 			).pipe(Effect.provide(makeWorktreeLive(configDir))),
 		);
+		assertUnchanged(before);
+	});
+
+	it("uses the explicit local base only for its folder", async () => {
+		const baseHead = git("rev-parse", "HEAD");
+		git("branch", "feature/base");
+		writeFileSync(join(repository, "tracked.txt"), "current branch commit\n");
+		git("commit", "-qam", "Current branch advances");
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [folder, second], {
+				[repository]: "feature/base",
+			}),
+		);
+		expect(
+			git("-C", created.worktrees[repository] ?? "", "rev-parse", "HEAD"),
+		).toBe(baseHead);
+		expect(
+			git("-C", created.worktrees[second.path] ?? "", "rev-parse", "HEAD"),
+		).toBe(git("-C", second.path, "rev-parse", "HEAD"));
+		expect(git("rev-parse", "HEAD")).not.toBe(baseHead);
+	});
+
+	it.each([
+		"missing",
+		"release",
+		"origin/main",
+		"HEAD",
+		"main~1",
+		"main^{commit}",
+		"refs/heads/main",
+	])("rejects the non-local base %s before creating anything in either folder", async (base) => {
+		git("tag", "release");
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		const second = secondGitFolder();
+		const before = repositoryState();
+		const beforeSecond = repositoryState(second.path);
+		const error = await creationError(undefined, undefined, [second, folder], {
+			[repository]: base,
+		});
+		expect(error.reason).toBe("invalid-branch");
+		expect(error.message).toContain(base);
+		assertUnchanged(before);
+		expect(repositoryState(second.path)).toEqual(beforeSecond);
+		expect(existsSync(ownedWorktreePath(configDir, second))).toBe(false);
+	});
+
+	it("uses an explicit local base even when the source HEAD is detached", async () => {
+		git("checkout", "-q", "--detach");
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [folder], { [repository]: "main" }),
+		);
+		expect(
+			git("-C", created.worktrees[repository] ?? "", "rev-parse", "HEAD"),
+		).toBe(git("rev-parse", "main"));
+	});
+
+	it("rejects an explicit base for a non-git folder", async () => {
+		const scratch = { ...folder, path: join(fixture, "scratch") };
+		mkdirSync(scratch.path);
+		const before = repositoryState();
+		const error = await creationError(undefined, undefined, [folder, scratch], {
+			[scratch.path]: "main",
+		});
+		expect(error.reason).toBe("unsupported-project");
 		assertUnchanged(before);
 	});
 
