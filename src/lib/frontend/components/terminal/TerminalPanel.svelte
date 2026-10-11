@@ -21,12 +21,18 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { closePtyRpc, createPtyRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
+	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
 	import Button from "../ui/Button.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { onTabBarTouchStart }: { onTabBarTouchStart?: (e: TouchEvent) => void } = $props();
+	let { onTabBarTouchStart, folders = [] }: {
+		onTabBarTouchStart?: (e: TouchEvent) => void;
+		folders?: GetFileTreeResponse["roots"];
+	} = $props();
 
 	const tabs = $derived(getTabList());
 	const pendingTitle = $derived(getPendingTabTitle());
@@ -146,7 +152,7 @@
 		}
 	}
 
-	function handleNewTab() {
+	function handleNewTab(root?: string) {
 		const projectSlug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
 		if (!projectSlug || !beginCreateTab()) return;
@@ -154,6 +160,7 @@
 			projectSlug,
 			originId: getBrowserClientId(),
 			...(sessionId ? { sessionId } : {}),
+			...(root === undefined ? {} : { root }),
 		}).catch(() => {
 			failCreateTab("Failed to create terminal");
 		});
@@ -369,10 +376,38 @@
 					hoverFill="accent-bg"
 					class="term-new-btn shrink-0 py-1 px-2.5 ml-0.5 rounded font-sans text-xs font-medium duration-100 hover:text-accent-hover max-[480px]:py-[3px] max-[480px]:px-2 max-[480px]:text-sm"
 					title="New terminal"
-					onclick={handleNewTab}
+					onclick={() => handleNewTab()}
 				>
 					+ Terminal
 				</Button>
+				{#if folders.length > 1}
+					<Menu ariaLabel="New terminal in folder" side="top" align="start" class="max-w-[calc(100vw-16px)]">
+						{#snippet trigger({ props })}
+							<Button
+								{...props}
+								variant="ghost"
+								size="content"
+								tone="accent"
+								hoverFill="accent-bg"
+								icon="chevron-down"
+								iconSize={14}
+								iconOnly
+								ariaLabel="New terminal in folder"
+								data-testid="new-terminal-folder-picker"
+								class="shrink-0 py-1 px-2 rounded max-[480px]:py-[3px]"
+							/>
+						{/snippet}
+						{#each folders as folder (folder.root)}
+							<MenuItem
+								data-testid="new-terminal-folder-item"
+								title={folder.root}
+								onselect={() => handleNewTab(folder.root)}
+							>
+								<span class="truncate">{folder.label}</span>
+							</MenuItem>
+						{/each}
+					</Menu>
+				{/if}
 			{/if}
 
 			<!-- Font size controls (right-aligned) -->

@@ -1146,6 +1146,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
 		sessionId: Schema.optional(NonEmptyString),
+		root: Schema.optional(NonEmptyString),
 	},
 }) {}
 

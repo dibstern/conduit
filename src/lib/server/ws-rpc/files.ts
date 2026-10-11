@@ -14,7 +14,11 @@ import {
 } from "../../handlers/files.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { getToolContentValue } from "../../handlers/tool-content.js";
-import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+import {
+	mapRpcFailure,
+	resolveSessionRequestDirectory,
+	type WsRpcHandlerMap,
+} from "./shared.js";
 
 const containsPath = (directory: string, path: string) => {
 	const within = relative(directory, path);
@@ -29,17 +33,7 @@ const resolveFileDirectory = (request: {
 	readonly path?: string | undefined;
 }) =>
 	Effect.gen(function* () {
-		const { workspaceRoot, effectiveFolders } =
-			yield* resolveSessionRequestFolders(request.sessionId);
-		const directory =
-			request.root === undefined
-				? workspaceRoot
-				: effectiveFolders.find(({ root }) => root === request.root)?.directory;
-		if (directory === undefined) {
-			return yield* Effect.fail(
-				new WsRpcError({ message: `Unknown file root: ${request.root}` }),
-			);
-		}
+		const directory = yield* resolveSessionRequestDirectory(request, "file");
 		const path = resolve(directory, request.path ?? ".");
 		if (!containsPath(directory, path)) {
 			return yield* Effect.fail(

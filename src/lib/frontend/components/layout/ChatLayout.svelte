@@ -801,7 +801,7 @@
 							</div>
 						{/if}
 						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
-							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+							<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
 						</div>
 					{/if}
 				</div>

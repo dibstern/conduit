@@ -53,7 +53,8 @@ moves are refused before recording an event; Claude supports moves.
 
 **Effective Working Directory** is the primary project folder's mapped worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
-session's git pill, next provider launch and new terminals use it.
+session's git pill and next provider launch use it; new terminals default to it
+and the picker can start one in any Effective Folder.
 The file tree lists every Effective Folder, each Project Folder mapped through
 the workspace, as a labelled root, primary first. Single-folder projects keep
 their existing tree without an extra root row. File list and content requests
