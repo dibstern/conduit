@@ -104,7 +104,10 @@ export const subscribeShell = (
 										...row,
 										item: {
 											...(config
-												? withCachedSessionGit(row.item, config.projectDir)
+												? withCachedSessionGit(row.item, [
+														config.projectDir,
+														...(config.extraFolders ?? []),
+													])
 												: row.item),
 											...(compacting === undefined ? {} : { compacting }),
 											...(retrying === undefined ? {} : { retrying }),

@@ -21,6 +21,8 @@ export function isKnownDriverKind(
 export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 	supportsMultiFolder: Schema.Boolean,
 	supportsWorktree: Schema.Boolean,
+	/** Individual background tasks can be stopped without interrupting a turn. */
+	supportsTaskStop: Schema.optional(Schema.Boolean),
 });
 export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
@@ -29,10 +31,18 @@ export type ProviderSessionCapabilities =
 export const PROVIDER_SESSION_CAPABILITIES = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
-	claude: { supportsMultiFolder: true, supportsWorktree: true },
+	claude: {
+		supportsMultiFolder: true,
+		supportsWorktree: true,
+		supportsTaskStop: true,
+	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// No captured session worktree/cwd-switch contract is wired for this adapter.
-	opencode: { supportsMultiFolder: true, supportsWorktree: false },
+	opencode: {
+		supportsMultiFolder: true,
+		supportsWorktree: false,
+		supportsTaskStop: false,
+	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
 	ProviderSessionCapabilities
@@ -51,8 +61,8 @@ export function defaultInstanceIdForDriver(
 
 /**
  * Rewrite a pre-driver-model legacy default OpenCode instance id (`"default"`)
- * to the canonical `defaultInstanceIdForDriver("opencode")` across an instance
- * list and the project bindings that reference it. The composer rail keys every
+ * to the canonical `defaultInstanceIdForDriver("opencode")` in an instance
+ * list. The composer rail keys every
  * OpenCode provider to the canonical id, so a lingering `"default"` leaves the
  * OpenCode harness unpickable (and re-seeding would duplicate it).
  *
@@ -62,11 +72,7 @@ export function defaultInstanceIdForDriver(
  */
 export function migrateLegacyDefaultOpencodeInstanceId<
 	I extends { readonly id: string; readonly driver?: ProviderDriverKind },
-	P extends { readonly instanceId?: string },
->(
-	instances: ReadonlyArray<I>,
-	projects: ReadonlyArray<P>,
-): { instances: I[]; projects: P[] } | null {
+>(instances: ReadonlyArray<I>): I[] | null {
 	const canonical: string = defaultInstanceIdForDriver("opencode");
 	const legacyId = "default";
 	const legacy = instances.find(
@@ -80,18 +86,10 @@ export function migrateLegacyDefaultOpencodeInstanceId<
 	) {
 		return null;
 	}
-	return {
-		instances: instances.map(
-			(instance): I =>
-				instance === legacy ? { ...instance, id: canonical } : instance,
-		),
-		projects: projects.map(
-			(project): P =>
-				project.instanceId === legacyId
-					? { ...project, instanceId: canonical }
-					: project,
-		),
-	};
+	return instances.map(
+		(instance): I =>
+			instance === legacy ? { ...instance, id: canonical } : instance,
+	);
 }
 
 export const ProviderInstanceStatusSchema = Schema.Literal(

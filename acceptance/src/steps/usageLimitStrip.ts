@@ -732,22 +732,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "bind the project to an instance",
-		match: /^the project is bound to (\S+)$/,
-		run: ({ world, match }) => {
-			requireRpcControl(world.page).setDaemonList("SubscribeProjects", {
-				projects: [
-					{
-						slug: "myapp",
-						title: "myapp",
-						folders: ["/src/myapp"],
-						instanceId: match[1],
-					},
-				],
-			});
-		},
-	},
-	{
 		name: "open the session bar account pill",
 		match: /^I open the account pill in the session bar$/,
 		run: async ({ world }) => {
@@ -830,54 +814,14 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the session bar shows the badge or the pill",
-		match:
-			/^the session bar shows (no account pill|no instance badge|the instance badge reading (.+))$/,
-		run: async ({ world, match }) => {
-			const bar = world.page.getByTestId("session-bar");
-			if (match[1] === "no account pill")
-				await expect(bar.getByTestId("session-account-pill")).toHaveCount(0);
-			else if (match[1] === "no instance badge")
-				await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
-			else
-				await expect(bar.getByTestId("instance-badge")).toHaveText(
-					match[2] ?? "",
-				);
-		},
-	},
-	{
-		name: "rebind the project from the instance badge",
-		match: /^I pick (.+) from the instance badge$/,
-		run: async ({ world, match }) => {
-			await world.page
-				.getByTestId("session-bar")
-				.getByTestId("instance-badge")
-				.click();
-			await world.page
-				.getByTestId("instance-selector-dropdown")
-				.getByRole("menuitemradio", { name: match[1] ?? "" })
-				.click();
-		},
-	},
-	{
-		name: "assert the project binding RPC",
-		match:
-			/^the SetProjectInstance RPC (?:was not sent|binds the project to (\S+))$/,
-		run: async ({ world, match }) => {
-			const rpc = requireRpcControl(world.page);
-			if (match[1] === undefined) {
-				expect(
-					rpc
-						.getRequests()
-						.filter((request) => request.tag === "SetProjectInstance"),
-				).toEqual([]);
-				return;
-			}
-			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "SetProjectInstance",
-			);
-			expect(request.payload["slug"]).toBe("myapp");
-			expect(request.payload["instanceId"]).toBe(match[1]);
+		name: "assert the session bar has no account pill",
+		match: /^the session bar shows no account pill$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page
+					.getByTestId("session-bar")
+					.getByTestId("session-account-pill"),
+			).toHaveCount(0);
 		},
 	},
 	{
@@ -918,8 +862,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert settings are open on the Usage tab",
-		match: /^settings are open on the Usage tab at the usage limit settings$/,
+		name: "assert settings are open on the Usage section",
+		match:
+			/^settings are open on the Usage section at the usage limit settings$/,
 		run: async ({ world }) => {
 			await expect(world.page.getByTestId("usage-settings")).toBeVisible();
 			await expect(world.page.locator("#usage-limit-settings")).toBeAttached();

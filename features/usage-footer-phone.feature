@@ -7,12 +7,12 @@ Background:
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
 
-Scenario Outline: normal accounts collapse to the project default and a count
+Scenario Outline: normal accounts collapse to the current account and a count
   Given the usage footer has several accounts with an unknown Claude reading
   When I tap back to the session list
   Then the session list is open
   And the phone usage chips are claude in that order
-  And the phone usage chip claude is the highlighted project default
+  And the phone usage chip claude is the highlighted current account
   And the phone usage chip claude shows 5h 41% at level ok
   And the phone usage footer counts 5 remaining accounts
   And the phone usage footer clears the new-session button and the last row text
@@ -29,7 +29,7 @@ Scenario Outline: warning accounts get chips with the binding window
   And I tap back to the session list
   Then the session list is open
   And the phone usage chips are claude, work in that order
-  And the phone usage chip claude is the highlighted project default
+  And the phone usage chip claude is the highlighted current account
   And the phone usage chip work shows <window> <value> at level warn
   And the phone usage footer counts 4 remaining accounts
   And the phone usage footer clears the new-session button and the last row text
@@ -46,7 +46,7 @@ Scenario Outline: a limited default shows its compact reset time
   And I tap back to the session list
   Then the session list is open
   And the phone usage chips are claude in that order
-  And the phone usage chip claude is the highlighted project default
+  And the phone usage chip claude is the highlighted current account
   And the phone usage chip claude shows 5h 3:13 at level limited
   And the phone usage footer counts 5 remaining accounts
   And the phone usage footer clears the new-session button and the last row text
@@ -93,13 +93,13 @@ Scenario: the default uses the fuller window even when both windows warn
   And the phone usage chip claude shows 5h 92% at level warn
   And the phone usage footer counts 5 remaining accounts
 
-Scenario: the first chip follows the project binding and can show a dash
+Scenario: the first chip follows the new session draft's pick and can show a dash
   Given the usage footer has several accounts with an unknown Claude reading
-  When the project is bound to unreadable
+  When I pick unreadable for a new session draft
   And I tap back to the session list
   Then the session list is open
   And the phone usage chips are unreadable in that order
-  And the phone usage chip unreadable is the highlighted project default
+  And the phone usage chip unreadable is the highlighted current account
   And the phone usage chip unreadable shows none — at level unknown
   And the phone usage footer counts 5 remaining accounts
   And the phone usage footer clears the new-session button and the last row text

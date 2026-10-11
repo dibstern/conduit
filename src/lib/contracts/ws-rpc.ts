@@ -173,7 +173,6 @@ export const ProjectInfoSchema = Schema.Struct({
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
 });
 
 export const InstanceStatusSchema = Schema.Literal(
@@ -606,7 +605,6 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
-	readonly instanceId?: string | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -984,7 +982,6 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
-			instanceId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -997,19 +994,6 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
-		},
-	},
-) {}
-
-export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>()(
-	"SetProjectInstance",
-	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: NonEmptyString,
-			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -2073,6 +2057,19 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 	},
 ) {}
 
+export class StopBackgroundTask extends Schema.TaggedRequest<StopBackgroundTask>()(
+	"StopBackgroundTask",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			taskId: NonEmptyString,
+		},
+	},
+) {}
+
 export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
 	"SetLogLevel",
 	{
@@ -2179,7 +2176,6 @@ export const WsRpcRequest = Schema.Union(
 	GetModels,
 	SaveProject,
 	RemoveProject,
-	SetProjectInstance,
 	StartInstance,
 	StopInstance,
 	RemoveInstance,
@@ -2214,6 +2210,7 @@ export const WsRpcRequest = Schema.Union(
 	SendInputNow,
 	SyncInputDraft,
 	CancelSession,
+	StopBackgroundTask,
 	SetLogLevel,
 );
 
@@ -2592,7 +2589,6 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(SaveProject),
 	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(SetProjectInstance),
 	Rpc.fromTaggedRequest(StartInstance),
 	Rpc.fromTaggedRequest(StopInstance),
 	Rpc.fromTaggedRequest(RemoveInstance),
@@ -2627,6 +2623,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SendInputNow),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
+	Rpc.fromTaggedRequest(StopBackgroundTask),
 	Rpc.fromTaggedRequest(SetLogLevel),
 );
 

@@ -490,6 +490,27 @@ describe("handleSSEEventEffect", () => {
 });
 
 describe("wireSSEConsumerEffect", () => {
+	it("invalidates PTY discovery on every SSE connection", async () => {
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		});
+		const onPtysChanged = vi.fn();
+		const deps = createMockSSEWiringDeps({ onPtysChanged });
+		await wireSSEConsumerForTest(deps, consumer);
+		const connected = listeners.get("connected");
+		assert.exists(connected);
+		// A PTY created before the first connection sends no event either.
+		connected();
+		expect(onPtysChanged).toHaveBeenCalledExactlyOnceWith(
+			deps.providerInstanceId,
+		);
+		connected();
+		expect(onPtysChanged).toHaveBeenCalledTimes(2);
+	});
+
 	it("invalidates delayed stop settlement when the instance starts again", async () => {
 		const listeners = new Map<string, (...args: unknown[]) => void>();
 		const consumer = {

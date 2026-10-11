@@ -18,7 +18,6 @@ const project = {
 	slug: "proj-1",
 	title: "Project 1",
 	folders: ["/work/proj-1"] as const,
-	instanceId: "inst-1",
 	missing: true,
 };
 
@@ -48,7 +47,6 @@ describe("WsRpcServerLayer project management", () => {
 				const response = yield* client.SaveProject({
 					projectSlug: project.slug,
 					folders: project.folders,
-					instanceId: project.instanceId,
 				});
 				expect(response.projects).toEqual([projectWithGit]);
 			}).pipe(
@@ -75,12 +73,10 @@ describe("WsRpcServerLayer project management", () => {
 			const response = yield* client.SaveProject({
 				projectSlug: "proj-1",
 				folders: ["/work/proj-1"],
-				instanceId: "inst-1",
 			});
 
 			expect(saveProject).toHaveBeenCalledWith({
 				folders: ["/work/proj-1"],
-				instanceId: "inst-1",
 			});
 			expect(response).toEqual({
 				projectSlug: "proj-1",
@@ -156,36 +152,6 @@ describe("WsRpcServerLayer project management", () => {
 				folders: project.folders,
 			});
 			expect(response.projects).toEqual([renamed]);
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ config, wsHandler })),
-				),
-			),
-		);
-	});
-
-	it.effect("sets a project instance and returns the updated list", () => {
-		const rebound = { ...project, instanceId: "inst-2" };
-		const setProjectInstance = vi.fn(async () => undefined);
-		const wsHandler = makeMockWebSocketHandler();
-		const config = makeMockConfig({
-			slug: "proj-1",
-			setProjectInstance,
-			getProjects: () => [rebound],
-		});
-
-		return Effect.gen(function* () {
-			const client = yield* rpcClient;
-			const response = yield* client.SetProjectInstance({
-				projectSlug: "proj-1",
-				slug: "proj-1",
-				instanceId: "inst-2",
-			});
-
-			expect(setProjectInstance).toHaveBeenCalledWith("proj-1", "inst-2");
-			expect(response.projects).toEqual([rebound]);
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

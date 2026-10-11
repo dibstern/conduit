@@ -22,7 +22,6 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
-	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import Banners from "../overlays/Banners.svelte";
 	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
@@ -113,7 +112,6 @@
 			-->
 			{@render title("text-[19px]", "text-[13px]")}
 			<span class="flex-1"></span>
-			{#if listScreen}<InstanceBadgeMenu />{/if}
 			<SessionGroupMenu compact />
 			<Menu
 				bind:open={listMenuOpen}

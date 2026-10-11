@@ -13,7 +13,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getAgentsRpc, getModelsRpc, setHarnessDefaultRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
-	let { visible, state: tabState = $bindable() }: { visible: boolean; state: { modelsFetchPending: boolean } } = $props();
+	let tabState = $state({ modelsFetchPending: false });
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
 	const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
 	const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
@@ -67,9 +67,8 @@
 		}
 	}
 
-	// Refresh both catalogs when this tab opens, including while viewing Claude.
+	// Refresh both catalogs when this section opens.
 	$effect(() => {
-		if (!visible) return;
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		untrack(() => {

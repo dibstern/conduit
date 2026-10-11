@@ -5,14 +5,15 @@ import { requireRpcControl } from "./shared.js";
 
 export const composerWordsHandlers: StepHandler[] = [
 	{
-		name: "open settings to composer tab",
-		match: /^I open settings to the Composer tab$/,
+		name: "open settings to general section",
+		match: /^I open settings to the General section$/,
 		run: async ({ world }) => {
 			await world.page.evaluate(() =>
-				window.dispatchEvent(new CustomEvent("settings:open")),
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { section: "general" } }),
+				),
 			);
 			await expect(world.page.locator("#settings-panel")).toBeVisible();
-			await world.page.getByTestId("settings-tab-composer").click();
 			await expect(
 				world.page.getByTestId("settings-composer-controls-icons"),
 			).toHaveAttribute("aria-checked", "true");

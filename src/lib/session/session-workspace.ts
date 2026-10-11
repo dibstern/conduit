@@ -1,5 +1,15 @@
 import type { SessionWorkspace } from "../contracts/session-workspace.js";
 
+/** Project order and identity stay stable while each directory follows its workspace. */
+export const effectiveSessionFolders = (
+	folders: readonly string[],
+	workspace: SessionWorkspace | null | undefined,
+) =>
+	folders.map((root) => ({
+		root,
+		directory: workspace?.worktrees[root] ?? root,
+	}));
+
 /** The primary folder's worktree, otherwise the single moved folder, otherwise primary. */
 export function effectiveWorkingDirectory(
 	primary: string,

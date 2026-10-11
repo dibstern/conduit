@@ -328,6 +328,16 @@ export class BackgroundLivenessTag extends Context.Tag("BackgroundLiveness")<
 	(sessionId: string) => SessionBackground | undefined
 >() {}
 
+/** A Claude runtime's live task ids; see makeSessionBackgroundLiveness. */
+export class LiveTaskListTag extends Context.Tag("LiveTaskList")<
+	LiveTaskListTag,
+	(
+		sessionId: string,
+	) =>
+		| { readonly taskIds: ReadonlySet<string>; readonly since: number }
+		| undefined
+>() {}
+
 /** The compaction in progress per session; see makeSessionCompactions. */
 export class SessionCompactionsTag extends Context.Tag("SessionCompactions")<
 	SessionCompactionsTag,

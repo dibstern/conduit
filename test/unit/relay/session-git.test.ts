@@ -19,14 +19,17 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-async function fixture() {
+async function fixture(extraFolders: readonly string[] = []) {
 	const path = tempEventsDbPath();
 	const runtime = ManagedRuntime.make(
 		SessionGitLive.pipe(
 			Layer.provideMerge(
 				Layer.merge(
 					makePersistenceEffectLayer(path, "test-project"),
-					Layer.succeed(ConfigTag, makeMockConfig({ projectDir: "/primary" })),
+					Layer.succeed(
+						ConfigTag,
+						makeMockConfig({ projectDir: "/primary", extraFolders }),
+					),
 				),
 			),
 		),
@@ -72,6 +75,48 @@ async function fixture() {
 }
 
 describe("Session git refresh", () => {
+	// Secondary-only changes must advance both session and sidebar versions;
+	// each workspace must resolve its attached folders before reading git.
+	it("refreshes attached effective directories and versions sessions on secondary-only changes", async () => {
+		const { refresh, runtime } = await fixture(["/attached"]);
+		let dirty = false;
+		const read = vi
+			.spyOn(daemonSessionGitCache, "refresh")
+			.mockImplementation(async (directory) => ({
+				branch: "main",
+				dirty: directory === "/attached" && dirty,
+			}));
+		await refresh();
+		expect(read.mock.calls.map(([directory]) => directory)).toContain(
+			"/attached",
+		);
+		const before = await runtime.runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.getSession("one")),
+		);
+		const sidebarBefore = await runtime.runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+		);
+		dirty = true;
+		read.mockClear();
+		await refresh({ sessionId: "one" });
+		expect(read.mock.calls.map(([directory]) => directory)).toEqual([
+			"/one",
+			"/attached",
+		]);
+		const after = await runtime.runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.getSession("one")),
+		);
+		const sidebarAfter = await runtime.runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+		);
+		expect(after?.version).toBeGreaterThan(before?.version ?? 0);
+		expect(
+			sidebarAfter.rows.find(({ item }) => item.id === "one")?.version,
+		).toBeGreaterThan(
+			sidebarBefore.rows.find(({ item }) => item.id === "one")?.version ?? 0,
+		);
+	});
+
 	it("coalesces a burst into one follow-up instead of repeating git for every request", async () => {
 		const { refresh } = await fixture();
 		let started!: () => void;

@@ -96,7 +96,7 @@ async function openSettings(
 		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("overflow-settings").click();
 	}
-	await page.getByTestId("settings-tab-visibility").click();
+	await page.getByTestId("settings-tab-models").click();
 	await field(page, "claude", "model").waitFor();
 	await page.waitForFunction(
 		() =>
@@ -337,7 +337,7 @@ test("defaults follow RPC writes across relays", async ({
 	const directory = join(harness.root, "other-default-project");
 	mkdirSync(directory);
 	const { savedSlug } = await Effect.runPromise(
-		browser.rpc.SaveProject({ folders: [directory], instanceId: "claude" }),
+		browser.rpc.SaveProject({ folders: [directory] }),
 	);
 	if (!savedSlug) throw new Error("SaveProject omitted the slug");
 	const other = await harness.connect(undefined, undefined, savedSlug);

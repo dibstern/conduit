@@ -5,9 +5,9 @@ Scenario Outline: phone Words controls warn at the selected context threshold
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose <threshold> for composer context warnings
-  And I open settings to the Composer tab
+  And I open settings to the General section
   And I choose Words for composer controls
   And the mock relay reports context <percent> percent
   Then the composer context warning is <visibility>
@@ -32,9 +32,9 @@ Scenario: Never suppresses high context warnings in the composer and picker
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Never for composer context warnings
-  And I open settings to the Composer tab
+  And I open settings to the General section
   And I choose Words for composer controls
   And the mock relay reports context 97 percent
   Then the composer context warning is not visible
@@ -92,7 +92,7 @@ Scenario Outline: phone Words controls show the context warning and usage below 
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   And the mock relay reports context 85 percent
   Then the composer context warning is visible

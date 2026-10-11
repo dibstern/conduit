@@ -31,6 +31,7 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-service.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
 import type {
@@ -55,6 +56,7 @@ import {
 	hasSessionID,
 	isPartUpdatedEvent,
 	isPermissionRepliedEvent,
+	isPtyEvent,
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
@@ -101,6 +103,7 @@ export interface SSEWiringDeps {
 	slug?: string;
 	/** Optional: record that a "done" was delivered via SSE (for dedup with status-poller) */
 	onDoneProcessed?: (sessionId: string) => void;
+	onPtysChanged?: OpenCodeTerminalService["onOpenCodePtysChanged"];
 	/** Optional: reply to an OpenCode permission (auto-approve path). */
 	replyPermission?: (
 		sessionId: string,
@@ -757,7 +760,8 @@ function wireSSEConsumerWithCallbacks(
 	// Instances and arrive as ordinary stream events.
 	consumer.on("connected", () => {
 		log.info("Connected to OpenCode event stream");
-
+		// PTYs created before this connection, or while it was down, send no event.
+		deps.onPtysChanged?.(deps.providerInstanceId);
 		if (hasConnected) callbacks.onReconnect?.();
 		hasConnected = true;
 	});
@@ -831,6 +835,10 @@ export const wireSSEConsumerEffect = (
 					);
 				},
 				handleEvent: (event) => {
+					if (isPtyEvent(event)) {
+						deps.onPtysChanged?.(deps.providerInstanceId);
+						return;
+					}
 					runFork(
 						handleSSEEventEffect(deps, event).pipe(
 							Effect.catchAllCause((cause) =>

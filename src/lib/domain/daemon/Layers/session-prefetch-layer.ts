@@ -23,15 +23,22 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
+import {
+	getInstances,
+	type InstanceManagerStateTag,
+} from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
-import { ProjectRegistryTag } from "../Services/project-registry-service.js";
+import {
+	openCodeInstanceFor,
+	ProjectRegistryTag,
+} from "../Services/project-registry-service.js";
 
 /**
  * Effect program that prefetches session counts for all registered projects
  * that don't already have persisted counts.
  *
  * For each project:
- * 1. Take a client for the project's instance only if it is already running
+ * 1. Take a client for the first OpenCode instance if it is already running
  * 2. List the project's sessions
  * 3. Update the persistedSessionCounts map in DaemonConfigRefTag
  *
@@ -40,7 +47,10 @@ import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 export const prefetchSessionCounts: Effect.Effect<
 	number,
 	never,
-	DaemonConfigRefTag | OpenCodeInstancesTag | ProjectRegistryTag
+	| DaemonConfigRefTag
+	| OpenCodeInstancesTag
+	| ProjectRegistryTag
+	| InstanceManagerStateTag
 > = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
 	const registryRef = yield* ProjectRegistryTag;
@@ -48,6 +58,8 @@ export const prefetchSessionCounts: Effect.Effect<
 
 	const config = yield* Ref.get(configRef);
 	const registryState = yield* Ref.get(registryRef);
+	const openCode = openCodeInstanceFor(yield* getInstances);
+	if (openCode === undefined) return 0;
 
 	let fetched = 0;
 
@@ -58,10 +70,7 @@ export const prefetchSessionCounts: Effect.Effect<
 
 		// Best-effort count, only from an instance that is already running.
 		const count = yield* instances
-			.ifRunning(
-				entry.project.instanceId ?? "default",
-				entry.project.folders[0],
-			)
+			.ifRunning(openCode.id, entry.project.folders[0])
 			.pipe(
 				Effect.flatMap(
 					Option.match({
@@ -119,7 +128,10 @@ export const prefetchSessionCounts: Effect.Effect<
 export const SessionPrefetchLive: Layer.Layer<
 	never,
 	never,
-	DaemonConfigRefTag | OpenCodeInstancesTag | ProjectRegistryTag
+	| DaemonConfigRefTag
+	| OpenCodeInstancesTag
+	| ProjectRegistryTag
+	| InstanceManagerStateTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		yield* Effect.logInfo("Session prefetch layer initialized");
