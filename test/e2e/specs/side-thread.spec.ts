@@ -18,13 +18,13 @@ const parentPrompt =
 	"Remember the word 'alpha'. Reply with only: ok, remembered.";
 const question =
 	"What word did I ask you to remember? Reply with only the word.";
-const raisedPrompt = "Reply with only: ok, raised.";
-const readOnlyRules = [
+const followUpPrompt = "Reply with only: ok, raised.";
+const planRules = [
 	{ permission: "edit", pattern: "*", action: "deny" },
 	{ permission: "bash", pattern: "*", action: "ask" },
 	{ permission: "task", pattern: "*", action: "deny" },
 ];
-const raisedRules = [
+const askRules = [
 	{ permission: "edit", pattern: "*", action: "ask" },
 	{ permission: "bash", pattern: "*", action: "ask" },
 	{ permission: "task", pattern: "*", action: "allow" },
@@ -243,7 +243,7 @@ test.describe("OpenCode Side Threads", () => {
 					sessionId: sideId,
 				}),
 			);
-			expect(sideSettings.permissionMode).toBe("plan");
+			expect(sideSettings.permissionMode).toBe("ask");
 
 			const requestBodies = mockServer.requestBodies;
 			expect(
@@ -272,7 +272,7 @@ test.describe("OpenCode Side Threads", () => {
 			expect(titleUpdateIndex).toBeLessThan(promptIndex);
 			expect(
 				JSON.parse(requestBodies[titleUpdateIndex]?.body ?? "null"),
-			).toEqual({ title: question, permission: readOnlyRules });
+			).toEqual({ title: question, permission: askRules });
 			expect(
 				JSON.parse(requestBodies[promptIndex]?.body ?? "null"),
 			).not.toHaveProperty("agent");
@@ -301,7 +301,7 @@ test.describe("OpenCode Side Threads", () => {
 				parentId,
 				title: question,
 				sideThread: true,
-				permissionMode: "plan",
+				permissionMode: "ask",
 			});
 			const firstTurn = sideEvents.find((event) =>
 				event.type.startsWith("turn."),
@@ -367,7 +367,7 @@ test.describe("OpenCode Side Threads", () => {
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(eventsBeforeNested);
 			await app.input.fill("");
 
-			// Session rules enforce Plan, so the agent remains selectable.
+			// Side Thread modes are session rules, so the agent stays selectable.
 			const modelPicker = page.locator(
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 			);
@@ -380,18 +380,18 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(agentRow).toContainText("Plan");
 			await expect
 				.poll(() => parentSettings(relayUrl, sideId))
-				.toMatchObject({ permissionMode: "plan", agent: "plan" });
+				.toMatchObject({ permissionMode: "ask", agent: "plan" });
 			await agentRow.click();
 			await page.getByTestId("picker-agent-build").click();
 			await expect(agentRow).toContainText("Build");
 			// Escape in an empty Side Thread composer goes back to the parent.
 			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
-			await expect(approvalPill).toContainText("Plan");
+			await expect(approvalPill).toContainText("Ask");
 			await expect
 				.poll(() => parentSettings(relayUrl, sideId))
-				.toMatchObject({ permissionMode: "plan", agent: "build" });
-			await app.sendMessage(raisedPrompt);
+				.toMatchObject({ permissionMode: "ask", agent: "build" });
+			await app.sendMessage(followUpPrompt);
 			await expect(chat.assistantMessages.last()).toContainText("ok, raised");
 			await chat.waitForStreamingComplete();
 			const sidePrompts = mockServer.requestBodies
@@ -408,8 +408,8 @@ test.describe("OpenCode Side Threads", () => {
 			const planOption = page.getByTestId("permission-mode-option-plan");
 			await expect(planOption).toBeVisible();
 			await expect(planOption).not.toContainText("Claude");
-			await page.getByTestId("permission-mode-option-ask").click();
-			await expect(approvalPill).toContainText("Ask");
+			await planOption.click();
+			await expect(approvalPill).toContainText("Plan");
 			const sidePatches = () =>
 				mockServer.requestBodies
 					.filter(
@@ -421,8 +421,8 @@ test.describe("OpenCode Side Threads", () => {
 			await expect
 				.poll(sidePatches)
 				.toEqual([
-					{ title: question, permission: readOnlyRules },
-					{ permission: raisedRules },
+					{ title: question, permission: askRules },
+					{ permission: planRules },
 				]);
 			await modelPicker.click();
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
@@ -511,7 +511,7 @@ test.describe("Claude Side Threads", () => {
 				},
 			});
 
-			test("asks in a hidden plan-mode fork and leaves its parent untouched", async ({
+			test("asks in a hidden Ask-mode fork and leaves its parent untouched", async ({
 				page,
 				relayUrl,
 				harness,
@@ -575,7 +575,7 @@ test.describe("Claude Side Threads", () => {
 				await expect(chat.subagentBackBar).toContainText("Side Thread of");
 				await expect(chat.subagentBackBar).toContainText(parentTitle.trim());
 				await expect(page.getByTestId("permission-mode-badge")).toContainText(
-					"Plan",
+					"Ask",
 				);
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
@@ -583,11 +583,11 @@ test.describe("Claude Side Threads", () => {
 				const sideSettings = await rpc(relayUrl, (client) =>
 					client.GetModels({ projectSlug, sessionId: sideId }),
 				);
-				expect(sideSettings.permissionMode).toBe("plan");
-				// The Side Thread's first SDK turn asked for plan; the parent's did not.
+				expect(sideSettings.permissionMode).toBe("ask");
+				// The Side Thread asked for Ask ("default"), not the parent's "full".
 				expect(harness.claudeReplayer?.sentPermissionModes).toEqual([
 					"default",
-					"plan",
+					"default",
 				]);
 
 				const sideEvents = sessionEvents(harness.eventsDbPath, sideId);
@@ -600,7 +600,7 @@ test.describe("Claude Side Threads", () => {
 					title: question,
 					provider: "claude",
 					sideThread: true,
-					permissionMode: "plan",
+					permissionMode: "ask",
 				});
 				const firstTurn = sideEvents.find((event) =>
 					event.type.startsWith("turn."),
@@ -629,7 +629,7 @@ test.describe("Claude Side Threads", () => {
 					question,
 				);
 				await expect(page.getByTestId("permission-mode-badge")).toContainText(
-					"Plan",
+					"Ask",
 				);
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
