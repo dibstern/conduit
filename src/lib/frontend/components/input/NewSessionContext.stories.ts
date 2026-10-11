@@ -75,6 +75,7 @@ const meta = {
 	component: NewSessionContext,
 	tags: ["autodocs", "viewport-capture"],
 	parameters: { layout: "padded", a11y: { test: "error" } },
+	args: { sessionModeDefault: { mode: "local", source: "global" } },
 } satisfies Meta<typeof NewSessionContext>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -176,7 +177,50 @@ export const NewWorktreeEnabled: Story = {
 
 export const NewWorktreeSelected: Story = {
 	beforeEach: () => seed(true, 1, true, "claude"),
-	args: { newWorktree: true },
+	args: { newWorktree: true, modeChosen: true },
+};
+
+export const DefaultedWorktree: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, true, "claude");
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "Isolated by default",
+			git: { branch: "release/session-defaults" },
+		}));
+		return cleanup;
+	},
+	args: { sessionModeDefault: { mode: "worktree", source: "file" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			await canvas.findByTestId("draft-start-chip"),
+		).toHaveTextContent(/^New worktree$/);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from release\/session-defaults$/);
+		await expect(canvas.queryByTestId("draft-session-mode-warning")).toBeNull();
+	},
+};
+
+export const SessionModeWarning: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	args: {
+		sessionModeDefault: {
+			mode: "local",
+			source: "global",
+			warning: "Invalid conduit.json: sessionMode must be local or worktree",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			await canvas.findByTestId("draft-session-mode-warning"),
+		).toHaveTextContent("Invalid conduit.json");
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^main$/,
+		);
+	},
 };
 
 export const OpenCodeNewWorktreeEnabled: Story = {
@@ -245,7 +289,7 @@ export const BaseBranchDefault: Story = {
 		}));
 		return cleanup;
 	},
-	args: { newWorktree: true },
+	args: { newWorktree: true, modeChosen: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
 		await expect(
@@ -259,6 +303,7 @@ export const BaseBranchList: Story = {
 	beforeEach: () => seed(true, 1, true, "claude"),
 	args: {
 		newWorktree: true,
+		modeChosen: true,
 		loadBranches: async () => ({
 			current: "main",
 			branches: ["feature/session-ui", "main", "release"],

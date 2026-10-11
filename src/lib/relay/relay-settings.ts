@@ -5,6 +5,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
+import {
+	type SessionMode,
+	SessionModeSchema,
+} from "../contracts/project-file.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
@@ -21,6 +25,7 @@ export interface RelaySettings {
 		opencode?: { providerId: string; modelId: string; contextWindow: string };
 	};
 	defaultPermissionMode?: SessionPermissionMode;
+	defaultSessionMode?: SessionMode;
 	defaultGroupingMode?: GroupingMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
@@ -43,11 +48,8 @@ function stripComments(text: string): string {
 }
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
-
-const isPermissionMode = (
-	value: unknown,
-): value is SessionPermissionMode | undefined =>
-	value === undefined || isSessionPermissionMode(value);
+const isSessionMode = Schema.is(SessionModeSchema);
+const isGroupingMode = Schema.is(GroupingModeSchema);
 
 /**
  * Load relay settings from the config directory.
@@ -58,17 +60,24 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
 		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
-		if (
-			settings.defaultGroupingMode !== undefined &&
-			!Schema.is(GroupingModeSchema)(settings.defaultGroupingMode)
-		)
-			delete settings.defaultGroupingMode;
-		// The file is hand-editable, so an unknown mode reaches getPermissionMode
-		// as a value no caller can interpret — the pill would fall back to "Ask"
-		// while the session ran under something else. Drop it and use the default.
-		if (isPermissionMode(settings.defaultPermissionMode)) return settings;
-		const { defaultPermissionMode: _unusable, ...rest } = settings;
-		return rest;
+		// The file is hand-editable. Drop unknown modes so consumers use their defaults.
+		const {
+			defaultPermissionMode,
+			defaultSessionMode,
+			defaultGroupingMode,
+			...rest
+		} = settings;
+		return {
+			...rest,
+			...(defaultPermissionMode !== undefined &&
+				isSessionPermissionMode(defaultPermissionMode) && {
+					defaultPermissionMode,
+				}),
+			...(defaultSessionMode !== undefined &&
+				isSessionMode(defaultSessionMode) && { defaultSessionMode }),
+			...(defaultGroupingMode !== undefined &&
+				isGroupingMode(defaultGroupingMode) && { defaultGroupingMode }),
+		};
 	} catch {
 		return {};
 	}
@@ -101,6 +110,9 @@ export function saveRelaySettings(
 	}
 	if (settings.defaultPermissionMode !== undefined) {
 		merged.defaultPermissionMode = settings.defaultPermissionMode;
+	}
+	if (settings.defaultSessionMode !== undefined) {
+		merged.defaultSessionMode = settings.defaultSessionMode;
 	}
 	if (settings.defaultGroupingMode !== undefined) {
 		merged.defaultGroupingMode = settings.defaultGroupingMode;

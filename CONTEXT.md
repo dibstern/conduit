@@ -189,9 +189,25 @@ so a restart never leaves it running forever.
 
 The **Project File** is `conduit.json` in the primary Project Folder, never in a
 session's worktree. Its implementation-free Effect Schema accepts optional
-`setupScript` and ignores unknown keys. It is read afresh for every new worktree
+`setupScript` and `sessionMode` and ignores unknown keys. It is read afresh for every new worktree
 session. Invalid JSON or schema data skips setup with a visible notice; a daemon
 setup override still takes precedence. An absent script means no setup.
+
+## Default Session Mode
+
+The **Default Session Mode** is `local` or `worktree`. The daemon project
+override wins, then the Project File, then the daemon's global default, which
+is Local when unset. Clearing a project override restores that inheritance.
+The daemon resolver reads the primary folder's Project File afresh for each
+draft project or provider change and returns the mode and its source. Invalid
+files are ignored with a visible warning, including when a project override
+wins.
+
+New worktree is selected only when the project has a Git folder and the provider
+supports creating worktrees. Otherwise the draft starts Local and the existing
+control explains why. Explicit draft choices survive late defaults and layout
+changes. Global edits apply to the next draft. Neither defaults nor workspace
+choices are stored in browser storage.
 
 ## Workspace Hint
 

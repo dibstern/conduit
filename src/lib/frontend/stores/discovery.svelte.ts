@@ -1,5 +1,6 @@
 // Agents, models, providers, and commands.
 
+import type { SessionMode } from "../../contracts/project-file.js";
 import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
 
 import type {
@@ -171,6 +172,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
+	defaultSessionMode: "local" as SessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -304,6 +306,9 @@ export const discoveryState = {
 		return (
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
+	},
+	get defaultSessionMode(): SessionMode {
+		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
 		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
@@ -1112,6 +1117,10 @@ export function applyHiddenEntriesSet(
 export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	serverDiscovery.defaultPermissionMode = mode;
 	choice.defaultPermissionMode = null;
+}
+
+export function applyDefaultSessionMode(mode: SessionMode): void {
+	serverDiscovery.defaultSessionMode = mode;
 }
 
 /** Clear all discovery state (for project switch). */

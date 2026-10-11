@@ -5,6 +5,7 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
+import type { SessionMode } from "./contracts/project-file.js";
 import type { ProjectSetupState } from "./contracts/project-setup.js";
 import type {
 	ProviderDriverKind,
@@ -563,6 +564,7 @@ export interface ProjectInfo {
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;
+	sessionMode?: SessionMode | undefined;
 	/** Unset inherits the daemon's global default. */
 	groupingMode?: GroupingMode | undefined;
 	effectiveGroupingMode?: GroupingMode;
