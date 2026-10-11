@@ -62,6 +62,7 @@ import {
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
+import { getInstances } from "./instance-manager-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -725,6 +726,32 @@ export const replaceRelay = (slug: string) =>
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.replaceRelay"),
+	);
+
+/** The OpenCode instance a project's relay drives: its bound instance when
+ *  that is OpenCode, else the first OpenCode instance. */
+export const openCodeInstanceFor = <I extends { id: string; driver?: string }>(
+	instances: readonly I[],
+	instanceId: string | undefined,
+): I | undefined =>
+	instances.find((i) => i.driver !== "claude" && i.id === instanceId) ??
+	instances.find((i) => i.driver !== "claude");
+
+/** Bind a project's new sessions to an instance. The relay reads the binding
+ *  only through openCodeInstanceFor, so a running relay that already drives
+ *  the new choice (say, after a rebind between two Claude accounts) is kept
+ *  instead of rebuilt, which takes seconds. */
+export const setProjectInstance = (slug: string, instanceId: string) =>
+	Effect.gen(function* () {
+		yield* updateProject(slug, { instanceId });
+		const relay = yield* (yield* RelayCacheTag).peek(slug);
+		const openCode = openCodeInstanceFor(yield* getInstances, instanceId)?.id;
+		if (Option.isSome(relay) && relay.value.openCodeInstanceId === openCode)
+			return;
+		yield* replaceRelay(slug);
+	}).pipe(
+		Effect.annotateLogs("slug", slug),
+		Effect.withSpan("projectRegistry.setProjectInstance"),
 	);
 
 /**

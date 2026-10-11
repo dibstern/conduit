@@ -47,6 +47,8 @@ export interface Relay {
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
+	/** The OpenCode instance this relay drives, fixed when it was built. */
+	openCodeInstanceId?: string | undefined;
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;
