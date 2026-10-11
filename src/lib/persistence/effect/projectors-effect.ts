@@ -1034,10 +1034,11 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}
 			}
 
-			// Idle means the provider has nothing in flight, so an open turn
-			// still waiting for its reply never got one (sent from another
-			// client, or ended before replying), and no result will close it.
-			// It settles; a later reply reopens it.
+			// Idle means the provider has nothing in flight, so every turn it
+			// leaves open is over: one waiting for a reply never got it, and one
+			// whose result named no reply this turn owns will see no other close.
+			// The inbox reads an open turn as busy and would queue every later
+			// send. A turn the provider continues reopens on its next reply.
 			if (
 				isEventType(event, "session.status") &&
 				event.data.status === "idle"
@@ -1045,7 +1046,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 				const written = yield* sql<OwnedRow & { id: string }>`
 						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
 						WHERE session_id = ${event.sessionId}
-						AND state IN ('pending', 'running') AND assistant_message_id IS NULL
+						AND state IN ('pending', 'running')
 						AND requested_at <= ${event.createdAt}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };
@@ -1159,7 +1160,13 @@ export const makeTurnProjector = (): EffectProjector => ({
 						WHERE ${
 							event.data.userMessageId
 								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
-								: sql`assistant_message_id = ${event.data.messageId}`
+								: // A turn can hold several replies (an input the SDK folds
+									// into it starts a new one), but its row names only the
+									// first, so the reply's own turn link settles it too.
+									sql`session_id = ${event.sessionId}
+									AND (assistant_message_id = ${event.data.messageId}
+										OR id = (SELECT turn_id FROM messages
+											WHERE id = ${event.data.messageId}))`
 						}
 						RETURNING id, session_id`;
 				return { sessions: owners(written), messages: ids(written) };

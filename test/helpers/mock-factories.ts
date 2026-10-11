@@ -170,9 +170,7 @@ function createMockClient(): HandlerDeps["client"] {
 			fork: vi.fn().mockResolvedValue({ id: "ses_forked" }),
 			revert: vi.fn().mockResolvedValue(undefined),
 			unrevert: vi.fn().mockResolvedValue(undefined),
-			share: vi.fn().mockResolvedValue(undefined),
 			summarize: vi.fn().mockResolvedValue(undefined),
-			diff: vi.fn().mockResolvedValue(undefined),
 			children: vi.fn().mockResolvedValue([]),
 		},
 		permission: {
@@ -208,12 +206,9 @@ function createMockClient(): HandlerDeps["client"] {
 			read: vi
 				.fn()
 				.mockResolvedValue({ content: "file content", binary: false }),
-			status: vi.fn().mockResolvedValue({}),
 		},
 		find: {
-			text: vi.fn().mockResolvedValue([]),
 			files: vi.fn().mockResolvedValue([]),
-			symbols: vi.fn().mockResolvedValue([]),
 		},
 		app: {
 			agents: vi.fn().mockResolvedValue([]),
@@ -537,9 +532,7 @@ export function makeMockOpenCodeAPI(
 			fork: vi.fn(async () => ({ id: "ses_forked" })),
 			revert: vi.fn(async () => undefined),
 			unrevert: vi.fn(async () => undefined),
-			share: vi.fn(async () => undefined),
 			summarize: vi.fn(async () => undefined),
-			diff: vi.fn(async () => undefined),
 			children: vi.fn(async () => []),
 		},
 		permission: {
@@ -571,12 +564,9 @@ export function makeMockOpenCodeAPI(
 		file: {
 			list: vi.fn(async () => []),
 			read: vi.fn(async () => ({ content: "file content", binary: false })),
-			status: vi.fn(async () => ({})),
 		},
 		find: {
-			text: vi.fn(async () => []),
 			files: vi.fn(async () => []),
-			symbols: vi.fn(async () => []),
 		},
 		app: {
 			agents: vi.fn(async () => []),

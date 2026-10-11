@@ -33,6 +33,11 @@ import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
+import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
+import {
+	BrowserRpcConnectionsLive,
+	RpcCaller,
+} from "../../src/lib/server/ws-rpc.js";
 import type { StoredProject } from "../../src/lib/types.js";
 
 export const makeDaemonRpcTestLayer = (
@@ -52,6 +57,8 @@ export const makeDaemonRpcTestLayer = (
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,
+		BrowserRpcConnectionsLive,
+		Layer.succeed(RpcCaller, { kind: "cli" }),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive({
 			...makeDaemonConfigFromOptions({ port: 0 }),
@@ -68,9 +75,13 @@ export const makeDaemonRpcTestLayer = (
 			KeepAwakeTag,
 			Effect.gen(function* () {
 				const active = yield* Ref.make(false);
+				const command = yield* Ref.make<string | null>(null);
 				return {
 					activate: () => Ref.set(active, true),
 					deactivate: () => Ref.set(active, false),
+					setCommand: (executable, args) =>
+						Ref.set(command, [executable, ...args].join(" ")),
+					getCommand: () => Ref.get(command),
 					isActive: () => Ref.get(active),
 					isSupported: () => Effect.succeed(true),
 				};
@@ -88,9 +99,10 @@ export const makeDaemonRpcTestLayer = (
 	);
 	const dependencies = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(
-			(options.persistence ?? ConfigPersistenceNoopLive).pipe(
-				Layer.provideMerge(base),
-			),
+			Layer.merge(
+				AuthManagerFromConfigLive,
+				options.persistence ?? ConfigPersistenceNoopLive,
+			).pipe(Layer.provideMerge(base)),
 		),
 	);
 	return DaemonWsRpcHandlersLive.pipe(

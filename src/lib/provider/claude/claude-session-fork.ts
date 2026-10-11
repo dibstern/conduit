@@ -4,7 +4,7 @@ import { Worker } from "node:worker_threads";
 import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 
 interface SdkCallOptions {
-	readonly dir: string;
+	readonly dir?: string;
 	readonly configDir?: string;
 }
 
@@ -172,7 +172,7 @@ export function resolveForkUpToUuid(
 export async function forkClaudeTranscript(
 	input: {
 		readonly parentSdkId: string;
-		readonly projectDir: string;
+		readonly projectDir?: string;
 		readonly configDir?: string;
 		readonly title: string;
 		readonly messageId?: string;
@@ -181,7 +181,7 @@ export async function forkClaudeTranscript(
 	sdk: ClaudeSessionForkSdk,
 ): Promise<{ sdkSessionId: string }> {
 	const options = {
-		dir: input.projectDir,
+		...(input.projectDir !== undefined && { dir: input.projectDir }),
 		...(input.configDir !== undefined && { configDir: input.configDir }),
 	};
 	let upToMessageId: string | undefined;

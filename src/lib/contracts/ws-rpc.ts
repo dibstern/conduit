@@ -742,6 +742,7 @@ export const GetStatusResponseSchema = Schema.Struct({
 		),
 	),
 	keepAwake: Schema.Boolean,
+	keepAwakeCommand: Schema.NullOr(Schema.String),
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,
@@ -931,11 +932,22 @@ export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
 	payload: {},
 }) {}
 
+export class SetPinRejected extends Schema.TaggedError<SetPinRejected>()(
+	"SetPinRejected",
+	{
+		reason: Schema.Literal("wrong_pin", "locked_out"),
+		retryAfterSeconds: Schema.optional(Schema.Number),
+	},
+) {}
+
 export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
-	failure: WsRpcError,
+	failure: Schema.Union(WsRpcError, SetPinRejected),
 	success: OkResponseSchema,
 	payload: {
 		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+		currentPin: Schema.optional(
+			Schema.String.pipe(Schema.pattern(/^\d{4,8}$/)),
+		),
 	},
 }) {}
 
@@ -979,11 +991,7 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 	{
 		failure: WsRpcError,
 		success: OkResponseSchema,
-		payload: {
-			config: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			),
-		},
+		payload: {},
 	},
 ) {}
 

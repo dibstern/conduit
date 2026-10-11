@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { type SetPinRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 const daemonRequired = (operation: string) =>
@@ -7,7 +7,8 @@ const daemonRequired = (operation: string) =>
 
 export const daemonOnlyHandlers = {
 	GetStatus: (_request) => daemonRequired("GetStatus"),
-	SetPin: (_request) => daemonRequired("SetPin"),
+	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
+		daemonRequired("SetPin"),
 	SetKeepAwake: (_request) => daemonRequired("SetKeepAwake"),
 	SetKeepAwakeCommand: (_request) => daemonRequired("SetKeepAwakeCommand"),
 	Shutdown: (_request) => daemonRequired("Shutdown"),

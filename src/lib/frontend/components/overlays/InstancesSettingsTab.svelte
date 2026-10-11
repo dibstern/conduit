@@ -11,7 +11,6 @@
 	import { applyInstanceListResponse, applyScanNowResponse, beginScan, clearScanInFlight, getCachedInstances, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { addInstanceRpc, removeInstanceRpc, renameInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
@@ -45,39 +44,24 @@
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
 	const ccsDetected = $derived(proxyResult?.found ?? false);
-	function getRpcProjectSlug(): string | null {
-		const slug = getCurrentSlug();
-		if (!slug) {
-			showToast("No active project connection", { variant: "warn" });
-			return null;
-		}
-		return slug;
-	}
-
 	function handleToggleInstance(instanceId: string) {
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
 		if (state.expandedInstanceId !== instanceId) state.renamingInstanceId = null;
 	}
 	function handleStart(instanceId: string) {
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
-		void startInstanceRpc({ projectSlug, instanceId })
+		void startInstanceRpc({ instanceId })
 			.then(applyInstanceListResponse)
 			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
 	}
 	function handleStop(instanceId: string) {
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
-		void stopInstanceRpc({ projectSlug, instanceId })
+		void stopInstanceRpc({ instanceId })
 			.then(applyInstanceListResponse)
 			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
 	}
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
 		if (confirmed) {
-			const projectSlug = getRpcProjectSlug();
-			if (!projectSlug) return;
-			void removeInstanceRpc({ projectSlug, instanceId })
+			void removeInstanceRpc({ instanceId })
 				.then(applyInstanceListResponse)
 				.catch(() =>
 					showToast("Failed to remove instance", { variant: "warn" }),
@@ -146,8 +130,6 @@
 			showToast("Instance name is required", { variant: "warn" });
 			return;
 		}
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
 		const isClaude = state.formDriver === "claude";
 		const port = state.formPort.trim() ? Number(state.formPort.trim()) : undefined;
 		if (!isClaude && port !== undefined && !Number.isInteger(port)) {
@@ -161,7 +143,6 @@
 		const request =
 			state.instanceFormMode === "edit" && state.editingInstanceId
 				? updateInstanceRpc({
-						projectSlug,
 						instanceId: state.editingInstanceId,
 						name,
 						...(isClaude
@@ -172,7 +153,6 @@
 								}),
 					})
 				: addInstanceRpc({
-						projectSlug,
 						name,
 						driver: state.formDriver,
 						...(isClaude
@@ -201,10 +181,8 @@
 			});
 	}
 	function handleScanNow() {
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
 		beginScan();
-		void scanNowRpc({ projectSlug })
+		void scanNowRpc()
 			.then(applyScanNowResponse)
 			.catch(() => {
 				clearScanInFlight();
@@ -219,10 +197,7 @@
 		if (!state.renamingInstanceId) return;
 		const trimmed = state.renameValue.trim();
 		if (!trimmed) { showToast("Instance name cannot be empty", { variant: "warn" }); return; }
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
 		void renameInstanceRpc({
-			projectSlug,
 			instanceId: state.renamingInstanceId,
 			name: trimmed,
 		})

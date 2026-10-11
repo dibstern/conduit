@@ -24,7 +24,7 @@ const requestLayer = (url: string, headers?: HeadersInit) =>
 			new Request(`http://localhost${url}`, {
 				...(headers !== undefined && { headers }),
 			}),
-		),
+		).modify({ remoteAddress: "127.0.0.1" }),
 	);
 
 function makeHandler(auth: AuthManager) {

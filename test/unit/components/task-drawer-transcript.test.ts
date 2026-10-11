@@ -300,15 +300,15 @@ describe("Task drawer transcript", () => {
 		await settle();
 		setScrollSize(parent);
 		scrollTo(parent, 200);
-		sessionViewState.forcedOpen = true;
+		sessionViewState.barOpen = true;
 		const drawer = mountDrawer();
 		await settle();
 		expect(sessionViewState.atBottom).toBe(false);
-		expect(sessionViewState.forcedOpen).toBe(true);
+		expect(sessionViewState.barOpen).toBe(true);
 		const child = within(drawer.pane).getByRole("region");
 		setScrollSize(child);
 		scrollTo(child, 200);
-		expect(sessionViewState.forcedOpen).toBe(true);
+		expect(sessionViewState.barOpen).toBe(true);
 		expect(parent.scrollTop).toBe(200);
 		requestTranscriptFollow();
 		await settle();
@@ -321,7 +321,7 @@ describe("Task drawer transcript", () => {
 		).toBe(false);
 
 		scrollTo(parent, 200);
-		sessionViewState.forcedOpen = true;
+		sessionViewState.barOpen = true;
 		seedTranscript("drawer-next", "Next child reply");
 		await drawer.rerender({ task: { ...task, sessionId: "drawer-next" } });
 		expect(within(drawer.pane).getByText("Next child reply")).toBeTruthy();
@@ -331,7 +331,7 @@ describe("Task drawer transcript", () => {
 		expect(parentView.getByRole("region")).toBe(parent);
 		expect(parent.scrollTop).toBe(200);
 		expect(sessionViewState.atBottom).toBe(false);
-		expect(sessionViewState.forcedOpen).toBe(true);
+		expect(sessionViewState.barOpen).toBe(true);
 		expect(sessionState.currentId).toBe(parentId);
 	});
 

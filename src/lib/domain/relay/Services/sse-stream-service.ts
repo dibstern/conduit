@@ -1,6 +1,7 @@
 import { Context, Effect, Fiber, Layer, Stream } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import type { Logger } from "../../../logger.js";
+import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
@@ -13,6 +14,8 @@ import {
 import { ConfigTag } from "./services.js";
 
 export interface RelayOpenCodeStream extends SSEStreamPort {
+	/** Register before dispatch; earlier directories remain live for in-flight turns. */
+	includeDirectory(directory: string): Effect.Effect<void>;
 	/**
 	 * Wires a port for every other OpenCode instance that delivers events for
 	 * this project. Ports also receive managed stops before their first event.
@@ -101,6 +104,11 @@ export const SSEStreamLive: Layer.Layer<
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
+		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const directories = new Set([
+			config.projectDir,
+			...(config.extraFolders ?? []),
+		]);
 		const log = config.log;
 		const scope = yield* Effect.scope;
 		const gate = yield* Effect.makeSemaphore(1);
@@ -160,12 +168,35 @@ export const SSEStreamLive: Layer.Layer<
 			on: main.on,
 			getHealth: main.getHealth,
 			isConnected: main.isConnected,
+			includeDirectory: (directory) =>
+				Effect.sync(() => {
+					directories.add(directory);
+				}),
 			connectEffect: () =>
 				gate.withPermits(1)(
 					Effect.gen(function* () {
 						if (fiber) return;
+						if (read._tag === "Some") {
+							const sessions = yield* read.value.listSessionInfos().pipe(
+								Effect.catchAll((error) => {
+									log?.warn(
+										"Failed to read OpenCode workspace directories",
+										error,
+									);
+									return Effect.succeed([]);
+								}),
+							);
+							for (const session of sessions)
+								for (const directory of Object.values(
+									session.workspace?.worktrees ?? {},
+								))
+									directories.add(directory);
+						}
 						fiber = yield* Effect.forkIn(
-							Stream.runForEach(instances.events([config.projectDir]), route),
+							Stream.runForEach(
+								instances.events(() => [...directories]),
+								route,
+							),
 							scope,
 						);
 					}),

@@ -58,6 +58,7 @@ export interface DaemonStatus {
 	tlsEnabled: boolean;
 	tailscaleServe?: { url: string } | { error: string };
 	keepAwake: boolean;
+	keepAwakeCommand: string | null;
 	projects: Array<{
 		slug: string;
 		folders: readonly [string, ...string[]];

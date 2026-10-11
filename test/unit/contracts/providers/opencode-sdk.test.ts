@@ -7,7 +7,6 @@ import {
 	OpenCodeCommandSchema,
 	OpenCodeEventSchema,
 	OpenCodeFileNodeSchema,
-	OpenCodeFileStatusEntrySchema,
 	OpenCodeMessageWithPartsSchema,
 	OpenCodePartSchema,
 	OpenCodePathSchema,
@@ -176,19 +175,6 @@ describe("OpenCode provider contract schemas", () => {
 			Either.isLeft(
 				Schema.decodeUnknownEither(OpenCodePathSchema)({
 					cwd: "/workspace/project",
-				}),
-			),
-		).toBe(true);
-	});
-
-	it("decodes SDK file status entries", () => {
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeFileStatusEntrySchema)({
-					path: "src/app.ts",
-					added: 2,
-					removed: 1,
-					status: "modified",
 				}),
 			),
 		).toBe(true);

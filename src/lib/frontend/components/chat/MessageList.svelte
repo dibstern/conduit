@@ -33,8 +33,8 @@
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
 	import {
+		noteScrollGesture,
 		noteSessionChanged,
-		noteUserScroll,
 		publishAtBottom,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
@@ -98,12 +98,7 @@
 		return tasks;
 	});
 
-	const scrollCtrl = createScrollController(
-		() => chat.loadLifecycle,
-		() => {
-			if (primary) noteUserScroll();
-		},
-	);
+	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
 
 	let handledFollowRequest = sessionViewState.followRequest;
 	$effect(() => {
@@ -141,6 +136,39 @@
 		);
 	});
 
+	// The bar follows the reader's gesture, not scrollTop: the bar's own resize
+	// moves scrollTop (see topClearance below), so reading direction off scroll
+	// events would let each toggle trigger the next.
+	$effect(() => {
+		const scroller = messagesEl;
+		if (!scroller || !primary) return;
+		const note = (delta: number) => {
+			if (scroller.scrollHeight > scroller.clientHeight) noteScrollGesture(delta > 0 ? "down" : "up");
+		};
+		let touchY: number | undefined;
+		const onWheel = (event: WheelEvent) => {
+			if (event.deltaY !== 0) note(event.deltaY);
+		};
+		const onTouchStart = (event: TouchEvent) => {
+			touchY = event.touches[0]?.clientY;
+		};
+		// A small dead zone keeps a tap or a wobbling thumb from toggling the bar.
+		const onTouchMove = (event: TouchEvent) => {
+			const y = event.touches[0]?.clientY;
+			if (touchY === undefined || y === undefined || Math.abs(touchY - y) < 10) return;
+			note(touchY - y);
+			touchY = y;
+		};
+		scroller.addEventListener("wheel", onWheel, { passive: true });
+		scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+		scroller.addEventListener("touchmove", onTouchMove, { passive: true });
+		return () => {
+			scroller.removeEventListener("wheel", onWheel);
+			scroller.removeEventListener("touchstart", onTouchStart);
+			scroller.removeEventListener("touchmove", onTouchMove);
+		};
+	});
+
 	// Container resizes can change the bottom gap without a scroll event.
 	$effect(() => {
 		const scroller = messagesEl;
@@ -174,12 +202,12 @@
 	// Auto-scroll when content changes (messages, permissions).
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
-	// - Only auto-scroll when session is actively producing content
-	//   (processing or streaming) OR when an explicit
-	//   scroll request was made (e.g. error messages set this before
-	//   phaseToIdle kills the isProcessing guard). On inactive sessions,
-	//   background events (another tab's message, permission state) must
-	//   NOT snap to bottom.
+	// - Only auto-scroll when the reader was parked at the very bottom, the
+	//   session is actively producing content (processing or streaming), or an
+	//   explicit scroll request was made (e.g. error messages set this before
+	//   phaseToIdle kills the isProcessing guard). On inactive sessions, a
+	//   reader sitting just above the bottom must NOT be snapped down by
+	//   background events (another tab's message, permission state).
 	// NOTE: processing and consumeScrollRequest() are checked via
 	// untrack() so they act as guards (checked but not tracked). The effect
 	// only re-runs when actual content changes — not on every toggle.
@@ -191,7 +219,7 @@
 		const _questionLen = primary ? 0 : orphanQuestions.length;
 		const isActive = untrack(() => processing);
 		const scrollRequested = untrack(() => primary && consumeScrollRequest());
-		if (!awaitingPrepend && (isActive || scrollRequested)) {
+		if (!awaitingPrepend && (isActive || scrollRequested || scrollCtrl.isPinned)) {
 			scrollCtrl.onNewContent();
 		}
 	});

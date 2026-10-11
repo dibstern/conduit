@@ -56,8 +56,8 @@ vi.hoisted(() => {
 const {
 	forceBarOpen,
 	isBarCollapsed,
+	noteScrollGesture,
 	noteSessionChanged,
-	noteUserScroll,
 	publishAtBottom,
 	sessionViewState,
 	watchCompactViewport,
@@ -82,82 +82,52 @@ beforeEach(() => {
 describe("session bar collapse", () => {
 	beforeEach(() => {
 		sessionViewState.compact = true;
-		noteUserScroll();
 	});
 
-	it("collapses when compact, at the bottom, and not forced open", () => {
+	it("arrives expanded, then follows the scroll gesture anywhere in the transcript", () => {
+		publishAtBottom(false);
+		expect(isBarCollapsed()).toBe(false);
+		noteScrollGesture("down");
 		expect(isBarCollapsed()).toBe(true);
+		noteScrollGesture("up");
+		expect(isBarCollapsed()).toBe(false);
 	});
 
-	it("desktop never collapses, even at the bottom with no force", () => {
+	it("desktop never collapses", () => {
+		noteScrollGesture("down");
 		sessionViewState.compact = false;
-		expect(sessionViewState.atBottom).toBe(true);
-		expect(sessionViewState.forcedOpen).toBe(false);
 		expect(isBarCollapsed()).toBe(false);
 	});
 
-	it("does not collapse when not at the bottom", () => {
+	it("reaching the bottom without a gesture collapses it", () => {
 		publishAtBottom(false);
-		expect(isBarCollapsed()).toBe(false);
-	});
-
-	it("does not collapse when forced open", () => {
-		forceBarOpen();
-		expect(isBarCollapsed()).toBe(false);
-	});
-
-	it("forceBarOpen expands the bar while atBottom stays true for the chevron", () => {
-		expect(isBarCollapsed()).toBe(true);
-		forceBarOpen();
-		expect(isBarCollapsed()).toBe(false);
-		expect(sessionViewState.atBottom).toBe(true);
-	});
-
-	it("publishAtBottom(true) from false clears forcedOpen", () => {
-		publishAtBottom(false);
-		forceBarOpen();
 		publishAtBottom(true);
-		expect(sessionViewState.atBottom).toBe(true);
-		expect(sessionViewState.forcedOpen).toBe(false);
 		expect(isBarCollapsed()).toBe(true);
 	});
 
-	it("publishAtBottom(true) when already at the bottom does not clear forcedOpen", () => {
-		forceBarOpen();
+	it("staying at the bottom or leaving it does not change it", () => {
 		publishAtBottom(true);
-		expect(sessionViewState.forcedOpen).toBe(true);
 		expect(isBarCollapsed()).toBe(false);
-	});
-
-	it("publishAtBottom(false) leaves forcedOpen alone", () => {
-		forceBarOpen();
+		noteScrollGesture("down");
 		publishAtBottom(false);
-		expect(sessionViewState.atBottom).toBe(false);
-		expect(sessionViewState.forcedOpen).toBe(true);
-		noteUserScroll();
-		publishAtBottom(false);
-		expect(sessionViewState.forcedOpen).toBe(false);
-	});
-
-	it("noteUserScroll clears forcedOpen", () => {
-		forceBarOpen();
-		noteUserScroll();
-		expect(sessionViewState.forcedOpen).toBe(false);
-	});
-
-	it("noteSessionChanged sets forcedOpen so a session switch arrives expanded", () => {
 		expect(isBarCollapsed()).toBe(true);
-		noteSessionChanged();
-		expect(sessionViewState.forcedOpen).toBe(true);
-		expect(isBarCollapsed()).toBe(false);
 	});
 
-	it("collapses after arrival and a sub-threshold user scroll while still at the bottom", () => {
-		noteSessionChanged();
+	it("the chevron expands it until the next downward gesture", () => {
+		noteScrollGesture("down");
+		forceBarOpen();
 		expect(isBarCollapsed()).toBe(false);
-		noteUserScroll();
 		expect(sessionViewState.atBottom).toBe(true);
+		noteScrollGesture("down");
 		expect(isBarCollapsed()).toBe(true);
+	});
+
+	it("a session switch arrives expanded, even from a session scrolled up", () => {
+		noteScrollGesture("down");
+		publishAtBottom(false);
+		noteSessionChanged();
+		publishAtBottom(true);
+		expect(isBarCollapsed()).toBe(false);
 	});
 });
 

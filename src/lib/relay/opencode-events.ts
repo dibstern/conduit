@@ -429,27 +429,11 @@ export interface FileWatcherUpdatedEvent extends SSEEventBase {
 	};
 }
 
-export type FileEvent = FileEditedEvent | FileWatcherUpdatedEvent;
-
-export function isFileEvent(event: unknown): event is FileEvent {
-	if (!hasProps(event)) return false;
-	if (event.type !== "file.edited" && event.type !== "file.watcher.updated") {
-		return false;
-	}
-	return typeof event.properties["file"] === "string";
-}
-
 export interface InstallationUpdateEvent extends SSEEventBase {
 	type: "installation.update-available";
 	properties: {
 		version?: string;
 	};
-}
-
-export function isInstallationUpdateEvent(
-	event: unknown,
-): event is InstallationUpdateEvent {
-	return hasProps(event) && event.type === "installation.update-available";
 }
 
 export interface TodoUpdatedEvent extends SSEEventBase {

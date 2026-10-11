@@ -161,6 +161,40 @@ export const WorkspaceMismatch: Story = {
 	},
 };
 
+export const MovedBack: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		git: { branch: "main" },
+		workspaceCause: "missing",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("workspace-moved-back"),
+		).toHaveTextContent("moved back: worktree removed");
+	},
+};
+
+export const MovedBackPhone: Story = {
+	...MovedBack,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const notice = canvas.getByTestId("workspace-moved-back");
+		await expect(notice).toHaveAttribute("role", "img");
+		await expect(notice).toHaveAttribute(
+			"aria-label",
+			"moved back: worktree removed",
+		);
+		await expect(notice).toHaveTextContent(/^$/);
+		await expect(
+			canvas.getByTestId("session-bar-identity"),
+		).toHaveAccessibleName(/moved back: worktree removed/);
+	},
+};
+
 export const WorkspaceHint: Story = {
 	tags: ["viewport-capture"],
 	args: {

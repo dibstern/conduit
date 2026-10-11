@@ -5,7 +5,6 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 	import { confirm } from "../../stores/ui.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { setLogLevelRpc } from "../../transport/ws-rpc-client.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 
@@ -15,11 +14,8 @@
 
 	function toggleVerbose() {
 		const newValue = !wsDebugState.verboseMessages;
-		const projectSlug = getCurrentSlug();
 		wsDebugState.verboseMessages = newValue;
-		if (!projectSlug) return;
 		void setLogLevelRpc({
-			projectSlug,
 			level: newValue ? "verbose" : "info",
 		}).catch(() => {});
 	}

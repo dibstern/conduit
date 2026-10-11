@@ -165,7 +165,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				Deferred.Deferred<void, OpenCodeUnavailable>
 			>();
 			const subscribers = new Set<{
-				directories: ReadonlySet<string>;
+				directories: () => ReadonlySet<string>;
 				send: (event: OpenCodeInstanceEvent) => void;
 			}>();
 			// One /global/event stream per instance, open exactly while the
@@ -211,7 +211,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				return canonical;
 			};
 			const subscribedDirectories = () =>
-				[...subscribers].flatMap(({ directories }) => [...directories]);
+				[...subscribers].flatMap(({ directories }) => [...directories()]);
 			const broadcast = (event: OpenCodeInstanceEvent) => {
 				for (const subscriber of subscribers) subscriber.send(event);
 			};
@@ -251,7 +251,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			) => {
 				let delivered = false;
 				for (const subscriber of subscribers) {
-					if (!subscriber.directories.has(directory)) continue;
+					if (!subscriber.directories().has(directory)) continue;
 					subscriber.send({
 						_tag: "event",
 						instanceId,
@@ -893,7 +893,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				// Subscribe path: registers a directory subscriber. Passive: it
 				// neither opens a stream nor keeps one open.
 				events: (
-					directories: readonly string[],
+					directories: readonly string[] | (() => readonly string[]),
 					instanceId: string = defaultInstanceIdForDriver("opencode"),
 				) =>
 					Stream.asyncScoped<OpenCodeInstanceEvent>(
@@ -904,7 +904,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										const subscriber = yield* Effect.acquireRelease(
 											Effect.sync(() => {
 												const member = {
-													directories: new Set(directories.map(normalize)),
+													directories: () =>
+														new Set(
+															(typeof directories === "function"
+																? directories()
+																: directories
+															).map(normalize),
+														),
 													send: (event: OpenCodeInstanceEvent) => {
 														void emit.single(event).catch(() => {});
 													},
@@ -917,7 +923,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 													Effect.sync(() => {
 														subscribers.delete(member);
 														const remaining = new Set(subscribedDirectories());
-														for (const directory of member.directories) {
+														for (const directory of member.directories()) {
 															if (remaining.has(directory)) continue;
 															for (const stream of streams.values())
 																stream.reconciler.forget(directory);
@@ -954,7 +960,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 											)
 												void running.reconciler.reconcile(
 													running.reconcileClient,
-													subscriber.directories,
+													subscriber.directories(),
 													(_directory, payload) =>
 														subscriber.send({
 															_tag: "event",

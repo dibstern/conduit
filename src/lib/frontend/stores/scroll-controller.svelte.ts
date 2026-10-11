@@ -9,6 +9,9 @@ export interface ScrollController {
 	readonly state: ScrollState;
 	readonly isDetached: boolean;
 	readonly isLoading: boolean;
+	/** The last known position was the bottom. Content growth since does not
+	 *  unset it, so it answers "was the reader at the bottom before this?". */
+	readonly isPinned: boolean;
 	attach(container: HTMLElement): void;
 	detach(): void;
 	resetForSession(): void;
@@ -23,10 +26,10 @@ const REFOLLOW_THRESHOLD = 5; // px from bottom to re-follow (tight to prevent a
 
 export function createScrollController(
 	getLifecycle: () => LoadLifecycle,
-	onUserScroll?: () => void,
 ): ScrollController {
 	let container: HTMLElement | null = null;
 	let userDetached = $state(false);
+	let pinned = true;
 	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
 	let resetTimerScheduled = false; // guards against scheduling multiple reset timers
 
@@ -40,6 +43,7 @@ export function createScrollController(
 	function scrollToBottom(): void {
 		if (!container) return;
 		programmaticScrollCount++;
+		pinned = true;
 		container.scrollTop = container.scrollHeight;
 		// Safety reset: setTimeout(0) fires in the NEXT task, which is after
 		// the current rendering cycle (scroll events + rAF). This means:
@@ -78,26 +82,7 @@ export function createScrollController(
 
 		const distFromBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight;
-
-		// Only a scroll that left the bottom counts as user intent. The counter
-		// guard above is necessary but not sufficient: a coalesced scroll event
-		// from one of those writes can
-		// be delivered after the counter's setTimeout(0) safety reset has zeroed
-		// its slot, at which point it is indistinguishable from a real scroll.
-		// Every such stray lands at the bottom, because pinning is what caused
-		// it — so the distance is what tells them apart. This was measured, not
-		// theorised: without it the session bar arrived collapsed on load, before
-		// the user had touched anything.
-		//
-		// Nothing is lost by declining to report a scroll that ends at the
-		// bottom: returning to the bottom is already an atBottom rising edge, and
-		// that edge is what the bar listens to.
-		if (distFromBottom >= REFOLLOW_THRESHOLD) {
-			// And not while the transcript is still hydrating, where the controller
-			// is force-pinning the bottom and any position off it is transient.
-			const state = getState();
-			if (state === "following" || state === "detached") onUserScroll?.();
-		}
+		pinned = distFromBottom < REFOLLOW_THRESHOLD;
 
 		// Re-follow when scrolled to the very bottom (within 5px).
 		// All programmatic scrolls early-returned above, so this is
@@ -124,6 +109,9 @@ export function createScrollController(
 		},
 		get isLoading(): boolean {
 			return getState() === "loading";
+		},
+		get isPinned(): boolean {
+			return pinned;
 		},
 
 		attach(el: HTMLElement): void {

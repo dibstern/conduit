@@ -203,18 +203,8 @@ function makeStubSdk() {
 				error: undefined,
 				response: { status: 200 },
 			})),
-			share: vi.fn<() => Promise<SdkResponse>>(async () => ({
-				data: { url: "https://share.test" },
-				error: undefined,
-				response: { status: 200 },
-			})),
 			summarize: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: true,
-				error: undefined,
-				response: { status: 200 },
-			})),
-			diff: vi.fn<() => Promise<SdkResponse>>(async () => ({
-				data: { diffs: [] },
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -299,52 +289,10 @@ function makeStubSdk() {
 				error: undefined,
 				response: { status: 200 },
 			})),
-			status: vi.fn<() => Promise<SdkResponse>>(async () => ({
-				data: [
-					{
-						path: "src/app.ts",
-						added: 2,
-						removed: 1,
-						status: "modified",
-					},
-				],
-				error: undefined,
-				response: { status: 200 },
-			})),
 		},
 		find: {
-			text: vi.fn<() => Promise<SdkResponse>>(async () => ({
-				data: [
-					{
-						path: { text: "src/app.ts" },
-						lines: { text: "const app = true;" },
-						line_number: 1,
-						absolute_offset: 0,
-						submatches: [{ match: { text: "app" }, start: 6, end: 9 }],
-					},
-				],
-				error: undefined,
-				response: { status: 200 },
-			})),
 			files: vi.fn<() => Promise<SdkResponse>>(async () => ({
 				data: ["src/app.ts"],
-				error: undefined,
-				response: { status: 200 },
-			})),
-			symbols: vi.fn<() => Promise<SdkResponse>>(async () => ({
-				data: [
-					{
-						name: "main",
-						kind: 12,
-						location: {
-							uri: "file:///test/src/app.ts",
-							range: {
-								start: { line: 1, character: 0 },
-								end: { line: 1, character: 4 },
-							},
-						},
-					},
-				],
 				error: undefined,
 				response: { status: 200 },
 			})),
@@ -697,44 +645,6 @@ describe("OpenCodeAPI", () => {
 		});
 	});
 
-	it("file.status() decodes SDK file status arrays", async () => {
-		const sdk = makeStubSdk();
-		const api = new OpenCodeAPI({
-			sdk,
-			baseUrl: "http://localhost:4096",
-			authHeaders: {},
-		});
-
-		await expect(api.file.status()).resolves.toEqual([
-			{
-				path: "src/app.ts",
-				added: 2,
-				removed: 1,
-				status: "modified",
-			},
-		]);
-	});
-
-	it("file.status() rejects non-array status responses", async () => {
-		const sdk = makeStubSdk();
-		sdk.file.status.mockResolvedValue({
-			data: {},
-			error: undefined,
-			response: { status: 200, url: "/file/status" },
-		});
-		const api = new OpenCodeAPI({
-			sdk,
-			baseUrl: "http://localhost:4096",
-			authHeaders: {},
-		});
-
-		await expect(api.file.status()).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/file/status",
-			context: expect.objectContaining({ label: "file.status" }),
-		});
-	});
-
 	it("session.prompt() rejects malformed non-void promptAsync responses", async () => {
 		const sdk = makeStubSdk();
 		sdk.session.promptAsync.mockResolvedValue({
@@ -832,26 +742,6 @@ describe("OpenCodeAPI", () => {
 			_tag: "OpenCodeApiError",
 			endpoint: "/file/content",
 			context: expect.objectContaining({ label: "file.read" }),
-		});
-	});
-
-	it("find.text() rejects malformed match entries", async () => {
-		const sdk = makeStubSdk();
-		sdk.find.text.mockResolvedValue({
-			data: [{ path: "src/app.ts" }],
-			error: undefined,
-			response: { status: 200, url: "/find" },
-		});
-		const api = new OpenCodeAPI({
-			sdk,
-			baseUrl: "http://localhost:4096",
-			authHeaders: {},
-		});
-
-		await expect(api.find.text("app")).rejects.toMatchObject({
-			_tag: "OpenCodeApiError",
-			endpoint: "/find",
-			context: expect.objectContaining({ label: "find.text" }),
 		});
 	});
 

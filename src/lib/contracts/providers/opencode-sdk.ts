@@ -3,12 +3,9 @@ import type {
 	Command as SdkCommand,
 	Config as SdkConfig,
 	Event as SdkEvent,
-	File as SdkFile,
 	FileContent as SdkFileContent,
 	FileNode as SdkFileNode,
 	FindFilesResponse as SdkFindFilesResponse,
-	FindSymbolsResponse as SdkFindSymbolsResponse,
-	FindTextResponse as SdkFindTextResponse,
 	Message as SdkMessage,
 	Part as SdkPart,
 	Path as SdkPath,
@@ -17,7 +14,6 @@ import type {
 	Session as SdkSession,
 	SessionMessageResponse as SdkSessionMessageResponse,
 	SessionStatus as SdkSessionStatus,
-	Symbol as SdkSymbol,
 } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 
@@ -162,26 +158,6 @@ type _OpenCodePathCoversSdkPath = AssertExtends<
 	Pick<SdkPath, keyof OpenCodePath>
 >;
 
-export const OpenCodeFileStatusEntrySchema = Schema.Struct({
-	path: Schema.String,
-	added: Schema.Number,
-	removed: Schema.Number,
-	status: Schema.Literal("added", "deleted", "modified"),
-});
-
-export type OpenCodeFileStatusEntry = Schema.Schema.Type<
-	typeof OpenCodeFileStatusEntrySchema
->;
-
-type _OpenCodeSdkFileCoversSchema = AssertExtends<
-	SdkFile,
-	OpenCodeFileStatusEntry
->;
-type _OpenCodeFileStatusEntryCoversSdkFile = AssertExtends<
-	NormalizeSchemaType<OpenCodeFileStatusEntry>,
-	SdkFile
->;
-
 export const OpenCodePtySchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
@@ -264,65 +240,6 @@ type _OpenCodeFileContentCoversSdkFileContent = AssertExtends<
 	SdkFileContent
 >;
 
-const OpenCodeRangePositionSchema = Schema.Struct({
-	line: Schema.Number,
-	character: Schema.Number,
-});
-
-const OpenCodeRangeSchema = Schema.Struct({
-	start: OpenCodeRangePositionSchema,
-	end: OpenCodeRangePositionSchema,
-});
-
-export const OpenCodeFindTextMatchSchema = Schema.Struct({
-	path: Schema.Struct({ text: Schema.String }),
-	lines: Schema.Struct({ text: Schema.String }),
-	line_number: Schema.Number,
-	absolute_offset: Schema.Number,
-	submatches: Schema.Array(
-		Schema.Struct({
-			match: Schema.Struct({ text: Schema.String }),
-			start: Schema.Number,
-			end: Schema.Number,
-		}),
-	),
-});
-
-export type OpenCodeFindTextMatch = Schema.Schema.Type<
-	typeof OpenCodeFindTextMatchSchema
->;
-
-type _OpenCodeSdkFindTextMatchCoversSchema = AssertExtends<
-	SdkFindTextResponse[number],
-	OpenCodeFindTextMatch
->;
-type _OpenCodeFindTextMatchCoversSdkFindTextMatch = AssertExtends<
-	NormalizeSchemaType<OpenCodeFindTextMatch>,
-	SdkFindTextResponse[number]
->;
-
-export const OpenCodeFindSymbolSchema = Schema.Struct({
-	name: Schema.String,
-	kind: Schema.Number,
-	location: Schema.Struct({
-		uri: Schema.String,
-		range: OpenCodeRangeSchema,
-	}),
-});
-
-export type OpenCodeFindSymbol = Schema.Schema.Type<
-	typeof OpenCodeFindSymbolSchema
->;
-
-type _OpenCodeSdkFindSymbolCoversSchema = AssertExtends<
-	SdkSymbol,
-	OpenCodeFindSymbol
->;
-type _OpenCodeFindSymbolCoversSdkFindSymbol = AssertExtends<
-	NormalizeSchemaType<OpenCodeFindSymbol>,
-	SdkSymbol
->;
-
 export const OpenCodeFindFilesResponseSchema = Schema.Array(Schema.String);
 
 export type OpenCodeFindFilesResponse = Schema.Schema.Type<
@@ -338,23 +255,8 @@ type _OpenCodeFindFilesCoversSdkFindFiles = AssertExtends<
 	SdkFindFilesResponse
 >;
 
-type _OpenCodeSdkFindSymbolsCoversSchema = AssertExtends<
-	SdkFindSymbolsResponse,
-	Array<OpenCodeFindSymbol>
->;
-type _OpenCodeFindSymbolsCoversSdkFindSymbols = AssertExtends<
-	Array<NormalizeSchemaType<OpenCodeFindSymbol>>,
-	SdkFindSymbolsResponse
->;
-
-export const OpenCodeFindTextResponseSchema = Schema.Array(
-	OpenCodeFindTextMatchSchema,
-);
 export const OpenCodeFindFilesArrayResponseSchema =
 	OpenCodeFindFilesResponseSchema;
-export const OpenCodeFindSymbolsResponseSchema = Schema.Array(
-	OpenCodeFindSymbolSchema,
-);
 
 export const OpenCodeConfigResponseSchema = Schema.Record({
 	key: Schema.String,
@@ -1687,28 +1589,11 @@ export const decodeOpenCodeQuestionActionResponse = Schema.decodeUnknownSync(
 	Schema.Union(Schema.Boolean, OpenCodeUndefinedResponseSchema),
 );
 
-export const OpenCodeShareResponseSchema = Schema.Struct({
-	url: Schema.String,
-});
-
-export const OpenCodeDiffResponseSchema = Schema.Struct({
-	diffs: Schema.Array(
-		Schema.Struct({
-			path: Schema.String,
-			diff: Schema.String,
-		}),
-	),
-});
-
 export const OpenCodeFileEntryListResponseSchema = Schema.Array(
 	OpenCodeFileNodeSchema,
 );
 
 export const OpenCodeFileReadResponseSchema = OpenCodeFileContentSchema;
-
-export const OpenCodeFileStatusListResponseSchema = Schema.Array(
-	OpenCodeFileStatusEntrySchema,
-);
 
 export const OpenCodeVcsResponseSchema = Schema.Struct({
 	branch: Schema.optional(Schema.String),
@@ -1775,12 +1660,6 @@ export const decodeOpenCodeBooleanResponse = Schema.decodeUnknownSync(
 export const decodeOpenCodeUndefinedResponse = Schema.decodeUnknownSync(
 	OpenCodeUndefinedResponseSchema,
 );
-export const decodeOpenCodeShareResponse = Schema.decodeUnknownSync(
-	OpenCodeShareResponseSchema,
-);
-export const decodeOpenCodeDiffResponse = Schema.decodeUnknownSync(
-	OpenCodeDiffResponseSchema,
-);
 export const decodeOpenCodeConfigResponse = Schema.decodeUnknownSync(
 	OpenCodeConfigResponseSchema,
 );
@@ -1798,17 +1677,8 @@ export const decodeOpenCodeFileEntryListResponse = Schema.decodeUnknownSync(
 export const decodeOpenCodeFileReadResponse = Schema.decodeUnknownSync(
 	OpenCodeFileReadResponseSchema,
 );
-export const decodeOpenCodeFileStatusListResponse = Schema.decodeUnknownSync(
-	OpenCodeFileStatusListResponseSchema,
-);
-export const decodeOpenCodeFindTextResponse = Schema.decodeUnknownSync(
-	OpenCodeFindTextResponseSchema,
-);
 export const decodeOpenCodeFindFilesResponse = Schema.decodeUnknownSync(
 	OpenCodeFindFilesArrayResponseSchema,
-);
-export const decodeOpenCodeFindSymbolsResponse = Schema.decodeUnknownSync(
-	OpenCodeFindSymbolsResponseSchema,
 );
 export const decodeOpenCodeAgentListResponse = Schema.decodeUnknownSync(
 	OpenCodeAgentListResponseSchema,
