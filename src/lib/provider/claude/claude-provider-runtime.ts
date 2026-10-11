@@ -1500,12 +1500,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		);
 	}
 
-	/** The server places the message before this turn may produce output. */
+	/**
+	 * The server places the message before this turn may produce output. A
+	 * continuation places nothing: it resumes the cut-off message's turn.
+	 */
 	private placeUserMessageEffect(
 		input: SendTurnInput,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		const sinkId = this.sinkId(input.eventSink);
-		if (!sinkId) return Effect.void;
+		if (!sinkId || input.continuation) return Effect.void;
 		return this.emit({
 			type: "place-user-message",
 			sinkId,
@@ -2612,8 +2615,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx.eventSink = unplaced.eventSink;
 				yield* this.releaseSinkEffect(priorSink);
 			}
-			// A continuation places nothing: it resumes the cut-off message's turn.
-			if (unplaced.continuation) return;
 			// The stream outlives one input: a failed placement must not end it.
 			yield* this.placeUserMessageEffect(unplaced).pipe(
 				Effect.catchAll((error) =>

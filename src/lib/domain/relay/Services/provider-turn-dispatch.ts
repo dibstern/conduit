@@ -840,9 +840,14 @@ const dispatchEngineTurn = (
 			dispatchProgram,
 			{ onlyIfMissing: true },
 		);
-		yield* Effect.raceFirst(
-			Deferred.await(accepted),
-			Fiber.await(fiber).pipe(Effect.asVoid),
+		// The race interrupts its loser, which an uninterruptible caller (a
+		// continuation) would otherwise wait out for the whole turn. The
+		// dispatch runs in the map, so only the wait is interrupted.
+		yield* Effect.interruptible(
+			Effect.raceFirst(
+				Deferred.await(accepted),
+				Fiber.await(fiber).pipe(Effect.asVoid),
+			),
 		);
 	});
 
