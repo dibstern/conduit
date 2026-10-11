@@ -172,6 +172,7 @@ describe("smart default", () => {
 				managed: false,
 				status: "stopped",
 			}),
+			expect.objectContaining({ id: "claude", driver: "claude" }),
 		]);
 	});
 

@@ -35,6 +35,7 @@ describe("settings reads with Effect-native settings service", () => {
 				Layer.succeed(LoggerTag, makeMockLogger()),
 				Layer.succeed(ConfigTag, makeMockConfig()),
 				Layer.succeed(SessionWorkspaceTag, {
+					renameBranch: () => Effect.die("unused"),
 					get: () => Effect.succeed("/workspace"),
 					move: () => Effect.succeed("/workspace"),
 					inherit: () => Effect.die("unused"),

@@ -14,6 +14,7 @@ import {
 } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
@@ -111,6 +112,23 @@ export const sessionsHandlers = {
 				removeWorktrees: plan.removeWorktrees,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
+	RenameSessionBranch: (request) =>
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			yield* workspace.renameBranch(request.sessionId, request.branchName);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some") yield* git.value.refresh();
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchAll(
+				(
+					error,
+				): Effect.Effect<never, WorktreeBranchRenameError | WsRpcError> =>
+					error instanceof WorktreeBranchRenameError
+						? Effect.fail(error)
+						: mapRpcFailure("RenameSessionBranch")(error),
+			),
+		),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -145,29 +163,26 @@ export const sessionsHandlers = {
 									Schema.parseJson(SessionWorkspaceSchema),
 								)(row.workspace);
 					const directory = effectiveWorkingDirectory(config.projectDir, state);
-					const folder =
-						state?.origin === "conduit"
-							? Object.entries(state.worktrees).find(
-									([, path]) => path === directory,
-								)?.[0]
-							: undefined;
-					if (!folder)
+					const folders =
+						state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
+					if (folders.length === 0)
 						return yield* new WorktreeRecoveryError({
 							path: directory,
 							reason: "not-owned",
 							message:
 								"Could not recreate worktree: the session has no Conduit-owned worktree.",
 						});
-					return {
-						directory: yield* worktrees.recreate(
-							{
-								path: folder,
+					yield* worktrees.recreateAll(
+						folders.map(([path, directory]) => ({
+							folder: {
+								path,
 								projectSlug: config.slug,
 								sessionId: request.sessionId,
 							},
 							directory,
-						),
-					};
+						})),
+					);
+					return { directory };
 				}),
 			);
 			const git = yield* Effect.serviceOption(SessionGitServiceTag);
@@ -743,6 +758,7 @@ export const sessionsHandlers = {
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
+	| "RenameSessionBranch"
 	| "ListWorktrees"
 	| "InspectSessionWorktrees"
 	| "ListBranches"

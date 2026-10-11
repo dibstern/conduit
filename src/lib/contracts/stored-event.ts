@@ -387,11 +387,14 @@ export interface SessionRenamedPayload {
 	readonly title: string;
 }
 
-export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
+export interface SessionWorkspaceChangedPayload
+	extends Omit<SessionWorkspace, "cause"> {
+	/** A branch rename updates ownership without moving the workspace. */
+	readonly cause: SessionWorkspace["cause"] | "branch-rename";
 	readonly sessionId: string;
 	/** Effective cwd after applying the mapping, including a reset to main. */
 	readonly path?: string;
-	/** Only a new Conduit launch owns these checkouts; forks never copy this metadata. */
+	/** Launch ownership, or its branch-name update. Forks never copy this metadata. */
 	readonly ownership?: readonly SessionWorktreeOwnership[];
 }
 
@@ -1032,6 +1035,10 @@ export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	path: Schema.optional(Schema.String),
 	ownership: Schema.optional(Schema.Array(SessionWorktreeOwnershipSchema)),
 	...SessionWorkspaceSchema.fields,
+	cause: Schema.Union(
+		SessionWorkspaceSchema.fields.cause,
+		Schema.Literal("branch-rename"),
+	),
 });
 
 export const SessionWorkspaceHintChangedPayloadSchema = Schema.Struct({

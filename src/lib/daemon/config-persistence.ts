@@ -271,13 +271,17 @@ export interface ResolvedProviderInstance {
 export function resolveConfiguredInstances(
 	config: DaemonConfig,
 ): ReadonlyArray<ResolvedProviderInstance> {
-	const explicitInstances = (config.instances ?? []).map((instance) => ({
-		id: ProviderInstanceIdSchema.make(instance.id),
-		driver: instance.driver ?? "opencode",
-		...(instance.configDir === undefined
-			? {}
-			: { configDir: instance.configDir }),
-	}));
+	const explicitInstances = (config.instances ?? []).map((instance) => {
+		const configDir =
+			instance.id === defaultInstanceIdForDriver("claude")
+				? (instance.configDir ?? config.claudeConfigDir)
+				: instance.configDir;
+		return {
+			id: ProviderInstanceIdSchema.make(instance.id),
+			driver: instance.driver ?? "opencode",
+			...(configDir === undefined ? {} : { configDir }),
+		};
+	});
 	const explicitIds = new Set(explicitInstances.map(({ id }) => id));
 	const defaults: ReadonlyArray<ResolvedProviderInstance> = [
 		{
@@ -364,9 +368,32 @@ export function resolveClaudeInstanceConfigDir(
 	const configuredInstance = config
 		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
 		: undefined;
-	return configuredInstance?.driver === "claude"
-		? configuredInstance.configDir
-		: undefined;
+	if (
+		configuredInstance?.driver !== "claude" ||
+		configuredInstance.configDir === undefined
+	)
+		return undefined;
+	// The default account uses the environment resolved at boot. Reading its
+	// saved folder here would apply a pending edit to the very next turn.
+	return instanceId === defaultInstanceIdForDriver("claude")
+		? process.env["CLAUDE_CONFIG_DIR"]
+		: configuredInstance.configDir;
+}
+
+/** Keep legacy explicit default folders in the daemon's single stored home. */
+function normalizeDefaultClaudeConfig(config: DaemonConfig): DaemonConfig {
+	const defaultId = defaultInstanceIdForDriver("claude");
+	const explicit = config.instances?.find(({ id }) => id === defaultId);
+	if (explicit?.configDir === undefined) return config;
+	return {
+		...config,
+		claudeConfigDir: explicit.configDir,
+		instances: (config.instances ?? []).map((instance) => {
+			if (instance.id !== defaultId) return instance;
+			const { configDir: _configDir, ...metadata } = instance;
+			return metadata;
+		}),
+	};
 }
 
 /** Default config for first-startup when no daemon.json exists. */
@@ -416,7 +443,9 @@ export const ServerConfigLive = (configDir?: string) =>
 				sanitizeRestartMetadata(json),
 			);
 			return {
-				...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+				...normalizeDefaultClaudeConfig(
+					migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+				),
 				autoSettleAfterDays:
 					decoded.autoSettleAfterDays === undefined
 						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -480,7 +509,9 @@ export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
 			sanitizeRestartMetadata(JSON.parse(data)),
 		);
 		return {
-			...migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+			...normalizeDefaultClaudeConfig(
+				migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
+			),
 			autoSettleAfterDays:
 				decoded.autoSettleAfterDays === undefined
 					? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -500,11 +531,16 @@ export async function saveDaemonConfig(
 	ensureDir(dir);
 	const tmpPath = join(dir, `.daemon.json.tmp.${process.pid}.${Date.now()}`);
 	const finalPath = join(dir, "daemon.json");
-	const projects = config.projects.map(migrateProjectFolders);
-	await writeFile(tmpPath, JSON.stringify({ ...config, projects }, null, 2), {
-		encoding: "utf-8",
-		mode: 0o600,
-	});
+	const normalized = normalizeDefaultClaudeConfig(config);
+	const projects = normalized.projects.map(migrateProjectFolders);
+	await writeFile(
+		tmpPath,
+		JSON.stringify({ ...normalized, projects }, null, 2),
+		{
+			encoding: "utf-8",
+			mode: 0o600,
+		},
+	);
 	await chmod(tmpPath, 0o600);
 	await rename(tmpPath, finalPath);
 }

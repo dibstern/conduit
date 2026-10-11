@@ -624,6 +624,21 @@ export async function moveSessionWorkspaceRpc(input: {
 	if (Either.isLeft(result)) throw result.left;
 }
 
+export async function renameSessionBranchRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly branchName: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RenameSessionBranch(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
 export async function recreateSessionWorktreeRpc(input: {
 	readonly projectSlug: string;
 	readonly sessionId: string;

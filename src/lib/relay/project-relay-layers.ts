@@ -15,6 +15,7 @@ import {
 	defaultDaemonConfig,
 	getConfigDir,
 	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
 	resolveConfiguredInstances,
 } from "../daemon/config-persistence.js";
 import {
@@ -313,7 +314,9 @@ export function createProjectRelayLayers({
 									.filter((instance) => instance.driver === "claude")
 									.map((instance) => {
 										const configDir =
-											instance.configDir ?? saved.claudeConfigDir;
+											instance.id === defaultInstanceIdForDriver("claude")
+												? resolveClaudeInstanceConfigDir(saved, instance.id)
+												: (instance.configDir ?? saved.claudeConfigDir);
 										return {
 											id: instance.id,
 											harness: "claude" as const,

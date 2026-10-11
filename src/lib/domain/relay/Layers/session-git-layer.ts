@@ -11,7 +11,7 @@ import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
-import type { SessionGit, SessionInfo } from "../../../shared-types.js";
+import type { SessionGit } from "../../../shared-types.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { inspectSessionWorktree } from "../Services/session-workspace.js";
@@ -74,7 +74,7 @@ export const SessionGitLive = Layer.effect(
 											])
 										: [],
 								);
-								const isolated = new Map<string, SessionInfo>();
+								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
 									if (
 										!request.sessionIds.has(session.id) &&
@@ -89,10 +89,18 @@ export const SessionGitLive = Layer.effect(
 										config.projectDir,
 										session.workspace,
 									);
-									if (session.workspace?.origin === "conduit")
-										isolated.set(workspaceDirectory, session);
+									if (session.workspace?.origin === "conduit") {
+										const state = yield* inspectSessionWorktree(
+											session,
+											config,
+										);
+										if (state)
+											for (const { path } of state.folders ?? [state])
+												missing.set(path, state);
+									}
 									for (const directory of [
 										workspaceDirectory,
+										...Object.values(session.workspace?.worktrees ?? {}),
 										...effectiveSessionFolders(
 											projectFolders,
 											session.workspace,
@@ -107,10 +115,7 @@ export const SessionGitLive = Layer.effect(
 								}
 								const next = new Map(published);
 								for (const [directory, force] of directories) {
-									const session = isolated.get(directory);
-									const workspaceMissing = session
-										? yield* inspectSessionWorktree(session, config)
-										: undefined;
+									const workspaceMissing = missing.get(directory);
 									const git =
 										!force && !daemonSessionGitCache.isStale(directory)
 											? daemonSessionGitCache.peek(directory)
