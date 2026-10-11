@@ -256,9 +256,11 @@ export const hasColdAutoSettleCandidate = (
 			readonly: true,
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
-		const facts = yield* readPersistedAutoSettleFacts(now).pipe(
-			Effect.provide(sqliteLayer),
-		);
+		const facts = yield* readPersistedAutoSettleFacts(
+			now,
+			undefined,
+			project.folders[0],
+		).pipe(Effect.provide(sqliteLayer));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
 		);

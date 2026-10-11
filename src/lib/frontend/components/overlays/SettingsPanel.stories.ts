@@ -14,6 +14,7 @@ import {
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
+import { serverStatus } from "../../stores/server-status.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
@@ -25,6 +26,29 @@ function resetState() {
 	routerState.path = "/";
 	clearDiscoveryState();
 	applyInstanceListResponse({ instances: [] });
+	Object.assign(serverStatus, {
+		status: {
+			uptime: 273_600,
+			version: "0.42.1",
+			port: 2633,
+			host: "0.0.0.0",
+			clientCount: 2,
+			projectCount: 0,
+			sessionCount: 0,
+			pinEnabled: false,
+			tlsEnabled: false,
+			keepAwake: false,
+			keepAwakeCommand: "caffeinate -di",
+			logLevel: "info",
+			supervised: true,
+			projects: [],
+		},
+		loading: false,
+		error: null,
+		restartInFlight: false,
+		restartAccepted: false,
+		shutdownInFlight: false,
+	});
 	applyUsageReadings([]);
 	applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
 	featureFlags.debug = false;
@@ -242,6 +266,28 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
+			"up 3d 4h",
+		);
+		await expect(canvas.getByTestId("server-status-version")).toHaveTextContent(
+			"0.42.1",
+		);
+		await expect(canvas.getByTestId("server-status-port")).toHaveTextContent(
+			"port 2633",
+		);
+		await expect(
+			canvas.getByTestId("server-status-browsers"),
+		).toHaveTextContent("2 browsers connected");
+		await userEvent.click(canvas.getByTestId("server-shutdown-btn"));
+		await expect(canvas.getByTestId("server-shutdown-cancel")).toHaveFocus();
+		await userEvent.click(canvas.getByTestId("server-shutdown-cancel"));
+		await expect(
+			canvas.queryByTestId("server-shutdown-confirmation"),
+		).not.toBeInTheDocument();
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
 };
 
 /**

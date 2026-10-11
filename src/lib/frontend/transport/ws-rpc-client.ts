@@ -516,6 +516,15 @@ const callDaemon = <A, E>(
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E, WsRpcClients> => callControl("", call);
 
+export const getServerStatusRpc = () =>
+	runTransportEffect(callDaemon((client) => client.GetStatus({})));
+
+export const restartServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.RestartWithConfig({})));
+
+export const shutdownServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,

@@ -7,6 +7,7 @@ import {
 } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -39,6 +40,23 @@ type RpcHandler = (
 	params: Record<string, unknown>,
 	request: JsonRpcRequest | EffectRpcRequest,
 ) => unknown | Promise<unknown>;
+
+export const MOCK_SERVER_STATUS: GetStatusResponse = {
+	uptime: 273_600,
+	version: "0.42.1",
+	port: 2633,
+	host: "0.0.0.0",
+	clientCount: 2,
+	projectCount: 0,
+	sessionCount: 0,
+	pinEnabled: false,
+	tlsEnabled: false,
+	keepAwake: false,
+	keepAwakeCommand: null,
+	logLevel: "info",
+	supervised: true,
+	projects: [],
+};
 
 /** Daemon-global feeds whose latest value the mock replays to each subscriber. */
 type DaemonListTag =
@@ -673,6 +691,7 @@ async function handleMessage(
 			handlers[raw.tag] ??
 			control.catalogHandler(raw.tag) ??
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
+			(raw.tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
 			(raw.tag === "GetUsageLimitsSetting"
 				? () => ({
 						usageLimits: { autoResume: false, autoSwitch: false, order: [] },

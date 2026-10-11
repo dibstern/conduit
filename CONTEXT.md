@@ -51,6 +51,8 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
 then the Session Workspace service records its launch move. It starts from the

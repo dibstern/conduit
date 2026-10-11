@@ -15,7 +15,7 @@
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
-	import InstancesSettingsTab from "./InstancesSettingsTab.svelte";
+	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
 	import type { SettingsSection } from "../layout/chrome-actions.js";
 	import { getCachedInstances, instanceStatusColor } from "../../stores/instance.svelte.js";
@@ -159,7 +159,7 @@
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}
-						<InstancesSettingsTab />
+						<ServerSettingsTab {onClose} />
 					{/if}
 				</div>
 			{/if}

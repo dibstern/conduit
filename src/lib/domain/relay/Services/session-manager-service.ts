@@ -171,6 +171,7 @@ export interface LoadHistoryOptions {
 export interface SetSessionSettledOptions {
 	readonly settled: boolean;
 	readonly automatic?: boolean;
+	readonly mergedHead?: string;
 }
 
 /**
