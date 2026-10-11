@@ -262,6 +262,7 @@
 			case "missing": return `${issue.path} no longer exists.`;
 			case "permission-denied": return `Permission denied: ${issue.path}. Check the folder permissions and try again.`;
 			case "not-a-folder": return `${issue.path} isn't a folder.`;
+			case "conduit-worktree": return `${issue.path} belongs to a session worktree and cannot be added to a project.`;
 			case "create-exists": return `${issue.path} already exists. Add it as an existing folder.`;
 			case "mkdir-failed": return `Couldn't create ${issue.path}: ${issue.message}`;
 			case "git-init-failed": return `Couldn't initialise git in ${issue.path}: ${issue.message}`;

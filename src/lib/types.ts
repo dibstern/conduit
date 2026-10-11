@@ -156,6 +156,10 @@ export interface ProjectRelayConfig {
 	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
 	/** Usage readings shared by every relay in this daemon. */
 	usage?: import("./domain/daemon/Services/usage.js").UsageService;
+	/** Daemon-owned worktree lifecycle shared with its project relays. */
+	worktreeContext?: import("effect").Context.Context<
+		import("./domain/daemon/Services/worktree-service.js").WorktreeServiceTag
+	>;
 	/** Shared daemon config state and persistence for settings and continuation. */
 	daemonConfigContext?: import("effect").Context.Context<
 		| import("./domain/daemon/Services/daemon-config-ref.js").DaemonConfigRefTag

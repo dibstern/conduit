@@ -26,6 +26,7 @@ export type FolderIssue =
 	| { readonly kind: "missing"; readonly path: string }
 	| { readonly kind: "permission-denied"; readonly path: string }
 	| { readonly kind: "not-a-folder"; readonly path: string }
+	| { readonly kind: "conduit-worktree"; readonly path: string }
 	| { readonly kind: "create-exists"; readonly path: string }
 	| {
 			readonly kind: "mkdir-failed";

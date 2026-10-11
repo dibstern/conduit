@@ -43,6 +43,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
@@ -153,6 +154,8 @@ export type ListSessionsOptions = {
 export interface CreateSessionOptions {
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	/** Reserved locally before a draft creates its workspace. */
+	readonly sessionId?: string;
 }
 
 export interface HistoryPage {
@@ -236,7 +239,7 @@ export const initialize = (title?: string) =>
 /**
  * Create a new session via the API.
  */
-const createLocalSessionId = (): string =>
+export const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
 const getLocalSessionProvider = () =>
@@ -255,15 +258,18 @@ const getConfiguredLocalSessionProvider = () =>
 const createLocalSession = (
 	title?: string,
 	selectedInstanceId?: ProviderInstanceId,
+	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 
 		const provider =
 			selectedInstanceId === undefined
-				? yield* getLocalSessionProvider()
+				? reservedSessionId === undefined
+					? yield* getLocalSessionProvider()
+					: "claude"
 				: selectedInstanceId;
-		const sessionId = createLocalSessionId();
+		const sessionId = reservedSessionId ?? createLocalSessionId();
 		const now = Date.now();
 		const sessionTitle = normalizeSessionTitle(title);
 
@@ -764,7 +770,7 @@ const makeServiceCreateSession = ({
 				);
 			const createViaLocal = (instanceId?: ProviderInstanceId) =>
 				Effect.either(
-					createLocalSession(title, instanceId).pipe(
+					createLocalSession(title, instanceId, options?.sessionId).pipe(
 						Effect.provideService(ReadQueryEffectTag, readQuery),
 						Effect.provideService(EventStoreEffectTag, eventStore),
 						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -787,6 +793,11 @@ const makeServiceCreateSession = ({
 					});
 				}
 				if (selectedDriver === "opencode") {
+					if (options?.sessionId)
+						return yield* new SessionManagerError({
+							operation: "createSession",
+							cause: "Reserved workspace sessions require Claude",
+						});
 					const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
 					if (openCodeResult._tag === "Right") {
 						yield* bindSessionProvider(
@@ -808,9 +819,15 @@ const makeServiceCreateSession = ({
 
 			const requestedProvider = options?.providerId?.trim();
 			const requestedLocalProvider =
-				requestedProvider === CLAUDE_PROVIDER_ID ||
+				(requestedProvider !== undefined &&
+					harnessForModelProvider(requestedProvider) === "claude") ||
 				requestedProvider === CLAUDE_SDK_PROVIDER_ID;
 			if (requestedProvider && !requestedLocalProvider) {
+				if (options?.sessionId)
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: "Reserved workspace sessions require Claude",
+					});
 				const openCodeResult = yield* createViaOpenCode();
 				if (openCodeResult._tag === "Right") {
 					yield* bindSessionProvider(openCodeResult.right, "opencode");
@@ -824,8 +841,9 @@ const makeServiceCreateSession = ({
 
 			const configuredProvider = yield* getConfiguredLocalSessionProvider();
 			if (
+				options?.sessionId !== undefined ||
 				configuredProvider == null ||
-				configuredProvider === CLAUDE_PROVIDER_ID
+				harnessForModelProvider(configuredProvider) === "claude"
 			) {
 				const localResult = yield* createViaLocal();
 				if (localResult._tag === "Right") {
@@ -833,6 +851,7 @@ const makeServiceCreateSession = ({
 					return localResult.right;
 				}
 
+				if (options?.sessionId) return yield* localResult.left;
 				log.warn(
 					`Relay-owned Claude session create failed; falling back to OpenCode session create: ${localResult.left}`,
 				);

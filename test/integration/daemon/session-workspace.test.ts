@@ -268,6 +268,7 @@ describe("Session workspace through the built daemon", () => {
 		expect(workspaceEvents(fixture).at(-1)?.data).toEqual({
 			sessionId: one,
 			cause: "user",
+			path: fixture.projectDir,
 			worktrees: {},
 			origin: "existing",
 		});
