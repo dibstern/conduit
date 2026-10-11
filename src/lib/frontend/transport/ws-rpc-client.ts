@@ -172,6 +172,7 @@ export interface CreateSessionRpcInput {
 	readonly providerId?: string;
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
+	readonly worktreeBase?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -525,6 +526,12 @@ export const restartServerRpc = () =>
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
 
+export async function listBranchesRpc(projectSlug: string) {
+	return runTransportEffect(
+		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -696,6 +703,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { worktreePath: input.worktreePath }
 				: {}),
 			...(input.newWorktree ? { newWorktree: true } : {}),
+			...(input.worktreeBase != null
+				? { worktreeBase: input.worktreeBase }
+				: {}),
 		}),
 	);
 

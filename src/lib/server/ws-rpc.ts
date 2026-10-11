@@ -92,6 +92,7 @@ export {
 	type GetToolContentResponse,
 	type GoalDetails,
 	type InstanceListResponse,
+	ListBranches,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
 	ListPtys,

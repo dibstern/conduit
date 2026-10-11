@@ -90,11 +90,13 @@
 	let inputText = $state("");
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
+	let draftWorktreeBase = $state<string | null>(null);
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${getEffectiveInstanceId()}:${sessionState.currentId ?? ""}`);
 	$effect(() => {
 		draftContext;
 		draftWorktree = null;
 		draftNewWorktree = false;
+		draftWorktreeBase = null;
 	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -764,6 +766,7 @@
 					...(model ? { model } : {}),
 					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 					...(draftNewWorktree ? { newWorktree: true } : {}),
+					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");
@@ -1124,7 +1127,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1443,7 +1446,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
 		{/if}
 	</div>
 </div>

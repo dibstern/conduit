@@ -9,7 +9,7 @@
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { listWorktreesRpc } from "../../transport/ws-rpc-client.js";
+	import { listBranchesRpc, listWorktreesRpc } from "../../transport/ws-rpc-client.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,18 +21,27 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), loadWorktrees = listWorktreesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
+		worktreeBase?: string | null;
 		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
+		loadBranches?: typeof listBranchesRpc;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
+	let branchList = $state<Awaited<ReturnType<typeof listBranchesRpc>> | undefined>();
 
 	const slug = $derived(getDraftProject());
 	const project = $derived(projectState.projects.find((p) => p.slug === slug));
 	const title = $derived(project?.title || slug || "Choose a project");
 	const branch = $derived(project?.git?.branch);
+	const currentBranch = $derived(branchList === undefined ? branch : branchList.current);
+	const baseBranch = $derived(worktreeBase ?? currentBranch);
+	$effect(() => {
+		slug;
+		branchList = undefined;
+	});
 	const multiFolder = $derived((project?.folders.length ?? 0) > 1);
 	const instance = $derived(getAvailableInstances().find((provider) => provider.id === getEffectiveInstanceId()));
 	const providerName = $derived(getInstanceById(instance?.id ?? "")?.name ?? instance?.label ?? "This provider");
@@ -61,6 +70,7 @@
 	function chooseProject(next: string) {
 		worktree = null;
 		newWorktree = false;
+		worktreeBase = null;
 		const params = getCurrentSearchParams();
 		params.set(DRAFT_PROJECT_PARAM, next);
 		replaceRoute(`/new?${params}`);
@@ -78,6 +88,22 @@
 			if (context !== worktreeContext) return;
 			worktrees = [];
 			showToast("Could not list worktrees", { variant: "error" });
+		}
+	}
+
+	async function openBranches() {
+		if (!slug) return;
+		const projectSlug = slug;
+		branchList = undefined;
+		try {
+			const result = await loadBranches(projectSlug);
+			if (projectSlug !== slug) return;
+			branchList = result;
+			if (worktreeBase === result.current) worktreeBase = null;
+		} catch {
+			if (projectSlug !== slug) return;
+			branchList = { branches: [] };
+			showToast("Could not list branches", { variant: "error" });
 		}
 	}
 </script>
@@ -160,7 +186,32 @@
 		{/if}
 	</Menu>
 
-	{#if worktree || newWorktree || branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{newWorktree ? "from committed HEAD" : worktree ? "existing worktree" : "current checkout"}</span>{/if}
+	{#if newWorktree}
+		<Menu ariaLabel="Base branch" {presentation} onopenchange={(open) => { if (open) void openBranches(); }}>
+			{#snippet trigger({ props })}
+				<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Base branch" data-testid="draft-base-branch-chip">
+					<Icon name="git-branch" size={12} />
+					<span class="truncate">from {baseBranch ?? "committed HEAD"}</span>
+					<Icon name="chevron-down" size={12} />
+				</Button>
+			{/snippet}
+			<MenuGroup label="Base branch">
+				{#if branchList === undefined}
+					<MenuItem disabled class={rowClass}>Loading branches…</MenuItem>
+				{:else if branchList.branches.length === 0}
+					<MenuItem disabled class={rowClass}>No local branches available</MenuItem>
+				{:else}
+					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { worktreeBase = value === currentBranch ? null : value; }}>
+						{#each branchList.branches as name (name)}
+							<MenuRadioItem value={name} class={rowClass}>{name}</MenuRadioItem>
+						{/each}
+					</MenuRadioGroup>
+				{/if}
+			</MenuGroup>
+		</Menu>
+	{:else if worktree || branch}
+		<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>
+	{/if}
 </div>
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
