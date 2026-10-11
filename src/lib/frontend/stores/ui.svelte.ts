@@ -1,5 +1,6 @@
 // Global UI state: sidebar, modals, toasts, scroll, rewind, plan mode, banners.
 
+import type { SessionWorktreeInspection } from "../../contracts/session-workspace.js";
 import type { ProjectSetting } from "../transport/ws-rpc.js";
 import type { BannerConfig, PanelId, Toast, ToastCard } from "../types.js";
 import { generateUuid } from "../utils/format.js";
@@ -8,6 +9,12 @@ const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
+
+type WorktreeConfirmChoice = {
+	worktrees: readonly SessionWorktreeInspection[];
+	removeWorktrees: boolean;
+	onchange?: (removeWorktrees: boolean) => void;
+};
 
 /** Safe localStorage.getItem that returns null in non-browser environments. */
 function safeGetItem(key: string): string | null {
@@ -38,6 +45,7 @@ export const uiState = $state({
 		text: string;
 		actionLabel: string;
 		returnFocus?: () => HTMLElement | null;
+		worktreeChoice?: WorktreeConfirmChoice;
 		resolve: (result: boolean) => void;
 	} | null,
 
@@ -193,6 +201,7 @@ export function confirm(
 	text: string,
 	actionLabel = "Confirm",
 	returnFocus?: () => HTMLElement | null,
+	worktreeChoice?: WorktreeConfirmChoice,
 ): Promise<boolean> {
 	return new Promise((resolve) => {
 		uiState.confirmDialog = {
@@ -200,6 +209,7 @@ export function confirm(
 			actionLabel,
 			resolve,
 			...(returnFocus ? { returnFocus } : {}),
+			...(worktreeChoice ? { worktreeChoice } : {}),
 		};
 	});
 }

@@ -204,6 +204,7 @@ export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+	readonly removeWorktrees?: boolean;
 }
 
 export interface ForkSessionRpcInput {
@@ -557,6 +558,17 @@ export async function listWorktreesRpc(
 	);
 }
 
+export async function inspectSessionWorktreesRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.InspectSessionWorktrees(input),
+		),
+	);
+}
+
 export async function moveSessionWorkspaceRpc(input: {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -731,13 +743,14 @@ const callAttachProject = (input: AttachProjectRpcInput) =>
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client
-			.DeleteSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId != null ? { originId: input.originId } : {}),
-			})
-			.pipe(Effect.asVoid),
+		client.DeleteSession({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			...(input.originId != null ? { originId: input.originId } : {}),
+			...(input.removeWorktrees === undefined
+				? {}
+				: { removeWorktrees: input.removeWorktrees }),
+		}),
 	);
 
 const callForkSession = (input: ForkSessionRpcInput) =>
@@ -1169,10 +1182,8 @@ export function attachProjectRpc(
 	return runTransportEffect(callAttachProject(input));
 }
 
-export async function deleteSessionRpc(
-	input: DeleteSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callDeleteSession(input));
+export async function deleteSessionRpc(input: DeleteSessionRpcInput) {
+	return runTransportEffect(callDeleteSession(input));
 }
 
 export async function forkSessionRpc(

@@ -118,6 +118,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				...daemonOnlyHandlers,
 				ListBranches: () => Effect.succeed({ branches: [] }),
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
+				InspectSessionWorktrees: () =>
+					Effect.succeed({ worktrees: [], removeWorktrees: true }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
 				RecreateSessionWorktree: () =>
 					Effect.succeed({ directory: "/worktree" }),

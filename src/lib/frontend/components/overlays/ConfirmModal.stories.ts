@@ -65,3 +65,114 @@ export const Hover: Story = {
 	...Visible,
 	parameters: { pseudo: { hover: true } },
 };
+
+export const CleanWorktree: Story = {
+	beforeEach: () => {
+		uiState.confirmDialog = {
+			text: 'Delete "Finished work"? This session and its history will be permanently removed.',
+			actionLabel: "Delete",
+			resolve: () => {
+				uiState.confirmDialog = null;
+			},
+			worktreeChoice: {
+				removeWorktrees: true,
+				worktrees: [
+					{
+						folder: "/workspace/app",
+						path: "/conduit/worktrees/app/finished/app",
+						reasons: [],
+						inUse: false,
+					},
+				],
+			},
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(
+			within(dialog).getByText("No unfinished work found."),
+		).toBeVisible();
+		await expect(
+			within(dialog).getByRole("radio", {
+				name: "Remove worktrees",
+			}),
+		).toBeChecked();
+	},
+};
+
+export const UnfinishedWorktrees: Story = {
+	beforeEach: () => {
+		uiState.confirmDialog = {
+			text: 'Delete "API migration"? This session and its history will be permanently removed.',
+			actionLabel: "Delete",
+			resolve: () => {
+				uiState.confirmDialog = null;
+			},
+			worktreeChoice: {
+				removeWorktrees: false,
+				worktrees: [
+					{
+						folder: "/workspace/app",
+						path: "/conduit/worktrees/app/migration/app",
+						reasons: ["Uncommitted changes", "Unpushed commits"],
+						inUse: false,
+					},
+					{
+						folder: "/workspace/api",
+						path: "/conduit/worktrees/app/migration/api",
+						reasons: ["Commits not merged into main"],
+						inUse: false,
+					},
+				],
+			},
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(within(dialog).getByText("Uncommitted changes")).toBeVisible();
+		await expect(
+			within(dialog).getByText("Commits not merged into main"),
+		).toBeVisible();
+		await expect(
+			within(dialog).getByRole("radio", {
+				name: "Keep worktrees",
+			}),
+		).toBeChecked();
+	},
+};
+
+export const WorktreeInUse: Story = {
+	beforeEach: () => {
+		uiState.confirmDialog = {
+			text: 'Delete "Parent session"? This session and its history will be permanently removed.',
+			actionLabel: "Delete",
+			resolve: () => {
+				uiState.confirmDialog = null;
+			},
+			worktreeChoice: {
+				removeWorktrees: false,
+				worktrees: [
+					{
+						folder: "/workspace/app",
+						path: "/conduit/worktrees/app/parent/app",
+						reasons: [],
+						inUse: true,
+					},
+				],
+			},
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole("dialog");
+		await expect(
+			within(dialog).getByText(
+				"Kept because another session uses this worktree.",
+			),
+		).toBeVisible();
+		await expect(
+			within(dialog).getByRole("radio", {
+				name: "Remove worktrees",
+			}),
+		).toBeDisabled();
+	},
+};

@@ -240,8 +240,10 @@
 			</div>
 		</div>
 
-		{#if sessionViewState.compact}
-			{#if listScreen}<UsageFooterMeter phone bind:height={phoneUsageHeight} />{/if}
+		{#if sessionViewState.compact && listScreen}
+			<UsageFooterMeter phone bind:height={phoneUsageHeight} />
+		{/if}
+		{#if sessionViewState.compact && !uiState.selectMode}
 			<Button
 				id="new-session-btn"
 				variant="ghost"

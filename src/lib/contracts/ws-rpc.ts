@@ -33,7 +33,11 @@ import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
-import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
+import {
+	SessionWorktreeInspectionSchema,
+	WorkspaceMoveError,
+	WorktreeInfoSchema,
+} from "./session-workspace.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
@@ -1410,6 +1414,18 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 	},
 ) {}
 
+export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSessionWorktrees>()(
+	"InspectSessionWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
+			removeWorktrees: Schema.Boolean,
+		}),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
 export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
 	"RecreateSessionWorktree",
 	{
@@ -1899,11 +1915,15 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	"DeleteSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: Schema.Struct({
+			ok: Schema.Literal(true),
+			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
+		}),
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
+			removeWorktrees: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}
@@ -2185,6 +2205,7 @@ export const WsRpcRequest = Schema.Union(
 	RenameSession,
 	ListBranches,
 	ListWorktrees,
+	InspectSessionWorktrees,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
 	ContinueSessionInMainFolder,
@@ -2601,6 +2622,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(InspectSessionWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(RecreateSessionWorktree),
 	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
