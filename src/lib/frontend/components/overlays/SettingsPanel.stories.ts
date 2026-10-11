@@ -62,6 +62,28 @@ function populateInstances() {
 	applyInstanceListResponse({
 		instances: [
 			{
+				id: "claude",
+				name: "Personal Claude",
+				driver: "claude",
+				configDir: "~/.claude",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000,
+			},
+			{
+				id: "work-claude",
+				name: "Work Claude",
+				driver: "claude",
+				configDir: "~/.config/claude/work",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_860_000,
+			},
+			{
 				id: "instance-local",
 				name: "Local OpenCode",
 				port: 4096,
@@ -331,6 +353,30 @@ export const InstanceExpanded: Story = {
 
 		await expect(canvas.getByRole("button", { name: "Rename" })).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
+	},
+};
+
+export const ClaudeAccountExpanded: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const account = within(canvas.getByTestId("instance-row-work-claude"));
+		const row = account.getByRole("button", { name: /Work Claude/ });
+		await expect(row).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(row);
+		await expect(row).toHaveAttribute("aria-expanded", "true");
+		await expect(
+			account.getByText("Config dir", { exact: true }),
+		).toBeVisible();
+		await expect(
+			account.getByText("Sessions you move to it, and auto-switch"),
+		).toBeVisible();
+		await expect(account.getByTestId("edit-instance-btn")).toBeVisible();
+		await expect(account.getByTestId("remove-instance-btn")).toBeVisible();
+		await expect(
+			account.queryByTestId("rename-instance-btn"),
+		).not.toBeInTheDocument();
 	},
 };
 
