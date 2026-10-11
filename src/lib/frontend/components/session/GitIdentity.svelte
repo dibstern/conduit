@@ -15,7 +15,7 @@
 	let { directory, git, presentation, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss, children }: {
 		directory: string;
 		git: SessionGit | undefined;
-		presentation?: "word" | "control" | "row" | undefined;
+		presentation: "word" | "control" | "row";
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
 		workspaceHint?: string | undefined;
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
@@ -29,10 +29,8 @@
 	let moving = $state(false);
 	let dismissing = $state(false);
 	let dismissedMismatch = $state<string | undefined>();
-	const word = $derived(presentation === "word");
 	const control = $derived(presentation === "control");
 	const row = $derived(presentation === "row");
-	const inComposer = $derived(word || control || row);
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const mismatchKey = $derived(workspaceMismatch ? `${directory}\0${workspaceMismatch.actualPath}` : undefined);
 	$effect(() => {
@@ -113,8 +111,8 @@
 		return [...base.slice(common).map(() => ".."), ...target.slice(common)].join("/") || ".";
 	});
 	const warningLabel = $derived(warningMismatch ? `Workspace mismatch: Claude is working in ${warningMismatch.actualPath}` : workspaceHint ? hintLabel : undefined);
-	const projectFloor = $derived(Math.min(project.length, inComposer ? 4.5 : 5));
-	const branchFloor = $derived(Math.min(checkout?.length ?? 0, inComposer ? 6.5 : 5));
+	const projectFloor = $derived(Math.min(project.length, 4.5));
+	const branchFloor = $derived(Math.min(checkout?.length ?? 0, 6.5));
 	// Floor = labels + slash, icon, padding, divider and fixed marks. It wins over the nominal cap for long operation labels.
 	const minimumWidth = $derived.by(() => {
 		const marks = [
@@ -123,7 +121,7 @@
 			showMerged ? "6ch" : null,
 		].filter((width) => width !== null);
 		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length + (control ? 1 : 0));
-		return `calc(${projectFloor + (checkout ? 1 + branchFloor : 0)}ch + 12px + ${control ? 22 : word ? 0 : 18}px + ${gaps}px${warningLabel ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
+		return `calc(${projectFloor + (checkout ? 1 + branchFloor : 0)}ch + 12px + ${control ? 22 : 0}px + ${gaps}px${warningLabel ? " + 17px" : ""}${marks.map((width) => ` + ${width}`).join("")})`;
 	});
 
 	async function copy(text: string) {
@@ -143,15 +141,15 @@
 				{:else}
 					<Icon name={!git ? "folder" : git.worktree ? "folder-tree" : "git-branch"} size={12} />
 				{/if}
-				<!-- On the icon, not after the branch: the icon never truncates, and a trailing dot sat against the account pill's dot. -->
+				<!-- The dirty mark stays on the icon, which never truncates. -->
 				{#if git?.dirty}
-					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {inComposer && !row ? 'ring-input-bg' : 'ring-bg-surface'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
+					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {row ? 'ring-bg-surface' : 'ring-input-bg'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
 				{/if}
 			</span>
 			<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
 			{#if checkout}
 				<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>
-				<span data-part="branch" class="min-w-0 truncate {git?.branch ? inComposer ? 'text-text-secondary' : 'text-text' : 'text-text-muted'}" style:min-width={inComposer ? `${branchFloor}ch` : undefined} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+				<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 			{/if}
 			{#if !phone && upstreamMark}
 				<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
@@ -165,7 +163,7 @@
 {/snippet}
 
 {#snippet checkoutMenu()}
-<Menu presentation={phone ? "sheet" : "popover"} side={inComposer ? "top" : undefined} align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid={presentation ? "composer-checkout-menu" : "session-bar-checkout"} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+<Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 	{#snippet trigger({ props })}
 		{#if row}
 			<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
@@ -178,9 +176,9 @@
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper and button share a font size so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control text-[11.5px]' : word ? 'git-word text-[11.5px]' : phone ? 'git-pill-phone text-[10px]' : 'text-[10px]'} inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size={inComposer ? "content" : "segment"} {...(inComposer ? { tone: "muted" as const, hoverFill: "none" as const } : {})} touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : word ? "max-w-full gap-[5px] font-normal font-brand" : "max-w-full"}
+			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : "max-w-full gap-[5px] font-normal font-brand"}
 				style={`min-width: ${minimumWidth}`}
-				title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid={presentation ? "composer-checkout" : "session-bar-identity"}>
+				title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid="composer-checkout">
 				{@render identity()}
 			</Button></span>
 		{/if}
@@ -261,10 +259,8 @@
 
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
-	.git-pill { max-width: 240px; flex-shrink: 1; }
-	.git-pill-phone { max-width: 150px; }
-	.git-pill.git-word { max-width: 100%; }
-	.git-pill.git-control { max-width: 100%; min-width: 0; }
+	.git-pill { max-width: 100%; flex-shrink: 1; }
+	.git-pill.git-control { min-width: 0; }
 	.commit-icon { display: flex; align-items: center; width: 12px; }
 	.commit-icon::before, .commit-icon::after { content: ""; flex: 1; border-top: 1px solid currentColor; }
 </style>

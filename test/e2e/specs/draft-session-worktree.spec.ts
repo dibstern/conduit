@@ -159,6 +159,12 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
+			await page.addInitScript(() => {
+				localStorage.setItem(
+					"conduit-composer-preferences",
+					JSON.stringify({ controls: "words" }),
+				);
+			});
 			const rpc = await openDraft(page, harness.relayBaseUrl);
 			await page.locator("#input").fill("Start in docs");
 			await press(page.getByTestId("draft-start-chip"));
@@ -219,7 +225,7 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
-			await expect(page.getByTestId("session-bar-identity")).toContainText(
+			await expect(page.getByTestId("composer-checkout")).toContainText(
 				"feature/docs",
 			);
 		});

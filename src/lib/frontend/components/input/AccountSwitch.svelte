@@ -2,8 +2,8 @@
   AccountSwitch — moves one Claude session to another account: a picker of the
   Claude accounts with each one's quota checked fresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
-  strip's Switch account and the session bar's account pill each bring their
-  own trigger; only the session moves, never the project's binding.
+  strip's Switch account brings its own trigger; only the session moves, never
+  the project's binding.
 
   The account with the most quota left is pre-selected. Limited accounts and the
   session's own stay visible but can't be picked; an account whose quota can't

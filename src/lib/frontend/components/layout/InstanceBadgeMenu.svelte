@@ -2,11 +2,8 @@
   InstanceBadgeMenu — which OpenCode instance the current project is bound to,
   and the control to rebind it.
 
-  It sits in both top bars (Header on desktop, SessionBar on phones) because it
-  is identity rather than an action: it says where this project's work actually
-  runs, so it belongs beside the project's name, not buried in an overflow
-  menu. One component so the two bars cannot drift on the rebind call or the
-  test IDs.
+  The phone session-list sidebar shows it beside the project name. Open
+  sessions show their instance in the composer and lock the picker's cards.
 
   Renders nothing when there is only one instance — no choice to offer, and no
   ambiguity to resolve.
@@ -71,7 +68,7 @@
 				size="content"
 				class={className}
 				title="{currentInstance.name} ({currentInstance.status})"
-				data-testid="instance-badge"
+				data-testid="project-instance-trigger"
 			>
 				<span
 					class={"w-1.5 h-1.5 rounded-full shrink-0 " +

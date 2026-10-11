@@ -51,7 +51,7 @@ Scenario Outline: accounts follow auto-switch order inside their harness groups
   And the usage footer groups read CLAUDE, CODEX, CURSOR in that order
   And the Claude usage footer rows read Personal, Work, Spare, Unreadable in auto-switch order
   And the usage footer claude row is the highlighted project default
-  And the usage footer claude dot matches the session account pill
+  And the usage footer claude dot matches the composer account badge
   And the usage footer claude shows five_hour 41% and seven_day 22%
   And the usage footer work shows five_hour 12% and seven_day 48%
   And the usage footer spare shows five_hour 0% and seven_day 9%
@@ -76,7 +76,7 @@ Scenario: the highlighted account follows the project binding
   And the usage footer has several accounts with an unknown Claude reading
   When the project is bound to work
   Then the usage footer work row is the highlighted project default
-  And the session bar account pill reads Personal
+  And the composer harness logo for claude shows P on its badge
 
 Scenario Outline: the minimum sidebar width hides the second window without clipping
   Given the conduit app is served with the connected mockup

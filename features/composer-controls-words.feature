@@ -309,8 +309,8 @@ Scenario Outline: D4 switching shows the target account with an ellipsis and a s
   And the handoff carries 2 of 2 messages with the first
   And the transcript ends with the unanswered message Switch the account
   And the account switch reply is held
-  When I open the account pill in the session bar
-  And I pick work in the account picker
+  When I view Account choices in the picker
+  And I select the work Account card
   And I press Switch and continue
   Then the ContinueSession RPC switches the current session from claude to work
   And the composer account word is <account>

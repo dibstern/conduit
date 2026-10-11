@@ -3115,22 +3115,22 @@ for (const behavior of [
 	});
 }
 
-// Story 16. Failures: the pill shows the project's account instead of the
-// session's, a pick rebinds the project, or the session stays on account 1.
-test("story 16: the session-bar account pill switches the session, not the project", async ({
+// Story 16. Failures: cards show the project's account instead of the session's,
+// a pick rebinds the project, or the session stays on account 1.
+test("story 16: composer account cards switch the session and keep the project binding", async ({
 	page,
 	harness,
 }, testInfo) => {
 	test.setTimeout(120_000);
 	const artifacts = resolve(
 		"test-results/account-switch",
-		`${testInfo.project.name}-session-pill-${testInfo.retry}`,
+		`${testInfo.project.name}-session-card-${testInfo.retry}`,
 	);
 	mkdirSync(artifacts, { recursive: true });
 	const browser = await harness.connect();
 	const accounts: { id: string; configDir: string }[] = [];
 	for (const name of ["Account 1", "Account 2"]) {
-		const configDir = mkdtempSync(join(harness.root, "pill-account-"));
+		const configDir = mkdtempSync(join(harness.root, "card-account-"));
 		const { addedInstanceId } = await Effect.runPromise(
 			browser.rpc.AddInstance({ name, driver: "claude", configDir }),
 		);
@@ -3141,11 +3141,11 @@ test("story 16: the session-bar account pill switches the session, not the proje
 	if (!source || !target) throw new Error("Two accounts are required");
 	const { savedSlug: projectSlug } = await Effect.runPromise(
 		browser.rpc.SaveProject({
-			folders: [mkdtempSync(join(harness.root, "pill-project-"))],
+			folders: [mkdtempSync(join(harness.root, "card-project-"))],
 			instanceId: source.id,
 		}),
 	);
-	if (!projectSlug) throw new Error("No pill project slug");
+	if (!projectSlug) throw new Error("No account-card project slug");
 	const boundInstance = async () =>
 		(await Effect.runPromise(browser.rpc.GetProjects({}))).projects.find(
 			(project) => project.slug === projectSlug,
@@ -3195,36 +3195,37 @@ test("story 16: the session-bar account pill switches the session, not the proje
 				delivery: "queue",
 			}),
 		);
-	const first = "session-pill-first-request";
+	const first = "session-card-first-request";
 	const evidence: Record<string, unknown> = {};
 	try {
-		await send(first, "pill-first");
+		await send(first, "card-first");
 		await expect
 			.poll(() => JSON.stringify(harness.marks))
 			.toContain(`done(${first})`);
 		await expect.poll(() => latest()?.status).toBe("idle");
 		writeFileSync(join(target.configDir, "conduit-test-quota"), "available");
+		await page.addInitScript(() => {
+			localStorage.setItem(
+				"conduit-composer-preferences",
+				JSON.stringify({ controls: "words" }),
+			);
+		});
 		await new AppPage(page).goto(
 			`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
 		);
 		const bar = page.getByTestId("session-bar");
-		const pill = bar.getByTestId("session-account-pill");
-		await expect(pill).toHaveText("Account 1");
-		await expect(pill).toHaveAttribute("data-account", source.id);
-		// The project's rebind control is not offered on a Claude session.
-		await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
-		await page.screenshot({ path: join(artifacts, "01-pill.png") });
+		await expect(bar.locator("[data-account]")).toHaveCount(0);
+		await expect(bar.getByTestId("project-instance-trigger")).toHaveCount(0);
+		await page.screenshot({ path: join(artifacts, "01-composer.png") });
 
-		await pill.click();
-		const row = page.locator(
-			`[data-testid="account-switch-option"][data-account="${target.id}"]`,
-		);
-		await expect(row.getByTestId("quota-meter-caption")).toHaveText("63% left");
-		await expect(
-			page.locator(
-				`[data-testid="account-switch-option"][data-account="${source.id}"]`,
-			),
-		).toHaveAttribute("data-disabled");
+		const trigger = page.getByTestId("composer-word-harness");
+		await trigger.click();
+		const row = page.getByTestId(`picker-account-${target.id}`);
+		const current = page.getByTestId(`picker-account-${source.id}`);
+		await expect(current).toHaveAttribute("aria-checked", "true");
+		await expect(current).toBeDisabled();
+		await expect(row.getByTestId("picker-account-usage")).toHaveText("37%");
+		await expect(row).toBeEnabled();
 		await page.screenshot({ path: join(artifacts, "02-picker.png") });
 		await row.click();
 		const dialog = page.getByTestId("handoff-dialog");
@@ -3248,12 +3249,14 @@ test("story 16: the session-bar account pill switches the session, not the proje
 			from: source.id,
 		});
 		expect(await boundInstance()).toBe(source.id);
-		await expect(pill).toHaveText("Account 2");
-		await expect(pill).toHaveAttribute("data-account", target.id);
+		await trigger.click();
+		await expect(row).toHaveAttribute("aria-checked", "true");
+		await expect(row).toBeDisabled();
+		await page.keyboard.press("Escape");
 		await page.screenshot({ path: join(artifacts, "04-switched.png") });
 
 		// The next turn runs on account 2 with the handoff; the project stays on 1.
-		await send("Next message on the new account.", "pill-next");
+		await send("Next message on the new account.", "card-next");
 		await expect
 			.poll(
 				() =>
@@ -3275,7 +3278,7 @@ test("story 16: the session-bar account pill switches the session, not the proje
 		evidence["sdkCalls"] = harness.claudeOptions();
 		evidence["sdkMarks"] = harness.marks;
 		writeFileSync(
-			join(artifacts, "session-pill-rpc.json"),
+			join(artifacts, "session-card-rpc.json"),
 			JSON.stringify(evidence, null, 2),
 		);
 		await Effect.runPromise(Fiber.interrupt(subscription));

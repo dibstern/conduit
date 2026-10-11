@@ -8,7 +8,7 @@ const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
 	tags: ["autodocs"],
-	args: { directory: "/src/conduit", git: undefined },
+	args: { directory: "/src/conduit", git: undefined, presentation: "control" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		sessionViewState.composerWidth = 760;
@@ -44,7 +44,7 @@ export const Narrow: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const identity = within(canvasElement).getByTestId("session-bar-identity");
+		const identity = within(canvasElement).getByTestId("composer-checkout");
 		// Size the story's own wrapper: #storybook-root outlives the story, so
 		// styling it would leak the narrow width into the next one.
 		const container = identity.parentElement;
@@ -94,7 +94,7 @@ export const DetailsOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(
 			within(document.body).getByRole("menu", { name: "Checkout" }),
@@ -119,7 +119,7 @@ export const WorktreeMenu: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await userEvent.click(
 			within(document.body).getByRole("menuitem", {
@@ -147,7 +147,7 @@ export const WorkspaceMismatch: Story = {
 	},
 	play: async ({ canvasElement, args }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
@@ -156,7 +156,7 @@ export const WorkspaceMismatch: Story = {
 		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
 		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-two");
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
 	},
@@ -186,7 +186,7 @@ export const WorkspaceHint: Story = {
 		await expect(
 			canvas.queryByTestId("workspace-hint-dismiss"),
 		).not.toBeInTheDocument();
-		const identity = canvas.getByTestId("session-bar-identity");
+		const identity = canvas.getByTestId("composer-checkout");
 		await userEvent.click(identity);
 		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
 		await userEvent.click(body.getByTestId("workspace-hint-move"));
@@ -304,7 +304,7 @@ export const WordWorkspaceHint: Story = {
 async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);
-	const identity = canvas.getByTestId("session-bar-identity");
+	const identity = canvas.getByTestId("composer-checkout");
 	await expect(identity).toHaveAttribute("title", "conduit / main");
 	await userEvent.click(canvas.getByRole("button", { name: "EnterWorktree" }));
 	await waitFor(() =>
@@ -317,7 +317,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-icon="worktree"]'),
 	).toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	let menu = await body.findByRole("menu", { name: "Checkout" });
@@ -343,7 +343,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-part="worktree"]'),
 	).not.toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	menu = await body.findByRole("menu", { name: "Checkout" });
@@ -405,7 +405,7 @@ export const LongNames: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const project = within(canvasElement)
-			.getByTestId("session-bar-identity")
+			.getByTestId("composer-checkout")
 			.querySelector('[data-part="project"]');
 		expect(project).not.toBeNull();
 		if (!project) return;

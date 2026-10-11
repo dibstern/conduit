@@ -14,6 +14,8 @@ Scenario Outline: The island floats at the bottom of the transcript
   When I scroll the transcript back to the bottom
   Then the session bar is collapsed
   And the session-bar region visually matches <baseline> at <threshold> percent
+  And the session header has no checkout
+  And the session header has no account or instance control
 
 Examples:
   | baseline              | threshold |
@@ -25,7 +27,9 @@ Scenario Outline: The full bar returns when the transcript is scrolled up
   When I scroll the transcript up by 400 pixels
   Then the jump-to-latest control is visible
   And the session bar is expanded
-  And the session bar's first row reads back, identity and the overflow menu from left to right
+  And the session bar's first row reads back, session controls and the overflow menu from left to right
+  And the session header has no checkout
+  And the session header has no account or instance control
   And the session-bar region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -106,7 +110,34 @@ Scenario Outline: The bar collapses at the bottom and the chevron brings it back
   When I tap the chevron to show the bar
   Then the session bar is expanded
   And the transcript is pinned to the bottom
+  And the session header has no checkout
+  And the session header has no account or instance control
 
 Examples:
-  | baseline                | threshold |
-  | session-bar-collapsed   | 98        |
+  | baseline              | threshold |
+  | session-bar-collapsed | 98        |
+
+Scenario Outline: header has no checkout
+  Given the session loaded the skills "release-notes by you in turn 1; changelog-style by agent in turn 1; verify by agent in turn 2"
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the <harness> harness
+  And the Claude accounts are claude as personal, self as work
+  And a named OpenCode instance Bedrock is already configured
+  And the composer uses words controls
+  And the composer checkout is conduit / account-chip as worktree
+  Then the composer checkout shows conduit / account-chip with a worktree icon
+  And the skills chip reads 3 skills used
+  And the session header has no checkout
+  And the session header has no account or instance control
+  And the session bar is expanded
+  And the session bar's first row reads back, session controls and the overflow menu from left to right
+  And the session-bar region visually matches <baseline> at <threshold> percent
+  When I choose the Terminal session view
+  Then the session header has no checkout
+  And the session header has no account or instance control
+
+Examples:
+  | harness  | baseline                      | threshold |
+  | Claude   | phone-session-bar-a1-claude   | 98        |
+  | OpenCode | phone-session-bar-a1-opencode | 98        |

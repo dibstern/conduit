@@ -357,18 +357,20 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert account dots retain the account pill's identity colour",
-		match: /^the usage footer (\S+) dot matches the session account pill$/,
+		name: "assert account dots match the composer account badge colour",
+		match: /^the usage footer (\S+) dot matches the composer account badge$/,
 		run: async ({ world, match }) => {
 			const footerDot = world.page.getByTestId(`usage-footer-dot-${match[1]}`);
-			const pillDot = world.page
-				.getByTestId("session-account-pill")
-				.getByTestId("account-dot");
+			const badge = world.page
+				.locator(
+					`#input-area [data-testid="harness-logo"][data-account="${match[1]}"]`,
+				)
+				.getByTestId("harness-logo-badge");
 			await expect(footerDot).toHaveAttribute("data-account", match[1] ?? "");
-			await expect(pillDot).toBeVisible();
+			await expect(badge).toBeVisible();
 			await expect(footerDot).toHaveCSS(
 				"background-color",
-				await pillDot.evaluate((dot) => getComputedStyle(dot).backgroundColor),
+				await badge.evaluate((dot) => getComputedStyle(dot).backgroundColor),
 			);
 		},
 	},

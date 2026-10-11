@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 
@@ -248,9 +248,9 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "phone first row reads back, identity, overflow",
+		name: "phone first row reads back, session controls, overflow",
 		match:
-			/^the session bar's first row reads back, identity and the overflow menu from left to right$/,
+			/^the session bar's first row reads back, session controls and the overflow menu from left to right$/,
 		run: async ({ world }) => {
 			const boxes = await Promise.all(
 				[
@@ -259,44 +259,71 @@ export const sessionPresentationHandlers: StepHandler[] = [
 					"[data-testid='session-bar-island-overflow']",
 				].map((selector) => world.page.locator(selector).boundingBox()),
 			);
-			const [back, identity, overflow] = boxes;
-			if (!back || !identity || !overflow) {
+			const [back, controls, overflow] = boxes;
+			if (!back || !controls || !overflow) {
 				throw new Error(
 					`first-row control has no layout box: ${JSON.stringify(boxes)}`,
 				);
 			}
 			const middle = (box: { y: number; height: number }) =>
 				box.y + box.height / 2;
-			const oneRow = [identity, overflow].every(
+			const oneRow = [controls, overflow].every(
 				(box) => Math.abs(middle(box) - middle(back)) < 8,
 			);
 			const ordered =
-				back.x + back.width <= identity.x + 1 &&
-				identity.x + identity.width <= overflow.x + 1;
+				back.x + back.width <= controls.x + 1 &&
+				controls.x + controls.width <= overflow.x + 1;
 			if (!oneRow || !ordered) {
 				throw new Error(
-					`first row out of order: ${JSON.stringify({ back, identity, overflow })}`,
+					`first row out of order: ${JSON.stringify({ back, controls, overflow })}`,
 				);
 			}
 		},
 	},
 	{
-		name: "desktop identity sits in the right group",
-		match: /^the desktop identity sits in the right-hand group$/,
+		name: "desktop session controls sit in the right group",
+		match: /^the desktop session controls sit in the right-hand group$/,
 		run: async ({ world }) => {
-			const [bar, identity] = await Promise.all([
+			const [bar, controls] = await Promise.all([
 				world.page.getByTestId("session-bar").boundingBox(),
 				world.page.locator("#session-bar-meta").boundingBox(),
 			]);
 			if (
 				!bar ||
-				!identity ||
-				identity.x + identity.width / 2 < bar.x + bar.width / 2
+				!controls ||
+				controls.x + controls.width / 2 < bar.x + bar.width / 2
 			) {
 				throw new Error(
-					`desktop identity is not right-aligned: ${JSON.stringify({ bar, identity })}`,
+					`desktop controls are not right-aligned: ${JSON.stringify({ bar, controls })}`,
 				);
 			}
+		},
+	},
+	{
+		name: "assert the header has no checkout",
+		match: /^the session header has no checkout$/,
+		run: async ({ world }) => {
+			const bar = world.page.getByTestId("session-bar");
+			await expect(bar).toBeVisible();
+			await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(
+				0,
+			);
+			await expect(bar.getByTestId("composer-checkout")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the header has no account or instance control",
+		match: /^the session header has no account or instance control$/,
+		run: async ({ world }) => {
+			const bar = world.page.getByTestId("session-bar");
+			await expect(bar).toBeVisible();
+			await expect(
+				bar.getByRole("button", {
+					name: /^(Session account:|Select instance)/,
+				}),
+			).toHaveCount(0);
+			await expect(bar.getByTestId("account-dot")).toHaveCount(0);
+			await expect(bar.getByTestId("project-instance-trigger")).toHaveCount(0);
 		},
 	},
 	{
