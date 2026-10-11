@@ -38,6 +38,9 @@ function resetState() {
 			sessionCount: 0,
 			pinEnabled: false,
 			tlsEnabled: false,
+			tailscaleServeEnabled: true,
+			tailscaleServeAvailable: true,
+			tailscaleServe: { url: "https://davids-mac-studio.tail662561.ts.net" },
 			keepAwake: false,
 			keepAwakeCommand: "caffeinate -di",
 			logLevel: "info",
@@ -393,6 +396,15 @@ export const Server: Story = {
 		const canvas = within(canvasElement);
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
+			canvas.getByTestId("server-access-settings"),
+		).toHaveTextContent("https://davids-mac-studio.tail662561.ts.net");
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle Tailscale Serve" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			within(canvas.getByTestId("server-startup-settings")).getByRole("button"),
+		).toHaveAttribute("aria-expanded", "false");
+		await expect(
 			canvas.getByTestId("server-security-settings"),
 		).toHaveTextContent(
 			"Off · anyone who can reach this address can open conduit",
@@ -417,6 +429,35 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+		canvas
+			.getByTestId("server-access-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ServerStartupExpanded: Story = {
+	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const startup = canvas.getByTestId("server-startup-settings");
+		const disclosure = within(startup).getByRole("button");
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		disclosure.blur();
+		await expect(canvas.getByTestId("server-startup-port")).toHaveTextContent(
+			"2633",
+		);
+		await expect(canvas.getByTestId("server-startup-host")).toHaveTextContent(
+			"0.0.0.0",
+		);
+		await expect(canvas.getByTestId("server-startup-https")).toHaveTextContent(
+			"Off",
+		);
+		await expect(canvas.getByTestId("server-startup-login")).toHaveTextContent(
+			"Installed",
+		);
+		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
+		startup.scrollIntoView({ block: "end" });
 	},
 };
 

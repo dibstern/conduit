@@ -512,6 +512,10 @@ export interface SetLogLevelRpcInput {
 	readonly level: RpcLogLevel;
 }
 
+export interface SetTailscaleServeRpcInput {
+	readonly enabled: boolean;
+}
+
 const callControl = <A, E>(
 	projectSlug: string | undefined,
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
@@ -1035,6 +1039,9 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
+
+const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
+	callDaemon((client) => client.SetTailscaleServe(input).pipe(Effect.asVoid));
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
@@ -1592,4 +1599,10 @@ export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetLogLevel(input));
+}
+
+export async function setTailscaleServeRpc(
+	input: SetTailscaleServeRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetTailscaleServe(input));
 }

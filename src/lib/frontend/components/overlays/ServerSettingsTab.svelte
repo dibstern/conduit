@@ -11,6 +11,7 @@
 	import ServerPowerSettings from "./ServerPowerSettings.svelte";
 	import ServerAccessSettings from "./ServerAccessSettings.svelte";
 	import ServerLogsSettings from "./ServerLogsSettings.svelte";
+	import ServerStartupSettings from "./ServerStartupSettings.svelte";
 
 	let { onClose, onOpenUsage }: { onClose?: (() => void) | undefined; onOpenUsage: () => void } = $props();
 	let openForm = $state<ServerForm | null>(null);
@@ -37,4 +38,5 @@
 	<ServerPowerSettings />
 	<ServerAccessSettings />
 	<ServerLogsSettings />
+	<ServerStartupSettings />
 </div>
