@@ -73,6 +73,11 @@ export type ClaudeSessionCommand =
 			readonly type: "interrupt" | "end-session" | "shutdown-after-turn";
 			readonly sessionId: string;
 	  }
+	| {
+			readonly type: "stop-task";
+			readonly sessionId: string;
+			readonly taskId: string;
+	  }
 	| { readonly type: "abort"; readonly sinkId: string }
 	| {
 			readonly type: "apply-live-settings";

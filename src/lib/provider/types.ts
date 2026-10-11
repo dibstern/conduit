@@ -347,6 +347,12 @@ export interface ProviderInstance {
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
+	/** Stop a background task while leaving the query and its input queue live. */
+	readonly stopTaskEffect?: (
+		sessionId: string,
+		taskId: string,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
+
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
 	resolvePermissionEffect(
 		sessionId: string,

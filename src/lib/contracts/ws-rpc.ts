@@ -2015,6 +2015,19 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 	},
 ) {}
 
+export class StopBackgroundTask extends Schema.TaggedRequest<StopBackgroundTask>()(
+	"StopBackgroundTask",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			taskId: NonEmptyString,
+		},
+	},
+) {}
+
 export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
 	"SetLogLevel",
 	{
@@ -2155,6 +2168,7 @@ export const WsRpcRequest = Schema.Union(
 	SendInputNow,
 	SyncInputDraft,
 	CancelSession,
+	StopBackgroundTask,
 	SetLogLevel,
 );
 
@@ -2561,6 +2575,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SendInputNow),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
+	Rpc.fromTaggedRequest(StopBackgroundTask),
 	Rpc.fromTaggedRequest(SetLogLevel),
 );
 

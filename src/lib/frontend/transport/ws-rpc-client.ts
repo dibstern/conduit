@@ -66,6 +66,12 @@ export interface CancelSessionRpcInput {
 	readonly commandId: string;
 }
 
+export interface StopBackgroundTaskRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly taskId: string;
+}
+
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
@@ -562,6 +568,16 @@ const callCancelSession = (input: CancelSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.CancelSession(input).pipe(Effect.asVoid),
 	);
+
+export async function stopBackgroundTaskRpc(
+	input: StopBackgroundTaskRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.StopBackgroundTask(input).pipe(Effect.asVoid),
+		),
+	);
+}
 
 const callGetModels = (input: GetModelsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetModels(input));

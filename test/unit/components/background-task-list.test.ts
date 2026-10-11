@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BackgroundTaskList from "../../../src/lib/frontend/components/session/BackgroundTaskList.svelte";
 import {
 	taskDrawer,
@@ -57,5 +57,29 @@ describe("BackgroundTaskList drill-in", () => {
 		expect(screen.queryByRole("button")).toBeNull();
 		await fireEvent.click(screen.getByText("Run the server"));
 		expect(taskDrawer.task).toBeNull();
+	});
+
+	it("stops by task id without opening the child or removing the row", async () => {
+		const onstop = vi.fn();
+		render(BackgroundTaskList, {
+			props: {
+				tasks: [
+					{
+						id: "agent",
+						type: "local_agent",
+						description: "Review the router",
+						firstSeenAt: 0,
+						childSessionId: "child",
+					},
+				],
+				onstop,
+			},
+		});
+		await fireEvent.click(
+			screen.getByRole("button", { name: "Stop Review the router" }),
+		);
+		expect(onstop).toHaveBeenCalledWith("agent");
+		expect(taskDrawer.task).toBeNull();
+		expect(screen.getByText("Review the router")).toBeTruthy();
 	});
 });
