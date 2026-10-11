@@ -1,7 +1,11 @@
 import { expect } from "@playwright/test";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../src/lib/contracts/provider-instance.js";
 import type { StepHandler } from "../runtime.js";
-import { mockInstances, requireRpcControl } from "./shared.js";
+import {
+	mockInstances,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
 
 // Oldest first, as the relay sends them. Ages are against the frozen clock.
 const TASKS = [
@@ -137,6 +141,93 @@ export async function setLiveTasks(
 }
 
 export const backgroundTasksHandlers: StepHandler[] = [
+	{
+		name: "stop the composer turn with tasks",
+		match: /^I stop the composer turn$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const id = sessionIdOf(world.page.url());
+			rpc.setResponse("CancelSession", { ok: true });
+			setSessionRowStatus(world.page, id, "busy");
+			await world.page.locator("#stop").click();
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "CancelSession" &&
+					request.payload["sessionId"] === id,
+			);
+			setSessionRowStatus(world.page, id, "idle");
+			await expect(world.page.locator("#stop")).toBeHidden();
+		},
+	},
+	{
+		name: "assert turn-stopped task toast",
+		match: /^the turn-stopped toast says (.+)$/,
+		run: async ({ world, match }) => {
+			const toast = world.page
+				.getByTestId("toast")
+				.filter({ hasText: "Turn stopped." });
+			await expect(toast).toContainText(match[1] ?? "");
+			await expect(
+				toast.getByRole("button", { name: "Stop them", exact: true }),
+			).toBeVisible();
+			await expect
+				.poll(async () => {
+					const bounds = await toast.boundingBox();
+					const composer = await world.page
+						.locator("#input-area")
+						.boundingBox();
+					if (!bounds || !composer)
+						throw new Error("Missing toast or composer bounds");
+					return bounds.y + bounds.height - composer.y;
+				})
+				.toBeLessThanOrEqual(0);
+		},
+	},
+	{
+		name: "assert turn-stopped toast absent",
+		match: /^the turn-stopped toast is gone$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("toast").filter({ hasText: "Turn stopped." }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "stop tasks from composer toast",
+		match: /^I press Stop them in the turn-stopped toast$/,
+		run: async ({ world }) => {
+			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
+				ok: true,
+			});
+			await world.page
+				.getByTestId("toast")
+				.getByRole("button", { name: "Stop them", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert composer task stop requests",
+		match: /^the toast asks to stop (.+) without another session cancellation$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter((request) => request.tag === "StopBackgroundTask")
+						.map((request) => request.payload["taskId"]),
+				)
+				.toEqual((match[1] ?? "").split(", "));
+			const stops = rpc
+				.getRequests()
+				.filter((request) => request.tag === "StopBackgroundTask");
+			for (const stop of stops)
+				expect(stop.payload["sessionId"]).toBe(sessionIdOf(world.page.url()));
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "CancelSession"),
+			).toHaveLength(1);
+		},
+	},
 	{
 		name: "seed live background tasks",
 		match: /^the session has ([1-4]) live background tasks?$/,

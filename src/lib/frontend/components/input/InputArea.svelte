@@ -10,7 +10,7 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
-	import { tick, untrack } from "svelte";
+	import { onDestroy, tick, untrack } from "svelte";
 	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -37,6 +37,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
+	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
 	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
@@ -64,7 +65,7 @@
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
+	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -863,10 +864,33 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
+	let taskStopToast: { id: string; sessionId: string; projectSlug: string } | null = $state(null);
+	let composerDestroyed = false;
+	$effect(() => {
+		const offer = taskStopToast;
+		if (!offer) return;
+		const count = currentSession?.backgroundTasks?.length ?? 0;
+		const active = sessionState.currentId === offer.sessionId && getCurrentSlug() === offer.projectSlug;
+		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
+		untrack(() => {
+			if (!active || count === 0 || !toast) {
+				dismissToast(offer.id);
+				taskStopToast = null;
+			} else toast.title = `Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`;
+		});
+	});
+	onDestroy(() => {
+		composerDestroyed = true;
+		if (taskStopToast) dismissToast(taskStopToast.id);
+	});
+
 	function handleStop() {
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
+		const instanceId = currentSession?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId];
+		const driver = getInstanceById(instanceId ?? "")?.driver ?? discoveryState.sessionProviderIds[sessionId];
+		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
 			projectSlug,
 			sessionId,
@@ -875,6 +899,17 @@
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || getCurrentSlug() !== projectSlug) return;
+			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
+			if (count === 0) return;
+			if (taskStopToast) dismissToast(taskStopToast.id);
+			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
+				duration: 6000,
+				action: { label: "Stop them", run: () => {
+					if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+				} },
+			});
+			taskStopToast = { id, sessionId, projectSlug };
 		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});

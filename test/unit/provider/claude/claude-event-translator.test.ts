@@ -17,6 +17,7 @@ import {
 	applyClaudeOwnershipDecisionEffect,
 	decideClaudeMessageOwnershipEffect,
 } from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
+import { sdkResultToTurnResult } from "../../../../src/lib/provider/claude/claude-runtime-turn.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -25,6 +26,10 @@ import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-s
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { makeSessionBackgroundLiveness } from "../../../../src/lib/session/background-liveness.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
+import {
+	makeErrorResult,
+	makeSuccessResult,
+} from "../../../helpers/mock-sdk.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
@@ -1901,6 +1906,40 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	// 15. result (interrupted)
+
+	it("settles an explicitly interrupted execution result without a visible error", async () => {
+		ctx.interruptRequested = true;
+		const result = makeErrorResult({ errors: ["Execution ended"] });
+		await runTranslate(translator, ctx, result);
+		expect(
+			sink.events.filter((event) => event.type === "turn.interrupted"),
+		).toHaveLength(1);
+		expect(sink.events.filter((event) => event.type === "turn.error")).toEqual(
+			[],
+		);
+		expect(sdkResultToTurnResult(ctx, result).status).toBe("interrupted");
+	});
+
+	it.each([
+		makeErrorResult({
+			subtype: "error_max_turns",
+			errors: ["Maximum turns exceeded"],
+		}),
+		makeSuccessResult({ is_error: true, result: "Upstream provider failed" }),
+	])("retains real failures after Stop: $subtype", async (result) => {
+		ctx.interruptRequested = true;
+		await runTranslate(translator, ctx, result);
+		expect(
+			sink.events.filter((event) => event.type === "turn.error"),
+		).toHaveLength(1);
+		expect(
+			sink.events.filter((event) => event.type === "turn.interrupted"),
+		).toEqual([]);
+		expect(sdkResultToTurnResult(ctx, result)).toMatchObject({
+			status: "error",
+			error: { code: "provider_error" },
+		});
+	});
 
 	it("translates result with interrupt error to turn.interrupted", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-3";

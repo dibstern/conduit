@@ -38,9 +38,8 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
-	import { stopBackgroundTaskRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import { getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { showToast } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -65,7 +64,7 @@
 	import SideThreadsPanel, { waitingMarker } from "../session/SideThreadsPanel.svelte";
 	import { appBanners } from "../overlays/Banners.svelte";
 	import BannersRow from "../overlays/BannersRow.svelte";
-	import { taskStopIds, tasksPanel } from "../session/background-tasks.svelte.js";
+	import { stopBackgroundTasks, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
@@ -117,21 +116,6 @@
 		if (backgroundTasks.length === 0) tasksPanel.open = false;
 	});
 
-	async function stopBackgroundTasks(taskId?: string) {
-		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
-		const ids = taskStopIds(backgroundTasks, taskId);
-		let failed = false;
-		for (const id of ids) {
-			try {
-				await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
-			} catch {
-				failed = true;
-			}
-		}
-		if (failed) showToast(taskId ? "Failed to stop background task" : "Failed to stop background tasks", { variant: "error" });
-	}
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
 	let detailsFailed = $state(false);
@@ -729,7 +713,7 @@
 	{/if}
 
 	{#if tasksPanel.open && backgroundTasks.length > 0}
-		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(); } : undefined} />
+		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug(), taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug()); } : undefined} />
 	{/if}
 
 	{#if sideThreadsPanel.open}

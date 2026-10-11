@@ -76,9 +76,17 @@ export type ProcessMark =
 	  }
 	| {
 			kind: "task-stop-turn";
-			phase: "streaming" | "result" | "after-result";
+			phase:
+				| "streaming"
+				| "result"
+				| "after-result"
+				| "interrupted-result"
+				| "execution-error"
+				| "late-tool";
 			queryId: string;
 			at: string;
+			inputId?: string;
+			request?: string;
 	  }
 	| {
 			kind: "handoff-first-turn-died";
@@ -167,6 +175,7 @@ export type ProcessMark =
 				| "initialization-failed"
 				| "query-closed"
 				| "query-interrupted"
+				| "query-interrupt-rejected"
 				| "system-init";
 			queryId: string;
 			at: string;
@@ -321,6 +330,34 @@ export const taskStopFixture = [
 		parentToolUseId: null,
 	},
 ] as const;
+
+export const taskStopMonitorFixture = [
+	{
+		task_id: "task-stop-monitor",
+		tool_use_id: "task-stop-monitor-tool",
+		task_type: "monitor_mcp",
+		description: "Monitor background events",
+		parentToolUseId: null,
+	},
+] as const;
+
+const taskStopUsage: Extract<SDKMessage, { type: "result" }>["usage"] = {
+	input_tokens: 1,
+	output_tokens: 2,
+	cache_read_input_tokens: 0,
+	cache_creation_input_tokens: 0,
+	cache_creation: {
+		ephemeral_1h_input_tokens: 0,
+		ephemeral_5m_input_tokens: 0,
+	},
+	fallback_credit: null,
+	inference_geo: "not_available",
+	iterations: [],
+	output_tokens_details: { thinking_tokens: 0 },
+	server_tool_use: { web_fetch_requests: 0, web_search_requests: 0 },
+	service_tier: "standard",
+	speed: "standard",
+};
 
 function mergeSettings(
 	base: Record<string, unknown>,
@@ -508,9 +545,15 @@ function query(params: {
 	// status it reports on a permission-mode change. Only a held turn polls,
 	// so they are collected only while one is held.
 	const outOfBand: SDKMessage[] = [];
-	let taskStopLive: (typeof taskStopFixture)[number][] = [];
+	let taskStopLive: (
+		| (typeof taskStopFixture)[number]
+		| (typeof taskStopMonitorFixture)[number]
+	)[] = [];
 	const pendingTaskStops = new Set<string>();
 	let turnHeld = false;
+	let taskStopHolding = false;
+	let taskStopHeldRequest: string | undefined;
+	let taskTurnInterrupted = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -691,9 +734,74 @@ function query(params: {
 	);
 	// A caller may attach the readiness barrier on the next tick.
 	void initialization.catch(() => {});
+	function* correctionForegroundTool(id: string): Generator<SDKMessage> {
+		const messageId = randomUUID();
+		const input = { command: `echo ${id}` };
+		yield stream(sessionId, {
+			type: "message_start",
+			message: { id: messageId, role: "assistant", content: [] },
+		});
+		yield stream(sessionId, {
+			type: "content_block_start",
+			index: 0,
+			content_block: { type: "tool_use", id, name: "Bash", input: {} },
+		});
+		yield stream(sessionId, {
+			type: "content_block_delta",
+			index: 0,
+			delta: {
+				type: "input_json_delta",
+				partial_json: JSON.stringify(input),
+			},
+		});
+		yield stream(sessionId, { type: "content_block_stop", index: 0 });
+		yield stream(sessionId, { type: "message_stop" });
+		yield {
+			type: "assistant",
+			uuid: randomUUID(),
+			session_id: sessionId,
+			parent_tool_use_id: null,
+			message: {
+				id: messageId,
+				type: "message",
+				role: "assistant",
+				model: liveModel ?? "claude-sonnet-4",
+				content: [{ type: "tool_use", id, name: "Bash", input }],
+				stop_reason: "tool_use",
+				stop_sequence: null,
+				container: null,
+				context_management: null,
+				diagnostics: null,
+				stop_details: null,
+				usage: taskStopUsage,
+			},
+		};
+	}
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
 		await initialization;
-		for await (const input of params.prompt) {
+		const inputs = params.prompt[Symbol.asyncIterator]();
+		while (!closed) {
+			const nextInput = inputs.next();
+			if (taskStopLive.length > 0) {
+				let ready = false;
+				void nextInput.then(
+					() => {
+						ready = true;
+					},
+					() => {
+						ready = true;
+					},
+				);
+				while (!ready && !closed) {
+					releaseTaskStops();
+					yield* outOfBand.splice(0);
+					await new Promise<void>((done) => setTimeout(done, 20));
+				}
+			}
+			if (closed) return;
+			const next = await nextInput;
+			if (next.done) return;
+			const input = next.value;
 			const at = process.hrtime.bigint().toString();
 			if (closed) return;
 			const content = input.message.content;
@@ -706,6 +814,14 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
+			if (request.includes("correction"))
+				yield {
+					type: "command_lifecycle",
+					state: "started",
+					command_uuid: userUuid,
+					uuid: randomUUID(),
+					session_id: sessionId,
+				};
 			recordNativeMessage(
 				{
 					type: "user",
@@ -1023,7 +1139,13 @@ function query(params: {
 			}
 			if (request.startsWith("task-stop-foreground")) {
 				if (!proof) throw new Error("Missing task-stop proof gates");
-				taskStopLive = [...taskStopFixture];
+				taskStopLive = request.endsWith("no-tasks")
+					? []
+					: request.includes("correction")
+						? [...taskStopMonitorFixture]
+						: request.endsWith("monitor")
+							? [...taskStopMonitorFixture]
+							: [...taskStopFixture];
 				for (const task of taskStopLive) {
 					const toolMessageId = randomUUID();
 					yield stream(
@@ -1200,23 +1322,33 @@ function query(params: {
 					index === 1 &&
 					proof
 				) {
+					turnHeld = true;
+					taskStopHolding = true;
+					taskStopHeldRequest = request;
+					if (request.includes("correction-reject"))
+						yield* correctionForegroundTool("correction-foreground");
 					mark({
 						kind: "task-stop-turn",
 						phase: "streaming",
 						queryId,
 						at: process.hrtime.bigint().toString(),
+						inputId: userUuid,
+						request,
 					});
-					turnHeld = true;
 					while (
 						!existsSync(join(dirname(proof), "task-stop-release-result")) &&
-						!closed
+						!closed &&
+						!taskTurnInterrupted
 					) {
 						releaseTaskStops();
 						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
 					}
 					turnHeld = false;
+					taskStopHolding = false;
+					taskStopHeldRequest = undefined;
 					if (closed) return;
+					if (taskTurnInterrupted) break;
 				}
 			}
 			// A turn that keeps streaming until it is stopped, for load tests.
@@ -1234,6 +1366,80 @@ function query(params: {
 					});
 				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
+			const correctionError = request === "task-stop-correction-error";
+			if (
+				(taskTurnInterrupted && request.startsWith("task-stop-foreground")) ||
+				correctionError
+			) {
+				taskTurnInterrupted = false;
+				if (request.includes("correction-duplicate") && proof)
+					while (
+						!existsSync(
+							join(
+								dirname(proof),
+								"task-stop-correction-release-interrupted-result",
+							),
+						) &&
+						!closed
+					)
+						await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				if (request.includes("correction-late-tool")) {
+					yield* correctionForegroundTool("correction-late-foreground");
+					mark({
+						kind: "task-stop-turn",
+						phase: "late-tool",
+						queryId,
+						at: process.hrtime.bigint().toString(),
+						inputId: userUuid,
+					});
+				}
+				mark({
+					kind: "task-stop-turn",
+					phase: correctionError ? "execution-error" : "interrupted-result",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+					inputId: userUuid,
+				});
+				yield {
+					type: "result",
+					subtype: "error_during_execution",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: true,
+					errors: [
+						correctionError
+							? "Fixture genuine execution failure"
+							: "Execution ended",
+					],
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 1,
+					stop_reason: null,
+					total_cost_usd: 0,
+					usage: taskStopUsage,
+					modelUsage: {},
+					permission_denials: [],
+					user_message_uuid: userUuid,
+				};
+				if (request.includes("correction-steer-boundary") && proof) {
+					mark({
+						kind: "task-stop-turn",
+						phase: "after-result",
+						queryId,
+						at: process.hrtime.bigint().toString(),
+						inputId: userUuid,
+					});
+					while (
+						!existsSync(
+							join(dirname(proof), "task-stop-correction-release-steer"),
+						) &&
+						!closed
+					)
+						await new Promise<void>((done) => setTimeout(done, 20));
+				}
+				continue;
+			}
 			if (request.startsWith("stall-"))
 				await new Promise<void>((done) => {
 					params.options?.abortController?.signal.addEventListener(
@@ -1891,6 +2097,21 @@ function query(params: {
 			});
 		},
 		interrupt: async () => {
+			if (
+				taskStopHeldRequest?.includes("correction-reject") &&
+				proof &&
+				!existsSync(
+					join(dirname(proof), "task-stop-correction-allow-interrupt"),
+				)
+			) {
+				mark({
+					kind: "query-interrupt-rejected",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				throw new Error("Fixture interrupt rejected");
+			}
+			if (taskStopHolding) taskTurnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,

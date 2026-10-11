@@ -240,8 +240,11 @@ export interface ClaudeSessionContext {
 	 *  know whether a turn is actually running. currentTurnId cannot answer
 	 *  that: it is set at submit and never cleared. */
 	turnInFlight?: boolean;
-	/** Stop interrupted the running turn but kept the query live for a
-	 *  pending steer; the turn's failed result is that interruption. */
+	/** Number of live tasks in the latest filtered SDK snapshot, including monitors. */
+	liveBackgroundTaskCount?: number;
+	/** Input whose Stop kept the query live for background tasks or a pending steer. */
+	interruptInputId?: string | undefined;
+	/** The terminal result covers the interrupted input. Set only while translating it. */
 	interruptRequested?: boolean;
 	/** Conduit's requested catalog/base model id for the current turn. */
 	currentModel: string | undefined;

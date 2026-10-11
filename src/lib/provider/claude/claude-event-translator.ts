@@ -284,8 +284,13 @@ function titleForItemType(t: CanonicalItemType): string {
 	}
 }
 
-export function isInterruptedResult(result: SDKResultMessage): boolean {
+export function isInterruptedResult(
+	result: SDKResultMessage,
+	interruptRequested = false,
+): boolean {
 	if (result.subtype === "success") return false;
+	if (interruptRequested && result.subtype === "error_during_execution")
+		return true;
 	const errors = result.errors.join(" ").toLowerCase();
 	if (errors.includes("interrupt") || errors.includes("aborted")) return true;
 	return (
@@ -1750,10 +1755,7 @@ export class ClaudeEventTranslator {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
 			}
 			yield* this.settleGoal(ctx);
-			if (
-				isInterruptedResult(result) ||
-				(ctx.interruptRequested && result.subtype !== "success")
-			) {
+			if (isInterruptedResult(result, ctx.interruptRequested)) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.push(
 					ctx,
