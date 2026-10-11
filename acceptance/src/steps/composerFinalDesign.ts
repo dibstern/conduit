@@ -188,19 +188,24 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert picker root row order",
-		match: /^the picker root rows are (.+)$/,
+		match: /^the picker root (sections and )?rows are (.+)$/,
 		run: async ({ world, match }) => {
 			const rows = world.page.locator(
-				'#model-picker [data-testid^="picker-row-"]',
+				match[1]
+					? '#model-picker [data-testid^="picker-row-"], #model-picker [data-testid="picker-harness-section"], #model-picker [data-testid="picker-account-section"]'
+					: '#model-picker [data-testid^="picker-row-"]',
 			);
-			await expect(rows).toHaveCount((match[1] ?? "").split(", ").length);
+			await expect(rows).toHaveCount((match[2] ?? "").split(", ").length);
 			expect(
 				await rows.evaluateAll((elements) =>
 					elements.map((element) =>
-						element.getAttribute("data-testid")?.replace("picker-row-", ""),
+						element
+							.getAttribute("data-testid")
+							?.replace(/^picker-(row-)?/, "")
+							.replace(/-section$/, ""),
 					),
 				),
-			).toEqual((match[1] ?? "").split(", "));
+			).toEqual((match[2] ?? "").split(", "));
 		},
 	},
 	{

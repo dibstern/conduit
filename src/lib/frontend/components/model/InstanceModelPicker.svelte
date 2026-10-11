@@ -9,6 +9,7 @@
 	import Dialog from "../ui/Dialog.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import OptionRow from "../ui/OptionRow.svelte";
+	import AccountDot from "../ui/AccountDot.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
@@ -41,6 +42,10 @@
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId } from "../../stores/usage.svelte.js";
+	import { getClaudeAccounts, type AccountAvailability } from "../../stores/claude-accounts.svelte.js";
+	import { instanceStatusColor } from "../../stores/instance.svelte.js";
+	import { accountColorClass } from "../../utils/account-color.js";
+	import { usageResetTime } from "../../utils/continuation.js";
 	import { bindProjectInstance, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
@@ -50,14 +55,14 @@
 		setDefaultModelRpc,
 		switchAgentRpc,
 	} from "../../transport/ws-rpc-client.js";
-	import type { AgentInfo, Immutable, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
+	import type { AgentInfo, Immutable, InstanceStatus, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
-	let view = $state<"root" | "instance" | "model" | "agent">("root");
+	let view = $state<"root" | "model" | "agent">("root");
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
@@ -74,7 +79,7 @@
 	const groupHeadingId = $props.id();
 	const titleId = `${groupHeadingId}-title`;
 	const title = $derived(
-		view === "root" ? "Harness & model" : view === "instance" ? "Instance" : view === "agent" ? "Agent" : "Model",
+		view === "root" ? "Harness & model" : view === "agent" ? "Agent" : "Model",
 	);
 
 	const instances = $derived(getAvailableInstances());
@@ -110,6 +115,39 @@
 		})),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
+	const accountProjectSlug = $derived(
+		sessionState.currentId
+			? findSession(sessionState.currentId)?.projectSlug ?? getCurrentSlug() ?? ""
+			: getDraftProject() ?? getCurrentSlug() ?? "",
+	);
+	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
+	type AccountCard = { value: string; label: string; locked: boolean } & (
+		| { kind: "usage"; availability: AccountAvailability }
+		| { kind: "status"; status: InstanceStatus }
+	);
+	const accountCards = $derived.by<AccountCard[]>(() => {
+		if (selectedDriver === "claude") {
+			return accounts.accounts.map((account) => {
+				// Cards show every account's own usage; only the lock depends on the open session.
+				const availability = accounts.availabilityOf(account.id, "");
+				return {
+					value: account.id,
+					label: accounts.nameOf(account.id),
+					locked: availability.kind === "limited" || (locked && account.id === selectedLogoInstanceId),
+					kind: "usage",
+					availability,
+				};
+			});
+		}
+		return driverInstances.map((instance) => ({
+			value: instance.id,
+			label: accounts.nameOf(instance.id, instance.label),
+			locked,
+			kind: "status",
+			// Built-in instances carry no managed status; they serve the catalog, so they're up.
+			status: instance.status ?? "healthy",
+		}));
+	});
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
 	const filteredGroups = $derived.by(() => {
@@ -298,25 +336,6 @@
 		return locked && instance.id !== boundInstanceId;
 	}
 
-	function instanceDescription(instance: InstanceOption): string {
-		if (isInstanceDisabled(instance)) return "Harness is fixed for this session";
-		const driver = instance.driver === "claude" ? "Claude Agent SDK" : instance.driver === "opencode" ? "OpenCode server" : driverLabel(instance.driver);
-		return instance.status && instance.status !== "healthy"
-			? `${driver} · ${instance.status}`
-			: driver;
-	}
-
-	function instanceLabel(instance: InstanceOption): string {
-		// Healthy is the norm, so only annotate degraded states.
-		const status =
-			instance.status && instance.status !== "healthy"
-				? ` · ${instance.status}`
-				: "";
-		return isInstanceDisabled(instance)
-			? `${instance.label} — harness is fixed for this session`
-			: `${instance.label}${status}`;
-	}
-
 	function providerSectionClass(group: Immutable<ProviderGroup>): string {
 		const base = "model-provider";
 		if (!isProviderConfigured(group.provider)) {
@@ -367,6 +386,18 @@
 		if (instance) handleInstanceSelect(instance);
 	}
 
+	function handleAccountSelect(id: string) {
+		// Open Claude account handoffs belong to bn6x.6; OpenCode stays fixed.
+		if (locked) return;
+		const card = accountCards.find((card) => card.value === id);
+		if (!card || card.locked) return;
+		const instance = instances.find((instance) => instance.id === id)
+			?? (selectedDriver === "claude" && id === "claude"
+				? { id, driver: "claude" as const, label: card.label, isCustom: false }
+				: undefined);
+		if (instance) handleInstanceSelect(instance);
+	}
+
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
 		const targetId = modelId ?? model.id;
@@ -410,6 +441,7 @@
 		const request = composerPickerState.request;
 		if (!request) return;
 		untrack(() => {
+			void accounts.refreshQuotas();
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
 			variantRef?.close();
 			searchQuery = "";
@@ -434,9 +466,10 @@
 			}
 			const panel = document.getElementById("model-picker");
 			const selectedTab = panel?.querySelector<HTMLElement>('[data-testid="picker-harness-options"] [aria-checked="true"]');
-			const row = (section === "harness" ? selectedTab : panel?.querySelector<HTMLElement>(
-				`[data-testid="picker-row-${section === "account" ? "instance" : section}"]`,
-			)) ?? selectedTab ?? panel?.querySelector<HTMLElement>('[data-testid="picker-row-model"]');
+			const selectedCard = panel?.querySelector<HTMLElement>('[data-testid="picker-account-options"] [aria-checked="true"]');
+			const row = (section === "harness" ? selectedTab : section === "account" ? selectedCard : panel?.querySelector<HTMLElement>(
+				`[data-testid="picker-row-${section}"]`,
+			)) ?? selectedTab ?? selectedCard ?? panel?.querySelector<HTMLElement>('[data-testid="picker-row-model"]');
 			row?.scrollIntoView({ block: "nearest", inline: "nearest" });
 			row?.focus({ preventScroll: true });
 		});
@@ -520,24 +553,62 @@
 						</OptionRow>
 					</section>
 				{/if}
-				{#if driverInstances.length > 1}
-					<Button
-						variant="ghost"
-						size="content"
-						tone="default"
-						hoverFill="base"
-						layout="flow"
-						data-testid="picker-row-instance"
-						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
-						onclick={() => { view = "instance"; }}
-					>
-						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Instance</span>
-						<span class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold">
-							<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />
-							<span class="truncate">{selectedLabel}</span>
-						</span>
-						<Icon name="chevron-right" size={14} class="text-text-dimmer" />
-					</Button>
+				{#if accountCards.length > 1}
+					<section data-testid="picker-account-section" aria-label={selectedDriver === "claude" ? "Account" : "Instance"} class="pb-[4px]">
+						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
+							<span>{selectedDriver === "claude" ? "Account" : "Instance"}</span>
+							<span data-testid="picker-account-section-caption">{selectedDriver === "claude" ? "5-hour use" : "status"}</span>
+						</div>
+						<OptionRow
+							options={accountCards}
+							value={selectedLogoInstanceId}
+							onChange={handleAccountSelect}
+							label={selectedDriver === "claude" ? "Account" : "Instance"}
+							lockedReason={selectedDriver === "claude" ? "" : "Harness is fixed for this session"}
+							itemWidth={108}
+							testId="picker-account-options"
+							itemTestId={(id) => `picker-account-${id}`}
+							class="mb-[2px] gap-[6px]"
+							itemClass="block min-w-0 rounded-[9px] text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+						>
+							{#snippet item(option, selected)}
+								{@const card = accountCards.find((card) => card.value === option.value)}
+								{#if card}
+									{@const availability = card.kind === "usage" ? card.availability : undefined}
+									<span
+										class="picker-account-card"
+										class:selected
+										class:limited={availability?.kind === "limited"}
+										class:locked={card.kind === "status" && locked && !selected}
+										style="--account-color:var({accountColorClass(card.value).replace('bg-', '--color-')})"
+									>
+										<span class="flex min-w-0 items-center gap-[6px]">
+											<AccountDot instanceId={card.value} size={7} />
+											<span data-testid="picker-account-name" class="min-w-0 truncate">{card.label}</span>
+											{#if card.kind === "usage" && availability?.kind === "selectable"}
+												<small data-testid="picker-account-usage" class="ml-auto whitespace-nowrap text-[10px] text-text-muted">{availability.usagePct === null ? "—" : `${Math.round(availability.usagePct)}%`}</small>
+											{/if}
+										</span>
+										{#if card.kind === "status"}
+											<span data-testid="picker-account-caption" class="flex items-center gap-[6px] text-[10px] text-text-muted">
+												<span data-testid="picker-instance-status-dot" class="size-[7px] shrink-0 rounded-full {instanceStatusColor(card.status)}" aria-hidden="true"></span>
+												{card.status}
+											</span>
+										{:else if availability?.kind === "limited"}
+											{@const reset = usageResetTime(availability.resetsAt)}
+											<span data-testid="picker-account-caption" class="text-[10px] text-error">limit{reset ? ` · resets ${reset}` : ""}</span>
+										{:else if availability?.kind === "selectable" && availability.usagePct !== null}
+											<span data-testid="picker-account-meter" class="block h-[4px] overflow-hidden rounded-[2px] bg-border">
+												<span class="block h-full bg-[var(--account-color)]" style="width:{Math.max(0, Math.min(100, availability.usagePct))}%"></span>
+											</span>
+										{:else}
+											<span data-testid="picker-account-caption" class="text-[10px] text-text-muted">usage unknown</span>
+										{/if}
+									</span>
+								{/if}
+							{/snippet}
+						</OptionRow>
+					</section>
 				{/if}
 				<Button
 					variant="ghost"
@@ -627,37 +698,6 @@
 							<span class="block text-[13px] font-semibold">{agentLabel(agent)}</span>
 							{#if agent.description}<span class="block text-[11px] text-text-muted">{agent.description}</span>{/if}
 						</span>
-						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
-					</Button>
-				{/each}
-			{:else if view === "instance"}
-				{#each driverInstances as instance (instance.id)}
-					{@const disabled = isInstanceDisabled(instance)}
-					{@const selected = instance.id === selectedId}
-					<Button
-						variant="ghost"
-						size="content"
-						tone={selected ? "accent" : "default"}
-						hoverFill="base"
-						layout="flow"
-						ariaLabel={instanceLabel(instance)}
-						aria-pressed={selected}
-						ariaDisabled={disabled}
-						data-testid="picker-instance-{instance.id}"
-						data-driver={instance.driver}
-						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 last:border-b-0"
-						onclick={(e) => handleInstanceSelect(instance, e)}
-					>
-						<HarnessLogo driver={instance.driver} instanceId={instance.id} size={16} surface="surface" />
-						<span class="min-w-0 flex-1 text-left">
-							<span class="block text-[13px] font-semibold">{instance.label}</span>
-							<span class="block text-[11px] text-text-muted">
-								{instanceDescription(instance)}
-							</span>
-						</span>
-						{#if instance.isNew && !locked}
-							<Icon name="sparkles" size={12} class="text-warning" />
-						{/if}
 						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
 					</Button>
 				{/each}
@@ -889,6 +929,23 @@
 </div>
 
 <style>
+	.picker-account-card {
+		display: grid;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		gap: 6px;
+		border: 1px solid var(--color-border);
+		border-radius: 9px;
+		padding: 7px 9px;
+		font-size: 11.5px;
+	}
+	.picker-account-card.selected {
+		border-color: var(--account-color);
+		background: color-mix(in srgb, var(--account-color) 10%, transparent);
+	}
+	.picker-account-card.limited { opacity: .6; }
+	.picker-account-card.locked { opacity: .5; }
 	:global(.model-dropdown [data-testid="picker-harness-options"][data-layout="scroll"] > [data-radio-group-item]) {
 		border: 1px solid var(--color-border);
 	}
@@ -896,7 +953,6 @@
 		border-color: var(--color-text-secondary);
 	}
 	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-row-"]),
-	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-instance-"]),
 	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-agent-"]),
 	:global(.model-dropdown[data-phone="true"] .model-item) {
 		min-height: 50px;

@@ -371,8 +371,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "instance is selectable in the rail",
-		match: /^the (.+) instance is selectable in the rail$/,
+		name: "instance is selectable in the picker",
+		match: /^the (.+) instance is selectable in the picker$/,
 		run: async ({ world, match }) => {
 			const name = (match[1] ?? "").trim();
 			await openModelPicker(world.page);
@@ -383,10 +383,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await world.page
 				.getByTestId(`picker-harness-${instance["driver"]}`)
 				.click();
-			await world.page.getByTestId("picker-row-instance").click();
-			// Instance choices keep their slug ids in the retained instance view.
 			const railButton = world.page.getByTestId(
-				`picker-instance-${instanceSlug(name)}`,
+				`picker-account-${instanceSlug(name)}`,
 			);
 			await railButton.waitFor({ state: "visible", timeout: 5_000 });
 			const disabled = await railButton.getAttribute("aria-disabled");

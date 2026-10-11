@@ -147,8 +147,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			});
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-opencode").click();
-			await world.page.getByTestId("picker-row-instance").click();
-			await world.page.getByTestId(`picker-instance-${instanceId}`).click();
+			await world.page.getByTestId(`picker-account-${instanceId}`).click();
 			await world.page
 				.getByTestId("picker-row-model")
 				.waitFor({ state: "visible" });

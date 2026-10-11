@@ -110,6 +110,30 @@ const skillNavigationMockup = {
 
 export const mockAppHandlers: StepHandler[] = [
 	{
+		name: "publish OpenCode instance status",
+		match:
+			/^the OpenCode instance (\S+) has (healthy|starting|unhealthy|stopped) status$/,
+		run: ({ world, match }) => {
+			const instances = mockInstances.get(world.page) ?? [];
+			if (
+				!instances.some(
+					(instance) =>
+						instance["id"] === match[1] && instance["driver"] === "opencode",
+				)
+			)
+				throw new Error(`Missing OpenCode instance ${match[1]}`);
+			const next = instances.map((instance) =>
+				instance["id"] === match[1]
+					? { ...instance, status: match[2] }
+					: instance,
+			);
+			mockInstances.set(world.page, next);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: next,
+			});
+		},
+	},
+	{
 		name: "configure picker Harness choices through mock subscriptions",
 		match: /^the configured Harness choices are (.+)$/,
 		run: async ({ world, match }) => {

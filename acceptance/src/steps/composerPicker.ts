@@ -92,12 +92,23 @@ export const composerPickerHandlers: StepHandler[] = [
 	},
 	{
 		name: "view picker choices",
-		match: /^I view (Harness|Model|Agent|Instance) choices in the picker$/,
+		match:
+			/^I view (Harness|Model|Agent|Account|Instance) choices in the picker$/,
 		run: async ({ world, match }) => {
 			await openModelPicker(world.page);
 			if (match[1] === "Harness") {
 				await expect(
 					world.page.getByTestId("picker-harness-section"),
+				).toBeVisible();
+				await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
+				return;
+			}
+			if (match[1] === "Account" || match[1] === "Instance") {
+				await expect(
+					world.page.getByTestId("picker-account-section"),
+				).toHaveAttribute("aria-label", match[1]);
+				await expect(
+					world.page.getByTestId("picker-account-options"),
 				).toBeVisible();
 				await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
 				return;

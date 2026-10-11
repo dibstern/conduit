@@ -95,9 +95,9 @@ Scenario Outline: B1 the implicit default Claude account counts and shows C
   When I open the model picker
   Then the picker harness logo for claude shows C on its badge
   And the model-picker region visually matches <baseline> at <threshold> percent
-  When I view Instance choices in the picker
-  Then the picker harness logo for claude shows C on its badge
-  And the picker harness logo for self shows P on its badge
+  When I view Account choices in the picker
+  Then the picker card claude is named Claude and shows its AccountDot
+  And the picker card self is named personal and shows its AccountDot
 
 Examples:
   | tier   | controls | baseline                          | threshold |
@@ -120,9 +120,10 @@ Scenario Outline: B1 a resumed account's letter and colour match its AccountDot
   Then the picker harness logo for <account> shows <letter> on its badge
   And the picker harness badge for <account> matches its AccountDot colour
   And the model-picker region visually matches <baseline> at <threshold> percent
-  When I view Instance choices in the picker
-  Then the picker harness logo for self shows P on its badge
-  And the picker harness logo for team shows W on its badge
+  When I view Account choices in the picker
+  Then the picker card self is named personal and shows its AccountDot
+  And the picker card team is named Work and shows its AccountDot
+  And the <account> Account card is selected and in view
 
 Examples:
   | tier  | controls | account | letter | baseline                         | threshold |
@@ -140,8 +141,8 @@ Scenario Outline: B1 OpenCode badges both its default and named instance when th
   When I open the model picker
   Then the picker harness logo for opencode shows O on its badge
   When I view Instance choices in the picker
-  Then the picker harness logo for opencode shows O on its badge
-  And the picker harness logo for bedrock shows B on its badge
+  Then the picker card opencode is named OpenCode and shows its AccountDot
+  And the picker card bedrock is named Bedrock and shows its AccountDot
   And the model-picker region visually matches <baseline> at <threshold> percent
 
 Examples:
