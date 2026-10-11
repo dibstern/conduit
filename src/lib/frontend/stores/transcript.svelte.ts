@@ -652,6 +652,9 @@ function transcriptView(): {
 	let generation = 0;
 	let fiber: RuntimeFiber<void, unknown> | null = null;
 	let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
+	/** This view's stops, chained: its feed starts only after every earlier
+	 *  feed of this view is confirmed dead, so two feeds never share a ledger. */
+	let stopped: Promise<void> = Promise.resolve();
 
 	function cancelFrame(): void {
 		if (pendingFrame === null) return;
@@ -664,11 +667,14 @@ function transcriptView(): {
 		pendingFrame = null;
 	}
 
-	async function stopFeed(): Promise<void> {
+	function stopFeed(): Promise<void> {
 		const old = fiber;
 		fiber = null;
 		cancelFrame();
-		if (old) await runTransportEffect(Fiber.interrupt(old));
+		stopped = stopped.then(async () => {
+			if (old) await runTransportEffect(Fiber.interrupt(old));
+		});
+		return stopped;
 	}
 
 	return {

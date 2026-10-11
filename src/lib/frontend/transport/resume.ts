@@ -116,6 +116,7 @@ import {
 } from "effect";
 import {
 	digestRows,
+	PartRemovalId,
 	type ResumeBase,
 	ResumeChecksum,
 	ResumePoint,
@@ -340,6 +341,10 @@ const record = (
 			for (const part of ledger.parts.get(envelope.id) ?? [])
 				ledger.rows.delete(part);
 			ledger.parts.delete(envelope.id);
+			// A removed part leaves its message's index.
+			const part = Schema.decodeUnknownOption(PartRemovalId)(envelope.id);
+			if (Option.isSome(part))
+				ledger.parts.get(part.value[0])?.delete(envelope.id);
 			return Effect.void;
 		}
 		case "synchronized": {

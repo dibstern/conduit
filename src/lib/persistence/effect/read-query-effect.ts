@@ -1764,8 +1764,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									WHERE session_id = ${sessionId} AND id = ${listing.from}`)[0];
 					// Ids and versions only: the page, from its first message on (the
 					// whole session without one), then whatever moved past the page's
-					// version before it. Each half is one index range. A cursor past
-					// the store is answered with a snapshot, so it is not listed.
+					// version before it. Each half is one index range within the
+					// session; a part write stamps its message, so a moved part's
+					// message has moved too. A cursor past the store is answered with
+					// a snapshot, so it is not listed.
 					const inPage =
 						from === undefined
 							? sql.literal("1")
@@ -1801,9 +1803,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 												? sql.literal("")
 												: sql`UNION ALL
 										SELECT mp.message_id, mp.id, mp.version
-										FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
-										WHERE mp.version > ${listing.since}
-											AND m.session_id = ${sessionId} AND NOT (${inPage})`
+										FROM messages m CROSS JOIN message_parts mp ON mp.message_id = m.id
+										WHERE m.session_id = ${sessionId} AND m.version > ${listing.since}
+											AND mp.version > ${listing.since} AND NOT (${inPage})`
 										}`,
 								};
 					// A part write stamps its message too, so a message is never older

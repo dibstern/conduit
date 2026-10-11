@@ -252,9 +252,15 @@ test("a resume is checked against the server, and the server wins", async ({
 			received.push({ at: Date.now(), text: payload.toString() }),
 		),
 	);
-	const mismatches: string[] = [];
+	type Checksum = { readonly hash: number; readonly rows: number };
+	const mismatches: Promise<{
+		readonly server: Checksum;
+		readonly client: Checksum;
+	}>[] = [];
 	page.on("console", (message) => {
-		if (message.text().includes(MISMATCH)) mismatches.push(message.text());
+		const detail = message.args()[1];
+		if (message.text().includes(MISMATCH) && detail)
+			mismatches.push(detail.jsonValue());
 	});
 	await new AppPage(page).goto(
 		`${harness.baseUrl}/s/${SESSION}?p=process-test`,
@@ -454,6 +460,12 @@ test("a resume is checked against the server, and the server wins", async ({
 			]),
 		async () => {
 			await expect.poll(() => mismatches.length).toBe(3);
+			// The hash caught it, not the count.
+			const caught = await mismatches[2];
+			if (!caught) throw new Error("no third mismatch");
+			const { server, client } = caught;
+			expect(server.rows).toBe(client.rows);
+			expect(server.hash).not.toBe(client.hash);
 			await expect(page.locator("#messages")).toContainText(
 				"Appended while away.",
 			);
