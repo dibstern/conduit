@@ -226,13 +226,22 @@ export const NewFolder: Story = {
 	},
 };
 
+// Adding another project's main folder opens that project, so the clash only
+// shows when an edit makes it this project's main folder.
 export const Errors: Story = {
 	args: {
-		projects: [{ slug: "conduit", title: "Conduit", folders: [app] }],
+		project: { slug: "docs", title: "Docs", folders: [docs] },
+		projects: [
+			{ slug: "conduit", title: "Conduit", folders: [app] },
+			{ slug: "docs", title: "Docs", folders: [docs] },
+		],
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
 		await addPath(canvasElement, app);
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Make main: ${app}` }),
+		);
 		await expect(canvas.getByRole("alert")).toHaveTextContent(
 			"already the main folder",
 		);
@@ -240,9 +249,7 @@ export const Errors: Story = {
 			"href",
 			"/?p=conduit",
 		);
-		await expect(
-			canvas.getByRole("button", { name: "Add project" }),
-		).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 };
 
