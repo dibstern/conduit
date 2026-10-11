@@ -13,6 +13,10 @@ import {
 	Schema,
 } from "effect";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../daemon/config-persistence.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -203,10 +207,6 @@ function generationFailureReason(cause: unknown): string {
 	return String(cause);
 }
 
-function isClaudeSessionProvider(provider: string): boolean {
-	return provider === "claude" || provider === "claude-sdk";
-}
-
 export const makeSessionTitleServiceLive = (
 	options: SessionTitleServiceLiveOptions = {},
 ): Layer.Layer<
@@ -234,6 +234,14 @@ export const makeSessionTitleServiceLive = (
 				options.queryFactory ?? ((params) => sdkQuery(params));
 			const now = options.now ?? (() => new Date());
 			const primaryFolder = config.projectDir;
+			// Named instances (e.g. "personal-claude") store their instance id as the
+			// session provider, so resolve the driver instead of matching the id.
+			const isClaudeSessionProvider = (provider: string) =>
+				provider === "claude-sdk" ||
+				resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					provider,
+				) === "claude";
 
 			const generateTitle = (sessionId: string, firstMessage: string) =>
 				Effect.gen(function* () {
